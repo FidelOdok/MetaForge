@@ -1,0 +1,282 @@
+"""Twin type registry: versioned definitions vs append-only records (FORGE-522).
+
+Every twin type falls into one of three kinds, and the write paths consult
+this registry to decide what a write means:
+
+- **definition**: a thing that is *revised*. It has an :class:`Item` with a
+  stable key and exactly one current head. Re-recording it creates revision
+  ``n+1`` of the same item, never a free-standing sibling node.
+- **record**: a thing that *happened*. Append-only, never revised, never
+  given an item. A second design decision is a second decision, not "the
+  decision, revision 2".
+- **derived**: a generated view of other nodes (``prd_view``). Not a source
+  of truth; it gets neither an item nor record semantics.
+
+FORGE-528: the ``prd`` work product is the prd's *prose* (background, scope,
+non-requirements), a definition like any other. The prd a reader sees is the
+derived ``prd_view``: that prose plus intent, needs, objectives and the
+current constraint set, rendered on read.
+
+A type absent from this table keeps its pre-FORGE-522 behaviour (one node per
+write, no item) until it is classified. Classifying it here is the only step
+needed to bring it under item identity, provided its write path calls
+:mod:`twin_core.items.service`.
+
+The table is mirrored in ``docs/twin_schema.md`` ("Definitions vs records");
+``tests/unit/test_item_registry.py`` keeps the two in step.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+
+
+class TwinTypeKind(StrEnum):
+    """How a twin type behaves on write."""
+
+    DEFINITION = "definition"
+    RECORD = "record"
+    DERIVED = "derived"
+
+
+@dataclass(frozen=True)
+class TwinTypeSpec:
+    """One registry row."""
+
+    #: Registry name. For a definition this is also ``Item.item_type``.
+    name: str
+    kind: TwinTypeKind
+    #: Where its nodes live: ``work_product:<WorkProductType>``,
+    #: ``engineering_entity:<entity_type>``, ``bom_item``, or a non-twin store.
+    storage: str
+    #: Item key prefix (definitions only), e.g. ``CAD`` -> ``CAD-BRACKET``.
+    key_prefix: str | None = None
+    #: Definitions whose items may continue one another. A part that gains
+    #: parts becomes an assembly without losing its history.
+    family: str | None = None
+    description: str = ""
+
+
+_ROWS: tuple[TwinTypeSpec, ...] = (
+    # -- definitions -------------------------------------------------------
+    TwinTypeSpec(
+        "cad_model",
+        TwinTypeKind.DEFINITION,
+        "work_product:cad_model",
+        key_prefix="CAD",
+        family="geometry",
+        description="A part's geometry (twin.commit_geometry without parts).",
+    ),
+    TwinTypeSpec(
+        "assembly",
+        TwinTypeKind.DEFINITION,
+        "work_product:cad_model",
+        key_prefix="ASM",
+        family="geometry",
+        description="An assembly's geometry (twin.commit_geometry with parts).",
+    ),
+    TwinTypeSpec(
+        "constraint_set",
+        TwinTypeKind.DEFINITION,
+        "work_product:constraint_set",
+        key_prefix="CS",
+        description="A requirement/constraint set (twin.record_constraint_set).",
+    ),
+    TwinTypeSpec(
+        "intent",
+        TwinTypeKind.DEFINITION,
+        "engineering_entity:intent",
+        key_prefix="INT",
+        description="The engineering intent statement.",
+    ),
+    TwinTypeSpec(
+        "stakeholder_need",
+        TwinTypeKind.DEFINITION,
+        "engineering_entity:stakeholder_need",
+        key_prefix="NEED",
+        description="A stakeholder need.",
+    ),
+    TwinTypeSpec(
+        "design_value",
+        TwinTypeKind.DEFINITION,
+        "engineering_entity:design_value",
+        key_prefix="VAL",
+        description=(
+            "One engineering value and its source (FORGE-586); a changed value "
+            "or a better source is a new revision."
+        ),
+    ),
+    TwinTypeSpec(
+        "objective",
+        TwinTypeKind.DEFINITION,
+        "engineering_entity:objective",
+        key_prefix="OBJ",
+        description="An optimisation objective (metric, direction, target).",
+    ),
+    TwinTypeSpec(
+        "bom",
+        TwinTypeKind.DEFINITION,
+        "work_product:bom",
+        key_prefix="BOM",
+        description="A bill of materials (electronics BOM recorder).",
+    ),
+    TwinTypeSpec(
+        "component_selection",
+        TwinTypeKind.DEFINITION,
+        "bom_item",
+        key_prefix="CMP",
+        description=(
+            "The part chosen for one role (twin.record_component_selection); "
+            "choosing a different part for the same role is a new revision."
+        ),
+    ),
+    TwinTypeSpec(
+        "prd",
+        TwinTypeKind.DEFINITION,
+        "work_product:prd",
+        key_prefix="PRD",
+        description=(
+            "The prd prose: background, scope, non-requirements "
+            "(twin.record_document with document_type='prd'). Requirement "
+            "values live in the constraint set."
+        ),
+    ),
+    # FORGE-687: the electronics and firmware design files, recorded by
+    # twin.record_design_files from what the KiCad and firmware adapters wrote.
+    TwinTypeSpec(
+        "schematic",
+        TwinTypeKind.DEFINITION,
+        "work_product:schematic",
+        key_prefix="SCH",
+        description="A KiCad schematic, every sheet of it (twin.record_design_files).",
+    ),
+    TwinTypeSpec(
+        "pcb_layout",
+        TwinTypeKind.DEFINITION,
+        "work_product:pcb_layout",
+        key_prefix="PCB",
+        description="A KiCad board (twin.record_design_files).",
+    ),
+    TwinTypeSpec(
+        "gerber",
+        TwinTypeKind.DEFINITION,
+        "work_product:gerber",
+        key_prefix="GBR",
+        description="A board's gerber and drill set (twin.record_design_files).",
+    ),
+    TwinTypeSpec(
+        "pick_and_place",
+        TwinTypeKind.DEFINITION,
+        "work_product:pick_and_place",
+        key_prefix="PNP",
+        description="A board's placement file (twin.record_design_files).",
+    ),
+    TwinTypeSpec(
+        "pinmap",
+        TwinTypeKind.DEFINITION,
+        "work_product:pinmap",
+        key_prefix="PIN",
+        description=(
+            "Which MCU pin does what (twin.record_design_files, or "
+            "twin.create_firmware_scaffold from an assembly's joints)."
+        ),
+    ),
+    TwinTypeSpec(
+        "firmware_source",
+        TwinTypeKind.DEFINITION,
+        "work_product:firmware_source",
+        key_prefix="FW",
+        description=(
+            "A firmware project's sources and its build output "
+            "(twin.record_design_files, or twin.create_firmware_scaffold)."
+        ),
+    ),
+    # FORGE-711: a third-party part model (an NVIDIA SimReady OpenUSD package)
+    # with its preview, recorded by twin.record_design_files from what
+    # simready.import wrote. Its own family: it is bought, not authored, so a
+    # cad_model slot must not bind to it.
+    TwinTypeSpec(
+        "purchased_model",
+        TwinTypeKind.DEFINITION,
+        "work_product:cad_model",
+        key_prefix="PMD",
+        description=(
+            "A bought part's model: an OpenUSD package, its GLB preview, licence and "
+            "measured mass (twin.record_design_files after simready.import)."
+        ),
+    ),
+    # -- records -----------------------------------------------------------
+    TwinTypeSpec(
+        "design_decision",
+        TwinTypeKind.RECORD,
+        "work_product:design_decision",
+        description="A recorded design decision (twin.record_decision).",
+    ),
+    TwinTypeSpec(
+        "simulation_result",
+        TwinTypeKind.RECORD,
+        "work_product:simulation_result",
+        description="One simulation run's result.",
+    ),
+    TwinTypeSpec(
+        "evidence",
+        TwinTypeKind.RECORD,
+        "engineering_entity:evidence",
+        description="Evidence pinned to the revisions it was produced against.",
+    ),
+    TwinTypeSpec(
+        "approval",
+        TwinTypeKind.RECORD,
+        "approvals service",
+        description="A gate or tool approval decision.",
+    ),
+    TwinTypeSpec(
+        "session",
+        TwinTypeKind.RECORD,
+        "agent_sessions (Postgres)",
+        description="An agent session and its events.",
+    ),
+    TwinTypeSpec(
+        "run",
+        TwinTypeKind.RECORD,
+        "runs / design-flow workflow",
+        description="One design-flow or chat run.",
+    ),
+    # -- derived -----------------------------------------------------------
+    TwinTypeSpec(
+        "prd_view",
+        TwinTypeKind.DERIVED,
+        "rendered on read (GET /v1/twin/projects/{id}/prd)",
+        description=(
+            "The prd a reader sees: the prd prose plus intent, needs, objectives "
+            "and the current constraint set revision, with KEY@n refs."
+        ),
+    ),
+)
+
+TWIN_TYPES: dict[str, TwinTypeSpec] = {row.name: row for row in _ROWS}
+
+
+def classify(type_name: str) -> TwinTypeSpec | None:
+    """The registry row for ``type_name``, or ``None`` when unclassified."""
+    return TWIN_TYPES.get(type_name)
+
+
+def is_definition(type_name: str) -> bool:
+    """True when writes of ``type_name`` create item revisions."""
+    spec = TWIN_TYPES.get(type_name)
+    return spec is not None and spec.kind is TwinTypeKind.DEFINITION
+
+
+def definition_types() -> list[str]:
+    """All definition type names, in registry order."""
+    return [r.name for r in _ROWS if r.kind is TwinTypeKind.DEFINITION]
+
+
+def family_of(type_name: str) -> set[str]:
+    """``type_name`` plus every definition sharing its family."""
+    spec = TWIN_TYPES.get(type_name)
+    if spec is None or spec.family is None:
+        return {type_name}
+    return {r.name for r in _ROWS if r.family == spec.family}

@@ -1,0 +1,15 @@
+{
+  "name": "rank_manufacturing_processes",
+  "version": "0.1.0",
+  "domain": "manufacturing",
+  "agent": "mechanical",
+  "description": "Ranks candidate manufacturing processes for a part before it is designed: fit (envelope, minimum feature, tolerance, material), availability on the route, and cost at the stated quantity, never assuming an unsourced capability",
+  "phase": 1,
+  "tools_required": [],
+  "input_schema": "schema.RankManufacturingProcessesInput",
+  "output_schema": "schema.RankManufacturingProcessesOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["manufacturing", "process_selection", "dfm", "cost"]
+}

@@ -1,7 +1,7 @@
 # UAT Tier-1 cadquery — Claude-driven first run (2026-04-28)
 
 **Scenario set**: `tests/uat/scenarios/tier1/cadquery.md` (6 scenarios)
-**Validates**: MET-337, MET-340, MET-373
+**Validates**:
 **Tier**: 1 (cycle gate cadence)
 **Path**: validator surrogate (parent Claude Code session pre-dates `.mcp.json`; canonical path is `/uat-cycle12 --tier 1`)
 **Surrogate driver**: `scripts/run_tier1_cadquery_validator_surrogate.py`
@@ -25,13 +25,13 @@
 
 ## What this validated
 
-This is the first Tier-1 run since MET-373 closed in PR #140. The fix had three layers:
+This is the first Tier-1 run since the empty tool list fix closed in PR #140. The fix had three layers:
 
 1. **`.mcp.json`** sets `METAFORGE_ADAPTER_CADQUERY_URL=http://localhost:8101` so the standalone `python -m metaforge.mcp` knows where the adapter container is.
 2. **`docker-compose.yml`** exposes cadquery-adapter port `8101:8101` to the host.
 3. **`tool_registry/registry.py` + `metaforge/mcp/server.py` + `metaforge/mcp/__main__.py`** (this branch): the unified MCP server now registers remote adapters via a `_RemoteAdapterServer` shim that surfaces them through `list_adapter_servers()`, and `_tool_list` delegates to each adapter's `handle_request` rather than poking private `_tools` dicts. The bootstrap and stdio loops now share one event loop so aiohttp `ClientSession`s registered during bootstrap stay valid through tool calls.
 
-Without these three layers, the surrogate would see `"tools": []` (the bug Tier-0's UAT-CLAUDE-T0 first run originally surfaced as MET-373).
+Without these three layers, the surrogate would see `"tools": []` (the bug Tier-0's UAT-CLAUDE-T0 first run originally surfaced).
 
 ---
 
@@ -63,4 +63,4 @@ Exit 0 = all PASS; exit 1 = at least one FAIL.
 
 ## Path note
 
-Surrogate path used because the parent Claude Code session pre-dates `.mcp.json`. Same fix lands the canonical `/uat-cycle12 --tier 1` path identically — the only difference is who spawns the standalone `python -m metaforge.mcp` (subagent vs harness). The MET-373 fix is in the unified server, not the surrogate.
+Surrogate path used because the parent Claude Code session pre-dates `.mcp.json`. Same fix lands the canonical `/uat-cycle12 --tier 1` path identically — the only difference is who spawns the standalone `python -m metaforge.mcp` (subagent vs harness). The empty tool list fix is in the unified server, not the surrogate.

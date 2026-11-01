@@ -43,9 +43,13 @@ def sample_input() -> ValidateStressInput:
             StressConstraint(
                 max_von_mises_mpa=250.0,
                 safety_factor=1.5,
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         ],
+        material_name="aluminium_6061_t6",
+        fixed_node_set="Surface1",
+        load_node_set="Surface2",
+        load_force_n=(0.0, 0.0, -100.0),
     )
 
 
@@ -67,6 +71,10 @@ class TestStressSchemas:
                     material="steel_304",
                 )
             ],
+            material_name="steel_304",
+            fixed_node_set="Surface1",
+            load_node_set="Surface2",
+            load_force_n=(0.0, 0.0, -100.0),
         )
         assert inp.mesh_file_path == "/mesh/test.inp"
         assert inp.constraints[0].safety_factor == 2.0
@@ -78,6 +86,10 @@ class TestStressSchemas:
                 mesh_file_path="/mesh/test.inp",
                 load_case="load_1",
                 constraints=[],
+                material_name="steel_304",
+                fixed_node_set="Surface1",
+                load_node_set="Surface2",
+                load_force_n=(0.0, 0.0, -100.0),
             )
 
     def test_constraint_safety_factor_minimum(self) -> None:
@@ -201,7 +213,7 @@ class TestValidateStressHandler:
                 StressConstraint(
                     max_von_mises_mpa=250.0,
                     safety_factor=1.5,
-                    material="aluminum_6061",
+                    material="aluminium_6061_t6",
                 ),
                 StressConstraint(
                     max_von_mises_mpa=400.0,
@@ -209,6 +221,10 @@ class TestValidateStressHandler:
                     material="steel_304",
                 ),
             ],
+            material_name="aluminium_6061_t6",
+            fixed_node_set="Surface1",
+            load_node_set="Surface2",
+            load_force_n=(0.0, 0.0, -100.0),
         )
         mock_context.twin.get_work_product.return_value = {"id": str(inp.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")

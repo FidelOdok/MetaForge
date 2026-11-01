@@ -5,8 +5,8 @@ Exposes the dev MCP HTTP sidecar (`mcp-http`, port `8765`) to **Claude cloud**
 public HTTPS hostname. No inbound ports are opened on the host; `cloudflared`
 makes an outbound-only connection to Cloudflare's edge.
 
-Tracking: **MET-482**. Builds on MET-479 (sidecar) and MET-338 (API-key auth).
-OAuth for the claude.ai connector is separate (MET-480) — this runbook covers
+Builds on the sidecar and the API-key auth.
+OAuth for the claude.ai connector is separate — this runbook covers
 the token-based static-key path.
 
 ## Architecture
@@ -81,13 +81,26 @@ local dev — use the public URL only in environments that need it.)
 ### claude.ai web connector
 
 The web connector UI can't send a static bearer token — it runs OAuth 2.1
-+ PKCE against the MCP server, which is implemented in **MET-480**
-(`metaforge/mcp/oauth.py`). To enable it:
++ PKCE against the MCP server, which is implemented in
+`metaforge/mcp/oauth.py`. To enable it:
 
-1. In `.env`, set `METAFORGE_OAUTH_LOGIN_SECRET` (the shared access secret
-   the `/authorize` page asks for) and `METAFORGE_OAUTH_ISSUER` to the
-   public tunnel URL (e.g. `https://mcp.yourdomain.com`). Restart
-   `mcp-http`.
+1. In `.env`, set `METAFORGE_OAUTH_LOGIN_SECRET` — the shared access secret
+   the `/authorize` page asks for. Restart `mcp-http`.
+
+   :::tip[You do not need to set `METAFORGE_OAUTH_ISSUER`]
+
+   The server works out its own public URL from the `X-Forwarded-Proto` and
+   `X-Forwarded-Host` headers Cloudflare sets, so the OAuth metadata
+   advertises the hostname the client actually used. Leaving it unset is the
+   better default: on a *quick* tunnel the hostname changes every restart, and
+   a pinned issuer then advertises an address that no longer exists — which
+   looks like a server fault rather than stale configuration.
+
+   Set it only when something in front of the server does not send
+   `X-Forwarded-*`, in which case it overrides the derived value.
+   `tests/unit/test_mcp_oauth.py::TestIssuerDerivation` covers both paths.
+
+   :::
 2. In claude.ai → **Settings → Connectors → Add custom connector**, enter
    the MCP URL `https://mcp.yourdomain.com/mcp`.
 3. claude.ai auto-discovers the OAuth endpoints (via the
@@ -96,10 +109,13 @@ The web connector UI can't send a static bearer token — it runs OAuth 2.1
    Enter the shared secret to authorize; claude.ai completes the token
    exchange and connects.
 
-Identity is dev-grade (one shared secret, single actor, in-memory tokens
-that reset on restart — claude.ai re-runs the flow transparently).
-Federation to a real IdP and persistent token storage are tracked
-follow-ups on MET-480.
+Identity is dev-grade (one shared secret; the operator name typed at sign-in
+is a label, not a verified identity). Registered clients and issued tokens
+survive a restart of `mcp-http` when `DATABASE_URL` is set: they
+are kept in Postgres, in the `mcp_oauth_clients` and `mcp_oauth_tokens`
+tables, tokens by their SHA-256 only. Without a database they live in memory
+and a restart signs every client out. Federation to a real IdP is a tracked
+follow-up on.
 
 The OAuth flow claude.ai runs:
 

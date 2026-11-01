@@ -43,6 +43,50 @@ export interface TwinNode {
   // full state from an already-fetched node list, no extra round trip and
   // no live FreeCAD session required.
   assembly?: AssemblyDescription;
+  // FORGE-250: a robot_description node's saved named poses
+  // ({poseName: {jointName: value}}) — undefined for every other node
+  // type, or a robot_description with no saved poses yet.
+  poses?: Record<string, Record<string, number>>;
+  // FORGE-305: a simulation_result node's mesh statistics ({num_nodes,
+  // num_elements, ...}). Undefined for every other node type, or a result
+  // recorded without them. Like geometryParameters above, this is here
+  // because `properties` is scalar-only and silently drops objects.
+  meshStats?: Record<string, unknown>;
+  // FORGE-511: an assembly cad_model's part list (metadata.parts) — undefined
+  // for every other node.
+  assemblyParts?: AssemblyPart[];
+  // FORGE-528: the project the node belongs to, when it has one.
+  projectId?: string;
+  // FORGE-687: a node kept by twin.record_design_files (schematic, board,
+  // gerbers, placement, pin map, firmware). Undefined for every other node.
+  designFiles?: DesignFilesView;
+}
+
+/** FORGE-687: what twin.record_design_files kept, as GET /twin/nodes returns it. */
+export interface DesignFilesView {
+  /** Every file, by its path in the project folder. */
+  files: { path: string; bytes?: number }[];
+  /** SVG previews (one per schematic sheet, or the board's top side). */
+  previews: string[];
+  previewError?: string | null;
+  /** A gerber set's files and what each layer is. */
+  layers: { path: string; layer: string }[];
+  /** A firmware project's build output (firmware.elf/.bin/.hex). */
+  buildOutputs: string[];
+  /** Node ids it was generated from. */
+  sources: string[];
+}
+
+export interface AssemblyPartBox {
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
+export interface AssemblyPart {
+  node_id: string;
+  name: string;
+  material?: string | null;
+  position_bbox_mm?: AssemblyPartBox | null;
 }
 
 export interface TwinRelationship {
@@ -51,6 +95,21 @@ export interface TwinRelationship {
   targetId: string;
   type: string;
   label: string;
+}
+
+/** FORGE-704: what an edge points at when it is not a listed work product (a
+ * constraint, a baseline, a BOM item, an engineering entity). */
+export interface TwinEndpoint {
+  kind: string;
+  name: string;
+}
+
+/** The relationships view: the edges, the names of their unlisted ends, and how
+ * many work products' links could not be read. */
+export interface TwinGraph {
+  relationships: TwinRelationship[];
+  endpoints: Record<string, TwinEndpoint>;
+  skippedNodes: number;
 }
 
 export interface ImportWorkProductResponse {

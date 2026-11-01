@@ -1,0 +1,113 @@
+# power_v1 domain fragment (FORGE-682, power design).
+#
+# Power architecture (the tree, recorded) -> regulator thermal -> battery
+# runtime -> load-step transient, for the board's supply: where the power
+# comes from, how each rail is made, what each regulator turns into heat and
+# whether it survives it, how long the battery lasts, and whether a rail
+# holds up when the load steps.
+#
+# The rail load budget is electronics_v1's power_budget (rail_load_margin_pct);
+# this fragment does not repeat it. It adds what that budget does not say:
+# the regulator junction temperatures (an LDO that carries its load but runs
+# past its Tj max), the total power the electronics draw from their source as
+# `electronics_power_w`, which battery sizing reads (mobile_robot_v1,
+# aircraft_v1), and the runtime that power gives.
+#
+# A regulator change is a component-selection change: composed with
+# electronics_v1 it re-runs the architecture, the thermal check and
+# everything after it, the battery sizing that reads electronics_power_w, and
+# thermal_v1 through the board dissipation electronics_v1 records.
+#
+# Limits are inputs from the requirements or datasheets, never numbers
+# written here: the ambient, the required runtime, the battery, the allowed
+# dip. Each regulator's theta_JA and Tj max come from its datasheet; a
+# regulator without them is not_established, which never passes.
+#
+# Bump `version` when a task, its contract or a check changes.
+id: power_v1
+version: 1.0.0
+domain: power
+label: Power design
+description: Power tree, regulator thermal, battery runtime and load-step transient.
+keywords: [power design, power tree, power supply, regulator, ldo, buck, battery, runtime, battery life, rail]
+disciplines: [electronics]
+tasks:
+- id: architecture
+  stage: design
+  title: Power architecture
+  objective: >-
+    Lay out the power tree from the component selection: the source (battery, USB, an ESC's
+    BEC, a wall adapter), each regulator with its topology (LDO or switching), input and output
+    rails, rated output current, efficiency or quiescent current, theta_JA and Tj max from its
+    datasheet, and every load on each rail. Record the tree as an engineering entity
+    (`power_tree`) with each figure's source, the number of regulated rails as
+    `power_rail_count`, and each regulator's topology choice as a design decision with the
+    alternatives considered (an LDO's dissipation is (Vin - Vout) x Iout; a buck's is
+    Pout x (1/eta - 1)).
+  inputs:
+  - component_selection:electronics
+  outputs:
+  - design_value:power_rail_count
+  records: [design_decision]
+  checks:
+  - power_rail_count > 0
+  capabilities: [twin.record_engineering_entity, twin.record_decision]
+  outcome: the power tree, from source to every load, recorded with its sources
+- id: regulator_thermal
+  stage: design
+  title: Regulator thermal
+  objective: >-
+    Run power.check_budget on the recorded tree with each regulator's theta_JA and Tj max and
+    the maximum ambient. Record the smallest junction margin (Tj max minus junction
+    temperature) as `regulator_tj_margin_c` (degC), the regulators' total dissipation as
+    `regulator_dissipation_w` (W), and the power drawn from the source as
+    `electronics_power_w` (W), all sourced to the tool run. A regulator the tool could not
+    establish (a figure missing) leaves the margin unrecorded; say which figure.
+  inputs:
+  - design_value:power_rail_count
+  - design_value:max_ambient_temp_c
+  outputs:
+  - design_value:regulator_tj_margin_c
+  - design_value:regulator_dissipation_w
+  - design_value:electronics_power_w
+  checks:
+  - regulator_tj_margin_c >= 0 degC
+  capabilities: [power.check_budget]
+  outcome: every regulator below its maximum junction temperature at the hottest ambient
+- id: battery_runtime
+  stage: design
+  title: Battery runtime
+  objective: >-
+    Run power.runtime with the battery's capacity and usable fraction (depth of discharge and
+    reserve, from the cell's datasheet and the requirements) and the average load: the
+    electronics power plus any other load recorded on the same battery (a drive, a
+    propulsion system). Record the runtime as `runtime_h` (h), sourced to the tool run, and
+    name the loads it includes.
+  inputs:
+  - design_value:electronics_power_w
+  - design_value:battery_capacity_wh
+  - design_value:usable_battery_fraction
+  outputs:
+  - design_value:runtime_h
+  checks:
+  - runtime_h >= required_runtime_h
+  capabilities: [power.runtime]
+  outcome: the battery lasts the required runtime at the recorded load
+- id: load_transient
+  stage: simulation
+  title: Load-step transient
+  objective: >-
+    Simulate the worst load step on each regulated rail (the largest load switching on: a
+    radio transmitting, a motor driver enabling) with spice.run_simulation, using the
+    regulator's model or its datasheet output impedance and the rail's capacitance. Record
+    the largest rail dip as `load_step_dip_mv` (mV), sourced to the simulation, and the run as
+    a simulation_result naming the models used.
+  inputs:
+  - design_value:regulator_tj_margin_c
+  outputs:
+  - design_value:load_step_dip_mv
+  records: [simulation_result]
+  checks:
+  - load_step_dip_mv <= max_load_step_dip_mv
+  capabilities: [spice.run_simulation]
+  outcome: every rail stays within its allowed dip when the load steps

@@ -214,6 +214,13 @@ class TestBuildParser:
         assert args.twin_command == "list"
         assert args.domain == "mechanical"
         assert args.work_product_type == "cad_model"
+        assert args.project is None
+
+    def test_twin_list_command_accepts_project_flag(self) -> None:
+        """FORGE-248: --project <id|name> filters the node list."""
+        parser = build_parser()
+        args = parser.parse_args(["twin", "list", "--project", "6-DOF Robotic Arm"])
+        assert args.project == "6-DOF Robotic Arm"
 
     def test_proposals_command(self) -> None:
         parser = build_parser()
@@ -423,3 +430,79 @@ class TestForgeClientTwin:
         params = call_args[1].get("params", {})
         assert params.get("domain") == "electronics"
         assert params.get("type") == "schematic"
+
+    @patch("cli.forge_cli.client.httpx.Client")
+    def test_twin_list_with_project_id(self, mock_client_cls: MagicMock) -> None:
+        """FORGE-248: project_id maps through to the gateway's own filter."""
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
+        mock_ctx.__exit__ = MagicMock(return_value=False)
+        mock_ctx.get.return_value = _mock_response({"nodes": [], "total": 0})
+        mock_client_cls.return_value = mock_ctx
+
+        fc = ForgeClient()
+        fc.twin_list(project_id="b3fd796a-9ee1-417f-9504-d6009cf37eed")
+        call_args = mock_ctx.get.call_args
+        params = call_args[1].get("params", {})
+        assert params.get("project_id") == "b3fd796a-9ee1-417f-9504-d6009cf37eed"
+
+    @patch("cli.forge_cli.client.httpx.Client")
+    def test_twin_list_omits_project_id_when_not_given(self, mock_client_cls: MagicMock) -> None:
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
+        mock_ctx.__exit__ = MagicMock(return_value=False)
+        mock_ctx.get.return_value = _mock_response({"nodes": [], "total": 0})
+        mock_client_cls.return_value = mock_ctx
+
+        fc = ForgeClient()
+        fc.twin_list()
+        call_args = mock_ctx.get.call_args
+        params = call_args[1].get("params", {})
+        assert "project_id" not in params
+
+
+class TestResolveProjectRef:
+    """FORGE-248: forge twin list --project <id|name>."""
+
+    def test_a_real_uuid_passes_through_unresolved(self) -> None:
+        from cli.forge_cli.main import _resolve_project_ref
+
+        client = MagicMock()
+        pid = str(uuid4())
+        assert _resolve_project_ref(client, pid) == pid
+        client.list_projects.assert_not_called()
+
+    def test_a_name_resolves_via_list_projects_case_insensitively(self) -> None:
+        from cli.forge_cli.main import _resolve_project_ref
+
+        client = MagicMock()
+        client.list_projects.return_value = {
+            "projects": [
+                {"id": "p-1", "name": "6-DOF Robotic Arm"},
+                {"id": "p-2", "name": "Quadruped Robot"},
+            ]
+        }
+        assert _resolve_project_ref(client, "6-dof robotic arm") == "p-1"
+
+    def test_an_unknown_name_exits_with_error(self) -> None:
+        from cli.forge_cli.main import _resolve_project_ref
+
+        client = MagicMock()
+        client.list_projects.return_value = {"projects": []}
+        with pytest.raises(SystemExit) as exc:
+            _resolve_project_ref(client, "nonexistent project")
+        assert exc.value.code == 1
+
+    def test_an_ambiguous_name_exits_with_error(self) -> None:
+        from cli.forge_cli.main import _resolve_project_ref
+
+        client = MagicMock()
+        client.list_projects.return_value = {
+            "projects": [
+                {"id": "p-1", "name": "Robot Arm"},
+                {"id": "p-2", "name": "robot arm"},
+            ]
+        }
+        with pytest.raises(SystemExit) as exc:
+            _resolve_project_ref(client, "Robot Arm")
+        assert exc.value.code == 1

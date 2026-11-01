@@ -41,6 +41,44 @@ class NodeType(StrEnum):
     # carried through PROPOSED -> ... -> COMMITTED | ROLLED_BACK (see
     # twin_core/models/engineering_change_transaction.py).
     ENGINEERING_CHANGE_TRANSACTION = "engineering_change_transaction"
+    # FORGE-260 (gap G-B1): a generic node for the product hierarchy tree
+    # (product/system/subsystem/assembly -- see HierarchyNode.kind).
+    # Mirrors ENGINEERING_ENTITY's precedent exactly -- one node type for a
+    # whole family of organizational kinds, not one class per kind. Part/
+    # Component/Feature (the hierarchy's LEAF kinds) deliberately are NOT
+    # HierarchyNode -- they're real, already-existing nodes (a fabricated
+    # part is a WorkProductType.CAD_MODEL, a COTS component is a BOMItem)
+    # that a HierarchyNode links to via EdgeType.REALIZED_BY/INSTANCE_OF,
+    # not duplicates of them.
+    HIERARCHY_NODE = "hierarchy_node"
+    # FORGE-319 (target lifecycle spec §29 MaturityGate, step 17): a real
+    # promotion gate with its own persistent multi-field state
+    # (required_claim_ids/results/state/authority) -- an ECT-like small
+    # state machine, not a generic EngineeringEntity tag (unlike waiver/
+    # release_approval, which are flat single-purpose records that fit
+    # entirely in metadata; MaturityGate's required_claim_ids/results are
+    # structured lists that want real typed fields).
+    MATURITY_GATE = "maturity_gate"
+    # FORGE-287 (gap G-G1, target lifecycle spec's "dual state machine:
+    # propose -> constraint engine -> commit/reject -> next iteration"):
+    # one candidate value evaluated during a closed design loop (propose a
+    # parameter value -> evaluate against constraints -> repeat). Its own
+    # NodeType, not a generic EngineeringEntity tag or Evidence row -- an
+    # iteration has real structured state (loop_id, iteration_number,
+    # parameter/objective values, feasibility, approval) a caller queries
+    # by loop, the same reasoning MaturityGate above already used for
+    # itself. Deliberately generic (parameter_name/parameter_value/metric/
+    # objective_value, not wall-thickness-specific fields) so a future
+    # generalisation to other search parameters (FORGE-288) reuses this
+    # same node type rather than needing a schema migration.
+    DESIGN_LOOP_ITERATION = "design_loop_iteration"
+    # FORGE-523 (epic FORGE-521): the stable identity of a versioned
+    # definition (a part, an assembly, a constraint set, an intent, ...).
+    # Each write of that definition is a separate, immutable revision node
+    # (the WorkProduct/EngineeringEntity/BOMItem the recorder already
+    # creates) linked to its Item by REVISION_OF; the Item points at its
+    # current revision by HEAD. See twin_core/items/.
+    ITEM = "item"
 
 
 class WorkProductType(StrEnum):
@@ -103,6 +141,20 @@ class WorkProductType(StrEnum):
     # distributor, lead time) produced by `create_procurement_record`,
     # usually linked back to the BOM it was sourced from.
     PROCUREMENT_RECORD = "procurement_record"
+    # FORGE-278: a reusable FEA boundary-condition definition (material,
+    # fixed_node_set, load_node_set, load_force_n, source_of_loads) so a
+    # load case is authored once and re-run across design versions instead
+    # of being retyped inline on every calculix.run_fea call. Linked to the
+    # cad_model/mesh it applies to via a PARENT_OF edge (the same precedent
+    # ROBOT_DESCRIPTION/CAD_SOURCE_SCRIPT already use for their own source
+    # geometry link).
+    LOAD_CASE = "load_case"
+    # FORGE-630: studio renders of a model (Blender, via blender.render),
+    # one PNG per view. The first view is the primary blob; the rest are
+    # named blobs in `metadata.image_files`. Linked to the model it shows by
+    # a GENERATED_FROM edge, and records that model's content hash so a
+    # stale render can be told apart from a current one.
+    RENDER = "render"
 
 
 class ConstraintSeverity(StrEnum):
@@ -195,3 +247,54 @@ class EdgeType(StrEnum):
     # Baseline.includes list (same non-source-of-truth relationship
     # parent_refs already has to its own DERIVES_FROM/... edges).
     INCLUDED_IN_BASELINE = "included_in_baseline"
+    # FORGE-260 (gap G-B1): HierarchyNode --REALIZED_BY--> WorkProduct
+    # (the cad_model/robot_description that gives this hierarchy position
+    # its actual geometry). Distinct from CONTAINS (structural nesting
+    # between hierarchy positions) and from PARENT_OF (a work product's own
+    # provenance link to the geometry it was derived FROM, e.g. a
+    # robot_description's source cad_model parts) -- REALIZED_BY always
+    # points from an organizational tree position to the real artifact that
+    # fulfils it.
+    REALIZED_BY = "realized_by"
+    # FORGE-260: HierarchyNode --INSTANCE_OF--> BOMItem, for a COTS leaf
+    # position (e.g. one of 3 identical igus RL-SE-80-50 actuator mounting
+    # positions) -- the position is an instance of one canonical component
+    # record, not a duplicate of it. How MANY of this instance the parent
+    # uses is the parent's own CONTAINS edge quantity, not this edge.
+    INSTANCE_OF = "instance_of"
+    # FORGE-321: DeviceInstance --MEASURED_BY--> the WorkProduct (a
+    # SYSTEM_ARCHITECTURE doc today) whose InterfaceQuantity.measured list
+    # a real-world measurement from this unit was appended to. An
+    # InterfaceQuantity has no node id of its own to point at directly
+    # (embedded in ArchInterface.quantities, per that module's own
+    # docstring), so the edge names the document that holds it; the
+    # measurement's own metadata (interface/metric) disambiguates which
+    # quantity within it.
+    MEASURED_BY = "measured_by"
+    # FORGE-523: revision node --REVISION_OF--> Item. Edge metadata carries
+    # the revision number, change_reason, run_id and author, so history is
+    # readable from the edges alone, including for legacy nodes adopted
+    # into an item after the fact (their own properties are never edited).
+    REVISION_OF = "revision_of"
+    # FORGE-523: Item --HEAD--> its current revision node. Exactly one per
+    # item; moved (remove + add) on every new revision.
+    HEAD = "head"
+
+
+# FORGE-64 (epic FORGE-35, Phase 6): the real evidence kinds
+# `twin.record_evidence` accepts (`api_gateway/twin/evidence_recorder.py`
+# imports this, not the other way around -- twin_core never imports from
+# api_gateway). FORGE-258 (gap G-A2) reuses the SAME set for
+# `Constraint.expected_evidence`, so a requirement can never declare it
+# expects a kind of evidence this codebase can't actually record.
+EVIDENCE_TYPES: frozenset[str] = frozenset(
+    {
+        "calculation",
+        "simulation",
+        "test",
+        "inspection",
+        "demonstration",
+        "datasheet",
+        "external_reference",
+    }
+)

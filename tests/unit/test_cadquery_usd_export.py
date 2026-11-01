@@ -217,7 +217,7 @@ class TestBuildUsdaAssembly:
 
     def test_fixed_joint(self):
         joints = [{"name": "j1", "type": "fixed", "base": "base", "follower": "arm"}]
-        text = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
+        text, _ = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'def Xform "bot"' in text
         assert 'def Xform "base"' in text
         assert 'def Xform "arm"' in text
@@ -235,15 +235,44 @@ class TestBuildUsdaAssembly:
                 "axis": (0, 0, 1),
             },
         ]
-        text = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
+        text, emitted = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'def PhysicsRevoluteJoint "j1"' in text
         assert 'uniform token physics:axis = "X"' in text
         assert "physics:lowerLimit" not in text
         assert "physics:upperLimit" not in text
+        assert emitted == [{"name": "j1", "type": "PhysicsRevoluteJoint", "limits": None}]
+
+    def test_revolute_with_real_limits_are_not_dropped(self):
+        """FORGE-240: PhysicsRevoluteJoint's limits are optional (unlike
+        PhysicsPrismaticJoint's, which is required) -- but previously they
+        were never emitted at all, even when the caller DID supply them,
+        because the limit-emission branch only ever checked for the
+        prismatic type. A real caller-supplied range must be written."""
+        joints = [
+            {
+                "name": "J1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "limits": {"lower": -2.9670597, "upper": 2.9670597},  # +/-170deg
+            },
+        ]
+        text, emitted = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
+        assert 'def PhysicsRevoluteJoint "J1"' in text
+        assert "float physics:lowerLimit = -2.9670597" in text
+        assert "float physics:upperLimit = 2.9670597" in text
+        assert emitted == [
+            {
+                "name": "J1",
+                "type": "PhysicsRevoluteJoint",
+                "limits": {"lower": -2.9670597, "upper": 2.9670597},
+            }
+        ]
 
     def test_ball_joint_is_supported_natively(self):
         joints = [{"name": "j1", "type": "ball", "base": "base", "follower": "arm"}]
-        text = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
+        text, _ = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'def PhysicsSphericalJoint "j1"' in text
 
     def test_slider_requires_limits(self):
@@ -264,7 +293,7 @@ class TestBuildUsdaAssembly:
                 "limits": {"lower": -0.05, "upper": 0.05},
             },
         ]
-        text = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
+        text, _ = build_usda_assembly(robot_name="bot", links=self._LINKS, joints=joints)
         assert "float physics:lowerLimit = -0.05" in text
         assert "float physics:upperLimit = 0.05" in text
 

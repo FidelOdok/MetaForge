@@ -16,7 +16,9 @@ from tool_registry.tools.distributors.base import (
     PartDetail,
     PartSearchResult,
     PricingBreak,
+    parse_price,
 )
+from tool_registry.tools.distributors.cache import ResponseCache
 from tool_registry.tools.distributors.rate_limiter import TokenBucketRateLimiter
 
 logger = structlog.get_logger(__name__)
@@ -34,11 +36,20 @@ _LIFECYCLE_MAP: dict[str, LifecycleStatus] = {
 }
 
 
+#: FORGE-613: Mouser caps search calls per day. Both are settable because the
+#: allowance belongs to the key, not to this code.
+DEFAULT_DAILY_LIMIT = 1000
+DEFAULT_CACHE_TTL_SECONDS = 6 * 3600
+
+
 class MouserAdapter(DistributorAdapter):
     """Mouser API adapter using API key authentication.
 
     Reads MOUSER_API_KEY from environment.
-    Rate-limited to 30 req/min (0.5 req/s).
+    Rate-limited to 30 req/min (0.5 req/s). Responses are cached
+    (``MOUSER_CACHE_TTL_SECONDS``, default 6 h) and real calls are counted
+    against ``MOUSER_DAILY_LIMIT`` (default 1000) per UTC day (FORGE-613).
+    Details, pricing and availability for one part share a single call.
     """
 
     def __init__(
@@ -50,6 +61,30 @@ class MouserAdapter(DistributorAdapter):
         self._owns_client = client is None
         self._api_key = api_key or os.environ.get("MOUSER_API_KEY", "")
         self._rate_limiter = TokenBucketRateLimiter(rate=30.0 / 60.0, burst=5)
+        self._cache = ResponseCache(
+            "Mouser",
+            ttl_seconds=float(
+                os.environ.get("MOUSER_CACHE_TTL_SECONDS") or DEFAULT_CACHE_TTL_SECONDS
+            ),
+            daily_limit=int(os.environ.get("MOUSER_DAILY_LIMIT") or DEFAULT_DAILY_LIMIT),
+        )
+
+    async def _post(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
+        """One Mouser call, through the cache and the daily budget."""
+
+        async def fetch() -> dict[str, Any]:
+            await self._rate_limiter.acquire()
+            resp = await self._client.post(url, params={"apiKey": self._api_key}, json=body)
+            resp.raise_for_status()
+            data: dict[str, Any] = resp.json()
+            return data
+
+        result: dict[str, Any] = await self._cache.get(ResponseCache.key(url, body), fetch)
+        return result
+
+    @staticmethod
+    def _part_body(mpn: str) -> dict[str, Any]:
+        return {"SearchByPartRequest": {"mouserPartNumber": mpn, "partSearchOptions": "Exact"}}
 
     @property
     def name(self) -> str:
@@ -63,19 +98,11 @@ class MouserAdapter(DistributorAdapter):
         with tracer.start_as_current_span("mouser.search_parts") as span:
             span.set_attribute("query", query)
             try:
-                await self._rate_limiter.acquire()
-                resp = await self._client.post(
+                data = await self._post(
                     _SEARCH_URL,
-                    params={"apiKey": self._api_key},
-                    json={
-                        "SearchByKeywordRequest": {
-                            "keyword": query,
-                            "records": limit,
-                        }
-                    },
+                    {"SearchByKeywordRequest": {"keyword": query, "records": limit}},
                 )
-                resp.raise_for_status()
-                return self._map_search_results(resp.json())
+                return self._map_search_results(data)
             except Exception as exc:
                 span.record_exception(exc)
                 logger.warning("mouser_search_failed", query=query, error=str(exc))
@@ -85,19 +112,8 @@ class MouserAdapter(DistributorAdapter):
         with tracer.start_as_current_span("mouser.get_part_details") as span:
             span.set_attribute("mpn", mpn)
             try:
-                await self._rate_limiter.acquire()
-                resp = await self._client.post(
-                    _PART_URL,
-                    params={"apiKey": self._api_key},
-                    json={
-                        "SearchByPartRequest": {
-                            "mouserPartNumber": mpn,
-                            "partSearchOptions": "Exact",
-                        }
-                    },
-                )
-                resp.raise_for_status()
-                return self._map_part_detail(resp.json())
+                data = await self._post(_PART_URL, self._part_body(mpn))
+                return self._map_part_detail(data)
             except Exception as exc:
                 span.record_exception(exc)
                 logger.warning("mouser_details_failed", mpn=mpn, error=str(exc))
@@ -107,19 +123,8 @@ class MouserAdapter(DistributorAdapter):
         with tracer.start_as_current_span("mouser.get_pricing") as span:
             span.set_attribute("mpn", mpn)
             try:
-                await self._rate_limiter.acquire()
-                resp = await self._client.post(
-                    _PART_URL,
-                    params={"apiKey": self._api_key},
-                    json={
-                        "SearchByPartRequest": {
-                            "mouserPartNumber": mpn,
-                            "partSearchOptions": "Exact",
-                        }
-                    },
-                )
-                resp.raise_for_status()
-                return self._map_pricing(resp.json())
+                data = await self._post(_PART_URL, self._part_body(mpn))
+                return self._map_pricing(data)
             except Exception as exc:
                 span.record_exception(exc)
                 logger.warning("mouser_pricing_failed", mpn=mpn, error=str(exc))
@@ -129,19 +134,8 @@ class MouserAdapter(DistributorAdapter):
         with tracer.start_as_current_span("mouser.get_availability") as span:
             span.set_attribute("mpn", mpn)
             try:
-                await self._rate_limiter.acquire()
-                resp = await self._client.post(
-                    _PART_URL,
-                    params={"apiKey": self._api_key},
-                    json={
-                        "SearchByPartRequest": {
-                            "mouserPartNumber": mpn,
-                            "partSearchOptions": "Exact",
-                        }
-                    },
-                )
-                resp.raise_for_status()
-                return self._map_availability(resp.json())
+                data = await self._post(_PART_URL, self._part_body(mpn))
+                return self._map_availability(data)
             except Exception as exc:
                 span.record_exception(exc)
                 logger.warning("mouser_availability_failed", mpn=mpn, error=str(exc))
@@ -208,16 +202,23 @@ class MouserAdapter(DistributorAdapter):
             return []
         breaks: list[PricingBreak] = []
         for bp in parts[0].get("PriceBreaks", []):
-            price_str = bp.get("Price", "0").replace("$", "").replace(",", "")
-            try:
-                price = float(price_str)
-            except (ValueError, TypeError):
-                price = 0.0
+            # Mouser prices in the key's currency ("£89.42", "$1.23"); a break
+            # whose price or currency cannot be read is dropped and logged,
+            # never kept as 0.0 or given a guessed currency.
+            price = parse_price(bp.get("Price"))
+            currency = str(bp.get("Currency") or "").strip().upper()
+            if price is None or not currency:
+                logger.warning(
+                    "mouser_price_unreadable",
+                    price=bp.get("Price"),
+                    currency=bp.get("Currency"),
+                )
+                continue
             breaks.append(
                 PricingBreak(
                     quantity=bp.get("Quantity", 1),
                     unit_price=price,
-                    currency=bp.get("Currency", "USD"),
+                    currency=currency,
                 )
             )
         return breaks

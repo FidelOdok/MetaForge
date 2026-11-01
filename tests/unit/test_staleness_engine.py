@@ -5,10 +5,16 @@ from uuid import uuid4
 import pytest
 
 from twin_core.api import InMemoryTwinAPI
-from twin_core.consistency.staleness import Dependency, StalenessEngine, StalenessStatus
+from twin_core.consistency.staleness import (
+    Dependency,
+    StalenessEngine,
+    StalenessStatus,
+    work_product_current_revision,
+)
 from twin_core.models.constraint import Constraint
 from twin_core.models.engineering_entity import EngineeringEntity
-from twin_core.models.enums import ConstraintSeverity
+from twin_core.models.enums import ConstraintSeverity, EdgeType, WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 
 @pytest.fixture
@@ -41,6 +47,115 @@ async def _seed_constraint(twin, project_id, name="req") -> Constraint:
 async def _seed_evidence(twin, project_id, statement="sim result") -> EngineeringEntity:
     e = EngineeringEntity(entity_type="evidence", statement=statement, project_id=project_id)
     return await twin.create_engineering_entity(e)
+
+
+async def _seed_cad(twin, name="upper_arm") -> WorkProduct:
+    return await twin.create_work_product(
+        WorkProduct(
+            name=name,
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path=f"/cad/{name}.step",
+            content_hash="deadbeef",
+            format="step",
+            created_by="test",
+        )
+    )
+
+
+class TestWorkProductCurrentRevision:
+    async def test_zero_while_no_incoming_supersedes(self, twin):
+        wp = await _seed_cad(twin)
+        assert await work_product_current_revision(twin, wp.id) == 0
+
+    async def test_one_once_superseded(self, twin):
+        original = await _seed_cad(twin)
+        revised = await _seed_cad(twin)
+        await twin.add_edge(revised.id, original.id, EdgeType.SUPERSEDES)
+        assert await work_product_current_revision(twin, original.id) == 1
+        # the new tip is itself still un-superseded.
+        assert await work_product_current_revision(twin, revised.id) == 0
+
+
+class TestWorkProductDependency:
+    """FORGE-314: an Evidence entity can declare a dependency on a
+    WorkProduct (the CAD geometry it validated), and propagate() marks it
+    STALE the same way a constraint/engineering_entity dependency does."""
+
+    async def test_propagate_marks_evidence_stale_when_geometry_superseded(
+        self, engine, twin, project_id
+    ):
+        original = await _seed_cad(twin)
+        evidence = await _seed_evidence(twin, project_id, statement="fit check")
+        await engine.declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="work_product", entity_id=original.id, revision=0)],
+        )
+
+        revised = await _seed_cad(twin)
+        await twin.add_edge(revised.id, original.id, EdgeType.SUPERSEDES)
+
+        markings = await engine.propagate(project_id, "work_product", original.id)
+
+        assert len(markings) == 1
+        assert markings[0].entity_id == evidence.id
+        assert await engine.get_status("engineering_entity", evidence.id) == StalenessStatus.STALE
+
+    async def test_transitive_propagation_from_geometry_reaches_downstream(
+        self, engine, twin, project_id
+    ):
+        """spec section 21's mount CAD -> simulation -> BOM example, with the
+        first hop now a real WorkProduct dependency instead of a stand-in
+        Constraint."""
+        original = await _seed_cad(twin, name="mount")
+        simulation = await _seed_evidence(twin, project_id, statement="thermal simulation")
+        bom_note = await _seed_evidence(twin, project_id, statement="BOM impact note")
+
+        await engine.declare_dependencies(
+            "engineering_entity",
+            simulation.id,
+            [Dependency(entity_kind="work_product", entity_id=original.id, revision=0)],
+        )
+        await engine.declare_dependencies(
+            "engineering_entity",
+            bom_note.id,
+            [Dependency(entity_kind="engineering_entity", entity_id=simulation.id, revision=1)],
+        )
+
+        revised = await _seed_cad(twin, name="mount")
+        await twin.add_edge(revised.id, original.id, EdgeType.SUPERSEDES)
+
+        markings = await engine.propagate(project_id, "work_product", original.id)
+        marked_ids = {m.entity_id for m in markings}
+        assert simulation.id in marked_ids
+        assert bom_note.id in marked_ids
+
+    async def test_no_marking_when_geometry_not_yet_superseded(self, engine, twin, project_id):
+        wp = await _seed_cad(twin)
+        evidence = await _seed_evidence(twin, project_id)
+        await engine.declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="work_product", entity_id=wp.id, revision=0)],
+        )
+        markings = await engine.propagate(project_id, "work_product", wp.id)
+        assert markings == []
+
+    async def test_preview_impact_does_not_write(self, engine, twin, project_id):
+        original = await _seed_cad(twin)
+        evidence = await _seed_evidence(twin, project_id)
+        await engine.declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="work_product", entity_id=original.id, revision=0)],
+        )
+        markings = await engine.preview_impact(
+            project_id, "work_product", original.id, projected_revision=1
+        )
+        assert len(markings) == 1
+        assert markings[0].entity_id == evidence.id
+        assert await engine.get_status("engineering_entity", evidence.id) == StalenessStatus.CURRENT
 
 
 class TestDeclareAndReadDependencies:

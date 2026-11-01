@@ -53,6 +53,37 @@ EngineeringEntityType = Literal[
     # from creation alone. See twin_core.consistency.gates's G8 section.
     "waiver",
     "release_approval",
+    # FORGE-262 (gap G-B2): one candidate architecture in a trade study --
+    # metadata carries `criteria_scores` (dict[str, float], e.g.
+    # {"mass_kg": 1.8, "cost_usd": 340, "risk": 3, "performance": 7}) and
+    # `evidence_backed_criteria` (list[str] naming which of those keys came
+    # from a real measured/recorded source -- e.g. a CAD work product's own
+    # mass_kg -- rather than an asserted number; risk/performance in the
+    # general case have no measured source in this codebase and are always
+    # asserted). `twin.select_concept` (api_gateway/twin/trade_study.py)
+    # reads these back to compute a weighted score and record the selection
+    # as a real Decision -- see that module's own docstring.
+    "concept_option",
+    # FORGE-586: one engineering value (a height, a tube section, a top
+    # thickness) and where it came from. metadata carries name, value,
+    # optional unit, and a `source` checked by twin_core.provenance: a value
+    # with no identifiable source is refused at record time.
+    "design_value",
+    # FORGE-299 (gap G-I3): a versioned snapshot bundling a project's
+    # current hierarchy/BOM/evidence/decision node ids (never a deep copy of
+    # their content) plus a simple count-delta diff against the previous
+    # release_package, if any. Gated at creation time on `evaluate_g8_release`
+    # (twin_core.consistency.gates) returning PASSED -- see
+    # api_gateway/twin/release_package.py's module docstring.
+    "release_package",
+    # FORGE-295 (gap G-H3): a step-by-step assembly sequence derived from a
+    # work product's real `metadata.assembly.joints` (FORGE-271/245) --
+    # metadata carries `work_product_id` and an ordered `steps` list (each
+    # `{step_number, joint_name, joint_type, base, follower, instruction}`),
+    # produced by topologically sorting the joints' base->follower
+    # dependency graph. One entity per checklist (not one per step) -- see
+    # api_gateway/twin/bringup_checklist.py's module docstring.
+    "bringup_checklist",
 ]
 
 

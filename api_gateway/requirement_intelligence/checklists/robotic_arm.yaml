@@ -1,0 +1,70 @@
+# FORGE-257: product-specific checklist for the robotic-arm yardstick
+# project (see this repo's DoD note: "the model designs a 6-DOF arm that
+# meets its mass and safety-factor budgets, proves it in simulation, and
+# outputs manufacturable files"). Replaces the generic checklist's
+# "mechanical" category with arm-specific concerns; keeps safety/power/
+# environmental/verification since those apply unchanged.
+product_type: robotic_arm
+categories:
+  - id: safety
+    label: Safety
+    keywords:
+      - safety
+      - hazard
+      - emergency stop
+      - e-stop
+      - collision
+      - pinch
+      - injury
+      - fail-safe
+      - failsafe
+  - id: payload_and_reach
+    label: Payload & reach
+    keywords:
+      - payload
+      - reach
+      - workspace
+      - end effector
+      - end-effector
+      - gripper
+  - id: mechanical
+    label: Mechanical / structural
+    keywords:
+      - mass
+      - weight
+      - weigh
+      - torque
+      - stress
+      - joint
+      - link
+      - repeatability
+      - degrees of freedom
+  - id: power
+    label: Power / electrical
+    keywords:
+      - power
+      - voltage
+      - current
+      - battery
+      - watt
+      - watts
+      - motor
+  - id: environmental
+    label: Environmental
+    keywords:
+      - temperature
+      - humidity
+      - ip rating
+      - dust
+      - vibration
+  - id: verification
+    label: Verification
+    keywords:
+      - test
+      - inspection
+      - analysis
+      - demonstration
+      - verify
+      - verified
+      - validate
+      - validated

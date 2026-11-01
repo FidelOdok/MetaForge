@@ -123,8 +123,29 @@ class TestExitCode:
 
         monkeypatch.setattr("orchestrator.worker_healthcheck._poller_identities", _fake)
 
-        assert main() == 1
+        # `[]` rather than the default: main() now parses argv (FORGE-401
+        # added --task-queue), and under pytest the default argv is
+        # pytest's own arguments.
+        assert main([]) == 1
         assert "unhealthy:" in capsys.readouterr().out
+
+    def test_the_task_queue_flag_reaches_the_probe(self, monkeypatch, capsys):
+        """A second worker on a second queue (FORGE-401) makes this matter.
+
+        Without the flag, a design-flow worker probes the *agent-task* queue
+        and reports green while it is itself dead -- a health check that
+        answers about a different container is worse than none.
+        """
+        seen: list[str] = []
+
+        async def _fake(task_queue, *_args, **_kwargs):
+            seen.append(task_queue)
+            return [f"1@{socket.gethostname()}"]
+
+        monkeypatch.setattr("orchestrator.worker_healthcheck._poller_identities", _fake)
+
+        assert main(["--task-queue", "metaforge-design-flows"]) == 0
+        assert seen == ["metaforge-design-flows"]
 
     def test_main_exits_zero_when_healthy(self, monkeypatch, capsys):
         async def _fake(*_args, **_kwargs):
@@ -132,5 +153,5 @@ class TestExitCode:
 
         monkeypatch.setattr("orchestrator.worker_healthcheck._poller_identities", _fake)
 
-        assert main() == 0
+        assert main([]) == 0
         assert "healthy:" in capsys.readouterr().out

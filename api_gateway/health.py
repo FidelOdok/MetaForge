@@ -23,7 +23,9 @@ from enum import StrEnum
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from api_gateway.version import gateway_version
 
 # ---------------------------------------------------------------------------
 # Models
@@ -51,10 +53,22 @@ class HealthResponse(BaseModel):
     """Top-level response from ``GET /health``."""
 
     status: DependencyStatus
-    version: str = "0.1.0"
+    version: str = Field(default_factory=gateway_version)
     uptime_seconds: float
     components: list[ComponentHealth] = []
     timestamp: datetime
+
+    #: Which authentication mode this gateway is *actually* running with:
+    #: ``off``, or the name of the auth provider it has installed. Not a closed
+    #: set — providers are plug-ins (FORGE-540), so the valid values depend on
+    #: this gateway's environment.
+    #:
+    #: Reported here because "is this gateway authenticated?" must be
+    #: answerable by asking the running process, not by reading the config
+    #: someone believes they deployed. A gateway that was meant to be protected
+    #: and silently is not is the failure this field exists to expose, and
+    #: ``/health`` is deliberately public so a probe can check it.
+    auth_mode: str = "off"
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +92,18 @@ class HealthChecker:
         self._checks: list[tuple[str, HealthCheckFn]] = []
 
     def register_check(self, name: str, check_fn: HealthCheckFn) -> None:
-        """Register an async health-check callable under *name*."""
+        """Register an async health-check callable under *name*.
+
+        Replaces an existing check of the same name rather than appending
+        a second one (FORGE-391). Appending looked harmless and was not:
+        ``create_app()`` registers ``postgres``, ``neo4j`` and the rest at
+        startup, so any process that builds the app twice probed each
+        dependency twice and **counted it twice in the aggregation**. One
+        unreachable database registered twice satisfies
+        ``unhealthy_count == len(components)``, which reports the whole
+        gateway ``unhealthy`` rather than ``degraded``.
+        """
+        self._checks = [(n, fn) for n, fn in self._checks if n != name]
         self._checks.append((name, check_fn))
 
     async def check_all(self) -> HealthResponse:
@@ -139,6 +164,39 @@ def set_health_checker(checker: HealthChecker) -> None:
     _health_checker = checker
 
 
+def reset_health_checker() -> HealthChecker:
+    """Install a fresh checker and return it (FORGE-391).
+
+    Health checks belong to an application, not to the process: they are
+    registered while ``create_app`` wires up its backends, and they close
+    over that app's connections. Leaving the previous app's checks in
+    place meant a second app inherited probes for dependencies it never
+    configured -- which is how the gateway smoke tests came to report
+    ``degraded`` when run after the unit suite, and would equally affect
+    any host that builds the app more than once.
+    """
+    global _health_checker  # noqa: PLW0603
+    _health_checker = HealthChecker()
+    return _health_checker
+
+
+# The auth mode is resolved by ``create_app`` and published here rather than
+# imported the other way round, which would make ``health`` depend on
+# ``server`` and close an import cycle.
+_reported_auth_mode: str = "off"
+
+
+def set_reported_auth_mode(mode: str) -> None:
+    """Record the resolved auth mode for ``GET /health`` to report."""
+    global _reported_auth_mode  # noqa: PLW0603
+    _reported_auth_mode = mode
+
+
+def get_reported_auth_mode() -> str:
+    """The auth mode ``GET /health`` currently reports."""
+    return _reported_auth_mode
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -151,4 +209,5 @@ async def health_check(
     checker: HealthChecker = Depends(get_health_checker),
 ) -> HealthResponse:
     """Return the aggregated health of the gateway and its dependencies."""
-    return await checker.check_all()
+    response = await checker.check_all()
+    return response.model_copy(update={"auth_mode": get_reported_auth_mode()})

@@ -23,7 +23,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import structlog
+
+from mcp_core.service_auth import is_service_refusal
+from orchestrator.harness.tools import ToolNotFoundError
 from orchestrator.harness.validation import ToolValidationError
+
+logger = structlog.get_logger(__name__)
 
 CACHED_NOTE = (
     "identical call already made this turn -- the previous successful result is "
@@ -53,6 +59,32 @@ def dedup_key(name: str, arguments: dict[str, Any]) -> str:
         return f"{name}:{arguments!r}"
 
 
+def observation_failure_reason(observation: Any) -> str | None:
+    """FORGE-225: a tool call can transport-succeed (no exception) while its
+    own payload reports failure -- a skill handler that catches its own
+    ValueError returns ``{"success": False, "errors": [...]}`` as a normal
+    result, not an exception (``skill_registry.skill_base.SkillBase.run``).
+    Transport success alone doesn't mean the call did anything; this is what
+    the trace -- and the TUI's per-step ✓/✗ (``ReActStep.error``) -- must
+    actually reflect, not only a raised exception.
+
+    Deliberately narrow: only the conventions this codebase's own tool/skill
+    result shapes actually use (``success: false`` + ``errors``/``error``, or
+    ``status: "error"`` + ``error``), never a heuristic guess at arbitrary
+    adapter payload shapes.
+    """
+    if not isinstance(observation, dict):
+        return None
+    if observation.get("success") is False:
+        errors = observation.get("errors")
+        if isinstance(errors, list) and errors:
+            return "; ".join(str(e) for e in errors)
+        return str(observation.get("error") or "tool reported failure")
+    if observation.get("status") == "error":
+        return str(observation.get("error") or "tool reported failure")
+    return None
+
+
 def cached_view(observation: Any) -> dict[str, Any]:
     """The envelope a reused result is presented as.
 
@@ -63,6 +95,24 @@ def cached_view(observation: Any) -> dict[str, Any]:
     return {"cached": True, "note": CACHED_NOTE, "result": observation}
 
 
+def note_service_refusal(metrics: Any, tool: str, exc: Exception, *, source: str = "model") -> bool:
+    """Log and count a guardrail refusal of a design-flow call (FORGE-492).
+
+    Returns whether ``exc`` was one, so a loop can pick the log line for
+    ordinary failures when it was not. The refusal itself is not an abort:
+    the caller still hands it to the model as the call's observation.
+    """
+    if not is_service_refusal(exc):
+        return False
+    logger.warning("design_flow_tool_refused", tool=tool, source=source, error=str(exc))
+    if metrics is not None:
+        try:
+            metrics.record_design_flow_tool_refusal(tool, source)
+        except Exception:  # noqa: BLE001 - metrics must never break a tool call
+            pass
+    return True
+
+
 def error_content(exc: Exception) -> str:
     """Render a failed tool call as a structured result the model can act on.
 
@@ -71,7 +121,7 @@ def error_content(exc: Exception) -> str:
     do instead — was flattened into one opaque line, so a model could not tell
     "the container is down, stop trying" from "that argument was wrong, fix it".
     """
-    if isinstance(exc, ToolValidationError):
+    if isinstance(exc, (ToolValidationError, ToolNotFoundError)):
         return render_json(exc.to_payload())
     payload: dict[str, Any] = {"status": "error", "error": str(exc)}
     tool_id = getattr(exc, "tool_id", None)
@@ -80,6 +130,14 @@ def error_content(exc: Exception) -> str:
     envelope = getattr(exc, "payload", None)
     if isinstance(envelope, dict) and envelope:
         payload["details"] = envelope
+    if is_service_refusal(exc):
+        # FORGE-492: tell the model this is a decision, not a fault. Without
+        # the hint it reads like a transient failure and retries the same call.
+        payload["refused"] = True
+        payload["hint"] = (
+            "this tool is not available to this run; retrying cannot change that. "
+            "Choose a different tool."
+        )
     return render_json(payload)
 
 

@@ -150,21 +150,96 @@ class ForgeClient:
             resp.raise_for_status()
             return resp.json()
 
+    def twin_migration_plan(self, project_id: str) -> dict[str, Any]:
+        """Dry-run the item migration (FORGE-529): ``POST .../item-migration/plan``."""
+        with self._client() as client:
+            resp = client.post(self._url(f"/twin/projects/{project_id}/item-migration/plan"))
+            resp.raise_for_status()
+            return resp.json()
+
+    def twin_migration_apply(
+        self, project_id: str, plan: dict[str, Any], reason: str
+    ) -> dict[str, Any]:
+        """Apply a reviewed migration plan with an explicit approval (FORGE-529).
+
+        A 409 (the twin changed since the plan was made) or 403 is raised as a
+        ``RuntimeError`` carrying the gateway's message.
+        """
+        with self._client() as client:
+            resp = client.post(
+                self._url(f"/twin/projects/{project_id}/item-migration/apply"),
+                json={"plan": plan, "approve": True, "reason": reason},
+                headers=self._approval_headers(),
+            )
+            if resp.status_code in (400, 403, 409):
+                try:
+                    detail = resp.json().get("detail")
+                except ValueError:
+                    detail = resp.text
+                raise RuntimeError(f"migration not applied ({resp.status_code}): {detail}")
+            resp.raise_for_status()
+            return resp.json()
+
     def twin_list(
         self,
         domain: str | None = None,
         work_product_type: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
-        """List Digital Twin work_products via ``GET /api/v1/twin/nodes``."""
+        """List Digital Twin work_products via ``GET /api/v1/twin/nodes``.
+
+        ``project_id`` (FORGE-248) maps to the gateway's own project-scoped
+        node query -- omitted or ``None`` returns every node (including
+        unscoped legacy nodes), matching the gateway's own default.
+        """
         params: dict[str, str] = {}
         if domain:
             params["domain"] = domain
         if work_product_type:
             params["type"] = work_product_type
+        if project_id:
+            params["project_id"] = project_id
         with self._client() as client:
             resp = client.get(self._url("/twin/nodes"), params=params)
             resp.raise_for_status()
             return resp.json()
+
+    def _get_json(self, path: str, params: dict[str, str] | None = None) -> Any:
+        with self._client() as client:
+            resp = client.get(self._url(path), params=params or {})
+            resp.raise_for_status()
+            return resp.json()
+
+    def twin_item_history(self, key: str, project_id: str | None = None) -> dict[str, Any]:
+        """One item's revisions via ``GET /v1/twin/items/{key}/revisions`` (FORGE-526)."""
+        params = {"project_id": project_id} if project_id else {}
+        result: dict[str, Any] = self._get_json(f"/twin/items/{key}/revisions", params)
+        return result
+
+    def twin_item_diff(
+        self, key: str, a: str | None = None, b: str | None = None, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """Compare two revisions via ``GET /v1/twin/items/{key}/diff`` (FORGE-526)."""
+        params: dict[str, str] = {}
+        if a:
+            params["a"] = a
+        if b:
+            params["b"] = b
+        if project_id:
+            params["project_id"] = project_id
+        result: dict[str, Any] = self._get_json(f"/twin/items/{key}/diff", params)
+        return result
+
+    def twin_baselines(self, project_id: str | None = None) -> dict[str, Any]:
+        """A project's baselines via ``GET /v1/twin/baselines`` (FORGE-526)."""
+        params = {"project_id": project_id} if project_id else {}
+        result: dict[str, Any] = self._get_json("/twin/baselines", params)
+        return result
+
+    def twin_baseline_diff(self, a: str, b: str) -> dict[str, Any]:
+        """Compare two baselines via ``GET /v1/twin/baselines/diff`` (FORGE-526)."""
+        result: dict[str, Any] = self._get_json("/twin/baselines/diff", {"a": a, "b": b})
+        return result
 
     # ------------------------------------------------------------------
     # Proposals
@@ -211,6 +286,98 @@ class ForgeClient:
         with self._client() as client:
             resp = client.post(self._url(f"/assistant/proposals/{change_id}/decide"), json=payload)
             resp.raise_for_status()
+            return resp.json()
+
+    # ------------------------------------------------------------------
+    # Unified approvals (FORGE-506/509) -- served at /v1/approvals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _approval_headers() -> dict[str, str]:
+        """Identity headers for the approvals API.
+
+        Always ``X-MetaForge-Surface: cli``.  When ``METAFORGE_APPROVAL_AGENT``
+        and ``METAFORGE_APPROVAL_ON_BEHALF_OF`` are both set, the surface is
+        ``agent`` and the on-behalf-of user is attached.  A bearer token from
+        ``METAFORGE_AUTH_TOKEN`` is sent when configured.
+        """
+        headers = {"X-MetaForge-Surface": "cli"}
+        agent = os.environ.get("METAFORGE_APPROVAL_AGENT", "").strip()
+        on_behalf = os.environ.get("METAFORGE_APPROVAL_ON_BEHALF_OF", "").strip()
+        if agent and on_behalf:
+            headers["X-MetaForge-Surface"] = "agent"
+            headers["X-MetaForge-On-Behalf-Of"] = on_behalf
+            headers["X-MetaForge-Agent"] = agent
+        token = os.environ.get("METAFORGE_AUTH_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    @staticmethod
+    def _raise_for_approval(resp: httpx.Response) -> None:
+        if resp.is_success:
+            return
+        detail: Any = None
+        try:
+            body = resp.json()
+            detail = body.get("detail") if isinstance(body, dict) else None
+        except ValueError:
+            pass
+        if isinstance(detail, list):
+            detail = "; ".join(
+                str(d.get("msg", d)) if isinstance(d, dict) else str(d) for d in detail
+            )
+        raise ForgeClientError(
+            str(detail) if detail else f"HTTP {resp.status_code}", resp.status_code
+        )
+
+    def list_approvals(
+        self,
+        *,
+        status: str = "pending",
+        project_id: str | None = None,
+        kind: str | None = None,
+    ) -> dict[str, Any]:
+        """``GET /v1/approvals`` -> ``{"items": [...], "unscoped_count": int}``."""
+        params: dict[str, str] = {"status": status}
+        if project_id:
+            params["project_id"] = project_id
+        if kind:
+            params["kind"] = kind
+        with self._client() as client:
+            resp = client.get("/v1/approvals", params=params, headers=self._approval_headers())
+            self._raise_for_approval(resp)
+            return resp.json()
+
+    def get_approval(self, approval_id: str) -> dict[str, Any]:
+        """``GET /v1/approvals/{id}`` -> one ApprovalItem."""
+        with self._client() as client:
+            resp = client.get(
+                f"/v1/approvals/{quote(approval_id, safe=':')}", headers=self._approval_headers()
+            )
+            self._raise_for_approval(resp)
+            return resp.json()
+
+    def decide_approval(
+        self,
+        approval_id: str,
+        decision: str,
+        reason: str | None = None,
+        to_phase: str | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v1/approvals/{id}/decision`` -> the updated ApprovalItem."""
+        payload: dict[str, Any] = {"decision": decision}
+        if reason:
+            payload["reason"] = reason
+        if to_phase:
+            payload["to_phase"] = to_phase
+        with self._client() as client:
+            resp = client.post(
+                f"/v1/approvals/{quote(approval_id, safe=':')}/decision",
+                json=payload,
+                headers=self._approval_headers(),
+            )
+            self._raise_for_approval(resp)
             return resp.json()
 
     # ------------------------------------------------------------------

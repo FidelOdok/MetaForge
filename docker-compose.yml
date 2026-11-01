@@ -31,7 +31,13 @@ services:
       - METAFORGE_ENV=docker
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      # FORGE-712: this stack ships Neo4j, so a gateway that cannot reach it
+      # exits instead of serving an empty in-memory twin. After a host reboot
+      # Docker restarts containers without honouring depends_on; exiting lets
+      # restart: unless-stopped retry until Neo4j is up, where the in-memory
+      # fallback looked healthy and silently hid every persisted node.
+      - METAFORGE_REQUIRE_NEO4J=${METAFORGE_REQUIRE_NEO4J:-true}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - TEMPORAL_HOST=temporal:7233
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -47,8 +53,20 @@ services:
       # calculix.* ran in-process here where the ccx solver binary isn't
       # installed (only calculix-adapter's own image bundles it).
       - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
+      # FORGE-542: ngspice is only in spice-adapter's image.
+      - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
+      # FORGE-628: Blender (GPL) runs only in blender-adapter's own image.
+      - METAFORGE_ADAPTER_BLENDER_URL=http://blender-adapter:8202
+      # FORGE-557: OpenFOAM is only in openfoam-adapter's image, which runs under
+      # the `cfd` compose profile; without it a call says so rather than failing
+      # obscurely.
+      - METAFORGE_ADAPTER_OPENFOAM_URL=http://openfoam-adapter:8300
+      # FORGE-674/677: PlatformIO, Renode and Espressif QEMU are only in
+      # firmware-adapter's image, which runs under the `firmware` compose
+      # profile; without it a call says the adapter is not running.
+      - METAFORGE_ADAPTER_FIRMWARE_URL=http://firmware-adapter:8105
       - ADAPTER_WORKSPACE_DIR=/workspace
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
       - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
       - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
@@ -107,7 +125,7 @@ services:
       - PROPERTY_EXTRACTION_MODEL=${PROPERTY_EXTRACTION_MODEL:-}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
       - MINIO_SECURE=${MINIO_SECURE:-false}
       # Distributor APIs (MET-434). Loader skips registration when the
@@ -119,6 +137,11 @@ services:
       - MOUSER_API_KEY=${MOUSER_API_KEY:-}
       - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
       - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
+      - FARNELL_API_KEY=${FARNELL_API_KEY:-}
+      - FARNELL_STORE=${FARNELL_STORE:-uk.farnell.com}
+      - ARROW_LOGIN=${ARROW_LOGIN:-}
+      - ARROW_API_KEY=${ARROW_API_KEY:-}
+      - MOUSER_DAILY_LIMIT=${MOUSER_DAILY_LIMIT:-1000}
       # Web search (MET-7). Same skip-when-unset contract as the distributor
       # keys above: without this, web.search / web.fetch are not registered
       # at all rather than registered-but-always-empty.
@@ -143,6 +166,15 @@ services:
       # caught (MET-10): a selection set minutes earlier was gone by the next
       # chat turn.
       - metaforge-home:/root/.metaforge
+      # FORGE-292: GET /v1/evals reads evals/reports/<ts>/report*.json for
+      # the "pass rate per scenario" eval dashboard. evals/ is deliberately
+      # NOT copied into the image (it's a standalone, stdlib-only tool
+      # directory, not app code -- see Dockerfile), and the reports
+      # themselves are gitignored, host-local artifacts nightly.sh writes
+      # when it runs ON the box (not inside this container) -- a bind mount
+      # is the only way this container can see them. Read-only: the route
+      # only ever reads.
+      - ./evals/reports:/app/evals/reports:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -156,6 +188,8 @@ services:
         condition: service_healthy
     networks:
       - metaforge
+      # FORGE-577: reaches the object store
+      - storage
     restart: unless-stopped
 
   # ── OCCT Converter (STEP/IGES → GLB microservice) ──────────────
@@ -163,7 +197,7 @@ services:
     build:
       context: ./tools/occt-converter
       dockerfile: Dockerfile
-    image: metaforge-occt:latest
+    image: ghcr.io/fidelodok/metaforge-occt:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
       - "${OCCT_PORT:-8100}:8100"
     healthcheck:
@@ -178,6 +212,9 @@ services:
 
   # ── MetaForge Dashboard (production — static nginx build) ────────
   dashboard:
+    # FORGE-593: published by CI (adapter-images.yml), so a host pulls it; the
+    # build stays as the contributor fallback, as it does for the adapters.
+    image: ghcr.io/fidelodok/metaforge-dashboard:${METAFORGE_DASHBOARD_TAG:-latest}
     build:
       context: ./dashboard
       dockerfile: Dockerfile
@@ -198,7 +235,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-metaforge}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metaforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       POSTGRES_DB: ${POSTGRES_DB:-metaforge}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -219,7 +256,7 @@ services:
       - "${NEO4J_HTTP_PORT:-7474}:7474"
       - "${NEO4J_BOLT_PORT:-7687}:7687"
     environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-metaforge}
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - NEO4J_PLUGINS=["apoc"]
       - NEO4J_server_memory_heap_initial__size=256m
       - NEO4J_server_memory_heap_max__size=512m
@@ -236,31 +273,54 @@ services:
       - metaforge
     restart: unless-stopped
 
-  # ── MinIO (KB object-storage source of truth — MET-476) ─────────
+  # ── Object store (S3; KB object-storage source of truth — MET-476) ──
   # Authoritative store for L1-L3 knowledge data (datasheets, extracted
-  # properties, design decisions, BOM specs). Neo4j + pgvector are
-  # regenerable caches built from these objects. Dev creds default to
-  # minioadmin/minioadmin; override via MINIO_ACCESS_KEY/MINIO_SECRET_KEY
-  # in real environments.
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  # properties, design decisions, BOM specs), CAD blobs and simulation
+  # fields. Neo4j + pgvector are regenerable caches built from these
+  # objects. MINIO_ACCESS_KEY identifies the account and keeps a default;
+  # MINIO_SECRET_KEY is the credential and has none (FORGE-558). The
+  # variable names stay MINIO_* so existing .env files keep working.
+  #
+  # FORGE-577: SeaweedFS replaced MinIO, whose community images were
+  # discontinued and then removed from Docker Hub. The image is our own
+  # GHCR copy of the signed upstream release (mirror-images.yml), so an
+  # upstream deletion cannot break a host again.
+  #
+  # One container, two processes: the storage server (master, volume,
+  # filer) listens on loopback only, so its unauthenticated HTTP and gRPC
+  # APIs (including the filer's IAM service) are unreachable from other
+  # containers; the S3 gateway is the only thing on the network, on the
+  # port MinIO used. The admin identity comes from AWS_ACCESS_KEY_ID /
+  # AWS_SECRET_ACCESS_KEY; a wrong or missing key is refused. The S3
+  # gateway's own gRPC port cannot be bound separately, so the service sits
+  # on a `storage` network shared only with the services that use it.
+  object-store:
+    image: ghcr.io/fidelodok/metaforge-seaweedfs:${METAFORGE_SEAWEEDFS_TAG:-4.48}
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        weed server -dir=/data -ip=127.0.0.1 -ip.bind=127.0.0.1
+        -filer -filer.disableHttp
+        -master.volumeSizeLimitMB=1024 -volume.max=0 &
+        exec weed s3 -filer=127.0.0.1:8888 -ip.bind=0.0.0.0 -port=9000
+        -port.iceberg=0 -port.lance=0 -metricsPort=9327
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
     volumes:
-      - minio-data:/data
+      - object-store-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9000/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 20s
     networks:
-      - metaforge
+      storage:
+        # Every MINIO_ENDPOINT default is minio:9000; the name stays.
+        aliases: [minio]
     restart: unless-stopped
 
   # ── Kafka (Event Bus) ───────────────────────────────────────────
@@ -307,7 +367,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:?TEMPORAL_POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- Temporal's database password used to be hardcoded as 'temporal'}
       POSTGRES_DB: temporal
     volumes:
       - temporal-db-data:/var/lib/postgresql/data
@@ -330,7 +390,7 @@ services:
       - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
+      - POSTGRES_PWD=${TEMPORAL_POSTGRES_PASSWORD:?TEMPORAL_POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- Temporal's database password used to be hardcoded as 'temporal'}
       - POSTGRES_SEEDS=temporal-db
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
     volumes:
@@ -380,8 +440,8 @@ services:
       - TEMPORAL_HOST=temporal:7233
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://metaforge:metaforge@postgres:5432/metaforge}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       # MET-724: the worker synthesizes insights in its own process, so it
       # needs the same LLM credentials the gateway has. Without the key the
@@ -415,12 +475,454 @@ services:
       - metaforge
     restart: unless-stopped
 
+  # ── MCP HTTP sidecar — the unified MCP server on :8765, which the
+  # harness plugins connect to. FORGE-593: defined here, not only in the
+  # dev override, so a host running from images alone has it; the override
+  # adds the source mounts for hot reload. DATABASE_URL points at the
+  # in-cluster postgres so knowledge + memory adapters wire up.
+  mcp-http:
+    # FORGE-411: the CI-published gateway image, not a local build. This
+    # service had a `build:` and no `image:`, so it could only ever run an
+    # image built on whatever box it was started on -- which is how it ended
+    # up predating `pint` and `temporalio` and crash-looping on restart, while
+    # the gateway beside it (same Dockerfile, but with an `image:`) was fine.
+    #
+    # The `build:` is deliberately gone rather than kept alongside: a stray
+    # `docker compose build mcp-http` is what produced the divergent local
+    # image in the first place. The gateway service owns the build; this uses
+    # what it produces.
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
+    command: >
+      python -m metaforge.mcp --transport http
+      --host 0.0.0.0 --port 8765
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam,firmware,simready
+      --allow-twin-mutations
+      --capture-sessions
+    ports:
+      - "8765:8765"
+    environment:
+      - METAFORGE_ENV=docker
+      - NEO4J_URI=bolt://neo4j:7687
+      # FORGE-488: the design_flow adapter starts runs through Temporal. Unset,
+      # the client falls back to localhost:7233, which inside this container is
+      # the container itself (temporal_connect_failed, connection refused).
+      - TEMPORAL_HOST=temporal:7233
+      # FORGE-406: where to park a held write. The approval store is
+      # process-level, so without this the sidecar holds calls in its own
+      # memory and the dashboard -- served by the gateway -- never sees them.
+      # Unset, the sidecar falls back to that in-process queue and says so on
+      # every start-up rather than only when somebody tries to write.
+      - METAFORGE_GATEWAY_URL=http://gateway:8000
+      # FORGE-647: the key the sidecar presents when it posts a live assembly
+      # placement to the gateway. Empty on a gateway with no key, as for the worker.
+      - METAFORGE_GATEWAY_API_KEY=${METAFORGE_GATEWAY_API_KEY:-}
+      # FORGE-487: matches `design-flow-worker`'s value and nothing else's.
+      # It is how this sidecar recognises the worker as a service caller (and
+      # then only for a run the gateway confirms is running an approved flow
+      # version in the call's project). No default: unset, the worker's writes
+      # are held like any untrusted caller's.
+      - METAFORGE_MCP_SERVICE_KEY=${METAFORGE_MCP_SERVICE_KEY:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      # Credentials sourced from .env — same vars the gateway service uses.
+      # No literal fallbacks: secret scanners treat a hardcoded user/pass
+      # pair in a connection string as a credential leak even for dev defaults.
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
+      # MET-436: digikey/mouser/nexar adapters + offer_resolver need these to
+      # register with live credentials — the gateway service (docker-compose.yml)
+      # already had this passthrough; this sidecar never did, so distributor
+      # tools always skipped with "missing env vars" here regardless of .env.
+      - DIGIKEY_CLIENT_ID=${DIGIKEY_CLIENT_ID:-}
+      - DIGIKEY_CLIENT_SECRET=${DIGIKEY_CLIENT_SECRET:-}
+      - DIGIKEY_BASE_URL=${DIGIKEY_BASE_URL:-}
+      - MOUSER_API_KEY=${MOUSER_API_KEY:-}
+      - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
+      - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
+      - FARNELL_API_KEY=${FARNELL_API_KEY:-}
+      - FARNELL_STORE=${FARNELL_STORE:-uk.farnell.com}
+      - ARROW_LOGIN=${ARROW_LOGIN:-}
+      - ARROW_API_KEY=${ARROW_API_KEY:-}
+      - MOUSER_DAILY_LIMIT=${MOUSER_DAILY_LIMIT:-1000}
+      # MET-7: same gap as the distributor creds above -- web.search/
+      # web.fetch need this to register with a live key; the gateway
+      # service (docker-compose.yml) already had this passthrough, this
+      # sidecar never did, so the web adapter always skipped with
+      # "missing env vars: BRAVE_API_KEY" here regardless of .env.
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
+      - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
+      # MET-478 follow-up: without this, kicad.* tools ran in-process inside
+      # this sidecar, which has no kicad-cli binary, so every real call
+      # failed with -32001 even though tools/list looked healthy.
+      - METAFORGE_ADAPTER_KICAD_URL=http://kicad-adapter:8103
+      # MET-658 follow-up: same gap as kicad -- the ccx solver binary isn't
+      # installed in this sidecar image, only in calculix-adapter's own.
+      - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
+      # FORGE-542: ngspice is only in spice-adapter's image.
+      - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
+      # FORGE-628: Blender (GPL) runs only in blender-adapter's own image.
+      - METAFORGE_ADAPTER_BLENDER_URL=http://blender-adapter:8202
+      # FORGE-557: OpenFOAM is only in openfoam-adapter's image, which runs under
+      # the `cfd` compose profile; without it a call says so rather than failing
+      # obscurely.
+      - METAFORGE_ADAPTER_OPENFOAM_URL=http://openfoam-adapter:8300
+      # FORGE-674/677: PlatformIO, Renode and Espressif QEMU are only in
+      # firmware-adapter's image, which runs under the `firmware` compose
+      # profile; without it a call says the adapter is not running.
+      - METAFORGE_ADAPTER_FIRMWARE_URL=http://firmware-adapter:8105
+      - OCCT_CONVERTER_URL=http://occt-converter:8100
+      - ADAPTER_WORKSPACE_DIR=/workspace
+      # MET-495: same MinIO config as the gateway so twin.record_decision can
+      # store decision blobs in the shared work-products bucket (without it,
+      # the blob client hangs on a misconfigured endpoint).
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+      # Static API-key auth (MET-338). Once the Cloudflare tunnel (MET-482)
+      # makes :8765 publicly reachable, set this in .env so the endpoint
+      # isn't open to the world. Empty => open mode (LAN-only dev).
+      - METAFORGE_MCP_API_KEY=${METAFORGE_MCP_API_KEY:-}
+      # OAuth 2.1 + PKCE for the claude.ai web connector (MET-480).
+      # Setting the login secret turns the OAuth server on; the issuer is
+      # the public tunnel hostname (else derived from forwarded headers).
+      - METAFORGE_OAUTH_LOGIN_SECRET=${METAFORGE_OAUTH_LOGIN_SECRET:-}
+      - METAFORGE_OAUTH_ISSUER=${METAFORGE_OAUTH_ISSUER:-}
+      # FORGE-604: extra browser origins allowed to call /mcp, comma
+      # separated. Loopback, claude.ai/claude.com and the issuer are always
+      # allowed and requests without an Origin are unaffected; "*" turns the
+      # check off.
+      - METAFORGE_MCP_ALLOWED_ORIGINS=${METAFORGE_MCP_ALLOWED_ORIGINS:-}
+      # FORGE-592: MCP revision 2026-07-28 (handshake-free) is served by
+      # default; "off" stops serving it (rollback). Handshake clients are
+      # unaffected either way.
+      - METAFORGE_MCP_MODERN=${METAFORGE_MCP_MODERN:-}
+      # FORGE-601: signs the state a question returned to a 2026-07-28
+      # client carries. Optional: unset, a random per-process key is used and
+      # a question outstanding across a restart is simply asked again.
+      - METAFORGE_MCP_STATE_KEY=${METAFORGE_MCP_STATE_KEY:-}
+    volumes:
+      # Read-write (MET-618 follow-up): twin.stage_work_product_file and
+      # MET-612's boolean-cut staging both write into this shared workspace
+      # so any adapter can load the result — the gateway's own mount above
+      # was already read-write for the same reason; this one was never
+      # updated to match, so any write-needing tool exposed through this
+      # standalone sidecar (used by external MCP clients) failed with
+      # "Read-only file system" no matter which work product it targeted.
+      - adapter-workspace:/workspace
+    # Override the gateway image's baked-in HEALTHCHECK (it probes :8000,
+    # the gateway's port) — this sidecar serves on :8765, so without this
+    # the container reports "unhealthy" forever while working fine.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - metaforge
+      # FORGE-577: reaches the object store
+      - storage
+    restart: unless-stopped
+
+  # ── Design-flow worker (FORGE-401) ──────────────────────────────
+  # A second worker, on its own task queue. Design-flow phases are long
+  # agent loops (minutes to hours); sharing a queue with the short agent
+  # tasks would let one slow phase starve them, and the two have completely
+  # different scaling shapes.
+  #
+  # Without this service, runs start and then sit forever: the workflow is
+  # durably created, and nothing polls the queue to advance it. That failure
+  # is quiet by construction, which is why the gateway refuses to start a run
+  # when Temporal itself is unreachable -- the loud half of the same problem.
+  design-flow-worker:
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "api_gateway.runs.flow_worker"]
+    environment:
+      - METAFORGE_ENV=docker
+      - TEMPORAL_HOST=temporal:7233
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}}
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      # FORGE-475: a phase runs the same chat harness the gateway does, so it
+      # needs the same model config. This service had none, and every phase
+      # failed with "missing API key in env 'METAFORGE_LLM_API_KEY'" against
+      # whatever the in-code default happened to be. Keep this block in step
+      # with the gateway's (tests/unit/test_compose_design_flow_worker.py).
+      - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
+      - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
+      - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
+      - METAFORGE_LLM_API_KEY=${METAFORGE_LLM_API_KEY:-}
+      - METAFORGE_CHAT_SKILLS=${METAFORGE_CHAT_SKILLS:-off}
+      - METAFORGE_CHAT_MAX_STEPS=${METAFORGE_CHAT_MAX_STEPS:-}
+      - METAFORGE_CHAT_WALL_CLOCK_SECONDS=${METAFORGE_CHAT_WALL_CLOCK_SECONDS:-}
+      - METAFORGE_CHAT_MAX_COST_USD=${METAFORGE_CHAT_MAX_COST_USD:-}
+      - METAFORGE_ROTATION_STRATEGY=${METAFORGE_ROTATION_STRATEGY:-round_robin}
+      # FORGE-475: where a phase gets its tools. This process has no tool
+      # registry of its own, so without the sidecar a phase ran with only
+      # search_tools (mcp_tools=0). The worker fails the phase with this URL
+      # in the reason when it cannot connect, rather than running toolless.
+      - METAFORGE_MCP_URL=${METAFORGE_MCP_URL:-http://mcp-http:8765/mcp}
+      - METAFORGE_MCP_CLIENT_KEY=${METAFORGE_MCP_API_KEY:-}
+      # FORGE-489: where the worker announces an open gate, so the run shows on
+      # the Approvals page. Unreachable, the gate is still open and durable,
+      # and the failure shows as outcome="failed" on the announce metric.
+      - METAFORGE_GATEWAY_URL=${METAFORGE_GATEWAY_URL:-http://gateway:8000}
+      - METAFORGE_GATEWAY_API_KEY=${METAFORGE_GATEWAY_API_KEY:-}
+      # FORGE-501: the worker's deterministic fallback commit (geometry
+      # recorder) stores the STEP blob in MinIO. Without these a cad_model was
+      # created with no stored geometry. Same names and defaults as `gateway`.
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+      # FORGE-487: the service credential that lets the sidecar tell this
+      # worker from a plugin client, so a phase's writes inside an approved,
+      # running flow are not each held for a dashboard click. Shared with
+      # `mcp-http` ONLY (docker-compose.override.yml); never give it to the
+      # gateway or any other service. No default on purpose: unset, the
+      # feature is off and this worker stays an untrusted caller whose writes
+      # are held. Generate with `openssl rand -hex 32`.
+      - METAFORGE_MCP_SERVICE_KEY=${METAFORGE_MCP_SERVICE_KEY:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OCCT_CONVERTER_URL=http://occt-converter:8100
+      - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
+      - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
+    # FORGE-475: the durable provider selection and stored keys (`forge auth
+    # use`/`login`) live in ~/.metaforge/harness-auth.json, and the Codex
+    # OAuth token in ~/.codex. Sharing the gateway's volumes is what makes a
+    # phase resolve the same provider/model as a chat turn; without them the
+    # worker only ever saw the env defaults.
+    volumes:
+      - metaforge-home:/root/.metaforge
+      - codex-home:/root/.codex
+    # Inherits the gateway image's HEALTHCHECK, which curls :8000 -- this
+    # serves no HTTP, so it would report unhealthy while running perfectly.
+    # Same fix and same reasoning as temporal-worker above (MET-726).
+    healthcheck:
+      test:
+        ["CMD-SHELL", "python -m orchestrator.worker_healthcheck --task-queue metaforge-design-flows || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - metaforge
+      # FORGE-577: reaches the object store
+      - storage
+    restart: unless-stopped
+
+  # ── Host watchdog (FORGE-713) ───────────────────────────────────
+  # Docker restarts a container that exits, never one that keeps running in a
+  # bad state. This restarts a stack container that stays unhealthy, restarts
+  # the gateway when its twin has fallen back to memory, and reports host
+  # memory (warning only; it never kills anything). Restarts are rate limited
+  # so a container that fails every start is reported, not looped.
+  #
+  # The Docker socket is root-equivalent on the host. The watchdog only lists,
+  # inspects and restarts containers of its own compose project, but anything
+  # that can run code in this container could do more. See
+  # docs/runbooks/host-watchdog.md.
+  watchdog:
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "observability.watchdog"]
+    environment:
+      - METAFORGE_ENV=docker
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - METAFORGE_WATCHDOG_INTERVAL=${METAFORGE_WATCHDOG_INTERVAL:-30}
+      - METAFORGE_WATCHDOG_MEMORY_WARN_MB=${METAFORGE_WATCHDOG_MEMORY_WARN_MB:-512}
+      - METAFORGE_WATCHDOG_MAX_RESTARTS_PER_HOUR=${METAFORGE_WATCHDOG_MAX_RESTARTS_PER_HOUR:-3}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # The image's HEALTHCHECK curls :8000, which this process does not serve.
+    healthcheck:
+      disable: true
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── SPICE Adapter (FORGE-542: ngspice circuit simulation) ──────
+  # Shares adapter-workspace with kicad-adapter, so a netlist exported by
+  # kicad.export_netlist can be simulated by path.
+  spice-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/spice/Dockerfile
+    # FORGE-593: published by CI (adapter-images.yml); a host pulls it. The
+    # build: stays as the contributor fallback.
+    image: ghcr.io/fidelodok/metaforge-spice-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "8104:8104"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - SPICE_WORK_DIR=/workspace
+      - SPICE_HTTP_PORT=8104
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8104/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── Blender Adapter (FORGE-628: headless renders, Blender 5.2 LTS) ─
+  # Blender is GPL. It runs here, as a separate program; only
+  # tool_registry/tools/blender/bpy_scripts/ (GPL-3.0-or-later) runs inside
+  # it. See tool_registry/tools/blender/BLENDER_NOTICE.md.
+  blender-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/blender/Dockerfile
+    image: ghcr.io/fidelodok/metaforge-blender-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "8202:8202"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - BLENDER_WORK_DIR=/workspace
+      - BLENDER_BINARY=blender
+      - MCP_PORT=8202
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "python3.12", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8202/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── OpenFOAM Adapter (FORGE-557: steady internal flow, OpenFOAM 11) ─
+  # Opt-in: the image is about 4 GB, so it only runs under the `cfd` profile
+  # (add `cfd` to COMPOSE_PROFILES). Built by CI, not on a shared host. It shares
+  # adapter-workspace with the CAD adapters, so an STL they export is read by path.
+  # Resource limits matter: a mesh and solve are CPU-bound and this box also runs
+  # the twin and its databases. The published port is loopback only; the gateway
+  # reaches the adapter over the compose network.
+  openfoam-adapter:
+    profiles: ["cfd"]
+    build:
+      context: .
+      dockerfile: tool_registry/tools/openfoam/Dockerfile
+    image: ghcr.io/fidelodok/metaforge-openfoam-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "127.0.0.1:8300:8300"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - OPENFOAM_WORK_DIR=/workspace
+      - OPENFOAM_HTTP_PORT=8300
+      - OPENFOAM_MAX_PROCS=${OPENFOAM_MAX_PROCS:-8}
+      - OPENFOAM_MAX_CELLS=${OPENFOAM_MAX_CELLS:-2000000}
+      - OPENFOAM_MAX_OPERATION_TIME=${OPENFOAM_MAX_OPERATION_TIME:-3600}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+          cpus: '8'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8300/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── Firmware Adapter (FORGE-674/677: PlatformIO build, Renode + QEMU) ─
+  # Opt-in: the image carries the STM32 and ESP32 toolchains, ESP-IDF, Renode
+  # and Espressif's QEMU (several GB), so it only runs under the `firmware`
+  # profile (add `firmware` to COMPOSE_PROFILES). Built by CI, not on a shared
+  # host. It shares adapter-workspace, so a project written there is built by
+  # path and the ELF a build leaves is emulated by path. The published port is
+  # loopback only; the gateway reaches the adapter over the compose network.
+  firmware-adapter:
+    profiles: ["firmware"]
+    build:
+      context: .
+      dockerfile: tool_registry/tools/firmware/Dockerfile
+    image: ghcr.io/fidelodok/metaforge-firmware-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "127.0.0.1:8105:8105"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - FIRMWARE_WORK_DIR=/workspace
+      - FIRMWARE_HTTP_PORT=8105
+      - FIRMWARE_MAX_BUILD_TIME=${FIRMWARE_MAX_BUILD_TIME:-600}
+      - FIRMWARE_MAX_EMULATION_TIME=${FIRMWARE_MAX_EMULATION_TIME:-120}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8105/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── KiCad Adapter (Phase 1 — read-only ERC/DRC/BOM/Gerber) ──────
   kicad-adapter:
     build:
       context: .
       dockerfile: tool_registry/tools/kicad/Dockerfile
-    image: metaforge/kicad-adapter:latest
+    # FORGE-593: published by CI (adapter-images.yml); a host pulls it. The
+    # build: stays as the contributor fallback.
+    image: ghcr.io/fidelodok/metaforge-kicad-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
       - "8103:8103"
     volumes:
@@ -450,7 +952,12 @@ services:
     build:
       context: .
       dockerfile: tool_registry/tools/calculix/Dockerfile
-    image: metaforge/calculix-adapter:latest
+    # FORGE-587: published by .github/workflows/adapter-images.yml.
+    # This used to name an image nothing published, so every host built
+    # it locally -- including fidel-dev, which is the load that workflow
+    # exists to move off the box. `build:` stays for contributors; Compose
+    # only builds when no local image matches the tag.
+    image: ghcr.io/fidelodok/metaforge-calculix-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
       - "${CALCULIX_PORT:-8200}:8200"
     volumes:
@@ -481,7 +988,9 @@ services:
     build:
       context: .
       dockerfile: tool_registry/tools/cadquery/Dockerfile
-    image: metaforge/cadquery-adapter:latest
+    # FORGE-593: published by CI (adapter-images.yml); a host pulls it. The
+    # build: stays as the contributor fallback.
+    image: ghcr.io/fidelodok/metaforge-cadquery-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     stdin_open: true
     ports:
       - "8101:8101"
@@ -512,7 +1021,12 @@ services:
     build:
       context: .
       dockerfile: tool_registry/tools/freecad/Dockerfile
-    image: metaforge/freecad-adapter:latest
+    # FORGE-587: published by .github/workflows/adapter-images.yml.
+    # This used to name an image nothing published, so every host built
+    # it locally -- including fidel-dev, which is the load that workflow
+    # exists to move off the box. `build:` stays for contributors; Compose
+    # only builds when no local image matches the tag.
+    image: ghcr.io/fidelodok/metaforge-freecad-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
       - "8102:8102"
     volumes:
@@ -593,7 +1107,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-metaforge}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-metaforge}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - POSTGRES_DATABASE=${POSTGRES_DB:-metaforge}
       - POSTGRES_WORKSPACE=lightrag_ui
       # Embeddings — ollama default. The bootstrap helper below
@@ -690,6 +1204,8 @@ services:
       - "--web.enable-lifecycle"
     networks:
       - metaforge
+      # FORGE-577: reaches the object store
+      - storage
     restart: unless-stopped
 
   grafana:
@@ -703,7 +1219,11 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-metaforge}
+      # FORGE-556: no default. The old one (`metaforge`) was in the public
+      # repo from the first compose commit, so every install shared an admin
+      # password any reader already knew. `:?` refuses rather than falling
+      # back -- the same rule the gateway's auth applies to itself.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
@@ -759,7 +1279,10 @@ volumes:
   postgres-data:
   neo4j-data:
   neo4j-logs:
+  # FORGE-577: kept so an existing host's MinIO data can be copied into
+  # object-store-data (scripts/storage/copy_objects.py); nothing mounts it.
   minio-data:
+  object-store-data:
   zookeeper-data:
   kafka-data:
   temporal-db-data:
@@ -776,4 +1299,7 @@ volumes:
 
 networks:
   metaforge:
+    driver: bridge
+  # FORGE-577: only the object store and the services that use S3.
+  storage:
     driver: bridge

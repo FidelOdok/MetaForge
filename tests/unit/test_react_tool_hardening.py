@@ -22,6 +22,7 @@ from orchestrator.harness.tool_exec import (
     cached_view,
     dedup_key,
     error_content,
+    observation_failure_reason,
 )
 from orchestrator.harness.tools import ToolRegistry
 from orchestrator.harness.validation import ToolValidationError
@@ -101,6 +102,25 @@ class TestSharedHelpers:
         cache.put(cache.key("t", {}), "ok")
         assert cache.has(cache.key("t", {})) is True
         assert len(cache) == 1
+
+    # FORGE-225: observation_failure_reason -- the pure detector behind the
+    # step-error marking tested end-to-end in TestSkillReportedFailureMarkedAsStepError.
+    def test_observation_failure_reason_detects_success_false(self):
+        reason = observation_failure_reason({"success": False, "errors": ["bad op", "bad ref"]})
+        assert reason == "bad op; bad ref"
+
+    def test_observation_failure_reason_detects_status_error(self):
+        reason = observation_failure_reason({"status": "error", "error": "no such object"})
+        assert reason == "no such object"
+
+    def test_observation_failure_reason_none_for_a_real_success(self):
+        assert observation_failure_reason({"success": True, "cad_file": "x.step"}) is None
+        assert observation_failure_reason({"status": "ok"}) is None
+
+    def test_observation_failure_reason_none_for_a_non_dict_observation(self):
+        assert observation_failure_reason("plain string result") is None
+        assert observation_failure_reason(None) is None
+        assert observation_failure_reason([1, 2, 3]) is None
 
 
 class TestReActDedup:
@@ -219,3 +239,47 @@ class TestReActStructuredErrors:
         payload = json.loads(result.steps[0].error)
         assert payload["error"] == "invalid_arguments"
         assert "NOT executed" in payload["hint"]
+
+
+class TestSkillReportedFailureMarkedAsStepError:
+    """FORGE-225, ReAct side: a skill tool that catches its own error and
+    returns a normal {"success": False, ...} result (no exception) must not
+    look like a success in the trace either -- fixed for both loops
+    (native_tools.py already had its own regression coverage)."""
+
+    @pytest.mark.asyncio
+    async def test_a_success_false_result_is_marked_as_a_step_error(self):
+        async def rejects(arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"success": False, "errors": ["Invalid Design IR document: 3 errors"]}
+
+        registry = ToolRegistry()
+        registry.register_native(
+            "skill_mechanical_generate_cad_ir",
+            description="s",
+            input_schema={"type": "object"},
+            handler=rejects,
+        )
+        policy = ScriptedPolicy([("skill_mechanical_generate_cad_ir", {})])
+
+        result = await run_react(_runtime(registry), policy, "build it", max_steps=3)
+
+        assert result.steps[0].error is not None
+        assert "Invalid Design IR document" in result.steps[0].error
+
+    @pytest.mark.asyncio
+    async def test_a_success_true_result_is_not_marked_as_an_error(self):
+        async def ok(arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"success": True, "cad_file": "output/part.step"}
+
+        registry = ToolRegistry()
+        registry.register_native(
+            "skill_mechanical_generate_cad",
+            description="s",
+            input_schema={"type": "object"},
+            handler=ok,
+        )
+        policy = ScriptedPolicy([("skill_mechanical_generate_cad", {})])
+
+        result = await run_react(_runtime(registry), policy, "build it", max_steps=3)
+
+        assert result.steps[0].error is None

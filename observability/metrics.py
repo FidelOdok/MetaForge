@@ -11,7 +11,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import structlog
 from pydantic import BaseModel, field_validator
+
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Metric definition model
@@ -80,6 +83,17 @@ class MetricsRegistry:
         type="gauge",
         description="Active user sessions",
         labels=["status"],
+    )
+    # MetaForge Cloud. ``outcome`` is one of: allowed, public, rejected,
+    # unavailable. Watch "unavailable" in particular — it means the identity
+    # provider could not be reached, which looks like an auth outage to users
+    # but is not a credential problem, and it is the signal that distinguishes
+    # the two.
+    GATEWAY_AUTH_TOTAL = MetricDefinition(
+        name="metaforge_gateway_auth_total",
+        type="counter",
+        description="Gateway authentication decisions",
+        labels=["mode", "outcome"],
     )
 
     # ── Agent metrics (MET-107) ────────────────────────────────────────
@@ -226,6 +240,105 @@ class MetricsRegistry:
         ),
         labels=["kind"],
     )
+    #: One sample per definition write that went through item identity
+    #: (FORGE-523). ``outcome`` is ``created``, ``drafted`` (inside a run,
+    #: FORGE-525) or ``failed``; ``resolved_by``
+    #: says how the item was found (``new``, ``name``, ``item_key``,
+    #: ``supersedes``, or one of those with ``_adopted`` when an old
+    #: SUPERSEDES chain was folded in). A ``failed`` sample means a node was
+    #: written but its item link was not, so it looks like a fresh sibling.
+    TWIN_ITEM_REVISION_TOTAL = MetricDefinition(
+        name="metaforge_twin_item_revision_total",
+        type="counter",
+        description="Item revisions written per definition type, by outcome and resolution",
+        labels=["item_type", "outcome", "resolved_by"],
+    )
+    #: One sample per run change-set decision (FORGE-525). ``outcome`` is
+    #: ``committed`` (a gate approval moved the heads), ``refused`` (the
+    #: approval found heads that moved since the run drafted them, so nothing
+    #: was committed), ``rejected`` / ``abandoned`` (drafts closed without a
+    #: head move) or ``failed`` (a commit broke part-way and was restored).
+    TWIN_CHANGE_SET_TOTAL = MetricDefinition(
+        name="metaforge_twin_change_set_total",
+        type="counter",
+        description="Run change-set commits and closes, by outcome",
+        labels=["outcome"],
+    )
+    #: Items and revisions created by the legacy-node migration (FORGE-529),
+    #: per definition type. ``kind`` is ``item`` (a new Item node) or
+    #: ``revision`` (a legacy node linked as a revision); ``outcome`` is
+    #: ``created`` or ``failed``.
+    TWIN_ITEM_MIGRATION_TOTAL = MetricDefinition(
+        name="metaforge_twin_item_migration_total",
+        type="counter",
+        description="Items and revisions created by the item migration, per type",
+        labels=["item_type", "kind", "outcome"],
+    )
+    #: One sample per definition write inside a design-flow phase that
+    #: declares slots of its type (FORGE-524). ``outcome`` is ``slot`` (the
+    #: write landed on its declared item) or ``undeclared`` (it matched none
+    #: and became a new item, listed for the gate reviewer).
+    FLOW_ITEM_SLOT_TOTAL = MetricDefinition(
+        name="metaforge_flow_item_slot_total",
+        type="counter",
+        description="Design-flow definition writes by slot outcome (slot or undeclared)",
+        labels=["item_type", "outcome"],
+    )
+    #: One sample per requirement-like value found in a prd write (FORGE-528).
+    #: ``outcome`` is ``matched`` (the current constraint set has it) or
+    #: ``stray`` (it does not, and the write returned a warning naming it).
+    TWIN_PRD_REQUIREMENT_VALUE_TOTAL = MetricDefinition(
+        name="metaforge_twin_prd_requirement_value_total",
+        type="counter",
+        description="Requirement values found in prd prose, matched or stray",
+        labels=["outcome"],
+    )
+    TWIN_RECORD_STALENESS_TOTAL = MetricDefinition(
+        name="metaforge_twin_record_staleness_total",
+        type="counter",
+        description=(
+            "Records (simulation results, decisions, evidence) whose staleness changed, "
+            "by record type and status (FORGE-527)"
+        ),
+        labels=["record_type", "status"],
+    )
+    #: FORGE-526: baselines recorded, by ``source`` (``gate`` approval or
+    #: ``manual`` twin.create_baseline) and ``outcome`` (``created``,
+    #: ``existing`` for an idempotent repeat, ``empty`` when the project had
+    #: no current item to pin, ``failed``).
+    TWIN_BASELINE_TOTAL = MetricDefinition(
+        name="metaforge_twin_baseline_total",
+        type="counter",
+        description="Baselines recorded per source and outcome",
+        labels=["source", "outcome"],
+    )
+
+    # ── Simulation result field metrics (FORGE-532) ──────────────────
+    #: One per solved run: did the 3D field payload build (``built``), build
+    #: only after decimation (``decimated``), or fail (``failed``)? A failure
+    #: never fails the solve, so this counter is the only place it shows.
+    SIM_FIELD_PAYLOAD_TOTAL = MetricDefinition(
+        name="metaforge_sim_field_payload_total",
+        type="counter",
+        description="CalculiX result field payload builds, by analysis type and outcome",
+        labels=["analysis_type", "outcome"],
+    )
+    SIM_FIELD_PAYLOAD_BYTES = MetricDefinition(
+        name="metaforge_sim_field_payload_bytes",
+        type="histogram",
+        description="Compressed size of a CalculiX result field payload",
+        labels=["analysis_type"],
+        unit="By",
+        buckets=[10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000, 1_500_000],
+    )
+    #: Recorder side: a simulation_result whose field blob did (``stored``)
+    #: or did not (``failed``) reach MinIO, or was rejected (``invalid``).
+    SIM_FIELD_STORE_TOTAL = MetricDefinition(
+        name="metaforge_sim_field_store_total",
+        type="counter",
+        description="Simulation result field blobs stored to MinIO, by outcome",
+        labels=["outcome"],
+    )
 
     # ── Telemetry / MQTT metrics (MET-119) ───────────────────────────
     MQTT_MESSAGES_RECEIVED_TOTAL = MetricDefinition(
@@ -334,6 +447,23 @@ class MetricsRegistry:
         ),
         labels=["agent_id", "source_kind"],
     )
+    #: One sample per project brief composed (FORGE-530). ``mode`` is
+    #: ``baseline`` (one line per current item) or ``legacy`` (newest work
+    #: products, for a project with no items); ``capped`` is ``true`` when
+    #: the brief hit ``METAFORGE_BRIEF_CHAR_LIMIT`` and was shortened.
+    PROJECT_BRIEF_TOTAL = MetricDefinition(
+        name="metaforge_project_brief_total",
+        type="counter",
+        description="Project briefs composed, by mode and whether the char cap cut them",
+        labels=["mode", "capped"],
+    )
+    PROJECT_BRIEF_CHARS = MetricDefinition(
+        name="metaforge_project_brief_chars",
+        type="histogram",
+        description="Characters in a composed project brief (before the cap), by mode",
+        labels=["mode"],
+        buckets=[500, 1000, 2000, 4000, 6000, 8000, 10000, 15000, 25000, 50000],
+    )
 
     # ── Knowledge service latency (MET-401 / L1-A7) ───────────────────
     #
@@ -349,6 +479,16 @@ class MetricsRegistry:
         labels=["top_k_bucket"],
         unit="s",
         buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0],
+    )
+
+    KB_STORAGE_INIT_TOTAL = MetricDefinition(
+        name="metaforge_kb_storage_init_total",
+        type="counter",
+        description=(
+            "Knowledge-base object storage set-up at gateway start by outcome: "
+            "ready, failed, skipped (FORGE-594)"
+        ),
+        labels=["outcome"],
     )
 
     # ── Consolidation / agent-memory metrics (MET-454 / MET-455) ───────
@@ -391,6 +531,61 @@ class MetricsRegistry:
         labels=[],
     )
 
+    # ── Design-flow engine metrics (FORGE-401) ─────────────────────────
+    DESIGN_FLOW_ENGINE_UNAVAILABLE = MetricDefinition(
+        name="metaforge_design_flow_engine_unavailable_total",
+        type="counter",
+        description=("Design-flow run starts refused because the workflow engine was unreachable"),
+        labels=["target"],
+    )
+    # FORGE-469: a human approval gate asked to decide with no Temporal
+    # runtime to wait on. It used to approve on the spot, so a missing
+    # dependency silently waved every gate through. It now refuses, and
+    # this counts the refusals so the broken worker is visible.
+    APPROVAL_GATE_NO_RUNTIME_TOTAL = MetricDefinition(
+        name="metaforge_approval_gate_no_runtime_total",
+        type="counter",
+        description="Approval gates refused because no Temporal runtime was available",
+        labels=["required_role"],
+    )
+    # FORGE-470: an IterationController gate decided with no approval
+    # workflow behind it. outcome="blocked" is a converged loop that could
+    # not be approved because nothing can ask a human (it used to approve
+    # silently); outcome="auto_approved" is an explicit auto_approve config
+    # merging without review, counted so automatic approvals are visible.
+    ITERATION_GATE_UNATTENDED_TOTAL = MetricDefinition(
+        name="metaforge_iteration_gate_unattended_total",
+        type="counter",
+        description="Iteration gates decided without an approval workflow, by outcome",
+        labels=["outcome", "agent_code"],
+    )
+    DESIGN_FLOW_RUN_STARTED = MetricDefinition(
+        name="metaforge_design_flow_run_started_total",
+        type="counter",
+        description="Design-flow runs started, by engine and flow template",
+        labels=["engine", "flow"],
+    )
+    DESIGN_FLOW_GATE_TOTAL = MetricDefinition(
+        name="metaforge_design_flow_gate_total",
+        type="counter",
+        description="Design-flow gate outcomes",
+        labels=["gate", "outcome"],
+    )
+    DESIGN_FLOW_GATE_ANNOUNCE_TOTAL = MetricDefinition(
+        name="metaforge_design_flow_gate_announce_total",
+        type="counter",
+        description="Design-flow gates announced to approvers, by outcome (FORGE-489)",
+        labels=["outcome"],
+    )
+    CLIENT_TASK_TOTAL = MetricDefinition(
+        name="metaforge_client_task_total",
+        type="counter",
+        description=(
+            "Client-mode phase tasks by event: opened, claimed, submitted, cancelled (FORGE-581)"
+        ),
+        labels=["event"],
+    )
+
     # ── Chat harness loop metrics (production-harness audit follow-up) ─
     HARNESS_TURN_DURATION = MetricDefinition(
         name="metaforge_harness_turn_duration_seconds",
@@ -420,6 +615,26 @@ class MetricsRegistry:
         description="Total harness tool calls by tool and outcome",
         labels=["tool_name", "status"],
     )
+    DESIGN_FLOW_TOOL_REFUSAL_TOTAL = MetricDefinition(
+        name="metaforge_design_flow_tool_refusal_total",
+        type="counter",
+        description=(
+            "Tool calls the guardrail refused for the design-flow service caller "
+            "(FORGE-492); source is 'model' (returned as an observation) or "
+            "'handler' (a scripted step was refused and the phase fell back to the model)"
+        ),
+        labels=["tool_name", "source"],
+    )
+    # FORGE-98 / FORGE-520: a chat reply flagged as claiming work the turn did
+    # not do. ``kind`` is no_tool_call (no successful tool call at all),
+    # twin_write (claims a save/commit with no successful twin write) or
+    # node_id (quotes a node id no tool returned this turn).
+    CHAT_UNGROUNDED_CLAIM_TOTAL = MetricDefinition(
+        name="metaforge_chat_ungrounded_claim_total",
+        type="counter",
+        description="Chat replies flagged as ungrounded, by kind of unsupported claim",
+        labels=["kind"],
+    )
     HARNESS_PROVIDER_CALL_DURATION = MetricDefinition(
         name="metaforge_harness_provider_call_duration_seconds",
         type="histogram",
@@ -427,6 +642,189 @@ class MetricsRegistry:
         labels=["provider", "model", "role"],
         unit="s",
         buckets=[0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
+    )
+    # FORGE-468: a role served by something other than its primary provider.
+    # The pipeline's fallback used to be silent, so a primary that failed on
+    # every call looked like a healthy chain.
+    HARNESS_PROVIDER_FALLBACK_TOTAL = MetricDefinition(
+        name="metaforge_harness_provider_fallback_total",
+        type="counter",
+        description="Harness model calls served by a fallback instead of the primary provider",
+        labels=["primary", "fallback", "role", "reason"],
+    )
+    # FORGE-476: token and cost accounting. ``kind`` is prompt, completion or
+    # cached_input; cost is only counted when the model has a known price, so
+    # a model missing from the price table adds tokens but no dollars.
+    LLM_TOKENS_TOTAL = MetricDefinition(
+        name="metaforge_llm_tokens_total",
+        type="counter",
+        description="LLM tokens consumed by role, provider, model and kind",
+        labels=["role", "provider", "model", "kind"],
+    )
+    LLM_COST_USD_TOTAL = MetricDefinition(
+        name="metaforge_llm_cost_usd_total",
+        type="counter",
+        description="LLM spend in USD by role, provider and model (priced models only)",
+        labels=["role", "provider", "model"],
+        unit="USD",
+    )
+    LLM_CALLS_TOTAL = MetricDefinition(
+        name="metaforge_llm_calls_total",
+        type="counter",
+        description="LLM calls by role, provider, model and whether usage was reported",
+        labels=["role", "provider", "model", "usage_reported"],
+    )
+    # Per-run cost cannot be a label (unbounded cardinality), so the alert is
+    # on a counter bumped once when a run crosses the spend threshold.
+    LLM_RUN_SPEND_EXCEEDED_TOTAL = MetricDefinition(
+        name="metaforge_llm_run_spend_exceeded_total",
+        type="counter",
+        description="Runs whose accumulated LLM spend crossed the runaway-spend threshold",
+        labels=["role"],
+    )
+    # FORGE-466: a held approval closed because nobody is waiting for it any
+    # more. ``outcome`` is timed_out or canceled; ``trigger`` is ``waiter``
+    # (the side that held the call said so) or ``deadline`` (the gateway
+    # expired it because the waiter never did); ``result`` is resolved,
+    # already_resolved, decided or failed. A rise in trigger="deadline" means
+    # waiters are dying without saying so; result="failed" means the
+    # sidecar cannot reach the ledger to close what it opened.
+    TOOL_APPROVAL_RESOLUTION_TOTAL = MetricDefinition(
+        name="metaforge_tool_approval_resolution_total",
+        type="counter",
+        description="Held tool approvals closed with no answer, by outcome, trigger and result",
+        labels=["outcome", "trigger", "result"],
+    )
+
+    # FORGE-490: an approval hold created where nothing can answer it (an
+    # in-process store in a non-gateway process). It can only time out and
+    # deny, so any non-zero count is a wiring bug.
+    UNREACHABLE_APPROVAL_HOLD_TOTAL = MetricDefinition(
+        name="metaforge_unreachable_approval_hold_total",
+        type="counter",
+        description="Approval holds created with no reachable approver, by tool",
+        labels=["tool"],
+    )
+
+    # FORGE-507: one decision through the unified /v1/approvals API. ``kind``
+    # is gate, tool, change, design_loop, sketch or drawing; ``surface`` is
+    # dashboard, cli, agent or unknown; ``outcome`` is ok, refused (a 4xx the
+    # existing rules produced) or error. No alert: refusals are a reviewer
+    # answering something already closed, not a fault.
+    APPROVAL_DECISION_TOTAL = MetricDefinition(
+        name="metaforge_approval_decision_total",
+        type="counter",
+        description="Decisions made through /v1/approvals, by kind, decision, surface and outcome",
+        labels=["kind", "decision", "surface", "outcome"],
+    )
+
+    # ── MCP surface (FORGE-379) ────────────────────────────────────────
+    #
+    # The MCP server is where every external harness meets MetaForge, and it
+    # had no metrics at all -- only logs. "Which plugin tool is failing, for
+    # whom" was a question you answered by reading Loki by hand.
+    MCP_TOOL_CALL_TOTAL = MetricDefinition(
+        name="metaforge_mcp_tool_call_total",
+        type="counter",
+        description="Total MCP tool calls by tool, outcome and client",
+        labels=["tool_id", "status", "client"],
+    )
+    MCP_TOOL_CALL_DURATION = MetricDefinition(
+        name="metaforge_mcp_tool_call_duration_seconds",
+        type="histogram",
+        description="MCP tool call duration",
+        labels=["tool_id", "status"],
+        unit="s",
+        buckets=[0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120],
+    )
+    #: Separate from the call counter, and the point of this group: a
+    #: rate of "errors" says something is wrong, `error_class` says what to
+    #: do about it. A spike in `approval_timed_out` needs a reviewer, in
+    #: `adapter_unavailable` a container, in `tool_not_found` a client
+    #: that is calling a tool this build does not have.
+    MCP_ORIGIN_REJECTED_TOTAL = MetricDefinition(
+        name="metaforge_mcp_origin_rejected_total",
+        type="counter",
+        description=(
+            "MCP HTTP requests refused because their Origin is not on the allow-list (FORGE-604)"
+        ),
+        labels=[],
+    )
+    MCP_ERROR_TOTAL = MetricDefinition(
+        name="metaforge_mcp_error_total",
+        type="counter",
+        description="MCP errors by tool, class and client",
+        labels=["tool_id", "error_class", "client"],
+    )
+    #: One sample per health probe, labelled by outcome. FORGE-332 made the
+    #: probe real; this is what lets an alert fire on it rather than someone
+    #: happening to run the doctor.
+    #:
+    #: A counter and not a gauge on purpose: ``type="gauge"`` in this
+    #: registry creates an OTel *UpDownCounter*, whose ``add()`` is a delta.
+    #: Writing 1 then 0 to it would climb and never come back down, so a
+    #: "reachable" gauge would read as healthy forever.
+    MCP_ADAPTER_PROBE_TOTAL = MetricDefinition(
+        name="metaforge_mcp_adapter_probe_total",
+        type="counter",
+        description="Adapter health probes by adapter and outcome",
+        labels=["adapter_id", "result"],
+    )
+    #: Is this process running the code sitting next to it (FORGE-411)?
+    #:
+    #: A counter rather than a gauge for the reason given above, and
+    #: three-valued rather than boolean: ``unknown`` is its own result
+    #: because an image with no build SHA baked in cannot answer the
+    #: question, and reporting that as ``current`` is exactly the silent
+    #: pass this metric exists to end.
+    MCP_CODE_VERSION_CHECK_TOTAL = MetricDefinition(
+        name="metaforge_mcp_code_version_check_total",
+        type="counter",
+        description="Code-version checks by outcome (current, stale, unknown)",
+        labels=["result", "reloads"],
+    )
+
+    # ── Host watchdog (FORGE-713) ──────────────────────────────────────
+
+    WATCHDOG_CHECKS_TOTAL = MetricDefinition(
+        name="metaforge_watchdog_checks_total",
+        type="counter",
+        description=(
+            "Watchdog check passes completed. A heartbeat: when it stops "
+            "rising, nothing is watching the host (FORGE-713)."
+        ),
+        labels=[],
+    )
+    WATCHDOG_RESTARTS_TOTAL = MetricDefinition(
+        name="metaforge_watchdog_restarts_total",
+        type="counter",
+        description=(
+            "Containers the watchdog restarted or chose not to, by compose "
+            "service, reason (unhealthy, twin_in_memory) and outcome "
+            "(restarted, suppressed, failed) (FORGE-713)"
+        ),
+        labels=["service", "reason", "outcome"],
+    )
+    WATCHDOG_UNHEALTHY_CONTAINERS = MetricDefinition(
+        name="metaforge_watchdog_unhealthy_containers",
+        type="gauge",
+        description="Stack containers Docker reports unhealthy at the last check (FORGE-713)",
+        labels=[],
+    )
+    WATCHDOG_TWIN_IN_MEMORY = MetricDefinition(
+        name="metaforge_watchdog_twin_in_memory",
+        type="gauge",
+        description=(
+            "1 when the gateway's /health says the twin runs in memory although "
+            "Neo4j is configured, so persisted nodes are invisible (FORGE-713)"
+        ),
+        labels=[],
+    )
+    HOST_MEMORY_AVAILABLE_BYTES = MetricDefinition(
+        name="metaforge_host_memory_available_bytes",
+        type="gauge",
+        description="MemAvailable of the host running the stack, from /proc/meminfo (FORGE-713)",
+        labels=[],
     )
 
     # ── Class methods for grouped access ───────────────────────────────
@@ -447,7 +845,56 @@ class MetricsRegistry:
             + cls.twin_metrics()
             + cls.consolidation_metrics()
             + cls.harness_metrics()
+            + cls.mcp_metrics()
+            + cls.design_flow_metrics()
+            + cls.sim_field_metrics()
+            + cls.watchdog_metrics()
         )
+
+    @classmethod
+    def watchdog_metrics(cls) -> list[MetricDefinition]:
+        """Host watchdog metrics (FORGE-713)."""
+        return [
+            cls.WATCHDOG_CHECKS_TOTAL,
+            cls.WATCHDOG_RESTARTS_TOTAL,
+            cls.WATCHDOG_UNHEALTHY_CONTAINERS,
+            cls.WATCHDOG_TWIN_IN_MEMORY,
+            cls.HOST_MEMORY_AVAILABLE_BYTES,
+        ]
+
+    @classmethod
+    def sim_field_metrics(cls) -> list[MetricDefinition]:
+        """Simulation result field metrics (FORGE-532)."""
+        return [
+            cls.SIM_FIELD_PAYLOAD_TOTAL,
+            cls.SIM_FIELD_PAYLOAD_BYTES,
+            cls.SIM_FIELD_STORE_TOTAL,
+        ]
+
+    @classmethod
+    def design_flow_metrics(cls) -> list[MetricDefinition]:
+        """Design-flow engine and approval-gate metrics (FORGE-401, FORGE-469, FORGE-470)."""
+        return [
+            cls.DESIGN_FLOW_ENGINE_UNAVAILABLE,
+            cls.DESIGN_FLOW_RUN_STARTED,
+            cls.DESIGN_FLOW_GATE_TOTAL,
+            cls.DESIGN_FLOW_GATE_ANNOUNCE_TOTAL,
+            cls.CLIENT_TASK_TOTAL,
+            cls.APPROVAL_GATE_NO_RUNTIME_TOTAL,
+            cls.ITERATION_GATE_UNATTENDED_TOTAL,
+        ]
+
+    @classmethod
+    def mcp_metrics(cls) -> list[MetricDefinition]:
+        """MCP-surface metrics (FORGE-379)."""
+        return [
+            cls.MCP_TOOL_CALL_TOTAL,
+            cls.MCP_TOOL_CALL_DURATION,
+            cls.MCP_ERROR_TOTAL,
+            cls.MCP_ADAPTER_PROBE_TOTAL,
+            cls.MCP_CODE_VERSION_CHECK_TOTAL,
+            cls.MCP_ORIGIN_REJECTED_TOTAL,
+        ]
 
     @classmethod
     def harness_metrics(cls) -> list[MetricDefinition]:
@@ -457,7 +904,17 @@ class MetricsRegistry:
             cls.HARNESS_TURN_TOTAL,
             cls.HARNESS_TOOL_CALL_DURATION,
             cls.HARNESS_TOOL_CALL_TOTAL,
+            cls.DESIGN_FLOW_TOOL_REFUSAL_TOTAL,
+            cls.CHAT_UNGROUNDED_CLAIM_TOTAL,
             cls.HARNESS_PROVIDER_CALL_DURATION,
+            cls.HARNESS_PROVIDER_FALLBACK_TOTAL,
+            cls.LLM_TOKENS_TOTAL,
+            cls.LLM_COST_USD_TOTAL,
+            cls.LLM_CALLS_TOTAL,
+            cls.LLM_RUN_SPEND_EXCEEDED_TOTAL,
+            cls.TOOL_APPROVAL_RESOLUTION_TOTAL,
+            cls.UNREACHABLE_APPROVAL_HOLD_TOTAL,
+            cls.APPROVAL_DECISION_TOTAL,
         ]
 
     @classmethod
@@ -475,7 +932,15 @@ class MetricsRegistry:
     @classmethod
     def twin_metrics(cls) -> list[MetricDefinition]:
         """MET-439 twin graph hygiene metrics."""
-        return [cls.TWIN_ORPHANS]
+        return [
+            cls.TWIN_ORPHANS,
+            cls.TWIN_ITEM_REVISION_TOTAL,
+            cls.TWIN_CHANGE_SET_TOTAL,
+            cls.TWIN_ITEM_MIGRATION_TOTAL,
+            cls.FLOW_ITEM_SLOT_TOTAL,
+            cls.TWIN_PRD_REQUIREMENT_VALUE_TOTAL,
+            cls.TWIN_RECORD_STALENESS_TOTAL,
+        ]
 
     @classmethod
     def retrieval_metrics(cls) -> list[MetricDefinition]:
@@ -486,6 +951,8 @@ class MetricsRegistry:
             cls.RETRIEVAL_MRR,
             cls.RETRIEVAL_NDCG_AT_K,
             cls.CONTEXT_TRUNCATED_TOTAL,
+            cls.PROJECT_BRIEF_TOTAL,
+            cls.PROJECT_BRIEF_CHARS,
         ]
 
     @classmethod
@@ -493,6 +960,7 @@ class MetricsRegistry:
         """MET-401 / L1-A7 knowledge-service latency metrics."""
         return [
             cls.KNOWLEDGE_SEARCH_DURATION,
+            cls.KB_STORAGE_INIT_TOTAL,
         ]
 
     @classmethod
@@ -588,6 +1056,19 @@ class MetricsCollector:
     def __init__(self, meter: Any | None = None) -> None:
         self._meter = meter
         self._instruments: dict[str, Any] = {}
+        self._gauge_values: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}
+
+    @property
+    def is_recording(self) -> bool:
+        """True when this collector will actually publish samples.
+
+        FORGE-413: ``metrics is not None`` was never the right question. A
+        no-op collector is not None and records nothing, so a caller that
+        checked only for None would report healthy telemetry while every
+        sample went nowhere -- which is how four metrics stayed at zero
+        series through a release that added alert rules on them.
+        """
+        return self._meter is not None and bool(self._instruments)
 
     def create_instruments(self, definitions: list[MetricDefinition]) -> None:
         """Create OTel instruments from *definitions*.  No-op if no meter."""
@@ -659,6 +1140,59 @@ class MetricsCollector:
         gauge = self._instruments.get(MetricsRegistry.TWIN_ORPHANS.name)
         if gauge is not None:
             gauge.add(count, attributes={"kind": kind})
+
+    def record_twin_change_set(self, outcome: str) -> None:
+        """Record one run change-set commit or close (FORGE-525)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_CHANGE_SET_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_twin_item_migration(
+        self, item_type: str, kind: str, outcome: str = "created", count: int = 1
+    ) -> None:
+        """Record items / revisions the item migration created (FORGE-529)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_ITEM_MIGRATION_TOTAL.name)
+        if counter is not None and count > 0:
+            counter.add(
+                count, attributes={"item_type": item_type, "kind": kind, "outcome": outcome}
+            )
+
+    def record_twin_prd_requirement_value(self, outcome: str, count: int = 1) -> None:
+        """Record requirement values seen in a prd write (FORGE-528)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_PRD_REQUIREMENT_VALUE_TOTAL.name)
+        if counter is not None and count > 0:
+            counter.add(count, attributes={"outcome": outcome})
+
+    def record_twin_record_staleness(self, record_type: str, status: str) -> None:
+        """Record one record staleness change (FORGE-527)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_RECORD_STALENESS_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"record_type": record_type, "status": status})
+
+    def record_twin_item_revision(self, item_type: str, outcome: str, resolved_by: str) -> None:
+        """Record one item revision write (FORGE-523)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_ITEM_REVISION_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "item_type": item_type,
+                    "outcome": outcome,
+                    "resolved_by": resolved_by,
+                },
+            )
+
+    def record_flow_item_slot(self, item_type: str, outcome: str) -> None:
+        """Record one design-flow write's slot outcome (FORGE-524)."""
+        counter = self._instruments.get(MetricsRegistry.FLOW_ITEM_SLOT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"item_type": item_type, "outcome": outcome})
+
+    def record_twin_baseline(self, source: str, outcome: str) -> None:
+        """Record one baseline attempt (FORGE-526)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_BASELINE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"source": source, "outcome": outcome})
 
     # ── Agent ──────────────────────────────────────────────────────────
 
@@ -899,6 +1433,15 @@ class MetricsCollector:
         if counter is not None:
             counter.add(count, attributes={"agent_id": agent_id, "source_kind": source_kind})
 
+    def record_project_brief(self, mode: str, chars: int, capped: bool) -> None:
+        """Record one composed project brief (FORGE-530)."""
+        counter = self._instruments.get(MetricsRegistry.PROJECT_BRIEF_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"mode": mode, "capped": "true" if capped else "false"})
+        hist = self._instruments.get(MetricsRegistry.PROJECT_BRIEF_CHARS.name)
+        if hist is not None:
+            hist.record(chars, attributes={"mode": mode})
+
     # ── Knowledge service latency (MET-401 / L1-A7) ───────────────────
 
     def record_knowledge_search_duration(self, top_k: int, duration: float) -> None:
@@ -987,6 +1530,135 @@ class MetricsCollector:
         if hist is not None:
             hist.record(duration, attributes=attrs)
 
+    def record_design_flow_tool_refusal(self, tool_name: str, source: str) -> None:
+        """Count one guardrail refusal of a design-flow service call (FORGE-492)."""
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_TOOL_REFUSAL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool_name": tool_name, "source": source})
+
+    def record_sim_field_payload(
+        self, analysis_type: str, outcome: str, size_bytes: int | None = None
+    ) -> None:
+        """Count one result-field payload build, and its size when built (FORGE-532)."""
+        counter = self._instruments.get(MetricsRegistry.SIM_FIELD_PAYLOAD_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"analysis_type": analysis_type, "outcome": outcome})
+        if size_bytes is not None:
+            hist = self._instruments.get(MetricsRegistry.SIM_FIELD_PAYLOAD_BYTES.name)
+            if hist is not None:
+                hist.record(size_bytes, attributes={"analysis_type": analysis_type})
+
+    def record_sim_field_store(self, outcome: str) -> None:
+        """Count one simulation_result field blob store attempt (FORGE-532)."""
+        counter = self._instruments.get(MetricsRegistry.SIM_FIELD_STORE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_chat_ungrounded_claim(self, kind: str) -> None:
+        """Count one chat reply flagged as ungrounded (FORGE-520)."""
+        counter = self._instruments.get(MetricsRegistry.CHAT_UNGROUNDED_CLAIM_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind})
+
+    def record_mcp_tool_call(
+        self, tool_id: str, status: str, duration: float, client: str = "unknown"
+    ) -> None:
+        """Record one MCP tool call (counter + histogram).
+
+        ``client`` comes from the ``initialize`` handshake and is
+        low-cardinality by construction -- a handful of harness names.
+        Nothing here is labelled with a node id, an actor or a project:
+        those are unbounded, and a label that grows without limit takes
+        Prometheus down rather than telling you anything.
+        """
+        counter = self._instruments.get(MetricsRegistry.MCP_TOOL_CALL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool_id": tool_id, "status": status, "client": client})
+        hist = self._instruments.get(MetricsRegistry.MCP_TOOL_CALL_DURATION.name)
+        if hist is not None:
+            hist.record(duration, attributes={"tool_id": tool_id, "status": status})
+
+    def record_design_flow_started(self, engine: str, flow: str) -> None:
+        """One design-flow run handed to an engine (FORGE-401)."""
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_RUN_STARTED.name)
+        if counter is not None:
+            counter.add(1, attributes={"engine": engine, "flow": flow})
+
+    def record_design_flow_engine_unavailable(self, target: str) -> None:
+        """A run start refused because the workflow engine was unreachable.
+
+        The signal that matters most in FORGE-401. Without it, "Temporal is
+        down" shows up as users reporting that runs will not start, which is
+        both slower and less specific than a counter that says so.
+        """
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_ENGINE_UNAVAILABLE.name)
+        if counter is not None:
+            counter.add(1, attributes={"target": target})
+
+    def record_design_flow_gate(self, gate: str, outcome: str) -> None:
+        """One gate outcome: approved, rejected, timed_out or not_ready."""
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_GATE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"gate": gate, "outcome": outcome})
+
+    def record_design_flow_gate_announce(self, outcome: str) -> None:
+        """One gate announcement: announced, unannounced or failed (FORGE-489)."""
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_GATE_ANNOUNCE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_kb_storage_init(self, outcome: str) -> None:
+        """One knowledge-base storage set-up at gateway start (FORGE-594)."""
+        counter = self._instruments.get(MetricsRegistry.KB_STORAGE_INIT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_client_task(self, event: str) -> None:
+        """One client-mode phase task event (FORGE-581)."""
+        counter = self._instruments.get(MetricsRegistry.CLIENT_TASK_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"event": event})
+
+    def record_mcp_origin_rejected(self) -> None:
+        """One MCP HTTP request refused for its Origin (FORGE-604)."""
+        counter = self._instruments.get(MetricsRegistry.MCP_ORIGIN_REJECTED_TOTAL.name)
+        if counter is not None:
+            counter.add(1)
+
+    def record_mcp_error(self, tool_id: str, error_class: str, client: str = "unknown") -> None:
+        """Record one MCP error, classified."""
+        counter = self._instruments.get(MetricsRegistry.MCP_ERROR_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={"tool_id": tool_id, "error_class": error_class, "client": client},
+            )
+
+    def record_mcp_adapter_probe(self, adapter_id: str, reachable: bool) -> None:
+        """Record the outcome of one adapter health probe."""
+        counter = self._instruments.get(MetricsRegistry.MCP_ADAPTER_PROBE_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "adapter_id": adapter_id,
+                    "result": "reachable" if reachable else "unreachable",
+                },
+            )
+
+    def record_mcp_code_version(self, result: str, reloads: bool = False) -> None:
+        """Record one code-version check (FORGE-411).
+
+        ``result`` is ``stale``, ``current`` or ``unknown``. ``reloads`` says
+        whether the process picks the mounted source up by itself, which is
+        what makes a difference between the two SHAs expected rather than a
+        fault -- it is a label so an alert can exclude the gateway without
+        needing a second metric.
+        """
+        counter = self._instruments.get(MetricsRegistry.MCP_CODE_VERSION_CHECK_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"result": result, "reloads": str(reloads).lower()})
+
     def record_harness_provider_call(
         self, provider: str, model: str, role: str, duration: float
     ) -> None:
@@ -994,3 +1666,185 @@ class MetricsCollector:
         hist = self._instruments.get(MetricsRegistry.HARNESS_PROVIDER_CALL_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes={"provider": provider, "model": model, "role": role})
+
+    def record_harness_provider_fallback(
+        self, primary: str, fallback: str, role: str, reason: str
+    ) -> None:
+        """Record one harness call served by a fallback provider (FORGE-468)."""
+        counter = self._instruments.get(MetricsRegistry.HARNESS_PROVIDER_FALLBACK_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "primary": primary,
+                    "fallback": fallback,
+                    "role": role,
+                    "reason": reason,
+                },
+            )
+
+    def record_llm_usage(
+        self,
+        *,
+        role: str,
+        provider: str,
+        model: str,
+        prompt: int | None,
+        completion: int | None,
+        cached_input: int | None,
+        cost_usd: float | None,
+    ) -> None:
+        """Record one LLM call's tokens and cost (FORGE-476)."""
+        reported = prompt is not None or completion is not None
+        calls = self._instruments.get(MetricsRegistry.LLM_CALLS_TOTAL.name)
+        if calls is not None:
+            calls.add(
+                1,
+                attributes={
+                    "role": role,
+                    "provider": provider,
+                    "model": model,
+                    "usage_reported": str(reported).lower(),
+                },
+            )
+        tokens = self._instruments.get(MetricsRegistry.LLM_TOKENS_TOTAL.name)
+        if tokens is not None:
+            base = {"role": role, "provider": provider, "model": model}
+            for kind, count in (
+                ("prompt", prompt),
+                ("completion", completion),
+                ("cached_input", cached_input),
+            ):
+                if count:
+                    tokens.add(count, attributes={**base, "kind": kind})
+        cost = self._instruments.get(MetricsRegistry.LLM_COST_USD_TOTAL.name)
+        if cost is not None and cost_usd:
+            cost.add(cost_usd, attributes={"role": role, "provider": provider, "model": model})
+
+    def record_llm_run_spend_exceeded(self, role: str) -> None:
+        """A run's LLM spend crossed the runaway threshold (FORGE-476)."""
+        counter = self._instruments.get(MetricsRegistry.LLM_RUN_SPEND_EXCEEDED_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"role": role})
+
+    def record_tool_approval_resolution(self, outcome: str, trigger: str, result: str) -> None:
+        """Record one held approval closed with no answer (FORGE-466)."""
+        counter = self._instruments.get(MetricsRegistry.TOOL_APPROVAL_RESOLUTION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "trigger": trigger, "result": result})
+
+    def record_approval_decision(
+        self, kind: str, decision: str, surface: str, outcome: str
+    ) -> None:
+        """Record one decision through the unified approvals API (FORGE-507)."""
+        counter = self._instruments.get(MetricsRegistry.APPROVAL_DECISION_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "kind": kind,
+                    "decision": decision,
+                    "surface": surface,
+                    "outcome": outcome,
+                },
+            )
+
+    def record_unreachable_approval_hold(self, tool: str) -> None:
+        """Record one approval hold with no reachable approver (FORGE-490)."""
+        counter = self._instruments.get(MetricsRegistry.UNREACHABLE_APPROVAL_HOLD_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool": tool})
+
+    def record_approval_gate_no_runtime(self, required_role: str) -> None:
+        """Record one approval gate refused for lack of a Temporal runtime (FORGE-469)."""
+        counter = self._instruments.get(MetricsRegistry.APPROVAL_GATE_NO_RUNTIME_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"required_role": required_role})
+
+    def record_iteration_gate_unattended(self, outcome: str, agent_code: str) -> None:
+        """Record one iteration gate decided with no approval workflow (FORGE-470)."""
+        counter = self._instruments.get(MetricsRegistry.ITERATION_GATE_UNATTENDED_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "agent_code": agent_code})
+
+    # ── Host watchdog (FORGE-713) ──────────────────────────────────────
+
+    def _set_gauge(self, name: str, value: float, attributes: dict[str, str] | None = None) -> None:
+        """Set an up-down-counter gauge to an absolute value by adding the delta."""
+        gauge = self._instruments.get(name)
+        if gauge is None:
+            return
+        key = (name, tuple(sorted((attributes or {}).items())))
+        last = self._gauge_values.get(key, 0.0)
+        if value != last:
+            gauge.add(value - last, attributes=attributes or {})
+            self._gauge_values[key] = value
+
+    def record_watchdog_check(
+        self, *, unhealthy: int, twin_in_memory: bool, memory_available: int | None
+    ) -> None:
+        """Record one watchdog pass: the heartbeat plus the state it saw."""
+        counter = self._instruments.get(MetricsRegistry.WATCHDOG_CHECKS_TOTAL.name)
+        if counter is not None:
+            counter.add(1)
+        self._set_gauge(MetricsRegistry.WATCHDOG_UNHEALTHY_CONTAINERS.name, unhealthy)
+        self._set_gauge(MetricsRegistry.WATCHDOG_TWIN_IN_MEMORY.name, 1 if twin_in_memory else 0)
+        if memory_available is not None:
+            self._set_gauge(MetricsRegistry.HOST_MEMORY_AVAILABLE_BYTES.name, memory_available)
+
+    def record_watchdog_restart(self, service: str, reason: str, outcome: str) -> None:
+        """Record a restart the watchdog made, suppressed, or failed to make."""
+        counter = self._instruments.get(MetricsRegistry.WATCHDOG_RESTARTS_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"service": service, "reason": reason, "outcome": outcome})
+
+
+def collector_for(component: str) -> MetricsCollector:
+    """A :class:`MetricsCollector` on this process's active OTel meter.
+
+    FORGE-413. Every MCP metric had zero series in Prometheus because the
+    sidecar built no collector and passed none to the MCP server, so each
+    recorder hit its ``if counter is not None`` guard and returned. Four
+    FORGE-379 metrics and two FORGE-411 ones had never emitted a sample, and
+    six alert rules could not fire.
+
+    The gateway had this logic inline. It is here instead so a second
+    entrypoint gets it by calling one function rather than by remembering to
+    reproduce six lines -- the forgetting is the bug.
+
+    ``init_observability`` publishes the SDK meter provider globally, so this
+    needs no state passed through: whoever initialised telemetry first wins,
+    and a process that initialised none gets a working no-op collector.
+
+    It says which it got, unconditionally. A no-op collector is invisible by
+    construction -- that is the whole failure mode -- so the one place it can
+    be noticed is the line it writes at startup.
+    """
+    try:
+        from opentelemetry import metrics as otel_metrics
+    except ImportError:
+        logger.info("metrics_collector_noop", component=component, reason="opentelemetry absent")
+        return MetricsCollector()
+
+    provider = otel_metrics.get_meter_provider()
+    # A proxy provider is what you get before (or without) an SDK: it hands
+    # out meters whose instruments go nowhere. Named rather than duck-typed
+    # because "has get_meter" is true of both.
+    if (
+        type(provider).__name__.startswith("_Proxy")
+        or type(provider).__name__ == "NoOpMeterProvider"
+    ):
+        logger.warning(
+            "metrics_collector_noop",
+            component=component,
+            reason="no OTel SDK meter provider is configured, so nothing this "
+            "component records will reach Prometheus",
+            provider=type(provider).__name__,
+        )
+        return MetricsCollector()
+
+    collector = MetricsCollector(meter=provider.get_meter(component))
+    definitions = MetricsRegistry.all_metrics()
+    collector.create_instruments(definitions)
+    logger.info("metrics_collector_initialized", component=component, instruments=len(definitions))
+    return collector

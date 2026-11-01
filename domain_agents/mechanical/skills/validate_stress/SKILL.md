@@ -18,7 +18,11 @@ Validates stress analysis results against design constraints using CalculiX FEA.
 - `work_product_id` -- UUID of the CAD model work_product in the Digital Twin
 - `mesh_file_path` -- Path to the .inp mesh file
 - `load_case` -- Load case identifier
-- `constraints` -- List of stress constraints (max_von_mises_mpa, safety_factor, material)
+- `constraints` -- List of stress constraints: `max_von_mises_mpa` (the limit stress, e.g. yield, BEFORE the safety factor) or `allowable_mpa` (already derated, used as given), plus `safety_factor` and `material`
+- `material_name` -- Material name for FEA elastic properties (a material library name, e.g. `"aluminium_6061_t6"`)
+- `fixed_node_set` -- Mesh element set name to fully constrain (fixed support)
+- `load_node_set` -- Mesh element set name to apply `load_force_n` to
+- `load_force_n` -- `[Fx, Fy, Fz]` total applied force in Newtons
 
 ## Output
 
@@ -32,5 +36,5 @@ Validates stress analysis results against design constraints using CalculiX FEA.
 ## Limitations
 
 - Currently only supports static stress analysis (no modal, thermal)
-- Safety factor is applied as simple division (max_allowable / safety_factor)
+- Safety factor is applied as simple division (limit stress / safety_factor); an `allowable_mpa` is used as given, never divided again
 - Does not account for fatigue or cyclic loading

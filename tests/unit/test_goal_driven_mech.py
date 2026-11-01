@@ -75,3 +75,26 @@ async def test_handler_authors_and_commits_loadable_cad() -> None:
         "freecad.export_model",
         "twin.record_decision",
     ]
+
+
+@pytest.mark.asyncio
+async def test_handler_requires_the_blob_store_and_surfaces_its_failure() -> None:
+    """FORGE-501: the recorder is asked to require storage, and its error propagates."""
+    seen: dict = {}
+
+    async def recorder(**kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("geometry blob store unavailable")
+
+    async def fake_extract(goal, prior, *, provider, model):
+        return _normalize_spec(
+            {"name": "Bracket", "kind": "box", "parameters": {"length": 40}, "material": "Al6061"},
+            goal,
+        )
+
+    handler = GoalDrivenMechanicalHandler(_Bridge(), recorder, extract=fake_extract)
+    phase = get_flow("mech_v1").phases[1]
+    ctx = FlowContext(goal="a bracket", project_id="p1", completed=[])
+    with pytest.raises(RuntimeError, match="blob store unavailable"):
+        await handler.run_phase(goal=ctx.goal, phase=phase, context=ctx)
+    assert seen["require_blob_store"] is True

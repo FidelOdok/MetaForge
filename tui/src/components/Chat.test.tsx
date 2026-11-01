@@ -203,3 +203,39 @@ test("FORGE-33: pressing 'x' rejects, and a-key input isn't sent as a chat messa
   assert.deepEqual(sent, []);
   unmount();
 });
+
+test("FORGE-95: the approval keypress doesn't leak into the input box afterward", async () => {
+  // Live repro: "message sent as aaRecord the arm requirements…" -- the a/x
+  // keystroke that resolves an approval was ALSO landing in TextInput's own
+  // buffer (a second, independently-active input handler), so it prefixed
+  // whatever the user typed next.
+  const decisions: string[] = [];
+  const sent: string[] = [];
+  const props = (pendingApproval: UseChat["pendingApproval"]) => ({
+    client: fakeClient(),
+    chat: chatState({
+      status: "idle" as const,
+      pendingApproval,
+      resolveApproval: (decision: "approve" | "reject") => decisions.push(decision),
+      send: (c: string) => sent.push(c),
+    }),
+  });
+  const { stdin, rerender, unmount } = render(
+    React.createElement(Chat, props({ run_id: "run_1", tool: "twin.record_decision", arguments: {} })),
+  );
+  stdin.write("a");
+  await tick();
+  assert.deepEqual(decisions, ["approve"]);
+
+  // The modal closes once the approval resolves -- exactly what App does on
+  // a real resolveApproval() round-trip.
+  rerender(React.createElement(Chat, props(null)));
+  await tick();
+
+  stdin.write("Record the arm requirements");
+  await tick();
+  stdin.write("\r");
+  await tick();
+  assert.deepEqual(sent, ["Record the arm requirements"]);
+  unmount();
+});

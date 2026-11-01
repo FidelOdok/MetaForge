@@ -20,6 +20,7 @@ from api_gateway.chat.models import ChatThreadRecord
 from api_gateway.chat.streaming import notify_scope_changed
 from api_gateway.projects.routes import get_project_backend
 from api_gateway.projects.schemas import ProjectResponse
+from mcp_core.project_ref import ProjectRef, ProjectRefError, resolve_project_ref
 
 
 class ScopeResolutionError(ValueError):
@@ -34,45 +35,20 @@ class ScopeResolutionError(ValueError):
 async def resolve_project(query: str) -> ProjectResponse:
     """id -> exact name (case-insensitive) -> unique substring of the name.
 
-    Mirrors ``tui/src/lib/project.ts::resolveProject`` exactly, including the
-    rule that several matches is an error, never a guess — silently picking
-    one would scope work to the wrong project.
+    FORGE-335: the matching itself now lives in
+    :func:`mcp_core.project_ref.resolve_project_ref`, so the MCP surface
+    (``project.open``) refuses the same ambiguous query with the same
+    sentence rather than growing a fourth implementation of this. This
+    function keeps the part that is genuinely gateway-specific: where the
+    candidate list comes from, and the error type its callers catch.
     """
-    q = query.strip()
-    if not q:
-        raise ScopeResolutionError("a project id or name is required")
-
     projects = await get_project_backend().list_projects()
-    if not projects:
-        raise ScopeResolutionError("no projects exist on this gateway")
-
-    by_id = next((p for p in projects if p.id == q), None)
-    if by_id is not None:
-        return by_id
-
-    lower = q.lower()
-    exact = [p for p in projects if p.name.lower() == lower]
-    if len(exact) == 1:
-        return exact[0]
-    if len(exact) > 1:
-        raise ScopeResolutionError(_ambiguous(q, exact))
-
-    partial = [p for p in projects if lower in p.name.lower()]
-    if len(partial) == 1:
-        return partial[0]
-    if len(partial) > 1:
-        raise ScopeResolutionError(_ambiguous(q, partial))
-
-    raise ScopeResolutionError(f'no project matches "{q}"')
-
-
-def _ambiguous(query: str, matches: list[ProjectResponse]) -> str:
-    shown = [f"{p.name} ({p.id[:8]})" for p in matches[:5]]
-    more = f", +{len(matches) - len(shown)} more" if len(matches) > len(shown) else ""
-    return (
-        f'"{query}" matches {len(matches)} projects: {", ".join(shown)}{more} '
-        "— be more specific or use the id"
-    )
+    by_id = {p.id: p for p in projects}
+    try:
+        match = resolve_project_ref(query, [ProjectRef(id=p.id, name=p.name) for p in projects])
+    except ProjectRefError as exc:
+        raise ScopeResolutionError(str(exc)) from exc
+    return by_id[match.id]
 
 
 async def apply_thread_scope(

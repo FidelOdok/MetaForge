@@ -140,6 +140,7 @@ class ComplianceAgent:
             project_id=request.project_id,
             product_category=request.parameters.get("product_category", "consumer_electronics"),
             markets=markets,
+            product_features=request.parameters.get("product_features"),
         )
         self._apply_tracked_evidence(checklist)
 

@@ -1,0 +1,178 @@
+# pcb_v1 domain fragment (FORGE-685, Phase 2 electronics).
+#
+# Generated schematic -> board -> routing -> fabrication outputs -> 3D board,
+# from a circuit description (parts by KiCad symbol and footprint, nets by
+# pin), with every stage checked by KiCad itself: ERC and a netlist match on
+# the schematic; DRC with schematic parity on the routed board; Freerouting's
+# result counted by KiCad's own unconnected-items report, never the router's.
+#
+# Composed with electronics_v1 the board follows the component selection: a
+# changed part regenerates the schematic and everything after it. The board
+# outline, layer count and design rules are the person's (or the fab's) --
+# the agent records them as it uses them, it does not invent them.
+#
+# Placement is the generator's deterministic starting point (main IC at the
+# centre, connectors on the left edge, decoupling by the supply pins, inner
+# planes fanned out before routing); a person may move parts and re-route.
+# Nothing here claims signal integrity, impedance control or EMC: those need
+# a field solver and a person.
+#
+# Every task sits in the design stage, so the fragment composes with every
+# spine (design_v1 has no manufacturing stage); the STEP feeds the enclosure.
+#
+# FORGE-687: the schematic, the routed board, the gerber set and the placement
+# file are twin work products (twin.record_design_files), each linked to what
+# it was made from: BOM -> schematic -> board -> gerbers and placement.
+#
+# FORGE-694: the fabrication task gates on `bom_lines_without_mpn`, the
+# placed BOM lines whose symbols name no manufacturer part number. A run's
+# BOM passed every gate with its passives unsourced.
+#
+# FORGE-699: the schematic task gates on `unconfirmed_symbol_substitutions`,
+# the parts drawn with another part's symbol (a BMI270 as a BMI160) whose
+# pinout check is not recorded. ERC and the netlist match pass on the
+# stand-in's pins, so they cannot catch a pin that differs.
+#
+# FORGE-703: the fabrication task gates on `missing_paste_gerbers`, the paste
+# (stencil) layers an assembled board needs with no gerber in the export. A
+# run's fab package passed with the paste files written but dropped from the
+# export's file list, while the result still named the layers as exported.
+#
+# FORGE-705: the 3D board task gates on `unlinked_thread_stages`, the stages
+# of the thread (BOM -> schematic -> board -> gerbers, placement and the 3D
+# board) left with no link to the stage before them. A run recorded its
+# schematic and its board STEP with no source, and both showed as not linked.
+# The recorders now link a stage to the one current record before it when no
+# source is given, and report the stages they could not.
+#
+# Bump `version` when a task, its contract or a check changes.
+id: pcb_v1
+version: 1.5.0
+domain: pcb
+label: PCB design
+description: Schematic generation, board layout, autorouting, fabrication outputs and the 3D board.
+keywords: [pcb layout, board layout, routing, autoroute, gerber, schematic capture, kicad, 3d board, step board]
+disciplines: [electronics]
+tasks:
+- id: schematic
+  stage: design
+  title: Schematic capture
+  objective: >-
+    Write the circuit description from the component selection -- each part's KiCad symbol and
+    footprint, each net by pin name resolved to the symbol's pin number -- and generate the
+    schematic with kicad.generate_schematic. Record KiCad's ERC error count as
+    `generated_erc_error_count` and the number of nets KiCad's exported netlist does not match as
+    `netlist_mismatch_count`, both sourced to the schematic revision, and record the schematic
+    with twin.record_design_files (work_product_type schematic, generated from the BOM). Fix the
+    circuit, not the check: an ERC error is a real connection problem. A part with no KiCad
+    symbol of its own drawn with another part's (a BMI270 as Sensor_Motion:BMI160) comes back in
+    `symbol_substitutions` with a warning: check every pin number against the ordered part's
+    datasheet, say how in the component's `symbol_pinout_checked`, regenerate, and record the
+    result's `unconfirmed_symbol_substitutions`, sourced to the schematic revision. Never set
+    symbol_pinout_checked without having compared the pins.
+  inputs:
+  - component_selection:electronics
+  outputs:
+  - design_value:generated_erc_error_count
+  - design_value:netlist_mismatch_count
+  - design_value:unconfirmed_symbol_substitutions
+  records: [schematic]
+  checks:
+  - generated_erc_error_count == 0
+  - netlist_mismatch_count == 0
+  - unconfirmed_symbol_substitutions == 0
+  capabilities: [kicad.generate_schematic]
+  outcome: a schematic KiCad's ERC passes, wired exactly as the circuit says
+- id: board
+  stage: design
+  title: Board layout
+  objective: >-
+    Generate the board with kicad.generate_pcb from the same circuit and the person's outline,
+    layer count, design rules and fab limits (clearance, track, via, hole clearance; inner
+    planes on a 4-layer board). Record the number of parts the placer could not fit as
+    `unplaced_count`, sourced to the board revision. A part that does not fit is a board
+    size or part choice for the person, not something to drop.
+  inputs:
+  - design_value:generated_erc_error_count
+  outputs:
+  - design_value:unplaced_count
+  checks:
+  - unplaced_count == 0
+  capabilities: [kicad.generate_pcb]
+  outcome: every part placed on the board outline with the stated rules
+- id: routing
+  stage: design
+  title: Routing
+  objective: >-
+    Route the board with kicad.autoroute_pcb (Freerouting, the ground pour, then KiCad DRC with
+    schematic parity). Record KiCad's unconnected-item count as `unrouted_count`, its DRC error
+    count as `drc_error_count` and the schematic-parity findings as `parity_issue_count`, all
+    sourced to the routed revision, and record the routed board with twin.record_design_files
+    (work_product_type pcb_layout, generated from the schematic). A board that does not route
+    completely is reported with what is left, never finished by hand-waving.
+  inputs:
+  - design_value:unplaced_count
+  outputs:
+  - design_value:unrouted_count
+  - design_value:drc_error_count
+  - design_value:parity_issue_count
+  records: [pcb_layout]
+  checks:
+  - unrouted_count == 0
+  - drc_error_count == 0
+  - parity_issue_count == 0
+  capabilities: [kicad.autoroute_pcb]
+  outcome: a fully routed board KiCad's DRC and schematic parity pass
+- id: fabrication_outputs
+  stage: design
+  title: Fabrication outputs
+  objective: >-
+    Export the fabrication set from the routed board: gerbers for every copper layer (inner
+    planes included), the drill files, the pick-and-place file and the BOM, with
+    kicad.export_gerber, kicad.export_drill, kicad.export_pos and kicad.export_bom. Record the
+    number of copper layers without a gerber as `missing_copper_gerbers`, and the number of paste
+    layers the assembly needs (F.Paste, and B.Paste when parts sit on the bottom) that are not
+    in the export's `paste_layers` as `missing_paste_gerbers`, both sourced to the export; a
+    layer in `layers_missing` was requested and not written. Record the BOM in the twin, and the gerber and drill folder (gerber) and the placement file
+    (pick_and_place) with twin.record_design_files, both generated from the board. Record the
+    export's `lines_without_mpn` as `bom_lines_without_mpn`: a placed line with no MPN symbol
+    field is one the fab house cannot buy. Passives count: source each resistor and capacitor
+    with component.search_parametric (categories resistor and capacitor_ceramic, by value,
+    tolerance or voltage, dielectric and package), record the choice, set its MPN and
+    Manufacturer fields with kicad.update_components, and export again.
+  inputs:
+  - design_value:drc_error_count
+  outputs:
+  - design_value:missing_copper_gerbers
+  - design_value:missing_paste_gerbers
+  - design_value:bom_lines_without_mpn
+  records: [bom, gerber, pick_and_place]
+  checks:
+  - missing_copper_gerbers == 0
+  - missing_paste_gerbers == 0
+  - bom_lines_without_mpn == 0
+  capabilities: [kicad.export_gerber, kicad.export_drill, kicad.export_pos, kicad.export_bom]
+  outcome: a complete fabrication and assembly set from the checked board
+- id: board_3d
+  stage: design
+  title: 3D board
+  objective: >-
+    Export the routed board as STEP with kicad.export_3d for the enclosure and the mechanical
+    fit, and render it (kicad.render_pcb) for review. Record the number of footprints whose 3D
+    model is missing as `missing_3d_models`, sourced to the export, and the STEP as a cad_model
+    work product with twin.commit_geometry (file_path the export's file, source_tool
+    kicad.export_3d, source_node_ids the routed pcb_layout). A missing model leaves a hole in the
+    enclosure check: name the part. Record the commit's `thread_unlinked_stages` as
+    `unlinked_thread_stages`, sourced to the commit: a stage its `warnings` name has more than
+    one candidate before it, so record that stage again with source_node_ids.
+  inputs:
+  - design_value:drc_error_count
+  outputs:
+  - design_value:missing_3d_models
+  - design_value:unlinked_thread_stages
+  records: [cad_model]
+  checks:
+  - missing_3d_models == 0
+  - unlinked_thread_stages == 0
+  capabilities: [kicad.export_3d, kicad.render_pcb]
+  outcome: the board as a complete STEP model for the mechanical design

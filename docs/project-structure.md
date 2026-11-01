@@ -78,9 +78,10 @@ decision, consequences) but lighter — one heading per decision.
 ### `eda/kicad/`
 
 KiCad project files (`.kicad_pro`, `.kicad_sch`, `.kicad_pcb`,
-libraries). Phase 1 is **read-only** — the `kicad` MCP adapter
-runs ERC/DRC and exports BOM/Gerber but does not edit the
-schematic. Schematic write-back lands in Phase 2. See
+libraries). The `kicad` MCP adapter runs ERC/DRC and exports
+BOM/Gerber without editing these files. The Phase 2 generation tools
+(`kicad.generate_schematic`, `generate_pcb`, `autoroute_pcb`) write a
+new project folder rather than changing the person's own. See
 [`capability-matrix.md`](capability-matrix.md) for the current
 KiCad tool list.
 
@@ -140,18 +141,7 @@ Every file above shows up as one or more nodes in the Digital Twin:
 - `eda/kicad/*.kicad_pcb` → `PcbLayout` work product.
 - `firmware/src/` → `FirmwareModule` nodes.
 
-```mermaid
-flowchart LR
-    prd["PRD.md"] -->|Requirement| twin[("Digital Twin")]
-    cons["constraints.json"] -->|Constraint| twin
-    bom["bom/bom.csv"] -->|BOMItem| twin
-    pcb["eda/kicad/*.kicad_pcb"] -->|PcbLayout| twin
-    fw["firmware/src/"] -->|FirmwareModule| twin
-    twin --> q1["twin.find_by_property"]
-    twin --> q2["twin.thread_for"]
-    twin --> q3["twin.constraint_violations"]
-    bom -.->|satisfies| prd
-```
+![How project files become twin records: PRD.md to requirements, constraints.json to constraints, bom.csv to BOM items, the PCB file to a board layout, firmware to a firmware module](assets/diagrams/project-files-to-twin.png)
 
 Use `twin.find_by_property` or `twin.thread_for` (see
 [`cli-reference.md`](cli-reference.md)) to walk the thread from any

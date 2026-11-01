@@ -50,11 +50,12 @@ async def _call(server: ProjectServer, name: str, args: dict) -> dict:
 
 
 class TestRegistration:
-    def test_five_tools_registered(self, server: ProjectServer) -> None:
+    def test_six_tools_registered(self, server: ProjectServer) -> None:
         assert set(server.tool_ids) == {
             "project.create",
             "project.list",
             "project.get",
+            "project.open",
             "project.update",
             "project.delete",
         }

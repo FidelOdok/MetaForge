@@ -203,10 +203,147 @@ single `event: done` block.
   fields: `mcp_auth_denied transport=http reason=…`,
   `mcp_http_ready auth_enforced=…`, etc. Pipe into your usual log
   aggregator.
-* MET-326's retrieval-quality histograms (`metaforge_retrieval_*`)
+* The retrieval-quality histograms (`metaforge_retrieval_*`)
   surface tool-call quality when knowledge tools are exercised; the
   same dashboard applies whether the calls came over stdio, HTTP, or
   SSE.
+
+## Install as a plugin
+
+`integrations/codex/` is a generated Codex plugin (build output of
+`scripts/build_integrations.py`). It brings the MCP server, an `AGENTS.md`
+and the same skills as the Claude Code package: the 35 engineering skills,
+shipped from each skill's detailed `PLUGIN.md`, plus the
+`intent-to-verified-design` lifecycle skill. Codex has no slash
+commands, so the lifecycle rules (never use a value without a source, found
+with the `source-engineering-values` skill and recorded with it; propose
+a flow with `template` and `operations` together; stop at the approval) live
+in `AGENTS.md` and that skill. The package's README covers the marketplace
+layout Codex expects.
+
+Codex has no slash commands and no plugin hooks, so each workflow (`flow`,
+`verify`, `replan`, ...) ships as a `<name>-workflow` skill, and the session
+rules live in `AGENTS.md`.
+
+The plugin's `.mcp.json` points at `http://localhost:8765/mcp?profile=core`.
+Codex has no install-time settings, so to work in another discipline edit the
+`profile` in that URL: `mechanical` or `mechanical_product` for CAD,
+`simulation` for FEA, `electronics` for KiCad and sourcing, `manufacturing`
+for process selection and the DFM review (it reads the machine library),
+`client_run` to drive a client-mode run (phase tasks, gates in the chat, value
+sourcing), or `all` for every tool if your Codex build handles a
+long list. Registering, discovering or sending a job to a machine
+(`library.register_machine`, `library.discover_machine`,
+`library.dispatch_job`) is only in `all`.
+
+## Keeping the tool list a size Codex can use
+
+All 97 tools are served by default. If that is more than you want in
+context, start the server with a profile:
+
+```bash
+python -m metaforge.mcp --transport http --profile mechanical
+```
+
+`core`, `mechanical`, `simulation`, `electronics` and `robotics` are each
+between 20 and 40 tools. An unknown name stops the server rather than
+quietly serving everything.
+
+Whatever the reason a tool is not in the list, the response says so.
+An adapter whose container is down contributes nothing, but appears under
+`_meta.unavailableAdapters`; a profile naming a tool no loaded adapter
+registers appears under `_meta.profile.missing`. `_meta` is absent when
+there is nothing to report, so seeing it at all means something is worth
+looking at — `python -m metaforge.mcp --transport http` with no
+adapters down and no profile set returns none.
+
+## Writes wait for a human
+
+A tool that writes is held for approval when Codex reaches the
+gateway as a remote caller. The check runs on the server's dispatch path,
+so it applies whatever client asks and cannot be skipped by a client that
+does not implement it.
+
+A held call appears on the dashboard's **Approvals** page, tagged with
+the caller and `source: mcp`. Approve it there and the tool runs;
+reject it and it does not.
+
+When Codex declared the `elicitation` capability at `initialize`, the
+question is asked inside Codex instead, and the dashboard is only the
+fallback. Over HTTP it travels on whichever stream the session has: a
+`GET /mcp` stream if one is open, otherwise the held `tools/call`'s own
+response, which the server switches to `text/event-stream` when the call
+was sent with `Accept: application/json, text/event-stream`.
+The answer comes back as a POST and the tool result follows on the same
+stream. See
+[Over HTTP: which stream carries the question](../capability-matrix.md#over-http-which-stream-carries-the-question).
+
+If it is not approved, the call comes back as a JSON-RPC error naming
+which happened:
+
+```json
+{
+  "code": -32001,
+  "message": "twin.commit_geometry was not run: a reviewer rejected it.",
+  "data": {"tool_id": "twin.commit_geometry", "code": "approval_required",
+            "outcome": "rejected", "retryable": false}
+}
+```
+
+`outcome` is `rejected`, `timed_out` (nobody answered within the window:
+180s when progress is sent, 100s when not; see
+[While a call waits on the dashboard](claude-code.md#while-a-call-waits-on-the-dashboard)),
+`cancelled` (the hold was closed before anyone answered) or
+`not_configured` (the server holds writes but has no approval gate wired,
+so it refused rather than ran). None is worth retrying without a person
+doing something first.
+
+Running over **stdio on your own machine**, writes are not held by
+default: there is nowhere to answer an approval in that transport yet.
+That changes when a deployment sets `exempt_local_writes=False`.
+
+## Tool annotations and unknown-tool errors
+
+Every tool on `tools/list` carries the MCP annotation hints, so Codex
+can tell a read from a write before it calls anything:
+
+```json
+{
+  "name": "twin.get_node",
+  "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+  }
+}
+```
+
+The classification is deliberate rather than derived from the tool's
+name, and a tool nobody has classified inherits MCP's safe defaults
+(`readOnlyHint: false`, `destructiveHint: true`). One case is worth
+knowing: `twin.query_cypher` is read-only until the gateway is started
+with `--allow-twin-mutations`, after which it is not — the hint is
+computed per request from that flag, so it always matches what the
+server will enforce.
+
+Getting a tool id slightly wrong is recoverable. Separator mistakes
+resolve on their own, so `twin_get_node` and `twin/get_node` both reach
+`twin.get_node`; an alias that matches two tools is refused rather than
+guessed at. When an id matches nothing, the error names the closest real
+tools, in the message and in `error.data.did_you_mean`:
+
+```json
+{
+  "code": -32601,
+  "message": "Tool not found: twin.get_nodes. Did you mean: twin.get_node",
+  "data": {
+    "tool_id": "twin.get_nodes",
+    "did_you_mean": ["twin.get_node"],
+    "tool_count": 97
+  }
+}
+```
 
 ## Troubleshooting
 
@@ -245,7 +382,7 @@ the structured details payload that came back. Common causes:
   walkthrough (stdio).
 * [`mcp-config-examples.md`](mcp-config-examples.md) — full config
   reference.
-* [MET-337](https://linear.app/metaforge/issue/MET-337) — standalone
+ — standalone
   MCP server entrypoint.
-* [MET-338](https://linear.app/metaforge/issue/MET-338) — optional
+ — optional
   API-key auth on transports.

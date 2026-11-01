@@ -1,4 +1,4 @@
-import { useRef, useMemo, useEffect, useState } from 'react';
+import { lazy, useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame, ThreeEvent } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
@@ -7,6 +7,7 @@ import { useTransientTransform } from '../../store/transient-transform-store';
 import { parseRigidGroups, groupForMesh } from '../../lib/rigid-groups';
 import { computeExplodeOffset } from '../../lib/explode';
 import { TransformGizmo } from './TransformGizmo';
+import { DIRECT_MESH_FORMATS } from '../preview/registry';
 import type { TransformMode, Vec3 } from '../../store/transient-transform-store';
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
@@ -15,8 +16,16 @@ const HIGHLIGHT_OPACITY = 0.4;
 const IDENTITY_QUATERNION = new THREE.Quaternion();
 const IDENTITY_SCALE_VECTOR = new THREE.Vector3(1, 1, 1);
 
+// FORGE-531: STL/3MF files load directly (no converter round trip). Lazy so
+// the loaders only ship when a mesh file is actually opened.
+const MeshFileSceneContents = lazy(() =>
+  import('./MeshFileSceneContents').then((m) => ({ default: m.MeshFileSceneContents })),
+);
+
 interface SceneContentsProps {
   glbUrl: string;
+  /** How `glbUrl` is encoded: 'glb'/'gltf' (default) or 'stl'/'3mf'. */
+  format?: string;
   manifest: ModelManifest;
   onPartClick?: (part: PartInfo) => void;
   /** Boolean-cut cutter preview (MET-612): when set, every mesh renders with
@@ -35,8 +44,24 @@ interface MeshEntry {
   boundingBox: { min: [number, number, number]; max: [number, number, number] };
 }
 
-export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: SceneContentsProps) {
+export function SceneContents({ format, ...props }: SceneContentsProps) {
+  if (format && DIRECT_MESH_FORMATS.has(format)) {
+    return <MeshFileSceneContents format={format} {...props} />;
+  }
+  return <GltfSceneContents {...props} />;
+}
+
+function GltfSceneContents({ glbUrl, ...props }: Omit<SceneContentsProps, 'format'>) {
   const { scene } = useGLTF(glbUrl);
+  return <SceneBody scene={scene} {...props} />;
+}
+
+export interface SceneBodyProps extends Omit<SceneContentsProps, 'format' | 'glbUrl'> {
+  scene: THREE.Object3D;
+}
+
+/** Selection, visibility, explode and gizmo behaviour over a loaded scene. */
+export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBodyProps) {
   const groupRef = useRef<THREE.Group>(null);
   const meshMapRef = useRef<Map<string, MeshEntry>>(new Map());
 
@@ -58,6 +83,7 @@ export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: Sc
   );
   const selectedGroup = useTransientTransform((s) => s.selectedGroup);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
+  const focusPart = useViewerStore((s) => s.focusPart);
   const gizmoMode = useTransientTransform((s) => s.mode);
   const setDelta = useTransientTransform((s) => s.setDelta);
   const setRotationDelta = useTransientTransform((s) => s.setRotationDelta);
@@ -97,6 +123,21 @@ export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: Sc
         : null,
     [overlayTint?.color, overlayTint?.opacity],
   );
+
+  // FORGE-621: CAD geometry is authored Z-up and the STEP -> GLB converter
+  // keeps it that way, but this viewer (and three) treat Y as up. Left alone,
+  // a table's 18mm top lies on Z while the workplane lies in XZ, so the floor
+  // cuts through the model and the turntable spins about an axis that is not
+  // the model's up. The URDF path has always corrected this on load
+  // (use-urdf-robot.ts); CAD models now do the same, so both share one
+  // convention. Setting the rotation absolutely keeps it idempotent across
+  // re-renders, and the matrices are flushed here so every bound computed
+  // below -- whole-scene, per-mesh, explode centres -- is already in Y-up
+  // world space.
+  useMemo(() => {
+    scene.rotation.set(-Math.PI / 2, 0, 0);
+    scene.updateMatrixWorld(true);
+  }, [scene]);
 
   // Whole-scene bounding box — backs both the exploded-view center below and
   // modelBounds (camera auto-fit + grid sizing), so it's computed once.
@@ -257,6 +298,16 @@ export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: Sc
     }
   });
 
+  /** Double-click frames the part and moves the orbit pivot onto it
+   * (FORGE-618) -- the pivot is otherwise the whole assembly's centre, which
+   * swings a single part through a wide arc. */
+  const handleDoubleClick = (e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    const mesh = e.object as THREE.Mesh;
+    const meshName = mesh.name || mesh.parent?.name || '';
+    if (meshName) focusPart(meshName);
+  };
+
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     const mesh = e.object as THREE.Mesh;
@@ -277,7 +328,11 @@ export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: Sc
 
   return (
     <group ref={groupRef}>
-      <primitive object={scene} onClick={overlayTint ? undefined : handleClick} />
+      <primitive
+        object={scene}
+        onClick={overlayTint ? undefined : handleClick}
+        onDoubleClick={overlayTint ? undefined : handleDoubleClick}
+      />
       {gizmoCentroid && (
         <TransformGizmo centroid={gizmoCentroid} mode={gizmoMode} onChange={handleGizmoChange} />
       )}

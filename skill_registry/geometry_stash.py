@@ -60,6 +60,8 @@ class GeometryStash:
 
     def __init__(self, max_entries: int = 32) -> None:
         self._cache: OrderedDict[tuple[str, str], str] = OrderedDict()
+        # FORGE-505: measurements of the exact stored STEP, same key.
+        self._stored_props: dict[tuple[str, str], dict[str, Any]] = {}
         self._max = max_entries
 
     def remember(self, arguments: dict[str, Any], result: dict[str, Any]) -> bool:
@@ -79,9 +81,15 @@ class GeometryStash:
         if sid and oid and isinstance(blob, str) and blob:
             key = (str(sid), str(oid))
             self._cache[key] = blob
+            stored = payload.get("stored_properties")
+            if isinstance(stored, dict):
+                self._stored_props[key] = stored
+            else:
+                self._stored_props.pop(key, None)
             self._cache.move_to_end(key)
             while len(self._cache) > self._max:
-                self._cache.popitem(last=False)
+                evicted, _ = self._cache.popitem(last=False)
+                self._stored_props.pop(evicted, None)
             return True
         return False
 
@@ -109,6 +117,11 @@ class GeometryStash:
         blob = self._cache.get((str(sid), str(oid)))
         if not blob:
             return FillResult(injected=False, supplied_chars=len(supplied_str))
+        stored = self._stored_props.get((str(sid), str(oid)))
+        if stored is not None:
+            # Always (even when the blob matched): the commit must record the
+            # measurement of the stored file, not of the live session object.
+            arguments["stored_properties"] = stored
 
         if supplied_str and supplied_str == blob:
             # Faithfully reproduced. Nothing to do, and nothing to report.

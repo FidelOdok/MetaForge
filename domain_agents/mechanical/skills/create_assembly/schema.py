@@ -65,6 +65,17 @@ class CreateAssemblyInput(BaseModel):
             "product when omitted, same as generate_cad."
         ),
     )
+    name: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Name for the overall assembly (e.g. 'Gripper Assembly', 'J1-J3 Arm "
+            "Subassembly') -- used as the Twin work product's display name. "
+            "Required and must be specific to what this assembly actually is, "
+            "never a generic placeholder like the material alone. Distinct from "
+            "each AssemblyPart's own `name`."
+        ),
+    )
     parts: list[AssemblyPart] = Field(
         ...,
         min_length=1,

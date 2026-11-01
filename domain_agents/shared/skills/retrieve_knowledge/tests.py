@@ -1,7 +1,4 @@
-"""Skill-specific tests for retrieve_knowledge.
-
-These tests live alongside the skill for co-location.
-"""
+"""Skill-specific tests for retrieve_knowledge (FORGE-552)."""
 
 from __future__ import annotations
 
@@ -9,17 +6,28 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
+from digital_twin.knowledge.embedding_service import EmbeddingService
+from digital_twin.knowledge.store import InMemoryKnowledgeStore, KnowledgeEntry, KnowledgeType
 from skill_registry.skill_base import SkillContext
-from twin_core.knowledge.models import KnowledgeEntry, KnowledgeType, SearchResult
-from twin_core.knowledge.store import KnowledgeStore
 
 from .handler import RetrieveKnowledgeHandler
 from .schema import RetrieveKnowledgeInput
 
+_VECTORS = {"q": [1.0, 0.0], "near": [0.9, 0.1], "far": [0.0, 1.0]}
+
+
+class _TableEmbedding(EmbeddingService):
+    async def embed(self, text: str) -> list[float]:
+        return _VECTORS[text]
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [_VECTORS[t] for t in texts]
+
 
 @pytest.fixture()
-def mock_context() -> SkillContext:
+def context() -> SkillContext:
     ctx = MagicMock(spec=SkillContext)
     ctx.twin = AsyncMock()
     ctx.mcp = MagicMock()
@@ -30,85 +38,42 @@ def mock_context() -> SkillContext:
     return ctx
 
 
-@pytest.fixture()
-def mock_store() -> KnowledgeStore:
-    return MagicMock(spec=KnowledgeStore)
+async def _store() -> InMemoryKnowledgeStore:
+    store = InMemoryKnowledgeStore()
+    for name, ktype in (("near", KnowledgeType.CONSTRAINT), ("far", KnowledgeType.COMPONENT)):
+        await store.store(
+            KnowledgeEntry(
+                content=name,
+                embedding=_VECTORS[name],
+                knowledge_type=ktype,
+                source_path=f"docs/{name}.md",
+            )
+        )
+    return store
 
 
 class TestRetrieveKnowledgeSkill:
-    """Co-located tests for the retrieve_knowledge handler."""
-
-    async def test_execute_returns_results(
-        self, mock_context: SkillContext, mock_store: KnowledgeStore
+    async def test_scores_are_real_similarities_and_cite_the_source(
+        self, context: SkillContext
     ) -> None:
-        entry = KnowledgeEntry(
-            content="Aluminum 6061 has a yield strength of 276 MPa",
-            knowledge_type=KnowledgeType.MATERIAL_PROPERTY,
-            source="materials-db",
-        )
-        mock_store.search = AsyncMock(return_value=[SearchResult(entry=entry, score=0.92)])
+        handler = RetrieveKnowledgeHandler(context, await _store(), _TableEmbedding())
+        out = await handler.execute(RetrieveKnowledgeInput(query="q", top_k=2))
+        assert [r.content for r in out.results] == ["near", "far"]
+        assert out.results[0].score == pytest.approx(0.9939, abs=1e-3)
+        assert out.results[1].score == 0.0
+        assert out.results[0].source_path == "docs/near.md"
 
-        handler = RetrieveKnowledgeHandler(mock_context, mock_store)
-        input_data = RetrieveKnowledgeInput(query="aluminum yield strength", limit=5)
-        output = await handler.execute(input_data)
+    async def test_type_filter_uses_the_store_enum(self, context: SkillContext) -> None:
+        handler = RetrieveKnowledgeHandler(context, await _store(), _TableEmbedding())
+        out = await handler.execute(RetrieveKnowledgeInput(query="q", knowledge_type="component"))
+        assert [r.content for r in out.results] == ["far"]
 
-        assert output.total_results == 1
-        assert output.results[0].score == 0.92
-        assert "Aluminum 6061" in output.results[0].content
-        assert output.results[0].knowledge_type == "material_property"
-        assert output.query == "aluminum yield strength"
+    def test_limit_alias_and_bad_type(self) -> None:
+        assert RetrieveKnowledgeInput(query="q", limit=3).top_k == 3
+        with pytest.raises(ValidationError):
+            RetrieveKnowledgeInput(query="q", knowledge_type="design_rule")
 
-    async def test_execute_with_type_filter(
-        self, mock_context: SkillContext, mock_store: KnowledgeStore
-    ) -> None:
-        mock_store.search = AsyncMock(return_value=[])
-
-        handler = RetrieveKnowledgeHandler(mock_context, mock_store)
-        input_data = RetrieveKnowledgeInput(
-            query="design rules for PCB",
-            knowledge_type="design_rule",
-            limit=3,
-        )
-        output = await handler.execute(input_data)
-
-        mock_store.search.assert_awaited_once_with(
-            query="design rules for PCB",
-            knowledge_type=KnowledgeType.DESIGN_RULE,
-            limit=3,
-        )
-        assert output.total_results == 0
-        assert output.results == []
-
-    async def test_execute_with_invalid_type_searches_all(
-        self, mock_context: SkillContext, mock_store: KnowledgeStore
-    ) -> None:
-        mock_store.search = AsyncMock(return_value=[])
-
-        handler = RetrieveKnowledgeHandler(mock_context, mock_store)
-        input_data = RetrieveKnowledgeInput(
-            query="something",
-            knowledge_type="nonexistent_type",
-        )
-        output = await handler.execute(input_data)
-
-        # Should fall back to searching all types (knowledge_type=None)
-        mock_store.search.assert_awaited_once_with(
-            query="something",
-            knowledge_type=None,
-            limit=5,
-        )
-        assert output.total_results == 0
-
-    async def test_run_validates_input(
-        self, mock_context: SkillContext, mock_store: KnowledgeStore
-    ) -> None:
-        handler = RetrieveKnowledgeHandler(mock_context, mock_store)
-        input_data = RetrieveKnowledgeInput(query="test query")
-        mock_store.search = AsyncMock(return_value=[])
-
-        result = await handler.run(input_data)
-        assert result.success is True
-
-    async def test_schema_validation_rejects_empty_query(self) -> None:
-        with pytest.raises(Exception):
-            RetrieveKnowledgeInput(query="")
+    async def test_refuses_without_an_embedding_service(self, context: SkillContext) -> None:
+        handler = RetrieveKnowledgeHandler(context, await _store())
+        with pytest.raises(ValueError, match="embedding service"):
+            await handler.execute(RetrieveKnowledgeInput(query="q"))

@@ -294,3 +294,33 @@ async def test_extra_and_session_id_land_in_metadata() -> None:
     assert stored is not None
     assert stored.metadata["probability"] == "medium"
     assert stored.metadata["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
+async def test_recognized_unit_is_accepted() -> None:
+    # FORGE-311: "compile"-time unit check applies to any entity type
+    # carrying a `unit` key, not just budget/invariant.
+    twin = InMemoryTwinAPI.create()
+    record = make_engineering_entity_recorder(twin)
+    out = await record(
+        entity_type="assumption",
+        statement="Battery pack mass is 0.9 kg.",
+        extra={"value": 0.9, "unit": "kg"},
+        project_id=PROJECT_ID,
+    )
+    stored = await twin.get_engineering_entity(UUID(out["node_id"]))
+    assert stored is not None
+    assert stored.metadata["unit"] == "kg"
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_unit_is_rejected() -> None:
+    twin = InMemoryTwinAPI.create()
+    record = make_engineering_entity_recorder(twin)
+    with pytest.raises(ValueError, match="not a recognized unit"):
+        await record(
+            entity_type="assumption",
+            statement="Battery pack mass is 0.9 something.",
+            extra={"value": 0.9, "unit": "not_a_real_unit_xyz"},
+            project_id=PROJECT_ID,
+        )

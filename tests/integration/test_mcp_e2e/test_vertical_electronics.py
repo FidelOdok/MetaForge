@@ -38,7 +38,21 @@ from typing import Any
 import httpx
 import pytest
 
-from ._helpers import McpRpcError, call_tool
+from ._helpers import McpRpcError, McpToolError, call_tool
+
+
+async def _auto_approve(ask: object) -> object:
+    """These exercise tool flows, not the write gate (FORGE-387).
+
+    They drive a real HTTP app, which correctly classifies its callers as
+    remote, so every write is held. A deployment in that position has an
+    approval gate; supplying one here is closer to reality than pretending
+    the caller is local. The gate itself has its own tests.
+    """
+    from mcp_core.guardrails import ApprovalOutcome
+
+    return ApprovalOutcome.APPROVED
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -74,6 +88,7 @@ async def electronics_vertical_client() -> AsyncIterator[httpx.AsyncClient]:
         embeddings=create_embedding_service("local"),
     )
     server = await build_unified_server(
+        approval_gate=_auto_approve,
         knowledge_service=_FakeKnowledgeService(),
         twin=twin,
         constraint_engine=twin.constraints,
@@ -115,18 +130,22 @@ async def _attempt(
             "executed": True,
             "data": envelope.get("data"),
         }
-    except McpRpcError as exc:
-        if exc.code in (-32600, -32601):
-            raise AssertionError(
-                f"{tool}: dispatcher-level error {exc.code} (wire-up broken): {exc.message}"
-            ) from exc
-        assert exc.code == -32001, f"{tool}: unexpected error code {exc.code} ({exc.message})"
+    except McpToolError as exc:
+        # The tool ran and refused -- backend-missing-in-CI, and expected.
+        # FORGE-419 made this its own exception type, which is exactly the
+        # distinction this branch used to draw by comparing error codes.
         return {
             "tool": tool,
             "status": "tool_execution_error",
             "executed": False,
             "data": exc.data,
         }
+    except McpRpcError as exc:
+        # Anything still arriving as a JSON-RPC error is dispatch-level, and
+        # that is a real failure: the wire-up is broken.
+        raise AssertionError(
+            f"{tool}: dispatcher-level error {exc.code} (wire-up broken): {exc.message}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

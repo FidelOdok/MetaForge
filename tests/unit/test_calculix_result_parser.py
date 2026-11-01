@@ -20,9 +20,11 @@ from pathlib import Path
 import pytest
 
 from tool_registry.tools.calculix.result_parser import (
+    DatParseError,
     FrdParseError,
     extract_results,
     parse_frd_file,
+    parse_frequencies_dat,
 )
 
 REAL_CCX_FRD = """\
@@ -199,6 +201,22 @@ class TestParseFrdFileRealCcxOutput:
         assert result["displacement"]["nodes"]
         assert result["stress"]["nodes"]
 
+    def test_stress_carries_an_accuracy_verdict(self, real_frd_path: str) -> None:
+        """FORGE-280: auto-flag is computed unconditionally, from the full
+        nodal field, so it's present even without include_node_data=False
+        stripping anything."""
+        result = extract_results(real_frd_path)
+        assert "accuracy" in result["stress"]
+        assert result["stress"]["accuracy"]["suspicious"] in (True, False)
+
+    def test_accuracy_survives_stripped_node_data(self, real_frd_path: str) -> None:
+        """The accuracy verdict is a summary, computed before include_node_
+        data=False discards the raw per-node values it was computed from."""
+        result = extract_results(real_frd_path, include_node_data=False)
+        assert result["stress"]["nodes"] == {}
+        assert "accuracy" in result["stress"]
+        assert result["stress"]["accuracy"]["max_to_median_ratio"] is not None
+
 
 class TestParseFrdFileRealThermalOutput:
     """MET-661 follow-up: same -4/100C block-detection bug applies to the
@@ -228,14 +246,16 @@ class TestParseFrdFileErrors:
         with pytest.raises(FileNotFoundError):
             parse_frd_file("/nonexistent/path.frd")
 
-    def test_empty_file_yields_empty_results_not_an_error(self, tmp_path: Path) -> None:
+    def test_empty_file_raises_instead_of_silently_reporting_success(self, tmp_path: Path) -> None:
+        """FORGE-232: this used to return a "successful" empty result --
+        exactly the class of bug the ticket reported (CalculiX solving an
+        empty deck and every caller reporting success on nothing). node_count
+        == 0 must be a loud failure, not a quiet one."""
         path = tmp_path / "empty.frd"
         path.write_text("", encoding="utf-8")
 
-        result = parse_frd_file(str(path))
-        assert result["node_count"] == 0
-        assert result["stress"]["nodes"] == {}
-        assert result["displacement"]["nodes"] == {}
+        with pytest.raises(FrdParseError, match="node_count == 0"):
+            parse_frd_file(str(path))
 
     def test_unreadable_file_raises_frd_parse_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -249,3 +269,51 @@ class TestParseFrdFileErrors:
         monkeypatch.setattr(Path, "read_text", _boom)
         with pytest.raises(FrdParseError):
             parse_frd_file(str(path))
+
+
+# FORGE-281 follow-up: byte-for-byte capture of a real ccx *FREQUENCY .dat
+# file, same discipline as REAL_CCX_FRD above. Captured live on fidel-dev
+# 2026-09-30 from a real modal solve of a 100x20x10mm steel cantilever
+# (fixed at the x=0 face), AFTER fixing the *DENSITY-card float-precision
+# bug this same follow-up found (see deck_builder.py's ``_fmt`` docstring --
+# the original synthetic fixture this replaced assumed a "F R E Q U E N C I E S"
+# header with 2 data columns; the real header is "E I G E N V A L U E
+# O U T P U T" with 4 data columns per mode, Hz being the 3rd, not the
+# last -- neither original assumption was correct).
+REAL_CCX_DAT_FREQUENCIES = """\
+     E I G E N V A L U E   O U T P U T
+
+ MODE NO    EIGENVALUE                       FREQUENCY
+                                     REAL PART            IMAGINARY PART
+                           (RAD/TIME)      (CYCLES/TIME     (RAD/TIME)
+
+      1   0.2755344E+08   0.5249137E+04   0.8354261E+03   0.0000000E+00
+      2   0.1012618E+09   0.1006289E+05   0.1601559E+04   0.0000000E+00
+      3   0.9911443E+09   0.3148245E+05   0.5010587E+04   0.0000000E+00
+
+     P A R T I C I P A T I O N   F A C T O R S
+"""
+
+
+class TestParseFrequenciesDat:
+    def test_extracts_frequencies_in_order(self, tmp_path: Path) -> None:
+        path = tmp_path / "modal.dat"
+        path.write_text(REAL_CCX_DAT_FREQUENCIES, encoding="utf-8")
+        frequencies = parse_frequencies_dat(str(path))
+        assert frequencies == pytest.approx([835.4261, 1601.559, 5010.587])
+
+    def test_missing_file_raises_file_not_found(self) -> None:
+        with pytest.raises(FileNotFoundError):
+            parse_frequencies_dat("/nonexistent/path.dat")
+
+    def test_no_frequency_block_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "no_freq.dat"
+        path.write_text("some unrelated ccx output\n", encoding="utf-8")
+        with pytest.raises(DatParseError, match="no frequency block"):
+            parse_frequencies_dat(str(path))
+
+    def test_header_with_no_mode_lines_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "empty_freq.dat"
+        path.write_text("E I G E N V A L U E   O U T P U T\n\n(nothing here)\n", encoding="utf-8")
+        with pytest.raises(DatParseError, match="no mode data lines"):
+            parse_frequencies_dat(str(path))

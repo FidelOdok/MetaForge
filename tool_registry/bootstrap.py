@@ -75,6 +75,37 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.kicad.config",
         "config_class": "KicadConfig",
     },
+    # FORGE-542: ngspice. Registers so tools/list is stable; a call needs the
+    # spice-adapter container (METAFORGE_ADAPTER_SPICE_URL), since the
+    # gateway and sidecar images have no ngspice and raise
+    # SpiceNotAvailableError in-process.
+    "spice": {
+        "module": "tool_registry.tools.spice.adapter",
+        "class": "SpiceServer",
+        "config_module": "tool_registry.tools.spice.config",
+        "config_class": "SpiceConfig",
+    },
+    # FORGE-557: OpenFOAM 11 flow solver. Registers so tools/list is stable; a
+    # call needs the openfoam-adapter container
+    # (METAFORGE_ADAPTER_OPENFOAM_URL), since the gateway and sidecar images
+    # have no OpenFOAM and raise OpenFoamNotAvailableError in-process.
+    "openfoam": {
+        "module": "tool_registry.tools.openfoam.adapter",
+        "class": "OpenFoamServer",
+        "config_module": "tool_registry.tools.openfoam.config",
+        "config_class": "OpenFoamConfig",
+    },
+    # FORGE-674/677: PlatformIO builds and Renode / Espressif QEMU emulation.
+    # Registers so tools/list is stable; a call needs the firmware-adapter
+    # container (METAFORGE_ADAPTER_FIRMWARE_URL, `firmware` compose profile),
+    # since the gateway and sidecar images have no toolchain and raise
+    # FirmwareToolNotAvailableError in-process.
+    "firmware": {
+        "module": "tool_registry.tools.firmware.adapter",
+        "class": "FirmwareServer",
+        "config_module": "tool_registry.tools.firmware.config",
+        "config_class": "FirmwareConfig",
+    },
     # MET-633: opt-in like freecad/kicad above -- needs a real `gz` binary
     # (Gazebo Sim) in the container/host PATH to execute; the adapter
     # registers regardless so tools/list is stable, but handlers raise
@@ -86,6 +117,16 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.gazebo.config",
         "config_class": "GazeboConfig",
     },
+    # FORGE-628: Blender 5.2 LTS renders. Registers regardless so tools/list
+    # is stable; without METAFORGE_ADAPTER_BLENDER_URL (the blender-adapter
+    # container) the handlers say Blender is not installed here. Blender is
+    # GPL: this process never imports bpy (see tools/blender/BLENDER_NOTICE.md).
+    "blender": {
+        "module": "tool_registry.tools.blender.adapter",
+        "class": "BlenderServer",
+        "config_module": "tool_registry.tools.blender.config",
+        "config_class": "BlenderConfig",
+    },
     # MET-634: opt-in like freecad/kicad above -- needs the 'omniverse-usd'
     # extra (usd-core, trimesh, scipy; plain PyPI wheels, no GPU/conda).
     # Adapter registers regardless so tools/list is stable; handlers raise
@@ -95,6 +136,15 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "class": "OmniverseUsdServer",
         "config_module": "tool_registry.tools.omniverse_usd.config",
         "config_class": "OmniverseUsdConfig",
+    },
+    # FORGE-711: NVIDIA SimReady packages. Search and attribution need only
+    # the network; inspect and import also need the 'omniverse-usd' extra and
+    # raise UsdConversionError with the install hint without it.
+    "simready": {
+        "module": "tool_registry.tools.simready.adapter",
+        "class": "SimReadyServer",
+        "config_module": "tool_registry.tools.simready.config",
+        "config_class": "SimReadyConfig",
     },
     # MET-635/636: opt-in like freecad/kicad above -- this adapter is a
     # thin coordinator (no GPU needed itself); it dispatches to a separate
@@ -123,9 +173,30 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
 # ``skipped`` simultaneously, even though it registered successfully.
 _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     {"knowledge", "constraint", "twin", "project", "run", "session", "memory"}
+    # FORGE-462: named in the sidecar's --adapters list now, so it must not
+    # read as unknown there.
+    | {"design_flow"}
     | {"digikey", "mouser", "nexar"}
+    # FORGE-613: two more distributors, same skip-when-unset contract.
+    | {"farnell", "arrow"}
     | {"component", "offer_resolver"}
     | {"web"}
+    # FORGE-544: in-process, no container, no credentials.
+    | {"power"}
+    # FORGE-451: the machine library, injected by the gateway or the sidecar.
+    | {"library"}
+    # FORGE-427: vendor connectors, injected by the gateway or the sidecar.
+    | {"vendor"}
+    # FORGE-615: in-process arithmetic, no container, no credentials.
+    | {"cost"}
+    # Composable flows: in-process search arithmetic, like power and cost.
+    | {"optimize"}
+    # FORGE-671: mobile-robot drive arithmetic, in-process.
+    | {"robot"}
+    # FORGE-672: corrugated carton arithmetic, in-process.
+    | {"packaging"}
+    # FORGE-670: fixed-wing aircraft arithmetic, in-process.
+    | {"aircraft"}
 )
 
 
@@ -247,6 +318,8 @@ async def bootstrap_tool_registry(
     agent_session_store: Any = None,
     decision_recorder: Any = None,
     geometry_recorder: Any = None,
+    measure_tool: Any = None,
+    assembly_info_tool: Any = None,
     proposal_recorder: Any = None,
     constraint_recorder: Any = None,
     engineering_entity_recorder: Any = None,
@@ -266,6 +339,52 @@ async def bootstrap_tool_registry(
     evidence_recorder: Any = None,
     claim_recorder: Any = None,
     ect_bridge: Any = None,
+    hierarchy_node_recorder: Any = None,
+    hierarchy_rollup_fn: Any = None,
+    hierarchy_geometry_linker: Any = None,
+    metric_evaluator: Any = None,
+    thermal_evaluator: Any = None,
+    overhang_evaluator: Any = None,
+    work_product_renderer: Any = None,
+    design_files_recorder: Any = None,
+    revalidation_executor: Any = None,
+    sensitivity_ranker: Any = None,
+    promotion_attempter: Any = None,
+    design_flow_catalogue_reader: Any = None,
+    design_flow_proposer: Any = None,
+    design_flow_status_reader: Any = None,
+    design_flow_run_starter: Any = None,
+    # FORGE-539: the lifecycle readers (intent, capabilities, run lifecycle).
+    design_flow_intent_compiler: Any = None,
+    design_flow_capability_reader: Any = None,
+    design_flow_lifecycle_reader: Any = None,
+    design_flow_patcher: Any = None,
+    # FORGE-582: a gate put to the person in the client's chat.
+    design_flow_gate_reader: Any = None,
+    design_flow_gate_decider: Any = None,
+    # FORGE-581: phase tasks for client-mode runs.
+    design_flow_client_tasks: Any = None,
+    brief_provider: Any = None,
+    parameter_optimizer: Any = None,
+    device_instance_registrar: Any = None,
+    measurement_recorder: Any = None,
+    design_loop_starter: Any = None,
+    design_loop_reader: Any = None,
+    design_loop_approver: Any = None,
+    tube_height_design_loop_starter: Any = None,
+    concept_selector: Any = None,
+    component_selector: Any = None,
+    release_package_creator: Any = None,
+    baseline_creator: Any = None,
+    test_plan_generator: Any = None,
+    bringup_checklist_creator: Any = None,
+    firmware_scaffold_creator: Any = None,
+    harness_estimate_getter: Any = None,
+    item_history_reader: Any = None,
+    # FORGE-451: the machine library (models, instances, limits).
+    machine_library: Any = None,
+    # FORGE-427: vendor connectors (quotes, held orders, order status).
+    vendor_service: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -294,6 +413,23 @@ async def bootstrap_tool_registry(
             shared adapter workspace so any CAD/FEA tool can load it by
             path even after its authoring session is gone. ``None``
             skips registration (same pattern as ``document_recorder``).
+        measure_tool: Optional async ``measure(session_id, obj_id) -> dict``
+            (FORGE-233). When supplied, ``twin.commit_geometry`` calls it to
+            derive volume_mm3/surface_area_mm2/bbox_mm server-side (via
+            freecad.measure on the still-live session object) whenever a
+            commit-by-reference call doesn't include ``properties`` --
+            instead of trusting the calling model to forward a prior
+            measurement (FORGE-100). ``None`` falls back to flagging the gap
+            (``measured_properties_missing``) instead of deriving it.
+        assembly_info_tool: Optional async ``assembly_info(session_id) -> dict``
+            (FORGE-245). Same lazy-bridge pattern as ``measure_tool``: when
+            supplied, ``twin.commit_geometry`` calls it (via
+            freecad.describe_session + freecad.list_joints on the still-live
+            session) to attach ``metadata.assembly = {parts, joints}`` to a
+            commit-by-reference call, so the parts/joints defined in the
+            FreeCAD session aren't lost once it expires. ``None`` skips the
+            derivation (an explicit ``assembly`` in ``extra_metadata`` still
+            wins either way).
         component_catalog_store: Optional ``ComponentCatalogStore`` instance
             (MET-436). When supplied together with ``knowledge_service``
             and ``component_intent_llm``, the ``component`` MCP adapter
@@ -344,6 +480,114 @@ async def bootstrap_tool_registry(
             inseparable state machine, so it's all-or-none, unlike the
             independent single-tool recorders above. ``None`` skips
             registration (same pattern as ``document_recorder``).
+        metric_evaluator: Optional async ``evaluate_tip_deflection(...)``
+            (make_metric_evaluator, FORGE-315). When supplied, registers
+            ``twin.evaluate_metric`` -- a tier-0 closed-form hand-calc
+            against a CAD work product's recorded geometry, escalating to
+            a real ``calculix.run_fea`` call when the estimate falls
+            within its error band of a supplied limit. ``None`` skips
+            registration (same pattern as ``document_recorder``).
+        thermal_evaluator: Optional async ``evaluate_thermal(...)``
+            (make_thermal_evidence_recorder, FORGE-297). When supplied,
+            registers ``twin.evaluate_thermal_metric`` -- runs a real
+            ``calculix.run_thermal`` call and records its output as
+            Evidence, single-tier (no hand-calc-gated escalation like
+            metric_evaluator). ``None`` skips registration (same pattern
+            as ``document_recorder``).
+        work_product_renderer: Optional async ``render(...)``
+            (make_work_product_renderer, FORGE-630). When supplied,
+            registers ``twin.render_work_product``: a STEP or mesh work
+            product rendered by ``blender.render`` and stored as a
+            ``render`` work product. ``None`` skips registration.
+        design_files_recorder: Optional async ``record(...)``
+            (make_design_files_recorder, FORGE-687). When supplied,
+            registers ``twin.record_design_files``: KiCad and firmware
+            files kept as schematic / pcb_layout / gerber /
+            pick_and_place / pinmap / firmware_source work products.
+            ``None`` skips registration.
+        overhang_evaluator: Optional async ``evaluate_overhang(...)``
+            (make_overhang_evidence_recorder, FORGE-273). When supplied,
+            registers ``twin.evaluate_overhang_metric`` -- runs a real
+            ``freecad.list_named_faces`` mesh lookup, flags faces tilted
+            past a threshold from vertical as 3D-print overhang risks, and
+            records the result as Evidence. Advisory only (not wired into
+            ``twin.attempt_promotion``). ``None`` skips registration (same
+            pattern as ``document_recorder``).
+        revalidation_executor: Optional async ``execute(ect_id) -> dict``
+            (make_revalidation_executor, FORGE-316). When supplied,
+            registers ``twin.execute_revalidation_plan`` -- re-runs
+            exactly the Evidence a committed ECT's real revalidation_plan
+            marked stale, for entities carrying a replayable provenance
+            recipe. ``None`` skips registration (same pattern as
+            ``document_recorder``).
+        sensitivity_ranker: Optional async ``rank(...)``
+            (make_sensitivity_ranker, FORGE-317). When supplied, registers
+            ``twin.rank_sensitivity`` -- one-at-a-time finite-difference
+            sensitivity of a metric's margin against named parameters,
+            against a CAD work product's real geometry. ``None`` skips
+            registration (same pattern as ``document_recorder``).
+        promotion_attempter: Optional async ``attempt_promotion(...)``
+            (api_gateway.requirement_intelligence.promotion, FORGE-319).
+            When supplied, registers ``twin.attempt_promotion`` -- the
+            first gate in this codebase that actually refuses when its
+            required claims aren't satisfied (or approved-waived), rather
+            than only reporting. ``None`` skips registration (same
+            pattern as ``document_recorder``).
+        parameter_optimizer: Optional async ``optimize(...)``
+            (make_wall_thickness_optimizer, FORGE-320). When supplied,
+            registers ``twin.optimize_parameter`` -- bisection search for
+            the minimum-mass wall_thickness_mm meeting deflection/safety-
+            factor constraints, against a CAD work product's real geometry.
+            ``None`` skips registration (same pattern as
+            ``document_recorder``).
+        device_instance_registrar: Optional async ``register(...)``
+            (make_device_instance_registrar, FORGE-321). When supplied,
+            registers ``twin.register_device_instance``. ``None`` skips
+            registration (same pattern as ``document_recorder``).
+        measurement_recorder: Optional async ``record(...)``
+            (make_measurement_recorder, FORGE-321). When supplied,
+            registers ``twin.record_measurement``. ``None`` skips
+            registration (same pattern as ``document_recorder``).
+        design_loop_starter: Optional async ``start(...)``
+            (make_design_loop_starter, FORGE-287). When supplied, registers
+            ``twin.start_design_loop`` -- closed loop: propose -> build ->
+            simulate -> evaluate -> revise -> repeat, persisting every
+            candidate as a real DesignLoopIteration. ``None`` skips
+            registration (same pattern as ``document_recorder``).
+        design_loop_reader: Optional async ``get(...)``
+            (make_design_loop_reader, FORGE-287). When supplied, registers
+            ``twin.get_design_loop``. ``None`` skips registration.
+        design_loop_approver: Optional async ``approve(...)``
+            (make_design_loop_approver, FORGE-287). When supplied, registers
+            ``twin.approve_design_loop``. ``None`` skips registration.
+        tube_height_design_loop_starter: Optional async ``start(...)``
+            (make_design_loop_starter wired with make_tube_height_optimizer,
+            FORGE-288). When supplied, registers
+            ``twin.start_tube_height_design_loop`` -- a second real
+            parameter (height_mm) plugged into the SAME design-loop
+            machinery ``design_loop_starter`` uses. ``None`` skips
+            registration.
+        concept_selector: Optional async ``select(...)``
+            (make_trade_study_selector, FORGE-262). When supplied, registers
+            ``twin.select_concept``. ``None`` skips registration.
+        component_selector: Optional async ``select(...)``
+            (make_component_selector, FORGE-265). When supplied, registers
+            ``twin.select_component``. ``None`` skips registration.
+        release_package_creator: Optional async ``create(*, project_id, notes=None)``
+            (make_release_package_creator, FORGE-299). When supplied, registers
+            ``twin.create_release_package``. ``None`` skips registration.
+        baseline_creator: Optional async ``create(*, project_id, approved_by,
+            reason, name=None)`` (make_baseline_creator, FORGE-405). When
+            supplied, registers ``twin.create_baseline``. ``None`` skips
+            registration.
+        hierarchy_geometry_linker: Optional async ``realize(...)``
+            (make_hierarchy_geometry_linker, FORGE-266). When supplied,
+            registers ``twin.realize_hierarchy_node``. ``None`` skips
+            registration.
+        item_history_reader: Optional async ``read(*, item_key=None,
+            node_id=None, project_id=None)`` (make_item_history_reader,
+            FORGE-523). When supplied, registers ``twin.item_history``.
+            ``None`` skips registration.
 
     Returns:
         The populated ToolRegistry.
@@ -485,6 +729,48 @@ async def bootstrap_tool_registry(
                 ),
             )
 
+        # ----- Design-flow MCP adapter (FORGE-400) -----
+        # Flows were dashboard-only: an agent in Claude Code or Codex could
+        # not see that any of it existed. Registered whenever the gateway
+        # supplies its bindings; each tool registers only if its own
+        # callable is present, so a partial wiring exposes what works rather
+        # than a surface that half-fails.
+        _flow_bindings = (
+            design_flow_catalogue_reader,
+            design_flow_proposer,
+            design_flow_status_reader,
+            design_flow_run_starter,
+        )
+        if any(b is not None for b in _flow_bindings) and _is_adapter_enabled("design_flow"):
+            try:
+                from tool_registry.tools.design_flow.adapter import DesignFlowServer
+
+                flow_server = DesignFlowServer(
+                    catalogue_reader=design_flow_catalogue_reader,
+                    proposer=design_flow_proposer,
+                    run_status_reader=design_flow_status_reader,
+                    run_starter=design_flow_run_starter,
+                    intent_compiler=design_flow_intent_compiler,
+                    capability_reader=design_flow_capability_reader,
+                    lifecycle_reader=design_flow_lifecycle_reader,
+                    patcher=design_flow_patcher,
+                    gate_reader=design_flow_gate_reader,
+                    gate_decider=design_flow_gate_decider,
+                    client_tasks=design_flow_client_tasks,
+                )
+                await registry.register_adapter(flow_server)
+                registered.append("design_flow")
+                logger.info(
+                    "design_flow_mcp_adapter_registered",
+                    tools=sorted(flow_server.tool_ids),
+                )
+            except Exception as exc:
+                logger.error("design_flow_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("design_flow")
+        else:
+            skipped.append("design_flow")
+
         # ----- Twin MCP adapter (MET-382) -----
         # Same runtime-injection pattern as knowledge / constraint:
         # depends on a TwinAPI instance the gateway holds, not a
@@ -498,6 +784,8 @@ async def bootstrap_tool_registry(
                     allow_mutations=twin_allow_mutations,
                     decision_recorder=decision_recorder,
                     geometry_recorder=geometry_recorder,
+                    measure_tool=measure_tool,
+                    assembly_info_tool=assembly_info_tool,
                     proposal_recorder=proposal_recorder,
                     constraint_recorder=constraint_recorder,
                     engineering_entity_recorder=engineering_entity_recorder,
@@ -514,6 +802,34 @@ async def bootstrap_tool_registry(
                     evidence_recorder=evidence_recorder,
                     claim_recorder=claim_recorder,
                     ect_bridge=ect_bridge,
+                    hierarchy_node_recorder=hierarchy_node_recorder,
+                    hierarchy_rollup_fn=hierarchy_rollup_fn,
+                    hierarchy_geometry_linker=hierarchy_geometry_linker,
+                    metric_evaluator=metric_evaluator,
+                    thermal_evaluator=thermal_evaluator,
+                    overhang_evaluator=overhang_evaluator,
+                    work_product_renderer=work_product_renderer,
+                    design_files_recorder=design_files_recorder,
+                    revalidation_executor=revalidation_executor,
+                    sensitivity_ranker=sensitivity_ranker,
+                    promotion_attempter=promotion_attempter,
+                    brief_provider=brief_provider,
+                    parameter_optimizer=parameter_optimizer,
+                    device_instance_registrar=device_instance_registrar,
+                    measurement_recorder=measurement_recorder,
+                    design_loop_starter=design_loop_starter,
+                    design_loop_reader=design_loop_reader,
+                    design_loop_approver=design_loop_approver,
+                    tube_height_design_loop_starter=tube_height_design_loop_starter,
+                    concept_selector=concept_selector,
+                    component_selector=component_selector,
+                    release_package_creator=release_package_creator,
+                    baseline_creator=baseline_creator,
+                    test_plan_generator=test_plan_generator,
+                    bringup_checklist_creator=bringup_checklist_creator,
+                    firmware_scaffold_creator=firmware_scaffold_creator,
+                    harness_estimate_getter=harness_estimate_getter,
+                    item_history_reader=item_history_reader,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
@@ -540,7 +856,7 @@ async def bootstrap_tool_registry(
             try:
                 from tool_registry.tools.project.adapter import ProjectServer
 
-                server = ProjectServer(backend=project_backend)
+                server = ProjectServer(backend=project_backend, brief_provider=brief_provider)
                 await registry.register_adapter(server)
                 registered.append("project")
                 logger.info(
@@ -740,10 +1056,27 @@ async def bootstrap_tool_registry(
 
             return NexarAdapter()
 
+        def _make_farnell() -> DistributorAdapter | None:
+            if not os.environ.get("FARNELL_API_KEY"):
+                return None
+            from tool_registry.tools.farnell.adapter import FarnellAdapter
+
+            return FarnellAdapter()
+
+        def _make_arrow() -> DistributorAdapter | None:
+            if not (os.environ.get("ARROW_LOGIN") and os.environ.get("ARROW_API_KEY")):
+                return None
+            from tool_registry.tools.arrow.adapter import ArrowAdapter
+
+            return ArrowAdapter()
+
         _DISTRIBUTOR_FACTORIES = (
             ("digikey", _make_digikey, "DIGIKEY_CLIENT_ID + DIGIKEY_CLIENT_SECRET"),
             ("mouser", _make_mouser, "MOUSER_API_KEY"),
             ("nexar", _make_nexar, "NEXAR_CLIENT_ID + NEXAR_CLIENT_SECRET"),
+            # FORGE-613
+            ("farnell", _make_farnell, "FARNELL_API_KEY"),
+            ("arrow", _make_arrow, "ARROW_LOGIN + ARROW_API_KEY"),
         )
 
         # Populated as each distributor adapter constructs successfully,
@@ -861,6 +1194,150 @@ async def bootstrap_tool_registry(
                     else "disabled via config"
                 ),
             )
+
+        # ----- Power budget MCP adapter (FORGE-544) -----
+        # Pure arithmetic over figures the caller supplies, so nothing to
+        # inject and nothing that can be missing: it registers wherever it
+        # is asked for, which is every server that does not narrow the list.
+        if _is_adapter_enabled("power") and (not adapter_ids or "power" in adapter_ids):
+            try:
+                from tool_registry.tools.power.adapter import PowerServer
+
+                await registry.register_adapter(PowerServer())
+                registered.append("power")
+                logger.info("power_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("power_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("power")
+        else:
+            skipped.append("power")
+            logger.info(
+                "power_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "power" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Machine library MCP adapter (FORGE-451) -----
+        # The library is the gateway's store; the sidecar reaches it over
+        # HTTP. Registered whenever a binding is supplied.
+        if machine_library is not None and _is_adapter_enabled("library"):
+            try:
+                from tool_registry.tools.library.adapter import LibraryServer
+
+                library_server = LibraryServer(machine_library)
+                await registry.register_adapter(library_server)
+                registered.append("library")
+                logger.info("library_mcp_adapter_registered", tools=sorted(library_server.tool_ids))
+            except Exception as exc:
+                logger.error("library_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("library")
+        else:
+            skipped.append("library")
+
+        # ----- Manufacturing cost estimate MCP adapter (FORGE-615) -----
+        # Pure arithmetic like power: registers wherever it is asked for.
+        if _is_adapter_enabled("cost") and (not adapter_ids or "cost" in adapter_ids):
+            try:
+                from tool_registry.tools.cost.adapter import CostServer
+
+                await registry.register_adapter(CostServer())
+                registered.append("cost")
+                logger.info("cost_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("cost_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("cost")
+        else:
+            skipped.append("cost")
+
+        # ----- Design-variable search MCP adapter (composable flows) -----
+        # Ask-and-tell search arithmetic like power and cost: registers
+        # wherever it is asked for. It never evaluates an objective itself.
+        if _is_adapter_enabled("optimize") and (not adapter_ids or "optimize" in adapter_ids):
+            try:
+                from tool_registry.tools.optimize.adapter import OptimizeServer
+
+                await registry.register_adapter(OptimizeServer())
+                registered.append("optimize")
+                logger.info("optimize_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("optimize_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("optimize")
+        else:
+            skipped.append("optimize")
+
+        # ----- Mobile-robot drive MCP adapter (FORGE-671) -----
+        # Drive sizing and kinematics arithmetic, like power: registers
+        # wherever it is asked for.
+        if _is_adapter_enabled("robot") and (not adapter_ids or "robot" in adapter_ids):
+            try:
+                from tool_registry.tools.robot.adapter import RobotServer
+
+                await registry.register_adapter(RobotServer())
+                registered.append("robot")
+                logger.info("robot_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("robot_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("robot")
+        else:
+            skipped.append("robot")
+
+        # ----- Packaging MCP adapter (FORGE-672) -----
+        # Carton compression and dieline arithmetic, like power: registers
+        # wherever it is asked for.
+        if _is_adapter_enabled("packaging") and (not adapter_ids or "packaging" in adapter_ids):
+            try:
+                from tool_registry.tools.packaging.adapter import PackagingServer
+
+                await registry.register_adapter(PackagingServer())
+                registered.append("packaging")
+                logger.info("packaging_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("packaging_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("packaging")
+        else:
+            skipped.append("packaging")
+
+        # ----- Aircraft MCP adapter (FORGE-670) -----
+        # Wing sizing, cruise, trim and endurance arithmetic, like power:
+        # registers wherever it is asked for.
+        if _is_adapter_enabled("aircraft") and (not adapter_ids or "aircraft" in adapter_ids):
+            try:
+                from tool_registry.tools.aircraft.adapter import AircraftServer
+
+                await registry.register_adapter(AircraftServer())
+                registered.append("aircraft")
+                logger.info("aircraft_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("aircraft_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("aircraft")
+        else:
+            skipped.append("aircraft")
+
+        # ----- Vendor connector MCP adapter (FORGE-427) -----
+        if vendor_service is not None and _is_adapter_enabled("vendor"):
+            try:
+                from tool_registry.tools.vendor.adapter import VendorServer
+
+                vendor_server = VendorServer(vendor_service)
+                await registry.register_adapter(vendor_server)
+                registered.append("vendor")
+                logger.info("vendor_mcp_adapter_registered", tools=sorted(vendor_server.tool_ids))
+            except Exception as exc:
+                logger.error("vendor_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("vendor")
+        else:
+            skipped.append("vendor")
 
         span.set_attribute("adapters.registered", len(registered))
         span.set_attribute("adapters.skipped", len(skipped))

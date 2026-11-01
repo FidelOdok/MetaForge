@@ -10,6 +10,13 @@ import { decideInvocation } from "./lib/invocation.js";
  *   - bare (or `ui`), optionally with --project/--debug + a TTY → the Ink TUI
  *   - a subcommand / --help / any other flag → run it non-interactively
  *   - bare + piped (no TTY) → print a hint (can't render a UI without a TTY)
+ *
+ * FORGE-92: every write `runCommand` makes goes through commands.ts's
+ * synchronous `writeAllSync` now, so nothing is left buffered by the time
+ * its promise resolves -- a plain `process.exit(code)` right after is safe
+ * and correct (an async drain-then-exit wrapper was tried first and turned
+ * out not to be reliable across runtimes; see commands.ts's writeAllSync
+ * docstring for what actually happened).
  */
 const rawArgv = process.argv.slice(2);
 const { mode, initialProject, continueLatest, debug } = decideInvocation(rawArgv);

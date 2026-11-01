@@ -16,8 +16,8 @@ None -- this skill operates directly on the KnowledgeStore (in-process).
 ## Input
 
 - `query` -- Natural language search query (required)
-- `knowledge_type` -- Optional filter by category (e.g. "design_rule", "material_property")
-- `limit` -- Maximum results to return (default: 5, max: 50)
+- `knowledge_type` -- Optional filter: one of `design_decision`, `component`, `failure`, `constraint`, `session` (the `knowledge.search` values)
+- `top_k` -- Maximum results to return (default: 5, max: 50). `limit` is still accepted
 
 ## Output
 
@@ -25,14 +25,15 @@ None -- this skill operates directly on the KnowledgeStore (in-process).
   - `entry_id` -- UUID of the knowledge entry
   - `content` -- The knowledge text
   - `knowledge_type` -- Category
-  - `source` -- Where this knowledge came from
-  - `score` -- Relevance score (0-1, higher is better)
+  - `source_path` -- The source it was ingested from, for citation
+  - `score` -- Cosine similarity to the query, clamped to 0-1
   - `metadata` -- Additional key-value metadata
 - `query` -- Echo of the original query
 - `total_results` -- Count of results returned
 
 ## Limitations
 
+- Needs an embedding service; without one the skill refuses rather than ranking by nothing
 - Relevance depends on the quality of the embedding service
 - The default local hash embedding is deterministic but not semantically meaningful
 - In-memory store does not persist across restarts

@@ -16,6 +16,7 @@ import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
 from api_gateway.convert.service import ConversionError, ConversionService
+from api_gateway.runs.geometry_constraints import assembly_parts
 from api_gateway.twin.boolean_ops import (
     BooleanOpError,
     InvalidFormatError,
@@ -23,6 +24,7 @@ from api_gateway.twin.boolean_ops import (
     NoOverlapError,
     perform_boolean_op,
 )
+from api_gateway.twin.edge_endpoints import resolve_endpoints
 from api_gateway.twin.file_link import (
     FileLink,
     FileLinkCreateRequest,
@@ -32,6 +34,7 @@ from api_gateway.twin.file_link import (
     link_store,
     sync_linked_file,
 )
+from api_gateway.twin.geometry_diff import NoPreviousVersion
 from api_gateway.twin.import_schemas import ImportWorkProductResponse
 from api_gateway.twin.import_service import (
     ALLOWED_EXTENSIONS,
@@ -41,9 +44,12 @@ from api_gateway.twin.import_service import (
     infer_domain,
     infer_wp_type,
 )
+from api_gateway.twin.record_pins import record_view
 from api_gateway.twin.schemas import (
     ApproveSketchRequest,
     ApproveSketchResponse,
+    ApproveTechnicalDrawingRequest,
+    ApproveTechnicalDrawingResponse,
     BooleanCutRequest,
     BooleanCutResponse,
     TwinNodeListResponse,
@@ -51,8 +57,12 @@ from api_gateway.twin.schemas import (
     TwinNodeScriptResponse,
     TwinRelationshipListResponse,
     TwinRelationshipResponse,
+    UpdateAssemblyJointsRequest,
+    UpdateAssemblyJointsResponse,
 )
 from api_gateway.twin.version_schemas import (
+    GeometryDiffResponse,
+    InterferenceCheckResponse,
     IterateRequest,
     RevisionDiff,
     WorkProductRevision,
@@ -62,7 +72,7 @@ from api_gateway.twin.version_service import VersionService
 from observability.tracing import get_tracer
 from shared.storage import default_storage
 from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
-from twin_core.models.enums import WorkProductType
+from twin_core.models.enums import EdgeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
 
 logger = structlog.get_logger(__name__)
@@ -100,12 +110,84 @@ def init_design_sketch_approver(approver: Any) -> None:
     _design_sketch_approver = approver
 
 
+# FORGE-301: an injected async ``diff(*, work_product_id) -> dict`` (built in
+# server.py over ``geometry_diff.make_geometry_diff``) -- real volume/area/
+# bounding-box delta between a work product and its SUPERSEDES predecessor.
+_geometry_diff: Any = None
+
+
+def get_geometry_diff() -> Any:
+    """The injected geometry differ, or ``None`` (FORGE-526 item diff reuses it)."""
+    return _geometry_diff
+
+
+def init_geometry_diff(differ: Any) -> None:
+    """Wire in the geometry-diff callable (server lifespan)."""
+    global _geometry_diff  # noqa: PLW0603
+    _geometry_diff = differ
+
+
+# FORGE-272: an injected async
+# ``check(*, work_product_id_a, work_product_id_b) -> dict`` (built in
+# server.py over ``interference_check.make_interference_check``) -- a real
+# boolean-intersection clearance/interference check between two named
+# parts. None until the server lifespan wires it in.
+_interference_check: Any = None
+
+
+def init_interference_check(checker: Any) -> None:
+    """Wire in the interference-check callable (server lifespan)."""
+    global _interference_check  # noqa: PLW0603
+    _interference_check = checker
+
+
+# FORGE-293: an injected async ``approve(node_id, ...)`` (built in server.py
+# over ``technical_drawing_viewer.make_technical_drawing_approver``) -- the
+# dashboard's human-approval action for a technical_drawing work product,
+# mirroring ``_design_sketch_approver`` above. None until the server
+# lifespan wires it in.
+_technical_drawing_approver: Any = None
+
+
+def init_technical_drawing_approver(approver: Any) -> None:
+    """Wire in the technical-drawing approval callable (server lifespan)."""
+    global _technical_drawing_approver  # noqa: PLW0603
+    _technical_drawing_approver = approver
+
+
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _entity_to_response(entity: Any) -> TwinNodeResponse:
+    """Map an EngineeringEntity to a TwinNodeResponse (FORGE-515)."""
+    properties: dict[str, str | int | float | bool] = {
+        "entity_type": entity.entity_type,
+        "status": entity.status,
+        "authority": entity.authority.value,
+        "created_by": entity.created_by,
+        "revision": entity.revision,
+    }
+    if entity.statement:
+        properties["statement"] = entity.statement
+    for key, value in entity.metadata.items():
+        if isinstance(value, (str, int, float, bool)):
+            properties.setdefault(key, value)
+    return TwinNodeResponse(
+        id=str(entity.id),
+        name=entity.title or entity.statement or entity.entity_type,
+        type=entity.entity_type,
+        domain=str(entity.metadata.get("domain", "")),
+        status=entity.status,
+        properties=properties,
+        updatedAt=entity.created_at.isoformat(),
+        projectId=str(entity.project_id) if getattr(entity, "project_id", None) else None,
+        **record_view(entity.entity_type, entity.metadata),
+    )
 
 
 def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
@@ -129,6 +211,7 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         status="valid",
         properties=properties,
         updatedAt=wp.updated_at.isoformat(),
+        projectId=str(wp.project_id) if wp.project_id else None,
         # MET-630: surface the structured (non-scalar) geometry_features
         # metadata that the loop above silently drops, and whether a
         # git-versioned script backs this node.
@@ -144,6 +227,42 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         assembly=wp.metadata.get("assembly")
         if isinstance(wp.metadata.get("assembly"), dict)
         else None,
+        # FORGE-250: {pose_name: {joint_name: value}} -- None for every
+        # other node type, or a robot_description with no saved poses yet.
+        poses=wp.metadata.get("poses") if isinstance(wp.metadata.get("poses"), dict) else None,
+        # FORGE-305: {num_nodes, num_elements, ...} for a simulation_result --
+        # the same metadata key GET /v1/simulation/results already surfaces,
+        # reached here from a node id rather than a project listing.
+        meshStats=(
+            wp.metadata.get("mesh_stats")
+            if isinstance(wp.metadata.get("mesh_stats"), dict)
+            else None
+        ),
+        # FORGE-511: an assembly cad_model's part list (metadata.parts).
+        assemblyParts=assembly_parts(wp.metadata) or None,
+        # FORGE-687: what twin.record_design_files kept, for the previews.
+        designFiles=_design_files_view(wp.metadata),
+        # FORGE-293: a technical_drawing node's own structured dimensions/
+        # GD&T/surface-finish/inspection data and approval state, keyed by
+        # wp.type rather than a shape-sniff (unlike `assembly` above, there's
+        # no key-name collision risk here since no other WorkProductType
+        # writes these fields). None for every other node type.
+        technicalDrawing=(
+            {
+                "part_name": wp.metadata.get("part_name", ""),
+                "dimensions": wp.metadata.get("dimensions", []),
+                "gdt_callouts": wp.metadata.get("gdt_callouts", []),
+                "surface_finishes": wp.metadata.get("surface_finishes", []),
+                "inspection_requirements": wp.metadata.get("inspection_requirements", []),
+                "approved": bool(wp.metadata.get("approved")),
+                "approved_at": wp.metadata.get("approved_at"),
+                "approved_by": wp.metadata.get("approved_by"),
+            }
+            if wp.type == WorkProductType.TECHNICAL_DRAWING
+            else None
+        ),
+        # FORGE-527: what a record was for and whether it is still current.
+        **record_view(wp.type.value, wp.metadata),
     )
 
 
@@ -156,6 +275,7 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
 async def list_twin_nodes(
     domain: str | None = None,
     project_id: str | None = None,
+    include_drafts: bool = False,
 ) -> TwinNodeListResponse:
     """List work-product nodes in the Digital Twin.
 
@@ -163,6 +283,10 @@ async def list_twin_nodes(
     or empty returns every node (including unscoped legacy nodes) —
     preserving the prior global behaviour. A specific ``project_id``
     returns only that project's nodes; unscoped nodes are excluded.
+
+    FORGE-525: a design-flow run's drafts are left out until its gate
+    approves them (and for good if it never does); ``include_drafts=true``
+    lists them too.
     """
     with tracer.start_as_current_span("twin.list_nodes") as span:
         if domain is not None:
@@ -175,8 +299,23 @@ async def list_twin_nodes(
                 raise HTTPException(status_code=400, detail="Invalid project_id format")
             span.set_attribute("twin.filter.project_id", project_id)
         work_products = await _twin.list_work_products(domain=domain, project_id=scoped_project)
+        hidden = 0
+        if not include_drafts:
+            from twin_core.items import is_unapproved_draft, supports_items
+
+            if supports_items(_twin):
+                kept = [wp for wp in work_products if not await is_unapproved_draft(_twin, wp)]
+                hidden = len(work_products) - len(kept)
+                work_products = kept
         nodes = [_wp_to_response(wp) for wp in work_products]
-        logger.info("twin_nodes_listed", count=len(nodes), domain=domain, project_id=project_id)
+        span.set_attribute("twin.drafts_hidden", hidden)
+        logger.info(
+            "twin_nodes_listed",
+            count=len(nodes),
+            domain=domain,
+            project_id=project_id,
+            drafts_hidden=hidden,
+        )
         return TwinNodeListResponse(nodes=nodes, total=len(nodes))
 
 
@@ -201,12 +340,24 @@ async def list_twin_relationships(
         work_products = await _twin.list_work_products(project_id=scoped_project)
         edges = []
         seen: set[str] = set()
+        skipped = 0
         for wp in work_products:
             try:
-                wp_edges = await _twin.get_edges(wp.id)
+                # FORGE-704: both directions. Outgoing only meant an engineering
+                # entity that depends on a work product, or a record generated
+                # from one, was never listed (120 edges on the sandbox).
+                wp_edges = await _twin.get_edges(wp.id, direction="both")
             except Exception:
+                # One unreadable node must not blank the view, but it must not
+                # vanish either: it is counted and reported.
+                skipped += 1
+                logger.warning("twin_relationships_node_skipped", node_id=str(wp.id))
                 continue
             for edge in wp_edges:
+                # FORGE-523: REVISION_OF/HEAD point at Item nodes, which this
+                # view does not list; returning them would draw dangling edges.
+                if edge.edge_type in (EdgeType.REVISION_OF, EdgeType.HEAD):
+                    continue
                 key = f"{edge.source_id}:{edge.target_id}:{edge.edge_type}"
                 if key in seen:
                     continue
@@ -221,9 +372,29 @@ async def list_twin_relationships(
                         label=label,
                     )
                 )
+        # FORGE-704: name the ends that are not listed work products (a
+        # constraint, a baseline, a BOM item, an engineering entity), so a client
+        # can draw them instead of dropping the edge.
+        listed = {str(wp.id) for wp in work_products}
+        unlisted = {
+            end for edge in edges for end in (edge.sourceId, edge.targetId) if end not in listed
+        }
+        endpoints = await resolve_endpoints(_twin, sorted(unlisted))
         span.set_attribute("twin.relationships_count", len(edges))
-        logger.info("twin_relationships_listed", count=len(edges), project_id=project_id)
-        return TwinRelationshipListResponse(relationships=edges, total=len(edges))
+        span.set_attribute("twin.relationship_endpoints", len(endpoints))
+        logger.info(
+            "twin_relationships_listed",
+            count=len(edges),
+            endpoints=len(endpoints),
+            skipped_nodes=skipped,
+            project_id=project_id,
+        )
+        return TwinRelationshipListResponse(
+            relationships=edges,
+            total=len(edges),
+            endpoints=endpoints,
+            skipped_nodes=skipped,
+        )
 
 
 @router.get("/nodes/{node_id}", response_model=TwinNodeResponse)
@@ -237,7 +408,13 @@ async def get_twin_node(node_id: str) -> TwinNodeResponse:
             raise HTTPException(status_code=400, detail="Invalid node ID format")
         wp = await _twin.get_work_product(uid)
         if wp is None:
-            raise HTTPException(status_code=404, detail="Node not found")
+            # FORGE-515: engineering entities (intent, stakeholder_need, ...)
+            # are not work products but are real nodes reviewers open.
+            entity = await _twin.get_engineering_entity(uid)
+            if entity is None:
+                raise HTTPException(status_code=404, detail="Node not found")
+            logger.info("twin_entity_retrieved", node_id=node_id)
+            return _entity_to_response(entity)
         logger.info("twin_node_retrieved", node_id=node_id)
         return _wp_to_response(wp)
 
@@ -420,6 +597,22 @@ _PREVIEW_CONTENT_TYPES: dict[str, str] = {
     "gbr": "text/plain; charset=utf-8",
     "c": "text/plain; charset=utf-8",
     "h": "text/plain; charset=utf-8",
+    # FORGE-687: the rest of a design-files node's text files.
+    "cpp": "text/plain; charset=utf-8",
+    "hpp": "text/plain; charset=utf-8",
+    "ini": "text/plain; charset=utf-8",
+    "ld": "text/plain; charset=utf-8",
+    "pos": "text/plain; charset=utf-8",
+    "drl": "text/plain; charset=utf-8",
+    "gbrjob": "application/json",
+    "kicad_pro": "application/json",
+    # FORGE-532: solver result formats. A CalculiX .frd is fixed-width
+    # ASCII; a .vtu is VTK XML. The 3D viewer's own field payload is served
+    # by GET /v1/simulation/results/{id}/field, not this route.
+    "frd": "text/plain; charset=utf-8",
+    "dat": "text/plain; charset=utf-8",
+    "vtu": "application/xml",
+    "gz": "application/gzip",
 }
 
 
@@ -451,6 +644,21 @@ def _resolve_blob(wp: WorkProduct) -> tuple[bytes, str]:
                 error=exc.detail,
             )
         raise
+
+
+def _design_files_view(meta: dict[str, Any]) -> dict[str, Any] | None:
+    """The file list, previews, layers and build output of a design-files node."""
+    if not isinstance(meta.get("design_files"), dict):
+        return None
+    files = [f for f in meta.get("files") or [] if isinstance(f, dict)]
+    return {
+        "files": files or [{"path": p} for p in meta["design_files"]],
+        "previews": [p for p in meta.get("preview_files") or [] if isinstance(p, str)],
+        "previewError": meta.get("preview_error"),
+        "layers": [r for r in meta.get("layers") or [] if isinstance(r, dict)],
+        "buildOutputs": [p for p in meta.get("build_outputs") or [] if isinstance(p, str)],
+        "sources": [s for s in meta.get("source_work_product_ids") or [] if isinstance(s, str)],
+    }
 
 
 @router.get("/nodes/{node_id}/file")
@@ -496,7 +704,7 @@ async def download_node_file(
         )
 
 
-@router.get("/nodes/{node_id}/files/{filename}")
+@router.get("/nodes/{node_id}/files/{filename:path}")
 async def download_node_named_file(node_id: str, filename: str) -> Response:
     """Stream one of a work product's NAMED blobs (MET-740 follow-up).
 
@@ -522,8 +730,14 @@ async def download_node_named_file(node_id: str, filename: str) -> Response:
         if wp is None:
             raise HTTPException(status_code=404, detail="Node not found")
 
-        mesh_files = wp.metadata.get("mesh_files")
-        mesh_key = mesh_files.get(filename) if isinstance(mesh_files, dict) else None
+        # A render node (FORGE-630) keeps its other views the same way, and a
+        # design-files node (FORGE-687) every file by its path in the project.
+        mesh_key = None
+        for field in ("mesh_files", "image_files", "design_files"):
+            named = wp.metadata.get(field)
+            if isinstance(named, dict) and named.get(filename):
+                mesh_key = named[filename]
+                break
 
         if mesh_key:
             from api_gateway.twin.blob_store import fetch_work_product_blob
@@ -874,6 +1088,55 @@ async def iterate_work_product(node_id: UUID, body: IterateRequest) -> WorkProdu
     return WorkProductRevision(**revision)
 
 
+@router.patch("/nodes/{node_id}/assembly-joints", response_model=UpdateAssemblyJointsResponse)
+async def update_assembly_joints(
+    node_id: UUID, body: UpdateAssemblyJointsRequest
+) -> UpdateAssemblyJointsResponse:
+    """Add/edit/delete mates+joints on an already-committed assembly node (FORGE-271).
+
+    Whole-list replace -- matches how the URDF/SDF/USD export panel's own
+    manual joint-list form already works (FORGE-245/MET-740). Persisted
+    directly onto ``metadata.assembly.joints``: a joint is a logical
+    annotation, not new geometry, so this deliberately skips the full
+    ``VersionService`` revision machinery ``/nodes/{id}/iterate`` uses for
+    an actual re-export -- editing joints here never touches the underlying
+    committed blob.
+
+    Unlike the export panel, this does NOT require a live FreeCAD session or
+    re-running an export -- it works on any already-committed node, any
+    time, which is the whole point (joints are persisted onto the node at commit time; this is what
+    makes them editable afterward).
+    """
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+
+    existing_assembly = wp.metadata.get("assembly")
+    if existing_assembly is not None and not isinstance(existing_assembly, dict):
+        # MET-745: some CAD_MODEL nodes carry a bare `assembly: True` flag
+        # (a different, older meaning -- "was this built from multiple
+        # parts?"), a real, documented key-name collision. Refuse rather
+        # than silently clobber it with the {parts, joints} shape.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Node {node_id}'s 'assembly' metadata is not a {{parts, joints}} "
+                "structure (likely a legacy boolean flag) -- refusing to overwrite it."
+            ),
+        )
+
+    parts = existing_assembly.get("parts", []) if existing_assembly else []
+    new_assembly: dict[str, Any] = {
+        "parts": parts,
+        "joints": [j.model_dump() for j in body.joints],
+    }
+    updated_metadata = {**wp.metadata, "assembly": new_assembly}
+    await _twin.update_work_product(node_id, {"metadata": updated_metadata})
+
+    logger.info("assembly_joints_updated", node_id=str(node_id), joint_count=len(body.joints))
+    return UpdateAssemblyJointsResponse(nodeId=str(node_id), assembly=new_assembly)
+
+
 @router.get("/nodes/{node_id}/diff", response_model=RevisionDiff)
 async def diff_versions(node_id: UUID, v1: int = Query(...), v2: int = Query(...)) -> RevisionDiff:
     """Return a metadata diff between two revisions (1-indexed)."""
@@ -887,6 +1150,79 @@ async def diff_versions(node_id: UUID, v1: int = Query(...), v2: int = Query(...
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/nodes/{node_id}/geometry-diff", response_model=GeometryDiffResponse)
+async def diff_geometry(node_id: str) -> GeometryDiffResponse:
+    """Diff a work product's real geometry against its SUPERSEDES predecessor.
+
+    Unlike ``/diff`` above (a metadata-revision diff on the SAME node --
+    ``/iterate`` never changes the underlying blob, so no two revisions of one
+    node ever have different geometry), this walks the real SUPERSEDES edge a
+    re-committed, same-named CAD_MODEL gets (``api_gateway.twin.geometry_
+    recorder``) and compares the two NODES' actual STEP files.
+
+    A node that has never been superseded gets a 200 saying so rather than
+    a 404 (FORGE-709): the dashboard asks this for every selected node, so
+    the common answer must not read as an error in the console or in
+    telemetry. A 404 here now means only that the node itself is unknown.
+    """
+    if _geometry_diff is None:
+        raise HTTPException(status_code=503, detail="geometry diff is not configured")
+    with tracer.start_as_current_span("twin.diff_geometry") as span:
+        span.set_attribute("twin.node_id", node_id)
+        try:
+            result = await _geometry_diff(work_product_id=node_id)
+        except NoPreviousVersion:
+            span.set_attribute("twin.has_previous_version", False)
+            return GeometryDiffResponse(current_work_product_id=node_id, has_previous_version=False)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 -- surface a clean 502 with the cause
+            logger.warning("geometry_diff_failed", node_id=node_id, error=str(exc))
+            span.record_exception(exc)
+            raise HTTPException(status_code=502, detail=f"geometry diff failed: {exc}") from exc
+        return GeometryDiffResponse(**result)
+
+
+@router.get("/interference-check", response_model=InterferenceCheckResponse)
+async def check_interference(
+    work_product_id_a: str = Query(...), work_product_id_b: str = Query(...)
+) -> InterferenceCheckResponse:
+    """Real boolean-intersection clearance/interference check between two
+    named parts' committed STEP geometry (FORGE-272, gap G-D4).
+
+    Deliberately a pairwise check on two caller-named parts, not an
+    all-pairs sweep across an entire assembly, and deliberately not an ISO
+    286 tolerance-grade/fit classification -- see
+    ``api_gateway.twin.interference_check``'s module docstring for why
+    both are out of scope here.
+    """
+    if _interference_check is None:
+        raise HTTPException(status_code=503, detail="interference check is not configured")
+    with tracer.start_as_current_span("twin.check_interference") as span:
+        span.set_attribute("twin.work_product_id_a", work_product_id_a)
+        span.set_attribute("twin.work_product_id_b", work_product_id_b)
+        try:
+            result = await _interference_check(
+                work_product_id_a=work_product_id_a, work_product_id_b=work_product_id_b
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 -- surface a clean 502 with the cause
+            logger.warning(
+                "interference_check_failed",
+                work_product_id_a=work_product_id_a,
+                work_product_id_b=work_product_id_b,
+                error=str(exc),
+            )
+            span.record_exception(exc)
+            raise HTTPException(
+                status_code=502, detail=f"interference check failed: {exc}"
+            ) from exc
+        return InterferenceCheckResponse(**result)
+
+
 @router.post("/nodes/{node_id}/approve-sketch", response_model=ApproveSketchResponse)
 async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> ApproveSketchResponse:
     """Human sign-off on a design_sketch work product (follow-up to MET-740/747).
@@ -895,6 +1231,16 @@ async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> Ap
     this is the dashboard's side of the gate — a human explicitly approving it
     before the calling agent is expected to proceed to real CAD/build work.
     """
+    result = await approve_sketch_node(node_id, body.approved_by)
+    return ApproveSketchResponse(
+        node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
+    )
+
+
+async def approve_sketch_node(
+    node_id: UUID, approved_by: str | None, audit: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Approve a design_sketch. Shared with ``/v1/approvals`` (FORGE-507)."""
     if _design_sketch_approver is None:
         raise HTTPException(status_code=503, detail="design-sketch approval is not configured")
     wp = await _twin.get_work_product(node_id)
@@ -906,12 +1252,52 @@ async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> Ap
             detail=f"Node {node_id} is a {wp.type.value}, not a design_sketch",
         )
     try:
-        result = await _design_sketch_approver(str(node_id), approved_by=body.approved_by)
+        result: dict[str, Any] = await _design_sketch_approver(
+            str(node_id), approved_by=approved_by, **({"audit": audit} if audit else {})
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return ApproveSketchResponse(
+    return result
+
+
+@router.post(
+    "/nodes/{node_id}/approve-technical-drawing", response_model=ApproveTechnicalDrawingResponse
+)
+async def approve_technical_drawing(
+    node_id: UUID, body: ApproveTechnicalDrawingRequest
+) -> ApproveTechnicalDrawingResponse:
+    """Human sign-off on a technical_drawing work product (FORGE-293, gap G-H1).
+
+    Mirrors ``approve_design_sketch`` above -- a real work product, a real
+    approval gate, not a dashboard-local checkbox.
+    """
+    result = await approve_drawing_node(node_id, body.approved_by)
+    return ApproveTechnicalDrawingResponse(
         node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
     )
+
+
+async def approve_drawing_node(
+    node_id: UUID, approved_by: str | None, audit: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Approve a technical_drawing. Shared with ``/v1/approvals`` (FORGE-507)."""
+    if _technical_drawing_approver is None:
+        raise HTTPException(status_code=503, detail="technical-drawing approval is not configured")
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    if wp.type != WorkProductType.TECHNICAL_DRAWING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Node {node_id} is a {wp.type.value}, not a technical_drawing",
+        )
+    try:
+        result: dict[str, Any] = await _technical_drawing_approver(
+            str(node_id), approved_by=approved_by, **({"audit": audit} if audit else {})
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return result
 
 
 # ---------------------------------------------------------------------------

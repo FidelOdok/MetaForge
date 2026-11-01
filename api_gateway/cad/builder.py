@@ -198,6 +198,23 @@ async def build_assembly(
             {"session_id": sid, "assembly_id": asm_id, "part_id": part_id},
         )
 
+    # FORGE-245: the committed node otherwise carries no record of which
+    # parts made up the assembly (only the merged STEP geometry) -- the
+    # dashboard's Assembly tab, the URDF export panel's "load joints from
+    # node", and the digital thread all need this to answer "what is this
+    # assembly made of" without a live (and TTL-bound) FreeCAD session.
+    # This builder never authors joints itself (no add_assembly_joint
+    # call above), so "joints" is honestly empty here -- a session-based
+    # commit (twin.commit_geometry by session reference) is where real
+    # joints get attached, see tool_registry/tools/twin/adapter.py.
+    assembly_info = {
+        "parts": [
+            {"name": part["name"], "obj_id": obj_id}
+            for part, obj_id in zip(parts, part_ids, strict=True)
+        ],
+        "joints": [],
+    }
+
     export = await invoke("freecad.export_model", {"session_id": sid, "obj_id": asm_id})
     step_b64 = (
         export.get("step_base64")
@@ -213,7 +230,7 @@ async def build_assembly(
         name=name,
         project_id=project_id,
         session_id=session_id,
-        extra_metadata={"assembly": True, "part_count": len(parts)},
+        extra_metadata={"assembly": assembly_info, "part_count": len(parts)},
     )
     logger.info(
         "cad_assembly_built",

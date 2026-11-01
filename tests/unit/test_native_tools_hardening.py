@@ -362,3 +362,129 @@ class TestStructuredErrors:
 
         assert payload["error"] == "invalid_arguments"
         assert payload["validation_errors"] == ["missing 'x'"]
+
+    @pytest.mark.asyncio
+    async def test_an_unprefixed_tool_name_self_corrects_without_a_bare_keyerror(self):
+        """FORGE-236: live-observed a model calling twin_commit_geometry
+        (dropped the mcp_ prefix); the ENTIRE error used to be the bare
+        quoted name via KeyError's own __str__, with nothing telling the
+        model what went wrong -- it once concluded a healthy backend was
+        down. The registry now auto-resolves the alias when unambiguous, so
+        this exact call just succeeds."""
+        executed: list[dict[str, Any]] = []
+
+        async def commit(arguments: dict[str, Any]) -> dict[str, Any]:
+            executed.append(arguments)
+            return {"committed": True}
+
+        registry = ToolRegistry()
+        registry.register_mcp(
+            "twin",
+            "commit_geometry",
+            description="d",
+            input_schema={"type": "object"},
+            handler=commit,
+        )
+
+        invoke, seen = _scripted([[_call("twin_commit_geometry", {"obj_id": "o1"}, "1")]])
+        await run_native_tools(_runtime(registry), "commit", invoke=invoke)
+
+        assert executed == [{"obj_id": "o1"}]
+        content = [m for m in seen[-1]["messages"] if m.get("role") == "tool"][0]["content"]
+        assert json.loads(content) == {"committed": True}
+
+    def test_unknown_tool_renders_as_its_own_structured_payload(self):
+        from orchestrator.harness.tool_exec import error_content
+        from orchestrator.harness.tools import ToolNotFoundError
+
+        payload = json.loads(
+            error_content(ToolNotFoundError("nope", did_you_mean=["mcp_twin_get_node"]))
+        )
+
+        assert payload["error"] == "unknown_tool"
+        assert payload["tool"] == "nope"
+        assert payload["did_you_mean"] == ["mcp_twin_get_node"]
+        assert "mcp_" in payload["hint"]
+
+
+class TestSkillReportedFailureMarkedAsStepError:
+    """FORGE-225: a skill tool that catches its own error and returns a
+    normal {"success": False, ...} result (skill_registry.skill_base's own
+    convention, no exception raised) used to leave ReActStep.error unset --
+    the TUI's ✓/✗ tick reads that field, so 13 rejected Design IR documents
+    in a real re-test all rendered as green checkmarks."""
+
+    @pytest.mark.asyncio
+    async def test_a_success_false_result_is_marked_as_a_step_error(self):
+        async def rejects(arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"success": False, "errors": ["Invalid Design IR document: 3 errors"]}
+
+        registry = ToolRegistry()
+        registry.register_native(
+            "skill_mechanical_generate_cad_ir",
+            description="s",
+            input_schema={"type": "object"},
+            handler=rejects,
+        )
+
+        invoke, _ = _scripted([[_call("skill_mechanical_generate_cad_ir", {}, "1")]])
+        result = await run_native_tools(_runtime(registry), "build it", invoke=invoke)
+
+        assert result.steps[0].error is not None
+        assert "Invalid Design IR document" in result.steps[0].error
+        # The model still sees the full payload -- only the trace's own
+        # error flag was missing, not the information itself.
+        assert result.steps[0].observation == {
+            "success": False,
+            "errors": ["Invalid Design IR document: 3 errors"],
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_success_true_result_is_not_marked_as_an_error(self):
+        async def ok(arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"success": True, "cad_file": "output/part.step"}
+
+        registry = ToolRegistry()
+        registry.register_native(
+            "skill_mechanical_generate_cad",
+            description="s",
+            input_schema={"type": "object"},
+            handler=ok,
+        )
+
+        invoke, _ = _scripted([[_call("skill_mechanical_generate_cad", {}, "1")]])
+        result = await run_native_tools(_runtime(registry), "build it", invoke=invoke)
+
+        assert result.steps[0].error is None
+
+    @pytest.mark.asyncio
+    async def test_a_duplicate_call_of_a_reported_failure_stays_marked_as_an_error(self):
+        """The dedup ("already tried, don't re-run") path reads the cached
+        raw observation, not just the wrapper -- a repeated invalid IR call
+        must not suddenly look like it succeeded on the second attempt."""
+        calls = 0
+
+        async def rejects(arguments: dict[str, Any]) -> dict[str, Any]:
+            nonlocal calls
+            calls += 1
+            return {"success": False, "errors": ["bad op"]}
+
+        registry = ToolRegistry()
+        registry.register_native(
+            "skill_mechanical_generate_cad_ir",
+            description="s",
+            input_schema={"type": "object"},
+            handler=rejects,
+        )
+
+        invoke, _ = _scripted(
+            [
+                [_call("skill_mechanical_generate_cad_ir", {"x": 1}, "1")],
+                [_call("skill_mechanical_generate_cad_ir", {"x": 1}, "2")],
+            ]
+        )
+        result = await run_native_tools(_runtime(registry), "build it", invoke=invoke)
+
+        assert calls == 1  # deduplicated, not re-executed
+        assert result.steps[0].error is not None
+        assert result.steps[1].error is not None

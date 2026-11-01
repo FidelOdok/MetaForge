@@ -7,6 +7,27 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class RecordPinResponse(BaseModel):
+    """One item revision a record depends on (FORGE-527)."""
+
+    itemKey: str  # noqa: N815
+    revision: int
+    itemRef: str  # noqa: N815 - KEY@n
+    itemType: str = ""  # noqa: N815
+    nodeId: str | None = None  # noqa: N815 - the pinned revision's node
+
+
+class RecordStalenessResponse(BaseModel):
+    """Whether a record is still valid evidence (FORGE-527, spec section 20)."""
+
+    #: ``current``, ``stale``, ``invalid``, ``superseded`` or ``revalidated``.
+    status: str
+    reason: str | None = None
+    #: For a stale record: ``{item_key: {pinned, current}}``.
+    staleFor: dict[str, Any] | None = None  # noqa: N815
+    supersededBy: str | None = None  # noqa: N815
+
+
 class TwinNodeResponse(BaseModel):
     """Single node in the Digital Twin graph, shaped for the dashboard."""
 
@@ -17,6 +38,12 @@ class TwinNodeResponse(BaseModel):
     status: str
     properties: dict[str, str | int | float | bool]
     updatedAt: str  # noqa: N815
+    # FORGE-248: the node's own project scope (MET-491's project_id, None for
+    # an unscoped legacy node) -- without this, a client that already listed
+    # every node (no ?project_id= filter, the default) has no way to tell
+    # which project any given node belongs to, and `forge twin list --json`
+    # had nothing to filter or display on.
+    projectId: str | None = None  # noqa: N815
     # MET-630: structured geometry parameters/properties (pad_length_mm,
     # volume_mm3, ...) — kept separate from `properties` above, which is
     # scalar-only and shared by every node type. None when the node has
@@ -33,6 +60,63 @@ class TwinNodeResponse(BaseModel):
     # round trip and no live FreeCAD session required. None for every other
     # node type.
     assembly: dict[str, Any] | None = None
+    # FORGE-250: a robot_description node's saved named poses
+    # (metadata.poses -- {pose_name: {joint_name: value}}), written via the
+    # generic POST /nodes/{id}/iterate revision endpoint's metadata_updates.
+    # None for every other node type, or a robot_description with no saved
+    # poses yet.
+    poses: dict[str, dict[str, float]] | None = None
+    # FORGE-305: a simulation_result node's mesh_stats ({num_nodes,
+    # num_elements, ...}). The scalar-only `properties` loop above drops it
+    # silently, like MET-630's geometry_features before it -- so the one piece
+    # of an FEA result that says how much to trust it was the one piece the
+    # inspector could not show. None for every other node type, or a result
+    # recorded without mesh stats.
+    meshStats: dict[str, Any] | None = None  # noqa: N815
+    # FORGE-511: an assembly cad_model's part list ([{node_id, name, material,
+    # position_bbox_mm}]), from metadata.parts. None for every other node.
+    assemblyParts: list[dict[str, Any]] | None = None  # noqa: N815
+    # FORGE-293: a technical_drawing node's own structured dimensions/GD&T/
+    # surface-finish/inspection data and approval state (same "real data,
+    # scalar-only properties loop drops it" shape as meshStats above).
+    # None for every other node type.
+    technicalDrawing: dict[str, Any] | None = None  # noqa: N815
+    # FORGE-687: a node kept by twin.record_design_files (schematic, board,
+    # gerbers, placement, pin map, firmware): its files, previews, gerber
+    # layers, build output and sources. None for every other node.
+    designFiles: dict[str, Any] | None = None  # noqa: N815
+    # FORGE-527: a record's (simulation_result, design_decision, evidence)
+    # revision pins and staleness. None for definitions and other nodes.
+    dependsOn: list[RecordPinResponse] | None = None  # noqa: N815
+    staleness: RecordStalenessResponse | None = None
+
+
+class AssemblyJoint(BaseModel):
+    """One mate/joint between two committed parts (FORGE-271).
+
+    Same shape as ``AssemblyDescription['joints'][n]`` (``types/twin.ts``) /
+    the export panel's own ``JointRow`` -- a joint authored here and one
+    authored via the URDF/SDF/USD export form are structurally identical.
+    """
+
+    name: str = Field(min_length=1)
+    type: str
+    base: str = Field(min_length=1)
+    follower: str = Field(min_length=1)
+    axis: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    anchor: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    limits: dict[str, float] | None = None
+
+
+class UpdateAssemblyJointsRequest(BaseModel):
+    """Body for ``PATCH /nodes/{node_id}/assembly-joints`` -- whole-list replace."""
+
+    joints: list[AssemblyJoint]
+
+
+class UpdateAssemblyJointsResponse(BaseModel):
+    nodeId: str  # noqa: N815 — dashboard contract is camelCase
+    assembly: dict[str, Any]
 
 
 class TwinNodeScriptResponse(BaseModel):
@@ -62,11 +146,29 @@ class TwinRelationshipResponse(BaseModel):
     label: str
 
 
+class TwinEndpointResponse(BaseModel):
+    """What an edge points at when it is not a listed work product (FORGE-704).
+
+    The relationships view lists work products only, but an edge can run to a
+    constraint, a baseline, a BOM item or an engineering entity. Without a name
+    and kind for those the dashboard could not draw the other end of the edge
+    and dropped the edge, without saying so.
+    """
+
+    kind: str  # node type, or the entity type for an engineering entity
+    name: str
+
+
 class TwinRelationshipListResponse(BaseModel):
     """List of edges for the Digital Twin graph."""
 
     relationships: list[TwinRelationshipResponse]
     total: int
+    #: id -> name and kind, for every edge end that is not a listed work product.
+    endpoints: dict[str, TwinEndpointResponse] = Field(default_factory=dict)
+    #: Work products whose edges could not be read. Reported, not swallowed: a
+    #: non-zero value means the graph shown is incomplete.
+    skipped_nodes: int = 0
 
 
 class BooleanCutRequest(BaseModel):
@@ -101,3 +203,66 @@ class ApproveSketchResponse(BaseModel):
     node_id: str
     approved: bool
     approved_at: str
+
+
+class ApproveTechnicalDrawingRequest(BaseModel):
+    """Human sign-off on a technical_drawing work product (FORGE-293)."""
+
+    approved_by: str | None = Field(
+        default=None, description="Identifier of the human approving this drawing."
+    )
+
+
+class ApproveTechnicalDrawingResponse(BaseModel):
+    """Result of approving a technical_drawing — the gate's new state."""
+
+    node_id: str
+    approved: bool
+    approved_at: str
+
+
+class TechnicalDrawingDimension(BaseModel):
+    """One toleranced dimension on a technical_drawing (FORGE-293)."""
+
+    feature: str
+    nominal_mm: float
+    tolerance_plus_mm: float = 0.0
+    tolerance_minus_mm: float = 0.0
+
+
+class TechnicalDrawingGdtCallout(BaseModel):
+    """One GD&T callout (ASME Y14.5 style) on a technical_drawing (FORGE-293)."""
+
+    feature: str
+    symbol: str
+    tolerance_value_mm: float
+    datum_refs: list[str] = Field(default_factory=list)
+
+
+class TechnicalDrawingSurfaceFinish(BaseModel):
+    """One surface-finish requirement on a technical_drawing (FORGE-293)."""
+
+    feature: str
+    ra_um: float
+
+
+class TechnicalDrawingSummary(BaseModel):
+    """A real recorded technical_drawing work product, listed for a part."""
+
+    node_id: str
+    created_at: str
+    name: str
+    part_name: str
+    dimensions: list[TechnicalDrawingDimension]
+    gdt_callouts: list[TechnicalDrawingGdtCallout]
+    surface_finishes: list[TechnicalDrawingSurfaceFinish]
+    inspection_requirements: list[str]
+    approved: bool
+    approved_at: str | None = None
+    approved_by: str | None = None
+
+
+class TechnicalDrawingListResponse(BaseModel):
+    """A part's real recorded technical drawings, oldest first (FORGE-293)."""
+
+    drawings: list[TechnicalDrawingSummary]

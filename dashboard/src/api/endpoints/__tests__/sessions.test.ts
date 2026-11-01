@@ -25,7 +25,7 @@ describe('getSessions', () => {
       },
     });
 
-    const result = await getSessions();
+    const { sessions: result } = await getSessions();
     expect(result[0]?.agentCode).toBe('MECH');
     expect(result[0]?.taskType).toBe('validate_stress');
     expect(result[0]?.events[0]?.agentCode).toBe('MECH');
@@ -54,7 +54,7 @@ describe('getSessions', () => {
       },
     });
 
-    const result = await getSessions();
+    const { sessions: result } = await getSessions();
     expect(result[0]?.status).toBe('abandoned');
     expect(result[0]?.events[0]?.type).toBe('action');
   });

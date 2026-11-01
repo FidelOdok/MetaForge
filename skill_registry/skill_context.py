@@ -67,7 +67,7 @@ def cards_for_domains(cards: list[SkillCard], domains: tuple[str, ...]) -> list[
     return [c for c in cards if c.domain in wanted]
 
 
-def procedural_overlay(cards: list[SkillCard], *, budget_chars: int = 30000) -> str:
+def procedural_overlay(cards: list[SkillCard], *, budget_chars: int = 40000) -> str:
     """Concatenate the cards' SKILL.md into a procedural reference block, trimmed
     to ``budget_chars`` so a phase with many skills can't blow the context.
 
@@ -77,7 +77,14 @@ def procedural_overlay(cards: list[SkillCard], *, budget_chars: int = 30000) -> 
     procedures rather than the corpus actually being too large for a modern
     LLM context window. Raised to 30000 (~7500 tokens) for real per-domain
     growth headroom; the tiny-budget trimming behaviour itself is unaffected
-    (callers can still pass an explicit ``budget_chars``)."""
+    (callers can still pass an explicit ``budget_chars``).
+
+    FORGE-611: it nearly happened again. Mechanical's 12 cards reach 29850 of
+    30000, and while the new manufacturing skills briefly sat in that domain
+    the overlay hit 33323 and dropped ``validate_stress``. They moved to their
+    own ``manufacturing`` domain, but the next mechanical skill would cut a
+    card, so the default is 40000 (~10000 tokens). The test that caught it
+    stays: it asserts a real mechanical card is inlined at the default."""
     if not cards:
         return ""
     header = (

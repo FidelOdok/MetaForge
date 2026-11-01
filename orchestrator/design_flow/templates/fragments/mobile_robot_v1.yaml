@@ -1,0 +1,162 @@
+# mobile_robot_v1 domain fragment (FORGE-671, composable flows).
+#
+# Locomotion selection -> energy closure (mass, drive sizing and battery,
+# solved together) -> kinematics -> dynamics in simulation -> navigation
+# testing. Each task declares the twin items it reads and writes, so a heavier
+# payload re-runs the energy closure and what reads it, not the locomotion
+# choice.
+#
+# The mass <-> drive power <-> battery capacity loop is a coupled block: the
+# engine repeats it until the three values settle (FORGE-666).
+#
+# Limits are inputs, never numbers written here: payload, slope, rolling
+# resistance, speed, acceleration, runtime and the required margins come from
+# the requirements, recorded as sourced design values. A limit nobody recorded
+# is no_data, and no_data never passes a check.
+#
+# Navigation testing names `gazebo.run_navigation_scenario`, which does not
+# exist yet: until an adapter provides it, that task is a blocking capability
+# gap in every proposal that composes this fragment (FORGE-671).
+#
+# Bump `version` when a task, its contract or a check changes.
+id: mobile_robot_v1
+version: 1.1.0
+domain: mobile_robot
+label: Mobile robot
+description: Locomotion, drive and battery sizing, kinematics, dynamics and navigation testing.
+keywords: [mobile robot, robot, rover, agv, amr, wheeled, locomotion, differential drive, navigation]
+disciplines: [robotics]
+tasks:
+- id: locomotion
+  stage: design
+  title: Locomotion selection
+  objective: >-
+    Choose how the robot moves (differential-drive wheels, skid-steer, tracks, legs) for the
+    terrain, slope and manoeuvring the requirements state, and record the choice as a design
+    decision with the alternatives considered. For a wheeled design record the number of driven
+    wheels as `driven_wheel_count`, the wheel radius as `wheel_radius_m` (m) and the track width
+    as `track_width_m` (m), each with its source (a chosen wheel's datasheet, a stated envelope).
+  outputs:
+  - design_value:driven_wheel_count
+  - design_value:wheel_radius_m
+  - design_value:track_width_m
+  records: [design_decision]
+  checks:
+  - driven_wheel_count >= 1
+  - wheel_radius_m > 0 m
+  - track_width_m > 0 m
+  capabilities: [twin.record_engineering_entity, twin.record_decision]
+  outcome: locomotion chosen with its wheel geometry
+- id: mass_rollup
+  stage: design
+  title: Mass roll-up
+  objective: >-
+    Sum the all-up mass: structure, drive, electronics, the battery (from its recorded capacity
+    and the cell's specific energy, cited) and the payload the requirements state. Record it as
+    `total_mass_kg` (kg) with the breakdown in its source.
+  inputs:
+  - design_value:battery_capacity_wh
+  - design_value:payload_mass_kg
+  outputs:
+  - design_value:total_mass_kg
+  capabilities: [twin.record_engineering_entity]
+- id: drive_sizing
+  stage: design
+  title: Drive sizing
+  objective: >-
+    Size the drive with robot.size_drive: give the recorded total mass, wheel radius, driven
+    wheel count, maximum slope, rolling resistance, maximum acceleration, top speed and
+    drivetrain efficiency, and a candidate motor and gearbox from its datasheet. Record the
+    peak drive power as `drive_power_w` (W), the motor's torque margin as `motor_torque_margin`
+    (a fraction) and the gear ratio as `gear_ratio`, each sourced to the tool run and datasheet.
+    If the margin is below the requirement, choose another motor or gearbox and run it again.
+  inputs:
+  - design_value:total_mass_kg
+  - design_value:wheel_radius_m
+  - design_value:driven_wheel_count
+  - design_value:max_slope_deg
+  - design_value:rolling_resistance
+  - design_value:max_speed_mps
+  - design_value:max_acceleration_mps2
+  - design_value:drivetrain_efficiency
+  outputs:
+  - design_value:drive_power_w
+  - design_value:motor_torque_margin
+  - design_value:gear_ratio
+  checks:
+  - motor_torque_margin >= required_torque_margin
+  capabilities: [robot.size_drive]
+- id: battery_sizing
+  stage: design
+  title: Battery sizing
+  objective: >-
+    Size the battery for the required runtime at the recorded drive power plus the electronics
+    load (`electronics_power_w`, from the power design when it is composed), with the usable
+    depth of discharge from the cell's datasheet. Record the capacity as
+    `battery_capacity_wh` (Wh) with its calculation in the source.
+  inputs:
+  - design_value:drive_power_w
+  - design_value:electronics_power_w
+  - design_value:required_runtime_h
+  outputs:
+  - design_value:battery_capacity_wh
+  checks:
+  - battery_capacity_wh > 0 Wh
+  capabilities: [twin.record_engineering_entity]
+- id: kinematics
+  stage: design
+  title: Kinematics
+  objective: >-
+    Check the drive's kinematics with robot.diff_drive_kinematics from the recorded wheel
+    radius, track width, gear ratio and the motor's usable speed at load (datasheet), against
+    the required speed and yaw rate. Record the top speed as `max_speed_capability_mps` (m/s).
+  inputs:
+  - design_value:wheel_radius_m
+  - design_value:track_width_m
+  - design_value:gear_ratio
+  outputs:
+  - design_value:max_speed_capability_mps
+  checks:
+  - max_speed_capability_mps >= required_speed_mps
+  capabilities: [robot.diff_drive_kinematics]
+  outcome: top speed and turning shown to meet the requirements
+- id: dynamics
+  stage: simulation
+  title: Dynamics in simulation
+  objective: >-
+    Simulate the robot (its URDF/SDF from the committed geometry and the recorded mass) driving
+    up the maximum slope in Gazebo. Record the speed it holds on the slope as
+    `slope_climb_speed_mps` (m/s), sourced to the simulation result.
+  inputs:
+  - design_value:total_mass_kg
+  - design_value:max_slope_deg
+  outputs:
+  - design_value:slope_climb_speed_mps
+  records: [simulation_result]
+  checks:
+  - slope_climb_speed_mps > 0 m/s
+  capabilities: [gazebo.run_simulation]
+- id: navigation
+  stage: simulation
+  title: Navigation testing
+  objective: >-
+    Run the navigation scenarios the requirements name (course, obstacles, number of trials) in
+    simulation and record the fraction of trials that reached the goal without collision as
+    `nav_success_rate` (0 to 1), sourced to the simulation results.
+  inputs:
+  - design_value:max_speed_capability_mps
+  outputs:
+  - design_value:nav_success_rate
+  records: [simulation_result]
+  checks:
+  - nav_success_rate >= required_nav_success_rate
+  capabilities: [gazebo.run_navigation_scenario]
+  outcome: navigation shown to meet its success rate in simulation
+blocks:
+- id: energy_closure
+  stage: design
+  title: Energy closure
+  members: [mass_rollup, drive_sizing, battery_sizing]
+  solves_for: [total_mass_kg, drive_power_w, battery_capacity_wh]
+  tolerance: 0.01
+  max_iterations: 20

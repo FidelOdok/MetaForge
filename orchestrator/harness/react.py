@@ -21,7 +21,13 @@ import structlog
 
 from observability.tracing import get_tracer
 from orchestrator.harness.runtime import HarnessRuntime
-from orchestrator.harness.tool_exec import TurnToolCache, cached_view, error_content
+from orchestrator.harness.tool_exec import (
+    TurnToolCache,
+    cached_view,
+    error_content,
+    note_service_refusal,
+    observation_failure_reason,
+)
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.harness.react")
@@ -192,20 +198,35 @@ async def run_react(
             if tool_cache.has(key):
                 view = cached_view(tool_cache.get(key))
                 logger.info("react_tool_call_deduplicated", tool=call.name)
-                steps.append(ReActStep(action.thought, call, observation=view))
+                steps.append(
+                    ReActStep(
+                        action.thought,
+                        call,
+                        observation=view,
+                        error=observation_failure_reason(tool_cache.get(key)),
+                    )
+                )
                 await _emit(steps[-1])
                 continue
 
             try:
                 observation = await runtime.call_tool(call.name, call.arguments)
                 tool_cache.put(key, observation)
-                steps.append(ReActStep(action.thought, call, observation=observation))
+                steps.append(
+                    ReActStep(
+                        action.thought,
+                        call,
+                        observation=observation,
+                        error=observation_failure_reason(observation),
+                    )
+                )
                 await _emit(steps[-1])
             except Exception as exc:  # noqa: BLE001 - surface tool failure to the policy, don't abort
                 # Failures are never cached, so a retry really retries.
                 steps.append(ReActStep(action.thought, call, error=error_content(exc)))
                 await _emit(steps[-1])
-                logger.warning("react_tool_error", tool=call.name, error=str(exc))
+                if not note_service_refusal(getattr(runtime, "metrics", None), call.name, exc):
+                    logger.warning("react_tool_error", tool=call.name, error=str(exc))
 
         logger.info("react_exhausted", goal=goal, steps=max_steps)
         span.set_attribute("steps", max_steps)

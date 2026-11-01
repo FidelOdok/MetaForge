@@ -16,8 +16,10 @@ from tool_registry.tools.kicad.adapter import (
     KicadServer,
     _check_kicad_cli,
     _count_drc_unconnected,
-    _extract_field,
+    _gerber_file_layer,
+    _inner_copper_layers,
     _list_gerber_files,
+    _match_gerber_layers,
     _parse_bom_csv,
     _parse_drc_violations,
     _parse_erc_violations,
@@ -30,6 +32,18 @@ from tool_registry.tools.kicad.config import KicadConfig
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _design_paths_exist(request, monkeypatch) -> None:
+    """The handler tests mock kicad-cli and use paths like /designs/x.kicad_sch.
+
+    The missing-file refusal (FORGE-680) is tested on its own, with real
+    files, in TestMissingFiles; elsewhere a named file is taken to exist.
+    """
+    if request.node.get_closest_marker("real_paths"):
+        return
+    monkeypatch.setattr(KicadServer, "_existing", lambda self, path, kind: path)
 
 
 @pytest.fixture()
@@ -302,7 +316,7 @@ SAMPLE_DRC_REPORT = {
             ],
         },
     ],
-    "unresolved": [
+    "unconnected_items": [
         {
             "type": "unconnected",
             "description": "Unconnected pad",
@@ -314,10 +328,20 @@ SAMPLE_DRC_REPORT = {
 
 # Sample BOM CSV content
 SAMPLE_BOM_CSV = (
-    '"Reference";"Value";"Footprint";"Qty"\n'
-    '"R1, R2, R3";"10k";"0402";"3"\n'
-    '"C1, C2";"100nF";"0402";"2"\n'
-    '"U1";"STM32F405";"LQFP-64";"1"\n'
+    # kicad-cli 9's default columns, grouped by value and footprint.
+    '"Refs","Value","Footprint","Qty","DNP"\n'
+    '"R1,R2,R3","10k","0402","3",""\n'
+    '"C1,C2","100nF","0402","2",""\n'
+    '"U1","STM32F405","LQFP-64","1",""\n'
+)
+
+SAMPLE_BOM_CSV_WITH_MPN = (
+    # FORGE-694: the columns export_bom asks kicad-cli for.
+    '"Refs","Value","Footprint","Qty","DNP","MPN","Manufacturer"\n'
+    '"R1,R2,R3","10k","0402","3","","",""\n'
+    '"C1,C2","100nF","0402","2","","GRM155R71C104KA88D","Murata"\n'
+    '"C9","10uF","0805","1","DNP","",""\n'
+    '"U1","STM32F405","LQFP-64","1","","STM32F405RGT6","STMicroelectronics"\n'
 )
 
 
@@ -342,7 +366,8 @@ class TestKicadConfig:
         assert cfg.work_dir == "/tmp/kicad"
         assert cfg.max_operation_time == 120
         assert cfg.max_memory_mb == 1024
-        assert cfg.supported_versions == ["7", "8"]
+        assert cfg.supported_versions == ["8", "9"]
+        assert cfg.router_cmd[-1] == "/opt/freerouting/freerouting.jar"
 
     def test_custom_config(self) -> None:
         cfg = KicadConfig(
@@ -379,8 +404,8 @@ class TestKicadServer:
     def test_server_version(self, server: KicadServer) -> None:
         assert server.version == "0.1.0"
 
-    def test_registers_six_tools(self, server: KicadServer) -> None:
-        assert len(server.tool_ids) == 6
+    def test_registers_fifteen_tools(self, server: KicadServer) -> None:
+        assert len(server.tool_ids) == 15
         expected = {
             "kicad.run_erc",
             "kicad.run_drc",
@@ -388,6 +413,19 @@ class TestKicadServer:
             "kicad.export_gerber",
             "kicad.export_netlist",
             "kicad.get_pin_mapping",
+            # FORGE-680: drill and position files complete the fabrication set.
+            "kicad.export_drill",
+            "kicad.export_pos",
+            # FORGE-683: Phase 2 generation.
+            "kicad.generate_schematic",
+            "kicad.generate_pcb",
+            "kicad.autoroute_pcb",
+            # FORGE-684: 3D, renders, component updates.
+            "kicad.export_3d",
+            "kicad.render_pcb",
+            "kicad.update_components",
+            # FORGE-687: SVG previews.
+            "kicad.export_svg",
         }
         assert set(server.tool_ids) == expected
 
@@ -513,10 +551,64 @@ class TestExportGerber:
             await server_with_mocks.export_gerber({"pcb_file": ""})
 
     async def test_gerber_default_output_dir(self, server_with_mocks: KicadServer) -> None:
-        """export_gerber auto-generates output_dir from pcb_file stem."""
+        """FORGE-692: unnamed, each export gets a new folder of its own."""
         await server_with_mocks.export_gerber({"pcb_file": "/designs/board.kicad_pcb"})
+        await server_with_mocks.export_gerber({"pcb_file": "/designs/board.kicad_pcb"})
+        calls = server_with_mocks._execute_gerber_export.call_args_list  # type: ignore[attr-defined]
+        first, second = calls[0][0][1], calls[1][0][1]
+        assert first.startswith("/tmp/kicad/exports/board_gerber-")
+        assert first != second
+
+    async def test_gerber_never_overwrites_a_named_folder(
+        self, server_with_mocks: KicadServer, tmp_path
+    ) -> None:
+        """FORGE-692: a folder that already holds files is refused by name."""
+        (tmp_path / "old.gbr").write_text("G04*")
+        with pytest.raises(ValueError, match="never overwrites"):
+            await server_with_mocks.export_gerber(
+                {"pcb_file": "/designs/board.kicad_pcb", "output_dir": str(tmp_path)}
+            )
+        empty = tmp_path / "new"
+        empty.mkdir()
+        await server_with_mocks.export_gerber(
+            {"pcb_file": "/designs/board.kicad_pcb", "output_dir": str(empty)}
+        )
         call_args = server_with_mocks._execute_gerber_export.call_args  # type: ignore[attr-defined]
-        assert call_args[0][1] == "/tmp/kicad/board_gerber"
+        assert call_args[0][1] == str(empty)
+
+    def test_a_named_export_file_that_exists_is_refused(self, tmp_path) -> None:
+        """FORGE-692: the placement file is refused rather than replaced."""
+        server = KicadServer(KicadConfig(work_dir=str(tmp_path)))
+        existing = tmp_path / "board_pos.csv"
+        existing.write_text("Ref,Val")
+        with pytest.raises(ValueError, match="never overwrites"):
+            server._fresh_file(str(existing), "board", "pos", "board_pos.csv")
+        fresh = server._fresh_file("", "board", "pos", "board_pos.csv")
+        assert fresh.startswith(f"{tmp_path}/exports/board_pos-") and fresh.endswith(
+            "/board_pos.csv"
+        )
+
+    async def test_default_layers_include_a_multilayer_boards_inner_copper(
+        self, server_with_mocks: KicadServer, tmp_path
+    ) -> None:
+        """FORGE-685: a 4-layer job without its planes is not a fabrication set."""
+        board = tmp_path / "fc.kicad_pcb"
+        board.write_text(
+            '(kicad_pcb (version 20241229)\n  (layers (0 "F.Cu" signal) (4 "In1.Cu" power)\n'
+            '    (6 "In2.Cu" power) (2 "B.Cu" signal) (25 "Edge.Cuts" user)))\n'
+        )
+        await server_with_mocks.export_gerber({"pcb_file": str(board)})
+        layers = server_with_mocks._execute_gerber_export.call_args[0][2]  # type: ignore[attr-defined]
+        assert layers[:4] == ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"]
+        # Layers the caller names are taken as given.
+        await server_with_mocks.export_gerber({"pcb_file": str(board), "layers": ["F.Cu"]})
+        assert server_with_mocks._execute_gerber_export.call_args[0][2] == ["F.Cu"]  # type: ignore[attr-defined]
+
+    def test_inner_copper_layers(self, tmp_path) -> None:
+        two = tmp_path / "two.kicad_pcb"
+        two.write_text('(kicad_pcb (layers (0 "F.Cu" signal) (2 "B.Cu" signal)))')
+        assert _inner_copper_layers(str(two)) == []
+        assert _inner_copper_layers(str(tmp_path / "missing.kicad_pcb")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -626,12 +718,12 @@ class TestKicadCliNotAvailable:
 
 
 class TestJsonRpcIntegration:
-    async def test_tool_list_returns_six_tools(self, server: KicadServer) -> None:
+    async def test_tool_list_returns_fifteen_tools(self, server: KicadServer) -> None:
         request = _make_jsonrpc("tool/list")
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 6
+        assert len(response["result"]["tools"]) == 15
 
     async def test_tool_call_erc(self, server_with_mocks: KicadServer) -> None:
         request = _make_jsonrpc(
@@ -676,7 +768,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "kicad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 6
+        assert response["result"]["tools_available"] == 15
 
     async def test_tool_list_filter_by_capability(self, server: KicadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "erc_validation"})
@@ -839,8 +931,48 @@ class TestRealKicadExecution:
         (tmp_path / "readme.txt").touch()  # should be excluded
         files = _list_gerber_files(str(tmp_path))
         assert len(files) == 3
+        # Inner copper (.g1, .g2, ...) counts; a 4-layer job is listed whole.
+        (tmp_path / "board-In1_Cu.g1").touch()
+        (tmp_path / "board-In2_Cu.g2").touch()
+        (tmp_path / "board-job.gbrjob").touch()
+        files = _list_gerber_files(str(tmp_path))
+        assert {"board-In1_Cu.g1", "board-In2_Cu.g2"} <= set(files)
+        assert "board-job.gbrjob" not in files
         assert "board-F_Cu.gtl" in files
         assert "readme.txt" not in files
+        # FORGE-703: the paste layers kicad-cli writes are listed too.
+        (tmp_path / "board-F_Paste.gtp").touch()
+        (tmp_path / "board-B_Paste.gbp").touch()
+        files = _list_gerber_files(str(tmp_path))
+        assert {"board-F_Paste.gtp", "board-B_Paste.gbp"} <= set(files)
+
+    def test_gerber_layers_are_read_from_the_files_written(self) -> None:
+        """FORGE-703: a layer is exported only when a file was written for it.
+
+        File names are kicad-cli 9's own (``<board>-<layer>.<ext>``), and an
+        old layer name (F.SilkS) matches the file of its current one."""
+        files = [
+            "drone-fc-F_Cu.gtl",
+            "drone-fc-F_Paste.gtp",
+            "drone-fc-F_Silkscreen.gto",
+            "drone-fc-In1_Cu.g1",
+            "drone-fc-User_Drawings.gbr",
+            "drone-fc.drl",
+        ]
+        found, missing = _match_gerber_layers(
+            ["F.Cu", "In1.Cu", "F.Paste", "B.Paste", "F.SilkS", "Dwgs.User", "Bogus.Layer"],
+            files,
+        )
+        assert found == {
+            "F.Cu": "drone-fc-F_Cu.gtl",
+            "In1.Cu": "drone-fc-In1_Cu.g1",
+            "F.Paste": "drone-fc-F_Paste.gtp",
+            "F.SilkS": "drone-fc-F_Silkscreen.gto",
+            "Dwgs.User": "drone-fc-User_Drawings.gbr",
+        }
+        assert missing == ["B.Paste", "Bogus.Layer"]
+        assert _gerber_file_layer("drone-fc.drl") is None
+        assert _gerber_file_layer("board-job.gbrjob") is None
 
     def test_list_gerber_files_missing_dir(self) -> None:
         """Missing directory returns empty list."""
@@ -929,24 +1061,6 @@ class TestRealKicadExecution:
         assert components == []
 
     # -- S-expression field extraction tests --
-
-    def test_extract_field_quoted(self) -> None:
-        """Extract a quoted field value."""
-        text = '(ref "U1") (value "STM32")'
-        assert _extract_field(text, "ref") == "U1"
-        assert _extract_field(text, "value") == "STM32"
-
-    def test_extract_field_unquoted(self) -> None:
-        """Extract an unquoted field value."""
-        text = "(ref U1) (value 10k)"
-        assert _extract_field(text, "ref") == "U1"
-        assert _extract_field(text, "value") == "10k"
-
-    def test_extract_field_missing(self) -> None:
-        """Missing field returns empty string."""
-        assert _extract_field("(ref U1)", "value") == ""
-
-    # -- Full ERC execution with mocked subprocess --
 
     async def test_execute_erc_with_mocked_subprocess(self, tmp_path) -> None:
         """Full ERC execution with mocked kicad-cli subprocess."""
@@ -1049,6 +1163,39 @@ class TestRealKicadExecution:
         assert result["format"] == "csv"
         assert result["total_components"] == 6
         assert result["unique_parts"] == 3
+        # FORGE-694: the default sample names no MPN anywhere.
+        assert result["lines_without_mpn"] == 3
+        assert result["components_without_mpn"] == 6
+
+    async def test_bom_export_asks_kicad_for_the_part_numbers(self, tmp_path) -> None:
+        """FORGE-694: MPN and Manufacturer are exported, and grouped on, so a
+        line without a part number is counted and named."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        seen: list[list[str]] = []
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            seen.append(list(args))
+            with open(args[args.index("--output") + 1], "w") as f:
+                f.write(SAMPLE_BOM_CSV_WITH_MPN)
+            return 0, "", ""
+
+        with patch(
+            "tool_registry.tools.kicad.adapter._check_kicad_cli",
+            AsyncMock(return_value="kicad-cli"),
+        ):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_bom_export("/designs/test.kicad_sch", "csv", "value")
+
+        args = seen[0]
+        assert args[args.index("--fields") + 1].endswith(",MPN,Manufacturer")
+        assert args[args.index("--labels") + 1].endswith(",MPN,Manufacturer")
+        assert "MPN" in args[args.index("--group-by") + 1].split(",")
+        # R1-R3 have no MPN; the DNP capacitor is not placed, so it does not count.
+        assert result["lines_without_mpn"] == 1
+        assert result["components_without_mpn"] == 3
+        assert result["references_without_mpn"] == ["R1", "R2", "R3"]
+        mcu = next(p for p in result["parts"] if p["value"] == "STM32F405")
+        assert mcu["mpn"] == "STM32F405RGT6" and mcu["manufacturer"] == "STMicroelectronics"
 
     # -- Full Gerber export execution with mocked subprocess --
 
@@ -1077,6 +1224,42 @@ class TestRealKicadExecution:
         assert result["total_files"] == 3
         assert "board-F_Cu.gtl" in result["files_generated"]
         assert result["layers_exported"] == ["F.Cu", "B.Cu"]
+        assert result["layers_missing"] == []
+
+    async def test_a_requested_layer_with_no_file_is_not_reported_exported(self, tmp_path) -> None:
+        """FORGE-703: the result named F.Paste and B.Paste as exported while no
+        paste file was listed; kicad-cli also skips an unknown layer and exits 0."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        output_dir = str(tmp_path / "gerber_out")
+        os.makedirs(output_dir, exist_ok=True)
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            for name in ["fc-F_Cu.gtl", "fc-F_Paste.gtp", "fc-job.gbrjob"]:
+                (tmp_path / "gerber_out" / name).touch()
+            return 0, "", ""
+
+        with patch(
+            "tool_registry.tools.kicad.adapter._check_kicad_cli",
+            AsyncMock(return_value="kicad-cli"),
+        ):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_gerber_export(
+                    "/designs/fc.kicad_pcb", output_dir, ["F.Cu", "F.Paste", "B.Paste"]
+                )
+
+        assert result["layers_exported"] == ["F.Cu", "F.Paste"]
+        assert result["layers_missing"] == ["B.Paste"]
+        assert result["paste_layers"] == ["F.Paste"]
+        assert result["layer_files"]["F.Paste"] == "fc-F_Paste.gtp"
+        assert "fc-F_Paste.gtp" in result["files_generated"]
+
+    async def test_default_layers_include_the_paste_layers(
+        self, server_with_mocks: KicadServer
+    ) -> None:
+        """FORGE-703: an assembled board's stencil comes from F.Paste and B.Paste."""
+        await server_with_mocks.export_gerber({"pcb_file": "/designs/board.kicad_pcb"})
+        layers = server_with_mocks._execute_gerber_export.call_args[0][2]  # type: ignore[attr-defined]
+        assert {"F.Paste", "B.Paste"} <= set(layers)
 
     # -- kicad-cli not found during execution --
 
@@ -1261,3 +1444,113 @@ class TestRealKicadExecution:
         # Temp file should have been cleaned up
         assert len(created_files) == 1
         assert not os.path.exists(created_files[0])
+
+
+class TestDrcVerdictForge551:
+    """kicad.run_drc counts unrouted nets and applies a custom rule_set (FORGE-551)."""
+
+    @staticmethod
+    async def _drc(
+        server: KicadServer, report: dict[str, Any], pcb: str, filt: str, rules: str | None
+    ) -> tuple[dict[str, Any], list[str]]:
+        seen: list[str] = []
+
+        async def fake_cli(_binary: str, args: list[str], _timeout: float):
+            board = args[-1]
+            seen.append(board)
+            dru = os.path.splitext(board)[0] + ".kicad_dru"
+            if os.path.exists(dru):
+                with open(dru) as f:
+                    seen.append(f.read())
+            with open(args[args.index("--output") + 1], "w") as f:
+                json.dump(report, f)
+            return 0, "", ""
+
+        with (
+            patch(
+                "tool_registry.tools.kicad.adapter._check_kicad_cli",
+                AsyncMock(return_value="kicad-cli"),
+            ),
+            patch("tool_registry.tools.kicad.adapter._run_kicad_cli", side_effect=fake_cli),
+        ):
+            result = await server._execute_drc(pcb, filt, rules)
+        return result, seen
+
+    async def test_unconnected_items_fail_the_board(self, server: KicadServer, tmp_path) -> None:
+        report = {"violations": [], "unconnected_items": [{"type": "unconnected_items"}]}
+        result, _ = await self._drc(server, report, str(tmp_path / "b.kicad_pcb"), "all", None)
+        assert result["unconnected_items"] == 1
+        assert result["passed"] is False
+
+    async def test_warnings_pass_and_filter_cannot_hide_errors(
+        self, server: KicadServer, tmp_path
+    ) -> None:
+        pcb = str(tmp_path / "b.kicad_pcb")
+        warn_only = {"violations": [SAMPLE_DRC_REPORT["violations"][1]]}
+        result, _ = await self._drc(server, warn_only, pcb, "all", None)
+        assert result["passed"] is True
+        result, _ = await self._drc(server, SAMPLE_DRC_REPORT, pcb, "warning", None)
+        assert result["errors"] == 0
+        assert result["passed"] is False
+
+    async def test_rule_set_text_is_placed_beside_a_copy_of_the_board(
+        self, server: KicadServer, tmp_path
+    ) -> None:
+        pcb = tmp_path / "b.kicad_pcb"
+        pcb.write_text("(kicad_pcb)")
+        rules = "(version 1)\n(rule big (constraint clearance (min 5mm)))"
+        result, seen = await self._drc(server, {"violations": []}, str(pcb), "all", rules)
+        assert seen[0] != str(pcb)
+        assert seen[0].endswith("b.kicad_pcb")
+        assert seen[1] == rules
+        assert result["rule_set_applied"] is True
+        assert not os.path.exists(seen[0])
+
+    async def test_rule_set_path_is_read(self, server: KicadServer, tmp_path) -> None:
+        pcb = tmp_path / "b.kicad_pcb"
+        pcb.write_text("(kicad_pcb)")
+        dru = tmp_path / "custom.kicad_dru"
+        dru.write_text("(version 1)")
+        _, seen = await self._drc(server, {"violations": []}, str(pcb), "all", str(dru))
+        assert seen[1] == "(version 1)"
+
+    async def test_missing_rule_file_is_refused(self, server: KicadServer, tmp_path) -> None:
+        pcb = tmp_path / "b.kicad_pcb"
+        pcb.write_text("(kicad_pcb)")
+        with pytest.raises(ValueError, match="rule_set"):
+            await self._drc(server, {}, str(pcb), "all", str(tmp_path / "nope.kicad_dru"))
+
+    def test_legacy_unresolved_key_still_counts(self) -> None:
+        from tool_registry.tools.kicad.adapter import _count_drc_unconnected
+
+        assert _count_drc_unconnected({"unresolved": [{}, {}]}) == 2
+        assert _count_drc_unconnected({"unconnected_items": [{}]}) == 1
+
+
+@pytest.mark.real_paths
+class TestMissingFiles:
+    """A schematic with no board is a normal state, said plainly (FORGE-172)."""
+
+    async def test_drc_with_no_board_says_so(self, tmp_path) -> None:
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        with pytest.raises(FileNotFoundError, match="no .kicad_pcb board yet"):
+            await server.run_drc({"pcb_file": "drone-fc.kicad_pcb"})
+
+    async def test_every_reader_refuses_a_missing_file(self, tmp_path) -> None:
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        for tool, arg in (
+            ("run_erc", "schematic_file"),
+            ("export_bom", "schematic_file"),
+            ("export_netlist", "schematic_file"),
+            ("get_pin_mapping", "schematic_file"),
+            ("export_gerber", "pcb_file"),
+            ("export_drill", "pcb_file"),
+            ("export_pos", "pcb_file"),
+        ):
+            with pytest.raises(FileNotFoundError, match="no (schematic|board) file at"):
+                await getattr(server, tool)({arg: "nope"})
+
+    def test_relative_paths_resolve_against_the_workspace(self, tmp_path) -> None:
+        (tmp_path / "a.kicad_sch").write_text("(kicad_sch)")
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        assert server._existing("a.kicad_sch", "schematic") == str(tmp_path / "a.kicad_sch")

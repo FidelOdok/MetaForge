@@ -132,6 +132,84 @@ def _fallback_errors(schema: dict[str, Any], arguments: dict[str, Any]) -> list[
     return errors
 
 
+def _discriminator_ref(schema: Any, instance: Any) -> str | None:
+    """The local ``$ref`` ``instance`` resolves to, per ``schema``'s own
+    ``discriminator`` hint (``propertyName`` + ``mapping``) -- how Pydantic
+    renders a discriminated ``Annotated`` union to JSON Schema. ``None`` when
+    the schema has no discriminator, ``instance`` isn't an object, or its
+    discriminator value has no mapping entry (an unrecognized/misspelled
+    type -- there's no single branch to blame, so the generic error is the
+    right one to keep in that case).
+    """
+    if not isinstance(schema, dict) or not isinstance(instance, dict):
+        return None
+    discriminator = schema.get("discriminator")
+    if not isinstance(discriminator, dict):
+        return None
+    prop_name = discriminator.get("propertyName")
+    mapping = discriminator.get("mapping")
+    if not (isinstance(prop_name, str) and isinstance(mapping, dict)):
+        return None
+    value = instance.get(prop_name)
+    ref = mapping.get(value) if isinstance(value, str) else None
+    return ref if isinstance(ref, str) else None
+
+
+def _resolve_local_ref(root_schema: dict[str, Any], ref: str) -> dict[str, Any] | None:
+    """Resolve a ``#/$defs/Name``-shaped ref against ``root_schema``'s own
+    ``$defs``. Pydantic's generated schemas only ever use this exact local
+    shape, so anything else (external refs) is deliberately left alone."""
+    prefix = "#/$defs/"
+    if not ref.startswith(prefix):
+        return None
+    defs = root_schema.get("$defs")
+    if not isinstance(defs, dict):
+        return None
+    sub = defs.get(ref[len(prefix) :])
+    return sub if isinstance(sub, dict) else None
+
+
+def _sharpen_oneof_error(
+    validator: Draft202012Validator,
+    root_schema: dict[str, Any],
+    err: Any,
+    path_prefix: list[Any],
+) -> list[tuple[list[Any], str]]:
+    """Replace a ``oneOf``/``anyOf`` failure's opaque "is not valid under any
+    of the given schemas" with the errors from the ONE branch ``err``'s own
+    discriminator property picks out — field-level and precise, instead of
+    every branch's failure flattened into a single whole-instance dump.
+    Recurses, so a discriminated union nested inside another (a Design IR
+    sketch entity's own discriminated ``elements``, inside the entity's own
+    discriminated ``op`` union) still bottoms out at the real leaf mistake.
+
+    ``path_prefix`` is ``err``'s own absolute path in the ORIGINAL top-level
+    document -- ``validator.descend(err.instance, ...)`` reports each
+    produced error's path relative to ``err.instance``, not the document
+    root, so it has to be re-prepended by hand to get a path the model can
+    actually act on (``entities.1.elements.0.origin``, not just ``origin``).
+
+    Returns ``[]`` when there's no discriminator to follow (the caller keeps
+    reporting ``err`` itself, unchanged, in that case) -- this only ever
+    sharpens a message, never suppresses one.
+    """
+    ref = _discriminator_ref(err.schema, err.instance)
+    if ref is None:
+        return []
+    sub = _resolve_local_ref(root_schema, ref)
+    if sub is None:
+        return []
+    leaves: list[tuple[list[Any], str]] = []
+    for sub_err in validator.descend(err.instance, sub, path=None, schema_path=None):
+        full_path = path_prefix + list(sub_err.absolute_path)
+        if sub_err.context:
+            deeper = _sharpen_oneof_error(validator, root_schema, sub_err, full_path)
+            leaves.extend(deeper if deeper else [(full_path, sub_err.message)])
+        else:
+            leaves.append((full_path, sub_err.message))
+    return leaves
+
+
 def validation_errors(schema: Any, arguments: Any) -> list[str]:
     """Human-readable reasons ``arguments`` fail ``schema``; empty when valid."""
     if not is_validatable(schema):
@@ -141,9 +219,23 @@ def validation_errors(schema: Any, arguments: Any) -> list[str]:
     if HAS_JSONSCHEMA:
         try:
             validator = Draft202012Validator(schema)
+            errors: list[tuple[list[Any], str]] = []
+            for err in validator.iter_errors(arguments):
+                # FORGE-229: a discriminated union (Design IR entities, and
+                # each entity's own discriminated sketch elements) fails
+                # oneOf/anyOf with the whole instance echoed back and no
+                # field-level detail -- the model can't tell which of its
+                # guesses was closest, let alone what to fix. When the
+                # instance carries the discriminator property, descend into
+                # the ONE branch it actually names instead.
+                path = list(err.absolute_path)
+                sharpened = (
+                    _sharpen_oneof_error(validator, schema, err, path) if err.context else []
+                )
+                errors.extend(sharpened if sharpened else [(path, err.message)])
             found = [
-                f"{'.'.join(str(p) for p in err.absolute_path) or 'arguments'}: {err.message}"
-                for err in validator.iter_errors(arguments)
+                f"{'.'.join(str(p) for p in path) or 'arguments'}: {message}"
+                for path, message in errors
             ]
         except Exception as exc:  # noqa: BLE001 — a broken schema is not the model's fault
             # A tool shipping an invalid schema must not become an unusable

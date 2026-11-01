@@ -8,77 +8,1533 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (63 across 16 adapters)
+## MCP tools (127 across 21 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
-`knowledge,twin,constraint,cadquery,calculix` (22 tools). FreeCAD, KiCad,
-Gazebo, the OpenUSD conversion adapter, and Isaac Sim are opt-in;
+`knowledge,twin,constraint,cadquery,calculix` (32 tools). FreeCAD, KiCad,
+Gazebo, the OpenUSD conversion adapter, the SimReady asset adapter, and
+Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
+
+One hundred twenty of the 127 are described in the table below. The seven
+that are not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
+and the five `twin.commit_*` document tools
+(`compliance_checklist`, `design_sketch`, `hazard_analysis`,
+`procurement_record`, `technical_drawing`) — are registered and callable;
+they simply have no row here yet. Every one of the 127 does carry an MCP
+annotation (see below), because that set is checked against the registry
+by a test rather than maintained by hand.
+
+### Tool profiles
+
+All 100 tools are served by default. Every MCP client caps how many tools
+it will carry, though, and the ones that do not error simply drop the
+overflow — which leaves the model behaving as though the missing
+capability does not exist.
+
+`--profile` serves a named subset instead:
+
+| Profile | Tools | For |
+|---|---|---|
+| `core` | 40 | Projects, sessions, twin reads, the records that are not domain-specific, and the design-flow lifecycle tools, and renders of a work product (`twin.render_work_product`; `run.get_status` made room for it, `flow.status` covers a run's state) |
+| `mechanical` | 36 | CAD authoring across both kernels, plus geometry commit, renders of what was modelled (`twin.render_work_product`), and bought parts' models from NVIDIA SimReady (`simready.search`, `simready.inspect`, `simready.import`, recorded with `twin.record_design_files`) |
+| `simulation` | 34 | FEA, circuit simulation (`spice.run_simulation`), steady internal flow (`openfoam.run_internal_flow`), load cases, meshes and the evidence they produce, including `twin.record_document` to record a `simulation_result` or `load_case` |
+| `electronics` | 34 | Phase 1: schematic and board checks, fabrication exports (Gerber, drill, pick-and-place, BOM), component search, sourcing, the per-rail power budget (`power.check_budget`), circuit simulation (`spice.run_simulation`), building, checking and emulating firmware (`firmware.build`, `firmware.static_check`, `firmware.run_emulated`), and keeping the firmware project and pin map in the twin (`twin.record_design_files`). `kicad.export_netlist` and `knowledge.populate_bom` left it to keep the phases that draw on it within budget |
+| `pcb_design` | 35 | Phase 2 board design: schematic, board and routing generated from a circuit (`kicad.generate_schematic`, `kicad.generate_pcb`, `kicad.autoroute_pcb`), the board's 3D model and renders (`kicad.export_3d`, `kicad.render_pcb`), component updates (`kicad.update_components`), the checks and fabrication exports run on the result, and the schematic, board, gerbers and placement kept in the twin (`twin.record_design_files`). Kept apart from `electronics`, which would otherwise pass the 40-tool cap |
+| `robotics` | 39 | Assemblies, URDF/SDF/USD export, simulators, and robot arms, grippers and cell equipment from NVIDIA SimReady with their physics (`simready.*`, `twin.record_design_files`) |
+| `mechanical_product` | 36 | A mechanical product end to end: the FreeCAD session tools (open, sketch, pad/pocket, assembly, export, close), geometry commit, component selection. No promotion tool: promotion is a human authority |
+| `manufacturing` | 38 | Choosing a process before design and the DFM review after it: web and knowledge sourcing, component search, the machine library reads (`library.list_machines`, `library.get_machine`, `library.machine_limits`), `library.process_limits` (a library process's rules as DFM limits; the chosen processes and materials are already in the flow context), vendor quotes and handoffs (`vendor.list_connectors`, `vendor.quote`, `vendor.handoffs`; ordering is not in any capped set), a rough cost estimate (`cost.estimate_manufacturing`), the geometry reads a DFM check can use (`freecad.measure`, `freecad.describe_model`, `freecad.describe_session`, `freecad.list_named_faces`, `twin.evaluate_overhang_metric`) and the records. No CAD authoring |
+| `industrial_design` | 37 | Industrial design: renders of a work product in its appearances (`twin.render_work_product`), the appearance library (`library.list_appearances`, `library.get_appearance`, `library.register_appearance`, `library.update_appearance`), the ergonomic limits (`library.list_ergonomic_limits`, `library.get_ergonomic_limit`), materials, process and machine limits for what a finish or a wall can be, model measurement (`freecad.measure`, `freecad.describe_model`, `freecad.describe_step_file`) and value sourcing for ergonomic limits (web, `knowledge.extract`). No CAD authoring: the envelope it fixes is what mechanical design draws |
+| `client_run` | 38 | Driving a client-mode run on a harness with a hard tool cap: start and watch the run, `phase.list_tasks`/`claim`/`submit`, `flow.await_gate`, and value sourcing (`knowledge.extract`, web, component search, the records), and the machine library (`library.list_machines`, `library.machine_limits`). No CAD authoring or solvers: they do not fit beside these |
+
+`all` is not a capped set: it asks for every tool by name. It is
+for a client that loads tools lazily, such as Claude Code, which defers them
+behind its tool search. A client-mode run needs phase, gate, CAD, simulation
+and value-sourcing tools together, and no 40-tool set holds them all.
+
+Each profile also includes `health.check`, so `/metaforge:doctor` works on
+the connection most likely to need it — a capped one, on a harness that
+truncates.
+
+**Choose it per connection, on the URL**:
+
+```
+http://localhost:8765/mcp?profile=mechanical
+```
+
+That is how the shipped plugin manifests ask for one: a manifest has no way
+to pass a command-line flag, and `--profile` is deployment-wide — one
+sidecar serves both a plugin and the dashboard chat, so shrinking it for one
+shrinks it for the other. The connection's own choice wins over the flag.
+
+```bash
+# still available, as a deployment default
+python -m metaforge.mcp --transport http --profile mechanical
+```
+
+The Claude Code packages ask for `all` out of the box: the HTTP
+plugin through its `tool_profile` user-config option, the stdio one through
+`--profile all` (no URL to hang a query on). They used to ask for `core`,
+which carried none of `phase.*`, `flow.await_gate` or `knowledge.extract`, so
+a client-mode run or value sourcing was impossible on the default install.
+Setting `tool_profile` to a capped set still works. The Codex package asks
+for `core` in its `.mcp.json` and `config.toml` together, because a harness
+with a hard cap truncates; switch it to `client_run` to drive a client-mode
+run there.
+
+The sets live in `mcp_core/profiles.py` and are held between 20 and 40
+tools by a test rather than trimmed at runtime — a profile that outgrows
+its ceiling is a decision about what to drop, and silently dropping it is
+the failure profiles exist to prevent.
+
+An unknown profile name is refused, never resolved to "serve everything" (only
+the explicit name `all` does that): a
+client that asked for a 30-tool set and silently received 108 has been
+handed the exact problem profiles exist to prevent. As a start-up flag it
+stops the server; as a URL parameter it is an `-32602` naming the profiles
+that do exist.
+
+`tools/list` reports `_meta.profile` with the profile's name, how many tools
+were served and which of its tools **no loaded adapter registers** — a
+profile that looks small because an adapter is disabled is a configuration
+problem, not a smaller profile.
+
+### "No data" is not a pass
+
+A cross-domain check reports one of three things, not two:
+
+| Status | Meaning |
+|---|---|
+| `pass` | The check ran and the design satisfies it |
+| `fail` | The check ran and the design does not |
+| `no_data` | The check could not run — the thing it inspects is not recorded |
+
+`CrossDomainCheck.passed` is true only for `pass`, so a gate reading it
+treats `no_data` as unsatisfied rather than as success. Whether missing
+data should block is the gate's decision; it cannot make that decision if
+the check has already claimed to pass.
+
+This replaced nine checks that returned `passed=True` whenever the thing
+they inspected was absent. A project with no work products,
+no mounting holes, no thermal zones, no connectors, no weight budget and
+no power figures scored a clean cross-domain sweep — the emptiest project
+looked like the best one.
+
+Two of them computed a verdict from absence rather than skipping: a PCB
+with no recorded dimensions became 0×0mm and fitted inside any enclosure,
+and components with no recorded weight contributed nothing to the budget
+they were being checked against. A `no_data` result now names the fields
+it is missing, because "no data" is only useful if it says which.
+
+### Asking the thread a question
+
+Two tools name the questions engineers actually ask:
+
+| Tool | Question |
+|---|---|
+| `twin.what_verifies` | What evidence, tests or claims support this requirement? |
+| `twin.where_used` | Which assemblies or designs depend on this part? |
+
+`twin.thread_for` can answer both — but only if you know which way to walk.
+Traceability edges point child-to-parent (evidence *satisfies* a
+requirement), so a requirement is usually an edge **target**, and
+`thread_for`'s default `direction="outgoing"` returns nothing for it. An
+empty subgraph reads as *"nothing verifies this requirement"* when the
+traversal simply went the wrong way.
+
+These two encode the direction, because it is a property of the question
+rather than something the asker should have to know. Each restricts to its
+own edge types, so "what verifies this" does not also return everything
+that merely contains it.
+
+An empty answer says so explicitly — `verified: false`, `related_count: 0`
+and a note naming the edges walked and the direction — so it reads as
+"nothing is recorded" rather than "the tool did not work". `thread_for`
+stays available for an arbitrary walk.
+
+### MCP prompts
+
+Six curated workflows are served through `prompts/list` and `prompts/get`:
+
+| Prompt | What it does |
+|---|---|
+| `use` | Pick the project for this session and summarise where it stands |
+| `status` | What is built, and which requirements are unverified |
+| `design` | Design or revise a part, committed to the twin |
+| `fea` | Run a load case and record the evidence against the revision it came from |
+| `gate` | Review whether the project can be promoted |
+| `doctor` | Check the connection, and what is unreachable |
+
+They are defined once, in `mcp_core/workflows.py`, and served twice: as MCP
+prompts to any spec-compliant client, and as slash commands in the
+generated Claude Code package. Two definitions would mean two harnesses
+getting different instructions for the same task, and the one that drifts
+being whichever nobody is currently testing.
+
+An unknown prompt name lists the ones that exist, rather than rejecting
+bare — the caller cannot otherwise tell a typo from a server with no
+prompts at all.
+
+### MCP resources
+
+The server advertises `resources` on `initialize` and routes
+`resources/list` and `resources/read`. Resources use the `metaforge://`
+scheme:
+
+```
+metaforge://<adapter>/<kind>/<id>
+```
+
+A read routes on the adapter segment the URI already carries, rather than
+asking every adapter and taking the first match — that would make the
+answer depend on the order adapters happen to be constructed in, which no
+caller can see or control.
+
+`resources/list` follows the same rule as `tools/list`: an adapter that
+cannot answer is reported under `_meta.unavailableAdapters`, never quietly
+dropped. A short resource list reads to a model as "that context does not
+exist".
+
+Adapters have been able to register resources and the
+knowledge adapter already did — but the unified server used to
+dispatch neither method and advertise no capability, so a
+spec-compliant client got "Unknown method" and no way to learn they
+existed.
+
+#### Project resources
+
+| URI | What it answers |
+|---|---|
+| `metaforge://twin/brief/{project_id}` | What this project is and what has been built in it, newest work first, with recent requirement docs inline |
+| `metaforge://twin/hierarchy/{project_id}` | The product breakdown, with mass and cost rolled up the tree |
+| `metaforge://twin/requirements/{project_id}` | Requirements against the evidence that verifies them, with each row's live status |
+| `metaforge://twin/decisions/{project_id}` | Recorded decisions, their rationale and the alternatives considered |
+| `metaforge://twin/risks/{project_id}` | Recorded risk entities |
+
+The brief is the **same** one the chat harness gives its agent — one
+builder, two callers — so an MCP client and a chat agent are briefed
+identically and stay that way as it changes.
+
+Each resource renders an existing source rather than computing anything
+new. A resource doing its own analysis would be a second opinion the
+dashboard and the gates do not share, and the one an agent reads would be
+the one nobody validated.
+
+The requirement resource reports `no_data` as itself and states the count
+of requirements with no evidence at all. An unverified requirement must
+never read as a satisfied one — the same rule the cross-domain checks
+follow.
+
+A project that does not exist is an error; a project that exists with
+nothing recorded returns a resource saying so. "No such project" and
+"nothing built yet" are different answers, and the second is the one an
+agent needs at the start of a session.
+
+### Grounding: citing what actually happened
+
+Every `tools/call` response carries a reference in `_meta`:
+
+```json
+{
+  "content": [{"type": "text", "text": "{\"node\": \"n-1\"}"}],
+  "isError": false,
+  "_meta": {"callId": "7a619373979b4216"}
+}
+```
+
+The same id is recorded against the action in the agent session, so a
+reply claiming *"I committed the geometry"* can name a call id — and that
+id either appears in the session timeline or the claim is unsupported.
+Without it, a grounded answer and an invented one read identically: both
+are prose, and a reviewer has no way to tell which is which.
+
+Failed calls get a reference too. An agent claiming it *tried* something
+is as worth checking as one claiming it succeeded.
+
+The id lives in `_meta`, not inside the text payload — the text is the
+tool's own output, and burying a protocol-level id in it would make every
+adapter's result schema wrong.
+
+### These claims are tested
+
+The guarantees on this page are checked against the HTTP app on every
+test run (`tests/unit/test_documented_contract.py`), not only against
+objects a test constructed.
+
+That distinction is the whole reason the file exists. A
+guarantee this page stated and the server did not keep was found — writes from a
+remote caller were documented as held, and ran — and it survived because
+every test that touched it built the server directly, passing arguments
+the real transport never passed. The contract was verified everywhere
+except where it is assembled.
+
+### Approval-held writes
+
+A tool that writes is held for a human when the request comes from a
+remote caller, whatever client asked. The gate is on the MCP dispatch
+path itself, not in any client — a harness cannot opt out of it by not
+implementing it.
+
+This used to exist only on the chat path: `HarnessRuntime`
+paused on `requires_approval`, and the MCP path consulted nothing. The
+same `twin.commit_geometry` was gated when a person asked in the
+dashboard and ungated when an external harness asked over MCP.
+
+What is held is decided from the same annotations the client is shown
+(see above), so a tool cannot advertise `readOnlyHint: true` and be
+treated as a write, or the reverse. A tool nobody has classified is
+held.
+
+| Caller | Read | Write |
+|---|---|---|
+| Local stdio | runs | runs (see below) |
+| Remote (OAuth identity) | runs | **held** |
+| Untrusted (tunnel, no identity) | runs | **held** |
+
+Those last two rows used to never happen. `caller` defaulted to
+`local` and **no transport ever set it**, so every HTTP caller was treated
+as the engineer at the keyboard and the local-write exemption waved their
+writes through. The default is now `untrusted` — a default that is the
+most permissive value is how a guardrail goes missing quietly — and each
+transport declares what it is: stdio `local`, HTTP `remote` when the login
+identifies the caller and `untrusted` otherwise.
+
+Held calls land in the same queue as chat approvals and appear on the
+dashboard's Approvals page, recorded with `caller` and `source: mcp` —
+the same write from a remote harness and from the dashboard are not the
+same request to whoever is deciding.
+
+Every outcome other than an approval stops the call:
+
+| Outcome | Meaning |
+|---|---|
+| `not_configured` | The server was told to hold writes and given no gate. Refused, never run. |
+| `rejected` | A reviewer said no. |
+| `timed_out` | Nobody answered inside the window: 180s when the client is sent progress, 100s when it is not (see [Writes wait for a human](integrations/claude-code.md#while-a-call-waits-on-the-dashboard)). |
+| `cancelled` | The hold was closed before anyone answered. |
+
+`rejected` and `timed_out` stay distinct because "a person said no" and
+"nobody was looking" need different words to an agent; all of them carry
+`retryable: false`.
+
+**Local stdio writes are exempt by default — unless the client can be
+asked.** Not because local is trusted (the chat path holds local writes
+today) but because a stdio session historically had nowhere to answer:
+no dashboard is necessarily open. Holding with no way to approve is an
+outage, not a guardrail. A client that supports elicitation *is*
+somewhere to answer, so the exemption stops applying to it. Set
+`exempt_local_writes=False` to hold local writes even from clients that
+cannot be asked.
+
+### The Codex package
+
+`integrations/codex/` carries a plugin manifest at
+`.codex-plugin/plugin.json`, a marketplace entry, an `.mcp.json`, the
+skills, and an `AGENTS.md`.
+
+The format did not come from the documentation, which describes
+installing Codex plugins but not the manifest's filename, location or
+fields — the developer guide it links 404s. It came from **codex-cli
+0.118.0 itself**: `codex features list` reports `plugins  stable  true`,
+and the binary embeds the scaffolding script that writes these files.
+
+| | |
+|---|---|
+| Manifest | `<plugin>/.codex-plugin/plugin.json` |
+| Marketplace | `.agents/plugins/marketplace.json` |
+| Entry source | `{"source": "local", "path": "./plugins/<name>"}` |
+| Install policy | `NOT_AVAILABLE` \| `AVAILABLE` \| `INSTALLED_BY_DEFAULT` |
+| Auth policy | `ON_INSTALL` \| `ON_USE` |
+
+An entry's `./plugins/<name>` resolves from the directory that *contains*
+`.agents/`, not from the marketplace file — so a home-rooted marketplace
+at `~/.agents/plugins/marketplace.json` looks for `~/plugins/<name>`.
+
+It has been loaded and driven end to end against codex-cli 0.118.0 **and
+0.159.2** — the format survived that upgrade unchanged. Checked by driving
+`codex app-server` over stdio: `plugin/list` returns `metaforge@metaforge`
+with no marketplace load errors, `plugin/read` resolves all 30 skills plus
+`mcpServers: ["metaforge"]`, `plugin/install` writes the entry into
+`~/.codex/config.toml`, and Codex's own MCP client completes the handshake
+with the sidecar — `server_info: Implementation { name: "metaforge-mcp" }`
+at protocol `2025-06-18` — and reads its `tools/list`.
+
+The agent then uses the tools, which is the part a manifest check misses.
+A read goes through: Codex called `project.list` and got a `status:
+success` envelope. A write is held: `project.create` was refused with
+`-32001` / `approval_required`, caller classified untrusted, and a
+follow-up `project.list` came back empty, so the write did not run. That
+distinction is the whole guardrail — an error returned *after* the write
+would be worse than no guardrail, because it would look like it held.
+
+The format is still taken from the program that reads it rather than from
+a published spec, so a future Codex upgrade can still move it: if
+`/plugins` stops showing the plugin, re-check the manifest against your
+version first. Wiring the MCP server up by hand via `config.toml` needs no
+plugin and is the path this repo has been running.
+
+### Reaching a local gateway from a hosted harness
+
+ChatGPT and claude.ai cannot reach `localhost`. `forge tunnel up` runs an
+off-the-shelf tunnel (`cloudflared` or `ngrok`, whichever is installed)
+and, first, checks the gateway is fit to be public:
+
+```
+$ forge tunnel up --check-only
+Refusing to open a tunnel:
+  - this gateway accepts unauthenticated connections. On your own machine
+    that is fine; through a tunnel it is an open endpoint on the internet.
+    Set METAFORGE_MCP_API_KEY (or configure OAuth) and restart it before
+    exposing it.
+```
+
+**The pre-flight is the reason this is a command rather than a line in a
+README telling people to run `cloudflared` themselves.** A tunnel does not
+change what the server enforces; it changes who can reach it, and the
+moment between "it worked locally" and "it is public" is exactly where
+nobody re-checks.
+
+It refuses four things: nothing listening, something that is not a
+MetaForge gateway (tunnelling it would publish a stranger's service), a
+gateway that accepts unauthenticated connections, and — implicitly — an
+un-installed tunnel binary, which it will not install for you. A binary
+that opens a public hostname is something you should have chosen to have.
+
+A passing check still warns that writes from a tunnelled caller are held
+for approval, so the first held write does not look like the tunnel
+breaking.
+
+### Installing it
+
+```
+/plugin marketplace add FidelOdok/MetaForge
+/plugin install metaforge          # connects to a gateway over HTTP
+/plugin install metaforge-local    # runs MetaForge here, no gateway
+```
+
+The first line needs `.claude-plugin/marketplace.json` at the repo root,
+which is where Claude Code looks and where every relative plugin source
+resolves from. Both READMEs had advertised that command since the
+packages existed and **there was no marketplace file**, so it failed — a
+documented install path with nothing behind it, which is worse than none
+because it is the first thing a new user does.
+
+The catalog is generated by `scripts/build_integrations.py` alongside the
+packages, so the entries cannot drift from the directories they point at.
+A test checks each `source` resolves to a real plugin, and that the
+READMEs install a plugin this marketplace actually lists — the pairing
+that broke.
+
+**The other channels A1 names are not done**, and are not blocked on
+this:
+
+| Channel | State |
+|---|---|
+| Claude Code marketplace | shipped |
+| Codex `/plugins` | shipped, **not verified end to end** — see below |
+| ChatGPT app directory | needs a public HTTPS endpoint and OAuth, which is the tunnel/broker work |
+| Hermes Skills Hub | MCP + skills; not yet packaged |
+
+### Finding the gateway
+
+`forge connect` probes for a MetaForge gateway and prints the URL to put
+in the plugin's `gateway_url` setting. `/metaforge:connect` is the same
+thing from inside a harness — and, being a packaged command file rather
+than an MCP prompt, it still works when nothing is connected, which is
+the situation it exists for.
+
+```
+Found a MetaForge gateway at http://fidel-dev:8765/mcp
+  version 0.1.0, MCP 2024-11-05
+```
+
+**A candidate only counts when it names itself.** The check is not "is
+something listening" — a dev machine has plenty of services, and another
+MCP server answers `initialize` perfectly happily. Only
+`serverInfo.name == "metaforge-mcp"` is a match. Reporting a random
+service would be worse than finding nothing: the user pastes it in and
+gets a stranger set of failures, further from the cause.
+
+A `401`/`403` **is** a match. The URL is right and the token is the next
+step; saying "not found" would send them after the wrong problem.
+
+Candidates, in order:
+
+1. `<configured gateway>/mcp` — whoever set `METAFORGE_GATEWAY_URL` or a
+   saved config has already said where their gateway is.
+2. `<same host>:8765/mcp` — in the standard compose file the gateway is
+   `:8000` and the MCP sidecar is a **separate service** on `:8765`, so
+   `<gateway>/mcp` 404s and this is the right answer.
+3. `localhost:8765`, `127.0.0.1:8765`, `localhost:8000`.
+
+Deriving a URL is a guess; each one is still probed before being
+reported.
+
+When nothing is found, every candidate is listed with what it said, and
+the three ways forward are named: start one with `docker compose up
+gateway`, enter a team or hosted URL, or install the `metaforge-local`
+package and run with [no gateway at
+all](#running-with-no-gateway-at-all). `forge connect` exits non-zero, so
+it works as a precondition check in a script.
+
+### Importing somebody else's robot
+
+`twin.import_urdf` reads a URDF and records it as a reference design to
+work against: links become components, joints become interfaces, stored
+through the same recorder as `twin.commit_system_architecture`. A URDF
+is a rigid-body graph, which is the shape the twin already holds, so
+this adds no representation nothing else reads.
+
+STEP import already worked and preserves the file's own part labels
+(`freecad.import_step`). URDF had **export only** —
+there was no way to bring an existing arm in.
+
+**Geometry does not come in.** A URDF references meshes by path, usually
+`package://` URIs that resolve only inside a ROS workspace this server
+does not have. The structure is imported, every skipped mesh is listed:
+
+```json
+{
+  "robot_name": "two_link_arm", "component_count": 3, "interface_count": 2,
+  "not_imported": [
+    {"kind": "mesh", "name": "base_link/visual",
+     "detail": "package://arm/meshes/base.stl -- geometry is referenced by path and was not resolved; the structure was imported without it"}
+  ]
+}
+```
+
+`not_imported` also carries any joint whose type is not one the URDF spec
+defines, and any joint naming a link the file does not contain. Neither
+is guessed at — a joint whose type we invented would move wrongly in
+every downstream simulation.
+
+A document that is not a URDF is refused rather than partly read:
+malformed XML, a root that is not `<robot>`, or a file with no links. An
+empty import reporting success is worse than an error.
+
+### Bought parts from NVIDIA SimReady
+
+[SimReady Central](https://huggingface.co/spaces/nvidia/simready-central) is
+NVIDIA's catalogue of OpenUSD models with physics already on them: robot
+arms and grippers from their makers, motors, racks, cooling units and
+thousands of generic props. The `simready` adapter finds them,
+checks them and puts them where the twin can keep them:
+
+1. `simready.search` reads the catalogue from the index repository
+   (`NVIDIA-Omniverse/simready-central`, one commit-pinned URL per package)
+   and each dataset's licence from its Hugging Face card.
+2. `simready.import` fetches the package's manifest, decides the licence,
+   and only then fetches the OpenUSD layers, each checked against the
+   sha256 the package lists. It measures the stage and writes a GLB preview.
+3. `twin.record_design_files` with `work_product_type="purchased_model"`
+   records that folder as a versioned `cad_model` item (`PMD-` keys). The
+   3D viewer and the preview open its GLB as a mesh (the USD layers,
+   licence and attribution are its other files); `mass_kg` is on the node,
+   so a hierarchy roll-up
+   and a mass constraint read it like a measured part.
+4. `library.register_component` with the returned `library_component`
+   keeps the part for other projects. Its geometry is
+   `{usd_url, sha256, licence, package_id, attribution}`, and the library
+   refuses a USD geometry without an accepted licence.
+
+**The licence decides first.** Accepted without a person reading them:
+CC-BY-4.0, CC0-1.0, Apache-2.0, BSD-2-Clause, BSD-3-Clause and MIT
+(`twin_core/library/licences.py`). A package states its licence in up to
+four places (dataset card, manifest, `LICENSE.txt`, the USD layer's
+`asset_license`); they must agree, or the import is refused as
+inconsistent. Universal Robots' dataset (`license: other`, terms that bind
+whoever opens the file) is left out of search and refused by import.
+`simready.attribution` gives the credit lines a deliverable must carry.
+Some packages declare their licence everywhere but ship no text (OnRobot's
+grippers, BSD-3-Clause); their `LICENSE.txt` is then a notice naming the
+SPDX identifier, the copyright holder the package names, its source and
+where the licence text is published, never an empty file.
+
+**What comes in, and what does not.** Only the USD layers, ~60 MB for a
+typical asset; textures (often a gigabyte) only with `include_textures`, and
+never the thumbnails or the publisher's `source_assets`. The preview colours
+each face with its material's diffuse colour (a geometry subset's own
+material first, then the mesh's, then `displayColor`, then grey); it carries
+no textures or shading. It is written the way the STEP converter writes a
+part, in millimetres and Z up with every transform in the vertices, so the 3D
+viewer draws it at the same scale and the same way up as the project's own
+parts. Measured in SI whatever the stage's units:
+bounding box, mass per rigid body (a body and its mesh can both carry the
+same `MassAPI` mass, so only the topmost counts), joints, contact friction
+and restitution, Wikidata labels, the physics backends the asset offers and
+its latest SimReady conformance run.
+
+**These are simulation models, not manufacturer CAD.** NVIDIA's own library
+is generic props, so their mass goes into the library as an `assumption`
+that needs review; a manufacturer's dataset is a `manufacturer_spec`. Use
+them for envelopes, mass, dynamics and context, not as geometry to machine
+against.
+
+Inspect and import need the `omniverse-usd` extra (`usd-core`, `trimesh`,
+`scipy`); search and attribution need only the network.
+
+### Does the part actually meet the requirements
+
+`twin.record_component_selection` holds the chosen part's specs against
+every typed requirement the project already has, and returns the result
+with the commit:
+
+```json
+{
+  "node_id": "bom-1", "mpn": "TPS62840",
+  "requirement_margins": [
+    {"requirement": "iq", "metric": "quiescent_current", "operator": "<=",
+     "limit": 50.0, "unit": "uA", "spec_value": 75.0,
+     "satisfied": false, "margin": -25.0, "margin_pct": -50.0}
+  ],
+  "violates": ["iq"]
+}
+```
+
+**The selection is still recorded.** Refusing the commit would block the
+normal case — choosing the best available part and then revising the
+requirement. But it is no longer silent: without this the violation first
+surfaced at a gate, with nothing linking it back to the decision to buy
+that part.
+
+`margin` is signed, in the requirement's own unit: positive is slack,
+negative is overshoot. An `==` requirement reports no margin at all,
+because "how far over" is not meaningful there and a number would invite
+a comparison between parts that does not mean anything.
+
+Units are converted when the spec carries one (`"3300 mV"` against a
+limit in `V`). A bare number is compared and flagged `unit_assumed` —
+refusing would leave most catalog rows unchecked, and not flagging would
+let a 3300 that is microfarads read as farads and satisfy almost
+anything. A genuinely incompatible unit is not compared.
+
+`unchecked_requirements` names every requirement no margin could be
+computed for, with a reason: `no_matching_spec`, `spec_not_numeric`,
+`incompatible_units`, `requirement_not_bound`. Reported rather than
+skipped — "no margin shown" and "no requirement" otherwise look the same.
+
+This works only because requirements are typed (see [A requirement
+something can check](#a-requirement-something-can-check)); an untyped one
+comes back as `requirement_not_bound`.
+
+### Why a budget cell is blank
+
+Budget allocations roll up mass and cost over the `CONTAINS` tree and
+compare each subsystem's actual against what it was allocated. When the
+comparison cannot be made, the status says which of three reasons it is
+rather than returning a blank:
+
+| `reason` | Means | What to do |
+|---|---|---|
+| `metric_has_no_rollup` | Nothing can compute this metric — `power` today | Nothing; wait for a source |
+| `target_is_not_a_node_id` | `target` is the free-text label the model documents ("frame") | Store a node id if you want it checked |
+| `target_node_not_found` | A well-formed id pointing at nothing | Repair the reference |
+| *(empty)* | The rollup ran | Read `actual` |
+
+A rollup that ran and summed to nothing gives `actual: 0.0`, not `null` —
+a genuine zero is an answer, and under budget.
+
+This matters because all three used to arrive as the same empty cell, and
+they call for different actions: wait for a feature, fix a typo, repair a
+dangling reference. An engineer could not tell them apart, nor from a
+subsystem whose parts simply have no mass recorded yet.
+
+### Power is two budgets, not one
+
+Draw and dissipation are different quantities checked against different
+limits, and both roll up the hierarchy:
+
+| Budget metric | Rolls up | Checked against |
+|---|---|---|
+| `power_draw_peak` | `draw_peak_w` | supply or rail capacity — brown-outs, inrush |
+| `power_draw_average` | `draw_average_w` | battery capacity — runtime |
+| `power_dissipation` | `dissipation_w` | what the enclosure can shed |
+
+They are linked by one derived relationship:
+
+```
+dissipation = draw − output
+```
+
+For most electronics the useful output is near zero and the two nearly
+coincide, which is why merging them looks harmless. For a motor, an LED,
+a transmitter or a converter it is not — much of the draw leaves as work,
+light or RF. **Merging gets one budget wrong every time:** thermal
+overestimated, or supply underestimated.
+
+Per component, declare `draw_w` (or `draw_peak_w`/`draw_average_w`) and
+`output_w`, on a work product's metadata or a BOM item's specifications.
+`dissipation_w` is **derived, never read** — a stated dissipation that
+disagrees with `draw − output` is two sources of truth.
+
+A bare `draw_w` counts as both peak and average: a caller who gave one
+number has not distinguished them, and treating it as only one would
+understate the other budget.
+
+**An unknown `output_w` defaults dissipation to the full draw, and says
+so.** That is the right default and it is wrong for anything that does
+useful work, so it lands in `power_assumptions` rather than being applied
+silently — an unknown is an assumption, never data (F3).
+
+A budget whose metric is bare `power` is **refused as ambiguous**, not
+guessed:
+
+```json
+{"reason": "metric_is_ambiguous",
+ "detail": "'power' is two budgets: power_draw_peak / power_draw_average (against supply) and power_dissipation (against thermal capacity). Say which."}
+```
+
+Choosing on the caller's behalf is wrong in a way nothing later catches:
+a thermal budget checked against draw passes designs that overheat, and a
+supply budget checked against dissipation passes designs that brown out.
+
+The Structure tab renders mass and cost columns only, so a power budget
+still does not appear there — tracked separately. It is logged with
+`has_rollup: true` so nobody goes looking for a rollup that already
+exists.
+
+### A requirement something can check
+
+Design-flow gates compare structured envelope, thickness and material
+constraints to the committed `cad_model`, and deflection, stress and
+safety-factor constraints to the latest linked `simulation_result` with
+load-case scaling; the covered metrics and the gaps are listed in
+[design-flow-harness](architecture/design-flow-harness.md#constraint-as-gate-criteria).
+
+`twin.record_constraint_set` takes a `metric`, `operator`, `limit` and
+`unit` so a gate can evaluate the requirement, plus `verification_method`
+(how it will be shown to hold) and `acceptance_criteria` (what counts as
+meeting it).
+
+Those last two were already real typed fields on `Constraint`, read by
+the recorder and by the gate engine — and **once absent from the tool's input
+schema**. Supported, undocumented, invisible to any
+client reading `tools/list`, so the only way to use them was to already
+know the key.
+
+`verification_method` and `expected_evidence` are different questions:
+*analysis* is the method, *simulation* is the kind of artefact that would
+count.
+
+Only `name` is required, which is right — a half-specified requirement is
+a normal step in a conversation. What was missing is anyone saying so, so
+the result now names what it could not check:
+
+```json
+{
+  "node_id": "wp-1",
+  "constraint_ids": ["c-1"],
+  "incomplete": [
+    {"name": "be_light", "missing": ["expression or metric+limit", "verification_method"]}
+  ]
+}
+```
+
+An untyped requirement records happily, then sits in the evidence matrix
+as `no_data` indefinitely — indistinguishable from a properly-specified
+one whose evidence has not arrived yet. `incomplete` is what tells the
+two apart at the moment of writing. It is absent, not empty, when there
+is nothing to report.
+
+A `limit` with no `unit` is called out on its own: the matrix compares
+margins, and it cannot compare a bare number to a quantity.
+
+### When a plugin call fails
+
+The MCP surface publishes four metrics. It used to have none —
+only logs — so "which plugin tool is failing, for whom" was a question
+you answered by reading Loki by hand.
+
+| Metric | Labels | For |
+|---|---|---|
+| `metaforge_mcp_tool_call_total` | `tool_id`, `status`, `client` | Throughput and failure rate per tool |
+| `metaforge_mcp_tool_call_duration_seconds` | `tool_id`, `status` | Latency |
+| `metaforge_mcp_error_total` | `tool_id`, `error_class`, `client` | **What kind** of failure |
+| `metaforge_mcp_adapter_probe_total` | `adapter_id`, `result` | Health probes as a time series |
+
+`error_class` is the point of the group. A rate of "errors" says
+something is wrong; the class says what to do about it —
+`adapter_unavailable` needs a container, `approval_refused` needs a
+person, `tool_not_found` means a client is calling something this build
+does not have, and `unexpected` means an exception nobody has
+classified, which should stand out rather than hide inside
+`tool_execution_error`.
+
+The classes come from the exception types the server already raises
+rather than a parallel list, so the label cannot disagree with the error
+the client received.
+
+Labels are deliberately low-cardinality: a harness name, a tool id, an
+outcome. Nothing is labelled with a node id, actor or project — those are
+unbounded, and a label that grows without limit takes Prometheus down
+rather than telling you anything.
+
+Four alert rules live in `observability/alerting/rules.yaml`
+(`McpAdapterUnreachable`, `McpErrorRateHigh`, `McpApprovalsTimingOut`,
+`McpUnexpectedErrors`).
+
+Failures are also recorded on the trace. There were no
+`record_exception` calls anywhere in the MCP module, which is the
+difference between a Tempo span that shows a failure and one that shows a
+request that happened to return; each error path now records the
+exception and sets `mcp.error_class`, so a trace can be filtered by the
+same taxonomy the metric counts.
+
+Telemetry never fails a call — the same contract session capture keeps.
+
+### Running with no gateway at all
+
+The MCP server runs as a local subprocess over stdio and needs nothing
+configured. Verified on an empty environment, from a working directory
+outside the repo:
+
+```
+initialize  : {'name': 'metaforge-mcp', 'version': '0.1.0'}
+health      : healthy | adapters 13 | tools 105
+```
+
+No gateway, no URL, no token, no network, no API key. Persistent stores
+(Neo4j, Postgres) are optional; without them the twin is in-memory and
+does not survive a restart, and `health/check` says what is reachable
+rather than leaving it to be discovered.
+
+That path existed but nothing shipped it, so the only installable package
+was HTTP-only and working alone still meant running a sidecar. There are
+now two packages:
+
+| | `metaforge` | `metaforge-local` |
+|---|---|---|
+| Reaches | a gateway over HTTP | a process on this machine |
+| Needs | a gateway running, and its URL | `metaforge-mcp` on your PATH |
+| Suits | a team or hosted gateway | working on your own |
+
+**Install one, not both.** The plugin manifest format has no conditional —
+no `enabled`, no `when` — so a single package declaring both an `http`
+and a `stdio` server would connect to both: every tool twice, and an
+HTTP user also spawning a Python process they did not ask for. The
+choice has to be made at install time.
+
+The local package launches the `metaforge-mcp` console script rather than
+`python -m metaforge.mcp`, which would depend on whichever interpreter
+and working directory the harness spawned with. It also sets
+`METAFORGE_OTEL_EXPORT=false`: with export on, a bare stdio boot logged
+five OTLP connection failures to `localhost:4317` before finishing, which
+on a laptop with no collector is noise and nothing else. Local
+instrumentation stays on.
+
+### Pointing at the view that shows it
+
+A `tools/call` result can carry links to the dashboard view for whatever
+it just touched, alongside the call id in `_meta`:
+
+```json
+"_meta": {
+  "callId": "7a619373979b4216",
+  "links": [
+    {"url": "https://forge.example.com/twin?tab=model&node=n-7",
+     "label": "View the part in the twin"}
+  ]
+}
+```
+
+An agent saying *"I committed the bracket"* is asking the reader to go and
+find it — thirteen pages, some project, some node. The server is the only
+party that knows both the id and the route.
+
+Two rules, because a wrong link is worse than none (the agent states it
+with the same confidence either way, and the reader only finds out by
+clicking):
+
+- **The base URL is never invented.** It comes from
+  `METAFORGE_DASHBOARD_URL`. Unset means no links at all, and
+  `health/check` reports `dashboard_links: "disabled (...)"` so a doctor
+  can say so rather than leaving the reader to conclude the tools never
+  produce them.
+- **The route is never invented.** Only mappings verified against the
+  dashboard's own route table are listed, and a test re-checks every one
+  of them against `dashboard/src/App.tsx` — the failure mode of renaming
+  a route is otherwise a link that 404s months later in someone else's
+  transcript. A tool with no mapping, or a result missing the id its
+  route needs, gets no link; linking the bare page would point at
+  whatever happens to be selected, which is a different object.
+
+`links` is absent rather than empty when there is nothing to say: an
+empty list reads as "we looked and there is no view for this".
+
+`/twin` accepts `?node=` and `?tab=` (`graph`, `structure`,
+`model`, `sim`, `asm`, `mfg`). The tab was local state until,
+so a link naming one landed on the page and silently showed the default.
+
+### Who did it, with what
+
+Every captured action carries an attribution stamp. Captured actions used to be
+all filed under `agent_code: "mcp"` with nothing else, so `/sessions`
+could show *what* was done and not who did it, from which client, or with
+which model.
+
+```json
+{
+  "tool_id": "twin.commit_geometry",
+  "actor": "user:fidel",
+  "actor_verified": true,
+  "client": {"name": "claude-code", "version": "2.1.4"},
+  "claimed": {"model": "claude-opus-5"}
+}
+```
+
+The split between what the server established and what the client asserted
+is deliberate:
+
+- **`actor`** comes from the call context, and `actor_verified` is true
+  only when an OAuth token established it. A shared API key authorises the
+  call and identifies nobody; a client-supplied `X-MetaForge-Actor` header
+  is a claim. A past bug let that claim outrank a verified
+  token, and recording both under one unlabelled field would give it back
+  by another route.
+- **`client`** comes from the `initialize` handshake. Absent, not empty,
+  when the client never identified itself.
+- **`model`** cannot be known server-side — nothing on the MCP wire
+  carries it. A client may state it in the request's `_meta.model`, and it
+  is recorded under `claimed` so nobody later reads an assertion as
+  something the server checked.
+
+The session's `agent_code` is set from the client name, which is the one
+part of the stamp visible in `/sessions` without a schema change. Adding
+columns would need a migration mechanism the repo does not have yet
+(schema is `create_all` plus a few `CREATE TABLE IF NOT EXISTS`), so the
+rest rides in the event's existing JSON `data` column.
+
+### Being briefed, not offered a brief
+
+`project.open` returns the project brief inline with the result, so the
+agent is briefed by the act of opening the project.
+
+It used to be a resource the client had to fetch —
+`metaforge://twin/brief/{project_id}` — and the workflow prompts told the
+agent to read it. That made being briefed depend on the client supporting
+resources *and* the agent following the instruction, and an agent that
+skipped it looked exactly like one that had opened an empty project.
+
+Two things had to be fixed before the resource worked at all:
+
+- **The standalone MCP sidecar served no resources whatsoever.**
+  Registration is conditional on an injected `brief_provider` and
+  `build_unified_server` never forwarded one, so `resources/list` came
+  back empty on the deployment external harnesses actually connect to.
+  Nothing failed — the resources were simply never there.
+- **They were published under the wrong method and field name.** Every
+  MetaForge resource is parameterised by project, so they are all
+  *templates*: they belong in `resources/templates/list` under
+  `resourceTemplates`/`uriTemplate`. They were being returned from
+  `resources/list` keyed `uri_template`, which is neither the method nor
+  the field a compliant client reads, and a template has no `uri` for it
+  to address.
+
+`resources/list` now returns concrete resources only (none today, which
+is the honest answer) and `resources/templates/list` returns the five
+project templates.
+
+A deployment with no brief provider omits the `brief` key rather than
+returning an empty string — "no brief configured" and "a project with
+nothing in it" must not read the same. A brief that fails to render never
+fails the open.
+
+### Naming a project in prose
+
+`project.open` takes what the user said — an id, an exact name, or a
+unique name substring — and makes that project the session's scope.
+`project.create` scopes the session to what it just made, for the same
+reason: creating a project and then not being in it is the same papercut
+as picking one and having it not stick.
+
+**Several matches is an error, never a guess.** The error names them:
+
+```
+project.open: "arm" matches 2 projects: 6-DOF Arm (11111111), Arm Mk2 (22222222) — be more specific or use the id
+```
+
+Silently picking one scopes a design change to the wrong project, and
+nothing downstream can tell that happened. An unknown reference is an
+error too, rather than an empty result, which would invite a second
+project on the same subject — splitting the design thread with nothing to
+reconcile the halves.
+
+The matching is [`mcp_core.project_ref`](https://github.com/FidelOdok/MetaForge/blob/main/mcp_core/project_ref.py),
+shared with the gateway's chat-scope resolution so a human and an agent
+refuse the same ambiguous query with the same sentence.
+
+`project.open` is annotated `readOnlyHint: true`. It persists nothing,
+changes only this session's own view, and is undone by calling it again —
+treating project *selection* as a write would put it behind a human
+approval, which is the one action that makes every later call more
+correctly scoped.
+
+Because it does change where a later write lands, the approval prompt
+names the effective project. Once a scope is set, the calls that follow
+carry no project of their own, so that line is the only place a reviewer
+learns which project a commit writes to.
+
+### Picking a project, and it sticking
+
+`/metaforge:use` calls `session.start` with a `project_id`. Everything
+after that resolves to it: a later call that names no project gets the
+session's, and a call that names one explicitly still wins.
+
+The binding is keyed on the call's session id, never process-global. On a
+shared sidecar a "last project started" would hand one client's project to
+another's calls, which is a worse bug than the one it fixes.
+
+That means it only works for a caller the server can recognise again on
+the next request. Three ways that happens:
+
+| Transport | Session identity |
+|---|---|
+| stdio | `METAFORGE_SESSION_ID` — one process, one session |
+| Streamable HTTP | `Mcp-Session-Id`, issued by the server on the `initialize` response and echoed by the client on every later request |
+| Anything else | `X-MetaForge-Session`, MetaForge's own header |
+
+The middle row is the transport's own mechanism, so a spec-compliant HTTP
+client gets a sticky scope without being told about anything
+MetaForge-specific. A client may end its session with `DELETE /mcp`
+carrying the header, which releases the binding.
+
+**`session.start` reports whether it worked, and the report is load-bearing.**
+`project_scope_bound: false` means the caller presented no session
+identity, so the binding could never be matched again and the client must
+keep passing `project_id` on every call. This used to come back
+`true` regardless — which, given the instruction attached to it, told the
+agent to stop sending the one thing that was still working, and every
+later call fell through to the default tenant with nothing reporting it.
+
+### Answering in the harness
+
+Where the connected client supports MCP elicitation, the approval is put
+to the user in the harness they are already looking at, rather than
+parked in a dashboard queue they may not have open.
+
+```json
+{
+  "jsonrpc": "2.0", "id": "elicit-1", "method": "elicitation/create",
+  "params": {
+    "message": "MetaForge wants to run twin.commit_geometry.\n\nwrites; held for approval (remote caller)\n\nArguments:\n  obj_id: bracket\n\nRequested by: remote",
+    "requestedSchema": {
+      "type": "object",
+      "properties": {"approve": {"type": "boolean", "title": "Run twin.commit_geometry?"}},
+      "required": ["approve"]
+    }
+  }
+}
+```
+
+Three conditions all have to hold, and `health/check` reports the result
+as `client.can_elicit`:
+
+1. the transport has a channel back to the client (stdio does; a plain
+   HTTP POST with no SSE does not; over HTTP see
+   [Over HTTP: which stream carries the question](#over-http-which-stream-carries-the-question)),
+2. the client declared the `elicitation` capability at `initialize`, and
+3. the negotiated protocol revision is `2025-06-18` or later, which is
+   where `elicitation/create` was introduced. A client that declares the
+   capability while negotiating an older revision is not listening for
+   the request.
+
+The server negotiates the revision the client asked for when it is one of
+`2024-11-05` or `2025-06-18`. Otherwise:
+
+- a client **ahead of us** — Claude Code 2.1.286 asks for `2025-11-25` — is
+  answered `2025-06-18`, the newest we speak. This is the MCP spec's
+  recommended answer, and answering `2024-11-05` instead is what kept inline
+  approvals unreachable for that client: `elicitation/create` does not exist
+  before `2025-06-18`, so `can_elicit` was false and every held write went to
+  the dashboard queue.
+- a client asking for an **older** revision we do not speak — say
+  `2025-03-26` — is answered the newest revision not newer than its request,
+  so `2024-11-05`. The spec would have us answer `2025-06-18` here too, and
+  then permits such a client to disconnect; answering downward keeps a client
+  that pinned an older revision working. A deliberate, narrow deviation from a
+  SHOULD, only ever in the direction of not breaking an older client.
+
+Either way the connection is still reported as skewed by `health.check`:
+answering better than before is not the same as answering what was asked.
+
+The three-action response maps onto the outcomes above:
+
+| Response | Outcome |
+|---|---|
+| `accept` with `approve: true` | approved |
+| `accept` with `approve: false` | `rejected` — they were asked and said no |
+| `decline` | `rejected` — they refused the prompt itself |
+| `cancel`, or no answer inside the window | `timed_out` — nobody decided |
+
+An `accept` whose content does not carry a boolean `approve` is treated
+as a refusal. The failure mode of guessing the other way is an unreviewed
+write.
+
+#### Over HTTP: which stream carries the question
+
+Over Streamable HTTP the question needs a server-to-client direction, and
+there are two. Both are per session: the session is
+the `Mcp-Session-Id` the server issued at `initialize`, and conditions 2 and
+3 above are read from that session's own handshake.
+
+| The client... | The question goes |
+|---|---|
+| opened `GET /mcp` with its `Mcp-Session-Id` | down that standalone stream |
+| did not, but sent the `tools/call` with `Accept: application/json, text/event-stream` | on that POST's own response, which the server switches to `text/event-stream` |
+| neither | to the dashboard queue |
+
+The second row is the one Claude Code uses: it never opens `GET /mcp`. A
+`tools/call` from an eligible session runs as usual, and only if the call
+is held does its response become a stream: the `elicitation/create`
+request first, then (once the client POSTs its answer as a JSON-RPC
+response, routed by id and acknowledged `202`) the tool result, and the
+stream closes. A call that is never held still gets its plain JSON
+response. `Accept: */*` is not taken as consent to a stream.
+
+If the client hangs up while a question is open, the question is cancelled
+at once, so the call ends `timed_out` and nothing is written.
+
+`client.can_elicit` in `health/check` is a snapshot taken inside that
+call. Over HTTP it is true when `GET /mcp` is open, or when the
+`health.check` call itself was sent with `text/event-stream` in `Accept`
+from an eligible session. The `mcp_initialize` log line names the
+capabilities the client declared, so a client that is never asked inline
+can be diagnosed from the log: no `elicitation` in that list is the usual
+reason.
+
+### The result says it was held
+
+An approved call used to return a success envelope identical to one that was
+never held, so a client had no way to tell the difference — and an agent
+reading it told the user "writes from this external harness are not being
+held for approval", which the gateway ledger flatly contradicted. The
+guardrail worked; the result did not mention it, so the model guessed.
+
+A held call now carries the outcome in two places:
+
+```json
+"_meta": {
+  "callId": "…",
+  "approval": {
+    "held": true,
+    "outcome": "approved",
+    "route": "dashboard",
+    "heldSeconds": 8.2,
+    "approvalId": "run_b42aa3ea023f46c0",
+    "approvedBy": "Fidel",
+    "approverVerified": false
+  }
+}
+```
+
+and as a **second content block**, because a model reads content and
+`_meta` alone is what "technically present and never looked at" looks like:
+
+> This write was held for human approval and was approved by Fidel (approval
+> `run_b42aa3ea023f46c0`) after 8.2s via dashboard, identity unverified.
+
+Three things it is careful about. The tool's own output stays in the first
+block untouched, since that block belongs to the adapter's declared schema.
+`approverVerified` is reported separately from the name, because a local
+gateway runs with auth off and has no identity to check — "approved by
+Fidel" must not read as a verified signature. And `rejected` and `timed_out`
+remain **errors** naming the outcome: a refused write reported as a success
+with a note attached would be a worse version of the bug this fixes.
+
+A call that was never held carries no `approval` key and no second block.
+
+**Elicitation is preferred, not chained.** A client that can be asked is
+asked, and the dashboard queue is not consulted; going on to the queue
+after the user had already answered would put the same question to a
+second person and discard the first answer. Clients that cannot elicit
+use the queue exactly as before.
+
+### Over HTTP
+
+An elicitor used to be attached only on the stdio path, so
+`can_elicit` was false for every HTTP client whatever it declared — and
+every plugin connects over HTTP, so inline approvals existed for a
+transport almost nobody uses. The channel is now:
+
+| | |
+|---|---|
+| `GET /mcp` | a long-lived SSE stream the server pushes `elicitation/create` down. Requires `Mcp-Session-Id` — a stream that cannot be correlated is a question asked into the void, so it is refused with 400 rather than opened on an invented session. |
+| `POST /mcp` with a JSON-RPC *response* | the client's answer, routed by id and acknowledged with 202. An id nothing is waiting for falls through to ordinary dispatch rather than being dropped. |
+
+`GET /mcp/sse` is unchanged and unrelated: it is a request/response
+convenience where the caller queues work as `?request=` params and the
+server closes with `event: done`.
+
+**Eligibility is per connection, not per server.** One sidecar serves many
+clients from one server instance, so `can_elicit` consults the elicitor
+rather than the server's own `_client_capabilities` — which are whichever
+client initialised last. A session is eligible only when its stream is
+open, *its* handshake declared `elicitation`, and *its* negotiated revision
+is `2025-06-18` or later. A connection that fails any of those falls back
+to the dashboard queue; choosing elicitation and then having nowhere to ask
+would hang the write to its timeout instead of parking it where somebody
+can see it.
+
+**Inline approval cannot satisfy a human-authority tool.** `twin.attempt_promotion`,
+`twin.approve_design_loop` and `twin.approve_engineering_change` record who
+decided, and an elicitation answer carries no identity — the
+client can report that a user clicked yes, not which user. Those calls are
+still *asked* inline, and then refused with "the approval was granted but
+the gate did not identify who granted it" rather than recorded against an
+authority that does not exist. They go through the dashboard, where the
+approver is the authenticated principal who clicked.
+
+Arguments are summarised into the prompt, redacted on any field whose
+name looks like a credential and clipped to keep the dialog readable. The
+spec is explicit that a server must not *request* sensitive information
+through elicitation; shipping a credential into the same dialog is the
+same mistake pointed the other way, and a reviewer does not need the key
+to say yes.
+
+### When the list is short
+
+`tools/list` never drops an adapter quietly. If an adapter cannot answer
+— its container is down, or it returns something that is not JSON — the
+tools it would have contributed are missing from the list, and the
+response says so in `_meta`:
+
+```json
+{
+  "tools": [...],
+  "_meta": {
+    "unavailableAdapters": [
+      {"adapter_id": "calculix", "error": "adapter container is down (-32001)"}
+    ],
+    "profile": {"name": "mechanical", "toolCount": 12, "missing": ["cadquery.create_parametric"]}
+  }
+}
+```
+
+`_meta` is absent when there is nothing to report, so its presence is
+itself the signal. `profile.missing` names tools the profile asked for
+that no loaded adapter registers, which is a configuration mistake rather
+than a smaller profile.
+
+### Health is measured, not asserted
+
+`health/check` on the unified server asks every adapter the same question
+and reports what came back. It does not read the registration table.
+
+```json
+{
+  "service": "metaforge-mcp",
+  "status": "degraded",
+  "adapter_count": 3,
+  "tool_count": 100,
+  "profile": {
+    "active": "core",
+    "served_tool_count": 21,
+    "available": ["core", "electronics", "industrial_design", "mechanical", "robotics", "simulation"],
+    "detail": "Profile 'core' serves 21 of 100 registered tools on this connection. The rest are not missing and nothing is down -- connect with a different profile to reach them."
+  },
+  "unreachable_adapters": ["calculix", "freecad"],
+  "detail": "2 of 3 adapters did not answer: calculix, freecad. Their tools are registered but calls to them will fail.",
+  "adapters": [
+    {"adapter_id": "twin", "version": "0.1.0", "tools_registered": 12, "reachable": true},
+    {"adapter_id": "calculix", "version": "0.1.0", "tools_registered": 5, "reachable": false,
+     "error": "adapter container is down (-32001)"},
+    {"adapter_id": "freecad", "version": "0.1.0", "tools_registered": 41, "reachable": false,
+     "error": "no answer within 3s"}
+  ]
+}
+```
+
+`status` is `healthy` only when every adapter answered; otherwise
+`degraded`, and `unreachable_adapters` names which. Each adapter gets
+three seconds; the probes run concurrently, so the whole check costs one
+timeout rather than one per adapter.
+
+The field is `tools_registered`, not `tools_available`. Those numbers come
+from the registry and stay the same whether the adapter is up or down —
+calling them "available" next to `reachable: false` claimed the opposite
+of what the same object said one key later.
+
+Two failure shapes stay distinct in `error`, because they need different
+fixes: **"container is down"** means the adapter answered with an error
+(start the container), **"no answer within 3s"** means nothing came back
+at all (the process is wedged, or the network to it is).
+
+The HTTP status stays **200** even when degraded. The MCP server is up and
+answering — it is telling you the truth about something else. A 503 here
+would have an orchestrator restart the gateway to cure a sick CAD
+container, which does not work and takes the working half down with it.
+
+### Why the tool list is shorter than `tool_count`
+
+`tool_count` is the **registered catalogue**; `profile.served_tool_count` is
+what *this connection* can call. With the `core` profile those are 100 and
+21, and nothing used to reconcile them -- so `/metaforge:doctor` reported
+"96 tools are not reaching the client" and named cadquery, freecad, calculix
+and kicad as missing. That was the profile working exactly as designed.
+
+Two causes make the list shorter and they need telling apart:
+
+| Cause | How to see it |
+|---|---|
+| A tool profile is active | `profile.active` is set, and `profile.detail` says so |
+| An adapter is down | it appears in `unreachable_adapters`, and `reachable: false` in `adapters` |
+
+`profile.active` is `null` when no profile is in force, rather than the key
+being absent: a reader that cannot tell "no profile" from "this build does
+not report one" has to guess, and guessing is what produced the original
+diagnosis. A per-connection `?profile=` naming something unknown is reported
+as `profile.error` rather than raising -- a health check that raises tells
+nobody anything.
+
+### What is protecting this connection
+
+`health/check` also reports the auth posture and who is on the other end —
+the other three things `/metaforge:doctor` is asked about.
+
+```json
+{
+  "auth": {
+    "mode": "open",
+    "transport": "stdio",
+    "identifies_caller": false,
+    "detail": "no API key and no OAuth configured: every connection on this transport is accepted, and no call is attributable to anyone"
+  },
+  "client": {
+    "connected": true,
+    "name": "claude-code",
+    "version": "2.1.4",
+    "protocol_requested": "2025-11-25",
+    "protocol_negotiated": "2025-06-18",
+    "protocol_skew": true,
+    "detail": "client asked for MCP 2025-11-25; this server answered 2025-06-18, the newest it speaks. Anything added after that revision is not available on this connection."
+  }
+}
+```
+
+`auth.mode` is one of `open`, `api_key`, `oauth`, `api_key+oauth` — or
+`unknown`, which means the transport never declared one and the server
+genuinely cannot say. `unknown` is deliberately not merged into `open`:
+a deployment with nothing configured and a reporting gap need to be
+distinguishable, and the safe reading of `unknown` is "assume nothing".
+
+`identifies_caller` is true only under OAuth. A shared API key authorises
+the call but identifies nobody, which is the same distinction the HTTP
+gate already draws by returning an actor for a token and none for a key
+match — so a session record from an `api_key` connection is attributable
+to the key, not to a person.
+
+`detail` appears only when something is worth saying, which for `auth`
+means open mode. That is the state an unset `METAFORGE_MCP_API_KEY` gives
+you, so it is the one most likely to be in force without anyone having
+chosen it.
+
+`client` is filled from the `initialize` handshake, or, for a
+handshake-free 2026-07-28 client, from the request asking. Such
+a client never sends `initialize`; its `clientInfo` and revision come with
+every request, so the report names them, sets `protocol_requested` and
+`protocol_negotiated` to that revision, and adds
+`handshake: "none: this revision is handshake-free, ..."`. Before that fix it
+was told no handshake had been completed and shown the server's default
+revision. Before any handshake on the legacy path
+it reports `connected: false` rather than an anonymous client — the
+legacy transports dispatch without one, and an empty name would read as a
+client that failed to identify itself. `protocol_skew` appears when the
+client asked for an MCP revision this server does not speak: the
+connection still works, minus anything added after the pinned revision,
+which otherwise surfaces as "the tool is just missing".
+
+`/metaforge:doctor` (see [MCP prompts](#mcp-prompts)) is built on this
+call, so anything the report cannot say, the doctor cannot say either.
+
+### Tool annotations
+
+Every tool reports `readOnlyHint`, `destructiveHint`, `idempotentHint`
+and `openWorldHint` on `tools/list`, so a harness can tell
+`twin.get_node` from `project.delete` without reading the description.
+
+The classification lives in `mcp_core/annotations.py` and is deliberate,
+never derived from the tool's name — `twin.record_claim` and
+`twin.reject_engineering_change` both read like queries and neither is
+one. A tool nobody has classified inherits MCP's own defaults
+(`readOnlyHint: false`, `destructiveHint: true`), so a new adapter is
+over-guarded rather than silently waved through.
+
+`twin.query_cypher` is the exception worth knowing about: it rejects
+mutating Cypher by default, but the adapter takes `--allow-twin-mutations`,
+and when that is set the tool stops being read-only. The annotation is
+computed per request from the adapter's own flag, so the hint matches
+what the server will actually enforce.
 
 | Adapter | Tool | Purpose | UAT scenario |
 |---|---|---|---|
 | `knowledge` (default) | `knowledge.ingest` | Index a file or text into the LightRAG-backed KB | [`tier1/ingest.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/ingest.md) |
 | `knowledge` | `knowledge.search` | Semantic + fulltext search over indexed sources | [`tier1/retrieval.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/retrieval.md) |
 | `knowledge` | `knowledge.extract` | Resolve an MPN → current Datasheet work product | [`tier1/retrieval.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/retrieval.md) |
-| `knowledge` | `knowledge.populate_bom` | Enrich a BOM from indexed datasheets. Optional `purchase_unit` narrows candidates to knowledge entries tagged that way at ingest time, degrading to an unfiltered search (flagged via `purchase_unit_filter_degraded`) rather than losing recall against an untagged corpus (MET-436) | _none yet_ |
-| `component` (injected) | `component.search_parametric` | Range/comparison query against the typed component catalog (e.g. `category=buck_converter`, `v_out==5`, `efficiency>0.9`) — the parametric index `knowledge.search`'s equality-only filters can't express (MET-436). Each row also carries `image_url`/`footprint`/`cad_model_url` (caller-supplied at index time — no extraction pipeline populates them yet) | live-verified (fidel-dev) |
-| `component` | `component.search_intent` | Translate a free-text goal ("step 12V down to 5V for a flight controller") into spec bounds, query the parametric catalog, fall back to `knowledge.populate_bom`'s fuzzy search per category; splits results into `buy_complete` (COTS assemblies) vs. `build_from_parts` (discrete components) — never merged (MET-436) | live-verified (fidel-dev) |
+| `knowledge` | `knowledge.populate_bom` | Enrich a BOM from indexed datasheets. Optional `purchase_unit` narrows candidates to knowledge entries tagged that way at ingest time, degrading to an unfiltered search (flagged via `purchase_unit_filter_degraded`) rather than losing recall against an untagged corpus | _none yet_ |
+| `component` (injected) | `component.search_parametric` | Range/comparison query against the typed component catalog (e.g. `category=buck_converter`, `v_out==5`, `efficiency>0.9`) — the parametric index `knowledge.search`'s equality-only filters can't express. Each row also carries `image_url`/`footprint`/`cad_model_url` (caller-supplied at index time — no extraction pipeline populates them yet) | live-verified (fidel-dev) |
+| `component` | `component.search_intent` | Translate a free-text goal ("step 12V down to 5V for a flight controller") into spec bounds, query the parametric catalog, fall back to `knowledge.populate_bom`'s fuzzy search per category; splits results into `buy_complete` (COTS assemblies) vs. `build_from_parts` (discrete components) — never merged | live-verified (fidel-dev) |
 | `twin` (default) | `twin.get_node` | Fetch a Twin node by id with first-hop neighbors | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `twin` | `twin.thread_for` | Walk the digital thread for a work product. `direction` (outgoing/incoming/both, default outgoing) controls traversal — most traceability edges point child-to-parent, so a requirement/constraint root (usually an edge *target*) needs `incoming` or `both` to see anything connected to it (FORGE-72) | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` | `twin.thread_for` | Walk the digital thread for a work product. `direction` (outgoing/incoming/both, default outgoing) controls traversal — most traceability edges point child-to-parent, so a requirement/constraint root (usually an edge *target*) needs `incoming` or `both` to see anything connected to it | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` (injected) | `twin.commit_geometry` part colours | A commit from an external MCP client (a harness plugin) is refused while any part of the STEP is uncoloured, naming the parts; the server sets this per call, the client cannot set or clear it (the design-flow worker and in-app chat are not held to it yet). `part_colours` {part name: `#RRGGBB` or [r,g,b]} or `color` are written into the STEP at commit, so stateless CAD output can be coloured too; an unknown part name is refused. `freecad.export_model` takes the same `part_colours` and returns `uncoloured_parts` | unit-verified |
+| `twin` (injected) | `twin.commit_geometry` sources | `source_node_ids` are linked `GENERATED_FROM`, e.g. the `pcb_layout` a board STEP came from. A STEP committed from `kicad.export_3d`'s `3d/` folder with no `source_tool` is stamped `kicad.export_3d`, not `freecad.export_model`. A board model (`source_tool` `kicad.*`) with no source is linked to the project's one current `pcb_layout` (`generated_from_inferred`), the project's other loose thread stages are linked too, and `thread_unlinked_stages` counts what could not be. Any other model (an enclosure, a bracket) is never linked this way | unit-verified |
+| `twin` (injected) | `twin.item_history` | Every revision of one item (part, assembly, constraint set, intent, need, objective, BOM, component selection), oldest first, by `item_key` or any revision's `node_id`: revision number, node id, change_reason, run_id, author, head flag, and a `lessons` list of rejected revisions with their `status_reason`. The definition write tools (`twin.commit_geometry`, `twin.record_constraint_set`, `twin.record_engineering_entity`, `twin.record_component_selection`) now write each call as the next revision of an item and return `item_key`/`revision`; optional `item_key` (`KEY` or `KEY@n`), `supersedes` and `change_reason` pin the item when a name drifts. REST: `GET /v1/twin/items`, `GET /v1/twin/items/{key}/revisions` | unit-verified |
 | `twin` | `twin.find_by_property` | Find nodes matching a property predicate | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `twin` | `twin.constraint_violations` | List active constraint violations on a project. Pass `project_id` to scope explicitly (FORGE-75, the project brief tells the agent to do this the same way it does for `twin.commit_geometry`) — without it, falls back to the calling session's ambient project context if one is set (FORGE-74, not currently reachable from a real chat turn — see FORGE-75), and otherwise evaluates every constraint across every project (admin path, previously always did this unconditionally, a real cross-project leak) | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` | `twin.constraint_violations` | List active constraint violations on a project. Pass `project_id` to scope explicitly (the project brief tells the agent to do this the same way it does for `twin.commit_geometry`) — without it, falls back to the calling session's ambient project context if one is set (not currently reachable from a real chat turn), and otherwise evaluates every constraint across every project (admin path, previously always did this unconditionally, a real cross-project leak) | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
 | `twin` | `twin.query_cypher` | Run a Cypher query against the Twin (mutating Cypher gated by `--allow-twin-mutations`) | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `twin` | `twin.record_decision` | Record a design decision as a typed DESIGN_DECISION work product (markdown blob + project link) | live-verified (MET-495) |
-| `twin` | `twin.record_document` | Persist a markdown document (requirements, notes) as a typed PRD/DOCUMENTATION work product (blob + project link); writes immediately, no approval gate | live-verified (MET-588) |
-| `twin` (injected) | `twin.record_component_selection` | Persist one chosen `component.search_parametric`/`search_intent` result as a real BOMItem work product (graph node + project link) — without this, a search result was pure chat output with no reviewable, versioned trace in the Twin (MET-436). Optionally stores `datasheet_url`/`image_url`/`footprint`/`cad_model_url` plus purchase/pricing provenance (`purchase_url`, `price_currency`, `priced_distributor`, and an auto-captured `priced_at` timestamp — a price is a snapshot, never caller-timestamped) on the BOMItem; any of those left unset by the caller are auto-filled from the component catalog store when a match on MPN/manufacturer exists, so a bare selection call still gets media/cost fields when the catalog already knows the part. When project-scoped, also adds a real `CONTAINS` edge from the project's `BOM` work product (created on first use, reused via a `kind` metadata marker so a document-shaped BOM work product is never mistaken for the container) to the new BOMItem — without this a BOMItem had only the Postgres project-junction link and no graph edge, so `TwinAPI.find_orphans()` flagged it as an orphan and it was unreachable via `twin.thread_for` | unit-verified (MET-436) |
-| `twin` | `twin.record_constraint_set` | Record structured requirements as evaluable Constraint nodes + a CONSTRAINT_SET work product; expressions compile-checked, violations feed gate criteria (MET-583) | unit-verified (MET-582) |
-| `twin` | `twin.record_engineering_entity` | Record one Engineering Intent & Requirements Harness entity (intent/stakeholder_need/objective/assumption/question/risk/verification_case/evidence/budget/invariant/waiver/release_approval), optionally linked to parent(s) via a real graph edge (`derives_from`/`satisfies`/`motivates`/...), resolved by exact name or UUID (FORGE-45/35). A `budget`/`invariant` (metric/unit/system_total or limit in `extra`) is read back automatically by the G3 Preliminary Feasibility gate; a `waiver`/`release_approval` only counts toward the G8 Release gate once approved via `twin.approve_engineering_entity` (FORGE-73) | unit-verified (FORGE-45/73) |
-| `twin` | `twin.approve_engineering_entity` | Advance one EngineeringEntity's authority from `proposed` to `reviewed`/`approved` — a real approval step distinct from creation, giving `AuthorityState` (FORGE-51) its first-ever non-baseline write path. A `waiver`/`release_approval` recorded but never approved this way FAILS the G8 Release gate's check (FORGE-73) | unit-verified (FORGE-73) |
-| `twin` | `twin.record_evidence` | Persist a tool-generated Evidence entity: the real structured output of a calculix/simulation/CAD/test tool call (producer, inputs, a content hash — never a restated assertion), optionally linked to the requirement(s) it supports/contradicts and revision-pinned `valid_against` dependencies that make FORGE-59's staleness propagation apply to evidence for the first time (FORGE-64/35). `supersedes` records a revalidation rerun and flips the stale evidence it replaces to SUPERSEDED (FORGE-65) | unit-verified (FORGE-64/65) |
-| `twin` | `twin.record_claim` | Persist a requirement satisfaction claim: a real graph edge asserting an artefact (CAD model, schematic, ...) satisfies a requirement, citing evidence ids. Status (supported/unsupported) is always computed live from current evidence staleness, never cached — a claim with no evidence, or whose evidence has all gone stale, reports unsupported (FORGE-65/35) | unit-verified (FORGE-65) |
-| `twin` | `twin.stage_work_product_file` | Materialize a committed work product's blob onto the shared adapter workspace, returning a file_path any freecad/cadquery/calculix tool can load — recovers a work product for inspection even after its authoring session is gone (MET-618) | unit-verified (MET-618) |
-| `twin` | `twin.propose_engineering_change` / `twin.analyze_engineering_change` / `twin.approve_engineering_change` / `twin.reject_engineering_change` / `twin.commit_engineering_change` / `twin.mark_engineering_change_rolled_back` | The Engineering Change Transaction lifecycle (PROPOSED → ANALYZING → READY_FOR_REVIEW → APPROVED/REJECTED → COMMITTED/ROLLED_BACK, spec section 13) as MCP tools — real since FORGE-66/67 but unreachable from any agent until now. `analyze` computes real transitive impact (ImpactEngine) and approval level (HITLEngine); `approve`'s `approver` is an agent-asserted identity string (same trust level as every `created_by` field in this API) but the independence check is real — raises if `approver` equals the patch's own `created_by`. `commit` actually applies the patch via `TransactionEngine`; on a conflict the ECT stays `APPROVED` with the conflict recorded, never silently marked committed. `mark_rolled_back` is a bookkeeping label only — no automatic undo capability exists anywhere in this system (FORGE-70/35) | unit-verified (FORGE-70) |
-| `run` | `run.start_design_flow` | Start a gated design lifecycle (hardware_v1 / mech_v1 / design_v1) for a goal, project-scoped; every phase gate still requires human approval | unit-verified (MET-587) |
-| `run` | `run.get_status` | Check a design-flow run's status / gate reason / result | unit-verified (MET-587) |
+| `twin` | `twin.record_decision` | Record a design decision as a typed DESIGN_DECISION work product (markdown blob + project link), with `alternatives` (structured option/reason-rejected pairs, never prose), `parent_refs` (requirement/objective links), and `evidence_refs` (links to the Evidence node(s) that support it via a real `SUPPORTED_BY` edge, not just a rationale string mentioning one). `depends_on` links the item revisions it rests on (`CS-...@n`) with a `depends_on` edge, so a requirements decision links the constraint set instead of restating it. `GET /v1/decisions?related_to=<node_id>` (no new MCP tool) answers "what decisions touch this node" for the dashboard's Structure tab and Design Loop section. The record is pinned to the item revisions it is about (optional `depends_on` item refs; otherwise inferred from `parent_refs`) and goes `stale` when one of them gets a newer head (see [twin_schema 2.31](twin_schema.md#records-pinned-to-revisions)) | live-verified |
+| `twin` | `twin.record_document` | Persist a text artifact as a typed PRD/DOCUMENTATION/ROBOT_DESCRIPTION/SIMULATION_RESULT/LOAD_CASE work product (blob + project link); writes immediately, no approval gate. A `load_case` persists a reusable FEA boundary-condition definition (material, node sets, load force, source of loads) so it doesn't need retyping inline on every `calculix.run_fea` call. A `simulation_result` also takes `field_file` (or `field_base64`), stored as a second MinIO blob with `field_object_key`/`field_content_hash` metadata, plus `analysed_geometry_node_id` (pinned with its revision and content hash, and a DERIVES_FROM edge), `load_case_spec` and `fixtures`. A `prd` records prose only, as the next revision of the project's prd item; requirement values belong in `twin.record_constraint_set`, the prd is rendered from both (`GET /v1/twin/projects/{id}/prd`), and values the constraint set lacks come back as `requirement_warning`. The record is pinned to the item revisions it is about (optional `depends_on` item refs; otherwise inferred from `analysed_geometry_node_id` and `source_part_node_ids`; constraint sets only when named, as `CS-...@n` or the requirement ids it verifies) and goes `stale` when one of them gets a newer head (see [twin_schema 2.31](twin_schema.md#records-pinned-to-revisions)) | live-verified; field persistence unit-verified |
+| `twin` (injected) | `twin.record_component_selection` | Persist one chosen `component.search_parametric`/`search_intent` result as a real BOMItem work product (graph node + project link) — without this, a search result was pure chat output with no reviewable, versioned trace in the Twin. Optionally stores `datasheet_url`/`image_url`/`footprint`/`cad_model_url` plus purchase/pricing provenance (`purchase_url`, `price_currency`, `priced_distributor`, and an auto-captured `priced_at` timestamp — a price is a snapshot, never caller-timestamped) on the BOMItem; any of those left unset by the caller are auto-filled from the component catalog store when a match on MPN/manufacturer exists, so a bare selection call still gets media/cost fields when the catalog already knows the part. When project-scoped, also adds a real `CONTAINS` edge from the project's `BOM` work product (created on first use, reused via a `kind` metadata marker so a document-shaped BOM work product is never mistaken for the container) to the new BOMItem — without this a BOMItem had only the Postgres project-junction link and no graph edge, so `TwinAPI.find_orphans()` flagged it as an orphan and it was unreachable via `twin.thread_for`. Presence-only: no requirement comparison — see `twin.select_component` for the requirement-driven half | unit-verified |
+| `twin` | `twin.record_constraint_set` | Record structured requirements as evaluable Constraint nodes + a CONSTRAINT_SET work product; expressions compile-checked, violations feed gate criteria. Each entry needs EITHER a raw `expression` OR a structured `metric`+`operator`+`limit`+`unit`+`target_node_type` binding — the latter records a benign placeholder expression (`"True"`) instead of requiring hand-written Python, since live pass/fail/no_data status comes from `GET /v1/requirements/matrix`'s real Claim/Evidence data, never from evaluating this expression. An entry may also declare `verification_method` and `expected_evidence` — the kind of evidence expected to verify it, validated against the same `EVIDENCE_TYPES` set `twin.record_evidence` itself accepts; G7 (Verification Readiness) checks both on every critical requirement | unit-verified |
+| `twin` | `twin.record_engineering_entity` | Record one Engineering Intent & Requirements Harness entity (intent/stakeholder_need/objective/assumption/question/risk/verification_case/evidence/budget/invariant/waiver/release_approval/concept_option), optionally linked to parent(s) via a real graph edge (`derives_from`/`satisfies`/`motivates`/...), resolved by exact name or UUID. A `budget` **requires** `metric`, `unit` and `system_total` in `extra` and is rejected without them (before that it recorded successfully and was then dropped from every rollup, so it looked like no budget had been set); an `invariant` carries `limit` instead. Both are read back automatically by the G3 Preliminary Feasibility gate; a `waiver`/`release_approval` only counts toward the G8 Release gate once approved via `twin.approve_engineering_entity`. A `budget`'s `allocations[].target` can be a HierarchyNode id so `GET /v1/twin/hierarchy` can check that branch's real rolled-up mass/cost against its allocation, not just the flat project-wide total the G3 gate checks. A `concept_option` is one candidate architecture in a trade study -- `extra.criteria_scores` (e.g. mass_kg/cost_usd/risk/performance) and `extra.evidence_backed_criteria` (which scores came from a real measured source, honestly usually just mass) -- graded and selected via `twin.select_concept` below. A `design_value` is one engineering value and its source: `extra.name`, `extra.value`, optional `extra.unit`, and `extra.source` = `{kind, ...}` (`user`, `project_document`, `standard`, `past_work`, `component`, `analysis`, `measurement`, `assumption`, each with the fields that let a reviewer find it again). A value without an identifiable source is refused; an `assumption` source is stamped `needs_review`. Any entity carrying a `source` has it checked the same way | unit-verified |
+| `twin` | `twin.select_concept` | Trade-study selection: given 2-4 recorded `concept_option` entities and a weight per criterion, computes each option's weighted score from its own recorded `criteria_scores` and records the selected one as a real Decision (`twin.record_decision`) -- every non-selected option becomes a real `alternatives` entry with its weighted score as `reason_rejected`, which flips `twin_core.consistency.gates`'s G5 "Trade study performed" check from `NOT_EVALUATED` to `PASS` (confirmed live on the real arm project). Links the Decision to the selected option via `EdgeType.GENERATED_FROM` (no new edge type, same precedent as the design-loop winner). Concept GENERATION is not this tool -- record each candidate via `twin.record_engineering_entity` first; there is no deterministic "architecture generator" to build. `POST /v1/trade-study/options`, `GET /v1/trade-study/options`, `POST /v1/trade-study/select` expose the same actions to the dashboard's "Concept trade study" section on `/requirements` | unit-verified |
+| `twin` | `twin.select_component` | Requirement-driven component selection: given 2+ real candidates (each an mpn + caller-asserted datasheet specs, e.g. a servo's published `torque_kg_cm`) and the specs the design actually requires (a threshold + `>=`/`<=` direction per spec), computes a real numeric margin per requirement per candidate (a threshold/margin check, not `twin.select_concept`'s weighted sum -- the wrong shape for "does this rating clear the requirement with margin"), records the selection as a real Decision (`twin.record_decision`, every non-selected candidate's margin summary as its `alternatives` entry), and persists the selected candidate as a real BOMItem via `twin.record_component_selection`'s own recorder -- unlike that tool alone, which has zero requirement comparison. Links the Decision to the new BOMItem via `EdgeType.GENERATED_FROM`. A candidate that fails a requirement can still be selected (`selected_meets_requirements` reports the honest outcome rather than the tool refusing). Spec values are caller-asserted real datasheet numbers, not scraped by any in-repo parsing pipeline -- `digital_twin.catalog.taxonomy.CATEGORY_REGISTRY` declares typed fields for categories like `servo`/`motor_driver` but has no seeded sample data. `POST /v1/component-selection/select` exposes the same action to the dashboard's BOM-page "Select component" action | unit-verified |
+| `twin` | `twin.approve_engineering_entity` | Advance one EngineeringEntity's authority from `proposed` to `reviewed`/`approved` — a real approval step distinct from creation, giving `AuthorityState` its first-ever non-baseline write path. A `waiver`/`release_approval` recorded but never approved this way FAILS the G8 Release gate's check | unit-verified |
+| `twin` | `twin.record_evidence` | Persist a tool-generated Evidence entity: the real structured output of a calculix/simulation/CAD/test tool call (producer, inputs, a content hash — never a restated assertion), optionally linked to the requirement(s) it supports/contradicts and revision-pinned `valid_against` dependencies that make staleness propagation apply to evidence for the first time. A `valid_against` entry can also pin a `work_product` (e.g. `CAD-BODY-003`, the doc's own example) — re-committing that same named geometry via `twin.commit_geometry` supersedes it and propagates staleness to any evidence pinned to the prior revision, and transitively to whatever depends on that evidence. `supersedes` records a revalidation rerun and flips the stale evidence it replaces to SUPERSEDED. The record is pinned to the item revisions it is about (optional `depends_on` item refs; otherwise inferred from `valid_against` work products and the project's constraint sets) and goes `stale` when one of them gets a newer head (see [twin_schema 2.31](twin_schema.md#records-pinned-to-revisions)) | unit-verified |
+| `twin` | `twin.record_claim` | Persist a requirement satisfaction claim: a real graph edge asserting an artefact (CAD model, schematic, ...) satisfies a requirement, citing evidence ids. Status (supported/unsupported) is always computed live from current evidence staleness, never cached — a claim with no evidence, or whose evidence has all gone stale, reports unsupported | unit-verified |
+| `twin` | `twin.place_part` | Place, move or remove one committed `cad_model` part in an assembly being put together, and show it in the twin viewer's Live assembly panel as it happens (position in mm, rotation in degrees). The viewer composes each part's cached GLB, so no conversion runs per step. Shows the layout only: it creates no assembly and records nothing in the twin, and `live` reports whether a viewer could have seen it. Not held for approval (it writes no design state). A part must exist, be a `cad_model` and belong to the project. The picture is held in the gateway's memory, so a gateway restart drops it | unit-verified |
+| `twin` | `twin.stage_work_product_file` | Materialize a committed work product's blob onto the shared adapter workspace, returning a file_path any freecad/cadquery/calculix tool can load — recovers a work product for inspection even after its authoring session is gone | unit-verified |
+| `twin` | `twin.propose_engineering_change` / `twin.analyze_engineering_change` / `twin.approve_engineering_change` / `twin.reject_engineering_change` / `twin.commit_engineering_change` / `twin.mark_engineering_change_rolled_back` | The Engineering Change Transaction lifecycle (PROPOSED → ANALYZING → READY_FOR_REVIEW → APPROVED/REJECTED → COMMITTED/ROLLED_BACK, spec section 13) as MCP tools — real but unreachable from any agent until now. `analyze` computes real transitive impact (ImpactEngine) and approval level (HITLEngine), storing the full structured `revalidation_plan` (a pre-commit preview) on the ECT. `approve`'s `approver` is an agent-asserted identity string (same trust level as every `created_by` field in this API) but the independence check is real — raises if `approver` equals the patch's own `created_by`. `commit` actually applies the patch via `TransactionEngine`; on success it ALSO calls `StalenessEngine.propagate` for real for every REVISE/SUPERSEDE/DEPRECATE/INVALIDATE op — a real gap, now closed (commit never used to propagate staleness at all, despite the living plan's tracker assuming it already did) — and overwrites `revalidation_plan` with the real post-commit plan. On a conflict the ECT stays `APPROVED` with the conflict recorded, never silently marked committed. `mark_rolled_back` is a bookkeeping label only — no automatic undo capability exists anywhere in this system | unit-verified |
+| `twin` | `twin.execute_revalidation_plan` | After a committed `twin.commit_engineering_change`, automatically re-runs exactly the Evidence a committed ECT's real `revalidation_plan` marked stale — only for entities carrying a replayable `metadata["replay"] = {tool_id, args}` recipe (e.g. `twin.evaluate_metric`'s own evidence). Records fresh Evidence superseding the stale one for each; anything without a replay recipe (hand-authored evidence, or a non-evidence entity the impact walk reached, e.g. a Constraint) is reported `manual_review_needed`, never guessed at. Does NOT attempt property-level impact through `Constraint.dependencies` (that field doesn't exist yet — explicitly deferred) or show anything on the dashboard (no ECT-related UI exists yet — both are their own separable follow-ups) | unit-verified |
+| `twin` | `twin.rank_sensitivity` | One-at-a-time finite-difference sensitivity of a metric's margin against its critical parameters, against a CAD work product's own recorded geometry (target lifecycle spec App. A Solver / step 15). `metric="tip_deflection"` ranks `wall_thickness_mm` and `length_mm` (a new hollow-rectangular-tube deflection formula, `twin_core/prediction/evaluator.py`'s `hollow_tube_tip_deflection_mm` — the solid-beam model has no wall-thickness concept at all); `metric="mass"` ranks `wall_thickness_mm` (continuous, `hollow_tube_mass_kg`) and candidate materials (categorical — ranked by the actual margin delta from swapping material, not a derivative; densities/elastic moduli resolved from `tool_registry.tools.cadquery.materials`, the existing table, not a second one). Records the ranking as Evidence, `valid_against` the work product. No dashboard tornado-chart UI — result is MCP-tool/Evidence only | unit-verified |
+| `twin` | `twin.evaluate_metric` | Tiered evaluator (target lifecycle spec §30, "minimum sufficient fidelity"): a tier-0 closed-form cantilever-beam hand-calc (`twin_core/prediction/evaluator.py`) against a CAD work product's own recorded geometry (`bounding_box`), escalating to a real tier-2 `calculix.run_fea` call (via a lazily-bound MCP bridge, `api_gateway/server.py`'s `_LazyBridge`) when the estimate's margin to a supplied `limit_mm` falls inside its error band. Only `metric="tip_deflection"` is implemented. Every tier's result is recorded as Evidence pinned (`valid_against`) to the work product's current revision. Tier-2 requires the caller to already have a generated mesh + node sets (`tier2: {mesh_file, fixed_node_set, load_node_set, material, load_force_n}`) — this tool does not derive FEA boundary conditions on its own; with escalation but no `tier2` args, it returns a clear "not attempted" result rather than guessing node-set names. Tier-2's persisted Evidence carries an explicit `"tier": 2` key (the raw `calculix.run_fea` output never named its own tier, forcing any consumer to guess it from `producer.tool` string matching) | unit-verified |
+| `twin` | `twin.evaluate_thermal_metric` | Single-tier thermal analysis evaluator: runs a real `calculix.run_thermal` steady-state conduction call (via the same lazily-bound MCP bridge pattern as `twin.evaluate_metric`'s tier-2) and records its real peak-temperature result as Evidence pinned to a work product's current revision — closing the gap where the thermal analysis had no path into the requirements matrix/coverage numbers. Unlike `twin.evaluate_metric`, deliberately single-tier: there is no cheap hand-calc gate before running the real solver, since thermal analysis has no equivalent closed-form estimate to gate on. Optional `cross_check` also runs `calculix.cross_check_thermal_steady_state` against the same result; optional `rated_max_temp_c` reports `within_rating`. Wiring the other two new analysis types (modal, joint-loads) into this same evidence-recording pattern is explicitly deferred to their own future tickets — this demonstrates the pattern for one, not all three | unit-verified |
+| `twin` | `twin.evaluate_overhang_metric` | Design-for-manufacture check: runs a real `freecad.list_named_faces` mesh face-table lookup (the same real per-face average-normal computation already built for FEA boundary-condition selection) and flags faces tilted past a threshold (default 45 degrees, the standard FDM self-supporting overhang convention) from the vertical build axis, recording the result as Evidence pinned to a work product -- same "run a real tool, record its output as graph-checkable Evidence" pattern as `twin.evaluate_thermal_metric`. Deliberately undirected: the underlying mesh normal isn't guaranteed to point outward (see `api_gateway/twin/dfm_evidence.py`'s module docstring), so this flags near-horizontal faces either way rather than risk a confidently-wrong directed check -- it will also flag a harmless flat top surface alongside a real unsupported overhang. Advisory only, not wired into `twin.attempt_promotion`. Scoped to one process (3D-print overhangs) and one rule of the ticket's own CNC/3D-print/sheet-metal breakdown -- CNC tool-access checking, minimum-wall-thickness measurement, and sheet-metal DFM each need geometric primitives this codebase doesn't have yet and are separate future tickets | unit-verified |
+| `twin` | `twin.create_release_package` | Bundles a project's current hierarchy/BOM/evidence/decision node ids into one new `release_package` EngineeringEntity -- a versioned snapshot, never a deep copy of the referenced items' content. Gated at creation time on `twin_core.consistency.gates.evaluate_g8_release` returning PASSED -- G8 (baseline fixed, no stale evidence, verification coverage complete, waivers approved, a `release_approval` entity approved) existed before this ticket but was purely advisory; this is its first real consumer with teeth, refusing creation and naming every failing check if the gate hasn't passed. A real `TraceabilityAgent`-backed accessor is injected so G8's "verification complete" check can actually evaluate. "Diff against previous release" is a simple count delta (hierarchy/BOM/evidence/decision, current minus the immediately-prior package) -- not a full structural diff, no such utility exists in `twin_core`. Drawings are always an empty list (drawing generation hasn't shipped). `GET /v1/releases`, `POST /v1/releases` expose the same create/list actions to the dashboard's "Release packages" section on `/requirements` | unit-verified |
+| `twin` | `twin.create_baseline` | Follow-up to Exposes the pre-existing, real `twin_core.transactions.baseline.create_baseline` so G8's "configuration baseline fixed" check (and, through it, `twin.create_release_package`) can actually become satisfiable on a real project -- before this, nothing in `tool_registry`/`api_gateway` ever called it. Auto-discovers the project's current `Constraint`s and `EngineeringEntity`s (the only two `ControlledEntityKind`s a Baseline can pin) rather than requiring the caller to enumerate member ids, atomically pins each one's current revision and advances its authority to `baselined` via the real optimistic-concurrency `TransactionEngine.commit` path (a member that changed underneath the call aborts the whole baseline, no partial write). Requires `project_id`, `approved_by` (non-empty), `reason`; rejects a project with zero constraints/entities rather than creating a vacuous baseline. Multiple baselines per project are valid. Also pins every current item of the project (`KEY@n`, result `item_count`/`items`), so a parts-only project can be baselined; gate approvals now record an item baseline on their own. REST: `GET /v1/twin/baselines`, `/baselines/{id}`, `/baselines/diff`, `/items/{key}/diff`, `/current-view`, `/runs/{run_id}/changes`, `/revision-index` | unit-verified |
+| `twin` | `twin.generate_test_plan` | Test plans generated from requirements: for every `Constraint` on a project with `verification_method == "test"`, mechanically derives one new `verification_case` EngineeringEntity from the requirement's own structured `metric`/`operator`/`limit`/`unit`/`target_node_type` fields -- a test step ("Measure {metric} on {target_node_type}; acceptance: {metric} {operator} {limit}{unit}") plus its acceptance value, pure string formatting over existing data, no new authoring/synthesis. Deliberately process-generic -- works for whatever real requirements a project actually declares `verification_method="test"`, not hardcoded to the ticket's own illustrative "payload, reach, repeatability" categories. Out of scope: FMEA, HALT/HASS, reliability modeling (later-phase per MetaForge-Planner's `FRAMEWORK_MAPPING.md`); bench-equipment/procedure authoring; wiring generated cases into `evaluate_g8_release`'s verification-complete check. `GET /v1/testplans`, `POST /v1/testplans` expose the same list/generate actions to the dashboard's "Test plan" section on `/requirements` | unit-verified |
+| `twin` | `twin.create_bringup_checklist` | Assembly bring-up checklist from the hierarchy + joint list: a work product's real `metadata.assembly.joints` is flat and unordered, so this topologically sorts the `base`->`follower` dependency graph into a real build order and records one new `bringup_checklist` EngineeringEntity whose metadata carries the ordered steps ("Step {n}: attach {follower} to {base} via {name} ({type} joint)"). Raises rather than guessing at an order if the joint graph is cyclic; multiple independent root parts (parallel subassemblies) are valid. Out of scope: any 3D visualization (exploded or cross-highlight -- neither exists as reusable infrastructure in this codebase); EVT/DVT/PVT staging distinctions; writing to the literal `tests/bringup.md` project-structure file (a different mechanism than this Twin-graph-backed capability). `GET /v1/bringup`, `POST /v1/bringup` expose the same list/create actions to the dashboard's "Bring-up checklist" panel on the Structure tab | unit-verified |
+| `twin` | `twin.create_firmware_scaffold` | Firmware scaffold from pinmap + joint list: reuses `twin.create_bringup_checklist`'s own topological build order over a work product's real `metadata.assembly.joints` to assign each joint a deterministic, 1-indexed CAN node ID -- a placeholder scheme, not a real hardware-specific allocation, since no target MCU or bus topology exists anywhere in this codebase to derive one from. Records a `pinmap` work product (CSV table, mirrored into its own metadata for direct dashboard reads) and a `firmware_source` work product (a minimal `#ifndef`-guarded C header: one `joint_config_t` struct literal per joint carrying `can_id`/`lower_limit`/`upper_limit`) via the generic `document_recorder` facade `api_gateway/runs/fw_handlers.py`'s own design-flow phase already uses -- both linked back to the source assembly. Raises the same `AssemblyGraphError` as the bring-up checklist on a cyclic joint graph. Out of scope: real CAN bus protocol/message-format implementation; control-loop/PID logic; real GPIO/MCU-specific pin assignment beyond the CAN-ID placeholder; RTOS configuration (`domain_agents/firmware`'s existing generic `configure_rtos` skill already covers this); hardware-in-the-loop testing. `POST /v1/firmware/scaffold` exposes the same create action to the dashboard's "Firmware" panel | unit-verified |
+| `twin` | `twin.get_harness_estimate` | Power-tree view + harness list per joint. The power-tree half needed no new tool -- `twin_core.consistency.hierarchy_rollup`'s `compute_hierarchy_rollup` has computed real per-branch `draw_peak_w`/`draw_average_w`/`output_w`/`dissipation_w`, but nothing surfaced them past the backend; `GET /v1/twin/hierarchy`'s `HierarchyNodeResponse` now carries them alongside the existing `massKg`/`cost` fields, turning the Structure tab's existing tree into a power-tree view with zero new route. This tool is the "harness list per joint" half: a work product's real `metadata.assembly.joints` anchors are expressed relative to each joint's own parent frame (confirmed on the real AR4 robot_description -- a standard URDF/kinematic-tree convention), so a single straight-line distance from one fixed origin would be physically meaningless on raw relative coordinates. Instead this sums each joint's own anchor-offset segment length along the real `base`->`follower` kinematic chain (the same topological order `twin.create_bringup_checklist` derives) -- a "cable routed along the arm's links" ESTIMATE, not a real routed path. Out of scope: real connector/wire-gauge selection (no schema concept exists); a real routed cable path; real motor-driver component selection/sizing (the `motor_driver`/`esc` taxonomy categories already exist in `digital_twin/catalog/taxonomy.py` but no real BOM line uses them, a separate ticket). `GET /v1/wiring/harness-estimate` exposes the same computation to the dashboard's "Harness estimate" panel on the Structure tab (named `/v1/wiring/...`, not `/v1/harness/...` -- that path already exists for this codebase's unrelated chat/execution harness admin routes) | unit-verified |
+| `twin` | `twin.attempt_promotion` | The first gate in this system that actually REFUSES rather than only reports (`twin_core.consistency.gates`'s G3-G8 gates stay purely advisory — unchanged by this ticket). Checks each of `required_claim_ids` against §2.15's own live `build_requirement_matrix` status; `pass` → satisfied, `uncertain`/`stale` → blocks, `fail`/`no_data` → blocks unless an APPROVED `waiver` EngineeringEntity names that exact requirement id in its `parent_refs` (reuses G8's own `_evaluate_waivers_check` pattern, now scoped per-requirement rather than a blanket scan). Even with every required claim satisfied, promotion needs a human — and that human is the person who **approved the call**, not a `decided_by` string the caller supplies. The call is always held for approval (the local-stdio exemption does not cover it), a supplied `decided_by` is an error rather than a silent drop, and an approval that identifies nobody is refused rather than recorded as anonymous. Persists an immutable `MaturityGate` record either way (whether promoted or refused), so "why wasn't this promoted" always has a real, queryable answer. `decided_by` is now recorded on every attempt, not only a promoted one. Gained `comment` (a reviewer's own rationale, distinct from the system-derived `blocked_reason`) and `reject` (a human veto that refuses a promotion EVEN IF every required claim passes — the evidence gate is necessary, never sufficient, to override a reviewer's own judgement). Exposed to the dashboard's new "Gate review" section on `/requirements` via `POST /v1/promotion/attempt` / `GET /v1/promotion` (the latter wraps the previously-unsurfaced `twin.list_maturity_gates`) | unit-verified |
+| `twin` | `twin.optimize_parameter` | Bisection search for the minimum-mass `wall_thickness_mm` meeting `deflection_limit_mm` and `sf_limit` (safety factor), against a CAD work product's own recorded geometry (target lifecycle spec App. A Optimiser, step 10). "Over Design IR parameters" (the ticket's own Jira wording) doesn't correspond to anything real — `twin_core/design_ir/` is a CAD-authoring op sequence, never persisted onto a committed work product — so this searches `wall_thickness_mm` instead, the parameter `twin.rank_sensitivity` already found dominant. Mass is the stated objective, not a third constraint (the project's `moving_mass_budget` covers the whole assembly, not one part in isolation, and no per-part budget allocation exists to check a share of it against). Both constraints are monotonic in wall thickness, so bisection finds the exact minimum-mass feasible point, not a heuristic. New tier-0 safety-factor hand-calc (`cantilever_max_bending_stress_mpa`) needed a real yield-strength table — `tool_registry.tools.cadquery.materials.MATERIAL_YIELD_MPA`/`resolve_yield_mpa`, same discipline as the existing elastic-modulus table. Records the search as Evidence pinned to the work product; a feasible winner is also recorded as a Decision via the EXISTING `twin.record_decision` (no new "Decision with alternatives" node type — that mechanism already is exactly that), each rejected candidate as an alternative, and linked back to this same run's own Evidence via `evidence_refs` (a real `SUPPORTED_BY` edge, not just a rationale string). Does NOT propose/commit an actual geometry change (`ControlledEntityKind` doesn't support `work_product` yet — a separate, nontrivial ECT widening; no parametrized re-authoring script exists for the real arm part either) or attempt automatic FEA boundary-condition derivation (same real, unsolved gap `twin.evaluate_metric` already documented) — a numeric recommendation only. `max_iterations` (default 60) is the real, honest iteration budget, echoed back in the response — this tool makes zero LLM calls, so there is no token cost to report. No dashboard UI | unit-verified |
+| `twin` | `twin.register_device_instance` | Register a specific manufactured unit (serial-number-level) of a product as a DeviceInstance (target lifecycle spec App. B REALISE, step 11) — the model existed since before this epic but had no CRUD or MCP tool until now. Optionally links it via an INSTANCE_OF edge to the design revision (a WorkProduct) it was built from, when `design_revision_ref` resolves to one; `product_id` stays a free-text identifier, never assumed to be a resolvable graph ref, since a unit can be registered without a born-digital design record on hand | unit-verified |
+| `twin` | `twin.start_design_loop` / `twin.get_design_loop` / `twin.approve_design_loop` | Closed loop: propose → build → simulate → evaluate against constraints → revise → repeat, until pass or proven infeasible, with an iteration budget (target lifecycle spec's "dual state machine"). Does not reimplement the search — composes `twin.optimize_parameter` unchanged, then persists EVERY candidate it evaluates as a real, queryable `DesignLoopIteration` node (linked via `SUPERSEDES`/`CONSTRAINED_BY`) instead of the one opaque Evidence blob. `get_design_loop` returns the full iteration timeline; `approve_design_loop` records a human's approval of the converged winner (raises if the loop never converged — the "with a human approving at gates" half of this ticket's own yardstick line). When the optimizer records a Decision for the winning candidate, `start()` also links it to that winning `DesignLoopIteration` via a real `GENERATED_FROM` edge — a reader can walk from the converged winner straight to the Decision it produced. The duplicate-commit guard: `start()` hashes `{work_product_id, **optimize_kwargs}` and, on a hit against an earlier identical call, returns that prior loop's already-persisted result (`duplicate: true`) instead of re-running the bisection and writing a second iteration subtree; `max_iterations` (the real iteration budget, not "tokens" — this loop makes zero LLM calls) is now threaded through and echoed back alongside `iteration_count`. Evidence-gated blocking, an eval harness, true multi-objective/Pareto-front search remain separate tickets | unit-verified |
+| `twin` | `twin.start_tube_height_design_loop` | A second real parameter over the SAME closed-loop machinery above — sweeps `height_mm`, `wall_thickness_mm` held fixed, over the identical hollow-tube hand-calc `twin.optimize_parameter` already uses; proof `start_design_loop`'s own candidate ingestion generalized beyond a single hardcoded parameter (`parameter_name`/`metric`/`candidate_mapper`, defaulting to the exact prior wall-thickness behavior — the full pre-existing design-loop test suite passes unchanged as the regression proof), not a second, separate loop implementation. `twin.get_design_loop`/`twin.approve_design_loop` work unchanged — they already read/update any `DesignLoopIteration` by `loop_id`. The dashboard's Design Loop section gained a small hand-rolled inline-SVG sparkline (objective vs iteration, no chart library in this codebase) and generic column headers reading `parameter_name`/`metric` off the fetched iterations, rendering correctly for either loop kind | unit-verified |
+| `twin` | `twin.record_measurement` | Record a real-world measurement against an interface quantity (target lifecycle spec App. B REALISE/LEARN, step 11) — e.g. a measured tip deflection on a built unit. Appends the value to the named metric on an interface embedded in a system_architecture work product (explicit `work_product_id`, or the project's one such document, on the one-per-project assumption), and links the measuring DeviceInstance via a new MEASURED_BY edge. When `predicted_value` is supplied (e.g. from a prior `twin.evaluate_metric` call — the natural, honest composition, never fabricated here), records the residual as Evidence for calibration; the first real prediction a quantity gets backfills its previously-unset `predicted` field, never overwrites an existing one. `digital_twin/calibration/store.py` turns residuals into a real band (`k * stddev(\|residual\|)`, k=2.0, needs >=3 samples — below that the caller's fixed prior is unchanged) that `twin.evaluate_metric` now reads INSTEAD of its fixed 0.2 prior once enough history exists, scanned across every project on purpose since calibration is meant to inform the NEXT project, not cache per-project (`band_source`/`calibration_sample_count` in the response say which was used). Deliberately NOT full conformal prediction — running stats is the smallest real thing the ticket's own acceptance wording needs. Gerbers/pick-and-place export (a separate bullet in this ticket's own Jira Scope) deliberately deferred: the yardstick project has zero PCB artifacts to honestly demonstrate against, and the ticket's own Acceptance never exercises it | unit-verified |
+| `twin` | `twin.record_hierarchy_node` | Persist one position in the project's product hierarchy tree (product/system/subsystem/assembly), nested via a real `CONTAINS{quantity, placement}` edge from an optional parent; `realized_by_node_id`/`instance_of_node_id` link a position to the cad_model/robot_description geometry or BOMItem that actually fulfils it | unit-verified |
+| `twin` | `twin.compute_hierarchy_rollup` | Sum mass/cost over one branch of the product hierarchy (a root id and everything it `CONTAINS`, recursively, weighted by each edge's own quantity), reading `mass_kg` from `REALIZED_BY`-linked cad_models and cost from `INSTANCE_OF`-linked BOMItems — computed live, never cached, so it can't go stale relative to its children. Every BOM line is listed in `cost_lines` with its branch quantity and extended cost; when any line has no price, `cost_partial` is true, `priced_lines` of `total_lines` says how many are priced, `unpriced_lines` names the rest, and `cost` is the priced lines only, a lower bound. A cost budget allocation checked against a partial cost is reported `over_budget: null` with reason `cost_is_partial` unless the priced lines alone already exceed it | unit-verified |
+| `twin` | `twin.realize_hierarchy_node` | "Replace placeholder with part": attach or REPLACE a hierarchy node's `REALIZED_BY` (a cad_model work product, e.g. from `twin.import_work_product`/the FreeCAD authoring tools) and/or `INSTANCE_OF` (a BOMItem, e.g. from `twin.record_component_selection`/`twin.select_component`) geometry after the node already exists — `twin.record_hierarchy_node` only ever sets these once, at creation time. Any existing edge of that type is removed first, so a node always has at most one of each. Classified DESTRUCTIVE (unlike the ADDITIVE `twin.record_hierarchy_node`) since it genuinely replaces prior state. `POST /v1/twin/hierarchy/{node_id}/realize` exposes the same action to the dashboard's Structure-tab "Replace placeholder with part" panel (upload a real STEP file via the existing `POST /v1/twin/import`, with a real GLB preview via the existing `GET /v1/twin/nodes/{id}/model`, or pick an already-recorded BOMItem) | unit-verified |
+| `run` | `run.start_design_flow` | Start a gated design lifecycle (hardware_v1 / mech_v1 / design_v1) for a goal, project-scoped; every phase gate still requires human approval | unit-verified |
+| `run` | `run.get_status` | Check a design-flow run's status / gate reason / result | unit-verified |
+| `design_flow` | `flow.list` | Every launchable flow with its phases, gates, required deliverables and whether it passes the server-enforced invariants (read), plus the domain `fragments` a proposal can compose in. Served by the sidecar from `GET /v1/design-flows` and `GET /v1/design-flows/fragments` when `METAFORGE_GATEWAY_URL` is set | unit-verified |
+| `design_flow` | `flow.propose` | Tailor a template to an intent and hold it for a person: returns the changes, a flow version id and an approval id, and starts nothing. Missing route, maturity or loads returns `status: needs_input` with questions instead; the sidecar passes `manufacturing_context`, `target_maturity`, `loads_and_use` and `budget` through unchanged. `manufacturing_context.machine_ids` names machine-library instances; their limits go into the frozen flow context (an unknown id is refused), and with none named every available instance is listed. `add_fragment` (value: a fragment id) composes a domain's tasks into the flow, with dependencies derived from the items they read and write; the response carries `composition.external_inputs` that must be recorded with a source ([Composable Design Flows](architecture/composable-flows.md)). Writes, but the call is not held: the version it creates is the one approval. The sidecar posts it to `POST /v1/design-flows/propose`, so the approval lands in the gateway's ledger | unit-verified |
+| `design_flow` | `flow.start_run` | Start a run on a flow version a person has approved; refused with an explanatory message until then, on either flow engine. Not held at the call, since the version approval is the authorisation. Optional `intelligence: client` runs every phase on the connected client instead of a server model. Via `POST /v1/runs` from the sidecar | unit-verified |
+| `design_flow` | `flow.await_gate` | Wait for a run's next gate and ask the person in the client's chat to decide it (MCP elicitation). Offers only the decisions the gate allows; a dismissed prompt leaves the gate open. Defaults (30 s wait, 80 s answer) fit a 120 s client call. Not held at the call. `GET /v1/approvals/gate:{id}`, `POST /v1/approvals/gate:{id}/inline-decision` | unit-verified |
+| `design_flow` | `phase.list_tasks` | Phases of client-mode runs waiting for a client (read). `GET /v1/client-tasks` | unit-verified |
+| `design_flow` | `phase.claim` | Take a waiting phase and get its brief. Held for a remote caller like any write. With `METAFORGE_CLIENT_TASK_WRITES` on, the claiming session's later writes in the run's project are not held. `POST /v1/client-tasks/{id}/claim` | unit-verified |
+| `design_flow` | `phase.submit` | Hand a claimed phase back with a summary and the ids recorded; the gate then checks the twin. `outcome: incomplete` says the objective was not met, and the gate then reads not ready. Held for a remote caller like any write. `POST /v1/client-tasks/{id}/submit` | unit-verified |
+| `design_flow` | `flow.status` | Phase-by-phase state of one run, `unknown` when the engine cannot be queried (read), via `GET /v1/runs/{id}/flow-state` from the sidecar | unit-verified |
+| `design_flow` | `flow.compile_intent` | The structured intent: goal versus immediate request, categorised constraints, measurable success criteria, unknowns marked blocking. Deterministic, stores nothing (read). `POST /v1/design-flows/intent` | unit-verified |
+| `design_flow` | `flow.capabilities` | Per-phase tool coverage and the gap register with severities and workarounds, against the live registry and adapter health, optionally for a profile (read). `GET /v1/design-flows/{flow}/capabilities` | unit-verified |
+| `design_flow` | `flow.lifecycle` | Per-phase execution, eligibility, validity (stale from twin item history) and objective status, gaps, requirements and the completion verdict (read). `GET /v1/runs/{id}/lifecycle` | unit-verified |
+| `design_flow` | `flow.verify_completion` | The completion verdict alone: `COMPLETED_VERIFIED` only when every mandatory requirement passes with current evidence (read). Full tool set only | unit-verified |
+| `design_flow` | `flow.patch` | Propose a patch to a running flow (held for a person; re-runs only what it touches) or apply an approved one. `POST /v1/runs/{id}/patches` | unit-verified; Temporal path integration-tested |
 | `constraint` (default) | `constraint.validate` | Pre-flight validate proposed graph changes | [`tier1/constraint-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/constraint-hp.md) |
+| `library` (gateway store) | `library.list_machines` | The machine library: models (a machine type and what it can do) and instances (one machine, with status, location and route `in_house` or `vendor`), narrowed by `layer` and `kind`. `GET /v1/library/machines` (read) | unit-verified |
+| `library` (gateway store) | `library.get_machine` | One machine with every capability, its unit and source, and its version history. `GET /v1/library/machines/{id}` (read) | unit-verified |
+| `library` (gateway store) | `library.machine_limits` | An instance's effective limits (its own capabilities over its model's) as a `rank_manufacturing_processes` candidate and `check_manufacturability` limits (envelope, wall thickness, feature size, overhang angle, bend radius, inside corner radius from half the smallest tool diameter), each citing its source; `needs_review` names the assumptions. A capability with no figure is absent, so DFM reads it as unknown. `GET /v1/library/machines/{id}/limits` (read) | unit-verified |
+| `library` (gateway) | `library.discover_machine` | Reads a 3D printer's controller (OctoPrint `/api/version`, `/api/printerprofiles`, `/api/printer`; Moonraker `/printer/info` and the Klipper `configfile`; PrusaLink `/api/version`, `/api/v1/info`, `/api/v1/status`) and returns a proposed instance: build volume (OctoPrint) or axis travel (Klipper), nozzle and state, each as `machine_report` with the endpoint and time read, plus the figures no controller reports. Registers nothing; registering is `library.register_machine`. The API key is read on the gateway from `credential_env` (`METAFORGE_MACHINE_*` only) and sent as `X-Api-Key`; only parsed figures come back. Read-only, open-world. `POST /v1/library/discover` | unit-verified with mock controllers |
+| `library` (gateway) | `library.dispatch_job` | Sends a G-code work product to an idle in-house printer with an OctoPrint (`POST /api/files/local`, select and print) or Moonraker (`POST /server/files/upload`, print) connection and starts it, pinning the part's current revision. Refuses a machine that is busy, not `available` in the library, or a vendor's, and anything that is not G-code (MetaForge has no slicer). Destructive and held for the person on every call. `POST /v1/library/jobs` | unit-verified with mock controllers; no live print |
+| `library` (gateway) | `library.job_status` | The job as its machine reports it now (OctoPrint `/api/job`, Moonraker `print_stats` and `virtual_sdcard`), normalised to idle, printing, paused, complete, cancelled, failed or offline. `job_state: unknown` when another file is on the machine. Read-only. `GET /v1/library/jobs/{id}/status` | unit-verified |
+| `library` (gateway) | `library.record_job_result` | Once a job has ended, records `demonstration` evidence pinned to the part revision it was sent for, with the outcome read from the machine rather than given by the caller; a stopped or failed print is recorded as not made. Recording twice returns the first record. Additive, held. `POST /v1/library/jobs/{id}/result` | unit-verified |
+| `library` (gateway store) | `library.register_machine` | Add a model or an instance. Every capability needs a known name, its unit and a source (`manufacturer_spec`, `measurement` and `machine_report` need a reference; `assumption` is flagged for review). A `connection` holds the protocol (`octoprint`, `moonraker`, `prusalink` or `none`), an http(s) URL and `credential_env`, the name of a gateway environment variable that must start `METAFORGE_MACHINE_` (the gateway sends it to the machine's URL, so no other secret can be named); a field that looks like a secret is refused. Held for approval. `POST /v1/library/machines` | unit-verified |
+| `library` (gateway store) | `library.update_machine` | Change processes, capabilities (merged by name) and, for an instance, status, location, name, route or connection; the previous version is kept. Held for approval. `PATCH /v1/library/machines/{id}` | unit-verified |
+| `library` (gateway store) | `library.list_processes`, `library.get_process` | Manufacturing processes in the library: family, the machine kinds that run it, the material families it makes, and rules (wall thickness, hole diameter, inside corner and bend radius, feature size, draft, overhang, envelope, tolerance), each with a source and optionally limited to one material family. `GET /v1/library/processes[/{id or name}]` (read) | unit-verified |
+| `library` (gateway store) | `library.list_components`, `library.get_component` | Mechanical components: standard parts (dimensions from a standard's table) and purchased parts (a supplier's CAD and part numbers), with typed, sourced specs (thread, length, head and socket sizes, bore, OD, width, dynamic and static load, speeds, mass, travel, force, torque), a geometry generator or STEP reference, a library material and supplier part numbers. `GET /v1/library/components[/{id or name}]` (read) | unit-verified |
+| `library` (gateway store) | `library.standard_part` | Builds a standard part from its standard's table without storing it: ISO 4762 socket head cap screws (size and length), ISO 4032 hex nuts, ISO 7089 plain washers, deep groove ball bearings by designation. Every dimension cites its table row (bd_warehouse data, Apache-2.0, vendored in `twin_core/library/data/bd_warehouse`); a size or length the standard lacks is refused. `GET /v1/library/components/standard` (read) | unit-verified |
+| `library` (gateway store) | `library.list_appearances`, `library.get_appearance` | Appearances: colour, material and finish entries. Finish, a colour named in its system (RAL, Pantone, NCS, supplier, custom) with a sourced on-screen `srgb_hex`, texture reference, sourced surface properties (gloss at 60 degrees, coating thickness, Ra) and render parameters (roughness, metallic), and the library materials and processes it applies to. `family` filters by finish. `GET /v1/library/appearances[/{id or name}]` (read) | unit-verified |
+| `library` (gateway store) | `library.register_appearance`, `library.update_appearance` | Add or change an appearance; an unsourced colour value, an unknown property or finish, or a render parameter outside 0..1 is refused, an assumed value is flagged for review, every change is versioned. Additive, held. `POST`/`PATCH /v1/library/appearances` | unit-verified |
+| `library` (gateway store) | `library.list_ergonomic_limits`, `library.get_ergonomic_limit` | Ergonomic design limits: min and/or max for a feature kind (grip diameter/width, handle length, finger clearance, button size, operating height, reach in mm; actuation force in N; product mass in kg), what it applies to, the population and the source. `family` filters by feature kind; `check_ergonomics` takes an entry as it is. Seed: 30 limits from MIL-STD-1472H (2020), each cited to its clause or figure (`twin_core/library/data/ergonomic_limits/`). `GET /v1/library/ergonomic-limits[/{id or name}]` (read) | unit-verified |
+| `library` (gateway store) | `library.register_ergonomic_limit`, `library.update_ergonomic_limit` | Add or change a limit; an unknown kind, a wrong unit, no bound, min above max, no population or no source is refused; an assumed value is flagged for review; every change is versioned. Additive, held. `POST`/`PATCH /v1/library/ergonomic-limits` | unit-verified |
+| `library` (gateway store) | `library.register_component`, `library.update_component` | Add or change a component; a standard part names its standard, specs have fixed units and sources, every change is versioned. Additive, held. `POST`/`PATCH /v1/library/components` | unit-verified |
+| `library` (gateway store) | `library.process_limits` | A process's rules as `check_manufacturability` limits and a `rank_manufacturing_processes` candidate (achievable tolerance, minimum feature), each citing its source; with a material, only the rules for its family apply, and a process not recorded as making that family is refused. `GET /v1/library/processes/{id or name}/limits?material=` (read) | unit-verified |
+| `library` (gateway store) | `library.register_process`, `library.update_process` | Add or change a process. Rule kinds and units are fixed (mm, deg); `standard`, `datasheet`, `manufacturer_spec`, `supplier` and `measurement` sources need a reference, `assumption` is flagged for review; names are unique identifiers; every change keeps the previous version. Additive, held. `POST`/`PATCH /v1/library/processes` | unit-verified |
+| `library` (gateway store) | `library.list_materials`, `library.get_material` | Materials in the library: family, designation, forms, the processes they suit, and typed properties with sources (density, stiffness, Poisson's ratio, yield, ultimate and fatigue strength, bending strength along and across and tension across the grain (woods and panels, which have no yield point), elongation, thermal conductivity and expansion, service and melting temperature, cost per kg with its currency, and across-the-grain stiffness and yield). `GET /v1/library/materials[/{id or name}]` (read) | unit-verified |
+| `library` (gateway store) | `library.register_material`, `library.update_material` | Add or change a material; properties merge by name, units are fixed, the same source rules apply, every change is versioned. No material ships built in. Additive, held. `POST`/`PATCH /v1/library/materials` | unit-verified |
+| `vendor` (gateway) | `vendor.list_connectors` | The vendor connectors configured on the gateway, each with its `services`, `mode` (`sandbox` or `production`, from `METAFORGE_VENDOR_<ID>_MODE`, sandbox unless set) and live `auth` (`ok`, `missing`, `refused`, `unreachable`, ...). `health.check` reports the same under `vendors`. Read-only. `GET /v1/vendors/connectors` | unit-verified with a fake vendor |
+| `vendor` (gateway) | `vendor.quote` | Price a job through one connector: service, items (work products or part numbers) and quantity. Recorded in the vendor store and in the twin as a `procurement_record` with the vendor, mode, reference and validity. Failures are typed (`auth`, `config`, `rate_limited`, `unreachable`, `refused`, `protocol`, `not_supported`), never an empty success. Additive, held. `POST /v1/vendors/quotes` | unit-verified |
+| `vendor` (gateway) | `vendor.place_order` | Order a stored quote; refused when it has expired, was already ordered, or the connector's mode changed since. Recorded in the twin linked to its quote. Can spend money: destructive and held on every call. `POST /v1/vendors/orders` | unit-verified |
+| `vendor` (gateway) | `vendor.order_status` | The order as the vendor reports it, normalised to placed, in_review, in_production, shipped, delivered, cancelled or failed. Read-only. `GET /v1/vendors/orders/{id}/status` | unit-verified |
+| `vendor` (gateway) | `vendor.handoffs` | For vendors with no ordering API (AISLER, Craftcloud, Xometry, SendCutSend): which take a service, their upload page, accepted formats, which of the given work products fit, and each file's gateway `download_path`. Sends nothing and calls no vendor; the catalogue is MetaForge's own (compiled 2026-10-13, not checked against each vendor's live page), so the person confirms formats on upload. Read-only, closed-world. `POST /v1/vendors/handoffs` | unit-verified |
+| `cost` (in-process) | `cost.estimate_manufacturing` | A rough per-unit and batch cost for CNC milling (stock volume x density x price; removed volume / removal rate x shop rate) or sheet metal (blank area x thickness x density x price; cut length / cut speed plus bends, x shop rate), with setup spread over the quantity. Every input is a figure with its source; nothing is built in or defaulted, and a missing figure leaves what needs it unknown. Always `kind: estimate` with `not_a_quote` and what it leaves out (finishing, tolerance and feature count, tooling, shipping, margin); `for_ranking` feeds `rank_manufacturing_processes`. Read-only arithmetic | unit-verified |
+| `blender` (container, Blender 5.2.2 LTS) | `blender.render` | Studio renders of a mesh model (glTF/GLB, STL, OBJ, PLY; convert STEP to GLB first) with Cycles on the CPU, headless: named views (iso, front, back, left, right, top, bottom) and a turntable of up to 36 frames, resolution, samples, perspective or orthographic, transparent background, part colour overrides in sRGB (as a hex code or colour picker gives them; converted to Blender's scene-linear values), optionally with the surface's roughness and metallic; a part name that matches nothing is reported in `unmatched_colours`; `model_up_axis` (`y`, the glTF convention, or `z`) reads a GLB written in CAD's Z-up axes, as MetaForge's STEP converter writes them; the Standard view transform shows specified colours as given. PNGs returned inline; nothing left behind. Read-only | unit-verified with a fake binary; run against real Blender 5.2.2 LTS |
+| `twin` | `twin.render_work_product` | Studio renders of a work product in the twin: a STEP part or assembly is converted to GLB by the same OCCT converter the dashboard viewer uses (so colours and part names come from the model, and the render is told the GLB is Z-up as the viewer is), a mesh (GLB, glTF, STL, OBJ, PLY) is used as is, and `blender.render` renders it with the same view, resolution, sample and colour options. `appearances` shows parts in library appearances: each is looked up with `library.get_appearance`, its sourced screen colour, render roughness and metallic go to Blender, and the render node records which appearance at which version it used (with any assumed values under `needs_review`); an unknown appearance, or a part given both a colour and an appearance, is refused before rendering. The PNGs are stored as a `render` work product linked to the model by `GENERATED_FROM`, carrying the model's content hash, in the model's project (both the node and the Projects junction); `store=false` renders without recording anything. Over the standard `tools/call` the images arrive as MCP image content (lifted out of the sidecar's `{tool_id, status, data}` result wrapper), so a harness shows them in chat, and the JSON text carries no base64. Refuses rather than falls back: an unreachable OCCT converter (its stub mesh is empty, and is dropped from the conversion cache), a format that is not a model, or storage that fails | unit-verified |
+| `twin` | `twin.record_design_files` | Keeps KiCad and firmware files the adapters wrote on the workspace as one versioned work product: `schematic` (every sheet, the project file and library tables), `pcb_layout`, `gerber` (the gerber and drill folder, each file's layer named), `pick_and_place`, `pinmap`, or `firmware_source` (a PlatformIO project's sources, with `firmware.elf/.bin/.hex` when built), or `purchased_model` (the folder `simready.import` wrote: a `cad_model` whose primary file is the GLB preview, with the USD layers, licence and attribution beside it, and the licence, package digest and `mass_kg` read from its `simready.json`, never from `metadata`). Recording the same name again is that item's next revision (`SCH-`, `PCB-`, `GBR-`, `PNP-`, `PIN-`, `FW-`, `PMD-` keys). Each file is a named blob served at `GET /v1/twin/nodes/{id}/files/{path}`; `source_node_ids` are linked `GENERATED_FROM` (BOM to schematic to board to gerbers and placement, schematic to pin map to firmware). Left out, the record is linked to the project's one current record of the stage before it (`generated_from_inferred`), and every other stage of the project still loose is linked the same way, so a schematic recorded before its BOM is linked once the BOM exists (`inferred_links`); a stage with more than one candidate is left unlinked, named in `warnings` and counted by `thread_unlinked_stages`, and a stage whose upstream is not recorded at all is named but not counted; the node is linked to its project under its own type, which is what `pcb_v1` and `firmware_v1` count as recorded. A schematic or board gets SVG previews from `kicad.export_svg`, best effort (`preview_error` says why one is missing). Reads only inside the adapter workspace | unit-verified |
+| `blender` (container) | `blender.export_blend` | The model staged as a Blender scene (lights, camera, colours) saved as a .blend, returned inline, for a designer to open in Blender. Read-only | unit-verified; run against real Blender 5.2.2 LTS |
+| `power` (in-process) | `power.check_budget` | Static worst-case power budget per supply rail. The caller gives every rail (voltage, `source_kind` supply/ldo/switching, rated output, `input_rail`, `efficiency` for a switching regulator, `quiescent_ma` for an LDO) and every load (`current_ma` or `power_mw`, with its source), plus the derating rule. Regulator input current is carried upstream (LDO: output plus quiescent; switching: Vout x Iout / (efficiency x Vin)). A figure not given is unknown and never assumed: a rail that depends on one is `not_established`, unless its known load already exceeds the allowance, which fails. Read-only arithmetic; on the `electronics` profile. With each regulator's `theta_ja_c_per_w` and `tj_max_c` and the request's `ambient_c`, it also returns each regulator's dissipation (LDO `(Vin - Vout) * Iout + Vin * Iq`, switching `Pout * (1/eta - 1)`), junction temperature `Ta + P * theta_JA`, margin to Tj max and a separate `thermal_verdict`: a hot LDO fails thermally while its rail still passes its load budget, and a regulator with no thermal figures is not_established. Backs the `check_power_budget` skill, which both electronics agents used to answer "not yet implemented" | unit-verified |
+| `power` (in-process) | `power.runtime` | Battery runtime: usable energy (`capacity_wh`, or `capacity_mah` x `nominal_voltage_v`, times `usable_fraction`) over the average load at the battery terminals; the rated capacity a `required_runtime_h` needs; and the peak current against the battery's continuous rating. Every figure is `{value, source}`; a missing one is not_established. Read-only arithmetic on the `electronics` profile | unit-verified |
+| `optimize` (in-process) | `optimize.suggest` | Ask-and-tell search over one bounded design variable: `golden_section` for a unimodal objective, `grid` otherwise. The caller evaluates each suggested point with the real analysis tool and passes every evaluation back (`x`, `objective`, `feasible`, `source`); the tool returns the next point or `converged` with the best. It never computes an objective, an infeasible point is never the best, all-infeasible is reported, and the bounds must name their source. Read-only arithmetic; on the `simulation` profile ([Composable Design Flows](architecture/composable-flows.md#optimisation)) | unit-verified |
+| `robot` (in-process) | `robot.size_drive` | Worst-case drive requirements for a wheeled mobile robot: traction force climbing the steepest slope while accelerating (`m*g*(Crr*cos+sin) + m*a`), torque and speed per driven wheel, and peak power through the drivetrain efficiency. With a candidate motor and gearbox it returns the motor's torque and speed margins against the required margin and a pass/fail verdict. Every figure is `{value, source}`; a figure not given is unknown and the verdict `not_established`. Read-only arithmetic; on the `robotics` profile | unit-verified |
+| `robot` (in-process) | `robot.diff_drive_kinematics` | Top linear speed and top yaw rate of a differential drive from wheel radius, track width, usable motor speed and gear ratio, checked against the required speed and yaw rate. A figure not given is unknown: `not_established`. Read-only arithmetic; on the `robotics` profile | unit-verified |
+| `packaging` (in-process) | `packaging.box_compression` | Simplified McKee estimate of a regular slotted carton's compression strength (`BCT = 5.87 * ECT * sqrt(caliper * perimeter)`, SI), reduced by every derating factor given (humidity, storage time; each 0..1 with its source) and compared with the static stack load times the required safety factor. An estimate: a compression test outranks it. A figure not given is unknown: `not_established`. Read-only arithmetic; reached through the `packaging_v1` tasks that name it | unit-verified |
+| `packaging` (in-process) | `packaging.rsc_dieline` | Blank size of a regular slotted container (FEFCO 0201) from its inside dimensions, the converter's score allowance and glue flap, checked against the converter's minimum glue flap, minimum panel and sheet size. Rules come from the converter or the process library, never assumed. Read-only arithmetic; reached through the `packaging_v1` tasks that name it | unit-verified |
+| `aircraft` (in-process) | `aircraft.wing_sizing` | Wing area that holds the stall speed at the maximum take-off mass (`S = 2 m g / (rho Vs^2 CL_max)`), or the stall speed of a chosen area, with span and mean chord from the aspect ratio. Every figure is `{value, source}`; a figure not given is unknown: `not_established`. Read-only arithmetic; reached through the `aircraft_v1` tasks that name it | unit-verified |
+| `aircraft` (in-process) | `aircraft.cruise_performance` | Parabolic drag polar `CD = CD0 + CL^2 / (pi e AR)` at the cruise lift coefficient: lift-to-drag, drag, shaft power and electrical power through the propulsive efficiency, and the best lift-to-drag ratio and its speed; fails a cruise at or above CL_max. A first-order estimate that a vortex-lattice or panel code outranks. Read-only arithmetic; reached through the `aircraft_v1` tasks that name it | unit-verified |
+| `aircraft` (in-process) | `aircraft.trim_stability` | Stick-fixed neutral point and static margin of a conventional wing and tail (Helmbold lift slopes, elliptic downwash estimate, tail volume), and the tail lift coefficient that trims cruise against the tail's usable CL. Static only; fuselage contributions neglected; an AVL eigenmode analysis outranks it. Read-only arithmetic; reached through the `aircraft_v1` tasks that name it | unit-verified |
+| `aircraft` (in-process) | `aircraft.electric_endurance` | Steady-cruise endurance and range of a battery-electric aircraft from usable battery energy over propulsion plus avionics power; with a required endurance, the capacity that meets it. A mission simulation outranks it. Read-only arithmetic; reached through the `aircraft_v1` tasks that name it | unit-verified |
 | `cadquery` (default) | `cadquery.create_parametric` | Generate a parametric solid (box, cylinder, …) → STEP | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.boolean_operation` | Union / cut / intersect two solids | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.get_properties` | Mass / volume / bounding-box for a STEP file | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.export_geometry` | Convert STEP → GLB (web viewer) or STL | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
-| `cadquery` | `cadquery.export_urdf` | Export a single-link URDF (robot description) — companion mesh + a real `<inertial>` block (mass/center-of-mass/inertia tensor) from the part's geometry and a material density lookup. Tier-1 only: one link, no joints — a multi-body assembly with real kinematic joints needs the FreeCAD assembly-joint tools mapped to URDF's `<joint>` schema, separate follow-on work. `xacro=true` writes a `.xacro`-extension file with the xacro namespace declared on the root element (no macro directives generated — includable into a larger macro-based description) (MET-706) | unit-verified |
-| `cadquery` | `cadquery.export_urdf_assembly` | Export a multi-link URDF with real kinematic joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). Maps `fixed`→`fixed`, `slider`→`prismatic` (requires explicit `limits`), `revolute`→`continuous` (no fabricated rotation limit); `cylindrical`/`ball` joints are rejected — no single-joint URDF equivalent. Same `xacro=true` support as `cadquery.export_urdf` (MET-706) | unit-verified |
-| `cadquery` | `cadquery.export_sdf` | Export a single-link SDFormat model (Gazebo) — same mass-property/mesh pattern as `export_urdf`, schema grounded directly against `gazebosim/sdformat`'s spec files. `world_name` wraps the model in a `<world>` (`.world` file); otherwise a standalone `.sdf` model. Tier-1 only: one model, one link, no `<joint>` (MET-706) | unit-verified |
-| `cadquery` | `cadquery.export_sdf_assembly` | Export a multi-link SDFormat model (Gazebo) with real joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). SDF's own `<joint>` schema is more permissive than URDF's: maps `fixed`→`fixed`, `slider`→`prismatic` (requires explicit `limits`), `revolute`→`continuous` (no fabricated rotation limit), and `ball`→`ball` (SDF supports it natively — URDF has no single-joint equivalent); `cylindrical` joints are rejected — no direct SDF `<joint>` equivalent (MET-706) | unit-verified |
-| `cadquery` | `cadquery.export_usd` | Export a plain-text `.usda` (USD) file — hand-authored (no `usd-core`/`pxr` dependency), mesh geometry as `UsdGeomMesh` point/face arrays (via an STL round-trip) plus real `PhysicsRigidBodyAPI`/`PhysicsCollisionAPI`/`PhysicsMassAPI` properties, schema grounded against `PixarAnimationStudios/OpenUSD`'s spec. Tier-1 only: axis-aligned parts (negligible off-diagonal inertia) — a rotated/asymmetric part raises an explicit error rather than emitting wrong principal-axis physics data (MET-706) | unit-verified |
-| `cadquery` | `cadquery.export_usd_assembly` | Export a multi-body `.usda` (USD) file with real UsdPhysics joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). Maps `fixed`→`PhysicsFixedJoint`, `slider`→`PhysicsPrismaticJoint` (requires explicit `limits`), `revolute`→`PhysicsRevoluteJoint` (no fabricated rotation limit), `ball`→`PhysicsSphericalJoint` (USD supports it natively, like SDF); `cylindrical` joints are rejected — no matching UsdPhysics joint type. Since `physics:axis` is a canonical X/Y/Z token (not a free vector), an arbitrary joint axis is expressed via a computed alignment quaternion on the joint frame. Still axis-aligned-inertia-only per part, same tier-1 restriction as `cadquery.export_usd` (MET-706) | unit-verified |
-| `cadquery` | `cadquery.generate_ros2_launch` | Generate a standalone ROS 2 launch file (`robot_state_publisher` + optional `joint_state_publisher`(`_gui`) + `rviz2`) for an exported URDF, grounded directly against `ros/urdf_launch`'s real launch files. Pure text generation — no STEP file or CadQuery geometry involved (MET-706) | unit-verified |
+| `cadquery` | `cadquery.export_urdf` | Export a single-link URDF (robot description) — companion mesh + a real `<inertial>` block (mass/center-of-mass/inertia tensor) from the part's geometry and a material density lookup. Tier-1 only: one link, no joints — a multi-body assembly with real kinematic joints needs the FreeCAD assembly-joint tools mapped to URDF's `<joint>` schema, separate follow-on work. `xacro=true` writes a `.xacro`-extension file with the xacro namespace declared on the root element (no macro directives generated — includable into a larger macro-based description) | unit-verified |
+| `cadquery` | `cadquery.export_urdf_assembly` | Export a multi-link URDF with real kinematic joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). Maps `fixed`→`fixed`, `slider`→`prismatic` (requires explicit `limits`), `revolute`→`continuous` (no fabricated rotation limit); `cylindrical`/`ball` joints are rejected — no single-joint URDF equivalent. Same `xacro=true` support as `cadquery.export_urdf` | unit-verified |
+| `cadquery` | `cadquery.export_sdf` | Export a single-link SDFormat model (Gazebo) — same mass-property/mesh pattern as `export_urdf`, schema grounded directly against `gazebosim/sdformat`'s spec files. `world_name` wraps the model in a `<world>` (`.world` file); otherwise a standalone `.sdf` model. Tier-1 only: one model, one link, no `<joint>` | unit-verified |
+| `cadquery` | `cadquery.export_sdf_assembly` | Export a multi-link SDFormat model (Gazebo) with real joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). SDF's own `<joint>` schema is more permissive than URDF's: maps `fixed`→`fixed`, `slider`→`prismatic` (requires explicit `limits`), `revolute`→`continuous` (no fabricated rotation limit), and `ball`→`ball` (SDF supports it natively — URDF has no single-joint equivalent); `cylindrical` joints are rejected — no direct SDF `<joint>` equivalent | unit-verified |
+| `cadquery` | `cadquery.export_usd` | Export a plain-text `.usda` (USD) file — hand-authored (no `usd-core`/`pxr` dependency), mesh geometry as `UsdGeomMesh` point/face arrays (via an STL round-trip) plus real `PhysicsRigidBodyAPI`/`PhysicsCollisionAPI`/`PhysicsMassAPI` properties, schema grounded against `PixarAnimationStudios/OpenUSD`'s spec. Tier-1 only: axis-aligned parts (negligible off-diagonal inertia) — a rotated/asymmetric part raises an explicit error rather than emitting wrong principal-axis physics data | unit-verified |
+| `cadquery` | `cadquery.export_usd_assembly` | Export a multi-body `.usda` (USD) file with real UsdPhysics joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). Maps `fixed`→`PhysicsFixedJoint`, `slider`→`PhysicsPrismaticJoint` (requires explicit `limits`), `revolute`→`PhysicsRevoluteJoint` (no fabricated rotation limit), `ball`→`PhysicsSphericalJoint` (USD supports it natively, like SDF); `cylindrical` joints are rejected — no matching UsdPhysics joint type. Since `physics:axis` is a canonical X/Y/Z token (not a free vector), an arbitrary joint axis is expressed via a computed alignment quaternion on the joint frame. Still axis-aligned-inertia-only per part, same tier-1 restriction as `cadquery.export_usd` | unit-verified |
+| `cadquery` | `cadquery.generate_ros2_launch` | Generate a standalone ROS 2 launch file (`robot_state_publisher` + optional `joint_state_publisher`(`_gui`) + `rviz2`) for an exported URDF, grounded directly against `ros/urdf_launch`'s real launch files. Pure text generation — no STEP file or CadQuery geometry involved | unit-verified |
 | `cadquery` | `cadquery.execute_script` | Run an inline CadQuery Python script | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
-| `cadquery` | `cadquery.create_assembly` | Multi-body assembly (Phase 2 — manifest only) | _Phase 2_ |
-| `cadquery` | `cadquery.generate_enclosure` | Parametric enclosure generator (Phase 2 — manifest only) | _Phase 2_ |
-| `calculix` (default) | `calculix.run_fea` | Linear-static FEA on a meshed solid | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
-| `calculix` | `calculix.run_thermal` | Steady-state thermal analysis | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `cadquery` | `cadquery.create_assembly` | Multi-body assembly. Each part's `location` takes `x`, `y`, `z` (mm) and `rx`, `ry`, `rz` (degrees, applied X then Y then Z); rotations used to be dropped. `interference_check_passed` comes from a real pairwise check, bounding boxes then a boolean intersection, and `interferences` lists each overlapping pair with its volume in mm³. Needs a cadquery adapter image rebuild to deploy | unit-verified; checked in the CadQuery 2.8 adapter container |
+| `cadquery` | `cadquery.generate_enclosure` | Phase 2. A shelled box sized from the board (`pcb_length`, `pcb_width`, `pcb_thickness`, `component_max_height`) with 1 mm clearance and a `wall_thickness` wall, rectangular `connector_cutouts` through the front, back, left or right wall, and a standoff post with a screw hole for each of `mounting_holes`. Writes a STEP and returns `cad_file`, `internal_volume`, `external_dimensions`, and `mass_kg` from `material` (default ABS). The board's own outline comes from `kicad.export_3d` | unit-verified; listed in the MCP e2e CAD tool set |
+| `calculix` (default) | `calculix.run_fea` | Linear-static FEA on a meshed solid (`analysis_type="static_stress"`), or modal/natural-frequency analysis (`analysis_type="modal"`) — a real CalculiX `*FREQUENCY` eigenvalue solve (mass matrix from a real `*DENSITY` card, converted from the caller's kg/m^3 material to the mm+N+MPa consistent system's own tonne/mm^3 mass unit) returning real natural frequencies (`frequencies_hz`), lowest mode first. Deliberately narrow: fatigue, contact/bolted-joints, non-linear material, and buckling (the ticket's other four bundled analysis types) have zero existing scaffolding in this codebase and are each a separate, comparably-sized effort. Every result also carries a `field` object, the solved mesh's outer surface with per-vertex von Mises stress and displacement vectors (modal: the mode-1 shape) as a gzipped `metaforge.sim_field` payload, with fixture and load markers located by the deck's own node sets. Capped at 1.5 MB compressed (decimated by vertex clustering above that, with the true full-field peak kept); `field.file` is its workspace path for `twin.record_document`'s `field_file`. A field that cannot be built returns `field.error` and never fails the solve. See [Simulation results in 3D](simulation-results.md) | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `calculix` | `calculix.run_thermal` | Steady-state conduction thermal analysis — a real CalculiX `*HEAT TRANSFER, STEADY STATE` solve: a `*CONDUCTIVITY` material card, a `*CFLUX` heat source (e.g. a BOM component's known power dissipation — this adapter has no Twin access, so the caller resolves `specifications.powerDissipationW` itself and passes the raw wattage) conducting to a fixed-temperature `*BOUNDARY` sink (e.g. a chassis/heatsink mount held near-ambient). Deliberately conduction-only: no convective (`*FILM`) boundary to open air, since that needs exposed element-face geometry this mesh-handling codebase doesn't derive anywhere yet — a fixed-temperature sink is a real, well-precedented simplification, not a stand-in. `analysis_mode="transient"` is accepted in the schema for forward compatibility but raises — there is no time-stepping deck builder yet. Live-validation follow-up: `heat_source_node_set`/`sink_node_set` get the same wrong-face span check `run_fea`'s `fixed_node_set` already had — caught live on the real "Upper Arm Link" part, where a full-length side face picked as the sink collapsed the effective conduction path and silently reported a peak temperature far below the real one. Also returns the same `field` payload as `run_fea`, with a `temperature` field and heat-source / sink markers | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
 | `calculix` | `calculix.validate_mesh` | Mesh quality and connectivity checks | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
-| `calculix` | `calculix.extract_results` | Pull max-stress / max-displacement from `.frd` | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `calculix` | `calculix.extract_results` | Pull max-stress / max-displacement from `.frd`. The `stress` block's own `accuracy` field auto-flags a suspicious result (max disproportionate to the rest of the nodal field — usually a point-load/BC concentration artifact) | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `calculix` | `calculix.cross_check_cantilever_beam` | Euler-Bernoulli hand-calc cross-check (sigma = M\*c/I) for a rectangular cantilever, tip-loaded — compares against an FEA max stress within a tolerance, for the textbook case a human caught a bad `fixed_node_set` with manually | unit-verified |
+| `calculix` | `calculix.cross_check_cantilever_frequency` | Closed-form first-bending-mode natural frequency for a uniform rectangular cantilever, tip-free (f1 = (beta1\*L)^2/(2*pi*L^2) \* sqrt(EI/(rho\*A)), a standard textbook constant) — the modal sibling of `calculix.cross_check_cantilever_beam`, same one-textbook-case scope, compares against a modal `calculix.run_fea` run's own first mode | unit-verified |
+| `calculix` | `calculix.cross_check_thermal_steady_state` | 1D steady-state conduction hand calc (T_peak = T_sink + Q\*L/(k\*A), the standard thermal-resistance formula) — the thermal sibling of `calculix.cross_check_cantilever_beam`, same one-textbook-case scope, for the exact fixed-temperature-sink model `calculix.run_thermal` solves. Compares against a thermal FEA run's own peak temperature within a tolerance | unit-verified |
+| `calculix` | `calculix.check_mesh_convergence` | Whether max stress has stopped changing meaningfully across element sizes already run (does not orchestrate the sweep itself — compares results the caller already produced). Each point may carry an optional `element_count`; record the output on the finest run's `simulation_result` as `metadata.mesh_convergence` and the Sim page charts peak stress against element count with the verdict | unit-verified |
+| `calculix` | `calculix.compute_joint_loads` | Quasi-static reaction force/moment at every joint of a posed serial robot-arm chain, from gravity alone — link masses/CoM and joint positions at a chosen pose, plus an optional payload; deliberately no velocity/acceleration/friction/actuator terms (a full dynamic worst-case-over-motion analysis needs a real multibody dynamics engine, not yet available from this repo's Gazebo/Isaac adapters). The worst joint's reaction feeds `calculix.run_fea`'s `load_force_n` directly, or a moment via a force-couple approximation | unit-verified |
 | `freecad` (opt-in) | `freecad.create_parametric` | FreeCAD-driven parametric solid | _none yet_ |
 | `freecad` | `freecad.boolean_operation` | FreeCAD boolean ops | _none yet_ |
 | `freecad` | `freecad.get_properties` | FreeCAD shape properties | _none yet_ |
-| `freecad` | `freecad.describe_step_file` | Per-component breakdown of a multipart assembly file (Label/volume/area/bbox per named part, not just the flattened aggregate) (MET-629) | unit-verified (MET-629) |
+| `freecad` | session tools (`open_session`, `close_session`, `create_primitive`, `create_body`, `import_step`, `create_sketch`, `pad_sketch`, `pocket_sketch`, `revolve_sketch`, `loft_sketches`, `sweep_sketch`, `shell_solid`, `transform_object`, `fillet`, `chamfer`, `boolean`, patterns, assembly and joint tools, `create_variable_set`, `set_expression`, the `generate_*` skills, `export_model`) | Stateful authoring on a session's scratch document. Annotation classes: `describe_session`, `describe_model`, `list_joints`, `measure` are read-only; `export_model` is producing (returns STEP bytes, writes nothing); the rest are additive (session scratch only). Because none is destructive, the design-flow service caller may call them. `freecad.execute_code` is deliberately destructive (its source-level sandbox still exposes `Import.export(objs, path)`), so the service caller is refused it and the refusal is returned to the model as a tool error | unit-verified |
+| `freecad` | `freecad.describe_step_file` | Per-component breakdown of a multipart assembly file (Label/volume/area/bbox per named part, not just the flattened aggregate) | unit-verified |
 | `freecad` | `freecad.export_geometry` | FreeCAD STEP / STL / IGES export | _none yet_ |
-| `freecad` | `freecad.generate_mesh` | FreeCAD-driven mesh generation | _none yet_ |
-| `kicad` (opt-in) | `kicad.run_erc` | Electrical rules check | _none yet_ |
-| `kicad` | `kicad.run_drc` | Design rules check | _none yet_ |
-| `kicad` | `kicad.export_bom` | Bill of materials export | _none yet_ |
-| `kicad` | `kicad.export_netlist` | Netlist export | _none yet_ |
-| `kicad` | `kicad.export_gerber` | Gerber set for fab | _none yet_ |
-| `kicad` | `kicad.get_pin_mapping` | Connector pinmap → JSON | _none yet_ |
+| `freecad` | `freecad.generate_mesh` | FreeCAD-driven mesh generation; `element_order` (1 or 2) selects linear (C3D4) or quadratic (C3D10) tetrahedra, second-order elements capture bending stress more accurately per element. The mesh is always in the twin's coordinate frame: a STEP whose Placement the mesher would drop (e.g. a sketch on the YZ plane) is baked first, so mesh node coordinates equal the committed twin `bounding_box`. The result adds `surface_sets` (name to bbox/centroid/area/normal), `mesh_bbox_mm`, `coordinate_frame: "twin"` and `placement_baked`, so fixed and load faces can be picked by position, and `calculix.run_fea`'s `load_force_n` is in that same frame. For `.inp` output, `quality_metrics` carries element quality measured from the tetrahedra themselves (`min_angle` as the minimum dihedral angle, `max_aspect_ratio` as longest over shortest edge, `avg_quality` as the mean radius ratio, `degenerate_elements`; above 200,000 elements an even sample), where it returned none and the mesh skill passed every mesh. Other output formats carry no quality, and the skill reports that as "not measured" rather than a pass. `freecad.export_model` also bakes placements into the exported STEP and measures its returned bbox from those bytes. Needs an adapter image rebuild to deploy | unit-verified (FreeCAD+gmsh end-to-end test skips without them) |
+| `freecad` | `freecad.list_named_faces` | Re-fetch an already-generated mesh's per-face geometry table (name, bbox, centroid, area, normal) without re-running gmsh — backs the dashboard's geometric boundary-condition face picker | unit-verified |
+| `kicad` (opt-in) | `kicad.run_erc` | Electrical rules check with kicad-cli: violations with severity, rule, sheet, component and pin, and each item's text. kicad-cli nests violations under each sheet, and they are read from there (until then only a top-level list was read, so every report parsed as clean). A path that does not exist is refused by name rather than reported as kicad-cli's bare exit code | live-verified in the kicad image (KiCad 9.0.2): the drone FC reference gives 0 errors and 1 warning, and a copy with U4's VIN label deleted fails with `pin_not_connected` and `power_pin_not_driven` (both reports are test fixtures) |
+| `kicad` | `kicad.run_drc` | Design rules check. `unconnected_items` counts unrouted connections from KiCad's `unconnected_items` report key (it read `unresolved`, which KiCad never writes, so an unrouted board counted zero). `rule_set` (a `.kicad_dru` path or its text) is applied: kicad-cli has no rules flag, so DRC runs on a copy of the board with the rules as its `<stem>.kicad_dru`, and `rule_set_applied` says so. `passed` is no error-severity violation and nothing unconnected, counted before `severity_filter`; warnings do not fail it, and the same rule holds for `kicad.run_erc`. Needs a kicad adapter image rebuild to deploy | unit-verified; report keys checked against kicad-cli 9.0.2 |
+| `kicad` | `kicad.export_bom` | Bill of materials from the schematic: one line per `group_by` group (`value` = value and footprint, `footprint`, or `reference` = one line per symbol), with references, value, footprint, quantity and DNP, as CSV or the same rows as JSON. The parser used to read `;`-separated rows while kicad-cli writes `,`, so every total was just the row count, and `group_by` never reached kicad-cli. Each line also carries the symbols' `MPN` and `Manufacturer` fields (grouped on, so different part numbers never share a line), and the result counts the placed (not DNP) lines with no MPN as `lines_without_mpn`, with `components_without_mpn` and `references_without_mpn`: the lines a fab house cannot buy against | live-verified in the kicad image (KiCad 9.0.2) on KiCad's own `pic_programmer` demo: 56 components on 36 lines |
+| `spice` (container) | `spice.run_simulation` | ngspice circuit simulation in the `spice-adapter` container (reached through `METAFORGE_ADAPTER_SPICE_URL`; the gateway image has no ngspice). `netlist` text or a `netlist_path` on the adapter workspace it shares with KiCad, so `kicad.export_netlist`'s SPICE output is simulated by path. One analysis card from `analysis_type` op/dc/ac/transient and `params`, or the netlist's own single card. Returns per-vector final/min/max (AC: magnitude dB and phase), decimated waveforms keyed with the scale, `convergence`, and ngspice's errors in `log` on failure. Backs the `run_spice` skill, whose tool nothing served before. Needs the new image built and started to deploy | unit-verified against real ngspice-44.2 rawfiles; checked in the container (divider 2.5 V, RC transient 1 - e^-5 at 5 tau, RC low-pass -55.96 dB at 100 kHz) |
+| `firmware` (container, opt-in) | `firmware.build` | Compiles a PlatformIO project in the `firmware-adapter` container (reached through `METAFORGE_ADAPTER_FIRMWARE_URL`; runs under the `firmware` compose profile, the gateway image has no toolchain). `project_path` on the adapter workspace, or `files` with `board` and `framework`; the sources are copied, never changed. Installed platforms: ST STM32 20.0.0 with STM32Cube for the F4, F7 and H7 families, and Espressif 32 7.1.3 with ESP-IDF for the ESP32; a board outside those platforms is refused, and one whose framework package is not in the image (another STM32 family) is `not_established` naming the package PlatformIO could not download. Board data is read from the installed platforms' manifests, so nothing waits on the network. A `FreeRTOSConfig.h` on an STM32 compiles in the FreeRTOS V11.3.1 kernel (STM32Cube does not) with the GCC port for the series, and for a CM4F/CM7 port the FPU flags it needs (`-mfloat-abi=softfp`). Returns the compiler's and linker's errors and warnings at file:line (including undefined references and region overflows), flash and RAM used against the part from PlatformIO's size check, the platform and package versions, the build log, and the `elf_path`. A build that timed out is `not_established`. The `configure_rtos` generator now writes the kernel options the real kernel requires (hooks, tick width, Cortex-M interrupt priorities and handler names, `configCPU_CLOCK_HZ` from `cpu_clock_hz` or CMSIS `SystemCoreClock`) | unit-verified against recorded PlatformIO output; live-verified in the image with networking off: the generator's FreeRTOS app for STM32F4-Discovery builds, a broken `main.c` fails at its line, the Nucleo-F767ZI and Nucleo-H753ZI build, an ESP-IDF app builds |
+| `firmware` | `firmware.static_check` | Static analysis with PlatformIO's `pio check` on the same project input as `firmware.build`: cppcheck by default, clang-tidy with `tools` (both baked into the image, so it runs offline). Each finding comes back with its tool, severity (high, medium, low), rule id, CWE and file:line, most severe first, with counts per severity. `passed` is no finding at or above `fail_on` (default high), so style findings alone do not fail it, as with ERC and DRC. `suppressions` take a cppcheck rule id, an optional file and a required reason, and are echoed in the result. A check with no report, a checker that did not complete, a timeout or a missing package is `not_established` | unit-verified against recorded `pio check` output; live-verified in the image with networking off: a defective `main.c` fails on cppcheck's `nullPointer` and `arrayIndexOutOfBounds` (high) with the unused variable as low, clean code passes, a suppression removes its rule, and clang-tidy runs alongside |
+| `firmware` | `firmware.run_emulated` | Runs a built ELF on an emulated board and checks it: `uart_expect` (regexes in order), `uart_forbid`, and on Renode `memory_expect` (32-bit words, masked). Renode 1.17.0 (MIT) runs `disco_f407vg` (USART2), `nucleo_f767zi` and `nucleo_h753zi` (USART3); Espressif QEMU 9.2.2 (GPL-2.0, a separate process) runs the ESP32, from a 4 MB flash image merged from the build's bootloader, partition table and app. Any other board, a missing emulator or a memory check on QEMU is `not_established`, never a pass. Each Renode board's SVD is cached in the image, so a run needs no network. Functional, not cycle-accurate: tick counts and timing from a run are not evidence | unit-verified with recorded Renode output; live-verified in the image: the generated FreeRTOS app boots on Renode's STM32F4-Discovery, both tasks print their start line and the generated LED pin reads back high in GPIOD ODR; both Nucleo boards print over USART3; an ESP-IDF app prints from `app_main` on Espressif QEMU; all with networking off |
+| `openfoam` (container, opt-in) | `openfoam.run_internal_flow` | Steady incompressible internal flow with OpenFOAM 11 in the `openfoam-adapter` container (reached through `METAFORGE_ADAPTER_OPENFOAM_URL`; runs under the `cfd` compose profile, the gateway image has no OpenFOAM). Fluid domain as inlet, outlet and wall STL surfaces on the adapter workspace; `blockMesh` and `snappyHexMesh`, then `foamRun` with the `incompressibleFluid` module, laminar or k-omega SST. Returns the static pressure drop, flow rate, mesh quality, final residuals, whether the residual controls were met and how far the pressure drop moved over the end of the run. A failed run reports its stage and OpenFOAM's reason; a run that does not converge says so. **Validated** against a straight round pipe at Re = 50 (finest mesh within 0.1% of the Hagen-Poiseuille value with the developing-flow entrance term); **not validated** for k-omega SST against measurements, so treat turbulent results as a screening estimate. One run at a time; capped cells, processes and wall time | unit-verified with a fake OpenFOAM replaying a captured run; live-verified on the sandbox |
+| `kicad` | `kicad.export_netlist` | Netlist export in kicad-cli 9's formats (`kicadsexpr`, `kicadxml`, `spice`, `spicemodel`, `cadstar`, `orcadpcb2`, `pads`, `allegro`; `kicad` stays an alias of `kicadsexpr`). It passed `--format kicad`, which kicad-cli 9 rejects ("Invalid format"). Net and component counts are read from KiCad's own format and are null for the others, not zero | live-verified in the kicad image (KiCad 9.0.2) on KiCad's own `pic_programmer` demo: 111 nets, 63 components |
+| `kicad` | `kicad.export_gerber` | Gerber set for fabrication. The layers go to kicad-cli as one comma-separated list (a repeated `--layers` kept only the last). With no `layers` given, the default set takes in the board's inner copper (In1.Cu, In2.Cu, ...), and the inner layers' `.g1`/`.g2` files are listed (a 4-layer job used to come back without its planes). The default set also takes in the paste (stencil) layers, F.Paste and B.Paste, and their `.gtp`/`.gbp` files are listed (they were written but dropped from the list). `layers_exported` names only the layers a file was written for, read from the files on disk (`layer_files` maps each to its file); a requested layer with no file, such as a name kicad-cli does not know and silently skips, is in `layers_missing`, and `paste_layers` names the stencil layers written. `pcb_v1` gates on `missing_paste_gerbers`. A missing board is refused by name | live-verified in the kicad image (KiCad 9.0.2) on KiCad's own `pic_programmer` demo: 7 layers; on the 4-layer drone flight controller: 9 |
+| `kicad` | `kicad.generate_schematic` | Phase 2 (KiCad write). A KiCad 9 schematic from a circuit description: components as KiCad symbol and footprint lib_ids with value and fields, nets as `REF.PIN`. Symbols are copied from the installed KiCad libraries (`extends` flattened, every unit of a multi-unit part placed), packed on a sheet sized to fit, and joined by global labels on each pin's connection point; a pin on no net gets a no-connect flag, a net whose power inputs nothing drives a `PWR_FLAG`, and the project gets its `.kicad_pro` and library tables. KiCad's ERC then runs on it and the netlist KiCad exports is compared net by net with the circuit; `verdict` pass is no ERC error and every net matched. An unknown symbol, library or pin is refused by name. A part drawn with a symbol whose name is not its part number (the `MPN` field, or a value that reads as one; generic libraries such as `Device` and `Connector` excepted), say a BMI270 as `Sensor_Motion:BMI160`, is listed in `symbol_substitutions` and carries a `Symbol_Substitute` field in the schematic; until the component's `symbol_pinout_checked` says how its pins were compared with the datasheet it is also in `warnings` and counted by `unconfirmed_symbol_substitutions`, which `pcb_v1` gates on. The BOM keeps the real MPN | unit-verified on symbols cut from KiCad's own libraries; live-verified in the kicad image (KiCad 9.0.2, Freerouting 2.5.0) with networking off on two circuits, an LDO with an LED and an op-amp buffer whose second unit is unused: ERC 0 violations, every net matched |
+| `kicad` | `kicad.generate_pcb` | A KiCad 9 board from the circuit's `board` (size, layers, clearance, track and via sizes, hole clearance, a power net class, ground pour, corner mounting holes, and on a 4-layer board solid `inner_planes` on In1/In2 marked as power layers), built with pcbnew in a worker under the system Python. The board's minimum hole, via and track follow the requested sizes, so DRC does not reject a smaller via as out of range. A component may name its own 3D `model` where a library footprint's reference is wrong or missing. Custom fields (MPN) are data, not silkscreen. Footprints come from the installed libraries; pad nets come from the netlist KiCad exports from the schematic (as KiCad's own update-from-schematic does, including each no-connect pin's `unconnected-(...)` net); each footprint is linked to its symbol. Placement is deterministic: connectors on the left edge, the main IC (more than 16 pads) as near the centre as fits, then each part beside the part it is most connected to. Shared signal nets count first; a rail or ground counts by how many pads the neighbour has on it, so a decoupling capacitor lands by the IC with the most supply pins. ICs with more than 16 pads keep a 2 mm margin for fanout. Parts that do not fit are listed. A starting point for review, not an optimum | live-verified in the kicad image (KiCad 9.0.2, Freerouting 2.5.0) with networking off on two circuits, an LDO with an LED and an op-amp buffer whose second unit is unused, and on the drone flight controller: an STM32F405 LQFP-64 and 33 other parts placed on 40 x 40 mm |
+| `kicad` | `kicad.autoroute_pcb` | Routes a copy of the board with Freerouting 2.5.0 (GPL-3.0, a separate Java 25 program) through KiCad's Specctra DSN export and session import, pours and fills the ground net on both outer layers (solid pad connection: thermal spokes to small pads starved), then runs KiCad's DRC with schematic parity when the schematic sits beside it. On a board with inner planes, every SMD pad on a plane net is first fanned out to a via before routing. The via goes under an IC's body where there is room, so the signal pins beside it keep their way out, and never into a footprint's keepout. The fanout is locked, so the router keeps it. Freerouting reaches a plane only by dropping vias of its own, and on the drone board it left 5 to 21 supply connections unrouted without the fanout. Returns tracks, vias, track length, unrouted connections, DRC errors and warnings, and parity issues; `pass` only when all three are zero. Freerouting's native `freerouting-cli` build was rejected: it crashes mid-route on a GraalVM serialization error and then waits forever | live-verified in the kicad image (KiCad 9.0.2, Freerouting 2.5.0) with networking off on two circuits, an LDO with an LED and an op-amp buffer whose second unit is unused: 0 unrouted, 0 DRC errors, schematic parity clean (one silkscreen-overlap warning on the LDO board); the 4-layer drone flight controller with GND and +3V3 planes: 0 unrouted and 0 DRC errors in one round, with parity clean and a complete STEP |
+| `kicad` | `kicad.export_3d` | The board as STEP (for the enclosure) or GLB (for viewing) with `kicad-cli pcb export`, the components' 3D models included. The image carries KiCad's STEP models for the families generated boards use (SMD passives, common IC packages, crystals, USB, JST, vertical headers and sockets, switches; 1.1 GB of the 4.9 GB set; KiCad 9 footprints reference STEP, so the VRML copies are dropped). kicad-cli leaves a missing model out without a word, so the adapter resolves every footprint's model path itself and lists the missing ones; `complete` is false then | live-verified in the kicad image with networking off on a generated, routed board: STEP and GLB complete; a Molex part, whose family the image does not carry, named as missing |
+| `kicad` | `kicad.render_pcb` | A ray-traced PNG of the board (`kicad-cli pcb render`): `view` top, bottom or iso (perspective, floor and shadows), optionally inline as base64 to show the person. (kicad-cli reads a `-45` rotation as an option, and its `-h` is height, not help: the views are fixed here.) | live-verified in the kicad image with networking off on a generated, routed board |
+| `kicad` | `kicad.export_svg` | Plots a schematic (one SVG per sheet, `kicad-cli sch export svg`, no drawing sheet) or a board (one SVG of `layers`, default the top side: copper, paste, silkscreen, mask and outline, cropped to the board) for previews. `twin.record_design_files` calls it for every schematic and board it records | unit-verified |
+| `kicad` | `kicad.update_components` | Value, footprint and fields of named references (every unit of a multi-unit part) in a schematic, and value and fields of the board's footprints, written as a new revision in a new folder, then ERC on it. A footprint change marks the board stale -- regenerate it from the schematic -- rather than swapping footprints in place. An unknown reference is refused by name | live-verified in the kicad image with networking off on a generated, routed board: a value and MPN change reaches the BOM; the original schematic is untouched |
+| `kicad` | `kicad.export_drill` | Drill files (Excellon, millimetres, plated and non-plated holes separately) with the hole count per file | live-verified in the kicad image (KiCad 9.0.2) on KiCad's own `pic_programmer` demo: 244 plated and 7 non-plated holes |
+| `kicad` | `kicad.export_pos` | Pick-and-place file (CSV, millimetres, both sides): each component's reference, value, package, position, rotation and side | live-verified in the kicad image (KiCad 9.0.2) on KiCad's own `pic_programmer` demo |
+| `kicad` | `kicad.get_pin_mapping` | Each component's pins with name, electrical type and net, from the S-expression netlist read as a tree (it split the text on `(comp `, and asked kicad-cli for a format it no longer accepts) | live-verified in the kicad image (KiCad 9.0.2) on KiCad's own `pic_programmer` demo |
 | `gazebo` (opt-in) | `gazebo.run_simulation` | Headless physics/dynamics simulation of an SDF/world file | _none yet_ |
 | `gazebo` | `gazebo.validate_world` | Validate an SDF/world file's basic structure before simulating | _none yet_ |
 | `gazebo` | `gazebo.extract_results` | Parse an existing Gazebo stats JSON file | _none yet_ |
 | `omniverse_usd` (opt-in) | `omniverse_usd.convert_glb_to_usd` | Convert a GLB (from cadquery/freecad/occt-converter) into an OpenUSD stage, preserving part names and transforms | _none yet_ |
 | `omniverse_usd` | `omniverse_usd.validate_usd_minimum` | Cheap structural viability gate on a USD stage (default prim, mesh count, metersPerUnit) before downstream simulation dispatch | _none yet_ |
 | `omniverse_usd` | `omniverse_usd.describe_stage` | Basic structural info about a USD stage (up axis, scale, prim paths, mesh count) | _none yet_ |
+| `simready` (opt-in) | `simready.search` | Find packages in NVIDIA SimReady Central by the words of their name, optionally from one publisher; each result is a commit-pinned `package_url` with its dataset licence. Packages under a licence MetaForge does not store unread are left out unless `include_unaccepted` | unit-verified |
+| `simready` | `simready.inspect` | Report one package without keeping it: the licence as the dataset, manifest, licence file and USD layer state it and whether it is accepted; then every USD layer checked against its sha256, and the stage's bounding box (m), mass per rigid body (kg), joints, contact friction and restitution, semantic labels, physics backends and SimReady conformance | unit-verified |
+| `simready` | `simready.import` | Fetch one package onto the adapter workspace under `simready/`, refused unless every licence statement agrees on an accepted licence and every file matches its sha256: the USD layers, a GLB preview (millimetres and Z up like the STEP converter's models, each face in its material's colour), `LICENSE.txt`, `ATTRIBUTION.txt` and `simready.json`, plus a `library.register_component` body. Textures only with `include_textures` | unit-verified |
+| `simready` | `simready.attribution` | The credit lines the imported parts' licences ask for, from the folders `simready.import` wrote | unit-verified |
 | `isaac_sim` (opt-in) | `isaac_sim.run_physics` | Dispatch a PhysX physics job to the `nvcr.io/nvidia/isaac-sim` container via ephemeral GPU compute; caller supplies the container command, requires `accept_eula=true` | _none yet_ |
 | `isaac_sim` | `isaac_sim.render_scene` | Dispatch an RTX render job to the same container | _none yet_ |
 | `project` (injected) | `project.create` | Create a project (rejects a case-insensitive duplicate name) | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
@@ -88,15 +1544,27 @@ when the gateway supplies their backend).
 | `project` | `project.delete` | Permanently delete a project by id | _none yet_ |
 | `memory` (injected) | `memory.retrieve_similar_experience` | Semantic recall of past agent experiences | _none yet_ |
 | `memory` | `memory.list_insights` | List consolidated memory insights | _none yet_ |
-| `session` (injected) | `session.start` | Open an agent session to record narrative (MET-494) | live-verified |
+| `session` (injected) | `session.start` | Open an agent session to record narrative | live-verified |
 | `session` | `session.log_event` | Append a thought / action / decision / … to a session | live-verified |
 | `session` | `session.complete` | Close a session with terminal status + summary | live-verified |
-| `offer_resolver` (injected, no required backend) | `distributors.resolve_offers` | Fan out to whichever of Digi-Key/Mouser/Nexar are configured, per MPN — quantity-aware price-tier selection, MOQ-forced overbuy, stock sufficiency (never just `stock>0`), deadline-vs-cost ranking. Registers even with zero distributor credentials; "no offers found" is a normal result, not an error. There is no FX-rate source in this layer, so offers spanning more than one currency are flagged via `currency_mismatch` rather than compared as if same-currency — a caller must check each offer's own `currency` before trusting cross-offer cost ranking (MET-436) | live-verified (fidel-dev) |
-| `web` (requires `BRAVE_API_KEY`) | `web.search` | Ranked public-web results (title/url/snippet) via the Brave Search API — current datasheets, standards, vendor docs, errata. Not registered at all when the key is unset, so an agent never sees a tool that cannot work. A rate-limit or API failure **raises** rather than returning an empty list, so the agent can't report "no results found" for a query that was never answered; 429s are retried with backoff first (MET-7) | live-verified |
-| `web` | `web.fetch` | Fetch one public http(s) URL as readable text — **HTML and PDF** (datasheets, app notes, reference manuals). SSRF-guarded: private/loopback/link-local hosts refused on the initial URL **and every redirect hop**; http/https + ports 80/443 only. HTML capped at 2 MB; a PDF is read up to `max_pages` (default 30) and says so in-band when later pages were skipped, is never byte-truncated (that corrupts the xref table), and an oversize/scanned/encrypted PDF is refused with the reason. Content is returned inside an explicit untrusted-data fence. Pair with `knowledge.ingest` (`source_path=<url>`) to keep a source (MET-7) | live-verified |
+| `farnell` (credential-gated) | `farnell.search`, `farnell.get_product`, `farnell.get_pricing`, `farnell.get_availability` | Farnell (element14) Product Search API, priced in the store's currency (`FARNELL_STORE`, default `uk.farnell.com`, GBP; an unmapped store needs `FARNELL_CURRENCY` or returns no prices). Registers only with `FARNELL_API_KEY`. Answers cached 6 h; one call serves details, pricing and availability for a part. Field mapping written from element14's published API, not yet run against a live key | unit-verified with recorded-shape mocks |
+| `arrow` (credential-gated) | `arrow.search`, `arrow.get_product`, `arrow.get_pricing`, `arrow.get_availability` | Arrow itemservice v4 token search. Maps part, manufacturer, description, datasheet, stock on hand, price breaks (cheapest per break across sources, with their currency) and minimum order quantity; lead time and lifecycle are left unknown, not guessed. Registers only with `ARROW_LOGIN` and `ARROW_API_KEY`. Not yet run against a live key | unit-verified with recorded-shape mocks |
+| `mouser` (credential-gated) | `mouser.*` call budget | Answers cached (`MOUSER_CACHE_TTL_SECONDS`, default 6 h) and real calls counted against `MOUSER_DAILY_LIMIT` (default 1000) per UTC day; one call serves details, pricing and availability for a part. With the budget spent a stale answer is served if there is one, otherwise the lookup returns nothing and logs `distributor_daily_limit_reached` | unit-verified |
+| `offer_resolver` (injected, no required backend) | `distributors.resolve_offers` | Fan out to whichever of Digi-Key/Mouser/Nexar/Farnell/Arrow are configured, per MPN: quantity-aware price-tier selection, MOQ-forced overbuy, stock sufficiency (never just `stock>0`), deadline-vs-cost ranking. Registers even with zero distributor credentials; "no offers found" is a normal result, not an error. There is no FX-rate source in this layer, so offers spanning more than one currency are flagged via `currency_mismatch` rather than compared as if same-currency: a caller must check each offer's own `currency` before trusting cross-offer cost ranking | live-verified (fidel-dev) |
+| `web` (requires `BRAVE_API_KEY`) | `web.search` | Ranked public-web results (title/url/snippet) via the Brave Search API — current datasheets, standards, vendor docs, errata. Not registered at all when the key is unset, so an agent never sees a tool that cannot work. A rate-limit or API failure **raises** rather than returning an empty list, so the agent can't report "no results found" for a query that was never answered; 429s are retried with backoff first | live-verified |
+| `web` | `web.fetch` | Fetch one public http(s) URL as readable text — **HTML and PDF** (datasheets, app notes, reference manuals). SSRF-guarded: private/loopback/link-local hosts refused on the initial URL **and every redirect hop**; http/https + ports 80/443 only. HTML capped at 2 MB; a PDF is read up to `max_pages` (default 30) and says so in-band when later pages were skipped, is never byte-truncated (that corrupts the xref table), and an oversize/scanned/encrypted PDF is refused with the reason. Content is returned inside an explicit untrusted-data fence. Pair with `knowledge.ingest` (`source_path=<url>`) to keep a source. A site that turns automated readers away is reported as such, not as a bare transport error: the error names the host, how it refused (a Cloudflare or Akamai challenge, no answer within the timeout, a dropped connection) and the sources that work instead (`digikey.get_product` / `mouser.get_product` for part data and a datasheet link, `knowledge.search`, or a person's own download added with `knowledge.ingest`). Measured from the sandbox: DigiKey's product pages answer 403 with a Cloudflare challenge, and www.st.com and mouser.com datasheet links never answer. web.fetch identifies itself honestly and does not try to get past either | live-verified |
+
+The KiCad exports (`export_bom`, `export_netlist`, `export_gerber`,
+`export_drill`, `export_pos`) never overwrite. With no output path
+each writes a new folder of its own under `exports/` on the adapter workspace; a
+named `output_dir` must be new or empty and a named `output_file` must not
+exist, or the call is refused by name. That makes them producing writes, not
+destructive ones, so a design-flow phase task (server or client mode) may run
+them: as destructive tools they were refused to every phase task, and no flow
+could produce its gerbers, placement file or BOM.
 
 Session capture also runs **server-side** (every tool call → an `action`
-event, MET-496) — see [`session-capture.md`](session-capture.md) for the full
+event) — see [`session-capture.md`](session-capture.md) for the full
 three-layer model and install.
 
 **MCP resources** (read-only, addressable):
@@ -116,7 +1584,7 @@ external MCP client like Claude Code.
 
 | Tool | Purpose | UAT scenario |
 |---|---|---|
-| `chat.set_project_scope` | Rescope the CURRENT chat thread to a project (id/name/substring, or `none` to leave) — in place, preserving the conversation (MET-580) | see [`cli-reference.md`](cli-reference.md#project-scoped-chat) |
+| `chat.set_project_scope` | Rescope the CURRENT chat thread to a project (id/name/substring, or `none` to leave) — in place, preserving the conversation | see [`cli-reference.md`](cli-reference.md#project-scoped-chat) |
 
 ### CAD kernel capability contract
 
@@ -130,10 +1598,10 @@ one of these tags, no skill code changes required.
 
 | Capability | `cadquery` tool | `freecad` tool | Guaranteed fields (both backends) | Backend-only extras |
 |---|---|---|---|---|
-| `cad_generation` | `create_parametric` | `create_parametric` | `shape_type` ∈ {bracket, plate, enclosure, cylinder}, `parameters`, `material`, `output_path` → `cad_file`, `volume_mm3`, `surface_area_mm2`, `bounding_box`, `parameters_used` | — (field-for-field identical) |
+| `cad_generation` | `create_parametric` | `create_parametric` | `shape_type` ∈ {bracket, plate, enclosure, cylinder}, `parameters`, `material`, `output_path` → `cad_file`, `volume_mm3`, `surface_area_mm2`, `bounding_box`, `parameters_used` | Both backends add `mass_kg` (volume × the material library's density) when `material` is given; omitted, never defaulted, when it isn't. A `material` the library does not hold is refused with the closest entries |
 | `cad_operations` | `boolean_operation` | `boolean_operation` | `input_file_a`, `input_file_b`, `operation` ∈ {union, subtract, intersect}, `output_path` → `output_file`, `result_volume`, `result_area` | — (field-for-field identical) |
 | `cad_analysis` | `get_properties` | `get_properties` | `input_file` → `volume`, `area`, `center_of_mass`, `bounding_box` | CadQuery adds `inertia`; FreeCAD's does not return it |
-| `cad_export` | `export_geometry` | `export_geometry` | `input_file`, `output_format`, `output_path` → `output_file`, `file_size_bytes`, `format` | CadQuery supports `step/stl/obj/brep/amf/svg`; FreeCAD supports only `step/stl/obj/brep` (no `amf`/`svg`), and errors on non-STEP today. Both include `step_base64` when the export is STEP (MET-489) — pass it to `twin.commit_geometry`'s `step_base64` argument to persist the result to MinIO + a `WorkProduct` node; without that follow-up call the file only exists in the adapter container and is lost on redeploy. |
+| `cad_export` | `export_geometry` | `export_geometry` | `input_file`, `output_format`, `output_path` → `output_file`, `file_size_bytes`, `format` | CadQuery supports `step/stl/obj/brep/amf/svg`; FreeCAD supports only `step/stl/obj/brep` (no `amf`/`svg`), and errors on non-STEP today. Both include `step_base64` when the export is STEP — pass it to `twin.commit_geometry`'s `step_base64` argument to persist the result to MinIO + a `WorkProduct` node; without that follow-up call the file only exists in the adapter container and is lost on redeploy. |
 | `cad_scripting` | `execute_script` | `execute_code` | Script assigns its result to a variable named `result` | Different call shape: CadQuery is stateless (`{script, output_path}` → one file); FreeCAD is session-based (`{session_id, code}` against a live document → `obj_id`, needs a separate `open_session`/`measure`/`export_model`/`close_session` sequence, see `generate_cad_script`'s `_run_freecad_code`) |
 
 **A verification step (or anything else consuming this contract) should rely
@@ -150,11 +1618,27 @@ automatically. Capabilities outside this table (FreeCAD's `PartDesign`/
 `create_assembly`/`generate_enclosure`) are intentionally kernel-specific and
 not part of this uniform contract — FreeCAD's session/feature-tree model is a
 categorically different, stateful capability CadQuery cannot replicate.
+`create_assembly` and `generate_enclosure` also return `volume_mm3` and
+(when a `material` is given) `mass_kg`, computed the same way as
+`create_parametric` above — for `create_assembly` this is a first-order
+estimate (summed part volume × one material's density), not per-part-accurate,
+since `AssemblyPart` doesn't carry a per-part material.
 
-## Dashboard routes (11)
+**Measured properties reach the Twin, not just the tool response**: the three
+mechanical skills that commit CAD geometry (`generate_cad`,
+`generate_enclosure`, `create_assembly`) pass whichever of `volume_mm3`,
+`surface_area_mm2`, `mass_kg`, and `bounding_box` (as `bbox_mm`) the tool
+actually returned to `commit_geometry`'s `extra_metadata` argument
+(`domain_agents/shared/commit_geometry.py`'s `measured_metadata_from_cad_result`),
+which flattens them onto the committed work product's top-level `metadata`.
+This is what lets a constraint expression like
+`wp.metadata.get('mass_kg', 0) <= 4.5` read a real measured value instead of
+always the vacuous-pass default.
+
+## Dashboard routes (14)
 
 Served by Vite under `dashboard/` — boot with
-`docker compose up gateway dashboard` and open `localhost:5173`.
+`docker compose up gateway dashboard` and open `localhost:3000`.
 
 | Path | Purpose | Backed by |
 |---|---|---|
@@ -163,12 +1647,15 @@ Served by Vite under `dashboard/` — boot with
 | `/sessions` | Workflow run list | `GET /v1/sessions` |
 | `/sessions/:id` | Session detail, agent messages | `GET /v1/sessions/{id}` |
 | `/approvals` | Pending change-proposal review | gateway approvals API |
-| `/bom` | BOM viewer | `GET /v1/bom/...` |
-| `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB | `GET /v1/twin/files/...` |
+| `/requirements` | Per-requirement quality flags (clarity/atomicity/quantified/traceability/verification-readiness), pairwise numeric-bound conflict detection with the conflicting pair highlighted, and a per-product-type completeness checklist; "Fix with AI" proposes a rewrite via the Requirement Author agent (never applied automatically). Evidence matrix (spec step 16): requirements × claims × evidence, one row per requirement with a live-derived status (`pass`/`uncertain`/`fail`/`no_data`/`stale`) from the most current cited evidence's own margin, flagging stale evidence even when the claim is still SUPPORTED by other current evidence; expandable evidence detail (method/tier/value/limit/margin/staleness) and a Structure-tab link per row; client-side CSV/MD export. Constraint editor: a "+ New constraint" form picks metric/operator/limit/unit/target node directly — no hand-typed Python expression — reusing the exact same `twin.record_constraint_set` validation as every MCP caller; the new requirement appears immediately on the matrix (honestly `no_data` until a claim cites it). The editor and matrix rows also carry `verification_method`/`expected_evidence` — a row where both are blank renders a red "not declared" badge, distinct from the matrix's own `no_data` status (which means "no evidence recorded yet", not "never said what verification it expects"). Design loop: a "Start design loop" form runs the closed propose→build→simulate→evaluate→revise loop against a CAD work product, renders the resulting iteration timeline (parameter/objective values, feasibility, status per candidate), and an "Approve winner" action once converged. Gate review: pick required claims + a maturity level + optional comment, Approve (evidence-gated — blocks on `no_data`/`fail` unless waived) or Reject. There is no reviewer field to type into: it was removed, because a box anyone can type a name into is a box the agent can type a name into (a human veto that refuses even a fully-satisfied set of claims); a history list shows every past attempt. Feature library: pick a named parametric feature (`bolt_pattern` -- a mounting plate with a circular bolt-hole pattern, or `rib` -- a triangular gusset), fill its typed parameters, generate a standalone CAD_MODEL work product from it via `generate_parametric_feature` (`domain_agents/mechanical/skills/`, a thin macro layer over the same Design IR entities `generate_cad_ir` already lowers -- only 2 of the ticket's 7 named features ship in this first cut, the rest are the same pattern, deliberately deferred). Traceability coverage heatmap: 5 tiles (needs→requirements, requirements→architecture, requirements→verification, verification→evidence, critical-requirements→evidence), computed live by `TraceabilityAgent.coverage()` (previously real, tested code with no gateway route exposing it at all); `null`/"N/A" for a genuinely empty denominator, never 0% or 100%. Advisory only -- the real live gate is `twin.attempt_promotion` above, consuming the evidence matrix, not this coverage summary. Release packages: a "Create release package" action and a list of past releases, each showing its real hierarchy/BOM/evidence/decision counts and the count delta against the immediately-prior release; creation is refused (a toast names the failing check(s)) unless the G8 release gate currently passes. Test plan: a "Generate test plan" action mechanically deriving one `verification_case` per real requirement with `verification_method="test"` from its own metric/operator/limit/unit/target-node fields, rendered as a step + acceptance-value table -- an empty result honestly means the project has no test-method requirements yet, not an error | `GET /v1/requirements/quality`, `GET /v1/requirements/matrix`, `GET /v1/requirements/coverage`, `POST /v1/requirements/{id}/fix`, `POST /v1/requirements/constraints`, `POST /v1/design-loop/start`, `GET /v1/design-loop/{loop_id}`, `POST /v1/design-loop/{loop_id}/approve`, `POST /v1/promotion/attempt`, `GET /v1/promotion`, `POST /v1/features/generate`, `GET /v1/releases`, `POST /v1/releases`, `GET /v1/testplans`, `POST /v1/testplans` |
+| `/bom` | BOM viewer, with a flat/hierarchical toggle: the hierarchical view derives an EBOM from the product hierarchy, quantities multiplied down the CONTAINS tree. `GET /v1/bom` also takes an optional `category` filter (case-insensitive exact match against `BOMItem.specifications.category`, e.g. `category=fastener` for a fastener list; no dashboard control for it yet, forge CLI/gateway-only). A "Supply-chain risk" button scores every real BOM line's real resolved distributor offers (single-source, lead time, lifecycle, price volatility, stock level, compliance) through the already-real, already-tested `BOMRiskScorer` -- this engine existed fully wired to a full `hardware_v1` design-flow run but had no on-demand route for an arbitrary project's existing BOM until this ticket. Compliance (RoHS/REACH) always scores as "missing both" since no distributor adapter in this codebase sources those flags yet -- a known, documented limitation, not a bug. Flagged (high/critical) parts render as badges with each factor's real score/description on hover. A line with no price reads "no price" (`unitPrice: null` from `GET /v1/bom`, never 0), and when any line is unpriced the header shows a partial total with how many lines are priced; the Structure tab marks a branch's partial cost the same way (`>=` and a coverage tooltip) | `GET /v1/bom/...`, `GET /v1/bom/hierarchical`, `GET /v1/bom/risk` |
+| `/sim` | Load-case editor + list, with a 3D geometric face picker for fixed/load faces; FEA results list with a numeric side-by-side version-compare panel, per project. The opened result renders in 3D (stress, displacement or temperature colour map with legend and peak, deformed shape with a scale slider, load and fixture markers, hover probe), two selected results compare side by side in 3D with a synced camera and one shared colour scale, and a recorded mesh-convergence sweep is charted; a result recorded without a field shows a "Field not stored" note | `GET/POST /v1/simulation/load-cases`, `POST /v1/simulation/named-faces`, `GET /v1/simulation/results`, `GET /v1/simulation/results/{id}/field` |
+| `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB; its Structure tab shows the product hierarchy tree-table with per-node mass/cost rollups, allocation owner/discipline, and a per-node interfaces badge (from `twin.commit_system_architecture`'s own interfaces); its Assembly tab's mates/joints are editable in place (add/delete, base/follower picked from the assembly's own part list) and persist directly onto the node with no live FreeCAD session or re-export needed. Its History tab now also shows a parameter-level diff against a `SUPERSEDES` predecessor when one exists — "editing" a parametric feature is re-generating it with the same name and a changed parameter value, and `generate_cad_ir` now threads that value into the committed node's `geometry_features.parameters` so this diff has something real to read. A loaded `robot_description` node's joint-slider overlay gets a "Use as load case" button: computes each joint's quasi-static reaction force/moment at the current slider pose (link mass/CoM read straight from the posed URDF, gravity only — no velocity/acceleration/trajectory terms) and shows the worst-loaded joint inline. A Structure-tab node with real committed geometry gets a "DFM check" button: runs the 3D-print overhang check against a supplied mesh file path (no mesh-generation UI exists yet, so this is an explicit input, not an assumption) and lists each flagged face's name/tilt/area -- a face-by-face list, not a 3D-highlighted contour (that's a separate future ticket). The same node also gets a "Release for manufacture" button: chains `twin.stage_work_product_file` (real MinIO-first blob resolution) into the already-real `cadquery.export_geometry` to produce a real STL (3D print) or STEP (CNC) file from the node's committed geometry, returned base64-encoded (same shape `cadquery.export_geometry`'s own `step_base64` field uses) and downloaded client-side. 3MF export and sheet-metal flat patterns (no flat-pattern geometry model exists in this codebase) are explicitly out of scope for this first cut. The node History section now also lets you pick any two of a work product's own metadata revisions to diff: `GET /v1/twin/nodes/{id}/diff` was real and already tested but had zero dashboard consumers until this ticket. A separate "Geometry changes vs. previous version" panel shows a real volume/area/bounding-box delta against a `SUPERSEDES` predecessor (`GET /v1/twin/nodes/{id}/geometry-diff`, new): unlike the metadata-revision diff, this compares two DIFFERENT nodes' actual STEP files via `freecad.describe_step_file`, since `/iterate` never re-uploads a blob, so no two revisions of one node ever have different geometry -- a true volumetric/mesh boolean diff visualization (3D "added/removed volume" highlight) stays out of scope, matching this same page's other deferred 3D-result visualizations. `GET /v1/controls/repeatability-estimate` (no dashboard control yet — forge CLI/gateway-only): a worst-case end-effector repeatability estimate from real `metadata.assembly.joints` kinematics, new in this ticket since no multi-joint chain composition or Jacobian existed anywhere in this codebase before it — a serial-chain forward-kinematics solve plus a numerical (finite-difference) Jacobian, both reusing `api_gateway/constraint/kinematics.py`'s Rodrigues-formula convention. Propagates each real actuator's real, manufacturer-cited encoder resolution (AK80-8 KV60: 15-bit output encoder, cubemars.com's own product page) through the Jacobian; for the arm's igus RL-SE actuators, no per-joint encoder resolution is published anywhere by igus (checked their product pages, the ReBeL technical wiki, and their public documentation), so their own published whole-arm repeatability spec (+/-1mm, igus.com/product/22534) is used as a real, cited, conservative stand-in for those joints' combined contribution rather than a fabricated per-joint decomposition. The ticket's other half — tracking error, stability margins, controller tuning, Bode/step-response plots — needs real closed-loop-controls analysis and the Planner's own candidate library (python-control) is unscheduled; not built here, same reasoning as the deferred Gazebo/Isaac dynamics work. A Structure-tab node with real committed geometry also gets a "Check interference" button: a real boolean-intersection clearance/interference check (`GET /v1/twin/interference-check`, new) against a second, explicitly-named part's committed STEP geometry -- `cadquery.boolean_operation(operation="intersect")` already existed and already returned a real overlap volume/area, just never named or wired for this purpose; `result_volume > 0` means the two parts interfere. Pairwise only (not an all-pairs sweep across an entire assembly) and an ISO 286 tolerance-grade/hole-shaft fit classification (H7/g6-style) stays out of scope -- real, nontrivial standard-table work with no identified real use case on this project today, unlike the clearance check itself which needed no new geometric algorithm. A Structure-tab node with a linked `technical_drawing` work product gets a "Technical drawing" button: surfaces the real dimensions/GD&T callouts/surface-finish/inspection-requirement data `generate_technical_drawing` (domain_agents/mechanical, predates this ticket) already recorded -- that skill's own docstring is explicit that it produces structured data, not a rendered 2D vector drawing, and no TechDraw-equivalent generator exists anywhere in this codebase, so a rendered drawing view stays out of scope here too. The panel also exposes a human approval gate (`POST /v1/twin/nodes/{id}/approve-technical-drawing`, new) mirroring `design_sketch`'s own approve-then-version pattern exactly: flips `metadata.approved`/`approved_at`/`approved_by` and records a real `VersionService` revision rather than a silent overwrite. `GET /v1/technical-drawings?work_product_id=` lists every `technical_drawing` linked to a part via a real `PARENT_OF` edge traversal (the skill already created these edges; this ticket is the first dashboard consumer of them) | `GET /v1/twin/files/...`, `GET /v1/twin/hierarchy`, `PATCH /v1/twin/nodes/{id}/assembly-joints`, `GET /v1/twin/nodes/{id}/diff`, `GET /v1/twin/nodes/{id}/geometry-diff`, `GET /v1/twin/interference-check`, `GET /v1/features/{id}/diff`, `POST /v1/robot/joint-loads`, `POST /v1/dfm/overhang-check`, `GET /v1/manufacture/release`, `GET /v1/controls/repeatability-estimate`, `GET /v1/technical-drawings`, `POST /v1/twin/nodes/{id}/approve-technical-drawing` |
 | `/files` | Legacy file browser | gateway files API |
 | `/knowledge` | Ingested-sources table (sortable, filterable) | `GET /api/v1/knowledge/sources` |
 | `/knowledge/sources/:id` | Per-source drill-in (placeholder in v1) | _stub_ |
 | `/assistant` | Chat panel (gateway → orchestrator) | `POST /v1/chat` |
+| `/evals` | Eval dashboard: pass rate per scenario over recorded nightly runs — "over releases" (the ticket's own wording) is aspirational, since `evals/nightly.sh` runs on a timestamp, not a CI release tag. Reads `evals/reports/*/report*.json` directly (a read-only bind mount in Docker, since `evals/` itself is deliberately not copied into the gateway image); shows the new outcome-graded `design_loop_rubric.py` scenario alongside the pre-existing keyword-graded ones | `GET /v1/evals` |
 
 ## CLI commands (8)
 
@@ -198,7 +1685,7 @@ A bare `pip install -e .` (no extras) gets you:
 You'll want at least `pip install -e ".[dev,knowledge,cadquery]"` to
 get a useful loadout.
 
-## Compute providers (MET-564)
+## Compute providers
 
 `tool_registry.container_runtime.ContainerRuntime` is the abstraction
 tool execution runs against — `DockerRuntime` (local Docker) is the
@@ -216,11 +1703,10 @@ onto ephemeral cloud compute instead of only local Docker.
 Neither remote runtime supports `ContainerConfig.volumes` (no host
 filesystem to bind-mount into a remote provider) — `run()` raises
 `RemoteVolumesUnsupportedError` if volumes are set. Real blob-store-backed
-input/output is tracked separately (MET-489). This first slice is also
-not yet wired into `bootstrap.py`'s on-demand adapter spin-up — see
-MET-564 for what's deliberately deferred (AWS Batch / GCP / Azure /
+input/output is tracked separately. This first slice is also
+not yet wired into `bootstrap.py`'s on-demand adapter spin-up — deliberately deferred are AWS Batch / GCP / Azure /
 CoreWeave / Lambda Cloud / Paperspace adapters, a GPU field on
-`ContainerConfig`).
+`ContainerConfig`.
 
 ## Phase-1 limits
 
@@ -229,12 +1715,13 @@ What's deliberately not in scope this phase — see
 
 | Limitation | Why | When |
 |---|---|---|
-| KiCad adapter is **read-only** (ERC, DRC, BOM, Gerber) — no schematic generation, no auto-routing | KiCad write requires a stable round-trip we don't have yet | Phase 2 |
+| KiCad write (Phase 2) generates new projects only: `kicad.generate_schematic`, `generate_pcb` and `autoroute_pcb` write a new project folder and never edit the person's own files in place. Placement is a deterministic starting point, and nothing checks signal integrity, impedance control or EMC | Editing a person's design needs a reviewed round-trip; SI and EMC need a field solver and a person | Not scheduled |
 | **No multi-user collaboration** — single-user local only | No auth + presence layer; not a Phase-1 goal | Phase 3 |
 | **In-memory Twin fallback** when Neo4j is unreachable — versioning + Cypher are limited | Graceful degradation for laptops without Docker | Always; full mode requires Neo4j |
 | **6–7 specialist agents**, not all 25 disciplines | 1:1 agent-to-discipline; covers electronics-heavy products (IoT, drones, embedded) | Phase 2 → 19 agents; Phase 3 → 25 |
-| **No production PDF ingest path** — text fixtures only for now | Server-side parser (MET-399) is in flight | Tracked under MET-399 |
+| **No production PDF ingest path** — text fixtures only for now | Server-side parser is in flight | Tracked as open work |
 | **No streaming progress for long-running tools** in the CLI yet | Streaming notifications work over MCP; CLI wrapper is a follow-up | Tracked separately |
+| **Flow solver covers steady incompressible internal flow only**: `run_cfd` runs it (`openfoam.run_internal_flow`) and steady conduction (`calculix.run_thermal`), and refuses convection, external flow, rotating parts and compressible flow rather than returning zeros. No layer meshing; the fluid-domain surfaces must be supplied as closed STL (nothing yet derives them from a committed solid); the turbulent path is not validated against measurements | OpenFOAM 11 in its own adapter container, built on CI runners (about 4 GB image), opt-in under the `cfd` compose profile; the host has a GPU that mainline OpenFOAM does not use | Follow-up work is open |
 
 ## Where each capability is proven
 

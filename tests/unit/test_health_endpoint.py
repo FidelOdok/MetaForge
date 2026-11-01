@@ -20,6 +20,7 @@ from api_gateway.health import (
     health_router,
     set_health_checker,
 )
+from api_gateway.version import gateway_version
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,7 +90,7 @@ class TestModels:
             uptime_seconds=10.0,
             timestamp=datetime.now(UTC),
         )
-        assert resp.version == "0.1.0"
+        assert resp.version == gateway_version()
         assert resp.components == []
 
 
@@ -179,7 +180,7 @@ class TestHealthChecker:
     async def test_version_default(self) -> None:
         checker = HealthChecker()
         result = await checker.check_all()
-        assert result.version == "0.1.0"
+        assert result.version == gateway_version()
 
 
 # ===================================================================

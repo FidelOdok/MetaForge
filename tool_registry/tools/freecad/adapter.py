@@ -10,16 +10,26 @@ address prior objects by a stable ``obj_id`` held in the session store.
 from __future__ import annotations
 
 import base64
+import re
 from pathlib import Path
 from typing import Any
 
 import structlog
 
-from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
+from tool_registry.mcp_server.handlers import ResourceLimits, ToolHandler, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.freecad.config import FreecadConfig
-from tool_registry.tools.freecad.operations import FreecadOperations
+from tool_registry.tools.freecad.materials_appearance import (
+    RGB,
+    apply_step_colours,
+    lookup_material_rgb,
+    read_step_colours,
+    resolve_rgb,
+    uncoloured_products,
+)
+from tool_registry.tools.freecad.operations import FreecadOperations, capped_result
 from tool_registry.tools.freecad.session import FreecadSessionStore
+from tool_registry.tools.freecad.worker_pool import FreecadWorkerPool
 
 logger = structlog.get_logger()
 
@@ -55,7 +65,9 @@ class FreecadServer(McpToolServer):
     thread_insert, generate_gear, lattice_perforation.
     """
 
-    def __init__(self, config: FreecadConfig | None = None) -> None:
+    def __init__(
+        self, config: FreecadConfig | None = None, *, worker_pool: FreecadWorkerPool | None = None
+    ) -> None:
         super().__init__(adapter_id="freecad", version="0.2.0")
         self.config = config or FreecadConfig()
         self._ops = FreecadOperations(
@@ -65,6 +77,13 @@ class FreecadServer(McpToolServer):
             ttl_seconds=self.config.session_ttl_seconds,
             max_sessions=self.config.max_sessions,
         )
+        # FORGE-221: None (the default -- every existing test, and every
+        # worker this pool itself spawns via entrypoint.py's stdio mode)
+        # keeps every stateful handler running its real body in-process,
+        # unchanged. A real pool (wired in by entrypoint.py's HTTP/gateway
+        # mode) makes every stateful handler forward to a per-session
+        # subprocess instead -- see _route below.
+        self._pool = worker_pool
         self._register_tools()
         self._register_authoring_tools()
 
@@ -130,14 +149,32 @@ class FreecadServer(McpToolServer):
                 tool_id="freecad.generate_mesh",
                 adapter_id="freecad",
                 name="Generate Mesh",
-                description="Generate finite element mesh from CAD geometry",
+                description=(
+                    "Generate a volumetric finite-element mesh (real C3D4 "
+                    "tetrahedra, via gmsh) from a STEP file -- for output_format="
+                    "'inp' this is what calculix.validate_mesh/run_fea consume. "
+                    "FORGE-239: the result's 'faces' table gives the real bbox/"
+                    "centroid/area/normal of every named surface group (e.g. "
+                    "'Surface1') -- use it to identify which group is 'the face "
+                    "at x=0' by its actual coordinates before choosing "
+                    "fixed_node_set/load_node_set; a gmsh-assigned name alone "
+                    "gives no clue which STEP face it is."
+                ),
                 capability="mesh_generation",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "input_file": {
                             "type": "string",
-                            "description": "Path to CAD file",
+                            "description": (
+                                "Path to a STEP file already on the shared adapter "
+                                "workspace, e.g. the 'cad_file'/'step_file' result of "
+                                "an earlier freecad.export_model/create_parametric call. "
+                                "This tool has no Twin access and does NOT accept a "
+                                "work_product_id (FORGE-223) -- if you only have one, "
+                                "call twin.stage_work_product_file first to materialize "
+                                "it and pass its returned file_path here instead."
+                            ),
                         },
                         "element_size": {
                             "type": "number",
@@ -147,13 +184,33 @@ class FreecadServer(McpToolServer):
                         "algorithm": {
                             "type": "string",
                             "enum": ["netgen", "gmsh", "mefisto"],
-                            "description": "Meshing algorithm",
+                            "description": (
+                                "Meshing algorithm. This adapter only has gmsh "
+                                "available (no separate netgen/mefisto backend) "
+                                "-- any value runs gmsh's own 3D algorithm; a "
+                                "non-'gmsh' choice is accepted but not honored "
+                                "as a distinct backend."
+                            ),
                         },
                         "output_format": {
                             "type": "string",
                             "enum": ["inp", "unv", "stl"],
                             "default": "inp",
                             "description": "Output mesh format",
+                        },
+                        "element_order": {
+                            "type": "integer",
+                            "enum": [1, 2],
+                            "default": 1,
+                            "description": (
+                                "FORGE-280: 1 (linear tets, C3D4) or 2 (quadratic, "
+                                "C3D10, gmsh's own '-order 2'). Second-order elements "
+                                "capture bending stress far more accurately per "
+                                "element -- linear tets are notoriously too stiff in "
+                                "bending. Try this before just shrinking element_size "
+                                "when calculix.check_mesh_convergence says the result "
+                                "hasn't converged."
+                            ),
                         },
                     },
                     "required": ["input_file"],
@@ -165,7 +222,45 @@ class FreecadServer(McpToolServer):
                         "num_nodes": {"type": "integer"},
                         "num_elements": {"type": "integer"},
                         "element_types": {"type": "array"},
-                        "quality_metrics": {"type": "object"},
+                        "quality_metrics": {
+                            "type": "object",
+                            "description": "Includes 'element_order' (1 or 2).",
+                        },
+                        "faces": {
+                            "type": "array",
+                            "description": (
+                                "output_format='inp' only. One entry per named "
+                                "surface (CPS3/CPS4) element set: name, "
+                                "element_type, num_elements, num_nodes, "
+                                "bbox_mm ({min,max}: [x,y,z]), centroid_mm "
+                                "([x,y,z]), area_mm2, normal ([x,y,z], unit "
+                                "vector -- 'a' normal, not verified outward)."
+                            ),
+                        },
+                        "surface_sets": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-505. Same data as 'faces' keyed by set name "
+                                "(bbox_mm, centroid_mm, area_mm2, normal), in the "
+                                "mesh frame = the twin frame, so fixed and load "
+                                "faces can be picked by position."
+                            ),
+                        },
+                        "mesh_bbox_mm": {
+                            "type": "object",
+                            "description": "Bounding box {min,max} of all mesh nodes (twin frame).",
+                        },
+                        "coordinate_frame": {
+                            "type": "string",
+                            "description": "Always 'twin': mesh coordinates equal the twin's.",
+                        },
+                        "placement_baked": {
+                            "type": "boolean",
+                            "description": (
+                                "True when the STEP carried a Placement that the mesher "
+                                "would have dropped and it was baked in first."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -174,6 +269,58 @@ class FreecadServer(McpToolServer):
                 ),
             ),
             handler=self.generate_mesh,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="freecad.list_named_faces",
+                adapter_id="freecad",
+                name="List Named Faces",
+                description=(
+                    "Re-fetch the per-face geometry table (name, bbox, centroid, "
+                    "area, normal) for an .inp mesh already produced by "
+                    "freecad.generate_mesh (FORGE-277) -- use this to identify a "
+                    "STEP face by its real coordinates (for fixed_node_set/"
+                    "load_node_set) without re-running gmsh, e.g. from a dashboard "
+                    "face picker or a later turn that no longer has the original "
+                    "generate_mesh result in context."
+                ),
+                capability="mesh_generation",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mesh_file": {
+                            "type": "string",
+                            "description": (
+                                "Path to an .inp mesh file already on the shared "
+                                "adapter workspace, e.g. the 'mesh_file' result of an "
+                                "earlier freecad.generate_mesh call."
+                            ),
+                        },
+                    },
+                    "required": ["mesh_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "mesh_file": {"type": "string"},
+                        "faces": {
+                            "type": "array",
+                            "description": (
+                                "One entry per named surface (CPS3/CPS4) element "
+                                "set: name, element_type, num_elements, num_nodes, "
+                                "bbox_mm ({min,max}: [x,y,z]), centroid_mm ([x,y,z]), "
+                                "area_mm2, normal ([x,y,z], unit vector)."
+                            ),
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=512, max_cpu_seconds=30, max_disk_mb=64
+                ),
+            ),
+            handler=self.list_named_faces,
         )
 
         self.register_tool(
@@ -426,11 +573,14 @@ class FreecadServer(McpToolServer):
         element_size = arguments.get("element_size", 1.0)
         algorithm = arguments.get("algorithm", self.config.default_mesh_algorithm)
         output_format = arguments.get("output_format", "inp")
+        element_order = arguments.get("element_order", 1)
 
         if not input_file:
             raise ValueError("input_file is required")
         if algorithm not in ("netgen", "gmsh", "mefisto"):
             raise ValueError(f"Unsupported meshing algorithm: {algorithm}")
+        if element_order not in (1, 2):
+            raise ValueError(f"Unsupported element_order: {element_order}")
 
         logger.info(
             "Generating mesh",
@@ -438,10 +588,22 @@ class FreecadServer(McpToolServer):
             element_size=element_size,
             algorithm=algorithm,
             output_format=output_format,
+            element_order=element_order,
         )
 
-        result = await self._execute_meshing(input_file, element_size, algorithm, output_format)
+        result = await self._execute_meshing(
+            input_file, element_size, algorithm, output_format, element_order
+        )
         return result
+
+    async def list_named_faces(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Re-fetch the per-face geometry table for an already-generated mesh."""
+        mesh_file = arguments.get("mesh_file", "")
+        if not mesh_file:
+            raise ValueError("mesh_file is required")
+
+        logger.info("Listing named faces", mesh_file=mesh_file)
+        return await self._execute_list_named_faces(mesh_file)
 
     async def boolean_operation(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Perform CSG boolean operation on two CAD models."""
@@ -515,9 +677,16 @@ class FreecadServer(McpToolServer):
         element_size: float,
         algorithm: str,
         output_format: str,
+        element_order: int = 1,
     ) -> dict[str, Any]:
         """Generate a mesh via FreeCAD (headless)."""
-        return self._ops.generate_mesh(input_file, element_size, algorithm, output_format)
+        return self._ops.generate_mesh(
+            input_file, element_size, algorithm, output_format, element_order
+        )
+
+    async def _execute_list_named_faces(self, mesh_file: str) -> dict[str, Any]:
+        """Re-parse an already-generated mesh's per-face geometry table."""
+        return self._ops.list_named_faces(mesh_file)
 
     async def _execute_boolean(
         self,
@@ -559,6 +728,96 @@ class FreecadServer(McpToolServer):
             return {"type": "object", "properties": props, "required": required}
 
         sid = {"type": "string", "description": "Session id from freecad.open_session"}
+
+        def _xy(desc: str) -> dict[str, Any]:
+            return {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 2,
+                "maxItems": 2,
+                "description": desc,
+            }
+
+        # FORGE-227: was a schemaless `{"type": "object"}` catchall, so a bad
+        # element key (the model reached for the Design IR's own convention,
+        # e.g. `center`/`radius`, on this tool's `cx`/`cy`/`r` circles) passed
+        # pre-approval validation only to KeyError deep inside operations.py.
+        # Each branch below accepts BOTH this tool's flat-key convention and
+        # the Design IR's grouped-point convention (see
+        # `FreecadOperations._sketch_point`/`_sketch_scalar`, which do the
+        # actual runtime alias resolution and raise a clear, key-listing
+        # error if neither convention is satisfied).
+        sketch_elements_schema = {
+            "type": "array",
+            "items": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "description": "line: x1/y1/x2/y2, or start=[x,y] + end=[x,y]",
+                        "properties": {
+                            "type": {"const": "line"},
+                            "x1": {"type": "number"},
+                            "y1": {"type": "number"},
+                            "x2": {"type": "number"},
+                            "y2": {"type": "number"},
+                            "start": _xy("[x, y] start point"),
+                            "end": _xy("[x, y] end point"),
+                        },
+                        "required": ["type"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "description": "circle: cx/cy + r, or center=[x,y] + radius",
+                        "properties": {
+                            "type": {"const": "circle"},
+                            "cx": {"type": "number"},
+                            "cy": {"type": "number"},
+                            "r": {"type": "number"},
+                            "center": _xy("[x, y] centre point"),
+                            "radius": {"type": "number"},
+                        },
+                        "required": ["type"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "description": (
+                            "rectangle: x/y (default 0,0) or origin=[x,y], plus width+height"
+                        ),
+                        "properties": {
+                            "type": {"const": "rectangle"},
+                            "x": {"type": "number"},
+                            "y": {"type": "number"},
+                            "origin": _xy("[x, y] corner point"),
+                            "width": {"type": "number"},
+                            "height": {"type": "number"},
+                        },
+                        "required": ["type", "width", "height"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "description": (
+                            "arc: cx/cy + r, or center=[x,y] + radius, "
+                            "plus start_angle/end_angle (degrees)"
+                        ),
+                        "properties": {
+                            "type": {"const": "arc"},
+                            "cx": {"type": "number"},
+                            "cy": {"type": "number"},
+                            "r": {"type": "number"},
+                            "center": _xy("[x, y] centre point"),
+                            "radius": {"type": "number"},
+                            "start_angle": {"type": "number"},
+                            "end_angle": {"type": "number"},
+                        },
+                        "required": ["type", "start_angle", "end_angle"],
+                        "additionalProperties": False,
+                    },
+                ]
+            },
+        }
 
         specs: list[tuple[str, str, str, dict[str, Any], Any]] = [
             (
@@ -612,6 +871,38 @@ class FreecadServer(McpToolServer):
                 self.create_body,
             ),
             (
+                "import_step",
+                "Load a STEP file into this session so it can be assembled (add_part_to_"
+                "assembly / add_assembly_joint) -- e.g. a part previously committed and "
+                "staged via twin.stage_work_product_file. Returns one obj_id per top-level "
+                "solid component the file contains (a multipart STEP yields several). "
+                "Each part's STEP colour is kept and written back by export_model.",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "file_path": {
+                            "type": "string",
+                            "description": (
+                                "Path to a STEP file already on the shared adapter workspace "
+                                "-- e.g. twin.stage_work_product_file's returned file_path."
+                            ),
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "Rename hint applied ONLY when the file contains exactly one "
+                                "solid component -- a multipart STEP keeps each part's own "
+                                "STEP-authored label (MET-534/535), since one name can't cover "
+                                "several parts."
+                            ),
+                        },
+                    },
+                    ["session_id", "file_path"],
+                ),
+                self.import_step,
+            ),
+            (
                 "create_sketch",
                 "Create a sketch on a body's plane (offset along normal) with 2D geometry",
                 "cad_author",
@@ -620,7 +911,7 @@ class FreecadServer(McpToolServer):
                         "session_id": sid,
                         "body_id": {"type": "string"},
                         "plane": {"type": "string", "enum": ["XY", "XZ", "YZ"]},
-                        "elements": {"type": "array", "items": {"type": "object"}},
+                        "elements": sketch_elements_schema,
                         "offset": {"type": "number"},
                     },
                     ["session_id", "body_id"],
@@ -679,7 +970,8 @@ class FreecadServer(McpToolServer):
             ),
             (
                 "transform_object",
-                "Move and/or rotate a session object (set its placement)",
+                "Move and/or rotate a session object (set its placement); returns the "
+                "verified placement and the measured global bounding box",
                 "cad_author",
                 obj_schema(
                     {
@@ -967,7 +1259,8 @@ class FreecadServer(McpToolServer):
             (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
-                "(escape hatch; assign `result` to surface an object). Namespace "
+                "(escape hatch; assign `result` to surface an object; any JSON-safe "
+                "`result` value is also returned as `result`, size-capped). Namespace "
                 "provides: FreeCAD (alias App), Part, math, doc, and the bare "
                 "geometry types Vector/Rotation/Placement/Matrix (no import needed, "
                 "no FreeCAD. prefix required). Blocked anywhere in the script: "
@@ -990,10 +1283,34 @@ class FreecadServer(McpToolServer):
                 "Export a session object to STEP and return the bytes (base64). "
                 "Returned bytes are NOT persisted anywhere — call "
                 "twin.commit_geometry (session_id + obj_id) afterward to add it "
-                "to the project/Twin as a cad_model work product.",
+                "to the project/Twin as a cad_model work product. Optional "
+                "'material' (e.g. '18 mm birch plywood', 'PETG') or 'color' "
+                "([r,g,b], 0-1 or 0-255) writes that appearance into the STEP so "
+                "the viewer shows it; 'part_materials' maps an assembly part "
+                "Label to its material for per-part colours, and 'part_colours' "
+                "maps a Label to a colour as given ('#RRGGBB', e.g. a library "
+                "appearance's srgb_hex, or [r,g,b]), which wins over its material. "
+                "With none of these, parts loaded by import_step keep their imported "
+                "colour. Unknown materials stay uncoloured (nothing is invented); the "
+                "result lists 'uncoloured_parts'. A harness plugin's "
+                "twin.commit_geometry refuses a model with an uncoloured part.",
                 "cad_export",
                 obj_schema(
-                    {"session_id": sid, "obj_id": {"type": "string"}}, ["session_id", "obj_id"]
+                    {
+                        "session_id": sid,
+                        "obj_id": {"type": "string"},
+                        "material": {"type": "string"},
+                        "color": {"type": "array", "items": {"type": "number"}},
+                        "part_materials": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "part_colours": {
+                            "type": "object",
+                            "description": "Part Label -> '#RRGGBB' or [r, g, b].",
+                        },
+                    },
+                    ["session_id", "obj_id"],
                 ),
                 self.export_model,
             ),
@@ -1147,6 +1464,12 @@ class FreecadServer(McpToolServer):
         ]
 
         for name, description, capability, input_schema, handler in specs:
+            # FORGE-221: close_session tears the worker subprocess itself down
+            # (FreecadWorkerPool.close_session) -- it must NOT go through the
+            # generic per-session _route forwarding below, which would just
+            # ask the worker to close its own internal (single-session) store
+            # entry and leak the subprocess + its pool bookkeeping forever.
+            routed_handler = handler if name == "close_session" else self._route(name, handler)
             self.register_tool(
                 manifest=ToolManifest(
                     tool_id=f"freecad.{name}",
@@ -1158,15 +1481,40 @@ class FreecadServer(McpToolServer):
                     phase=2,
                     resource_limits=limits,
                 ),
-                handler=handler,
+                handler=routed_handler,
             )
 
+    def _route(self, name: str, local: ToolHandler) -> ToolHandler:
+        """FORGE-221: forward a stateful call to its session's worker.
+
+        ``self._pool is None`` (the default, and every worker's own
+        in-process server) runs ``local`` unchanged -- this is the fallback
+        every existing test relies on. A pooled server forwards by
+        ``session_id`` instead, so a crash in one session's worker can never
+        touch this process or any other session's.
+        """
+
+        async def wrapper(arguments: dict[str, Any]) -> dict[str, Any]:
+            if self._pool is None:
+                return await local(arguments)
+            session_id = arguments.get("session_id")
+            if not session_id:
+                # Let the original body raise its own "session_id required".
+                return await local(arguments)
+            return await self._pool.call(session_id, name, arguments)
+
+        return wrapper
+
     async def open_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if self._pool is not None:
+            return await self._pool.open_session(arguments.get("name", ""))
         session_id = self._sessions.open_session(name=arguments.get("name", ""))
         return {"session_id": session_id}
 
     async def close_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
+        if self._pool is not None:
+            return {"closed": await self._pool.close_session(session_id)}
         return {"closed": self._sessions.close_session(session_id)}
 
     async def describe_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1186,10 +1534,44 @@ class FreecadServer(McpToolServer):
         session_id = self._require(arguments, "session_id")
         session = self._sessions.get(session_id)
         body = self._ops.create_body(session.document, arguments.get("name", "Body"))
-        obj_id = self._sessions.register_object(
-            session_id, body, "body", arguments.get("name", "Body")
-        )
-        return {"obj_id": obj_id, "kind": "body"}
+        label = arguments.get("name", "Body")
+        obj_id = self._sessions.register_object(session_id, body, "body", label)
+        # FORGE-501: a bare {"obj_id", "kind"} left the model unsure the body
+        # existed or what to do next, so a phase called this about nine times.
+        return {
+            "obj_id": obj_id,
+            "body_id": obj_id,
+            "kind": "body",
+            "label": label,
+            "message": (
+                f"Body '{label}' created as {obj_id}. Do NOT call create_body again for "
+                f"this part. Next: freecad.create_sketch with body_id='{obj_id}' (plane "
+                f"XY/XZ/YZ + elements), then freecad.pad_sketch with body_id='{obj_id}' "
+                "and the returned sketch_id. Add more features to this same body."
+            ),
+        }
+
+    async def import_step(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        file_path = self._require(arguments, "file_path")
+        session = self._sessions.get(session_id)
+        components = self._ops.import_step(session.document, file_path)
+        # A rename hint only makes sense when it's unambiguous which part it
+        # names -- a multipart STEP keeps each component's own STEP-authored
+        # label instead (see the tool's own schema description).
+        override_name = arguments.get("name") if len(components) == 1 else None
+        # FORGE-519: headless Import.insert drops colours, so read them from
+        # the source STEP and keep each with its session object; export_model
+        # writes them back unless an explicit colour/material overrides them.
+        colours = _read_file_colours(file_path)
+        parts = []
+        for obj in components:
+            rgb = _imported_colour(str(obj.Label), colours, single=len(components) == 1)
+            name = override_name or obj.Label
+            meta = {"color": list(rgb), "color_source": "imported_step"} if rgb else None
+            obj_id = self._sessions.register_object(session_id, obj, "part", name, metadata=meta)
+            parts.append({"obj_id": obj_id, "name": name, "color": list(rgb) if rgb else None})
+        return {"obj_ids": [p["obj_id"] for p in parts], "parts": parts}
 
     async def create_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
@@ -1204,7 +1586,16 @@ class FreecadServer(McpToolServer):
             offset=float(arguments.get("offset", 0.0)),
         )
         obj_id = self._sessions.register_object(session_id, sketch, "sketch", "Sketch")
-        return {"obj_id": obj_id, "kind": "sketch", "body_id": body_id}
+        return {
+            "obj_id": obj_id,
+            "sketch_id": obj_id,
+            "kind": "sketch",
+            "body_id": body_id,
+            "message": (
+                f"Sketch {obj_id} created on body {body_id}. Next: freecad.pad_sketch "
+                f"(or pocket_sketch) with body_id='{body_id}', sketch_id='{obj_id}', length."
+            ),
+        }
 
     async def loft_sketches(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
@@ -1300,7 +1691,18 @@ class FreecadServer(McpToolServer):
             arguments.get("position"),
             rotation if isinstance(rotation, dict) else None,
         )
-        return {"obj_id": obj_id, "transformed": True}
+        # FORGE-512: report what is now true (verified placement and the measured
+        # global bounding box), not just that the call returned.
+        out: dict[str, Any] = {
+            "obj_id": obj_id,
+            "transformed": True,
+            "placement": self._ops.placement_dict(obj),
+        }
+        try:
+            out.update(self._ops.shape_props(obj))
+        except Exception:  # noqa: BLE001 -- e.g. an empty body has no shape to measure
+            pass
+        return out
 
     async def _dress_up(
         self, arguments: dict[str, Any], op: str, param_key: str, sel_key: str
@@ -1541,24 +1943,66 @@ class FreecadServer(McpToolServer):
         session_id = self._require(arguments, "session_id")
         code = self._require(arguments, "code")
         session = self._sessions.get(session_id)
-        result = self._ops.execute_code(session.document, code)
+        result, raw = self._ops.execute_code(session.document, code, with_raw=True)
+        # FORGE-512: hand the script's ``result`` back as plain data.
+        plain, truncated = capped_result(raw)
+        extra: dict[str, Any] = {}
+        if raw is not None:
+            extra["result"] = plain
+            if truncated:
+                extra["result_truncated"] = True
         if result is not None and hasattr(result, "Shape"):
             obj_id = self._sessions.register_object(
                 session_id, result, "feature", getattr(result, "Name", "Result")
             )
-            out: dict[str, Any] = {"executed": True, "obj_id": obj_id}
+            out: dict[str, Any] = {"executed": True, "obj_id": obj_id, **extra}
             try:
                 out.update(self._ops.shape_props(result))
             except Exception:  # noqa: BLE001 — result may have no solid shape
                 pass
             return out
-        return {"executed": True, "session": self._sessions.describe(session_id)}
+        return {"executed": True, **extra, "session": self._sessions.describe(session_id)}
+
+    def _imported_part_colours(self, session_id: str) -> dict[str, RGB]:
+        """Live Label -> colour recorded at import, for every session object."""
+        out: dict[str, RGB] = {}
+        for e in self._sessions.get(session_id).objects.values():
+            rgb = e.metadata.get("color") if e.kind == "part" else None
+            label = getattr(e.obj, "Label", None)
+            if rgb and isinstance(label, str):
+                out[label] = (float(rgb[0]), float(rgb[1]), float(rgb[2]))
+        return out
 
     async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
         obj_id = self._require(arguments, "obj_id")
-        obj = self._sessions.get_object(session_id, obj_id)
+        entry = self._sessions.get_entry(session_id, obj_id)
+        obj = entry.obj
         step_bytes = self._ops.export_object_step_bytes(obj)
+        # FORGE-517: author the part colour into the STEP (viewer colours come
+        # only from STEP). Applied to the final bytes so it survives the
+        # FORGE-505 placement-bake round trip, which drops colours.
+        # Priority: part_materials, then color/material, then (FORGE-519) the
+        # colour each part was imported with.
+        default_rgb = resolve_rgb(arguments.get("color"), arguments.get("material"))
+        part_materials = arguments.get("part_materials") or {}
+        part_rgb = {
+            str(label): rgb
+            for label, mat in part_materials.items()
+            if (rgb := lookup_material_rgb(mat)) is not None
+        }
+        # FORGE-637: an explicit colour (a library appearance's srgb_hex) wins.
+        part_colours = arguments.get("part_colours") or {}
+        if not isinstance(part_colours, dict):
+            raise ValueError("part_colours must map a part Label to '#RRGGBB' or [r, g, b]")
+        part_rgb.update({str(label): resolve_rgb(colour) for label, colour in part_colours.items()})
+        imported_rgb = self._imported_part_colours(session_id)
+        if default_rgb is None and (own := entry.metadata.get("color")):
+            default_rgb = (float(own[0]), float(own[1]), float(own[2]))
+        step_bytes = apply_step_colours(
+            step_bytes, default_rgb, part_rgb, fallback_part_rgb=imported_rgb
+        )
+        stored = self._ops.measure_step_bytes(step_bytes)
         return {
             # MET-650: echoed back so a later twin.commit_geometry call (by
             # reference) can be built directly from this result even if the
@@ -1568,7 +2012,15 @@ class FreecadServer(McpToolServer):
             "format": "step",
             "size_bytes": len(step_bytes),
             "step_base64": base64.b64encode(step_bytes).decode("ascii"),
-            **self._ops.shape_props(obj),
+            # FORGE-637: what the viewer would show grey; a plugin's commit
+            # refuses the model until this is empty.
+            "uncoloured_parts": uncoloured_products(step_bytes),
+            # FORGE-505: measured from the exported bytes, so the recorded
+            # bounding box is the stored file's own frame, not the session's.
+            **stored,
+            # FORGE-505: the commit records this (the file that was written),
+            # not the session object's own measurement.
+            "stored_properties": stored,
         }
 
     # ---- assembly authoring (MET-530) ---------------------------------
@@ -1709,3 +2161,31 @@ class FreecadServer(McpToolServer):
         if not value:
             raise ValueError(f"{key} is required")
         return str(value)
+
+
+_FREECAD_SUFFIX_RE = re.compile(r"\d{3}$")
+
+
+def _read_file_colours(file_path: str) -> dict[str, RGB]:
+    """Per-product colours of a STEP on disk; best-effort, empty on failure."""
+    try:
+        colours = read_step_colours(Path(file_path).read_bytes())
+    except OSError as exc:
+        logger.warning("freecad_import_colours_unreadable", file_path=file_path, error=str(exc))
+        return {}
+    logger.info("freecad_import_colours_read", file_path=file_path, products=len(colours))
+    return colours
+
+
+def _imported_colour(label: str, colours: dict[str, RGB], *, single: bool) -> RGB | None:
+    """Colour of an imported component: by its Label (the STEP product name,
+    allowing FreeCAD's ``001`` de-duplication suffix); a single-component
+    import whose file has exactly one colour takes that colour."""
+    if label in colours:
+        return colours[label]
+    base = _FREECAD_SUFFIX_RE.sub("", label)
+    if base != label and base in colours:
+        return colours[base]
+    if single and len(set(colours.values())) == 1:
+        return next(iter(colours.values()))
+    return None

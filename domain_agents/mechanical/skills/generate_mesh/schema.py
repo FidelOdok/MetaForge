@@ -26,14 +26,22 @@ class GenerateMeshInput(BaseModel):
     algorithm: str = Field(default="netgen", description="Meshing algorithm: netgen, gmsh, mefisto")
     output_format: str = Field(default="inp", description="Output format: inp, unv, stl")
     min_angle_threshold: float = Field(
-        default=15.0, ge=0, description="Minimum acceptable angle in degrees"
+        default=10.0,
+        ge=0,
+        description=(
+            "Minimum acceptable dihedral angle in degrees. 10 rather than 15 because "
+            "an ordinary gmsh tet mesh of a plain box measures about 13 (FORGE-548)"
+        ),
     )
     max_aspect_ratio_threshold: float = Field(
         default=10.0, gt=0, description="Maximum acceptable aspect ratio"
     )
     refinement_regions: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Optional refinement regions: [{'name': '...', 'element_size': ...}]",
+        description=(
+            "Not supported yet: freecad.generate_mesh has no per-region sizing, "
+            "so a non-empty list is refused"
+        ),
     )
 
 

@@ -1,7 +1,7 @@
 # UAT Tier-2 Observability — Claude-driven first run (2026-04-27)
 
 **Scenario set**: `tests/uat/scenarios/tier2/{staleness,provenance,dedup}-probe.md`
-**Validates**: MET-307, MET-320, MET-322, MET-323, MET-326
+**Validates**:
 **Tier**: 2 (weekly cadence)
 **Path**: validator surrogate (parent Claude Code session pre-dates `.mcp.json`; canonical path is `/uat-cycle12 --tier 2`)
 **Surrogate driver**: `scripts/run_tier2_observability_validator_surrogate.py`
@@ -16,22 +16,22 @@
 |-------|----------|---------|-------|
 | staleness | 1: context_truncated metric increments | **BLOCKED** | gateway has no `/context/assemble` (per scenario's own contract) |
 | staleness | 2: superseded fragments not in retrievals | 1 PASS / 1 FAIL | search returns no hits → fact-A-absent technically passes vacuously; v2 not surfaced |
-| provenance | 1: every search hit has source_path | 1 PASS / 3 FAIL | gateway response missing `sourcePath`/`chunkIndex`/`totalChunks` → MET-376 |
+| provenance | 1: every search hit has source_path | 1 PASS / 3 FAIL | gateway response missing `sourcePath`/`chunkIndex`/`totalChunks` → filed forward below |
 | provenance | 2: ingestion + search produce log trail | 2 PASS / 1 FAIL | `knowledge_ingested` + `knowledge_search` events flow; source_path absent from log lines |
-| dedup | 1: re-ingest drops stale chunks | 1 PASS / 2 FAIL | predelete event missing → MET-378; titanium content not surfaced (zero-vector search) |
+| dedup | 1: re-ingest drops stale chunks | 1 PASS / 2 FAIL | predelete event missing (filed forward below); titanium content not surfaced (zero-vector search) |
 | dedup | 2: distinct source_paths coexist | 1 FAIL | search returns prewarm noise instead of probe content (zero-vector search) |
 
 ---
 
 ## Gaps filed forward
 
-Per the auto-file-FAIL policy, three follow-ups created in Cycle 2 (parent MET-372):
+Per the auto-file-FAIL policy, three follow-ups created in Cycle 2:
 
 | Ticket | Title | Priority | Why |
 |--------|-------|----------|-----|
-| MET-376 | gateway `/api/v1/knowledge/search` response missing source_path field | High | Breaks attribution UX entirely; LLM consumers can't cite hit origin |
-| MET-377 | gateway container missing `sentence-transformers` — search returns zero-vector results | High | Embeddings fall back to zero vectors; vector search is essentially random |
-| MET-378 | KnowledgeConsumer not wired into gateway boot — predelete events never fire | Medium | Dedup works at storage layer, but consumer telemetry is invisible |
+| - | gateway `/api/v1/knowledge/search` response missing source_path field | High | Breaks attribution UX entirely; LLM consumers can't cite hit origin |
+| - | gateway container missing `sentence-transformers` — search returns zero-vector results | High | Embeddings fall back to zero vectors; vector search is essentially random |
+| - | KnowledgeConsumer not wired into gateway boot — predelete events never fire | Medium | Dedup works at storage layer, but consumer telemetry is invisible |
 
 The 1 BLOCKED verdict (staleness/1) is **expected** — the scenario explicitly says "If `/context/assemble` is not exposed yet, skip step 1 and record this scenario as BLOCKED." The endpoint isn't built yet; that's a separate roadmap item, not a Cycle 2 regression.
 
@@ -57,7 +57,7 @@ The 1 BLOCKED verdict (staleness/1) is **expected** — the scenario explicitly 
 
 Notably absent: **`source_path` / `sourcePath`**, **`chunk_index`**, **`total_chunks`**.
 
-These fields exist on the underlying `LightRAGKnowledgeService.SearchHit` (Tier-1 Scenario 5 verified `chunk_index=0`, `total_chunks=1`, `source_path=...` are all populated when called directly). The gateway response model strips them on the way out. Filed as **MET-376**.
+These fields exist on the underlying `LightRAGKnowledgeService.SearchHit` (Tier-1 Scenario 5 verified `chunk_index=0`, `total_chunks=1`, `source_path=...` are all populated when called directly). The gateway response model strips them on the way out. Filed forward.
 
 ### Pattern 2: search returns wrong hits
 
@@ -67,11 +67,11 @@ Loki captured this warning on every gateway-side ingest:
 event="sentence_transformers_not_installed" fallback="zero_vector"
 ```
 
-The `metaforge-gateway` Docker image lacks `sentence-transformers`. Embeddings fall back to zero vectors. Vector similarity search becomes random tie-breaking → searching for `"Dedup-probe"` returns 5 unrelated documents from earlier in the day, including warmup noise. Filed as **MET-377**.
+The `metaforge-gateway` Docker image lacks `sentence-transformers`. Embeddings fall back to zero vectors. Vector similarity search becomes random tie-breaking → searching for `"Dedup-probe"` returns 5 unrelated documents from earlier in the day, including warmup noise. Filed forward.
 
 ### Pattern 3: consumer telemetry invisible
 
-`api_gateway/server.py` mentions the `KnowledgeConsumer` only in comments — never starts it. The events `knowledge_consumer_predelete`, `knowledge_consumer_indexed`, etc. are defined in `digital_twin/knowledge/consumer.py` but never reach Loki because the consumer never runs. Filed as **MET-378**.
+`api_gateway/server.py` mentions the `KnowledgeConsumer` only in comments — never starts it. The events `knowledge_consumer_predelete`, `knowledge_consumer_indexed`, etc. are defined in `digital_twin/knowledge/consumer.py` but never reach Loki because the consumer never runs. Filed forward.
 
 ---
 
@@ -87,7 +87,7 @@ curl -sf http://localhost:3001/api/health   # status 200
 .venv/bin/python scripts/run_tier2_observability_validator_surrogate.py
 ```
 
-Exit 1 (current state, with MET-376/377/378 outstanding); should be 0 once those land.
+Exit 1 (current state, with the three filed gaps outstanding); should be 0 once those land.
 
 ---
 

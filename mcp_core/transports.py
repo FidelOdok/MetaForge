@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp_core.client import Transport
 from mcp_core.context import context_to_headers, current_context
+from mcp_core.service_auth import HEADER_SERVICE_KEY
 
 if TYPE_CHECKING:
     from tool_registry.mcp_server.server import McpToolServer
@@ -71,9 +72,14 @@ class HttpTransport(Transport):
         timeout: float = 120.0,
         *,
         api_key: str | None = None,
+        service_key: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        # FORGE-487: the design-flow worker's credential, sent beside (not in
+        # place of) the bearer key. ``None`` sends nothing and the sidecar
+        # treats the caller as it always did.
+        self._service_key = service_key
         # MET-338: optional API key sent as ``Authorization: Bearer <key>``
         # on every request. ``None`` means open mode — no header sent.
         self._api_key = api_key
@@ -95,6 +101,8 @@ class HttpTransport(Transport):
         # Empty for the untouched sentinel context -- a call nobody ever
         # scoped sends no headers, same as before this existed.
         headers.update(context_to_headers(current_context()))
+        if self._service_key:
+            headers[HEADER_SERVICE_KEY] = self._service_key
         async with self._session.post(
             f"{self._base_url}/mcp",
             data=message,
@@ -154,8 +162,17 @@ class StdioTransport(Transport):
         ready_signal: str | None = None,
         ready_timeout: float = 30.0,
         api_key: str | None = None,
+        limit: int = 2**16,
     ) -> None:
         self._command = list(command)
+        # FORGE-238: readline()'s LimitOverrunError trips at this many bytes
+        # of unread data on one line. asyncio's own default (2**16 = 64 KiB)
+        # is smaller than a real-world JSON-RPC response can be once it
+        # inlines a base64 blob (e.g. a multi-part STEP export) -- a caller
+        # whose responses can be large should pass a bigger limit rather than
+        # switch framing, since every stdio MCP server in this codebase
+        # already speaks this same one-line-per-message wire format.
+        self._limit = limit
         # MET-338: when ``api_key`` is set, propagate it to the spawned
         # subprocess as ``METAFORGE_MCP_CLIENT_KEY`` so the server-side
         # auth check passes. The subprocess inherits the rest of the
@@ -185,6 +202,7 @@ class StdioTransport(Transport):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=self._env,
+            limit=self._limit,
         )
         if self._ready_signal is not None:
             await self._wait_for_ready()
@@ -224,6 +242,21 @@ class StdioTransport(Transport):
         if not response_line:
             raise RuntimeError("Subprocess closed stdout (process likely exited)")
         return response_line.decode("utf-8").rstrip("\n")
+
+    async def read_stderr(self, max_bytes: int = 4096) -> bytes:
+        """Best-effort read of whatever's buffered on the child's stderr.
+
+        Used to recover a crash diagnostic (e.g. a ``faulthandler`` dump)
+        after ``send()`` reports the process died -- a native crash writes
+        its traceback to stderr, not stdout, so it's otherwise lost the
+        moment the caller moves on from the dead transport (FORGE-221).
+        """
+        if self._proc is None or self._proc.stderr is None:
+            return b""
+        try:
+            return await asyncio.wait_for(self._proc.stderr.read(max_bytes), timeout=1.0)
+        except TimeoutError:
+            return b""
 
     async def disconnect(self) -> None:
         """Close stdin so the subprocess exits, then await teardown."""

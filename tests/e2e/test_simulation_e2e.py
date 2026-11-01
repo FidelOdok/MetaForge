@@ -39,32 +39,48 @@ SPICE_NON_CONVERGENT: dict[str, Any] = {
     "sim_time_s": 5.0,
 }
 
+# FORGE-561: calculix.run_fea's real result shape. The tool has no yield
+# data; the safety factor comes from the case's cited yield (276 MPa,
+# Al 6061-T6) over the reported peak stress.
 FEA_STATIC_RESULT: dict[str, Any] = {
-    "max_stress_mpa": 85.3,
-    "max_displacement_mm": 0.12,
-    "safety_factor": 3.24,
-    "solver_time_s": 12.5,
+    "max_von_mises": {"global": 85.3},
+    "displacement": {"max": 0.12},
+    "solver_time": 12.5,
+    "frd_path": "/workspace/motor_mount_bracket_solved.frd",
 }
 
 FEA_UNSAFE_RESULT: dict[str, Any] = {
-    "max_stress_mpa": 310.0,
-    "max_displacement_mm": 2.8,
-    "safety_factor": 0.89,
-    "solver_time_s": 15.0,
+    "max_von_mises": {"global": 310.0},
+    "displacement": {"max": 2.8},
+    "solver_time": 15.0,
+    "frd_path": "/workspace/motor_mount_bracket_solved.frd",
 }
 
+FEA_CASE = {
+    "mesh_file": "models/motor_mount_bracket.inp",
+    "load_case": "hover_3g",
+    "material": {"name": "aluminium_6061"},
+    "fixed_node_set": "Surface1",
+    "load_node_set": "Surface4",
+    "load_force_n": [0.0, 0.0, -30.0],
+    "yield_strength_mpa": 276.0,
+}
+
+# FORGE-543: calculix.run_thermal's real result shape (conduction only).
 CFD_CONVERGED_RESULT: dict[str, Any] = {
-    "max_velocity_ms": 4.2,
-    "pressure_drop_pa": 1250.0,
-    "max_temperature_c": 72.3,
-    "convergence_residual": 1e-5,
+    "max_temperature_c": 61.4,
+    "min_temperature_c": 25.0,
+    "solver_time": 0.8,
+    "result_files": ["/workspace/bracket_thermal.frd"],
 }
-
-CFD_NOT_CONVERGED: dict[str, Any] = {
-    "max_velocity_ms": 12.0,
-    "pressure_drop_pa": 5000.0,
-    "max_temperature_c": 150.0,
-    "convergence_residual": 0.1,
+CFD_NOT_CONVERGED: dict[str, Any] = {"result_files": []}
+CONDUCTION = {
+    "mesh_file": "models/motor_mount_bracket.inp",
+    "material": {"name": "aluminium_6061"},
+    "heat_source_node_set": "Surface3",
+    "power_dissipation_w": 2.5,
+    "sink_node_set": "Surface1",
+    "sink_temp_c": 25.0,
 }
 
 
@@ -221,17 +237,12 @@ class TestFeaSimulationE2E:
             TaskRequest(
                 task_type="run_fea",
                 work_product_id=s["work_product"].id,
-                parameters={
-                    "mesh_file": "models/motor_mount_bracket.inp",
-                    "load_cases": [{"name": "hover_3g", "force_n": 30, "direction": "z"}],
-                    "analysis_type": "static",
-                    "material": "Al6061-T6",
-                },
+                parameters=FEA_CASE,
             )
         )
 
         assert result.success is True
-        assert result.skill_results[0]["safety_factor"] == 3.24
+        assert result.skill_results[0]["safety_factor"] == round(276.0 / 85.3, 3)
         assert result.skill_results[0]["max_stress_mpa"] == 85.3
 
     async def test_fea_unsafe_fails(self):
@@ -245,10 +256,7 @@ class TestFeaSimulationE2E:
             TaskRequest(
                 task_type="run_fea",
                 work_product_id=work_product.id,
-                parameters={
-                    "mesh_file": "models/motor_mount_bracket.inp",
-                    "analysis_type": "static",
-                },
+                parameters=FEA_CASE,
             )
         )
 
@@ -286,8 +294,28 @@ class TestCfdSimulationE2E:
         agent = SimulationAgent(twin=twin, mcp=mcp)
         return {"twin": twin, "mcp": mcp, "agent": agent, "work_product": work_product}
 
-    async def test_cfd_converges(self, stack):
-        """CFD simulation converges with residual below threshold."""
+    async def test_conduction_case_runs(self, stack):
+        """FORGE-543: the conduction case reaches run_thermal with its real arguments."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="run_cfd",
+                work_product_id=s["work_product"].id,
+                parameters={
+                    "geometry_file": "models/motor_mount_bracket.step",
+                    "conduction": CONDUCTION,
+                },
+            )
+        )
+
+        assert result.success is True
+        out = result.skill_results[0]
+        assert out["analysis"] == "conduction_only"
+        assert out["max_temperature_c"] == 61.4
+        assert any("conduction only" in w for w in result.warnings)
+
+    async def test_flow_request_is_refused(self, stack):
+        """Velocity and pressure need a flow solver MetaForge does not have."""
         s = stack
         result = await s["agent"].run_task(
             TaskRequest(
@@ -296,18 +324,15 @@ class TestCfdSimulationE2E:
                 parameters={
                     "geometry_file": "models/motor_mount_bracket.step",
                     "fluid_properties": {"density_kg_m3": 1.225, "viscosity_pa_s": 1.8e-5},
-                    "boundary_conditions": {"inlet_velocity_ms": 5.0, "outlet_pressure_pa": 101325},
-                    "mesh_resolution": "medium",
+                    "boundary_conditions": {"inlet_velocity_ms": 5.0},
                 },
             )
         )
 
-        assert result.success is True
-        assert result.skill_results[0]["max_velocity_ms"] == 4.2
-        assert result.skill_results[0]["convergence_residual"] == 1e-5
+        assert result.success is False
+        assert any("internal_flow" in e for e in result.errors)
 
-    async def test_cfd_not_converged(self):
-        """CFD fails when convergence residual exceeds threshold."""
+    async def test_result_without_a_temperature_fails(self):
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge(cfd_result=CFD_NOT_CONVERGED)
         work_product = await twin.create_work_product(_make_mech_work_product())
@@ -317,14 +342,12 @@ class TestCfdSimulationE2E:
             TaskRequest(
                 task_type="run_cfd",
                 work_product_id=work_product.id,
-                parameters={
-                    "geometry_file": "models/motor_mount_bracket.step",
-                },
+                parameters={"conduction": CONDUCTION},
             )
         )
 
         assert result.success is False
-        assert any("residual" in w.lower() for w in result.warnings)
+        assert any("max_temperature_c" in e for e in result.errors)
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +371,8 @@ class TestFullSimulationE2E:
                 work_product_id=work_product.id,
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
-                    "mesh_file": "models/motor_mount_bracket.inp",
-                    "geometry_file": "models/motor_mount_bracket.step",
+                    **FEA_CASE,
+                    "conduction": CONDUCTION,
                 },
             )
         )
@@ -392,7 +415,7 @@ class TestFullSimulationE2E:
                 work_product_id=work_product.id,
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
-                    "mesh_file": "models/motor_mount_bracket.inp",
+                    **FEA_CASE,
                 },
             )
         )
@@ -454,7 +477,7 @@ class TestSimulationAgentCommonE2E:
             TaskRequest(
                 task_type="run_fea",
                 work_product_id=work_product.id,
-                parameters={"mesh_file": "models/motor_mount_bracket.inp"},
+                parameters=FEA_CASE,
             )
         )
         assert result.success is True
@@ -469,4 +492,4 @@ class TestSimulationAgentCommonE2E:
             },
         )
         assert "fea_results" in updated.metadata
-        assert updated.metadata["fea_results"]["safety_factor"] == 3.24
+        assert updated.metadata["fea_results"]["safety_factor"] == round(276.0 / 85.3, 3)

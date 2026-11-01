@@ -34,11 +34,17 @@ its place.
 
 ```bash
 # latest release, auto-detects your OS/arch
-curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | bash -s -- --cli-only
 
 # or a specific version
-curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | sh -s v0.1.0
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | bash -s -- --cli-only --version v0.1.0
 ```
+
+`install.sh` is the whole installer now, not just the binary fetcher
+ — without `--cli-only` it goes on to set up Docker, the stack and
+your first project. It needs `bash`, not `sh`. The older `| sh -s v0.1.0`
+form still does the right thing: a bare version argument is read as
+`--cli-only --version`.
 
 This drops `forge` into `~/.local/bin` (override with `FORGE_BIN_DIR`) and, if
 that directory isn't already on your `PATH`, adds it to your shell profile
@@ -115,7 +121,7 @@ forge chat -m "what's in this project?" --project "Monitor Build Demo"
 |---|---|
 | `^T` `^R` `^B` `^N` | chat · runs · twin · new run |
 | `PageUp` / `PageDn` | Scroll the transcript |
-| `/resume` | Pick a previous session (title · scope · activity) and continue it — the transcript backfills and the server rebuilds the conversation's context per turn (MET-595). `forge --continue` / `-c` resumes the most recent session directly at launch |
+| `/resume` | Pick a previous session (title · scope · activity) and continue it — the transcript backfills and the server rebuilds the conversation's context per turn. `forge --continue` / `-c` resumes the most recent session directly at launch |
 | `/project [id\|name]` | Show the current project, or switch to one. Switching starts a **new thread** — see below. `/project none` leaves the project |
 | `/model <slug>` | Change the model for this session (persisted to `~/.forge/config.json`) |
 | `/provider <id>` | Change the provider for this session |
@@ -175,6 +181,51 @@ Two consequences worth knowing:
 
 ## Commands
 
+### `tunnel` — expose a local gateway to a hosted harness
+
+```bash
+forge tunnel up --check-only   # pre-flight, change nothing
+forge tunnel up                # pre-flight, then run the tunnel
+```
+
+ChatGPT and claude.ai cannot reach `localhost`. This runs `cloudflared`
+or `ngrok` (whichever is installed — neither is bundled) and gives you the
+public URL to put in the harness.
+
+It refuses to open one over a gateway that is not fit to be public:
+nothing listening, something that is not a MetaForge gateway, or a
+gateway that accepts unauthenticated connections. A tunnel does not
+change what the server enforces; it changes who can reach it, and an open
+gateway that is fine on a laptop is an unauthenticated write endpoint on
+the internet.
+
+Writes from a tunnelled caller are held for approval — answer them in the
+dashboard, or from a client that supports MCP elicitation.
+
+### `connect` — find the gateway to point at
+
+```bash
+forge connect                 # probe the usual places
+forge connect --url https://team.example.com/mcp   # check one specific URL
+forge --format json connect   # machine-readable
+```
+
+Prints the MCP endpoint to use, or every candidate it tried and what each
+one said. Exits non-zero when nothing was found, so it works as a
+precondition check in a script.
+
+A candidate only counts when it answers an MCP `initialize` **and names
+itself** `metaforge-mcp`. Something listening on the port is not the same
+thing: another MCP server answers `initialize` perfectly happily, and
+reporting it would send you off to paste a URL that will never work. A
+`401`/`403` counts as found — the URL is right, the token is the next
+step.
+
+Order: the configured gateway (`--gateway-url`, `METAFORGE_GATEWAY_URL`,
+or saved config), then the same host on `:8765` (the MCP sidecar is a
+separate service from the REST gateway in the standard compose file, so
+`<gateway>/mcp` 404s), then the local defaults.
+
 ### `config` — configure the CLI (wizard)
 
 ```
@@ -200,27 +251,33 @@ Precedence, highest first: an explicit CLI flag, then the
 `METAFORGE_GATEWAY_URL` env var, then the config file, then the built-in
 default.
 
-!!! warning "This changed in MET-729"
-    The config file used to outrank `METAFORGE_GATEWAY_URL`. That inverted the
-    usual convention — an environment variable exists to override persisted
-    config for a single invocation — and it had a real cost: a unit test that
-    set `METAFORGE_GATEWAY_URL` to a dead port to keep itself local was
-    silently ignored, and instead ingested documents into a shared dev
-    gateway on every run (11 such writes in one week, found in that
-    deployment's own logs).
+:::warning[This changed]
 
-    If you relied on the old order, note that `forge config set gateway_url`
-    still works exactly as before whenever the env var is unset — which is the
-    normal case. Only a shell that exports `METAFORGE_GATEWAY_URL` now behaves
-    differently, and in that case the export is the more specific instruction.
+The config file used to outrank `METAFORGE_GATEWAY_URL`. That inverted the
+usual convention — an environment variable exists to override persisted
+config for a single invocation — and it had a real cost: a unit test that
+set `METAFORGE_GATEWAY_URL` to a dead port to keep itself local was
+silently ignored, and instead ingested documents into a shared dev
+gateway on every run (11 such writes in one week, found in that
+deployment's own logs).
 
-!!! note "What this does and doesn't configure"
-    `config` stores *your client's* choice of gateway and the per-turn
-    provider/model it sends. To give the gateway a **credential** (API key or a
-    ChatGPT subscription), use [`auth`](#auth-provider-login-selection) — it does
-    not set the `METAFORGE_CHAT_HARNESS` flag, which is a server-side setting.
+If you relied on the old order, note that `forge config set gateway_url`
+still works exactly as before whenever the env var is unset — which is the
+normal case. Only a shell that exports `METAFORGE_GATEWAY_URL` now behaves
+differently, and in that case the export is the more specific instruction.
 
-### `auth` — provider login & selection
+:::
+
+:::note[What this does and doesn't configure]
+
+`config` stores *your client's* choice of gateway and the per-turn
+provider/model it sends. To give the gateway a **credential** (API key or a
+ChatGPT subscription), use [`auth`](#auth-provider-login-selection) — it does
+not set the `METAFORGE_CHAT_HARNESS` flag, which is a server-side setting.
+
+:::
+
+### `auth` — provider login & selection {#auth-provider-login-selection}
 
 ```
 auth list                          # providers with configured/active state
@@ -254,7 +311,7 @@ Active-selection precedence: an explicit `chat --provider/--model` flag → the
 env. If the gateway sets `METAFORGE_HARNESS_ADMIN_TOKEN`, the CLI sends it
 automatically (from the same env var) so writes are authorized.
 
-### `chat` — interactive assistant REPL
+### `chat` — interactive assistant REPL {#chat-interactive-assistant-repl}
 
 ```
 chat [-m MESSAGE] [--thread ID] [--session ID] [--project ID] [--title T]
@@ -500,6 +557,119 @@ python -m cli.forge_cli twin list --domain electronics --type schematic
 | `--domain` | One of: `mechanical`, `electronics`, `firmware`, `simulation`, … |
 | `--type` | Work-product type: `cad_model`, `schematic`, `bom`, etc. |
 
+### `twin history`, `twin diff`, `twin baseline`: revisions and baselines {#twin-items}
+
+```
+twin history <KEY> [--project <id|name>]
+twin diff <KEY> [@a] [@b] [--project <id|name>]
+twin baseline list --project <id|name>
+twin baseline diff <baseline-id> <baseline-id|current>
+```
+
+```bash
+python -m cli.forge_cli twin history CAD-BRACKET
+python -m cli.forge_cli twin diff CAD-BRACKET @2 @3
+python -m cli.forge_cli twin baseline list --project "Shelf"
+python -m cli.forge_cli twin baseline diff 4f1c... current
+```
+
+Opt-in views over items (see [Twin schema section 2.31](twin_schema.md#231-baselines-over-items-the-current-view-and-revision-compare)); the normal flow needs none of them, because writes create revisions and gate approvals record baselines on their own.
+
+- `history` lists every revision of one item with its status (`committed`, `draft`, `approved`, `rejected`, `abandoned`), the head marker, the run and gate, and the change reason.
+- `diff` compares two revisions. With no revisions it compares the current one with the one before it; with one, that revision with the current one. It prints the geometry delta (volume, mass, bounding box, and whether the numbers came from the STEP files or from what each revision recorded), parameter, requirement and field changes, and the records still pinned to the older revision.
+- `baseline list` shows a project's baselines, newest first, with gate, run, approver and item count. `baseline diff` compares two of them item by item (`unchanged`, `changed`, `added`, `removed`); `current` as the second id compares a baseline with the project's current items.
+
+Add `--format json` for the raw gateway response.
+
+### `twin migrate`: fold a project's legacy nodes into items {#twin-migrate}
+
+```
+twin migrate <project_id|name> [--apply] [--yes] [--reason <text>]
+```
+
+```bash
+# Dry run: print the plan as a table (nothing is written)
+python -m cli.forge_cli twin migrate e7b896cc-...
+# The plan as JSON, for review or scripting
+python -m cli.forge_cli --format json twin migrate e7b896cc-...
+# Show the plan, confirm, then apply exactly that plan
+python -m cli.forge_cli twin migrate e7b896cc-... --apply --reason "reviewed with the team"
+```
+
+Turns a project's nodes written before items existed into items and
+revisions ([the migration](twin_schema.md#migrating-legacy-nodes)).
+It always shows the dry run first: every proposed item with its revisions
+(node id, name, `created_at`, status, and the rule and evidence that grouped
+it), groupings flagged `[REVIEW]`, the phase-summary decisions it will mark
+as run summaries, the simulation results it will pin (and which are stale),
+and counts before and after.
+
+| Flag | Notes |
+|---|---|
+| `--apply` | After the dry run, ask for confirmation and apply that exact plan. Nothing is deleted. The gateway refuses it (409) if the twin changed since the dry run; run the command again |
+| `--yes` | Skip the confirmation |
+| `--reason` | Why the plan is approved; kept in the gateway log with who approved it |
+
+Running it again after an apply prints "Nothing to migrate". Served by
+`POST /v1/twin/projects/{id}/item-migration/plan` and `.../apply`.
+
+### `approvals`: review and decide pending approvals {#approvals}
+
+```
+approvals list [--project <id>] [--kind <kind>] [--all | --decided] [--json]
+approvals show <id> [--json]
+approvals approve <id> [--reason <text>] [--json]
+approvals reject  <id> --reason <text> [--json]
+approvals retry   <id> --reason <text> [--json]
+approvals rework  <id> --to <phase> --reason <text> [--json]
+```
+
+One place to see and decide every pending human decision (design-flow gates,
+tool calls, flow proposals, design changes, sketches, drawings), served by
+`/v1/approvals`. Ids are `<kind>:<native id>`, for example `gate:run_abc`,
+`tool:run_def`, `change:<uuid>`.
+
+- `list` shows pending items by default; `--decided` shows only decided ones and
+  `--all` shows both. `--project` and `--kind` filter. Items with no project are
+  counted separately and noted under the table (the count is `unscoped_count` in
+  `--json`).
+- `show` prints the whole card: summary, findings, the decisions allowed now, the
+  decisions that need a reason, the rework targets, whether it is decidable (and
+  why not), the kind-specific detail, and the recorded decision once decided.
+- `approve`, `reject`, `retry` and `rework` first read the item, then check the
+  decision locally against `allowed_decisions`, `reason_required_for` and
+  `rework_targets` so a bad request fails fast without posting.
+- `--json` prints the raw gateway item (or list), so an agent can drive it.
+
+Requests carry `X-MetaForge-Surface: cli`. If both `METAFORGE_APPROVAL_AGENT` and
+`METAFORGE_APPROVAL_ON_BEHALF_OF` are set the surface is `agent` and the
+on-behalf-of user is attached. `METAFORGE_AUTH_TOKEN`, when set, is sent as a
+bearer token.
+
+**Exit codes** (the same in the Python CLI and the `forge` binary):
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Other failure (network error, 5xx) |
+| `2` | Usage error (missing or unknown argument) |
+| `3` | Not found: no approval with that id (HTTP 404) |
+| `4` | Not decidable right now: expired, waiting on the elicitation route, gate not ready, retries or rework exhausted (HTTP 409) |
+| `5` | Invalid decision: not in `allowed_decisions`, bad `--to` phase, or missing required reason (HTTP 422, or the same check failing locally) |
+| `6` | Not authorized (HTTP 401 or 403) |
+
+```bash
+python -m cli.forge_cli approvals list --project 6f1c... --json
+python -m cli.forge_cli approvals show gate:run_abc
+python -m cli.forge_cli approvals rework gate:run_abc --to design --reason "bracket too thin"
+```
+
+The older commands remain as aliases on the same API: `runs approve|reject <run_id>`
+decides `gate:<run_id>`, and `approve|reject <change_id>` (and `forge proposals
+approve|reject` in the `forge` binary) decides `change:<change_id>`. They now
+honour the same local checks and exit codes, so a `reject` that the gate requires
+a reason for needs `--reason`.
+
 ### `proposals` — list pending proposals
 
 ```
@@ -507,19 +677,21 @@ proposals
 ```
 
 Lists every change proposal that's still in `pending`. The output
-includes `change_id` (use it with `approve` / `reject`), the
+includes `change_id` (use it with `approve` / `reject`, or as
+`change:<change_id>` with [`approvals`](#approvals)), the
 proposing agent, the target work product, and the diff summary.
 
 ### `approve` / `reject` — act on a proposal
 
 ```
-approve <change_id> --reason "..." [--reviewer <id>]
-reject  <change_id> --reason "..." [--reviewer <id>]
+approve <change_id> --reason "..."
+reject  <change_id> --reason "..."
 ```
 
-Both commands require a `--reason` (audit-trail). `--reviewer`
-defaults to `cli-user`; pass your identity if you have a real
-reviewer record.
+Aliases for `approvals approve|reject change:<change_id>`. Both require a
+`--reason` (audit trail). `--reviewer` is still accepted but ignored: the
+approver identity now comes from the authenticated caller and the
+`X-MetaForge-Surface` headers.
 
 ```bash
 python -m cli.forge_cli approve 1a2b-... --reason "fits power budget"
@@ -690,6 +862,14 @@ The Projects API surface (`/v1/projects`). `list` prints a table of id / name /
 status / work-product count (`--status` filters, e.g. to find `draft` projects to
 clean up); `delete` asks for confirmation unless `--yes` is passed.
 
+A project's status:
+
+| Status | Meaning | Set by |
+|---|---|---|
+| `draft` | Created, no run started on it yet | creation |
+| `active` | Work has started | the first design-flow run started on it; at gateway start-up any `draft` project that already has a run is moved here once |
+| `archived` | Shelved | a person only (`PATCH /v1/projects/{id}`); a later run does not revive it |
+
 ### `runs` — drive harness runs directly
 
 ```
@@ -697,13 +877,15 @@ runs create [--goal <text>] [--request-json <json>] [--no-start]
 runs list [--json]
 runs get <run_id> [--json]
 runs watch <run_id>
-runs approve <run_id>
-runs reject <run_id>
+runs approve <run_id> [--reason <text>]
+runs reject <run_id> [--reason <text>]
 ```
 
 The lower-level surface over `/v1/runs`. `runs create --request-json '{...}'`
 takes a full run request (used by `design` under the hood); `watch` streams a
-run's SSE status; `approve`/`reject` resolve a run paused at a gate.
+run's SSE status; `approve`/`reject` resolve a run paused at a gate and are
+aliases for [`approvals approve|reject gate:<run_id>`](#approvals). Use
+`approvals retry` and `approvals rework` for the other two gate decisions.
 
 ## Output formats
 
@@ -722,12 +904,14 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 |---|---|---|
 | `METAFORGE_GATEWAY_URL` | every command | Base URL for the gateway |
 | `METAFORGE_HARNESS_ADMIN_TOKEN` | `auth` (client + gateway) | If set on the gateway, credential writes require it; the CLI sends the matching value from this env var |
+| `METAFORGE_AUTH_TOKEN` | `approvals` | Bearer token sent with approvals requests when set |
+| `METAFORGE_APPROVAL_AGENT` + `METAFORGE_APPROVAL_ON_BEHALF_OF` | `approvals` | When both are set, requests use surface `agent` and name the agent and the user it acts for (sent as `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of`) |
 | `METAFORGE_INGEST_TIMEOUT` | `ingest` | Override the default 300 s timeout |
 | `METAFORGE_MAX_OUTPUT_TOKENS` | chat (gateway-side) | Output-token cap per model completion (default 8192) |
 | `FORGE_LOG` | `forge` (TUI) | `1`/`true` enables verbose logging (raw SSE frames); same as `--debug` |
 | `FORGE_LOG_FILE` | `forge` (TUI) | Override the log path (default `~/.forge/logs/session.log`) |
 
-## Logs & debugging the interactive TUI
+## Logs & debugging the interactive TUI {#logs-debugging-the-interactive-tui}
 
 The interactive `forge` TUI owns the terminal, so it cannot print diagnostics to
 the screen without corrupting the UI. Instead it appends a JSONL session log to

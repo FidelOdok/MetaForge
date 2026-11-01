@@ -53,23 +53,17 @@ class IngestKnowledgeHandler(SkillBase[IngestKnowledgeInput, IngestKnowledgeOutp
         with tracer.start_as_current_span("ingest_knowledge.execute") as span:
             span.set_attribute("skill.name", "ingest_knowledge")
             span.set_attribute("knowledge.content_length", len(input_data.content))
-            span.set_attribute("knowledge.type", input_data.knowledge_type)
+            span.set_attribute("knowledge.type", str(input_data.knowledge_type))
 
-            # Resolve knowledge type
-            try:
-                knowledge_type = KnowledgeType(input_data.knowledge_type)
-            except ValueError:
-                self.logger.warning(
-                    "Unknown knowledge_type, defaulting to design_decision",
-                    knowledge_type=input_data.knowledge_type,
-                )
-                knowledge_type = KnowledgeType.DESIGN_DECISION
+            # The schema rejects a type outside the store's enum; an unknown
+            # type used to be filed silently as design_decision (FORGE-552).
+            knowledge_type = KnowledgeType(input_data.knowledge_type)
 
             self.logger.info(
                 "Ingesting knowledge",
                 content_length=len(input_data.content),
                 knowledge_type=knowledge_type.value,
-                source=input_data.source,
+                source_path=input_data.source_path,
             )
 
             metadata = dict(input_data.metadata) if input_data.metadata else {}
@@ -78,7 +72,7 @@ class IngestKnowledgeHandler(SkillBase[IngestKnowledgeInput, IngestKnowledgeOutp
             chunks = _chunk_text(input_data.content)
             entries: list[KnowledgeEntry] = []
 
-            for chunk in chunks:
+            for index, chunk in enumerate(chunks):
                 # Generate embedding if service available
                 embedding: list[float] = []
                 if self._embedding_service is not None:
@@ -89,6 +83,9 @@ class IngestKnowledgeHandler(SkillBase[IngestKnowledgeInput, IngestKnowledgeOutp
                     embedding=embedding,
                     knowledge_type=knowledge_type,
                     metadata=metadata,
+                    source_path=input_data.source_path,
+                    chunk_index=index,
+                    total_chunks=len(chunks),
                 )
                 stored = await self._store.store(entry)
                 entries.append(stored)

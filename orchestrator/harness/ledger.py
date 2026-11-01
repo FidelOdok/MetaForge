@@ -38,6 +38,22 @@ def default_ledger_path() -> Path:
     return Path.home() / ".metaforge" / "runs_ledger.db"
 
 
+def default_tool_approvals_ledger_path() -> Path:
+    """Where the chat tool-approval ledger lives by default (FORGE-89).
+
+    A separate file from ``default_ledger_path()`` -- design-flow runs and
+    chat tool-approvals are different domains sharing only the generic
+    ``Run``/``SqliteRunLedger`` machinery; keeping them in one ``runs``
+    table would make either one confusing to inspect on its own.
+    ``METAFORGE_TOOL_APPROVALS_LEDGER_PATH`` override, else
+    ``~/.metaforge/tool_approvals_ledger.db``.
+    """
+    override = os.environ.get("METAFORGE_TOOL_APPROVALS_LEDGER_PATH", "").strip()
+    if override:
+        return Path(override)
+    return Path.home() / ".metaforge" / "tool_approvals_ledger.db"
+
+
 def _fts5_available(conn: sqlite3.Connection) -> bool:
     try:
         conn.execute("CREATE VIRTUAL TABLE _fts_probe USING fts5(x)")
@@ -113,7 +129,12 @@ class SqliteRunLedger:
         self._conn.commit()
 
     def record_run(self, run: Run) -> None:
-        """Insert or update a run row from a harness :class:`Run`."""
+        """Insert or update a run row from a harness :class:`Run`.
+
+        The request is rewritten on update too (FORGE-507): a decision log is
+        appended to it before the transition that records the decision, and a
+        ledger that kept only the first copy would lose it on restart.
+        """
         self._conn.execute(
             """
             INSERT INTO runs (id, status, created_at, updated_at, request, result, error)
@@ -121,6 +142,7 @@ class SqliteRunLedger:
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 updated_at=excluded.updated_at,
+                request=excluded.request,
                 result=excluded.result,
                 error=excluded.error
             """,

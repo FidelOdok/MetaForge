@@ -1,0 +1,223 @@
+# aircraft_v1 domain fragment (FORGE-670, composable flows).
+#
+# Configuration -> wing sizing -> layout (tail and CG) -> power closure (mass,
+# cruise aerodynamics and battery, solved together) -> trim -> static
+# stability -> flight simulation, for a battery-electric fixed-wing aircraft
+# with a conventional wing and tail.
+#
+# The wing is sized for the stall speed at the maximum take-off mass, so it
+# sits outside the loop; the all-up mass <-> cruise power <-> battery capacity
+# loop is a coupled block the engine repeats until the three settle
+# (FORGE-666). A layout change (moving the CG, a bigger tail) re-runs trim and
+# stability, and nothing upstream.
+#
+# Limits are inputs, never numbers written here: the maximum take-off mass,
+# stall speed, cruise speed, endurance and required static margin come from
+# the requirements; the airfoil data (CL_max, section lift slope, Cm_ac), the
+# drag build-up (CD0, Oswald efficiency) and the propulsive efficiency from
+# cited sources. A limit nobody recorded is no_data, which never passes.
+#
+# The aircraft.* tools are classical first-order estimates (drag polar,
+# Helmbold lift slope, tail-volume neutral point). Flight simulation names
+# `jsbsim.run_mission`, which does not exist yet: until an adapter provides
+# it, that task is a blocking capability gap in every proposal that composes
+# this fragment, and a vortex-lattice or panel code (AVL, XFOIL) would
+# outrank the estimates when one exists (FORGE-670).
+#
+# Bump `version` when a task, its contract or a check changes.
+id: aircraft_v1
+version: 1.1.0
+domain: aircraft
+label: Fixed-wing aircraft
+description: Wing sizing, cruise aerodynamics, power closure, trim, stability and flight simulation.
+keywords: [aircraft, fixed wing, fixed-wing, uav, airplane, aeroplane, glider, wing, stall speed, endurance]
+disciplines: [simulation]
+tasks:
+- id: configuration
+  stage: design
+  title: Configuration
+  objective: >-
+    Choose the configuration (conventional wing and tail, the airfoil, flaps or none) for the
+    mission the requirements state, and record it as a design decision with the alternatives
+    considered. Record the wing aspect ratio as `aspect_ratio`, the wing's maximum lift
+    coefficient as `cl_max` (airfoil or flap data), the zero-lift drag coefficient as
+    `zero_lift_drag_coefficient` (a drag build-up) and the Oswald efficiency as
+    `oswald_efficiency`, each with its source.
+  outputs:
+  - design_value:aspect_ratio
+  - design_value:cl_max
+  - design_value:zero_lift_drag_coefficient
+  - design_value:oswald_efficiency
+  records: [design_decision]
+  checks:
+  - aspect_ratio > 0
+  - cl_max > 0
+  - zero_lift_drag_coefficient > 0
+  - oswald_efficiency > 0
+  capabilities: [twin.record_engineering_entity, twin.record_decision]
+  outcome: configuration chosen with its sourced aerodynamic figures
+- id: wing_sizing
+  stage: design
+  title: Wing sizing
+  objective: >-
+    Size the wing with aircraft.wing_sizing for the stall-speed limit at the maximum take-off
+    mass, both from the requirements, at the recorded CL_max and the air density of the
+    condition the requirement names. Round the area to one you can build and run the tool again
+    to check it. Record the area as `wing_area_m2` (m^2), the span as `wing_span_m` (m) and the
+    stall speed of the chosen area as `stall_speed_mps` (m/s), sourced to the tool run.
+  inputs:
+  - design_value:max_takeoff_mass_kg
+  - design_value:max_stall_speed_mps
+  - design_value:cl_max
+  - design_value:aspect_ratio
+  - design_value:air_density_kg_m3
+  outputs:
+  - design_value:wing_area_m2
+  - design_value:wing_span_m
+  - design_value:stall_speed_mps
+  checks:
+  - stall_speed_mps <= max_stall_speed_mps
+  capabilities: [aircraft.wing_sizing]
+  outcome: wing area chosen that holds the stall speed at the maximum take-off mass
+- id: layout
+  stage: design
+  title: Layout (tail and CG)
+  objective: >-
+    Lay out the tail and the internal arrangement for the recorded wing: the horizontal tail's
+    area and moment arm, and where the battery, payload and avionics sit. Record the tail volume
+    coefficient as `tail_volume_coefficient` (S_t l_t / (S c)) and the centre of gravity as
+    `cg_position_mac` (fraction of the mean aerodynamic chord from its leading edge), with the
+    mass breakdown in its source.
+  inputs:
+  - design_value:wing_area_m2
+  - design_value:wing_span_m
+  outputs:
+  - design_value:tail_volume_coefficient
+  - design_value:cg_position_mac
+  checks:
+  - tail_volume_coefficient > 0
+  capabilities: [twin.record_engineering_entity]
+- id: mass_rollup
+  stage: design
+  title: Mass roll-up
+  objective: >-
+    Sum the all-up mass: structure, propulsion, avionics, the battery (from its recorded
+    capacity and the cell's specific energy, cited) and the payload the requirements state.
+    Record it as `total_mass_kg` (kg) with the breakdown in its source.
+  inputs:
+  - design_value:battery_capacity_wh
+  - design_value:payload_mass_kg
+  outputs:
+  - design_value:total_mass_kg
+  checks:
+  - total_mass_kg <= max_takeoff_mass_kg
+  capabilities: [twin.record_engineering_entity]
+- id: aerodynamics
+  stage: design
+  title: Cruise aerodynamics
+  objective: >-
+    Compute the cruise condition with aircraft.cruise_performance from the recorded total mass,
+    wing area, aspect ratio, Oswald efficiency and zero-lift drag coefficient, at the cruise
+    speed and air density the requirements state and the propulsive efficiency (propeller,
+    motor and controller datasheets). Record the electrical power to the propulsion as
+    `cruise_power_w` (W), the cruise lift coefficient as `cruise_lift_coefficient` and the
+    lift-to-drag ratio as `lift_to_drag`, sourced to the tool run.
+  inputs:
+  - design_value:total_mass_kg
+  - design_value:wing_area_m2
+  - design_value:aspect_ratio
+  - design_value:oswald_efficiency
+  - design_value:zero_lift_drag_coefficient
+  - design_value:cruise_speed_mps
+  - design_value:propulsive_efficiency
+  outputs:
+  - design_value:cruise_power_w
+  - design_value:cruise_lift_coefficient
+  - design_value:lift_to_drag
+  checks:
+  - cruise_lift_coefficient < cl_max
+  capabilities: [aircraft.cruise_performance]
+- id: battery_sizing
+  stage: design
+  title: Battery sizing
+  objective: >-
+    Size the battery with aircraft.electric_endurance for the required endurance at the recorded
+    cruise power plus the electronics (avionics) power `electronics_power_w` -- from the power
+    design when it is composed -- and the payload power, with the usable fraction (depth of
+    discharge and reserve) from the cell's datasheet and the requirements. Record the capacity
+    as `battery_capacity_wh` (Wh), sourced to the tool run.
+  inputs:
+  - design_value:cruise_power_w
+  - design_value:electronics_power_w
+  - design_value:required_endurance_min
+  - design_value:usable_battery_fraction
+  outputs:
+  - design_value:battery_capacity_wh
+  checks:
+  - battery_capacity_wh > 0 Wh
+  capabilities: [aircraft.electric_endurance]
+- id: trim
+  stage: simulation
+  title: Trim
+  objective: >-
+    Check with aircraft.trim_stability that the tail can trim the cruise condition: from the
+    recorded cruise lift coefficient, tail volume coefficient and CG, both surfaces' aspect
+    ratios and section lift slopes, the tail efficiency, the wing a.c. position and Cm_ac
+    (airfoil data) and the tail's usable lift coefficient. Record the margin as
+    `trim_tail_cl_margin` (usable tail CL minus the CL that trims), sourced to the tool run.
+  inputs:
+  - design_value:cruise_lift_coefficient
+  - design_value:tail_volume_coefficient
+  - design_value:cg_position_mac
+  - design_value:aspect_ratio
+  outputs:
+  - design_value:trim_tail_cl_margin
+  checks:
+  - trim_tail_cl_margin >= 0
+  capabilities: [aircraft.trim_stability]
+  outcome: cruise shown to trim within the tail's usable lift
+- id: stability
+  stage: simulation
+  title: Static stability
+  objective: >-
+    Find the stick-fixed neutral point with aircraft.trim_stability from the same figures, and
+    record the static margin (neutral point minus CG, fraction of the MAC) as `static_margin`,
+    sourced to the tool run. If it is below the required margin, the layout changes: move the
+    CG forward or enlarge the tail.
+  inputs:
+  - design_value:tail_volume_coefficient
+  - design_value:cg_position_mac
+  - design_value:aspect_ratio
+  outputs:
+  - design_value:static_margin
+  checks:
+  - static_margin >= required_static_margin
+  capabilities: [aircraft.trim_stability]
+  outcome: aircraft shown statically stable with the required margin
+- id: flight_simulation
+  stage: simulation
+  title: Flight simulation
+  objective: >-
+    Fly the mission the requirements name (climb, cruise, loiter, descent and reserve) in a
+    flight simulation with the recorded mass, wing, aerodynamics and battery, and record the
+    endurance it reaches as `mission_endurance_min` (min), sourced to the simulation result.
+  inputs:
+  - design_value:total_mass_kg
+  - design_value:cruise_power_w
+  - design_value:battery_capacity_wh
+  - design_value:wing_area_m2
+  outputs:
+  - design_value:mission_endurance_min
+  records: [simulation_result]
+  checks:
+  - mission_endurance_min >= required_endurance_min
+  capabilities: [jsbsim.run_mission]
+  outcome: mission endurance shown to meet the requirement in simulation
+blocks:
+- id: power_closure
+  stage: design
+  title: Power closure
+  members: [mass_rollup, aerodynamics, battery_sizing]
+  solves_for: [total_mass_kg, cruise_power_w, battery_capacity_wh]
+  tolerance: 0.01
+  max_iterations: 20

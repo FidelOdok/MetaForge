@@ -39,6 +39,10 @@ from uuid import UUID
 
 import structlog
 
+from api_gateway.twin.item_revisions import (
+    finish_definition_revision,
+    plan_definition_revision,
+)
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -110,6 +114,28 @@ async def _find_or_create_bom_work_product(
         return None
 
 
+async def _requirement_margins(
+    twin: Any, project_id: str | None, specs: dict[str, Any]
+) -> tuple[list[Any], list[Any]]:
+    """Hold the chosen part's specs against the project's requirements.
+
+    FORGE-346. Best-effort by design: a margin report that fails must not
+    fail the BOM commit, which is the thing the caller actually asked for.
+    """
+    if not project_id or not specs:
+        return [], []
+    try:
+        from uuid import UUID
+
+        from twin_core.consistency.spec_margins import compare_specs_to_requirements
+
+        constraints = await twin.list_constraints(project_id=UUID(str(project_id)))
+        return compare_specs_to_requirements(specs, list(constraints))
+    except Exception as exc:  # noqa: BLE001 — never fail the commit
+        logger.warning("component_requirement_margins_failed", error=str(exc))
+        return [], []
+
+
 def make_component_recorder(
     twin: Any, project_backend: Any = None, catalog_store: Any = None
 ) -> Any:
@@ -150,6 +176,10 @@ def make_component_recorder(
         priced_distributor: str | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
+        item_key: str | None = None,
+        supersedes: str | None = None,
+        change_reason: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.bom_item import BOMItem
 
@@ -159,6 +189,22 @@ def make_component_recorder(
             raise ValueError("component recorder: 'manufacturer' is required (non-empty string)")
         if not category or not isinstance(category, str):
             raise ValueError("component recorder: 'category' is required (non-empty string)")
+
+        # FORGE-523: a component selection is a definition keyed by the role
+        # it fills (or by the part when no role is given), so choosing a
+        # different part for the same role is the next revision of one item.
+        selection_name = role or f"{manufacturer} {mpn}"
+        plan = await plan_definition_revision(
+            twin,
+            item_type="component_selection",
+            name=selection_name,
+            project_id=project_id,
+            default_author="twin.record_component_selection",
+            item_key=item_key,
+            supersedes=supersedes,
+            change_reason=change_reason,
+            run_id=run_id,
+        )
 
         with tracer.start_as_current_span("twin.record_component_selection") as span:
             span.set_attribute("component.mpn", mpn)
@@ -290,12 +336,36 @@ def make_component_recorder(
                 linked=linked,
                 bom_work_product_id=bom_wp_id,
             )
-            return {
+            result: dict[str, Any] = {
                 "node_id": node_id,
                 "mpn": mpn,
                 "category": category,
                 "project_linked": linked,
                 "bom_work_product_id": bom_wp_id,
             }
+            await finish_definition_revision(
+                twin, plan, UUID(node_id), name=selection_name, result=result
+            )
+            margins, unchecked = await _requirement_margins(twin, project_id, specs or {})
+            if margins or unchecked:
+                result["requirement_margins"] = [m.model_dump() for m in margins]
+                result["unchecked_requirements"] = [u.model_dump() for u in unchecked]
+                violated = [m.requirement for m in margins if not m.satisfied]
+                if violated:
+                    # FORGE-346: the part is still recorded -- refusing a
+                    # commit because a requirement is not met would block
+                    # the normal case of choosing the best available part
+                    # and then changing the requirement. But it must not be
+                    # silent: without this the violation first surfaces at a
+                    # gate, with nothing linking it back to the decision to
+                    # buy this part.
+                    result["violates"] = violated
+                    logger.warning(
+                        "component_selection_violates_requirements",
+                        node_id=node_id,
+                        mpn=mpn,
+                        requirements=violated,
+                    )
+            return result
 
     return record

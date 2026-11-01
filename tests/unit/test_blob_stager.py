@@ -133,3 +133,16 @@ class TestAdapterHandler:
         server = TwinServer(twin=twin, blob_stager=make_blob_stager(twin, workspace_dir=tmp_path))
         with pytest.raises(ValueError, match="node_id"):
             await server.stage_work_product_file({})
+
+
+class TestStageNextStepHint:
+    async def test_result_names_import_step_with_file_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        _patch_fetch(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        wp = await _make_wp(twin)
+        server = TwinServer(twin=twin, blob_stager=make_blob_stager(twin, workspace_dir=tmp_path))
+        out = await server.stage_work_product_file({"node_id": str(wp.id)})
+        assert "freecad.import_step" in out["next_step"]
+        assert out["file_path"] in out["next_step"]

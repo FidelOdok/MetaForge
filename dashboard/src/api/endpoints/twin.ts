@@ -1,14 +1,7 @@
-import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription } from '../../types/twin';
+import type { TwinNode, TwinGraph, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription, AssemblyPart, DesignFilesView } from '../../types/twin';
 import apiClient from '../client';
 import { apiUrl } from '../../lib/gatewayConfig';
 import { isSampleMode, sampleFileUrl } from '../../lib/sample-workspace';
-
-const MOCK_RELATIONSHIPS: TwinRelationship[] = [
-  { id: 'rel-001', sourceId: 'node-001', targetId: 'node-004', type: 'constrained_by', label: 'Stress constraint' },
-  { id: 'rel-002', sourceId: 'node-002', targetId: 'node-003', type: 'generates', label: 'PCB from schematic' },
-  { id: 'rel-003', sourceId: 'node-003', targetId: 'node-005', type: 'constrained_by', label: 'Clearance constraint' },
-  { id: 'rel-004', sourceId: 'node-002', targetId: 'node-009', type: 'constrained_by', label: 'Power budget' },
-];
 
 interface TwinNodeApiResponse {
   id: string;
@@ -21,6 +14,13 @@ interface TwinNodeApiResponse {
   geometryParameters?: { parameters: Record<string, unknown>; properties: Record<string, unknown> } | null;
   hasScript?: boolean;
   assembly?: AssemblyDescription | null;
+  poses?: Record<string, Record<string, number>> | null;
+  // FORGE-305: a simulation_result's mesh_stats.
+  meshStats?: Record<string, unknown> | null;
+  assemblyParts?: AssemblyPart[] | null;
+  projectId?: string | null;
+  // FORGE-687: a design-files node's files, previews, layers and build output.
+  designFiles?: DesignFilesView | null;
 }
 
 export interface TwinNodeScript {
@@ -59,6 +59,11 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     geometryParameters: node.geometryParameters ?? undefined,
     hasScript: node.hasScript,
     assembly: node.assembly ?? undefined,
+    poses: node.poses ?? undefined,
+    meshStats: node.meshStats ?? undefined,
+    assemblyParts: node.assemblyParts ?? undefined,
+    projectId: node.projectId ?? undefined,
+    designFiles: node.designFiles ?? undefined,
   }));
 }
 
@@ -77,6 +82,11 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       geometryParameters: node.geometryParameters ?? undefined,
       hasScript: node.hasScript,
       assembly: node.assembly ?? undefined,
+      poses: node.poses ?? undefined,
+      meshStats: node.meshStats ?? undefined,
+      assemblyParts: node.assemblyParts ?? undefined,
+      projectId: node.projectId ?? undefined,
+      designFiles: node.designFiles ?? undefined,
     };
   } catch {
     return undefined;
@@ -104,20 +114,28 @@ export async function getNodeScript(id: string): Promise<TwinNodeScript | undefi
   }
 }
 
-export async function getTwinRelationships(projectId?: string): Promise<TwinRelationship[]> {
-  // Live edges from the twin graph (backend already returns camelCase fields
-  // matching TwinRelationship). Falls back to mocks if the endpoint is absent.
+/**
+ * The twin's edges, with the names of the ends that are not work products.
+ *
+ * FORGE-704: this used to swallow any error and return built-in mock edges, so a
+ * broken request looked like a graph with odd data. It now throws, and the page
+ * says the links are unavailable.
+ */
+export async function getTwinGraph(projectId?: string): Promise<TwinGraph> {
   // MET-491: scope to a project when one is selected; omit for all projects.
-  try {
-    const params = projectId ? { project_id: projectId } : undefined;
-    const response = await apiClient.get<{ relationships: TwinRelationship[] }>(
-      '/twin/relationships',
-      { params },
-    );
-    return response.data.relationships ?? [];
-  } catch {
-    return MOCK_RELATIONSHIPS;
-  }
+  const params = projectId ? { project_id: projectId } : undefined;
+  const response = await apiClient.get<{
+    relationships?: TwinGraph['relationships'];
+    endpoints?: TwinGraph['endpoints'];
+    skipped_nodes?: number;
+  }>('/twin/relationships', { params });
+  const body = response.data ?? {};
+  return {
+    relationships: body.relationships ?? [],
+    // An older gateway (and the sample workspace) sends no endpoints.
+    endpoints: body.endpoints ?? {},
+    skippedNodes: body.skipped_nodes ?? 0,
+  };
 }
 
 export interface NodeModelResult {
@@ -219,6 +237,88 @@ export async function getNodeVersionHistory(nodeId: string): Promise<WorkProduct
   return data.revisions ?? [];
 }
 
+/**
+ * FORGE-250: "Save current pose" reuses this existing generic revision
+ * mechanism (``POST /v1/twin/nodes/{id}/iterate``, already used for CAD
+ * re-exports) rather than a bespoke pose-save route -- it merges
+ * `metadataUpdates` on top of the node's current metadata and records a new
+ * entry in the node's version history for free, which is exactly what the
+ * acceptance criteria (persisted + versioned + visible in History) needs.
+ */
+export async function iterateWorkProduct(
+  nodeId: string,
+  changeDescription: string,
+  metadataUpdates: Record<string, unknown>,
+): Promise<WorkProductRevision> {
+  const { data } = await apiClient.post<WorkProductRevision>(`/twin/nodes/${nodeId}/iterate`, {
+    change_description: changeDescription,
+    metadata_updates: metadataUpdates,
+  });
+  return data;
+}
+
+/** One field's before/after value in a ``RevisionDiff``. */
+export interface FieldDelta {
+  from_value: unknown;
+  to_value: unknown;
+}
+
+/** Metadata diff between two of a work product's own revisions (FORGE-301,
+ * gap G-J2) -- backed by ``GET /v1/twin/nodes/{id}/diff``, real and
+ * previously unconsumed anywhere in the dashboard. */
+export interface RevisionDiff {
+  work_product_id: string;
+  revision_a: number;
+  revision_b: number;
+  changed: Record<string, FieldDelta>;
+  added: Record<string, unknown>;
+  removed: Record<string, unknown>;
+}
+
+export async function getRevisionDiff(
+  nodeId: string,
+  revisionA: number,
+  revisionB: number,
+): Promise<RevisionDiff> {
+  const { data } = await apiClient.get<RevisionDiff>(`/twin/nodes/${nodeId}/diff`, {
+    params: { v1: revisionA, v2: revisionB },
+  });
+  return data;
+}
+
+/** Real volume/area/bounding-box delta between a work product and its
+ * SUPERSEDES predecessor (FORGE-301) -- unlike ``RevisionDiff`` above,
+ * this compares two DIFFERENT nodes' actual STEP geometry, since
+ * ``/iterate`` never changes a node's own blob. A work product with no
+ * prior version -- the common case -- answers 200 with
+ * ``has_previous_version`` false rather than a 404 (FORGE-709), so the
+ * ordinary answer never reaches the error log. */
+export interface NoGeometryDiff {
+  current_work_product_id: string;
+  has_previous_version: false;
+}
+
+export interface GeometryDiffResult {
+  current_work_product_id: string;
+  has_previous_version: true;
+  previous_work_product_id: string;
+  current_volume_mm3: number;
+  previous_volume_mm3: number;
+  volume_delta_mm3: number;
+  current_area_mm2: number;
+  previous_area_mm2: number;
+  area_delta_mm2: number;
+  current_bounding_box: Record<string, number>;
+  previous_bounding_box: Record<string, number>;
+}
+
+export type GeometryDiff = GeometryDiffResult | NoGeometryDiff;
+
+export async function getGeometryDiff(nodeId: string): Promise<GeometryDiff> {
+  const { data } = await apiClient.get<GeometryDiff>(`/twin/nodes/${nodeId}/geometry-diff`);
+  return data;
+}
+
 // ── Work-product file download / open / preview (MET-483) ───────────────────
 // The browser fetches blobs straight from the gateway, so these are full URLs
 // (not the apiClient base-relative paths) suitable for <a href>, <img src>,
@@ -233,6 +333,27 @@ export function nodeFileUrl(nodeId: string, download = false): string {
 }
 
 /** Fetch a text-previewable work-product blob as a string (for inline preview). */
+/** FORGE-528: the prd rendered from its one home for requirements. */
+export interface DerivedPrd {
+  project_id: string | null;
+  title: string;
+  markdown: string;
+  prose_ref: string | null;
+  requirement_refs: string[];
+  requirement_count: number;
+  refs: string[];
+}
+
+/**
+ * The derived prd for one prd prose revision (`PRD-KEY@n`): its prose plus
+ * the project's current intent, needs and constraint set, as markdown.
+ */
+export async function fetchDerivedPrd(itemRef: string, projectId?: string): Promise<DerivedPrd> {
+  const params = projectId ? { project_id: projectId } : undefined;
+  const { data } = await apiClient.get<DerivedPrd>(`/twin/items/${encodeURIComponent(itemRef)}/prd`, { params });
+  return data;
+}
+
 export async function fetchNodeFileText(nodeId: string): Promise<string> {
   const { data } = await apiClient.get(`/twin/nodes/${nodeId}/file`, { responseType: 'text' });
   return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
@@ -246,6 +367,20 @@ export async function fetchNodeFileText(nodeId: string): Promise<string> {
  * stand in for the whole file set. */
 export function nodeMeshBaseUrl(nodeId: string): string {
   return apiUrl(`/twin/nodes/${nodeId}/files/`);
+}
+
+/** FORGE-687: one named file of a node (a schematic sheet, a gerber layer, a
+ * firmware source), by its path in the project folder. */
+export function nodeNamedFileUrl(nodeId: string, path: string): string {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  return apiUrl(`/twin/nodes/${nodeId}/files/${encoded}`);
+}
+
+/** FORGE-687: one named file of a node, as text. */
+export async function fetchNodeNamedFileText(nodeId: string, path: string): Promise<string> {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  const { data } = await apiClient.get(`/twin/nodes/${nodeId}/files/${encoded}`, { responseType: 'text' });
+  return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 }
 
 // ── Design-sketch approval gate (follow-up to MET-740/747) ──────────────────
@@ -270,6 +405,26 @@ export async function approveSketch(nodeId: string, approvedBy?: string): Promis
     approved_by: approvedBy,
   });
   return { nodeId: data.node_id, approved: data.approved, approvedAt: data.approved_at };
+}
+
+interface UpdateAssemblyJointsApiResponse {
+  nodeId: string;
+  assembly: AssemblyDescription;
+}
+
+/** PATCH /v1/twin/nodes/{id}/assembly-joints — whole-list replace of an
+ * already-committed node's mates/joints (FORGE-271). No live FreeCAD
+ * session or re-export needed, unlike the URDF/SDF/USD export panel's own
+ * joint form — this edits the persisted annotation directly. */
+export async function updateAssemblyJoints(
+  nodeId: string,
+  joints: AssemblyDescription['joints'],
+): Promise<AssemblyDescription> {
+  const { data } = await apiClient.patch<UpdateAssemblyJointsApiResponse>(
+    `/twin/nodes/${nodeId}/assembly-joints`,
+    { joints },
+  );
+  return data.assembly;
 }
 
 // ── Real boolean CSG cut between two committed CAD nodes (MET-612) ─────────

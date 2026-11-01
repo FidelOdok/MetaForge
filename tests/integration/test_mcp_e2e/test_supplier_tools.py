@@ -39,6 +39,20 @@ from tool_registry.tools.distributors.base import (
 
 from ._helpers import McpRpcError, call_tool, rpc
 
+
+async def _auto_approve(ask: object) -> object:
+    """These exercise tool flows, not the write gate (FORGE-387).
+
+    They drive a real HTTP app, which correctly classifies its callers as
+    remote, so every write is held. A deployment in that position has an
+    approval gate; supplying one here is closer to reality than pretending
+    the caller is local. The gate itself has its own tests.
+    """
+    from mcp_core.guardrails import ApprovalOutcome
+
+    return ApprovalOutcome.APPROVED
+
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -183,6 +197,7 @@ async def digikey_mcp_client() -> AsyncIterator[httpx.AsyncClient]:
         ),
     ):
         server = await build_unified_server(
+            approval_gate=_auto_approve,
             knowledge_service=None,
             twin=InMemoryTwinAPI.create(),
             constraint_engine=None,

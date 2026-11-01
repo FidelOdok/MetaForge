@@ -27,27 +27,42 @@ def _spice_response(convergence: bool = True) -> dict:
     }
 
 
-def _fea_response(
-    safety_factor: float = 2.5,
-    max_stress: float = 150.0,
-) -> dict:
-    """Build a mock FEA tool response."""
+def _fea_response(max_stress: float = 100.0) -> dict:
+    """calculix.run_fea's real result shape (FORGE-561)."""
     return {
-        "max_stress_mpa": max_stress,
-        "max_displacement_mm": 0.12,
-        "safety_factor": safety_factor,
-        "solver_time_s": 8.3,
+        "max_von_mises": {"global": max_stress},
+        "displacement": {"max": 0.12},
+        "solver_time": 8.3,
+        "frd_path": "/workspace/bracket_solved.frd",
     }
 
 
-def _cfd_response(convergence_residual: float = 1e-5) -> dict:
-    """Build a mock CFD tool response."""
-    return {
-        "max_velocity_ms": 12.5,
-        "pressure_drop_pa": 350.0,
-        "max_temperature_c": 85.2,
-        "convergence_residual": convergence_residual,
-    }
+# A static case with every argument calculix.run_fea requires; 250 MPa yield
+# over the 100 MPa default stress gives a safety factor of 2.5.
+FEA_CASE = {
+    "mesh_file": "mesh/bracket.inp",
+    "load_case": "tip_load",
+    "material": {"name": "aluminium_6061"},
+    "fixed_node_set": "Surface1",
+    "load_node_set": "Surface6",
+    "load_force_n": [0.0, 0.0, -100.0],
+    "yield_strength_mpa": 250.0,
+}
+
+
+def _cfd_response() -> dict:
+    """calculix.run_thermal's real result shape (FORGE-543: conduction only)."""
+    return {"max_temperature_c": 58.0, "min_temperature_c": 25.0, "result_files": []}
+
+
+CONDUCTION = {
+    "mesh_file": "mesh/enclosure.inp",
+    "material": {"thermal_conductivity_w_mk": 167.0},
+    "heat_source_node_set": "Surface4",
+    "power_dissipation_w": 1.5,
+    "sink_node_set": "Surface1",
+    "sink_temp_c": 25.0,
+}
 
 
 @pytest.fixture
@@ -197,12 +212,7 @@ class TestRunFea:
         request = TaskRequest(
             task_type="run_fea",
             work_product_id=work_product_id,
-            parameters={
-                "mesh_file": "mesh/bracket.inp",
-                "load_cases": [{"name": "gravity", "force_n": 100}],
-                "analysis_type": "static",
-                "material": "steel_1018",
-            },
+            parameters=FEA_CASE,
         )
         result = await agent.run_task(request)
 
@@ -210,24 +220,55 @@ class TestRunFea:
         assert result.task_type == "run_fea"
         assert len(result.skill_results) == 1
         assert result.skill_results[0]["skill"] == "run_fea"
-        assert result.skill_results[0]["safety_factor"] >= 1.0
+        assert result.skill_results[0]["safety_factor"] == 2.5
+        assert result.skill_results[0]["max_stress_mpa"] == 100.0
 
     async def test_fea_fails_low_safety(self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge):
         """FEA with low safety factor should report failure."""
         mcp_bridge.register_tool_response(
             "calculix.run_fea",
-            _fea_response(safety_factor=0.5, max_stress=500.0),
+            _fea_response(max_stress=500.0),
         )
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_fea",
             work_product_id=uuid4(),
-            parameters={"mesh_file": "mesh/bracket.inp"},
+            parameters=FEA_CASE,
         )
         result = await agent.run_task(request)
 
         assert result.success is False
         assert any("safety factor" in w.lower() for w in result.warnings)
+
+    async def test_fea_sends_the_tools_own_arguments(
+        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
+    ):
+        """FORGE-561: it used to send load_cases / 'static' / a material name."""
+        calls: list[dict] = []
+        original = mcp_bridge.invoke
+
+        async def spy(tool_id, arguments, **kw):
+            calls.append(arguments)
+            return await original(tool_id, arguments, **kw)
+
+        mcp_bridge.invoke = spy  # type: ignore[method-assign]
+        agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
+        await agent.run_task(
+            TaskRequest(task_type="run_fea", work_product_id=uuid4(), parameters=FEA_CASE)
+        )
+        sent = calls[0]
+        assert sent["analysis_type"] == "static_stress"
+        assert sent["material"] == {"name": "aluminium_6061"}
+        assert sent["load_force_n"] == [0.0, 0.0, -100.0]
+        assert "load_cases" not in sent and "yield_strength_mpa" not in sent
+
+    async def test_static_case_without_a_load_is_refused(self, agent: SimulationAgent):
+        params = {k: v for k, v in FEA_CASE.items() if k != "load_force_n"}
+        result = await agent.run_task(
+            TaskRequest(task_type="run_fea", work_product_id=uuid4(), parameters=params)
+        )
+        assert result.success is False
+        assert any("load_force_n" in e for e in result.errors)
 
     async def test_fea_missing_mesh_file(self, agent: SimulationAgent):
         """FEA should fail when mesh_file is missing."""
@@ -247,56 +288,90 @@ class TestRunFea:
 class TestRunCfd:
     """Tests for the run_cfd task type."""
 
-    async def test_cfd_passes_convergence(self, agent: SimulationAgent):
-        """CFD with good convergence should succeed."""
-        work_product_id = uuid4()
+    async def test_conduction_case_reaches_run_thermal(
+        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
+    ):
+        """FORGE-543: the handler sends run_thermal its own arguments."""
+        calls: list[dict] = []
+        original = mcp_bridge.invoke
+
+        async def spy(tool_id, arguments, **kw):
+            calls.append(arguments)
+            return await original(tool_id, arguments, **kw)
+
+        mcp_bridge.invoke = spy  # type: ignore[method-assign]
+        agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
-            task_type="run_cfd",
-            work_product_id=work_product_id,
-            parameters={
-                "geometry_file": "cad/enclosure.step",
-                "fluid_properties": {"density_kg_m3": 1.225, "viscosity_pa_s": 1.8e-5},
-                "boundary_conditions": {"inlet_velocity_ms": 5.0},
-                "mesh_resolution": "medium",
-            },
+            task_type="run_cfd", work_product_id=uuid4(), parameters={"conduction": CONDUCTION}
         )
         result = await agent.run_task(request)
 
         assert result.success is True
-        assert result.task_type == "run_cfd"
-        assert len(result.skill_results) == 1
-        assert result.skill_results[0]["skill"] == "run_cfd"
-        assert result.skill_results[0]["convergence_residual"] < 1e-3
+        assert result.skill_results[0]["analysis"] == "conduction_only"
+        assert result.skill_results[0]["max_temperature_c"] == 58.0
+        assert calls[0] == {"analysis_mode": "steady_state", **CONDUCTION}
 
-    async def test_cfd_fails_no_convergence(
+    async def test_internal_flow_case_reaches_openfoam(
         self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
     ):
-        """CFD with high residual should report failure."""
+        """FORGE-557: a flow case goes to openfoam.run_internal_flow, and the
+        pressure drop and convergence come back in the task result."""
+        mcp_bridge.register_tool("openfoam.run_internal_flow", "flow_simulation")
         mcp_bridge.register_tool_response(
-            "calculix.run_thermal",
-            _cfd_response(convergence_residual=0.1),
+            "openfoam.run_internal_flow",
+            {
+                "completed": True,
+                "converged": True,
+                "solution_stable": True,
+                "pressure_drop_pa": 0.0097,
+                "inlet": {"volumetric_flow_m3_s": 7.7e-06},
+                "mesh": {"cells": 13784},
+                "case_dir": "/workspace/openfoam/x/case",
+            },
         )
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
+        flow = {
+            "inlet_stl": "pipe/inlet.stl",
+            "outlet_stl": "pipe/outlet.stl",
+            "wall_stls": ["pipe/wall.stl"],
+            "stl_units": "m",
+            "inside_point": [0.2, 0.0, 0.0],
+            "fluid": {"density_kg_m3": 1.2, "kinematic_viscosity_m2_s": 1e-5},
+            "inlet_velocity_m_s": 0.025,
+            "turbulence": "laminar",
+        }
+        result = await agent.run_task(
+            TaskRequest(
+                task_type="run_cfd", work_product_id=uuid4(), parameters={"internal_flow": flow}
+            )
+        )
+
+        assert result.success is True
+        out = result.skill_results[0]
+        assert out["analysis"] == "internal_flow"
+        assert out["pressure_drop_pa"] == 0.0097
+        assert out["converged"] is True and out["mesh_cells"] == 13784
+        assert out["solver"] == "openfoam.run_internal_flow"
+
+    async def test_flow_quantities_are_refused(self, agent: SimulationAgent):
         request = TaskRequest(
             task_type="run_cfd",
             work_product_id=uuid4(),
-            parameters={"geometry_file": "cad/enclosure.step"},
+            parameters={
+                "geometry_file": "cad/enclosure.step",
+                "boundary_conditions": {"inlet_velocity_ms": 5.0},
+            },
         )
         result = await agent.run_task(request)
 
         assert result.success is False
-        assert any("residual" in w.lower() for w in result.warnings)
+        assert any("internal_flow" in e for e in result.errors)
 
-    async def test_cfd_missing_geometry_file(self, agent: SimulationAgent):
-        """CFD should fail when geometry_file is missing."""
-        request = TaskRequest(
-            task_type="run_cfd",
-            work_product_id=uuid4(),
-        )
-        result = await agent.run_task(request)
+    async def test_no_case_is_refused(self, agent: SimulationAgent):
+        result = await agent.run_task(TaskRequest(task_type="run_cfd", work_product_id=uuid4()))
 
         assert result.success is False
-        assert any("geometry_file" in e for e in result.errors)
+        assert any("Pass one analysis" in e for e in result.errors)
 
 
 # --- Full simulation ---
@@ -313,8 +388,8 @@ class TestFullSimulation:
             work_product_id=work_product_id,
             parameters={
                 "netlist_path": "sim/power_supply.cir",
-                "mesh_file": "mesh/bracket.inp",
-                "geometry_file": "cad/enclosure.step",
+                **FEA_CASE,
+                "conduction": CONDUCTION,
             },
         )
         result = await agent.run_task(request)
@@ -358,7 +433,7 @@ class TestFullSimulation:
         # SPICE converges, FEA has low safety factor
         mcp_bridge.register_tool_response(
             "calculix.run_fea",
-            _fea_response(safety_factor=0.3),
+            _fea_response(max_stress=833.0),
         )
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
@@ -366,7 +441,7 @@ class TestFullSimulation:
             work_product_id=uuid4(),
             parameters={
                 "netlist_path": "sim/power_supply.cir",
-                "mesh_file": "mesh/bracket.inp",
+                **FEA_CASE,
             },
         )
         result = await agent.run_task(request)

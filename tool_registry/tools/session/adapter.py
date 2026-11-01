@@ -30,26 +30,27 @@ logger = structlog.get_logger(__name__)
 def _bind_project(project_id: Any) -> bool:
     """Scope this MCP session to ``project_id``. Returns whether it took effect.
 
-    Best-effort and honest about it: the binding needs the caller to present a
-    stable session identity (stdio ``METAFORGE_SESSION_ID``, or an HTTP
-    ``X-MetaForge-Session`` header). A client supplying neither gets a freshly
-    generated session id per call, so nothing can match later and the caller
-    must keep passing ``project_id`` explicitly -- reported back as
-    ``project_scope_bound: false`` rather than silently pretending.
+    Thin wrapper over :func:`mcp_core.context.bind_current_session_to`, which
+    ``project.open`` also uses -- the "only bind when the session is stable,
+    and say so when it is not" rule has to be one rule, not two that can
+    drift.
     """
-    if not project_id or not isinstance(project_id, str):
-        return False
     try:
-        from uuid import UUID
+        from mcp_core.context import bind_current_session_to
 
-        from mcp_core.context import bind_session_project, current_context
-
-        ctx = current_context()
-        bind_session_project(ctx.session_id, UUID(project_id))
+        bound = bind_current_session_to(project_id if isinstance(project_id, str) else None)
     except Exception as exc:  # noqa: BLE001 — scoping must not fail session.start
         logger.warning("session_project_bind_failed", error=str(exc))
         return False
-    return True
+    if not bound and project_id:
+        logger.warning(
+            "session_project_bind_skipped",
+            reason=(
+                "no stable session identity, or an unparseable project_id; a binding "
+                "here could never be matched again"
+            ),
+        )
+    return bound
 
 
 def _unbind_project() -> None:

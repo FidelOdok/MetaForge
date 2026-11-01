@@ -8,7 +8,10 @@ can be imported and tested without a real FreeCAD installation.
 from __future__ import annotations
 
 import base64
+import math
 import os
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -16,6 +19,13 @@ from typing import Any
 import structlog
 
 from observability.tracing import get_tracer
+
+# FORGE-100: shared, adapter-agnostic pure-data density lookup -- no cadquery
+# runtime dependency (materials.py imports nothing cadquery-specific), so
+# reusing it here is a same-layer (tool_registry) data import, not a
+# cross-adapter runtime one. Single source of truth for "material name ->
+# density" rather than a second table drifting from cadquery's own.
+from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.freecad.operations")
@@ -32,15 +42,6 @@ except ImportError:
     Import = None  # type: ignore[assignment]
     Part = None  # type: ignore[assignment]
     HAS_FREECAD = False
-
-# Conditional Mesh import (FEM workbench)
-try:
-    import Mesh  # type: ignore[import-untyped]
-
-    HAS_MESH = True
-except ImportError:
-    Mesh = None  # type: ignore[assignment]
-    HAS_MESH = False
 
 # Importing the Sketcher + PartDesign workbench modules registers their object
 # types (``Sketcher::SketchObject``, ``PartDesign::Body`` / ``Pad`` / ``Pocket``
@@ -297,6 +298,383 @@ class FreecadNotAvailableError(RuntimeError):
         )
 
 
+# FORGE-99: gmsh CLI has its own real 3D meshing algorithm but no mode
+# literally named "netgen"/"mefisto" (those are separate, unrelated
+# programs) -- so the schema's algorithm choices don't map to distinct real
+# backends here. Kept as a recognized-but-not-fully-honored input rather
+# than silently dropped: an unrecognized value still 400s, a recognized one
+# just gets logged when it isn't "gmsh" (see generate_mesh below).
+_MESH_ALGORITHMS = ("gmsh", "netgen", "mefisto")
+
+_MESH_TIMEOUT_SECONDS = 180
+
+# FORGE-505: tolerance when comparing a mesh/STEP bounding box to the twin's.
+_CAD_SUFFIXES = (".step", ".stp")
+_FRAME_TOL_MM = 0.01
+
+# CalculiX/Abaqus element-type prefixes that are real *volumetric* solid
+# elements (what a structural FEA solve actually needs) -- distinct from the
+# lower-dimensional boundary elements (T3D2 edges, CPS3/CPS4 surface facets)
+# gmsh also emits by default as named element sets per STEP entity, which
+# ARE useful (free node-set groups for applying loads/BCs to specific faces)
+# but aren't themselves solvable volume elements.
+_VOLUME_ELEMENT_PREFIXES = ("C3D",)
+
+
+def _parse_inp_mesh_counts(inp_path: str) -> tuple[int, dict[str, int]]:
+    """Count nodes and elements-by-type in a CalculiX/Abaqus ``.inp`` mesh.
+
+    Mirrors ``calculix.adapter._validate_mesh_file``'s own ``*NODE``/
+    ``*ELEMENT`` block-scanning approach (same file format, same convention)
+    but also tracks each ``*ELEMENT, type=X`` block's element type, so a
+    caller can tell a real volumetric mesh (``C3D4``/``C3D10``/...) from a
+    surface-only one, instead of a single opaque total.
+    """
+    node_count = 0
+    counts_by_type: dict[str, int] = {}
+    current_type: str | None = None
+    in_nodes = False
+    with open(inp_path, encoding="utf-8", errors="replace") as f:  # noqa: PTH123
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.upper().startswith("*NODE"):
+                current_type = None
+                in_nodes = True
+            elif stripped.upper().startswith("*ELEMENT"):
+                in_nodes = False
+                current_type = "UNKNOWN"
+                for part in stripped.split(","):
+                    key, _, value = part.strip().partition("=")
+                    if key.strip().upper() == "TYPE":
+                        current_type = value.strip()
+            elif stripped.startswith("*"):
+                in_nodes = False
+                current_type = None
+            elif in_nodes:
+                node_count += 1
+            elif current_type is not None:
+                counts_by_type[current_type] = counts_by_type.get(current_type, 0) + 1
+    return node_count, counts_by_type
+
+
+# FORGE-239: gmsh's Abaqus/CalculiX writer emits each original STEP face as
+# its own *ELEMENT, TYPE=CPS3 (triangle) ELSET -- confirmed against the real
+# adapter output (see tests/unit/test_freecad_operations.py's
+# _REAL_GMSH_INP_FIXTURE, captured live). CPS4 (quad) is handled too since
+# gmsh can emit either depending on its own meshing choice; anything else
+# (T3D2 lines, C3D* volumes, an unrecognized surface type) is a different
+# kind of group entirely and is left out of the face table -- reported live:
+# with no way to tell "Surface1" (the CalculiX ELSET name gmsh happened to
+# assign) from "the face at x=0", the model guessed wrong and clamped the
+# ENTIRE long side of a cantilever instead of just its fixed end, giving an
+# FEA result ~10x too stiff.
+_SURFACE_ELEMENT_TYPES = ("CPS3", "CPS4")
+
+
+def _triangle_area_and_normal(
+    a: tuple[float, float, float], b: tuple[float, float, float], c: tuple[float, float, float]
+) -> tuple[float, tuple[float, float, float]]:
+    """Area and unit normal of the triangle a-b-c (right-hand rule on a-b, a-c).
+
+    Winding order is whatever gmsh wrote -- this reports the geometric
+    normal as-is, not independently verified to point away from the solid
+    (that needs the part's interior, which isn't available from the mesh
+    alone); callers should treat it as "a" normal, not guaranteed "outward".
+    """
+    ab = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+    ac = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+    cross = (
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    )
+    mag = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
+    area = mag / 2.0
+    if mag < 1e-12:
+        return area, (0.0, 0.0, 0.0)
+    return area, (cross[0] / mag, cross[1] / mag, cross[2] / mag)
+
+
+def _parse_inp_face_table(inp_path: str) -> list[dict[str, Any]]:
+    """Per-STEP-face geometric summary of a gmsh-written .inp mesh.
+
+    Answers "which named element set is the face at x=0" without a human
+    having to open the mesh file and eyeball coordinates: for every surface
+    (CPS3/CPS4) ELSET, its bounding box, centroid, total area, and an
+    average face normal -- enough for a caller to pick e.g. ``{"face":
+    x_min}`` style reasoning themselves ("the group whose bbox is flat in X
+    at the part's minimum X is the fixed end"), which is exactly the
+    judgment call the model got wrong live (see module comment above).
+    """
+    nodes: dict[int, tuple[float, float, float]] = {}
+    # name -> (element_type, list of connectivity tuples)
+    surface_sets: dict[str, tuple[str, list[tuple[int, ...]]]] = {}
+    current_type: str | None = None
+    current_name: str | None = None
+    in_nodes = False
+    with open(inp_path, encoding="utf-8", errors="replace") as f:  # noqa: PTH123
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.upper().startswith("*NODE"):
+                current_type = None
+                current_name = None
+                in_nodes = True
+            elif stripped.upper().startswith("*ELEMENT"):
+                in_nodes = False
+                current_type = "UNKNOWN"
+                current_name = None
+                for part in stripped.split(","):
+                    key, _, value = part.strip().partition("=")
+                    key_upper = key.strip().upper()
+                    if key_upper == "TYPE":
+                        current_type = value.strip()
+                    elif key_upper == "ELSET":
+                        current_name = value.strip()
+            elif stripped.startswith("*"):
+                in_nodes = False
+                current_type = None
+                current_name = None
+            elif in_nodes:
+                parts = [p.strip() for p in stripped.split(",")]
+                node_id = int(parts[0])
+                nodes[node_id] = (float(parts[1]), float(parts[2]), float(parts[3]))
+            elif (
+                current_type in _SURFACE_ELEMENT_TYPES
+                and current_name is not None
+                and current_type is not None
+            ):
+                parts = [p.strip() for p in stripped.split(",")]
+                connectivity = tuple(int(p) for p in parts[1:])
+                entry = surface_sets.setdefault(current_name, (current_type, []))
+                entry[1].append(connectivity)
+
+    faces: list[dict[str, Any]] = []
+    for name, (etype, elements) in sorted(surface_sets.items()):
+        member_node_ids: set[int] = set()
+        for conn in elements:
+            member_node_ids.update(conn)
+        coords = [nodes[n] for n in member_node_ids if n in nodes]
+        if not coords:
+            continue
+
+        xs = [c[0] for c in coords]
+        ys = [c[1] for c in coords]
+        zs = [c[2] for c in coords]
+        bbox_min = (min(xs), min(ys), min(zs))
+        bbox_max = (max(xs), max(ys), max(zs))
+        centroid = (
+            sum(c[0] for c in coords) / len(coords),
+            sum(c[1] for c in coords) / len(coords),
+            sum(c[2] for c in coords) / len(coords),
+        )
+
+        total_area = 0.0
+        normal_sum = [0.0, 0.0, 0.0]
+        for conn in elements:
+            pts = [nodes[n] for n in conn if n in nodes]
+            # A quad (CPS4) is split fan-wise from its first corner; any
+            # element with fewer than 3 resolvable corners contributes no
+            # area (e.g. a dangling/unresolved node id) rather than guessing.
+            for i in range(1, len(pts) - 1):
+                area, normal = _triangle_area_and_normal(pts[0], pts[i], pts[i + 1])
+                total_area += area
+                normal_sum[0] += normal[0] * area
+                normal_sum[1] += normal[1] * area
+                normal_sum[2] += normal[2] * area
+        normal_mag = math.sqrt(sum(n * n for n in normal_sum))
+        avg_normal = (
+            tuple(n / normal_mag for n in normal_sum) if normal_mag > 1e-12 else (0.0, 0.0, 0.0)
+        )
+
+        faces.append(
+            {
+                "name": name,
+                "element_type": etype,
+                "num_elements": len(elements),
+                "num_nodes": len(member_node_ids),
+                "bbox_mm": {
+                    "min": [round(v, 6) for v in bbox_min],
+                    "max": [round(v, 6) for v in bbox_max],
+                },
+                "centroid_mm": [round(v, 6) for v in centroid],
+                "area_mm2": round(total_area, 6),
+                # area-weighted average normal -- "a" normal, see
+                # _triangle_area_and_normal's own docstring on outward-ness.
+                "normal": [round(v, 6) for v in avg_normal],
+            }
+        )
+    return faces
+
+
+def _inp_node_bbox(inp_path: str) -> dict[str, list[float]]:
+    """Bounding box of every ``*NODE`` coordinate in a ``.inp`` mesh (FORGE-505).
+
+    This is the box an FEA load/BC is actually applied in, so it is what a
+    caller must compare against the twin's committed ``bounding_box``.
+    """
+    lo = [math.inf] * 3
+    hi = [-math.inf] * 3
+    in_nodes = False
+    with open(inp_path, encoding="utf-8", errors="replace") as f:  # noqa: PTH123
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("*"):
+                in_nodes = stripped.upper().startswith("*NODE")
+                continue
+            if in_nodes:
+                parts = stripped.split(",")
+                for i in range(3):
+                    v = float(parts[i + 1])
+                    lo[i] = min(lo[i], v)
+                    hi[i] = max(hi[i], v)
+    if lo[0] is math.inf:
+        return {"min": [0.0, 0.0, 0.0], "max": [0.0, 0.0, 0.0]}
+    return {"min": [round(v, 6) for v in lo], "max": [round(v, 6) for v in hi]}
+
+
+#: Above this many tetrahedra the quality metrics are computed on an evenly
+#: spaced sample, so a fine mesh does not stall the tool; the result says so.
+_QUALITY_SAMPLE_LIMIT = 200_000
+
+
+def _tet_metrics(p: list[tuple[float, float, float]]) -> tuple[float, float, float] | None:
+    """(min dihedral angle in degrees, edge aspect ratio, radius-ratio quality).
+
+    Radius ratio is ``3 * r_in / r_circ``: 1 for a regular tetrahedron, 0 for
+    a flat one. ``None`` for a degenerate (zero-volume) element.
+    """
+
+    def sub(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, ...]:
+        return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+    def cross(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, ...]:
+        return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+    def dot(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+    def norm(a: tuple[float, ...]) -> float:
+        return math.sqrt(dot(a, a))
+
+    a, b, c, d = p
+    volume = abs(dot(sub(b, a), cross(sub(c, a), sub(d, a)))) / 6.0
+    if volume <= 1e-18:
+        return None
+    edges = [norm(sub(x, y)) for x, y in ((a, b), (a, c), (a, d), (b, c), (b, d), (c, d))]
+    faces = ((a, b, c), (a, b, d), (a, c, d), (b, c, d))
+    areas = [norm(cross(sub(y, x), sub(z, x))) / 2.0 for x, y, z in faces]
+    r_in = 3.0 * volume / sum(areas)
+    # Circumradius from the edge lengths (Cayley-Menger simplification).
+    ab, ac, ad, bc, bd, cd = edges
+    prod = (ab * cd + ac * bd + ad * bc) * (ab * cd + ac * bd - ad * bc)
+    prod *= (ab * cd - ac * bd + ad * bc) * (-ab * cd + ac * bd + ad * bc)
+    r_circ = math.sqrt(max(prod, 0.0)) / (24.0 * volume)
+    quality = 3.0 * r_in / r_circ if r_circ > 0 else 0.0
+    # Dihedral angle along each edge, from the two face normals meeting there.
+    normals = [cross(sub(y, x), sub(z, x)) for x, y, z in faces]
+    min_dihedral = 180.0
+    for i in range(4):
+        for j in range(i + 1, 4):
+            ni, nj = normals[i], normals[j]
+            denom = norm(ni) * norm(nj)
+            if denom <= 0:
+                continue
+            cos = max(-1.0, min(1.0, dot(ni, nj) / denom))
+            min_dihedral = min(min_dihedral, 180.0 - math.degrees(math.acos(cos)))
+    return min_dihedral, max(edges) / min(edges), quality
+
+
+def _inp_tet_quality(inp_path: str) -> dict[str, Any]:
+    """Element-quality metrics of the tetrahedra in a ``.inp`` mesh (FORGE-548).
+
+    ``freecad.generate_mesh`` returned no quality metrics at all, so a mesh
+    skill comparing them with thresholds compared nothing and always passed.
+    These are computed from the element geometry itself: the minimum
+    dihedral angle, the worst edge aspect ratio, and the mean radius-ratio
+    quality. Second-order elements are measured on their corner nodes.
+    """
+    nodes: dict[int, tuple[float, float, float]] = {}
+    tets: list[tuple[int, int, int, int]] = []
+    section = ""
+    with open(inp_path, encoding="utf-8", errors="replace") as f:  # noqa: PTH123
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("*"):
+                upper = stripped.upper().replace(" ", "")
+                if upper.startswith("*NODE"):
+                    section = "node"
+                elif upper.startswith("*ELEMENT") and (
+                    "TYPE=C3D4" in upper or "TYPE=C3D10" in upper
+                ):
+                    section = "tet"
+                else:
+                    section = ""
+                continue
+            parts = [x for x in stripped.split(",") if x.strip()]
+            if section == "node" and len(parts) >= 4:
+                nodes[int(parts[0])] = (float(parts[1]), float(parts[2]), float(parts[3]))
+            elif section == "tet" and len(parts) >= 5:
+                tets.append((int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])))
+    if not tets:
+        return {}
+    step = max(1, len(tets) // _QUALITY_SAMPLE_LIMIT)
+    min_angle, max_aspect, total_quality, measured, degenerate = 180.0, 0.0, 0.0, 0, 0
+    for tet in tets[::step]:
+        if any(n not in nodes for n in tet):
+            continue  # an element referencing an undefined node is not measurable
+        metrics = _tet_metrics([nodes[n] for n in tet])
+        if metrics is None:
+            degenerate += 1
+            continue
+        angle, aspect, quality = metrics
+        min_angle = min(min_angle, angle)
+        max_aspect = max(max_aspect, aspect)
+        total_quality += quality
+        measured += 1
+    if not measured and not degenerate:
+        return {}
+    out: dict[str, Any] = {
+        "min_angle": round(min_angle, 3) if measured else 0.0,
+        "max_aspect_ratio": round(max_aspect, 3),
+        "avg_quality": round(total_quality / measured, 4) if measured else 0.0,
+        "degenerate_elements": degenerate,
+        "elements_measured": measured,
+    }
+    if step > 1:
+        out["sampled_every"] = step
+    return out
+
+
+def _bboxes_match(a: dict[str, Any], b: dict[str, Any], tol_mm: float) -> bool:
+    """True when two ``{"min": [x,y,z], "max": [x,y,z]}`` boxes agree per axis."""
+    return all(abs(a[k][i] - b[k][i]) <= tol_mm for k in ("min", "max") for i in range(3))
+
+
+def _surface_sets_from_faces(faces: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Name -> bounding box / centroid / normal of each named surface set (FORGE-505).
+
+    A name-keyed view of the ``faces`` table, in the mesh frame (which is the
+    twin frame), so a caller can pick the fixed and load faces by position.
+    """
+    return {
+        f["name"]: {
+            "bbox_mm": f["bbox_mm"],
+            "centroid_mm": f["centroid_mm"],
+            "area_mm2": f["area_mm2"],
+            "normal": f["normal"],
+        }
+        for f in faces
+    }
+
+
 # Shape dimension defaults per shape type
 _SHAPE_DEFAULTS: dict[str, dict[str, float]] = {
     "box": {"length": 10.0, "width": 10.0, "height": 10.0},
@@ -314,6 +692,109 @@ _SHAPE_DEFAULTS: dict[str, dict[str, float]] = {
     },
 }
 
+# FORGE-96: 'diameter' is the natural word a caller reaches for describing a
+# disc/cylinder/sphere ("a 150mm diameter turntable"), but every shape here
+# is parameterized by radius. Aliased only for shapes whose defaults declare
+# a bare 'radius' (cylinder, sphere) -- cone's radius1/radius2 are per-end,
+# so there's no unambiguous single "diameter" for a frustum.
+_DIAMETER_ALIAS_SHAPES = frozenset(
+    shape for shape, defaults in _SHAPE_DEFAULTS.items() if "radius" in defaults
+)
+
+
+def _resolve_parameters(shape_type: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    """Translate known aliases and REJECT any parameter key the shape
+    builder doesn't read (FORGE-96).
+
+    Previously ``create_parametric`` merged caller parameters over defaults
+    with ``{**defaults, **parameters}`` and silently dropped any key
+    ``_build_shape`` doesn't read -- a caller asking for
+    ``shape_type="cylinder", parameters={"diameter": 150, ...}`` got the
+    shape's DEFAULT radius (5.0mm) instead, with no error and nothing in the
+    response signaling the request wasn't honored: a "150mm turntable"
+    silently became a 10mm pin. An unrecognized ``shape_type`` (not in
+    ``_SHAPE_DEFAULTS``) is left untouched here -- ``_build_shape``'s own
+    "Unsupported shape type" error is the more relevant one for that case.
+    """
+    if shape_type not in _SHAPE_DEFAULTS:
+        return dict(parameters)
+    accepted = set(_SHAPE_DEFAULTS[shape_type])
+    resolved = dict(parameters)
+    if "diameter" in resolved and shape_type in _DIAMETER_ALIAS_SHAPES and "radius" not in resolved:
+        resolved["radius"] = resolved.pop("diameter") / 2
+    unknown = set(resolved) - accepted
+    if unknown:
+        hint = (
+            ". 'diameter' is only accepted for shapes parameterized by a plain "
+            "'radius' (cylinder, sphere); did you mean 'radius' (diameter / 2)?"
+            if "diameter" in unknown
+            else ""
+        )
+        raise ValueError(
+            f"create_parametric: unknown parameter(s) {sorted(unknown)} for "
+            f"shape_type '{shape_type}' -- accepted: {sorted(accepted)}{hint}"
+        )
+    return resolved
+
+
+RESULT_MAX_CHARS = 20000
+
+
+def json_safe(value: Any, _depth: int = 0) -> Any:
+    """Plain-data form of an ``execute_code`` ``result`` (FORGE-512).
+
+    Vectors, placements, bounding boxes and document objects become dicts/lists;
+    anything unknown falls back to ``repr``. Depth-limited so a cyclic or huge
+    structure cannot run away; the caller caps the serialized size.
+    """
+    if value is None or isinstance(value, bool | int | str):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else repr(value)
+    if _depth > 6:
+        return repr(value)
+    if isinstance(value, dict):
+        return {str(k): json_safe(v, _depth + 1) for k, v in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [json_safe(v, _depth + 1) for v in value]
+    if isinstance(value, bytes):
+        return repr(value[:200])
+    # FreeCAD value types and objects, duck-typed so this needs no FreeCAD import.
+    if hasattr(value, "Base") and hasattr(value, "Rotation"):  # Placement
+        return {
+            "position": json_safe(value.Base, _depth + 1),
+            "rotation": {
+                "axis": json_safe(value.Rotation.Axis, _depth + 1),
+                "angle_deg": json_safe(math.degrees(value.Rotation.Angle), _depth + 1),
+            },
+        }
+    if hasattr(value, "XMin") and hasattr(value, "ZMax"):  # BoundBox
+        return {
+            "min": [value.XMin, value.YMin, value.ZMin],
+            "max": [value.XMax, value.YMax, value.ZMax],
+        }
+    if hasattr(value, "x") and hasattr(value, "y") and hasattr(value, "z"):  # Vector
+        return [
+            json_safe(value.x, _depth + 1),
+            json_safe(value.y, _depth + 1),
+            json_safe(value.z, _depth + 1),
+        ]
+    if hasattr(value, "Name") and hasattr(value, "TypeId"):  # document object
+        return {"name": value.Name, "label": getattr(value, "Label", value.Name)}
+    return repr(value)
+
+
+def capped_result(value: Any, max_chars: int = RESULT_MAX_CHARS) -> tuple[Any, bool]:
+    """``json_safe(value)`` capped to ``max_chars`` serialized; returns
+    ``(data, truncated)``. An oversize result becomes its truncated JSON text."""
+    import json
+
+    data = json_safe(value)
+    text = json.dumps(data, default=repr)
+    if len(text) <= max_chars:
+        return data, False
+    return text[:max_chars], True
+
 
 class FreecadOperations:
     """Core FreeCAD CAD operations.
@@ -326,6 +807,9 @@ class FreecadOperations:
     def __init__(self, work_dir: str = "/workspace", timeout: float = 60.0) -> None:
         self.work_dir = work_dir
         self.timeout = timeout
+        # FORGE-512: (document name, object name) -> shape a script assigned, kept
+        # so a later recompute of a parametric object cannot silently revert it.
+        self._pinned_shapes: dict[tuple[str, str], Any] = {}
 
     def _require_freecad(self) -> None:
         """Raise if FreeCAD is not available."""
@@ -377,11 +861,13 @@ class FreecadOperations:
                 output_path = os.path.join(self.work_dir, f"{shape_type}.step")
             self._ensure_output_dir(output_path)
 
-            # Merge defaults with provided parameters
+            # Merge defaults with provided parameters (FORGE-96: rejects an
+            # unrecognized key instead of silently dropping it).
             defaults = _SHAPE_DEFAULTS.get(shape_type, {})
-            merged = {**defaults, **parameters}
 
             try:
+                resolved_parameters = _resolve_parameters(shape_type, parameters)
+                merged = {**defaults, **resolved_parameters}
                 shape = self._build_shape(shape_type, merged)
             except Exception as exc:
                 span.record_exception(exc)
@@ -398,15 +884,26 @@ class FreecadOperations:
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
 
+            # FORGE-100: mass is the one measured property this tool computed
+            # a value for (geometric volume) but never converted to something
+            # a constraint expression (e.g. `moving_mass_kg <= 4.5`) could
+            # actually read -- reuses cadquery's own density table/conversion
+            # (materials.py, already established for export_urdf/export_sdf),
+            # not a second computation path.
+            mass_kg = (
+                round(volume * 1e-9 * resolve_density_kg_m3(material), 6) if material else None
+            )
+
             logger.info(
                 "Created parametric shape",
                 shape_type=shape_type,
                 output_path=output_path,
                 volume_mm3=round(volume, 2),
+                mass_kg=mass_kg,
                 duration_s=round(elapsed, 3),
             )
 
-            return {
+            result: dict[str, Any] = {
                 "cad_file": output_path,
                 "volume_mm3": round(volume, 2),
                 "surface_area_mm2": round(area, 2),
@@ -421,6 +918,9 @@ class FreecadOperations:
                 "parameters_used": merged,
                 "material": material,
             }
+            if mass_kg is not None:
+                result["mass_kg"] = mass_kg
+            return result
 
     def _build_shape(self, shape_type: str, params: dict[str, Any]) -> Any:
         """Build a FreeCAD Part shape from type and parameters."""
@@ -583,95 +1083,284 @@ class FreecadOperations:
                 "step_base64": step_base64,
             }
 
+    def _resolve_cad_input(self, input_file: str) -> str:
+        """Locate a CAD input, recovering a staged work-product file (FORGE-514).
+
+        ``twin.stage_work_product_file`` writes to
+        ``<work_dir>/_staged_work_products/<node_id>/<file>`` and that file is
+        never removed by meshing. Callers nevertheless re-derive other paths
+        from a mesh result (``<work_dir>/<stem>.inp`` -> ``<work_dir>/<stem>.step``)
+        or pass the bare node id, none of which exist. When the given path is
+        missing, look for the file (by basename, or by node id) under the
+        staging root and use it when the match is unambiguous; otherwise raise
+        an error naming the expected path and the staged candidates.
+        """
+        if Path(input_file).exists():
+            return input_file
+
+        staged_root = Path(self.work_dir) / "_staged_work_products"
+        name = Path(input_file).name
+        matches: list[Path] = []
+        if staged_root.is_dir():
+            node_dir = staged_root / name
+            if node_dir.is_dir():
+                matches = sorted(p for p in node_dir.iterdir() if p.suffix.lower() in _CAD_SUFFIXES)
+            elif Path(name).suffix:
+                matches = sorted(staged_root.glob(f"*/{name}"))
+            else:
+                matches = sorted(
+                    p for suffix in _CAD_SUFFIXES for p in staged_root.glob(f"*/{name}{suffix}")
+                )
+        if len(matches) == 1:
+            logger.warning(
+                "freecad_input_resolved_to_staged_file",
+                requested=input_file,
+                resolved=str(matches[0]),
+            )
+            return str(matches[0])
+
+        detail = (
+            f" Ambiguous staged candidates: {', '.join(str(m) for m in matches[:5])}."
+            if matches
+            else ""
+        )
+        raise FileNotFoundError(
+            f"CAD file not found: {input_file}. Expected the path returned by "
+            "twin.stage_work_product_file (under "
+            f"{staged_root}/<node_id>/<file>), which stays readable for repeated "
+            "meshes; re-run twin.stage_work_product_file if it is gone." + detail
+        )
+
     def generate_mesh(
         self,
         input_file: str,
         element_size: float = 1.0,
         algorithm: str = "netgen",
         output_format: str = "inp",
+        element_order: int = 1,
     ) -> dict[str, Any]:
-        """Generate a finite element mesh from a CAD file.
+        """Generate a volumetric finite-element mesh from a CAD file (FORGE-99).
+
+        FreeCAD's ``Mesh`` module (the previous implementation) can only
+        produce a surface triangulation (``Shape.tessellate()`` returns
+        (points, facet-index-triples), which ``Mesh.addFacets()`` doesn't
+        even accept the shape of -- it failed on every input with
+        ``TypeError: expect a sequence of floats or Vector``) -- not the
+        volumetric solid elements (C3D4/C3D10 tetrahedra) CalculiX needs to
+        solve a stress analysis on a solid part. This shells out to the
+        ``gmsh`` CLI (bundled in this adapter's image alongside FreeCAD)
+        instead, which meshes a STEP file directly into real tetrahedra and
+        writes CalculiX/Abaqus ``.inp`` format natively -- verified against
+        a real STEP box: a ``*ELEMENT, type=C3D4`` block with real
+        tetrahedra, plus free ``*ELSET`` groups per original STEP face/edge
+        (``Surface1``, ``Line1``, ...) useful for applying loads/BCs to a
+        specific face later.
 
         Args:
-            input_file: Path to the source CAD file.
-            element_size: Target element size for meshing.
-            algorithm: Meshing algorithm (netgen, gmsh, mefisto).
-            output_format: Output format (inp, unv, stl).
+            input_file: Path to the source CAD file (STEP).
+            element_size: Target element size for meshing (gmsh ``-clmax``).
+            algorithm: Meshing algorithm. gmsh has no backend literally named
+                "netgen"/"mefisto" (those are separate, unrelated programs) --
+                any of the three schema-declared values runs gmsh's own 3D
+                algorithm; a non-"gmsh" value is honored as a recognized
+                request but logged loudly, never silently substituted without
+                a trace.
+            output_format: Output format (inp, unv, stl) -- gmsh infers the
+                writer from ``output_path``'s extension.
+            element_order: 1 (default, linear tetrahedra -- C3D4) or 2
+                (quadratic -- C3D10, gmsh's ``-order 2``). FORGE-280: second-
+                order elements capture bending stress far more accurately
+                per element than first-order ones (linear tets are
+                notoriously stiff in bending -- the classic reason a coarse
+                first-order mesh under-predicts deflection/over-predicts
+                stiffness); use this instead of just shrinking element_size
+                when convergence (calculix.check_mesh_convergence) is slow.
 
         Returns:
-            Dict with mesh file path, node/element counts, and quality metrics.
+            Dict with mesh file path, node/element counts (total and by
+            CalculiX element type), and quality metrics.
         """
         self._require_freecad()
+
+        if algorithm not in _MESH_ALGORITHMS:
+            raise ValueError(
+                f"Unsupported meshing algorithm '{algorithm}' -- accepted: "
+                f"{', '.join(_MESH_ALGORITHMS)}"
+            )
+        if element_order not in (1, 2):
+            raise ValueError(f"Unsupported element_order '{element_order}' -- accepted: 1, 2")
+        if algorithm != "gmsh":
+            logger.warning(
+                "freecad_mesh_algorithm_not_honored",
+                requested=algorithm,
+                actual="gmsh",
+                reason="gmsh is the only meshing backend this adapter has -- "
+                "there is no separate netgen/mefisto integration",
+            )
+
+        gmsh_binary = shutil.which("gmsh")
+        if gmsh_binary is None:
+            raise RuntimeError("gmsh binary is not available on PATH")
+
+        input_file = self._resolve_cad_input(input_file)
 
         with tracer.start_as_current_span("freecad.mesh") as span:
             span.set_attribute("input.file", input_file)
             span.set_attribute("mesh.element_size", element_size)
             span.set_attribute("mesh.algorithm", algorithm)
+            span.set_attribute("mesh.element_order", element_order)
 
             start = time.monotonic()
+
+            # FORGE-505: mesh in the twin frame, not the STEP's raw local frame.
+            mesh_input, frame_baked = self._twin_frame_step(input_file)
+            span.set_attribute("mesh.placement_baked", frame_baked)
 
             stem = Path(input_file).stem
             output_path = os.path.join(self.work_dir, f"{stem}.{output_format}")
             self._ensure_output_dir(output_path)
 
+            cmd = [
+                gmsh_binary,
+                mesh_input,
+                "-3",
+                "-clmax",
+                str(element_size),
+                "-order",
+                str(element_order),
+                "-o",
+                output_path,
+            ]
             try:
-                # See export_step()'s comment above -- input_file is a STEP
-                # file, not a native .FCStd project, so it must be loaded via
-                # Import.insert() into a fresh document, not openDocument()
-                # (FORGE-83).
-                doc = FreeCAD.newDocument()
-                Import.insert(input_file, doc.Name)
+                result = subprocess.run(  # noqa: S603 — fixed binary, no shell, args are file paths/numbers
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=_MESH_TIMEOUT_SECONDS,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                err = RuntimeError(f"gmsh meshing timed out after {_MESH_TIMEOUT_SECONDS}s")
+                span.record_exception(err)
+                raise err from exc
 
-                # Find the first shape object
-                shape = None
-                for obj in doc.Objects:
-                    if hasattr(obj, "Shape"):
-                        shape = obj.Shape
-                        break
+            if result.returncode != 0:
+                err = RuntimeError(
+                    f"gmsh meshing failed (exit {result.returncode}): "
+                    f"{result.stderr.strip()[-2000:] or result.stdout.strip()[-2000:]}"
+                )
+                span.record_exception(err)
+                raise err
 
-                if shape is None:
-                    raise ValueError(f"No shapes found in {input_file}")
+            if not Path(output_path).exists():
+                err = RuntimeError(
+                    f"gmsh exited 0 but did not produce {output_path} -- stderr: "
+                    f"{result.stderr.strip()[-500:]}"
+                )
+                span.record_exception(err)
+                raise err
 
-                # Use Mesh module for meshing
-                if not HAS_MESH:
-                    raise RuntimeError("FreeCAD Mesh module is not available")
+            # Node/element counts are only meaningful for the CalculiX/Abaqus
+            # .inp format this system's FEA pipeline actually consumes
+            # (calculix.validate_mesh / calculix.run_fea both require .inp) --
+            # .unv/.stl use different, unparsed formats here.
+            mesh_bbox: dict[str, list[float]] | None = None
+            quality: dict[str, Any] = {}
+            if output_format == "inp":
+                num_nodes, counts_by_type = _parse_inp_mesh_counts(output_path)
+                faces = _parse_inp_face_table(output_path)
+                mesh_bbox = _inp_node_bbox(output_path)
+                quality = _inp_tet_quality(output_path)
+            else:
+                num_nodes, counts_by_type = 0, {}
+                faces = []
 
-                mesh_obj = Mesh.Mesh()
-                mesh_obj.addFacets(shape.tessellate(element_size)[1])
-
-                # Export
-                mesh_obj.write(output_path)
-
-                num_points = mesh_obj.CountPoints
-                num_facets = mesh_obj.CountFacets
-
-                FreeCAD.closeDocument(doc.Name)
-            except Exception as exc:
-                span.record_exception(exc)
-                raise
+            num_volume_elements = sum(
+                n
+                for etype, n in counts_by_type.items()
+                if etype.startswith(_VOLUME_ELEMENT_PREFIXES)
+            )
+            if output_format == "inp" and num_volume_elements == 0:
+                logger.warning(
+                    "freecad_mesh_no_volume_elements",
+                    input_file=input_file,
+                    output_path=output_path,
+                    counts_by_type=counts_by_type,
+                    reason="no C3D* (volumetric) elements in the mesh -- a "
+                    "structural FEA solve needs solid elements, not just "
+                    "surface/edge ones",
+                )
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
+            span.set_attribute("mesh.num_nodes", num_nodes)
+            span.set_attribute("mesh.num_volume_elements", num_volume_elements)
 
             logger.info(
                 "Generated mesh",
                 input_file=input_file,
                 output_path=output_path,
-                num_nodes=num_points,
-                num_elements=num_facets,
+                num_nodes=num_nodes,
+                num_elements=sum(counts_by_type.values()),
+                num_volume_elements=num_volume_elements,
+                element_counts_by_type=counts_by_type,
+                num_faces=len(faces),
                 duration_s=round(elapsed, 3),
             )
 
             return {
                 "mesh_file": output_path,
-                "num_nodes": num_points,
-                "num_elements": num_facets,
-                "element_types": ["triangle"],
+                "num_nodes": num_nodes,
+                "num_elements": sum(counts_by_type.values()),
+                "element_types": sorted(counts_by_type),
                 "quality_metrics": {
                     "element_size": element_size,
-                    "algorithm": algorithm,
+                    "algorithm": "gmsh",
+                    "element_order": element_order,
+                    "num_volume_elements": num_volume_elements,
+                    "element_counts_by_type": counts_by_type,
+                    # FORGE-548: measured, not assumed. Absent for non-.inp
+                    # output, which this tool does not parse.
+                    **quality,
                 },
+                # FORGE-239: per-STEP-face geometry (name, bbox, centroid,
+                # area, normal) so a caller can identify "the face at x=0"
+                # by its actual coordinates instead of guessing from an
+                # opaque gmsh-assigned name like "Surface1" -- see
+                # _parse_inp_face_table's own docstring for the reported
+                # bug this fixes (a wrongly-picked face silently gave an
+                # FEA result ~10x too stiff).
+                "faces": faces,
+                # FORGE-505: name -> bbox in the mesh frame, which is the twin
+                # frame (placements baked above), so fixed/load faces can be
+                # picked by position and run_fea load_force_n shares this frame.
+                "surface_sets": _surface_sets_from_faces(faces),
+                "mesh_bbox_mm": mesh_bbox,
+                "coordinate_frame": "twin",
+                "placement_baked": frame_baked,
             }
+
+    def list_named_faces(self, mesh_file: str) -> dict[str, Any]:
+        """Re-derive the per-face geometry table for an already-generated mesh (FORGE-277).
+
+        ``generate_mesh`` computes this ``faces`` table once, inline, at
+        mesh-generation time (FORGE-239). This is the same computation
+        exposed standalone, so a caller that already has an ``.inp`` mesh
+        file path (from an earlier ``generate_mesh`` call) can re-fetch the
+        face table -- e.g. for a dashboard face picker -- without re-running
+        gmsh. Pure text parsing of the ``.inp`` file -- unlike ``generate_mesh``
+        itself, this needs neither FreeCAD nor gmsh.
+        """
+        if not Path(mesh_file).exists():
+            raise FileNotFoundError(f"Mesh file not found: {mesh_file}")
+        if Path(mesh_file).suffix.lower() != ".inp":
+            raise ValueError(
+                f"list_named_faces only supports .inp mesh files (CalculiX/Abaqus "
+                f"format) -- got {mesh_file!r}. Named surface groups are not parsed "
+                f"from .unv/.stl output."
+            )
+        faces = _parse_inp_face_table(mesh_file)
+        return {"mesh_file": mesh_file, "faces": faces}
 
     # ------------------------------------------------------------------
     # File-based ops (retire the adapter's NotImplementedError stubs)
@@ -789,7 +1478,9 @@ class FreecadOperations:
         """Add a parametric Part primitive (box/cylinder/sphere/cone/torus)."""
         self._require_freecad()
         defaults = _SHAPE_DEFAULTS.get(kind, {})
-        merged = {**defaults, **params}
+        # FORGE-96: same unknown-key rejection as create_parametric -- this is
+        # the stateful session path's own equivalent, same silent-fallback risk.
+        merged = {**defaults, **_resolve_parameters(kind, params)}
         if kind == "box":
             obj = document.addObject("Part::Box", "Box")
             obj.Length, obj.Width, obj.Height = (
@@ -818,6 +1509,43 @@ class FreecadOperations:
             raise ValueError(f"Unsupported primitive: {kind}")
         document.recompute()
         return obj
+
+    def import_step(self, document: Any, file_path: str) -> list[Any]:
+        """Import a STEP file into a LIVE session document (FORGE-231).
+
+        Committed/staged parts (e.g. via ``twin.stage_work_product_file``)
+        had no way back into a FreeCAD session -- ``open_session`` only takes
+        a ``name``, and every assembly tool needs a session-registered
+        ``obj_id``. This loads the file the same Label-preserving way
+        ``describe_step_file`` already does (``Import.insert``, MET-534/535/
+        616), but into THIS document rather than a throwaway one, so the
+        returned objects are live and assembly-ready.
+
+        Returns each top-level solid component (same filter
+        ``describe_step_file`` uses: real ``Shape.Solids``, so a
+        multipart STEP's per-part objects come back, not just the
+        whole-assembly compound) -- the caller registers each one and hands
+        back its own obj_id.
+        """
+        self._require_freecad()
+        with tracer.start_as_current_span("freecad.import_step"):
+            before = set(document.Objects)
+            Import.insert(file_path, document.Name)
+            document.recompute()
+            imported = [obj for obj in document.Objects if obj not in before]
+            components = []
+            for obj in imported:
+                shape = getattr(obj, "Shape", None)
+                if shape is None or not shape.Solids:
+                    continue
+                components.append(obj)
+            if not components:
+                raise ValueError(
+                    f"freecad.import_step: {file_path!r} imported {len(imported)} object(s) "
+                    "but none had solid geometry (Shape.Solids) -- nothing usable for assembly. "
+                    "Check the file actually contains solids, not just curves/surfaces/a wireframe."
+                )
+            return components
 
     def create_body(self, document: Any, name: str = "Body") -> Any:
         """Create a PartDesign Body for parametric (sketch-based) modelling."""
@@ -879,13 +1607,44 @@ class FreecadOperations:
         document.recompute()
         return sweep
 
+    @staticmethod
+    def _sketch_point(
+        el: dict[str, Any], *, flat: tuple[str, str], grouped: str
+    ) -> tuple[float, float]:
+        """Read a 2D point, accepting either two flat keys (this tool's own
+        convention, e.g. ``cx``/``cy``) or one ``[x, y]``-valued key (the
+        Design IR's convention, e.g. ``center``) -- FORGE-227: the model
+        naturally reaches for whichever convention it saw last, and there is
+        no reason to make it guess which one a given call site wants."""
+        fx, fy = flat
+        if fx in el and fy in el:
+            return float(el[fx]), float(el[fy])
+        if grouped in el:
+            point = el[grouped]
+            return float(point[0]), float(point[1])
+        raise ValueError(
+            f"sketch element {el.get('type')!r} needs {fx!r} and {fy!r}, or "
+            f"{grouped!r}: [x, y] -- got keys {sorted(el)}"
+        )
+
+    @staticmethod
+    def _sketch_scalar(el: dict[str, Any], *names: str) -> float:
+        for name in names:
+            if name in el:
+                return float(el[name])
+        required = " or ".join(repr(n) for n in names)
+        raise ValueError(
+            f"sketch element {el.get('type')!r} needs {required} -- got keys {sorted(el)}"
+        )
+
     def _add_sketch_element(self, sketch: Any, el: dict[str, Any]) -> None:
         import FreeCAD as FC  # type: ignore[import-untyped]
 
         kind = el.get("type")
         if kind == "rectangle":
-            x, y = float(el.get("x", 0.0)), float(el.get("y", 0.0))
-            w, h = float(el["width"]), float(el["height"])
+            x, y = self._sketch_point(el, flat=("x", "y"), grouped="origin")
+            w = self._sketch_scalar(el, "width")
+            h = self._sketch_scalar(el, "height")
             pts = [
                 (x, y),
                 (x + w, y),
@@ -897,14 +1656,33 @@ class FreecadOperations:
                 b = FC.Vector(*pts[(i + 1) % 4], 0)
                 sketch.addGeometry(Part.LineSegment(a, b), False)
         elif kind == "circle":
-            cx, cy, r = float(el["cx"]), float(el["cy"]), float(el["r"])
+            cx, cy = self._sketch_point(el, flat=("cx", "cy"), grouped="center")
+            r = self._sketch_scalar(el, "r", "radius")
             sketch.addGeometry(Part.Circle(FC.Vector(cx, cy, 0), FC.Vector(0, 0, 1), r), False)
         elif kind == "line":
-            a = FC.Vector(float(el["x1"]), float(el["y1"]), 0)
-            b = FC.Vector(float(el["x2"]), float(el["y2"]), 0)
+            x1, y1 = self._sketch_point(el, flat=("x1", "y1"), grouped="start")
+            x2, y2 = self._sketch_point(el, flat=("x2", "y2"), grouped="end")
+            a = FC.Vector(x1, y1, 0)
+            b = FC.Vector(x2, y2, 0)
             sketch.addGeometry(Part.LineSegment(a, b), False)
+        elif kind == "arc":
+            # FORGE-227: not previously supported at all by this tool, only
+            # by the Design IR -- added so the tool schemas can genuinely
+            # match (oneOf line/circle/rectangle/arc) instead of the IR
+            # silently accepting a shape this tool would reject.
+            cx, cy = self._sketch_point(el, flat=("cx", "cy"), grouped="center")
+            r = self._sketch_scalar(el, "r", "radius")
+            start_deg = self._sketch_scalar(el, "start_angle")
+            end_deg = self._sketch_scalar(el, "end_angle")
+            circle = Part.Circle(FC.Vector(cx, cy, 0), FC.Vector(0, 0, 1), r)
+            sketch.addGeometry(
+                Part.ArcOfCircle(circle, math.radians(start_deg), math.radians(end_deg)), False
+            )
         else:
-            raise ValueError(f"Unsupported sketch element: {kind!r}")
+            raise ValueError(
+                f"Unsupported sketch element type {kind!r} -- expected one of "
+                "'line', 'circle', 'rectangle', 'arc'"
+            )
 
     def pad_sketch(
         self,
@@ -997,7 +1775,35 @@ class FreecadOperations:
             )
         obj.Placement = FC.Placement(pos, rot)
         document.recompute()
+        pinned = self._pinned_shapes.get((document.Name, obj.Name))
+        if pinned is not None:
+            # The object's shape was replaced by a script; the placement touch
+            # regenerated it from its own properties, so put the edit back.
+            shape = pinned.copy()
+            shape.Placement = FC.Placement(pos, rot)
+            self._repin(document, [(obj, shape)])
+        # FORGE-512: a recompute can regenerate a parametric object and drop the
+        # edit silently, so verify it stuck instead of reporting success blindly.
+        got = obj.Placement
+        if got.Base.distanceToPoint(pos) > 1e-6:
+            raise RuntimeError(
+                f"transform_object did not stick on {getattr(obj, 'Label', obj)!r}: "
+                f"requested position {tuple(pos)}, object is at {tuple(got.Base)}"
+            )
         return obj
+
+    @staticmethod
+    def placement_dict(obj: Any) -> dict[str, Any]:
+        """JSON-safe own placement: position (mm) plus axis/angle rotation."""
+        pl = obj.Placement
+        axis = pl.Rotation.Axis
+        return {
+            "position": [round(pl.Base.x, 4), round(pl.Base.y, 4), round(pl.Base.z, 4)],
+            "rotation": {
+                "axis": [round(axis.x, 6), round(axis.y, 6), round(axis.z, 6)],
+                "angle_deg": round(math.degrees(pl.Rotation.Angle), 4),
+            },
+        }
 
     # ------------------------------------------------------------------
     # Dress-up features (MET-527): fillet / chamfer / shell. They operate on a
@@ -1142,6 +1948,7 @@ class FreecadOperations:
         *,
         max_lines: int = 200,
         timeout: float = 30.0,
+        with_raw: bool = False,
     ) -> Any:
         """Run a sandboxed FreeCAD Python script against the session ``doc``.
 
@@ -1153,6 +1960,8 @@ class FreecadOperations:
         ``Rotation``, ``Placement``, ``Matrix`` (bare names -- not
         ``FreeCAD.Vector``, though that also works). Assign the object to
         surface to a variable named ``result`` (it gets registered + returned).
+        With ``with_raw=True`` the return is ``(resolved, raw_result)`` so the
+        caller can also hand back a plain-data ``result`` (FORGE-512).
         A script that instead assigns a dict describing the object (e.g.
         ``{'obj_id': model.Name}``) is tolerated -- ``document.Objects`` is
         searched by that name and the real object substituted (MET-687).
@@ -1217,6 +2026,30 @@ class FreecadOperations:
                 name: getattr(math, name) for name in _MATH_CONVENIENCE_NAMES if hasattr(math, name)
             },
         }
+        # FORGE-228: `FreeCAD.Base` (`Base.Vector`, `Base.Placement`, ...) is
+        # the spelling used throughout FreeCAD's own docs/examples -- the
+        # sandbox already flattens its members onto the namespace directly
+        # (`_SANDBOX_CONVENIENCE_NAMES` above) but never bound the module name
+        # itself, so a script written the documented way fails with
+        # "name 'Base' is not defined" (same bug class as MET-645/649/688/704:
+        # `_strip_sandbox_imports` removes `from FreeCAD import Base` but
+        # nothing rebinds it). Also expose Sketcher/PartDesign when this
+        # image has them (HAS_PARTDESIGN), so a sandboxed script can build a
+        # parametric sketch/pad in the session, not just Part-level shapes.
+        if hasattr(FreeCAD, "Base"):
+            namespace["Base"] = FreeCAD.Base
+        if HAS_PARTDESIGN:
+            namespace["Sketcher"] = Sketcher
+            namespace["PartDesign"] = PartDesign
+
+        # FORGE-512: snapshot each object's Shape so an edit made by the script
+        # can be pinned across the recompute below.
+        before_shapes = {}
+        for o in getattr(document, "Objects", None) or []:
+            try:
+                before_shapes[o.Name] = o.Shape
+            except Exception:  # noqa: BLE001 -- not every object has a Shape
+                continue
 
         is_main = threading.current_thread() is threading.main_thread()
         old_handler = None
@@ -1247,8 +2080,53 @@ class FreecadOperations:
                     if old_handler is not None:
                         signal.signal(signal.SIGALRM, old_handler)
 
+        # FORGE-512: a script that assigns ``obj.Shape`` on a parametric object
+        # (Part::Box, a primitive, ...) touches it, and the recompute then
+        # regenerates it from its own properties, silently discarding the edit
+        # ("success", but the next call reads it unchanged). Pin the new shape:
+        # recompute, re-assert it, and clear the touched flag so no later
+        # recompute reverts it either.
+        pinned = []
+        for o in getattr(document, "Objects", None) or []:
+            old = before_shapes.get(o.Name)
+            if old is None:
+                continue
+            try:
+                new = o.Shape
+                if not new.isNull() and not new.isPartner(old):
+                    pinned.append((o, new))
+            except Exception:  # noqa: BLE001
+                continue
+        # A pinned object a script merely re-placed is regenerated too, so
+        # carry the edited shape (at its new placement) forward for those.
+        for o in getattr(document, "Objects", None) or []:
+            key = (getattr(document, "Name", ""), o.Name)
+            if key in self._pinned_shapes and all(o is not p for p, _ in pinned):
+                try:
+                    shape = self._pinned_shapes[key].copy()
+                    shape.Placement = o.Placement
+                    pinned.append((o, shape))
+                except Exception:  # noqa: BLE001
+                    continue
         document.recompute()
-        return self._resolve_execute_code_result(document, namespace.get("result"))
+        self._repin(document, pinned)
+        raw = namespace.get("result")
+        resolved = self._resolve_execute_code_result(document, raw)
+        return (resolved, raw) if with_raw else resolved
+
+    def _repin(self, document: Any, pinned: list[tuple[Any, Any]]) -> None:
+        """Re-assert script-edited shapes after a recompute and clear their
+        touched flag (FORGE-512); remembered so later transforms keep them."""
+        for o, new in pinned:
+            try:
+                if not o.Shape.isPartner(new):
+                    o.Shape = new
+                o.purgeTouched()
+                kept = new.copy()
+                kept.Placement = type(o.Placement)()
+                self._pinned_shapes[(document.Name, o.Name)] = kept
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("freecad_shape_pin_failed", obj=o.Name, error=str(exc))
 
     def shell_solid(
         self, document: Any, body: Any, thickness: float, faces: list[str] | None = None
@@ -1711,10 +2589,176 @@ class FreecadOperations:
         the compound this builds has no Label/PRODUCT identity, so it must
         NOT be used for STEP export (see ``export_object_step_bytes``)."""
         self._require_freecad()
-        leaves = self._shape_leaves(obj)
-        if not leaves:
+        # FORGE-512: leaves carry their GLOBAL placement (own plus parent
+        # ``App::Part`` placements). A bare ``leaf.Shape`` ignores the parent, so
+        # a transform on an assembly container looked like a no-op when a child
+        # was measured afterwards (and the reverse).
+        shapes = [self._global_shape(leaf) for leaf in self._leaf_objects(obj)]
+        if not shapes:
             self._raise_empty_geometry(obj)
-        return leaves[0] if len(leaves) == 1 else Part.makeCompound(leaves)
+        return shapes[0] if len(shapes) == 1 else Part.makeCompound(shapes)
+
+    @staticmethod
+    def _baked_shape(shape: Any) -> Any:
+        """Copy of ``shape`` with its Placement written into the geometry itself
+        (identity Placement), so a placement-blind STEP reader sees the global
+        frame (FORGE-505).
+
+        ``transformShape`` is NOT enough: on a rigid transform OCCT stores it as
+        the shape's Location, FreeCAD re-exposes that as ``Placement``, and
+        ``Import.export`` writes it back out as an assembly transform (verified
+        against FreeCAD in the adapter image). ``transformGeometry`` bakes it
+        but turns every face into a B-spline. A raw ``exportStep`` / ``read``
+        round trip writes the Location into the geometry's own axes and keeps
+        planes and cylinders analytic.
+        """
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".step")
+        os.close(fd)
+        try:
+            shape.exportStep(path)
+            baked = Part.Shape()
+            baked.read(path)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        return baked
+
+    @staticmethod
+    def _global_shape(leaf: Any) -> Any:
+        """``leaf.Shape`` carrying its global placement (own plus any parent
+        ``App::Part`` placements), which is the frame the twin records."""
+        shape = leaf.Shape.copy()
+        try:
+            shape.Placement = leaf.getGlobalPlacement()
+        except Exception:  # noqa: BLE001 -- not a document object, keep own placement
+            pass
+        return shape
+
+    def _leaf_objects(self, obj: Any, _seen: set[int] | None = None) -> list[Any]:
+        """Like ``_shape_leaves`` but returns the objects (keeps Labels)."""
+        _seen = _seen if _seen is not None else set()
+        if id(obj) in _seen:
+            return []
+        _seen.add(id(obj))
+        shape = getattr(obj, "Shape", None)
+        if shape is not None:
+            try:
+                if not shape.isNull():
+                    return [obj]
+            except Exception:  # noqa: BLE001
+                return [obj]
+        out: list[Any] = []
+        group = getattr(obj, "Group", None)
+        if group:
+            for child in group:
+                out.extend(self._leaf_objects(child, _seen))
+        elif getattr(obj, "LinkedObject", None) is not None:
+            out.extend(self._leaf_objects(obj.LinkedObject, _seen))
+        return out
+
+    @staticmethod
+    def _bb_dict(bb: Any) -> dict[str, list[float]]:
+        return {"min": [bb.XMin, bb.YMin, bb.ZMin], "max": [bb.XMax, bb.YMax, bb.ZMax]}
+
+    def _reexport_baked(self, obj: Any, tmp_path: str) -> None:
+        """Rewrite ``tmp_path`` from placement-baked copies of ``obj``'s leaves,
+        keeping each leaf's Label as its STEP PRODUCT name (FORGE-505)."""
+        doc = FreeCAD.newDocument("step_bake")
+        try:
+            feats = []
+            for leaf in self._leaf_objects(obj):
+                f = doc.addObject("Part::Feature", "Leaf")
+                f.Label = getattr(leaf, "Label", "Part")
+                f.Shape = self._baked_shape(self._global_shape(leaf))
+                feats.append(f)
+            doc.recompute()
+            Import.export(feats, tmp_path)
+        finally:
+            FreeCAD.closeDocument(doc.Name)
+
+    def measure_step_bytes(self, step_bytes: bytes) -> dict[str, Any]:
+        """Volume/area/bbox of the STEP *as stored*, read the way every
+        placement-blind consumer reads it (FORGE-505)."""
+        self._require_freecad()
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tmp:
+            tmp.write(step_bytes)
+            path = tmp.name
+        try:
+            shape = Part.Shape()
+            shape.read(path)
+            cog = shape.CenterOfGravity
+            return {
+                "volume_mm3": round(shape.Volume, 2),
+                "surface_area_mm2": round(shape.Area, 2),
+                "center_of_mass": [round(cog.x, 3), round(cog.y, 3), round(cog.z, 3)],
+                "bounding_box": self._bbox_dict(shape.BoundBox),
+            }
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def _twin_frame_step(self, input_file: str) -> tuple[str, bool]:
+        """Return a STEP path whose raw geometry is in the twin (global) frame (FORGE-505).
+
+        ``Import.export`` writes an object's ``Placement`` as an assembly
+        transform on top of placement-free geometry. ``Shape.BoundBox`` (what
+        the twin records) includes it, but gmsh's STEP reader (and
+        ``Part.Shape.read``) take the raw geometry and drop the transform, so a
+        part authored on a rotated plane (e.g. a sketch on YZ) was meshed in
+        its local frame, axes permuted relative to the twin. This reads the
+        file through ``Import.insert`` (placement-aware) and compares with the
+        placement-blind read; when they disagree it bakes the placements into
+        the geometry and writes a new STEP to mesh instead.
+
+        Returns ``(path, rewritten)``.
+        """
+        self._require_freecad()
+        raw = Part.Shape()
+        raw.read(input_file)
+        doc = FreeCAD.newDocument()
+        try:
+            Import.insert(input_file, doc.Name)
+            doc.recompute()
+            leaves = [s for root in doc.RootObjects for s in self._shape_leaves(root)]
+            solids = [s for s in leaves if s.Solids]
+            if not solids:
+                return input_file, False
+            placed = solids[0] if len(solids) == 1 else Part.makeCompound(solids)
+            pb, rb = placed.BoundBox, raw.BoundBox
+            expected = {
+                "min": [pb.XMin, pb.YMin, pb.ZMin],
+                "max": [pb.XMax, pb.YMax, pb.ZMax],
+            }
+            blind = {"min": [rb.XMin, rb.YMin, rb.ZMin], "max": [rb.XMax, rb.YMax, rb.ZMax]}
+            if _bboxes_match(expected, blind, _FRAME_TOL_MM):
+                return input_file, False
+            baked = [self._baked_shape(s) for s in solids]
+            out = baked[0] if len(baked) == 1 else Part.makeCompound(baked)
+            ob = out.BoundBox
+            got = {"min": [ob.XMin, ob.YMin, ob.ZMin], "max": [ob.XMax, ob.YMax, ob.ZMax]}
+            if not _bboxes_match(expected, got, _FRAME_TOL_MM):
+                raise RuntimeError(
+                    f"could not bake placement into {input_file}: baked bbox {got} != {expected}"
+                )
+            out_path = os.path.join(self.work_dir, f"{Path(input_file).stem}_twinframe.step")
+            out.exportStep(out_path)
+            logger.warning(
+                "freecad_mesh_input_placement_baked",
+                input_file=input_file,
+                raw_bbox=blind,
+                twin_bbox=expected,
+            )
+            return out_path, True
+        finally:
+            FreeCAD.closeDocument(doc.Name)
 
     @staticmethod
     def _raise_empty_geometry(obj: Any) -> None:
@@ -1744,7 +2788,13 @@ class FreecadOperations:
         """Full geometric measurement of an object's shape."""
         self._require_freecad()
         shape = self._resolve_shape(obj)
-        com = shape.CenterOfMass
+        # FORGE-230: ``CenterOfMass`` only exists on ``Part.Solid`` -- it
+        # AttributeErrors on a ``Part.Compound`` (a pattern/pocket result, or
+        # any body whose tip shape is a compound), discarding an otherwise-
+        # successful build. ``CenterOfGravity`` is the shape-level equivalent
+        # FreeCAD computes on any shape (volume-weighted centroid across every
+        # solid) -- same fix already applied to ``get_properties`` above.
+        com = shape.CenterOfGravity
         return {
             "volume_mm3": round(shape.Volume, 2),
             "surface_area_mm2": round(shape.Area, 2),
@@ -1830,6 +2880,29 @@ class FreecadOperations:
             if solid_count == 0:
                 self._log_export_geometry_gap(obj, step_bytes, reason="roundtrip_zero_solids")
                 self._raise_empty_geometry(obj)
+            # FORGE-505: the twin records the live object's bounding box, which
+            # includes its Placement (transform_object, a sketch on YZ, ...).
+            # Import.export stores that Placement as an assembly transform,
+            # which gmsh/Part.Shape.read drop, so the stored file's own frame
+            # differed from the recorded one (axes cycled). Make them agree.
+            placed = [self._global_shape(leaf) for leaf in self._leaf_objects(obj)]
+            expected = self._bb_dict(
+                (placed[0] if len(placed) == 1 else Part.makeCompound(placed)).BoundBox
+            )
+            raw = Part.Shape()
+            raw.read(tmp_path)
+            if not _bboxes_match(expected, self._bb_dict(raw.BoundBox), _FRAME_TOL_MM):
+                self._reexport_baked(obj, tmp_path)
+                step_bytes = Path(tmp_path).read_bytes()
+                raw = Part.Shape()
+                raw.read(tmp_path)
+                got = self._bb_dict(raw.BoundBox)
+                if not _bboxes_match(expected, got, _FRAME_TOL_MM):
+                    raise RuntimeError(
+                        f"STEP export frame mismatch after baking placements: "
+                        f"stored {got} != live {expected}"
+                    )
+                logger.warning("freecad_export_placement_baked", expected=expected)
         finally:
             try:
                 os.remove(tmp_path)

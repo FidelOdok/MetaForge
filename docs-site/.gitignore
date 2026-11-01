@@ -1,0 +1,7 @@
+# Docusaurus build + cache
+/build
+/.docusaurus
+node_modules
+
+# Synced from ../docs by scripts/sync-static.mjs — never edit here.
+/static/reference/

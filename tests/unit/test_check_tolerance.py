@@ -87,7 +87,7 @@ def passing_input(cnc_process: ManufacturingProcess) -> CheckToleranceInput:
             ),
         ],
         manufacturing_process=cnc_process,
-        material="aluminum_6061",
+        material="aluminium_6061_t6",
     )
 
 
@@ -141,7 +141,7 @@ class TestToleranceModels:
             tolerances=[],
             manufacturing_process=cnc_process,
         )
-        assert inp.material == "aluminum_6061"
+        assert inp.material == "aluminium_6061_t6"
         assert inp.check_stack_up is False
         assert inp.tolerances == []
 

@@ -42,7 +42,7 @@ def cnc_process() -> ManufacturingProcess:
 @pytest.fixture()
 def passing_input(cnc_process: ManufacturingProcess) -> CheckToleranceInput:
     return CheckToleranceInput(
-        work_product_id="work_product-123",
+        work_product_id=uuid4(),
         tolerances=[
             ToleranceSpec(
                 dimension_id="D1",

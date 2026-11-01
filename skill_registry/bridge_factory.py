@@ -84,11 +84,7 @@ async def create_mcp_bridge(
                 fb,
                 require,
             )
-        # Annotated as the union because the stdio branch below binds a
-        # StdioTransport to this same name; without it the second assignment
-        # reads as a type error rather than the two-mode dispatch it is.
-        transport: HttpTransport | StdioTransport = HttpTransport(url, api_key=api_key)
-        return await _connect_and_wrap("http", url, transport, fb, require)
+        return await connect_http_bridge(url, api_key=api_key, fallback=fb, require=require)
 
     if mode == "stdio":
         cmd = os.environ.get("METAFORGE_MCP_SERVER_CMD")
@@ -111,6 +107,26 @@ async def create_mcp_bridge(
         fb,
         require,
     )
+
+
+async def connect_http_bridge(
+    url: str,
+    *,
+    api_key: str | None = None,
+    fallback: McpBridge | None = None,
+    require: bool = False,
+    service_key: str | None = None,
+) -> McpBridge:
+    """Connect to an MCP server over HTTP and wrap it as an ``McpBridge``.
+
+    ``url`` is the server's base URL; the transport posts to ``<url>/mcp``.
+    The same connect + ``tool/list`` discovery ``create_mcp_bridge`` runs for
+    ``METAFORGE_MCP_BRIDGE=http``, exposed for a process that is told where
+    its server is by something other than that env pair (FORGE-475: the
+    design-flow worker, which reaches the ``mcp-http`` sidecar).
+    """
+    transport = HttpTransport(url, api_key=api_key, service_key=service_key)
+    return await _connect_and_wrap("http", url, transport, fallback or InMemoryMcpBridge(), require)
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +187,15 @@ async def _discover_tools(client: McpClient, transport: Any) -> None:
     if "error" in payload:
         raise RuntimeError(f"tool/list returned an error: {payload['error']}")
     tools = payload.get("result", {}).get("tools", [])
+    # Every tool listed over this transport is reachable only through it, so
+    # register under the transport's adapter id. The server-reported per-tool
+    # adapter id (twin, health, ...) names no connected transport and would
+    # make McpClient.call_tool raise ToolUnavailableError (FORGE-483).
     for tool_data in tools:
         client.register_manifest(
             ToolManifest(
                 tool_id=tool_data["tool_id"],
-                adapter_id=tool_data.get("adapter_id", _DEFAULT_ADAPTER_ID),
+                adapter_id=_DEFAULT_ADAPTER_ID,
                 name=tool_data["name"],
                 description=tool_data.get("description", ""),
                 capability=tool_data.get("capability", ""),

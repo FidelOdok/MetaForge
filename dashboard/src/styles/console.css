@@ -3226,3 +3226,361 @@ button:disabled {
   
 }
 
+/* ── Manufacturing view ────────────────────────────────────────────────────
+   Reuses .tw-assembly for the shell (same tab slot, same padding/scroll) and
+   adds only what the readiness checklist needs. A missing output is styled
+   as muted rather than as an error: not producing a pick-and-place yet is
+   ordinary progress, not a fault, and colouring it red would cry wolf on
+   every new project. */
+.tw-mfg-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--mf-c-9a9aaa);
+  letter-spacing: 0.04em;
+}
+.tw-mfg-intro {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--mf-c-9a9aaa);
+  max-width: 62ch;
+}
+.tw-mfg-group { margin-bottom: 22px; }
+.tw-mfg-group > h3 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+}
+.tw-mfg-row {
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.tw-mfg-row.is-missing { opacity: 0.66; }
+.tw-mfg-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.tw-mfg-row-head strong { font-size: 13.5px; }
+.tw-mfg-row-head span {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--mf-c-9a9aaa);
+}
+.tw-mfg-row.is-present .tw-mfg-row-head span { color: var(--mf-c-3dd68c); }
+.tw-mfg-row > p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--mf-c-9a9aaa);
+}
+.tw-mfg-hint { margin-top: 8px !important; }
+
+/* FORGE-687: the electronics and firmware thread. */
+.tw-thread > h3 {
+  margin: 18px 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+}
+.tw-thread-lane {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+}
+.tw-thread-fan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tw-thread-card {
+  width: 210px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.tw-thread-card > strong { font-size: 12.5px; }
+.tw-thread-card.is-missing {
+  border-style: dashed;
+  opacity: 0.7;
+}
+.tw-thread-card.is-missing p { margin: 0; color: var(--mf-c-9a9aaa); line-height: 1.5; }
+.tw-thread-card code {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  color: var(--mf-c-86cfff);
+}
+.tw-thread-state { font-size: 11px; color: var(--mf-c-9a9aaa); }
+.tw-thread-node {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+.tw-thread-node:hover { border-color: var(--mf-r-65-72-90-0p35); }
+.tw-thread-node img,
+.tw-thread-node .material-symbols-outlined {
+  grid-row: 1 / span 2;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  background: #f5f4ef;
+  border-radius: 3px;
+  font-size: 22px;
+  line-height: 40px;
+  text-align: center;
+}
+.tw-thread-node .material-symbols-outlined { background: transparent; }
+.tw-thread-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tw-thread-node small { font-size: 10.5px; color: var(--mf-c-9a9aaa); }
+.tw-thread-arrow {
+  position: relative;
+  width: 74px;
+  height: 18px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.tw-thread-arrow::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 8px;
+  top: 50%;
+  border-top: 2px dashed var(--mf-r-65-72-90-0p35);
+}
+.tw-thread-arrow::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  top: calc(50% - 5px);
+  border-left: 7px solid var(--mf-r-65-72-90-0p35);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.tw-thread-arrow.is-linked::before { border-top-style: solid; border-top-color: var(--mf-c-3dd68c); }
+.tw-thread-arrow.is-linked::after { border-left-color: var(--mf-c-3dd68c); }
+.tw-thread-arrow span {
+  position: relative;
+  top: -14px;
+  font-size: 9.5px;
+  color: var(--mf-c-9a9aaa);
+  white-space: nowrap;
+}
+.tw-thread-arrow.is-linked span { color: var(--mf-c-3dd68c); }
+.tw-thread-arrow.is-stale::before { border-top-color: var(--mf-c-f5b04d); }
+.tw-thread-arrow.is-stale::after { border-left-color: var(--mf-c-f5b04d); }
+.tw-thread-arrow.is-stale span { color: var(--mf-c-f5b04d); }
+.tw-thread > p.tw-mfg-intro + h3 { margin-top: 22px; }
+.tw-thread-from { font-size: 11px; color: var(--mf-c-9a9aaa); font-style: italic; }
+.tw-mfg-hint code {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+  color: var(--mf-c-86cfff);
+}
+.tw-mfg-row ul, .tw-mfg-group > ul { list-style: none; margin: 10px 0 0; padding: 0; }
+.tw-mfg-row li, .tw-mfg-group > ul li { margin-bottom: 4px; }
+.tw-mfg-row li button, .tw-mfg-group > ul li button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mf-c-e2e2eb);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.tw-mfg-row li button:hover, .tw-mfg-group > ul li button:hover {
+  background: var(--mf-c-282a30);
+  border-color: var(--mf-r-65-72-90-0p2);
+}
+.tw-mfg-row li small, .tw-mfg-group > ul li small {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--mf-c-9a9aaa);
+}
+
+/* ── Assembly joint editor (FORGE-271) ───────────────────────────────────
+   Reuses .tw-mfg-row's bordered-row look for each joint; the add form is a
+   plain label/input stack matching LoadCaseDialog's own minimal style. */
+.tw-assembly-joints-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.tw-assembly-joints-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.tw-assembly-joint-summary {
+  flex: 1;
+  color: var(--mf-c-e2e2eb);
+}
+.tw-assembly-joints-list button {
+  background: transparent;
+  border: none;
+  color: var(--mf-c-9a9aaa);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+.tw-assembly-joints-list button:hover {
+  color: var(--mf-c-e2e2eb);
+  background: var(--mf-c-282a30);
+}
+.tw-assembly-joint-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  padding: 12px 14px;
+  margin-top: 8px;
+}
+.tw-assembly-joint-form label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+  margin-top: 6px;
+}
+.tw-assembly-joint-form input,
+.tw-assembly-joint-form select {
+  background: var(--mf-c-1e1f26);
+  border: 1px solid var(--mf-r-65-72-90-0p3);
+  border-radius: 5px;
+  color: var(--mf-c-e2e2eb);
+  padding: 6px 8px;
+  font-size: 13px;
+  width: 100%;
+}
+.tw-assembly-joint-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ── Structure view (FORGE-261) ──────────────────────────────────────────
+   Reuses .tw-assembly for the shell, same as Manufacturing. A tree-table:
+   one grid-templated row per hierarchy node, indented per depth via inline
+   padding-left (set from JS, not CSS, since depth is unbounded). */
+.tw-structure-tree {
+  margin: 15px 0;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.tw-structure-row {
+  display: grid;
+  grid-template-columns: 24px 20px minmax(120px, 1fr) 90px 50px 70px 70px 60px 118px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--mf-r-65-72-90-0p2);
+  font-size: 12.5px;
+}
+.tw-structure-row:last-child { border-bottom: none; }
+.tw-structure-header {
+  background: var(--mf-c-191b22);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+  padding-left: 10px !important;
+}
+.tw-structure-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--mf-c-9a9aaa);
+  cursor: pointer;
+}
+.tw-structure-toggle:disabled { cursor: default; opacity: 0.4; }
+.tw-structure-toggle .material-symbols-outlined { font-size: 16px; }
+.tw-structure-leaf-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--mf-c-9a9aaa);
+}
+.tw-structure-kind-icon { font-size: 15px; color: var(--mf-c-9a9aaa); }
+.tw-structure-name {
+  background: transparent;
+  border: none;
+  color: var(--mf-c-e2e2eb);
+  font-size: 12.5px;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tw-structure-name:hover { text-decoration: underline; }
+.tw-structure-kind-label {
+  font-size: 11px;
+  color: var(--mf-c-9a9aaa);
+  text-transform: capitalize;
+}
+.tw-structure-qty, .tw-structure-mass, .tw-structure-cost, .tw-structure-power {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+  color: var(--mf-c-9a9aaa);
+  text-align: right;
+}
+
+/* FORGE-264: an over-budget branch's actual/allocated pair and its row
+   are flagged distinctly from "no allocation yet" (which stays neutral). */
+.tw-structure-row.is-over-budget { background: rgba(255,180,171,0.08); }
+.tw-structure-mass.is-over-budget, .tw-structure-cost.is-over-budget {
+  color: var(--mf-c-ffb4ab);
+  font-weight: 600;
+}
+.tw-structure-warning {
+  font-size: 14px !important;
+  color: var(--mf-c-ffb4ab);
+  margin-right: 2px;
+}
+/* FORGE-313: small badge marking a node with a declared interface
+   (from twin.commit_system_architecture) -- hover (native title tooltip,
+   which already renders \n as line breaks) for details. */
+.tw-structure-interfaces-badge {
+  font-size: 13px !important;
+  color: var(--mf-c-9a9aaa);
+  cursor: help;
+}

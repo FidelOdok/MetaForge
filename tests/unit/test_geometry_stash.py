@@ -129,3 +129,16 @@ def test_lru_eviction() -> None:
     assert not stash.fill({"session_id": "s", "obj_id": "o0"})
     a = {"session_id": "s", "obj_id": "o2"}
     assert stash.fill(a) and a["step_base64"] == "b2"
+
+
+def test_stored_properties_are_threaded_into_the_commit_call() -> None:
+    """FORGE-505: the export's measurement of the written STEP rides along."""
+    stash = GeometryStash()
+    props = {"bounding_box": {"min_x": 1.0}, "volume_mm3": 2.0}
+    stash.remember(
+        {"session_id": "s1", "obj_id": "o1"},
+        {"step_base64": "U1RFUA==", "stored_properties": props},
+    )
+    args = {"session_id": "s1", "obj_id": "o1", "name": "P"}
+    assert stash.fill(args)
+    assert args["stored_properties"] == props

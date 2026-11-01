@@ -6,6 +6,11 @@ Usage::
     python -m cli.forge_cli.main status <session-id>
     python -m cli.forge_cli.main twin query <node-id>
     python -m cli.forge_cli.main twin list --domain mechanical --type cad_model
+    python -m cli.forge_cli.main twin list --project "6-DOF Robotic Arm"
+    python -m cli.forge_cli.main twin history CAD-BRACKET
+    python -m cli.forge_cli.main twin diff CAD-BRACKET @2 @3
+    python -m cli.forge_cli.main twin baseline list --project "6-DOF Robotic Arm"
+    python -m cli.forge_cli.main twin migrate <project-id> [--apply]
     python -m cli.forge_cli.main proposals
     python -m cli.forge_cli.main approve <change-id> --reason "looks good"
     python -m cli.forge_cli.main reject <change-id> --reason "needs revision"
@@ -21,6 +26,8 @@ import os
 import sys
 from typing import Any
 
+from cli.forge_cli.approvals import decide, handle_approvals
+from cli.forge_cli.approvals import register_subparser as register_approvals_subparser
 from cli.forge_cli.auth import handle_auth
 from cli.forge_cli.auth import register_subparser as register_auth_subparser
 from cli.forge_cli.cad import handle_cad
@@ -39,6 +46,7 @@ from cli.forge_cli.routines import handle_routine
 from cli.forge_cli.runs import handle_design, handle_runs
 from cli.forge_cli.sources import handle_sources
 from cli.forge_cli.sources import register_subparser as register_sources_subparser
+from cli.forge_cli.tunnel import TUNNEL_COMMANDS
 
 # ---------------------------------------------------------------------------
 # Argument parser construction
@@ -66,6 +74,50 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
+    # -- tunnel ------------------------------------------------------------
+    tunnel_parser = subparsers.add_parser(
+        "tunnel",
+        help="Expose a local gateway to a cloud harness through a tunnel",
+    )
+    tunnel_sub = tunnel_parser.add_subparsers(dest="tunnel_command")
+    tunnel_up = tunnel_sub.add_parser("up", help="Check the gateway, then open a tunnel")
+    tunnel_up.add_argument(
+        "--url",
+        default="http://localhost:8765/mcp",
+        help="The local MCP endpoint to expose (default: http://localhost:8765/mcp).",
+    )
+    tunnel_up.add_argument(
+        "--port", type=int, default=8765, help="Local port to forward (default: 8765)."
+    )
+    tunnel_up.add_argument(
+        "--provider",
+        default=None,
+        choices=sorted(TUNNEL_COMMANDS),
+        help="Which tunnel to use. Default: whichever is installed.",
+    )
+    tunnel_up.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Run the pre-flight and stop, without opening anything.",
+    )
+
+    # -- connect -----------------------------------------------------------
+    connect_parser = subparsers.add_parser(
+        "connect",
+        help="Find a local MetaForge gateway, or say what to enter instead",
+    )
+    connect_parser.add_argument(
+        "--url",
+        default=None,
+        help="Check one specific URL instead of the usual local candidates.",
+    )
+    connect_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=2.0,
+        help="Seconds to wait per candidate (default: 2).",
+    )
+
     # -- run ---------------------------------------------------------------
     run_parser = subparsers.add_parser("run", help="Invoke a skill via the gateway")
     run_parser.add_argument("skill_name", help="Name of the skill to invoke")
@@ -91,8 +143,45 @@ def build_parser() -> argparse.ArgumentParser:
     twin_list = twin_sub.add_parser("list", help="List twin work_products")
     twin_list.add_argument("--domain", default=None, help="Filter by domain")
     twin_list.add_argument("--type", default=None, dest="work_product_type", help="Filter by type")
+    twin_list.add_argument(
+        "--project", default=None, help="Filter by project id or name (FORGE-248)"
+    )
+
+    # FORGE-526: opt-in history, compare and baselines over items.
+    twin_history = twin_sub.add_parser("history", help="Revisions of one item (KEY)")
+    twin_history.add_argument("key", help="Item key, e.g. CAD-BRACKET")
+    twin_history.add_argument("--project", default=None, help="Project id or name")
+
+    twin_diff = twin_sub.add_parser("diff", help="Compare two revisions: KEY [@a] [@b]")
+    twin_diff.add_argument("key", help="Item key, e.g. CAD-BRACKET")
+    twin_diff.add_argument("a", nargs="?", default=None, help="Older revision (default: previous)")
+    twin_diff.add_argument("b", nargs="?", default=None, help="Newer revision (default: current)")
+    twin_diff.add_argument("--project", default=None, help="Project id or name")
+
+    twin_baseline = twin_sub.add_parser("baseline", help="Baselines recorded by gate approvals")
+    baseline_sub = twin_baseline.add_subparsers(dest="baseline_command")
+    baseline_list = baseline_sub.add_parser("list", help="List a project's baselines")
+    baseline_list.add_argument("--project", required=True, help="Project id or name")
+    baseline_diff = baseline_sub.add_parser("diff", help="Compare two baselines item by item")
+    baseline_diff.add_argument("a", help="Baseline id")
+    baseline_diff.add_argument("b", help="Baseline id, or 'current' for the current items")
 
     # -- proposals ---------------------------------------------------------
+    twin_migrate = twin_sub.add_parser(
+        "migrate",
+        help="Fold a project's legacy nodes into items and revisions (dry run by default)",
+    )
+    twin_migrate.add_argument("project_id", help="Project UUID or name")
+    twin_migrate.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the plan after showing it (asks for confirmation; nothing is deleted)",
+    )
+    twin_migrate.add_argument("--yes", action="store_true", help="Skip the confirmation")
+    twin_migrate.add_argument(
+        "--reason", default="", help="Why the plan is approved (kept in the gateway log)"
+    )
+
     subparsers.add_parser("proposals", help="List pending change proposals")
 
     # -- approve -----------------------------------------------------------
@@ -106,6 +195,9 @@ def build_parser() -> argparse.ArgumentParser:
     reject_parser.add_argument("change_id", help="Change proposal UUID")
     reject_parser.add_argument("--reason", required=True, help="Rejection reason")
     reject_parser.add_argument("--reviewer", default="cli-user", help="Reviewer identity")
+
+    # -- approvals (unified /v1/approvals) --------------------------------
+    register_approvals_subparser(subparsers)
 
     # -- runs (harness) ----------------------------------------------------
     runs_parser = subparsers.add_parser("runs", help="Drive harness runs (/v1/runs)")
@@ -125,9 +217,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     runs_approve = runs_sub.add_parser("approve", help="Approve a paused run")
     runs_approve.add_argument("run_id", help="Run id")
+    runs_approve.add_argument("--reason", default=None, help="Reason (audit trail)")
 
     runs_reject = runs_sub.add_parser("reject", help="Reject a paused run")
     runs_reject.add_argument("run_id", help="Run id")
+    runs_reject.add_argument("--reason", default=None, help="Reason (required by most gates)")
 
     runs_watch = runs_sub.add_parser("watch", help="Stream a run's status (SSE)")
     runs_watch.add_argument("run_id", help="Run id")
@@ -358,14 +452,209 @@ def handle_status(args: argparse.Namespace, client: ForgeClient) -> Any:
     return client.get_status(args.session_id)
 
 
+def _resolve_project_ref(client: ForgeClient, project_ref: str) -> str:
+    """Accept either a project UUID or a project name for ``--project`` (FORGE-248).
+
+    A name is resolved via ``GET /v1/projects`` (case-insensitive exact
+    match) -- the gateway's own node-list filter only understands a real
+    project id.
+    """
+    import uuid as _uuid
+
+    try:
+        _uuid.UUID(project_ref)
+        return project_ref
+    except ValueError:
+        pass
+
+    projects = client.list_projects().get("projects", [])
+    matches = [p for p in projects if str(p.get("name", "")).lower() == project_ref.lower()]
+    if not matches:
+        print(f"Error: no project named {project_ref!r} found", file=sys.stderr)
+        sys.exit(1)
+    if len(matches) > 1:
+        print(
+            f"Error: {len(matches)} projects are named {project_ref!r} -- use the project id "
+            "instead to disambiguate",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return str(matches[0]["id"])
+
+
+def _fmt(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={v}" for k, v in value.items())
+    return str(value)
+
+
+def _history_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    key = data["item"]["key"]
+    return [
+        {
+            "rev": f"{key}@{r['revision']}",
+            "status": r.get("status", ""),
+            "head": "*" if r.get("is_head") else "",
+            "run": r.get("run_id") or "",
+            "gate": r.get("gate") or "",
+            "reason": r.get("change_reason") or r.get("status_reason") or "",
+            "created": r.get("created_at") or "",
+        }
+        for r in data["revisions"]
+    ]
+
+
+def _diff_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    geo = data.get("geometry") or {}
+    if geo.get("available"):
+        a, b = geo.get("a") or {}, geo.get("b") or {}
+        for label, field, delta in (
+            ("volume_mm3", "volume_mm3", geo.get("volume_delta_mm3")),
+            ("mass_kg", "mass_kg", geo.get("mass_delta_kg")),
+            ("bounding_box", "bounding_box", geo.get("bounding_box_delta")),
+        ):
+            rows.append(
+                {
+                    "section": f"geometry ({geo.get('source')})",
+                    "name": label,
+                    "status": "",
+                    "from": _fmt(a.get(field)),
+                    "to": _fmt(b.get(field)),
+                    "delta": _fmt(delta),
+                }
+            )
+    for section in ("parameters", "requirements", "fields"):
+        for change in data.get(section) or []:
+            rows.append(
+                {
+                    "section": section,
+                    "name": change["name"],
+                    "status": change["status"],
+                    "from": _fmt(change.get("from")),
+                    "to": _fmt(change.get("to")),
+                    "delta": "",
+                }
+            )
+    for dep in data.get("dependents") or []:
+        rows.append(
+            {
+                "section": f"pinned to {data['a_ref']}",
+                "name": dep["name"],
+                "status": dep["type"],
+                "from": dep["node_id"],
+                "to": "",
+                "delta": "",
+            }
+        )
+    return rows
+
+
 def handle_twin(args: argparse.Namespace, client: ForgeClient) -> Any:
-    """Handle ``forge twin query|list``."""
+    """Handle ``forge twin query|list|history|diff|baseline|migrate``."""
+    as_json = getattr(args, "output_format", "table") == "json"
     if args.twin_command == "query":
         return client.twin_query(args.node_id)
     if args.twin_command == "list":
-        return client.twin_list(domain=args.domain, work_product_type=args.work_product_type)
-    print("Error: specify a twin subcommand (query or list)", file=sys.stderr)
+        project_id = _resolve_project_ref(client, args.project) if args.project else None
+        return client.twin_list(
+            domain=args.domain, work_product_type=args.work_product_type, project_id=project_id
+        )
+    if args.twin_command == "history":
+        project_id = _resolve_project_ref(client, args.project) if args.project else None
+        history = client.twin_item_history(args.key, project_id=project_id)
+        return history if as_json else _history_rows(history)
+    if args.twin_command == "diff":
+        project_id = _resolve_project_ref(client, args.project) if args.project else None
+        diff = client.twin_item_diff(args.key, a=args.a, b=args.b, project_id=project_id)
+        if as_json:
+            return diff
+        print(f"{diff['a_ref']} -> {diff['b_ref']}  ({diff['item_type']}: {diff['name']})")
+        rows = _diff_rows(diff)
+        return rows if rows else [{"section": "", "name": "no differences recorded"}]
+    if args.twin_command == "baseline":
+        if args.baseline_command == "list":
+            project_id = _resolve_project_ref(client, args.project)
+            listed = client.twin_baselines(project_id=project_id)
+            if as_json:
+                return listed
+            return [
+                {
+                    "id": b["id"],
+                    "name": b["name"],
+                    "gate": b.get("gate_id") or "",
+                    "run": b.get("run_id") or "",
+                    "approved_by": ", ".join(b.get("approved_by") or []),
+                    "items": b.get("item_count", 0),
+                    "created": b.get("created_at", ""),
+                }
+                for b in listed["baselines"]
+            ]
+        if args.baseline_command == "diff":
+            diff = client.twin_baseline_diff(args.a, args.b)
+            if as_json:
+                return diff
+            return [
+                {
+                    "key": d["key"],
+                    "status": d["status"],
+                    "from": d.get("from_ref") or "",
+                    "to": d.get("to_ref") or "",
+                }
+                for d in diff["items"]
+            ]
+        print("Error: specify a baseline subcommand (list or diff)", file=sys.stderr)
+        sys.exit(1)
+    if args.twin_command == "migrate":
+        return handle_twin_migrate(args, client)
+    print(
+        "Error: specify a twin subcommand (query, list, history, diff, baseline or migrate)",
+        file=sys.stderr,
+    )
     sys.exit(1)
+
+
+def handle_twin_migrate(args: argparse.Namespace, client: ForgeClient) -> Any:
+    """``forge twin migrate <project> [--apply]`` (FORGE-529).
+
+    Always shows the dry run first. ``--apply`` then sends that exact plan back
+    with an explicit approval; the gateway refuses it if the twin changed in
+    between, and the command says to run it again.
+    """
+    project_id = _resolve_project_ref(client, args.project_id)
+    planned = client.twin_migration_plan(project_id)
+    if args.output_format == "json" and not args.apply:
+        return planned["plan"]
+    print(planned["report"])
+    if not args.apply:
+        if not planned["empty"]:
+            print("\nDry run only. Re-run with --apply to apply this plan.")
+        return None
+    if planned["empty"]:
+        return None
+    if not args.yes:
+        reply = input("\nApply this plan? Nothing is deleted. [y/N] ").strip().lower()
+        if reply not in ("y", "yes"):
+            print("Not applied.")
+            return None
+    applied = client.twin_migration_apply(
+        project_id, planned["plan"], args.reason or "applied with forge twin migrate"
+    )
+    if args.output_format == "json":
+        return applied
+    result = applied["result"]
+    print(
+        f"\nApplied plan {result['plan_hash'][:12]} as {applied['approved_by']}: "
+        f"{result['items_created']} items created, {result['items_extended']} extended, "
+        f"{result['revisions_linked']} revisions linked, "
+        f"{result['run_summaries_marked']} run summaries marked, "
+        f"{result['records_pinned']} results pinned ({result['records_stale']} stale)."
+    )
+    for failure in result.get("failures") or []:
+        print(f"  failed: {failure}", file=sys.stderr)
+    return None
 
 
 def handle_proposals(args: argparse.Namespace, client: ForgeClient) -> Any:
@@ -373,22 +662,19 @@ def handle_proposals(args: argparse.Namespace, client: ForgeClient) -> Any:
     return client.list_proposals()
 
 
+def _change_approval_id(change_id: str) -> str:
+    """Map a bare change id onto the unified approvals id space."""
+    return change_id if ":" in change_id else f"change:{change_id}"
+
+
 def handle_approve(args: argparse.Namespace, client: ForgeClient) -> Any:
     """Handle ``forge approve <change_id>``."""
-    return client.approve_proposal(
-        change_id=args.change_id,
-        reason=args.reason,
-        reviewer=args.reviewer,
-    )
+    decide(client, _change_approval_id(args.change_id), "approve", reason=args.reason)
 
 
 def handle_reject(args: argparse.Namespace, client: ForgeClient) -> Any:
     """Handle ``forge reject <change_id>``."""
-    return client.reject_proposal(
-        change_id=args.change_id,
-        reason=args.reason,
-        reviewer=args.reviewer,
-    )
+    decide(client, _change_approval_id(args.change_id), "reject", reason=args.reason)
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +689,101 @@ def handle_ingest(args: argparse.Namespace, client: ForgeClient) -> Any:
     return _do_ingest(args, client)
 
 
+def handle_tunnel(args: argparse.Namespace, client: ForgeClient) -> None:
+    """`forge tunnel up` (FORGE-387).
+
+    The pre-flight is the reason this exists rather than a line in the
+    README telling people to run cloudflared themselves. A tunnel does
+    not change what the server enforces; it changes who can reach it,
+    and the moment between "it worked locally" and "it is public" is
+    exactly where nobody re-checks.
+    """
+    import subprocess
+
+    from cli.forge_cli.tunnel import preflight, tunnel_command
+
+    if getattr(args, "tunnel_command", None) != "up":
+        print("usage: forge tunnel up [--url URL] [--port PORT]", file=sys.stderr)
+        sys.exit(1)
+
+    result = preflight(args.url)
+    report = result.report()
+    if report:
+        print(report, file=sys.stderr if result.blockers else sys.stdout)
+    if not result.ok:
+        sys.exit(1)
+    print(f"Gateway at {args.url} is ready to expose.")
+    if args.check_only:
+        return
+
+    found = tunnel_command(args.port, prefer=args.provider)
+    if found is None:
+        installed = ", ".join(sorted(TUNNEL_COMMANDS))
+        print(
+            f"No tunnel client found. Install one of: {installed}.\n"
+            "Not bundled on purpose -- a binary that opens a public hostname "
+            "is something you should choose to have.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    name, argv = found
+    print(f"Starting {name}: {' '.join(argv)}")
+    print("Give the public URL it prints to your harness as the gateway URL.")
+    # Handed over rather than wrapped: the tunnel's own output is what the
+    # user needs (the hostname, the connection state), and re-printing it
+    # through here would only lose detail.
+    raise SystemExit(subprocess.call(argv))
+
+
+def handle_connect(args: argparse.Namespace, client: ForgeClient) -> None:
+    """Guided connect (FORGE-329).
+
+    Takes a ``client`` only to match every other handler's signature and
+    does not use it: this is the one command that has to work when there
+    is no gateway to talk to, which is the situation it exists for.
+
+    Exits non-zero when nothing was found, so it is usable as a
+    precondition check in a script and not only by eye.
+    """
+    from cli.forge_cli.discover import candidates_for, describe, detect_gateway
+
+    if args.url:
+        candidates: tuple[str, ...] = (args.url,)
+    else:
+        # Whatever this CLI is already configured to talk to comes first:
+        # someone who has set METAFORGE_GATEWAY_URL or saved a config has
+        # already told us where their gateway is, and probing localhost
+        # ahead of it could hand them a different one.
+        candidates = candidates_for(getattr(client, "base_url", "") or "")
+    found, probes = detect_gateway(candidates, timeout=args.timeout)
+    if getattr(args, "format", "table") == "json":
+        print(
+            json.dumps(
+                {
+                    "found": found.url if found else None,
+                    "probes": [
+                        {
+                            "url": p.url,
+                            "reachable": p.reachable,
+                            "is_metaforge": p.is_metaforge,
+                            "requires_auth": p.requires_auth,
+                            "detail": p.detail,
+                        }
+                        for p in probes
+                    ],
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(describe(found, probes))
+    if found is None:
+        sys.exit(1)
+
+
 _HANDLERS = {
+    "connect": handle_connect,
+    "tunnel": handle_tunnel,
     "run": handle_run,
     "status": handle_status,
     "twin": handle_twin,
@@ -415,6 +795,7 @@ _HANDLERS = {
     "knowledge": handle_knowledge,
     "memory": handle_memory,
     "runs": handle_runs,
+    "approvals": handle_approvals,
     "projects": handle_projects,
     "cad": handle_cad,
     "design": handle_design,

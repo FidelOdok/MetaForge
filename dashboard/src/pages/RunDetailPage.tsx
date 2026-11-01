@@ -2,10 +2,17 @@ import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight, RefreshCw, ShieldCheck, X } from 'lucide-react';
 
-import { findDesignFlow } from '../api/endpoints/design-flows';
+import { ApprovalCard } from '../components/approvals/ApprovalCard';
+
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { useRun, useSubmitApproval } from '../hooks/use-runs';
-import type { ApprovalDecision } from '../types/run';
+import { FlowGraph } from '../components/runs/FlowGraph';
+import { PhaseActivity } from '../components/runs/PhaseActivity';
+import { RunChangesPanel } from '../components/items/RunChangesPanel';
+import { useDesignFlows } from '../hooks/use-design-flows';
+import { useFlowState } from '../hooks/use-flow-state';
+import { useRunToolEvents } from '../hooks/use-run-tool-events';
+import { useApproval } from '../hooks/use-approvals';
+import { useRun } from '../hooks/use-runs';
 
 type PhaseResult = Record<string, unknown>;
 
@@ -16,14 +23,23 @@ function toIso(epochSeconds: number): string {
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const runQuery = useRun(id);
-  const approval = useSubmitApproval();
+  const designFlows = useDesignFlows();
+  const [selectedPhaseId, setSelectedPhaseId] = useState<string | null>(null);
+  // Only poll while the run can still change. A finished run polling
+  // forever is a request every two seconds forever, per open tab.
+  const runActive = !['completed', 'failed', 'rejected', 'canceled'].includes(
+    String(runQuery.data?.status ?? ''),
+  );
+  const flowState = useFlowState(id, runActive);
+  const toolStream = useRunToolEvents(id, runActive);
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [decision, setDecision] = useState<ApprovalDecision>('approve');
   const run = runQuery.data;
+  const awaiting = run?.status === 'awaiting_approval';
+  // The gate is read through the unified approvals API so the dialog shows
+  // the same card, findings and allowed decisions as /approvals.
+  const gate = useApproval(run ? `gate:${run.id}` : undefined, awaiting);
 
-  function openDecision(next: ApprovalDecision) {
-    setDecision(next);
-    approval.reset();
+  function openDecision() {
     // jsdom lacks showModal; fall back to the open attribute.
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -70,13 +86,12 @@ export function RunDetailPage() {
     );
   }
 
-  const flow = findDesignFlow(run.request.flow);
+  const flow = designFlows.data?.flows.find((f) => f.id === run.request.flow);
   const projectId = typeof run.request.project_id === 'string' ? run.request.project_id : undefined;
   const rawPhases = run.result?.phases;
   const phases: PhaseResult[] = Array.isArray(rawPhases)
     ? rawPhases.filter((p): p is PhaseResult => !!p && typeof p === 'object')
     : [];
-  const awaiting = run.status === 'awaiting_approval';
 
   return (
     <div className="flow-workspace">
@@ -106,6 +121,38 @@ export function RunDetailPage() {
         </div>
       </div>
 
+      {/* FORGE-396: phases and gates as a graph, with the selected phase's
+          activity beside it. Rendered whenever the run is a design flow --
+          including when the engine cannot be queried, because "unknown"
+          is information and a missing panel is not. */}
+      {flowState.data && flowState.data.phases.length > 0 && (
+        <div className="flow-run-view">
+          {!flowState.data.live && (
+            <p role="status" className="field-help" data-testid="flow-state-degraded">
+              {flowState.data.detail}
+            </p>
+          )}
+          <FlowGraph
+            phases={flowState.data.phases}
+            selectedPhaseId={selectedPhaseId}
+            onSelectPhase={setSelectedPhaseId}
+            canApprove={awaiting}
+            onApprove={() => openDecision()}
+          />
+          <PhaseActivity
+            phase={
+              flowState.data.phases.find((p) => p.id === selectedPhaseId) ??
+              flowState.data.phases.find((p) => p.id === flowState.data?.currentPhase) ??
+              null
+            }
+            events={flowState.data.events}
+            live={flowState.data.live}
+            toolCalls={toolStream.calls}
+            toolStreamConnected={toolStream.connected}
+          />
+        </div>
+      )}
+
       <dl className="run-facts flow-panel">
         <div>
           <dt>Run ID</dt>
@@ -113,7 +160,7 @@ export function RunDetailPage() {
         </div>
         <div>
           <dt>Workflow</dt>
-          <dd>{flow?.name ?? String(run.request.flow ?? 'Custom run')}</dd>
+          <dd>{flow?.label ?? String(run.request.flow ?? 'Custom run')}</dd>
         </div>
         <div>
           <dt>Last updated</dt>
@@ -140,11 +187,8 @@ export function RunDetailPage() {
               </Link>
             )}
             <div className="heading-actions">
-              <button type="button" className="action-primary" onClick={() => openDecision('approve')}>
+              <button type="button" className="action-primary" onClick={() => openDecision()}>
                 Review approval
-              </button>
-              <button type="button" className="action-secondary" onClick={() => openDecision('reject')}>
-                Reject run
               </button>
             </div>
           </div>
@@ -157,6 +201,9 @@ export function RunDetailPage() {
           <p>{run.error}</p>
         </section>
       )}
+
+      {/* FORGE-526: the item revisions this run produced, and what each gate did. */}
+      <RunChangesPanel runId={run.id} projectId={projectId} />
 
       <div className="flow-columns">
         <section className="flow-panel">
@@ -226,58 +273,28 @@ export function RunDetailPage() {
       <dialog ref={dialogRef} className="project-dialog" aria-labelledby="decision-title">
         <div className="flow-form">
           <div className="section-heading">
-            <h2 id="decision-title">
-              {decision === 'approve' ? 'Approve this gate?' : 'Reject this run?'}
-            </h2>
-            <button
-              type="button"
-              className="icon-control"
-              aria-label="Close decision"
-              disabled={approval.isPending}
-              onClick={closeDecision}
-            >
+            <h2 id="decision-title">Review this gate</h2>
+            <button type="button" className="icon-control" aria-label="Close decision" onClick={closeDecision}>
               <X size={20} />
             </button>
           </div>
-          <p>
-            {decision === 'approve'
-              ? 'Approval resumes execution. Confirm that you have reviewed the available evidence and accept this gate.'
-              : 'Rejection ends this run. Its recorded history remains available for review.'}
-          </p>
-          {approval.isError && (
-            <p className="form-error" role="alert">
-              The decision could not be confirmed. Refresh the run to check its current state before
-              retrying.
-            </p>
-          )}
-          {!awaiting && (
+          {!awaiting ? (
             <p role="status">
               This run is no longer waiting for approval. Close this dialog to view its current
               state.
             </p>
+          ) : gate.isError ? (
+            <p className="form-error" role="alert">
+              The gate could not be loaded. Refresh the run to check its current state.
+            </p>
+          ) : gate.data ? (
+            <ApprovalCard item={gate.data} onDecided={() => closeDecision()} />
+          ) : (
+            <p role="status">Loading gate…</p>
           )}
           <div className="dialog-actions">
-            <button
-              type="button"
-              className="action-secondary"
-              disabled={approval.isPending}
-              onClick={closeDecision}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="action-primary"
-              disabled={approval.isPending || !awaiting}
-              onClick={() =>
-                approval.mutate({ id: run.id, decision }, { onSuccess: () => closeDecision() })
-              }
-            >
-              {approval.isPending
-                ? 'Submitting…'
-                : decision === 'approve'
-                  ? 'Approve & continue'
-                  : 'Confirm rejection'}
+            <button type="button" className="action-secondary" onClick={closeDecision}>
+              Close
             </button>
           </div>
         </div>

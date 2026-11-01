@@ -1,8 +1,9 @@
-import { Suspense, lazy, useCallback, useEffect, useRef } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { VIEWER_COLOR_MANAGEMENT, VIEWER_GPU_PREFERENCE } from './viewerColor';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import { Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { TinkercadControls } from '../../lib/TinkercadControls';
 import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import { useThemeStore } from '../../store/theme-store';
@@ -27,6 +28,11 @@ const RobotControlsOverlay = lazy(() =>
 );
 
 const RAD_TO_DEG = 180 / Math.PI;
+
+/** Pixels per workplane texture tile. One tile spans one major section. */
+const GRID_TEXTURE_PX = 256;
+/** Minor cells within a tile, i.e. cells per section (the old 25/5 ratio). */
+const GRID_CELLS_PER_TILE = 5;
 
 // Tinkercad's translucent-red hole preview (MET-612).
 const CUTTER_OVERLAY_TINT = { color: '#ff3b30', opacity: 0.35 };
@@ -88,44 +94,181 @@ function LoadingFallback() {
   );
 }
 
-// Isometric-ish viewing direction, pre-normalized (1, 0.75, 1) — a fixed
-// angle looks natural regardless of model size; only the DISTANCE scales
-// with modelBounds.radius below.
-const VIEW_DIR = { x: 0.6247, y: 0.4685, z: 0.6247 };
-// Distance-to-radius ratio that comfortably fits a bounding sphere in a 45°
-// FOV camera with headroom (a tighter ratio clips corners on a tilted view).
-const FIT_DISTANCE_FACTOR = 2.2;
 // Generic framing used only before any model has reported its bounds (e.g.
 // the very first frame, or an empty scene) — matches the previous hardcoded
 // camera/target so behavior is unchanged until real bounds are available.
 const DEFAULT_BOUNDS = { center: [0, 0, 0] as [number, number, number], radius: 36 };
 
+export function createWorkplaneTexture(
+  minorColor: string,
+  majorColor: string,
+  maxAnisotropy: number,
+): THREE.Texture | null {
+  const canvas = document.createElement('canvas');
+  canvas.width = GRID_TEXTURE_PX;
+  canvas.height = GRID_TEXTURE_PX;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const cells = GRID_CELLS_PER_TILE;
+  const step = GRID_TEXTURE_PX / cells;
+
+  ctx.clearRect(0, 0, GRID_TEXTURE_PX, GRID_TEXTURE_PX);
+  ctx.strokeStyle = minorColor;
+  ctx.lineWidth = 1;
+  for (let i = 1; i < cells; i += 1) {
+    const at = Math.round(i * step) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(at, 0);
+    ctx.lineTo(at, GRID_TEXTURE_PX);
+    ctx.moveTo(0, at);
+    ctx.lineTo(GRID_TEXTURE_PX, at);
+    ctx.stroke();
+  }
+
+  // The tile edges are the major lines: every tile boundary is one, so the
+  // section grid falls out of the repeat instead of needing a second plane.
+  ctx.strokeStyle = majorColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, GRID_TEXTURE_PX, GRID_TEXTURE_PX);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  // These three lines are the fix. Mipmaps let a receding patch of floor
+  // average its cells into a flat tint instead of aliasing into a crawling
+  // moire, and anisotropy keeps that from smearing to mush at the grazing
+  // angles a workplane is mostly seen from.
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = maxAnisotropy;
+  return texture;
+}
+
+function useGridTexture(minorColor: string, majorColor: string): THREE.Texture | null {
+  const { gl } = useThree();
+  const maxAnisotropy = gl?.capabilities?.getMaxAnisotropy?.() ?? 1;
+
+  return useMemo(
+    () => createWorkplaneTexture(minorColor, majorColor, maxAnisotropy),
+    [minorColor, majorColor, maxAnisotropy],
+  );
+}
+
 /**
- * MET-747: an invisible-except-for-its-shadow ground plane (a `shadowMaterial`
- * only ever renders the shadow cast onto it, never a visible surface of its
- * own) so the new shadow-casting directionalLight (below) has something real
- * to shadow onto -- previously there was no ground at all (the visible grid
- * stays disabled per MET-623's shimmer issue; this doesn't touch that).
+ * Shadows are re-rendered only when the scene has actually moved (FORGE-623).
  *
- * Positioned/sized from `modelBounds` when available (GLB path -- computed
- * once per load by SceneContents). The robot-description path never
- * computes modelBounds (RobotSceneContents has no equivalent), so this falls
- * back to a fixed offset guessed from the quadruped reference build's own
- * scale (~100mm legs) rather than a real per-robot bound -- an honest
- * approximation, not exact: worst case the catcher plane sits at a slightly
- * wrong height, which is cosmetic, not a functional bug.
+ * The shadow map is a full extra depth pass over every mesh, at 2048x2048,
+ * and three redraws it on every single frame by default. In this viewer the
+ * geometry is still for almost all of that time -- orbiting moves the camera,
+ * which a directional light's shadow does not depend on -- so the pass was
+ * being paid for nothing on all but a handful of frames. Measured against the
+ * reference demo, the viewer was running at 19.8 fps to the demo's 52.9.
+ *
+ * Switching autoUpdate off makes staleness the risk instead of cost, so this
+ * re-renders on every store change that can move geometry. A change that
+ * somehow bypassed all of them would show a shadow that no longer matches the
+ * model, which is why the list is explicit rather than a guess.
  */
-function GroundShadowCatcher() {
+function ShadowUpdater() {
+  const gl = useThree((s) => s.gl);
   const modelBounds = useViewerStore((s) => s.modelBounds);
-  const center = modelBounds?.center ?? DEFAULT_BOUNDS.center;
-  const radius = modelBounds?.radius ?? DEFAULT_BOUNDS.radius;
-  const groundY = modelBounds?.groundY ?? -100;
-  const size = Math.max(radius * 6, 200);
+  const explodeFactor = useViewerStore((s) => s.explodeFactor);
+  const explodeDirection = useViewerStore((s) => s.explodeDirection);
+  const hiddenMeshes = useViewerStore((s) => s.hiddenMeshes);
+  const robotJointValues = useViewerStore((s) => s.robotJointValues);
+  const booleanCut = useViewerStore((s) => s.booleanCut);
+
+  useEffect(() => {
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
+    return () => {
+      gl.shadowMap.autoUpdate = true;
+    };
+  }, [gl]);
+
+  useEffect(() => {
+    // One redraw for this change; three clears the flag once it has done it.
+    gl.shadowMap.needsUpdate = true;
+  }, [gl, modelBounds, explodeFactor, explodeDirection, hiddenMeshes, robotJointValues, booleanCut]);
+
+  return null;
+}
+
+/**
+ * The workplane: one plane, carrying the grid and receiving the model's
+ * shadow (FORGE-623).
+ *
+ * It used to be two -- a visible grid and a separate invisible shadow catcher
+ * half a unit above it. Two near-coplanar planes at a few thousand units of
+ * depth range is a z-fight, and which one wins flips as the camera moves,
+ * which is seen as the floor shimmering. MET-621 fixed this exact shape of
+ * bug once before by deleting a second coplanar surface; FORGE-612
+ * reintroduced it. A material that both shows the grid and receives shadows
+ * needs only one surface, so there is nothing left to fight.
+ */
+/**
+ * The visible workplane the model sits on, restored after FORGE-34/MET-623
+ * hid it and re-done in FORGE-616 so it stops shimmering.
+ *
+ * Why it matters beyond decoration: with nothing under the model there is no
+ * reference for the motion, so an orbit reads as the object wobbling in a void
+ * rather than the view moving around a thing standing on a floor.
+ *
+ * It is one textured plane, not line geometry -- see `useGridTexture` for why
+ * that is what makes it hold still.
+ */
+function GroundGrid({ isDark }: { isDark: boolean }) {
+  const modelBounds = useViewerStore((s) => s.modelBounds);
+  const texture = useGridTexture(
+    isDark ? '#3a3a3a' : '#d8d8d8',
+    isDark ? '#5a5a5a' : '#b4b4b4',
+  );
+
+  // Only the GLB path computes bounds. The robot-description path has none,
+  // and a floor placed from a guess would cut straight through the robot, so
+  // it keeps the no-grid behaviour it has always had rather than get a plane
+  // at an invented height. The robot path keeps its own lighting; it simply
+  // gets no floor, which is honest rather than wrong.
+  if (!modelBounds || !texture) return null;
+
+  const { center, radius, groundY: modelGroundY } = modelBounds;
+  // Exactly at the model's floor: there is no second surface to clear now.
+  const groundY = modelGroundY ?? 0;
+
+  // Size scales with the model: a fixed 200-unit grid sat nowhere near a small
+  // or off-center model, which is what made an orbit look like the grid was
+  // the thing rotating (MET-620). One texture tile spans a section, so the
+  // repeat count is how many sections fit across the plane.
+  const size = Math.max(20, radius * 6);
+  const scale = radius / 36;
+  const tiles = Math.min(64, Math.max(2, Math.round(size / (25 * scale))));
+  texture.repeat.set(tiles, tiles);
+  texture.needsUpdate = true;
 
   return (
-    <mesh position={[center[0], groundY, center[2]]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <mesh
+      name="ground-grid"
+      position={[center[0], groundY, center[2]]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      receiveShadow
+    >
       <planeGeometry args={[size, size]} />
-      <shadowMaterial opacity={0.28} />
+      {/* Lambert, not standard (FORGE-624): this plane still has to receive
+          the model's shadow now that the separate catcher is gone, but it
+          covers most of the screen, and a standard material pays full PBR
+          with the studio environment map on every one of those pixels.
+          Measured on the deployed viewer, that cost more than switching the
+          shadow map to on-demand saved: 19.8 fps before the merge, 13.3
+          after. Lambert is lit and shadow-receiving at a fraction of the
+          per-pixel work, which is all a floor needs. */}
+      <meshLambertMaterial
+        map={texture}
+        transparent
+        opacity={0.9}
+        side={THREE.DoubleSide}
+      />
     </mesh>
   );
 }
@@ -136,25 +279,119 @@ function GroundShadowCatcher() {
  * could put the orbit pivot nowhere near the model, which reads as the ground
  * grid rotating rather than the camera orbiting the object. */
 function CameraController() {
-  const { camera } = useThree();
-  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const { camera, scene, gl, set } = useThree();
+  const controlsRef = useRef<TinkercadControls | null>(null);
   const registerCameraReset = useViewerStore((s) => s.registerCameraReset);
+  const registerFocusPart = useViewerStore((s) => s.registerFocusPart);
+  const registerOrbitControlsEnabledSetter = useViewerStore(
+    (s) => s.registerOrbitControlsEnabledSetter,
+  );
   const modelBounds = useViewerStore((s) => s.modelBounds);
 
-  const fitToModel = useCallback(() => {
-    const { center, radius } = modelBounds ?? DEFAULT_BOUNDS;
-    const dist = radius * FIT_DISTANCE_FACTOR;
-    camera.position.set(
-      center[0] + VIEW_DIR.x * dist,
-      center[1] + VIEW_DIR.y * dist,
-      center[2] + VIEW_DIR.z * dist,
-    );
-    camera.lookAt(center[0], center[1], center[2]);
-    if (controlsRef.current) {
-      controlsRef.current.target.set(center[0], center[1], center[2]);
-      controlsRef.current.update();
+  // FORGE-620: the Tinkercad turntable. It keeps orientation as azimuth,
+  // elevation and radius and rebuilds the camera from them every frame, so
+  // roll is structurally impossible and the workplane can never tilt -- the
+  // property the arcball gave up and OrbitControls only approximated.
+  //
+  // upAxis is 'y' here, not Tinkercad's 'z': the workplane convention is the
+  // same either way, but this viewer's GLB pipeline emits Y-up geometry, and
+  // SceneContents already reads the model's floor off box.min.y.
+  useEffect(() => {
+    const controls = new TinkercadControls(camera as THREE.PerspectiveCamera, gl.domElement, {
+      upAxis: 'y',
+    });
+    // Without a ceiling the wheel dollies to 1e6, far past anything the eye
+    // can resolve; fitToModel tightens this to the model it just framed.
+    controls.maxRadius = 1e5;
+    controlsRef.current = controls;
+    // Stand in for drei's `makeDefault` so GizmoHelper and anything else
+    // reading `state.controls` finds these. The cast is the same one drei
+    // makes: r3f types `controls` as its own event-ful shape.
+    set({ controls: controls as unknown as THREE.EventDispatcher });
+    return () => {
+      controls.dispose();
+      controlsRef.current = null;
+      set({ controls: null });
+    };
+  }, [camera, gl, set]);
+
+  // The camera is derived state: nothing moves until update() rebuilds it from
+  // the angles, and the damping eases toward whatever the last gesture asked
+  // for. Priority -1 so this lands before anything that reads the camera.
+  //
+  // FORGE-623: the depth range follows the dolly. near/far were fixed at
+  // 0.1/10000, and a model framed at ~3000 units away left only three or four
+  // scroll-ticks of headroom before the whole scene passed the far plane and
+  // vanished. Deriving both from the current radius keeps the model inside the
+  // frustum at any zoom, and keeps near as large as it can be, which is what
+  // buys depth precision.
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    controls.update();
+    const perspective = camera as THREE.PerspectiveCamera;
+    const far = Math.max(controls.radius * 20, 1000);
+    const near = Math.max(controls.radius / 1000, 0.01);
+    // Only touch the projection matrix when it actually moved: this runs every
+    // frame.
+    if (Math.abs(perspective.far - far) > far * 0.05 || Math.abs(perspective.near - near) > near * 0.5) {
+      perspective.far = far;
+      perspective.near = near;
+      perspective.updateProjectionMatrix();
     }
-  }, [camera, modelBounds]);
+  }, -1);
+
+  // FORGE-250: lets drag-to-pose suppress the camera the instant a joint drag
+  // starts, same registration pattern as registerCameraReset below.
+  useEffect(() => {
+    registerOrbitControlsEnabledSetter((enabled) => {
+      if (controlsRef.current) controlsRef.current.enabled = enabled;
+    });
+    return () => registerOrbitControlsEnabledSetter(null);
+  }, [registerOrbitControlsEnabledSetter]);
+
+  /** Frame a bounding box: the controls fit it by bounding sphere, which is
+   * why no view direction is passed -- framing keeps the current angles. */
+  const frameBox = useCallback((box: THREE.Box3) => {
+    controlsRef.current?.frame(box);
+  }, []);
+
+  const fitToModel = useCallback(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const { center, radius } = modelBounds ?? DEFAULT_BOUNDS;
+    const c = new THREE.Vector3(center[0], center[1], center[2]);
+    // modelBounds.radius is already the model's bounding-SPHERE radius, and
+    // frame() re-derives a sphere from whatever box it is given. A cube of
+    // +/-radius would have a sphere sqrt(3) bigger, pushing the camera 73%
+    // too far out, so size the box so its own sphere comes back to radius.
+    const side = (2 * radius) / Math.sqrt(3);
+    // Keep the dolly within sight of the model: 40x its own radius is already
+    // far enough that it is a speck, and it leaves the far plane room.
+    controls.maxRadius = radius * 40;
+    // Reset view goes home as well as re-framing, so it recovers a known
+    // orientation and not just a known distance.
+    controls.setView('home');
+    frameBox(new THREE.Box3().setFromCenterAndSize(c, new THREE.Vector3(side, side, side)));
+  }, [frameBox, modelBounds]);
+
+  /** Frame one part (FORGE-618). The pivot moves onto it, so it turns in
+   * place instead of swinging through a wide arc. */
+  const focusPart = useCallback(
+    (meshName: string) => {
+      const object = scene.getObjectByName(meshName);
+      if (!object) return;
+      const box = new THREE.Box3().setFromObject(object);
+      if (box.isEmpty()) return;
+      frameBox(box);
+    },
+    [frameBox, scene],
+  );
+
+  useEffect(() => {
+    registerFocusPart(focusPart);
+    return () => registerFocusPart(null);
+  }, [registerFocusPart, focusPart]);
 
   useEffect(() => {
     registerCameraReset(fitToModel);
@@ -170,14 +407,7 @@ function CameraController() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelBounds]);
 
-  return (
-    <OrbitControls
-      ref={controlsRef}
-      makeDefault
-      enableDamping
-      dampingFactor={0.1}
-    />
-  );
+  return null;
 }
 
 /**
@@ -317,13 +547,35 @@ function GizmoControls() {
 
 export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps) {
   const glbUrl = useViewerStore((s) => s.glbUrl);
+  const modelFormat = useViewerStore((s) => s.modelFormat);
   const manifest = useViewerStore((s) => s.manifest);
   const resetCamera = useViewerStore((s) => s.resetCamera);
+  const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
+  const focusPart = useViewerStore((s) => s.focusPart);
   const booleanCut = useViewerStore((s) => s.booleanCut);
   const selectPart = useViewerStore((s) => s.selectPart);
   const robotDescription = useViewerStore((s) => s.robotDescription);
   const themeMode = useThemeStore((s) => s.mode);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
+
+  // F frames the selected part and puts the orbit pivot on it (FORGE-618),
+  // the same key Tinkercad and most CAD tools use for fit-to-selection.
+  // Double-clicking a part in the scene does the same thing.
+  useEffect(() => {
+    if (!selectedMeshName) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'f' && e.key !== 'F') return;
+      // Never steal the key from someone typing -- the twin page has a search
+      // box and an agent chat on the same screen.
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      focusPart(selectedMeshName);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedMeshName, focusPart]);
 
   const isDark =
     themeMode === 'dark' ||
@@ -345,10 +597,16 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
     <div className="twin-canvas relative h-full w-full">
       <Canvas
         camera={{ position: [80, 60, 80], fov: 45, near: 0.1, far: 10000 }}
+        // FORGE-623: 1x on an ordinary screen, never beyond 2x on a dense
+        // one. Uncapped, a retina display renders 4x the pixels and a 4K one
+        // more again, which is most of why the viewer felt heavy.
+        dpr={[1, 2]}
         gl={{
+          ...VIEWER_GPU_PREFERENCE,
+          // Kept deliberately: TwinViewerPage exports the view with
+          // canvas.toDataURL, which reads blank without it.
           preserveDrawingBuffer: true,
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.1,
+          ...VIEWER_COLOR_MANAGEMENT,
         }}
         // MET-747: enables the renderer's shadow map -- without this prop
         // castShadow/receiveShadow on the light and meshes below are no-ops.
@@ -374,6 +632,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
             manifest && (
               <SceneContents
                 glbUrl={glbUrl}
+                format={modelFormat}
                 manifest={manifest}
                 onPartClick={onPartClick}
               />
@@ -420,13 +679,14 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
             <Environment preset="studio" />
           </Suspense>
         </ErrorBoundary>
-        {/* Ground grid temporarily hidden — drei's Grid draws lines via a
-            derivative-based shader that shimmers/flickers on its own,
-            independent of the z-fighting MET-621 fixed. Restoring it needs a
-            plain-material (baked-texture) plane instead (MET-623). The
-            invisible shadow-only catcher below (MET-747) is unaffected by
-            that bug -- a shadowMaterial has no lines to shimmer. */}
-        <GroundShadowCatcher />
+        {/* The workplane the model stands on, restored in FORGE-612 after
+            FORGE-34/MET-623 hid it: these are real GridHelper line segments,
+            not drei Grid's derivative-shaded procedural lines, so the shimmer
+            that forced the hiding cannot occur. The shadow-only catcher
+            (MET-747) sits just above it and was never affected either -- a
+            shadowMaterial has no lines to shimmer. */}
+        <ShadowUpdater />
+        <GroundGrid isDark={isDark} />
 
         <ambientLight intensity={0.4} />
         <directionalLight
@@ -464,22 +724,24 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
           tall, spans 40-72px), which this overlay's old bottom-14 (56-84px)
           overlapped (MET-624). */}
       <div className="absolute bottom-20 left-3 z-10 rounded-md bg-black/50 px-3 py-1.5 text-xs text-white/80 select-none pointer-events-none">
-        Left drag: rotate · Scroll: zoom · Right drag: pan · Click a part to move it
+        Right drag: rotate · Middle drag: pan · Scroll: zoom at cursor · Left click: select · Double-click or F: focus
       </div>
 
       {/* Camera reset button — bottom-right (bottom-20 clears the twin status
           bar and matches the controls-hint overlay's height, MET-624) so it
           doesn't sit on top of the ViewCube anchored top-right. */}
-      <button
-        type="button"
-        onClick={resetCamera}
-        className="absolute right-3 bottom-20 z-30 flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
-        title="Reset camera to default view"
-        aria-label="Reset camera"
-      >
-        <RotateCcw size={12} />
-        Reset view
-      </button>
+      <div className="absolute right-3 bottom-20 z-30 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={resetCamera}
+          className="flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+          title="Reset camera to default view"
+          aria-label="Reset camera"
+        >
+          <RotateCcw size={12} />
+          Reset view
+        </button>
+      </div>
     </div>
   );
 }

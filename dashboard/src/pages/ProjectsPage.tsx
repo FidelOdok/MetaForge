@@ -113,7 +113,8 @@ export function ProjectsPage() {
   const runsQuery = useRuns();
   const healthQuery = useHealth();
   const projects = projectsQuery.data ?? [];
-  const runs = runsQuery.data ?? [];
+  // Deliberately unscoped: this page counts runs *across* projects.
+  const runs = runsQuery.data?.runs ?? [];
 
   const dialogRef = useRef<CreateProjectDialogHandle>(null);
   const newProjectButtonRef = useRef<HTMLButtonElement>(null);

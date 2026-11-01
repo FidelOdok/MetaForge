@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from twin_core.design_ir import IREntity
+
 
 class BoundingBox(BaseModel):
     """Axis-aligned bounding box for generated geometry."""
@@ -25,15 +27,27 @@ class GenerateCadIrInput(BaseModel):
     work_product_id: UUID | None = Field(
         default=None, description="Twin work_product ID (optional for new generation)"
     )
-    entities: list[dict[str, Any]] = Field(
+    name: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Name for the generated part (e.g. 'Shoulder Yoke', 'Base Housing') -- "
+            "used as the Twin work product's display name. Required and must be "
+            "specific to what this part actually is, never a generic placeholder "
+            "like the material alone."
+        ),
+    )
+    entities: list[IREntity] = Field(
         ...,
         min_length=1,
         description=(
             "Design IR entities (requirements doc §6.2), e.g. "
             '[{"id": "body1", "op": "create_body"}, '
             '{"id": "sk1", "op": "sketch", "body_ref": "body1", ...}, ...]. '
-            "Validated into a real DesignIR document before anything runs; "
-            "malformed entities are rejected with a clear error, not a crash."
+            "Each entity's exact required fields are given by its own `op` "
+            "(a discriminated union -- see the op enum values and each "
+            "variant's schema below). Malformed entities are rejected with a "
+            "clear error, not a crash."
         ),
     )
     adapter: Literal["freecad", "cadquery"] = Field(
@@ -45,7 +59,7 @@ class GenerateCadIrInput(BaseModel):
             "narrower v1 op subset -- see its module docstring for exact coverage)."
         ),
     )
-    material: str = Field(default="aluminum_6061", description="Material name for metadata")
+    material: str = Field(default="aluminium_6061_t6", description="Material name for metadata")
     project_id: str | None = Field(
         default=None,
         description="Project UUID to link the resulting work product to, when committed",
@@ -55,6 +69,19 @@ class GenerateCadIrInput(BaseModel):
         description=(
             "Persist the generated geometry into the Twin via twin.commit_geometry "
             "immediately (best-effort — failure is reported on the output, not raised)"
+        ),
+    )
+    parameters: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "FORGE-270 (gap G-D2): the caller-supplied values that drove this "
+            "generation (e.g. {'thickness_mm': 2.0}) -- threaded straight through to "
+            "twin.commit_geometry's own 'parameters' argument (already real, "
+            "previously unused by any caller), landing in the committed node's "
+            "metadata.geometry_features.parameters. Recorded so a LATER call with a "
+            "changed value can be recognized as an edit of the same part (a new "
+            "SUPERSEDES-linked version, via commit_geometry's existing same-name "
+            "matching) rather than an untraceable sibling."
         ),
     )
 
@@ -91,4 +118,14 @@ class GenerateCadIrOutput(BaseModel):
     commit_error: str | None = Field(
         default=None,
         description="Set when commit=True was requested but persistence was skipped or failed",
+    )
+    already_committed: bool = Field(
+        default=False,
+        description=(
+            "FORGE-237: true when a cad_model with this exact name and geometry "
+            "(content_hash) already existed in the project — twin_node_id/model_url "
+            "point at that EXISTING node, nothing new was created. Do not call "
+            "twin.commit_geometry again for this same part; only re-commit if the "
+            "geometry actually changes."
+        ),
     )

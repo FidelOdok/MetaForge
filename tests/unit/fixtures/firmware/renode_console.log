@@ -1,0 +1,25 @@
+[03:51:44.3025] [INFO] Loaded monitor commands from: /opt/renode/scripts/monitor.py
+Renode, version 1.17.0 (1.17.0+20260907gitf1dd1b4af)
+
+(monitor) i @/tmp/tmp6gclb_4o/firmware/emulation/0448a9fbe37e/run.resc
+[03:51:44.4592] [INFO] Including script(s): /tmp/tmp6gclb_4o/firmware/emulation/0448a9fbe37e/run.resc
+[03:51:44.4794] [INFO] System bus created.
+[03:51:45.1387] [INFO] SynopsysEthernetMAC: Bus width not specified, defaulting to Bits32
+[03:51:46.3108] [INFO] Downloading https://dl.antmicro.com/projects/renode/svd/STM32F40x.svd.gz.
+[03:51:46.7500] [INFO] Download done.
+[03:51:46.7508] [INFO] Decompressing file
+[03:51:46.7556] [INFO] Decompression done
+[03:51:47.0401] [INFO] sysbus: Loaded SVD: /tmp/renode-864/23adf1e0-bb20-437b-9640-1a5352bc0a8d.tmp. Name: STM32F40x. Description: STM32F40x.
+[03:51:47.0751] [INFO] sysbus: Loading block of 4032 bytes length at 0x8000000.
+[03:51:47.0865] [INFO] sysbus: Loading block of 12 bytes length at 0x8000FC0.
+[03:51:47.0866] [INFO] sysbus: Loading block of 18196 bytes length at 0x2000000C.
+[03:51:47.2777] [INFO] cpu: Guessing VectorTableOffset value to be 0x8000000.
+[03:51:47.2904] [INFO] cpu: Setting initial values: PC = 0x8000E21, SP = 0x20020000.
+[03:51:47.2925] [INFO] metaforge: Machine started.
+[03:51:47.3446] [WARNING] nvic: Trying to set the priority for interrupt PendSV to 0xFF, but it should be maskable with 0xF0
+[03:51:47.3451] [WARNING] nvic: Trying to set the priority for interrupt SysTick to 0xFF, but it should be maskable with 0xF0
+[03:51:48.0197] [INFO] metaforge: Machine paused.
+MFREAD 0x40020C14
+0x00001000
+Renode is quitting
+[03:51:48.1097] [INFO] metaforge: Disposed.

@@ -5,8 +5,7 @@ layer. Covers the end-to-end developer flow: download → parse →
 ingest → query.
 
 > **Reference:** the model lives in `twin_core.models.Datasheet`; the
-> parser in `digital_twin.datasheets.parser`. See MET-430 (pipeline)
-> and MET-431 (ESP32 proof point).
+> parser in `digital_twin.datasheets.parser`.
 
 ## The pipeline at a glance
 
@@ -107,7 +106,7 @@ is **intentionally not done** to avoid silently injecting nodes the
 user didn't author. The supply chain agent (or manual `add_component`)
 populates Components; the datasheet then connects on the next ingest.
 
-## What's still ahead (MET-430 follow-ups)
+## What's still ahead
 
 The current pipeline ships:
 
@@ -116,7 +115,7 @@ The current pipeline ships:
 - [x] Supersedes chain across revisions
 - [x] Auto-link to existing Component
 
-Still queued under MET-430:
+Still queued under:
 
 - [ ] Table detection → structured rows (`extract_tables`)
 - [ ] Typed property extraction with confidence (feeds `knowledge.extract`)
@@ -126,6 +125,6 @@ Still queued under MET-430:
 
 ## See also
 
-- [knowledge-ingestion-playbook.md](../architecture/knowledge-ingestion-playbook.md) — general knowledge ingestion patterns
+- [knowledge-ingestion-playbook.md](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/knowledge-ingestion-playbook.md) — general knowledge ingestion patterns
 - [`scripts/datasheets/README.md`](https://github.com/FidelOdok/MetaForge/blob/main/scripts/datasheets/README.md) — fixture tooling
 - `tests/integration/test_esp32_datasheet_ingest.py` — end-to-end test

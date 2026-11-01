@@ -97,3 +97,17 @@ def test_summarize_trajectory_skips_final_answer_steps() -> None:
     final_step = ReActStep(thought="done", tool_call=None, observation="answer")
     summary = summarize_trajectory([final_step])
     assert "1." not in summary
+
+
+def test_summarize_trajectory_surfaces_a_truncation_step() -> None:
+    """FORGE-235: a step with no tool_call but a real error (the response
+    was cut off at the output token limit before any tool call completed)
+    must NOT be silently dropped the way a plain final-answer step is --
+    that's exactly the "what went wrong" this summary exists to report."""
+    truncated_step = ReActStep(
+        thought="",
+        tool_call=None,
+        error="response truncated at the output token limit",
+    )
+    summary = summarize_trajectory([truncated_step])
+    assert "response truncated at the output token limit" in summary

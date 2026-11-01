@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { lazy, Suspense, useState, useRef, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Activity,
@@ -21,26 +21,45 @@ import {
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
-import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../hooks/use-twin';
+import {
+  useTwinNodes,
+  useTwinNode,
+  useTwinRelationships,
+  useNodeVersionHistory,
+  useRevisionDiff,
+  useGeometryDiff,
+} from '../hooks/use-twin';
+import { useFeatureDiff } from '../hooks/use-features';
 import { useActiveProject } from '../hooks/use-active-project';
+import { RevisionPicker } from '../components/items/RevisionPicker';
+import { ItemHistoryPanel } from '../components/items/ItemHistoryPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
+import { LiveAssemblyPanel } from '../components/viewer/LiveAssemblyPanel';
 import { ComponentTree } from '../components/viewer/ComponentTree';
+import { AssemblyPartTree } from '../components/viewer/AssemblyPartTree';
 import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
+import { ManufacturingView } from '../components/viewer/ManufacturingView';
+import { ElectronicsThreadView } from '../components/viewer/ElectronicsThreadView';
+import { StructureView } from '../components/viewer/StructureView';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
+import { AssemblyJointsEditor } from '../components/viewer/AssemblyJointsEditor';
 import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
 import { useViewerStore } from '../store/viewer-store';
 import { useLayoutStore } from '../store/layout-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getNodeModel, nodeFileUrl } from '../api/endpoints/twin';
 import { FullScreenPreviewModal } from '../components/viewer/FullScreenPreviewModal';
+import { PreviewHost, hasInlinePreview } from '../components/preview/PreviewHost';
+import { ENGINE_LABELS, is3dEngine, previewEngineFor } from '../components/preview/registry';
 import { iconForNode } from '../utils/wp-icons';
 import { toDownloadHref, type ExportFile } from '../api/endpoints/cad-export';
 import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-export';
 import { useToast } from '../components/ui/Toast';
 import type { TwinNode } from '../types/twin';
+import { DEFAULT_SHOWN, LINK_GROUPS, splitLinks, type LinkGroup } from '../lib/graphLinks';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 import { resolveGatewayHref } from '../lib/gatewayConfig';
 import apiClient from '../api/client';
@@ -68,6 +87,46 @@ function getModelLoadErrorMessage(error: unknown): string {
     if (typeof response?.data?.detail === 'string') return response.data.detail;
   }
   return 'This work product has no viewable 3D model yet.';
+}
+
+const JsonTree = lazy(() =>
+  import('../components/preview/engines/DataEngines').then((m) => ({ default: m.JsonTree })),
+);
+
+const EMPTY_MANIFEST: ModelManifest = {
+  parts: [],
+  meshToNodeMap: {},
+  materials: [],
+  stats: { triangleCount: 0, fileSize: 0 },
+};
+
+/**
+ * FORGE-531: what the main viewer should load for a node, per the preview
+ * registry. `cad3d` goes through the STEP->GLB converter route; `mesh3d`
+ * (STL, 3MF, GLB) is the stored file itself, loaded with three's loaders.
+ * Null for a node with no 3D engine.
+ */
+async function fetchViewerModel(
+  node: TwinNode,
+): Promise<{ url: string; manifest: ModelManifest; format: string } | null> {
+  const { engine, format } = previewEngineFor(node);
+  if (engine === 'mesh3d') {
+    return { url: nodeFileUrl(node.id), manifest: EMPTY_MANIFEST, format: format === 'gltf' ? 'glb' : format };
+  }
+  if (engine !== 'cad3d') return null;
+  const result = await getNodeModel(node.id);
+  const manifest: ModelManifest = {
+    parts: result.metadata.parts.map((p) => ({
+      name: p.name,
+      meshName: p.meshName ?? p.name,
+      children: (p.children ?? []) as ModelManifest['parts'],
+      boundingBox: p.boundingBox as PartTreeNode['boundingBox'],
+    })),
+    meshToNodeMap: {},
+    materials: result.metadata.materials ?? [],
+    stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
+  };
+  return { url: resolveGatewayHref(result.glb_url), manifest, format: 'glb' };
 }
 
 // ── KC tokens ────────────────────────────────────────────────────────────────
@@ -376,38 +435,46 @@ function ExportForSimSection({ node, onClose }: { node: TwinNode; onClose: () =>
   );
 }
 
-function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) {
+/** FORGE-526: a node that is a revision of an item carries its key. */
+function itemKeyOf(node: TwinNode): string | undefined {
+  const key = node.properties?.item_key;
+  return typeof key === 'string' && key ? key : undefined;
+}
+
+function NodeDetail({
+  node,
+  onClose,
+  onSelectNode,
+}: {
+  node: TwinNode;
+  onClose: () => void;
+  onSelectNode?: (id: string) => void;
+}) {
+  const { activeProjectId: itemProjectId } = useActiveProject();
   const loadModel = useViewerStore((s) => s.loadModel);
   const setViewMode = useViewerStore((s) => s.setViewMode);
   const openBooleanCut = useViewerStore((s) => s.openBooleanCut);
   const [loading3d, setLoading3d] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const isCAD = node.properties.wp_type === 'cad_model';
+  // FORGE-531: the preview registry, not wp_type alone, decides what is 3D.
+  const { engine } = previewEngineFor(node);
+  const is3d = is3dEngine(engine);
+  // Boolean cut and sim export need real CAD geometry (the converter path).
+  const isCAD = node.properties.wp_type === 'cad_model' && engine === 'cad3d';
 
   const handleView3D = useCallback(async () => {
     setLoading3d(true);
     try {
-      const result = await getNodeModel(node.id);
-      const manifest: ModelManifest = {
-        parts: result.metadata.parts.map((p) => ({
-          name: p.name,
-          meshName: p.meshName ?? p.name,
-          children: (p.children ?? []) as ModelManifest['parts'],
-          boundingBox: p.boundingBox as PartTreeNode['boundingBox'],
-        })),
-        meshToNodeMap: {},
-        materials: result.metadata.materials ?? [],
-        stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
-      };
-      const glbUrl = resolveGatewayHref(result.glb_url);
-      loadModel(glbUrl, manifest);
+      const model = await fetchViewerModel(node);
+      if (!model) return;
+      loadModel(model.url, model.manifest, model.format);
       setViewMode('3d');
     } catch (err) {
       console.error('Failed to load 3D model:', err);
     } finally {
       setLoading3d(false);
     }
-  }, [node.id, loadModel, setViewMode]);
+  }, [node, loadModel, setViewMode]);
 
   // Boolean-cut targets whichever node is open in the 3D panel (MET-612) —
   // ensure this node is actually loaded there first, then enter picking mode.
@@ -445,19 +512,30 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
       <div className="flex-1 overflow-y-auto">
         {/* Status + meta */}
         <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
-          <StatusBadge status={node.status} />
+          <div className="flex items-center justify-between gap-2">
+            <StatusBadge status={node.status} />
+            {onSelectNode && (
+              <RevisionPicker
+                itemKey={itemKeyOf(node)}
+                nodeId={node.id}
+                projectId={node.projectId ?? itemProjectId ?? undefined}
+                onSelect={onSelectNode}
+              />
+            )}
+          </div>
           <div className="font-mono mt-1" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
             {node.domain} · {node.type} · {formatRelativeTime(node.updatedAt)}
           </div>
         </div>
 
         {/* View 3D / Boolean cut (MET-612) */}
-        {isCAD && (
+        {is3d && (
           <div className="px-3 py-2 flex-shrink-0 flex gap-1.5" style={{ borderBottom: `1px solid ${KC.border}` }}>
             <Button variant="primary" size="sm" onClick={handleView3D} disabled={loading3d} className="text-xs flex-1">
               <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>view_in_ar</span>
               {loading3d ? 'Loading…' : 'View 3D Model'}
             </Button>
+            {isCAD && (<>
             <Button
               variant="secondary"
               size="sm"
@@ -477,6 +555,7 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             >
               <span className="material-symbols-outlined" style={{ fontSize: 13, verticalAlign: 'middle' }}>precision_manufacturing</span>
             </Button>
+            </>)}
           </div>
         )}
 
@@ -485,9 +564,23 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
           <ExportForSimSection node={node} onClose={() => setExportOpen(false)} />
         )}
 
+        {/* FORGE-511: an assembly's part tree with per-part material/size */}
+        {node.assemblyParts && node.assemblyParts.length > 0 && (
+          <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+            <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+              Assembly parts ({node.assemblyParts.length})
+            </div>
+            <AssemblyPartTree parts={node.assemblyParts} />
+          </div>
+        )}
+
         {/* View a saved robot description directly -- no export form, no
          * manual part/joint re-entry (MET-740 follow-up). */}
         <RobotDescriptionViewSection node={node} />
+
+        {/* FORGE-531: inline preview from the shared registry (FEA summary for
+            a simulation_result, rendered Markdown, tables, decision card...). */}
+        <NodePreviewSection node={node} />
 
         {/* File: worktype + path + download / open / preview (MET-483) */}
         <WorkProductFileSection node={node} />
@@ -514,11 +607,38 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
         {/* Revision history (GET /v1/twin/nodes/{id}/versions) */}
         <NodeHistorySection nodeId={node.id} />
 
+        {/* Parameter diff vs. a SUPERSEDES predecessor (FORGE-270) */}
+        <FeatureVersionSection nodeId={node.id} />
+
+        {/* Geometry (volume/area/bounding-box) diff vs. a SUPERSEDES predecessor (FORGE-301) */}
+        <GeometryDiffSection nodeId={node.id} />
+
         {/* Pending design-change proposals for this node (gated apply, MET-548) */}
         <div className="px-3 py-2 flex-shrink-0">
-          <NodeProposals nodeId={node.id} onApplied={isCAD ? handleView3D : undefined} />
+          <NodeProposals nodeId={node.id} onApplied={is3d ? handleView3D : undefined} />
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── NodePreviewSection ──────────────────────────────────────────────────────
+/**
+ * FORGE-531: the inspector's inline preview, rendered by the shared
+ * PreviewHost. 3D, robot, PDF and HTML engines render nothing here (the main
+ * viewer and the full-screen Preview cover them); the FEA card brings its own
+ * heading.
+ */
+function NodePreviewSection({ node }: { node: TwinNode }) {
+  if (!hasInlinePreview(node, 'panel')) return null;
+  const { engine } = previewEngineFor(node);
+  if (engine === 'sim') return <PreviewHost node={node} mode="panel" />;
+  return (
+    <div className="px-3 py-2 flex-shrink-0" data-testid="node-preview-section" style={{ borderBottom: `1px solid ${KC.border}` }}>
+      <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+        Preview · {ENGINE_LABELS[engine]}
+      </div>
+      <PreviewHost node={node} mode="panel" />
     </div>
   );
 }
@@ -575,6 +695,8 @@ function RobotDescriptionViewSection({ node }: { node: TwinNode }) {
 function NodeHistorySection({ nodeId }: { nodeId: string }) {
   const { data: revisions, isLoading } = useNodeVersionHistory(nodeId);
   const [expanded, setExpanded] = useState(false);
+  const [revA, setRevA] = useState<number | undefined>(undefined);
+  const [revB, setRevB] = useState<number | undefined>(undefined);
 
   if (isLoading || !revisions || revisions.length === 0) return null;
 
@@ -615,18 +737,312 @@ function NodeHistorySection({ nodeId }: { nodeId: string }) {
           </div>
         ))}
       </div>
+
+      {/* FORGE-301: compare any two revisions' metadata (GET /nodes/{id}/diff,
+          real and already built -- this is its first dashboard consumer). */}
+      {revisions.length >= 2 && (
+        <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${KC.border}` }}>
+          <div className="flex items-center gap-1.5" style={{ fontSize: 11 }}>
+            <span style={{ color: KC.onSurfaceVariant }}>Compare</span>
+            <select
+              data-testid="revision-diff-select-a"
+              value={revA ?? ''}
+              onChange={(e) => setRevA(e.target.value ? Number(e.target.value) : undefined)}
+              className="font-mono rounded px-1"
+              style={{ background: KC.surfaceHigh, color: KC.onSurface, border: `1px solid ${KC.border}`, fontSize: 10 }}
+            >
+              <option value="">v?</option>
+              {sorted.map((r) => (
+                <option key={r.revision} value={r.revision}>
+                  v{r.revision}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+            <select
+              data-testid="revision-diff-select-b"
+              value={revB ?? ''}
+              onChange={(e) => setRevB(e.target.value ? Number(e.target.value) : undefined)}
+              className="font-mono rounded px-1"
+              style={{ background: KC.surfaceHigh, color: KC.onSurface, border: `1px solid ${KC.border}`, fontSize: 10 }}
+            >
+              <option value="">v?</option>
+              {sorted.map((r) => (
+                <option key={r.revision} value={r.revision}>
+                  v{r.revision}
+                </option>
+              ))}
+            </select>
+          </div>
+          <RevisionDiffView nodeId={nodeId} revisionA={revA} revisionB={revB} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── RevisionDiffView ─────────────────────────────────────────────────────────
+/** FORGE-301: renders GET /nodes/{id}/diff?v1=A&v2=B for the two revisions
+ * picked in NodeHistorySection above. Same changed/added/removed visual
+ * pattern as FeatureVersionSection below, generalized to any two revisions
+ * of any work product (not just a SUPERSEDES-linked parametric feature). */
+function RevisionDiffView({
+  nodeId,
+  revisionA,
+  revisionB,
+}: {
+  nodeId: string;
+  revisionA: number | undefined;
+  revisionB: number | undefined;
+}) {
+  const { data: diff, isLoading, isError } = useRevisionDiff(nodeId, revisionA, revisionB);
+
+  if (!revisionA || !revisionB || revisionA === revisionB) return null;
+  if (isLoading) return null;
+  if (isError) {
+    return (
+      <div className="mt-1.5 font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+        Could not diff v{revisionA} &rarr; v{revisionB}
+      </div>
+    );
+  }
+  if (!diff) return null;
+
+  const changedKeys = Object.keys(diff.changed);
+  const addedKeys = Object.keys(diff.added);
+  const removedKeys = Object.keys(diff.removed);
+  if (changedKeys.length === 0 && addedKeys.length === 0 && removedKeys.length === 0) {
+    return (
+      <div className="mt-1.5 font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+        No metadata differences
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="revision-diff-view" className="mt-1.5 space-y-1" style={{ fontSize: 11 }}>
+      {changedKeys.map((key) => {
+        const delta = diff.changed[key];
+        if (!delta) return null;
+        return (
+          <div key={key} className="flex items-center gap-1.5 font-mono" style={{ color: KC.onSurface }}>
+            <span style={{ color: KC.onSurfaceVariant }}>{key}:</span>
+            <span>{String(delta.from_value)}</span>
+            <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+            <span style={{ color: KC.teal }}>{String(delta.to_value)}</span>
+          </div>
+        );
+      })}
+      {addedKeys.map((key) => (
+        <div key={key} className="font-mono" style={{ color: KC.green }}>
+          + {key}: {String(diff.added[key])}
+        </div>
+      ))}
+      {removedKeys.map((key) => (
+        <div key={key} className="font-mono" style={{ color: KC.orange }}>
+          - {key}: {String(diff.removed[key])}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── FeatureVersionSection ─────────────────────────────────────────────────────
+/**
+ * FORGE-270 (gap G-D2): "editable parameters on committed parts" -- editing
+ * a parametric feature (FORGE-269) is re-generating it with the same name
+ * and a changed parameter value, which api_gateway.twin.geometry_recorder
+ * already links to its predecessor via a real SUPERSEDES edge. This renders
+ * that edge's parameter diff when one exists -- most work products have
+ * none (created once, never re-generated), so hasPreviousVersion false is
+ * the common, expected answer, not a loading/error state.
+ */
+function FeatureVersionSection({ nodeId }: { nodeId: string }) {
+  const { data: diff, isLoading } = useFeatureDiff(nodeId);
+
+  if (isLoading || !diff || !diff.hasPreviousVersion) return null;
+
+  const changedKeys = Object.keys(diff.changed);
+  const addedKeys = Object.keys(diff.added);
+  const removedKeys = Object.keys(diff.removed);
+  if (changedKeys.length === 0 && addedKeys.length === 0 && removedKeys.length === 0) return null;
+
+  return (
+    <div
+      data-testid="feature-version-diff"
+      className="px-3 py-2 flex-shrink-0"
+      style={{ borderBottom: `1px solid ${KC.border}` }}
+    >
+      <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+        Parameter changes vs. previous version
+      </div>
+      <div className="space-y-1" style={{ fontSize: 11 }}>
+        {changedKeys.map((key) => {
+          const delta = diff.changed[key];
+          if (!delta) return null;
+          return (
+            <div key={key} className="flex items-center gap-1.5 font-mono" style={{ color: KC.onSurface }}>
+              <span style={{ color: KC.onSurfaceVariant }}>{key}:</span>
+              <span>{String(delta.from_value)}</span>
+              <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+              <span style={{ color: KC.teal }}>{String(delta.to_value)}</span>
+            </div>
+          );
+        })}
+        {addedKeys.map((key) => (
+          <div key={key} className="font-mono" style={{ color: KC.green }}>
+            + {key}: {String(diff.added[key])}
+          </div>
+        ))}
+        {removedKeys.map((key) => (
+          <div key={key} className="font-mono" style={{ color: KC.orange }}>
+            - {key}: {String(diff.removed[key])}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── GeometryDiffSection ──────────────────────────────────────────────────────
+/**
+ * FORGE-301 (gap G-J2): the geometry half of "versioning and diff of
+ * geometry and parameters across work-product versions." ``/iterate``
+ * (NodeHistorySection/RevisionDiffView above) only ever changes a node's
+ * METADATA -- it never re-uploads a blob, so no two revisions of the same
+ * node ever have different geometry. The real "geometry changed" case is a
+ * SUPERSEDES edge between two separate nodes (the same edge
+ * FeatureVersionSection's parameter diff already walks) -- this renders the
+ * real volume/area/bounding-box delta between this node's actual committed
+ * STEP file and its predecessor's. No prior version is the common, expected
+ * answer -- a 200 with has_previous_version false since FORGE-709, not a
+ * loading/error state -- same convention as FeatureVersionSection.
+ */
+function GeometryDiffSection({ nodeId }: { nodeId: string }) {
+  const { data: diff, isLoading } = useGeometryDiff(nodeId);
+
+  if (isLoading || !diff || !diff.has_previous_version) return null;
+
+  const volumeUp = diff.volume_delta_mm3 >= 0;
+  const areaUp = diff.area_delta_mm2 >= 0;
+
+  return (
+    <div
+      data-testid="geometry-version-diff"
+      className="px-3 py-2 flex-shrink-0"
+      style={{ borderBottom: `1px solid ${KC.border}` }}
+    >
+      <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+        Geometry changes vs. previous version
+      </div>
+      <div className="space-y-1" style={{ fontSize: 11 }}>
+        <div className="flex items-center gap-1.5 font-mono" style={{ color: KC.onSurface }}>
+          <span style={{ color: KC.onSurfaceVariant }}>Volume:</span>
+          <span>{diff.previous_volume_mm3.toLocaleString()} mm&sup3;</span>
+          <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+          <span style={{ color: KC.teal }}>{diff.current_volume_mm3.toLocaleString()} mm&sup3;</span>
+          <span style={{ color: volumeUp ? KC.green : KC.orange }}>
+            ({volumeUp ? '+' : ''}
+            {diff.volume_delta_mm3.toLocaleString()})
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 font-mono" style={{ color: KC.onSurface }}>
+          <span style={{ color: KC.onSurfaceVariant }}>Surface area:</span>
+          <span>{diff.previous_area_mm2.toLocaleString()} mm&sup2;</span>
+          <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+          <span style={{ color: KC.teal }}>{diff.current_area_mm2.toLocaleString()} mm&sup2;</span>
+          <span style={{ color: areaUp ? KC.green : KC.orange }}>
+            ({areaUp ? '+' : ''}
+            {diff.area_delta_mm2.toLocaleString()})
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * FORGE-704. The graph's link controls: one switch per kind of linked record, and
+ * a plain statement of anything that is not drawn. Before this the graph kept
+ * only work-product to work-product edges and said nothing about the rest.
+ */
+function GraphLinksBar({
+  split,
+  shown,
+  onToggle,
+  failed,
+  skippedNodes,
+}: {
+  split: ReturnType<typeof splitLinks>;
+  shown: ReadonlySet<LinkGroup>;
+  onToggle: (group: LinkGroup) => void;
+  failed: boolean;
+  skippedNodes: number;
+}) {
+  const groups = LINK_GROUPS.filter((g) => split.counts[g.id] > 0);
+  if (!failed && !skippedNodes && !groups.length && !split.offscreen) return null;
+  return (
+    <div className="tw-links" role="group" aria-label="Linked records">
+      {failed && (
+        <span className="tw-links-warn" role="alert">
+          Links unavailable: the relationships request failed, so only the work products are shown.
+        </span>
+      )}
+      {skippedNodes > 0 && (
+        <span className="tw-links-warn" role="status">
+          {skippedNodes} work product{skippedNodes === 1 ? "'s" : "s'"} links could not be read.
+        </span>
+      )}
+      {groups.length > 0 && <span className="tw-links-label">Show links to</span>}
+      {groups.map((g) => (
+        <button
+          key={g.id}
+          type="button"
+          aria-pressed={shown.has(g.id)}
+          onClick={() => onToggle(g.id)}
+          title={shown.has(g.id) ? `Hide links to ${g.label.toLowerCase()}` : `Show links to ${g.label.toLowerCase()}`}
+        >
+          {g.label} <b>{split.counts[g.id]}</b>
+        </button>
+      ))}
+      {split.hidden > 0 && (
+        <span className="tw-links-note" role="status">
+          {split.hidden} link{split.hidden === 1 ? '' : 's'} hidden
+        </span>
+      )}
+      {split.offscreen > 0 && (
+        <span className="tw-links-note" title="Their other end is filtered out of the list, or has not been named">
+          {split.offscreen} off screen
+        </span>
+      )}
     </div>
   );
 }
 
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
-type TwinTab = 'graph' | 'model' | 'sim' | 'asm';
+type TwinTab = 'graph' | 'structure' | 'model' | 'sim' | 'asm' | 'mfg' | 'thread';
 type InspectorTab = 'overview' | 'constraints' | 'history';
 type NodeScope = 'all' | 'attention' | string;
 
-const TWIN_TABS: TwinTab[] = ['graph', 'model', 'sim', 'asm'];
-const TAB_LABELS: Record<TwinTab, string> = { graph: 'Graph', model: 'Model', sim: 'Sim', asm: 'Assembly' };
+const TWIN_TABS: TwinTab[] = ['graph', 'structure', 'model', 'sim', 'asm', 'mfg', 'thread'];
+
+/** A ?tab= value, or 'graph' (FORGE-371). An unknown name is not worth an
+ *  error: the page still works, and the link may come from a build older
+ *  or newer than this one. */
+function parseTwinTab(raw: string | null): TwinTab {
+  return TWIN_TABS.includes(raw as TwinTab) ? (raw as TwinTab) : 'graph';
+}
+const TAB_LABELS: Record<TwinTab, string> = {
+  graph: 'Graph',
+  structure: 'Structure',
+  model: 'Model',
+  sim: 'Sim',
+  asm: 'Assembly',
+  mfg: 'Manufacturing',
+  // FORGE-687: BOM to schematic to board to fab files, and the firmware.
+  thread: 'Electronics',
+};
 const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history'];
 
 /** Status words that put a node in the "need attention" bucket. */
@@ -647,11 +1063,17 @@ export function TwinViewerPage() {
   const [chatMax, setChatMax] = useState(false);
   const [chatMin, setChatMin] = useState(!sampleMode);
   const [chatDock, setChatDock] = useState<'overlay' | 'side'>('overlay');
+  // Defaulted plainly, not from searchParams: useSearchParams is declared
+  // further down, and reading it in this initialiser is a temporal-dead-zone
+  // crash at render (invisible to tsc -- the dashboard tests caught it).
+  // The effect below applies ?tab= on mount and on every later change.
   const [tab, setTab] = useState<TwinTab>('graph');
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('overview');
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<NodeScope>('all');
+  // FORGE-704: which kinds of linked record (constraints, baselines...) the graph draws.
+  const [shownLinks, setShownLinks] = useState<ReadonlySet<LinkGroup>>(DEFAULT_SHOWN);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const railMin = useLayoutStore((s) => s.sidebarCollapsed);
@@ -675,14 +1097,20 @@ export function TwinViewerPage() {
   // rejected it" -- a failed conversion must not silently fall back to the
   // generic upload placeholder.
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
-  // Deep-link: /twin?node=<id> preselects a node (MET-514).
-  const [searchParams] = useSearchParams();
+  // Deep-link: /twin?node=<id> preselects a node (MET-514), and
+  // ?tab=<tab> opens on it (FORGE-371). The tab used to be local state
+  // only, so a link naming a tab landed on the page and silently showed
+  // whichever one happened to be the default -- which reads as the link
+  // being wrong rather than unsupported.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // ── project scope ──
   // The single global active-project selection (Topbar switcher). Sample mode
   // pins the illustrative Drone FC workspace.
   const { activeProjectId: selectedProjectId, activeProject } = useActiveProject();
   const activeProjectId = sampleMode ? SAMPLE_PROJECT_ID : selectedProjectId;
+  // FORGE-647: watch an agent put an assembly together, part by part.
+  const [liveOpen, setLiveOpen] = useState(false);
   const projectName = sampleMode ? SAMPLE_PROJECT_NAME : activeProject?.name;
 
   // ── data ──
@@ -694,7 +1122,12 @@ export function TwinViewerPage() {
     dataUpdatedAt,
   } = useTwinNodes(activeProjectId ?? undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
-  const { data: relationships = [] } = useTwinRelationships(activeProjectId ?? undefined);
+  const {
+    data: relationships = [],
+    endpoints = {},
+    skippedNodes = 0,
+    isError: relationshipsFailed = false,
+  } = useTwinRelationships(activeProjectId ?? undefined);
   const items = nodes ?? [];
 
   // ── viewer store ──
@@ -719,6 +1152,13 @@ export function TwinViewerPage() {
     setSelectedId(searchParams.get('node'));
   }, [searchParams]);
 
+  // Follow a ?tab= change too, so a second deep link into an already-open
+  // page moves the view rather than appearing to do nothing.
+  useEffect(() => {
+    const wanted = searchParams.get('tab');
+    if (wanted) setTab(parseTwinTab(wanted));
+  }, [searchParams]);
+
   // MET-674: clear the selected node (and its cached model) when the active
   // project changes. Skips the null -> X transition (MET-686) so a cold
   // session's auto-selected project doesn't wipe a deep-linked node.
@@ -741,7 +1181,7 @@ export function TwinViewerPage() {
   useEffect(() => {
     if (viewMode !== '3d') return;
     const n = selectedNode;
-    if (!n || n.properties.wp_type !== 'cad_model') return;
+    if (!n || !is3dEngine(previewEngineFor(n).engine)) return;
     // MET-747: also reload if a robot description's mutual-exclusion clear
     // wiped glbUrl since this node was last loaded.
     if (loadedModelNodeId === n.id && glbUrl) return;
@@ -751,21 +1191,9 @@ export function TwinViewerPage() {
     let cancelled = false;
     (async () => {
       try {
-        const result = await getNodeModel(n.id);
-        if (cancelled) return;
-        const m: ModelManifest = {
-          parts: result.metadata.parts.map((p) => ({
-            name: p.name,
-            meshName: p.meshName ?? p.name,
-            children: (p.children ?? []) as ModelManifest['parts'],
-            boundingBox: p.boundingBox as PartTreeNode['boundingBox'],
-          })),
-          meshToNodeMap: {},
-          materials: result.metadata.materials ?? [],
-          stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
-        };
-        const url = resolveGatewayHref(result.glb_url);
-        loadModel(url, m);
+        const model = await fetchViewerModel(n);
+        if (cancelled || !model) return;
+        loadModel(model.url, model.manifest, model.format);
         setLoadedModelNodeId(n.id);
         setModelLoadError(null);
       } catch (err) {
@@ -830,7 +1258,17 @@ export function TwinViewerPage() {
 
   const switchTab = (next: TwinTab) => {
     setTab(next);
-    setViewMode(next === 'graph' || next === 'asm' ? 'graph' : '3d');
+    setViewMode(next === 'model' || next === 'sim' ? '3d' : 'graph');
+    // Mirror the tab into the URL so the address bar is a link someone can
+    // paste back. `replace` keeps clicking through tabs out of history.
+    setSearchParams(
+      (prev) => {
+        const next_ = new URLSearchParams(prev);
+        next_.set('tab', next);
+        return next_;
+      },
+      { replace: true },
+    );
   };
 
   const selectNode = (id: string | null) => {
@@ -846,6 +1284,15 @@ export function TwinViewerPage() {
       `${n.name} ${n.domain} ${n.id}`.toLowerCase().includes(query),
   );
   const visibleIds = new Set(visible.map((n) => n.id));
+  // FORGE-704: every edge is drawn, hidden by a switch, or off screen; none is dropped silently.
+  const linkSplit = splitLinks({ relationships, endpoints, visibleIds, shown: shownLinks });
+  const toggleLinks = (group: LinkGroup) =>
+    setShownLinks((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
   const domains = [...new Set(items.map((n) => n.domain))];
   const linked = new Set(relationships.flatMap((r) => [r.sourceId, r.targetId]));
   const linkedConstraints = items.filter(
@@ -863,6 +1310,10 @@ export function TwinViewerPage() {
     .filter((n) => n.updatedAt)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, 12);
+  // FORGE-511: the project's most recently updated assembly cad_model.
+  const latestAssembly = [...items]
+    .filter((n) => (n.assemblyParts?.length ?? 0) > 0)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   const robotNodes = items.filter((n) => n.properties.wp_type === 'robot_description');
   const is3d = tab === 'model' || tab === 'sim';
 
@@ -954,7 +1405,18 @@ export function TwinViewerPage() {
         <Link to={`/runs/new${activeProjectId ? '?project=' + encodeURIComponent(activeProjectId) : ''}`}>
           Start design run ↗
         </Link>
+        {activeProjectId && !sampleMode && (
+          <button type="button" onClick={() => setLiveOpen((open) => !open)} aria-pressed={liveOpen}>
+            Live assembly
+          </button>
+        )}
       </section>
+
+      {liveOpen && activeProjectId && (
+        <div className="tw-live">
+          <LiveAssemblyPanel projectId={activeProjectId} onClose={() => setLiveOpen(false)} />
+        </div>
+      )}
 
       <section className="tw-view" aria-label="Twin model and graph">
         <div className="tw-render-area">
@@ -971,12 +1433,22 @@ export function TwinViewerPage() {
                 <Link to="/settings">Connection settings ↗</Link>
               </div>
             ) : items.length ? (
-              <TwinGraphCanvas
-                nodes={visible}
-                relationships={relationships.filter((r) => visibleIds.has(r.sourceId) && visibleIds.has(r.targetId))}
-                selectedId={selectedId}
-                onSelectNode={selectNode}
-              />
+              <>
+                <GraphLinksBar
+                  split={linkSplit}
+                  shown={shownLinks}
+                  onToggle={toggleLinks}
+                  failed={relationshipsFailed}
+                  skippedNodes={skippedNodes}
+                />
+                <TwinGraphCanvas
+                  nodes={visible}
+                  relationships={linkSplit.drawn}
+                  ghosts={linkSplit.ghosts}
+                  selectedId={selectedId}
+                  onSelectNode={selectNode}
+                />
+              </>
             ) : (
               <div className="tw-empty">
                 <Network size={32} />
@@ -985,6 +1457,12 @@ export function TwinViewerPage() {
                 <button onClick={() => setImportOpen(true)}>Import work product</button>
               </div>
             )
+          ) : tab === 'structure' ? (
+            <StructureView projectId={activeProjectId} onSelect={selectNode} />
+          ) : tab === 'mfg' ? (
+            <ManufacturingView nodes={items} onSelect={selectNode} />
+          ) : tab === 'thread' ? (
+            <ElectronicsThreadView nodes={items} relationships={relationships} onSelect={selectNode} />
           ) : tab === 'asm' ? (
             <div className="tw-assembly">
               <div className="tw-assembly-heading">
@@ -992,7 +1470,12 @@ export function TwinViewerPage() {
                 <h2>Assembly</h2>
                 <button onClick={() => setAssemblyExportOpen((v) => !v)}>Configure export</button>
               </div>
-              {node?.assembly ? (
+              {node?.assemblyParts?.length ? (
+                <>
+                  <h3>{node.name}</h3>
+                  <AssemblyPartTree parts={node.assemblyParts} onOpenPart={selectNode} />
+                </>
+              ) : node?.assembly ? (
                 <>
                   <h3>{node.name}</h3>
                   <div className="tw-assembly-tree">
@@ -1003,18 +1486,19 @@ export function TwinViewerPage() {
                         <small>{part.material || 'Material unspecified'}</small>
                       </button>
                     ))}
-                    {node.assembly.joints.map((joint) => (
-                      <p key={joint.name}>
-                        {joint.base} → {joint.follower}
-                        <small>
-                          {joint.name} · {joint.type}
-                        </small>
-                      </p>
-                    ))}
                   </div>
+                  <h3>Mates &amp; joints</h3>
+                  <AssemblyJointsEditor
+                    nodeId={node.id}
+                    parts={node.assembly.parts}
+                    joints={node.assembly.joints}
+                  />
+                  {/* FORGE-531: a collapsible tree, not a raw JSON dump. */}
                   <details>
                     <summary>Assembly source</summary>
-                    <pre>{JSON.stringify(node.assembly, null, 2)}</pre>
+                    <Suspense fallback={null}>
+                      <JsonTree value={node.assembly} openDepth={1} />
+                    </Suspense>
                   </details>
                 </>
               ) : (
@@ -1120,6 +1604,21 @@ export function TwinViewerPage() {
                   Needs attention
                 </button>
               </div>
+              {latestAssembly && (
+                <button
+                  className="tw-latest-assembly"
+                  aria-label={`Open latest assembly ${latestAssembly.name}`}
+                  aria-current={latestAssembly.id === selectedId ? 'true' : undefined}
+                  onClick={() => selectNode(latestAssembly.id)}
+                >
+                  <span className="material-symbols-outlined">deployed_code</span>
+                  <span>
+                    <small>Latest assembly</small>
+                    <strong>{latestAssembly.name}</strong>
+                  </span>
+                  <em>{latestAssembly.assemblyParts?.length ?? 0} parts</em>
+                </button>
+              )}
               <div className="tw-node-list">
                 {!visible.length && <p className="tw-muted">{search ? 'No matching work products' : 'No work products'}</p>}
                 {domains.map((d) => (
@@ -1282,9 +1781,18 @@ export function TwinViewerPage() {
           <div className="tw-inspector-content">
             {node ? (
               inspectorTab === 'overview' ? (
-                <NodeDetail node={node} onClose={() => setSelectedId(null)} />
+                <NodeDetail node={node} onClose={() => setSelectedId(null)} onSelectNode={selectNode} />
               ) : inspectorTab === 'history' ? (
-                <NodeHistorySection nodeId={node.id} />
+                <>
+                  {itemKeyOf(node) && (
+                    <div className="px-3 py-2">
+                      <ItemHistoryPanel itemKey={itemKeyOf(node) as string} projectId={node.projectId ?? activeProjectId ?? undefined} />
+                    </div>
+                  )}
+                  <NodeHistorySection nodeId={node.id} />
+                  <FeatureVersionSection nodeId={node.id} />
+                  <GeometryDiffSection nodeId={node.id} />
+                </>
               ) : (
                 <div className="tw-constraints">
                   {linkedConstraints.length ? (

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "domain": "mechanical",
   "agent": "mechanical",
-  "description": "Generate CAD geometry from a Design IR document by lowering it via the freecad or cadquery adapter",
+  "description": "Generate CAD geometry from a Design IR document by lowering it via the freecad or cadquery adapter. Each entity's `op` picks its exact required fields (see the entities schema for the full per-op list) -- common ops: create_body, sketch (body_ref, elements: line/circle/rectangle/arc), pad/pocket (body_ref, sketch_ref, depth), revolve (body_ref, sketch_ref, axis, angle), fillet_edges/chamfer_edges (body_ref, radius/distance, edge_selectors), shell (body_ref, thickness), boolean (operation, base_ref, tool_refs), linear_pattern/polar_pattern (body_ref, source_ref, count). There is no extrude/cut/hollow/circle_pattern op -- use pad/boolean-subtract/shell/polar_pattern instead.",
   "phase": 1,
   "tools_required": [
     { "tool_id": "cadquery.execute_script", "capability": "cad_script", "required": false },

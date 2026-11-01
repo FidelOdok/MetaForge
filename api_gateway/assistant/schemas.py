@@ -203,6 +203,22 @@ class DesignChangeProposal(BaseModel):
         default=None,
         description="Who approved or rejected the proposal",
     )
+    reviewer_verified: bool = Field(
+        default=False,
+        description="Whether the reviewer identity was verified (FORGE-507)",
+    )
+    decision_surface: str | None = Field(
+        default=None,
+        description="dashboard, cli or agent: where the decision was made (FORGE-507)",
+    )
+    decision_on_behalf_of: str | None = Field(
+        default=None,
+        description="For an agent decision, the human it acted for (FORGE-507)",
+    )
+    decision_agent: str | None = Field(
+        default=None,
+        description="For an agent decision, the agent that took it (FORGE-510)",
+    )
 
 
 class WebSocketEvent(BaseModel):

@@ -1,21 +1,34 @@
 {
   "name": "run_cfd",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "domain": "simulation",
   "agent": "simulation",
-  "description": "Run computational fluid dynamics analysis using CalculiX thermal solver",
+  "description": "Answers a CFD request with what MetaForge can solve: steady incompressible internal flow through a bounded domain (OpenFOAM, pressure drop and flow rate), or steady conduction to a fixed-temperature sink (CalculiX). Convection, external flow and compressible flow are refused, and a run that fails or does not converge says so rather than returning numbers.",
   "phase": 1,
   "tools_required": [
     {
       "tool_id": "calculix.run_thermal",
-      "capability": "cfd_analysis",
-      "required": true
+      "capability": "thermal_analysis",
+      "required": false
+    },
+    {
+      "tool_id": "openfoam.run_internal_flow",
+      "capability": "flow_simulation",
+      "required": false
     }
   ],
   "input_schema": "schema.RunCfdInput",
   "output_schema": "schema.RunCfdOutput",
-  "timeout_seconds": 600,
+  "timeout_seconds": 3900,
   "retries": 1,
   "idempotent": true,
-  "tags": ["cfd", "thermal", "flow", "calculix"]
+  "tags": [
+    "cfd",
+    "flow",
+    "pressure-drop",
+    "thermal",
+    "conduction",
+    "openfoam",
+    "calculix"
+  ]
 }

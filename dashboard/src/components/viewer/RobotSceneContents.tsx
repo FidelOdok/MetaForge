@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Box3, Vector3 } from 'three';
 import type { Mesh } from 'three';
 import { useUrdfRobot } from '../../hooks/use-urdf-robot';
 import { useUrdfPhysics } from '../../hooks/use-urdf-physics';
 import { fetchNodeFileText, nodeMeshBaseUrl } from '../../api/endpoints/twin';
 import { useViewerStore } from '../../store/viewer-store';
+import { buildJointLoadChainPayload } from '../../lib/robot-statics';
+import { RobotPoseDragControls } from '../../lib/robot-drag-controls';
 
 /**
  * MET-747: the Canvas-side half of the "View Robot" consolidation. Fetches
@@ -26,6 +28,7 @@ export function RobotSceneContents({ nodeId }: { nodeId: string }) {
   const setRobotJoints = useViewerStore((s) => s.setRobotJoints);
   const robotJointValues = useViewerStore((s) => s.robotJointValues);
   const robotPhysicsEnabled = useViewerStore((s) => s.robotPhysicsEnabled);
+  const registerJointLoadChainCompute = useViewerStore((s) => s.registerJointLoadChainCompute);
 
   const meshBaseUrl = nodeMeshBaseUrl(nodeId);
 
@@ -123,6 +126,21 @@ export function RobotSceneContents({ nodeId }: { nodeId: string }) {
     setRobotJoints(joints);
   }, [robot, nodeId, setRobotJoints]);
 
+  // FORGE-283: registers a closure over the live `robot` object so
+  // RobotControlsOverlay's "Use as load case" button (an HTML sibling that
+  // can't reach into this Canvas child's Three.js objects) can read the
+  // CURRENT posed transforms on click -- see viewer-store's
+  // `_computeJointLoadChainFn` docstring for why this isn't just stored as
+  // plain data instead.
+  useEffect(() => {
+    if (!robot) {
+      registerJointLoadChainCompute(null);
+      return;
+    }
+    registerJointLoadChainCompute((jointNames) => buildJointLoadChainPayload(robot, jointNames));
+    return () => registerJointLoadChainCompute(null);
+  }, [robot, registerJointLoadChainCompute]);
+
   useUrdfPhysics(robot, robotPhysicsEnabled);
 
   // Kinematic posing (physics mode drives link transforms itself instead).
@@ -132,6 +150,43 @@ export function RobotSceneContents({ nodeId }: { nodeId: string }) {
       robot.setJointValue(name, value);
     }
   }, [robot, robotPhysicsEnabled, robotJointValues]);
+
+  // FORGE-250: pointer-drag-a-link-to-pose-its-joint. Built (not just
+  // disabled) only while kinematic control is active -- physics mode drives
+  // joint transforms itself (useUrdfPhysics above), so a drag controller
+  // fighting it over the same robot object would be meaningless as well as
+  // actively wrong.
+  const { camera, gl } = useThree();
+  const setRobotJointValue = useViewerStore((s) => s.setRobotJointValue);
+  const setRobotHoveredJoint = useViewerStore((s) => s.setRobotHoveredJoint);
+  const setRobotDragging = useViewerStore((s) => s.setRobotDragging);
+  const setOrbitControlsEnabled = useViewerStore((s) => s.setOrbitControlsEnabled);
+  useEffect(() => {
+    if (!robot || robotPhysicsEnabled) return;
+    const controls = new RobotPoseDragControls(robot, camera, gl.domElement, {
+      onJointChange: setRobotJointValue,
+      onHoverChange: setRobotHoveredJoint,
+      onDragStateChange: (dragging) => {
+        setRobotDragging(dragging);
+        setOrbitControlsEnabled(!dragging);
+      },
+    });
+    return () => {
+      controls.dispose();
+      setRobotHoveredJoint(null);
+      setRobotDragging(false);
+      setOrbitControlsEnabled(true);
+    };
+  }, [
+    robot,
+    robotPhysicsEnabled,
+    camera,
+    gl,
+    setRobotJointValue,
+    setRobotHoveredJoint,
+    setRobotDragging,
+    setOrbitControlsEnabled,
+  ]);
 
   if (!robot) return null;
   return <primitive object={robot} />;

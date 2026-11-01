@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from typing import Any
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
 
-from api_gateway.bom.routes import _item_to_component, init_twin, list_bom
+from api_gateway.bom.routes import (
+    _item_to_component,
+    init_twin,
+    list_bom,
+    list_hierarchical_bom,
+)
 from twin_core.api import InMemoryTwinAPI
+from twin_core.models.base import NodeBase
 from twin_core.models.bom_item import BOMItem
+from twin_core.models.enums import EdgeType, NodeType, WorkProductType
+from twin_core.models.hierarchy_node import HierarchyNode
+from twin_core.models.work_product import WorkProduct
 
 
 class TestMapping:
@@ -35,10 +45,12 @@ class TestMapping:
         item = BOMItem(part_number="x", manufacturer="y", specifications={"status": "bogus"})
         assert _item_to_component(item).status == "available"
 
-    def test_missing_unit_cost_is_zero(self) -> None:
+    def test_missing_unit_cost_is_none_not_zero(self) -> None:
+        """FORGE-700: 0.0 made an unpriced line look free, so a summed total
+        looked complete."""
         item = BOMItem(part_number="x", manufacturer="y")
         c = _item_to_component(item)
-        assert c.unitPrice == 0.0
+        assert c.unitPrice is None
         assert c.category == "uncategorized"
 
     def test_maps_media_purchase_and_price_currency_fields(self) -> None:
@@ -99,4 +111,154 @@ class TestRoute:
         init_twin(InMemoryTwinAPI.create())
         with pytest.raises(HTTPException) as exc:
             await list_bom(project_id="not-a-uuid")
+        assert exc.value.status_code == 400
+
+    async def test_category_filter_returns_only_matching_rows(self) -> None:
+        """FORGE-294 (gap G-H2): a fastener list is `category=fastener`
+        over the same BOM data -- no new schema, just a filter param."""
+        twin = InMemoryTwinAPI.create()
+        await twin._graph.add_node(
+            BOMItem(part_number="M3x10", manufacturer="m", specifications={"category": "fastener"})
+        )
+        await twin._graph.add_node(
+            BOMItem(part_number="STM32", manufacturer="m", specifications={"category": "ic"})
+        )
+        init_twin(twin)
+
+        result = await list_bom(category="fastener")
+
+        assert result.total == 1
+        assert result.components[0].partNumber == "M3x10"
+
+    async def test_category_filter_is_case_insensitive(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        await twin._graph.add_node(
+            BOMItem(part_number="M3x10", manufacturer="m", specifications={"category": "Fastener"})
+        )
+        init_twin(twin)
+
+        result = await list_bom(category="FASTENER")
+
+        assert result.total == 1
+
+    async def test_category_filter_with_no_matches_returns_empty(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        await twin._graph.add_node(
+            BOMItem(part_number="STM32", manufacturer="m", specifications={"category": "ic"})
+        )
+        init_twin(twin)
+
+        result = await list_bom(category="fastener")
+
+        assert result.total == 0
+        assert result.components == []
+
+    async def test_no_category_filter_returns_all(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        await twin._graph.add_node(
+            BOMItem(part_number="M3x10", manufacturer="m", specifications={"category": "fastener"})
+        )
+        await twin._graph.add_node(
+            BOMItem(part_number="STM32", manufacturer="m", specifications={"category": "ic"})
+        )
+        init_twin(twin)
+
+        result = await list_bom()
+
+        assert result.total == 2
+
+
+class _FakeTwinWithABareNodeBase:
+    """FORGE-242: InMemoryTwinAPI stores objects by reference (no
+    serialize/deserialize round trip), so it can never reproduce the real
+    failure -- a Neo4j-backed twin returning a bare NodeBase for a row that
+    should have deserialized as a BOMItem (the root cause, fixed separately
+    in neo4j_graph_engine.py's _props_to_node). This fake reproduces that
+    exact shape directly, independent of the root-cause fix, so the
+    defensive skip in list_bom is tested on its own."""
+
+    def __init__(self, items: list[Any]) -> None:
+        self._items = items
+
+    async def list_bom_items(self, project_id: UUID | None = None) -> list[Any]:
+        return self._items
+
+
+class TestMalformedNodeDoesNotBreakTheWholeList:
+    async def test_a_bare_nodebase_row_is_skipped_not_fatal(self) -> None:
+        good = BOMItem(part_number="A", manufacturer="m")
+        bad = NodeBase(node_type=NodeType.WORK_PRODUCT)  # degraded read-back shape
+        init_twin(_FakeTwinWithABareNodeBase([good, bad]))
+
+        result = await list_bom()
+
+        assert result.total == 1
+        assert result.components[0].partNumber == "A"
+
+    async def test_all_rows_malformed_returns_empty_not_500(self) -> None:
+        bad = NodeBase(node_type=NodeType.WORK_PRODUCT)
+        init_twin(_FakeTwinWithABareNodeBase([bad]))
+
+        result = await list_bom()
+
+        assert result.total == 0
+        assert result.components == []
+
+
+class TestListHierarchicalBom:
+    """FORGE-267 (gap G-C3) — GET /v1/bom/hierarchical."""
+
+    async def test_empty_when_no_product_hierarchy(self) -> None:
+        init_twin(InMemoryTwinAPI.create())
+        result = await list_hierarchical_bom()
+        assert result.total == 0
+        assert result.lines == []
+
+    async def test_derives_lines_from_the_product_hierarchy(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+
+        root = await twin.create_hierarchy_node(
+            HierarchyNode(name="Arm", kind="product", project_id=pid)
+        )
+        base = await twin.create_hierarchy_node(
+            HierarchyNode(name="Base", kind="subsystem", project_id=pid)
+        )
+        await twin.add_edge(root.id, base.id, EdgeType.CONTAINS, {"quantity": 1})
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Base plate",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+            )
+        )
+        await twin.add_edge(base.id, part.id, EdgeType.REALIZED_BY)
+
+        result = await list_hierarchical_bom(project_id=str(pid))
+        assert result.total == 1
+        line = result.lines[0]
+        assert line.path == ["Arm", "Base"]
+        assert line.quantity == 1
+        assert line.source == "realized_by"
+        assert line.description == "Base plate"
+
+    async def test_scopes_by_project(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid_a, pid_b = uuid4(), uuid4()
+        await twin.create_hierarchy_node(HierarchyNode(name="A", kind="product", project_id=pid_a))
+        await twin.create_hierarchy_node(HierarchyNode(name="B", kind="product", project_id=pid_b))
+
+        result = await list_hierarchical_bom(project_id=str(pid_a))
+        assert result.total == 0  # neither product has any REALIZED_BY/INSTANCE_OF leaves
+
+    async def test_invalid_project_id_is_400(self) -> None:
+        init_twin(InMemoryTwinAPI.create())
+        with pytest.raises(HTTPException) as exc:
+            await list_hierarchical_bom(project_id="not-a-uuid")
         assert exc.value.status_code == 400

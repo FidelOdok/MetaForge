@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useState } from 'react';
+import { VIEWER_GPU_PREFERENCE } from './viewerColor';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import type { URDFJoint } from 'urdf-loader';
@@ -121,7 +122,7 @@ export function UrdfPreviewPanel({ urdfFile, onClose }: UrdfPreviewPanelProps) {
           <Canvas
             data-testid="urdf-preview-canvas"
             camera={{ position: [1, 0.8, 1], fov: 50, near: 0.001, far: 1000 }}
-            gl={{ preserveDrawingBuffer: true }}
+            gl={{ ...VIEWER_GPU_PREFERENCE, preserveDrawingBuffer: true }}
             style={{ background: 'var(--mf-c-1e1f26)' }}
           >
             <Suspense fallback={null}>

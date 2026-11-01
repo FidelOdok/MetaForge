@@ -1,5 +1,7 @@
 regime: PSTI
 name: "Product Security and Telecommunications Infrastructure"
+# PSTI covers connectable products only (FORGE-553).
+requires: [connected]
 categories:
   - name: passwords
     items:

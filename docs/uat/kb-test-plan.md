@@ -10,7 +10,7 @@
 > evidence that produced the verdict. Update verdicts after each
 > `/uat-cycle12` run.
 >
-> **Owner:** Cycle 3 UAT (`MET-409`).
+> **Owner:** Cycle 3 UAT.
 > **Cadence:** tier-1 on every Cycle gate; tier-2 weekly; tier-0 nightly.
 > **Last reviewed:** 2026-05-01.
 > **Last full run:** 2026-04-30 (`docs/uat/cycle3-knowledge-ssot-test-run-2026-04-30.md`).
@@ -44,7 +44,7 @@
 | `KB-CLI` | `forge ingest` CLI |
 | `KB-EVT` | Event-driven ingest (Kafka → `KnowledgeConsumer`) |
 | `KB-RES` | Resources surface (`metaforge://knowledge/...`) |
-| `KB-PRG` | Streaming progress notifications (MET-388) |
+| `KB-PRG` | Streaming progress notifications |
 | `KB-CTX` | Per-call context, project isolation, metadata pass-through |
 | `KB-ERR` | Error envelope and error isolation |
 | `KB-OBS` | Observability: OTel spans, Prometheus metrics, Loki logs |
@@ -67,17 +67,17 @@
 
 | # | Capability area | Tests | ✅ | ❌ | ⚠️ | 🔄 | 📅 | Linear |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `knowledge_ingest` MCP tool | 12 | 9 | 0 | 1 | 2 | 0 | MET-346, MET-307, MET-385 |
-| 2 | `knowledge_search` MCP tool | 14 | 10 | 0 | 1 | 3 | 0 | MET-293, MET-335, MET-417 |
-| 3 | CLI `forge ingest` | 6 | 2 | 0 | 2 | 2 | 0 | MET-336, MET-399 |
-| 4 | Event-driven ingest (Kafka) | 4 | 1 | 0 | 0 | 3 | 0 | MET-307 |
-| 5 | Resources surface | 4 | 4 | 0 | 0 | 0 | 0 | MET-384 |
-| 6 | Streaming progress | 3 | 3 | 0 | 0 | 0 | 0 | MET-388 |
-| 7 | Per-call context / isolation | 4 | 2 | 0 | 0 | 2 | 0 | MET-401, MET-387 |
-| 8 | Error envelope | 3 | 1 | 0 | 0 | 2 | 0 | MET-385 |
+| 1 | `knowledge_ingest` MCP tool | 12 | 9 | 0 | 1 | 2 | 0 | - |
+| 2 | `knowledge_search` MCP tool | 14 | 10 | 0 | 1 | 3 | 0 | - |
+| 3 | CLI `forge ingest` | 6 | 2 | 0 | 2 | 2 | 0 | - |
+| 4 | Event-driven ingest (Kafka) | 4 | 1 | 0 | 0 | 3 | 0 | - |
+| 5 | Resources surface | 4 | 4 | 0 | 0 | 0 | 0 | - |
+| 6 | Streaming progress | 3 | 3 | 0 | 0 | 0 | 0 | - |
+| 7 | Per-call context / isolation | 4 | 2 | 0 | 0 | 2 | 0 | - |
+| 8 | Error envelope | 3 | 1 | 0 | 0 | 2 | 0 | - |
 | 9 | Observability propagation | 3 | 1 | 0 | 0 | 2 | 0 | tier2/otel-continuity-probe |
 | 10 | Versioning / staleness | 3 | 2 | 0 | 0 | 1 | 0 | tier2/staleness-probe, tier2/versioning-probe |
-| 11 | Real-datasheet retrieval QA | 80 | 0 | 0 | 0 | 80 | 0 | MET-346, MET-293, MET-335 |
+| 11 | Real-datasheet retrieval QA | 80 | 0 | 0 | 0 | 80 | 0 | - |
 | | **Totals** | **136** | **35** | **0** | **4** | **97** | **0** | |
 
 > **Read.** 136 distinct trackable tests. 31 already pass. 101 are
@@ -86,7 +86,7 @@
 > file at `tests/uat/scenarios/tier1/datasheets-real.md` and become
 > ✅ PASS the moment the first `/uat-cycle12` run records the
 > verdict here). 4 are blocked on capabilities not yet wired
-> (PDF parser, BM25 reranker, MET-399 ingest path).
+> (PDF parser, BM25 reranker).
 >
 > The detailed scenarios for each row follow in §1–§11. Every scenario
 > has full Given / When / Then so it is executable as soon as it is
@@ -101,7 +101,7 @@ Source: `tool_registry/tools/knowledge/adapter.py`.
 Surface: `mcp__metaforge__knowledge_ingest`.
 
 ### KB-ING-001 — happy-path round-trip
-**Validates:** MET-346, MET-293
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/knowledge.md` → "ingest then search round-trip"
 **Verdict:** ✅ PASS — last run 2026-04-30.
@@ -121,7 +121,7 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-002 — knowledge_type classification
-**Validates:** MET-346, MET-307
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/knowledge.md` → "ingest classifies by knowledge_type".
 **Verdict:** ✅ PASS — last run 2026-04-30.
@@ -141,7 +141,7 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-003 — empty-content rejection
-**Validates:** MET-346
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/knowledge.md` → "knowledge.ingest rejects empty content cleanly".
 **Verdict:** ✅ PASS — last run 2026-04-30.
@@ -160,7 +160,7 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-004 — identical re-ingest is deduplicated
-**Validates:** MET-307, MET-346
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/knowledge.md` → "deduplication on identical re-ingest".
 **Verdict:** ✅ PASS — last run 2026-04-30.
@@ -180,7 +180,7 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-005 — explicit knowledge_type override
-**Validates:** MET-307
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/ingest.md` → HP-INGEST-07.
 **Verdict:** ✅ PASS — last run 2026-04-30.
@@ -200,7 +200,7 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-006 — heading-aware chunking preserves H1/H2/H3
-**Validates:** MET-335
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/ingest.md` → HP-INGEST-05.
 **Verdict:** ✅ PASS — last run 2026-04-30.
@@ -219,7 +219,7 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-007 — metadata pass-through (work_product_id, project_id)
-**Validates:** MET-401, MET-387
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/ingest.md` → HP-INGEST-08.
 **Verdict:** ✅ PASS — last run 2026-04-30.
@@ -238,7 +238,7 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-008 — MCP-direct ingest reaches search in same session
-**Validates:** MET-346
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/ingest.md` → HP-INGEST-09.
 **Verdict:** ✅ PASS — last run 2026-04-30.
@@ -257,10 +257,10 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-009 — re-ingest after edit retires stale fragments  ✅
-**Validates:** MET-307 (extension)
+**Validates:** see the linked scenario
 **Tier:** 1
 **Existing scenario:** `tier1/full-capability.md` → "KB-ING-009 — re-ingest after edit retires stale fragments" (L1-F1a).
-**Verdict:** ✅ PASS — implementation lives in `tests/integration/test_reingest_after_edit.py` (L1-A6, MET-307). Hash-based supersede in `LightRAGKnowledgeService.ingest`: identical re-ingest dedups (chunks_indexed=0); edited re-ingest predeletes prior chunks and emits `knowledge_consumer_predelete` with `old_chunk_count`.
+**Verdict:** ✅ PASS — implementation lives in `tests/integration/test_reingest_after_edit.py` (L1-A6). Hash-based supersede in `LightRAGKnowledgeService.ingest`: identical re-ingest dedups (chunks_indexed=0); edited re-ingest predeletes prior chunks and emits `knowledge_consumer_predelete` with `old_chunk_count`.
 
 #### Given
 - Source path `uat://kb/ing/009-edit`.
@@ -279,11 +279,11 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 
 ---
 
-### KB-ING-010 — malformed knowledge_type returns MET-385 envelope  ✅
-**Validates:** MET-385, MET-307
+### KB-ING-010 — malformed knowledge_type returns the error envelope ✅
+**Validates:**
 **Tier:** 2
-**Existing scenario:** `tier2/error-envelope-probe.md` → "KB-ING-010 — malformed knowledge_type returns MET-385 envelope" (L1-F1c).
-**Verdict:** ✅ PASS — backed by `tests/unit/test_knowledge_tool_errors.py` (L1-B4, MET-385). The knowledge MCP adapter validates `knowledge_type` against the `KnowledgeType` enum at request-decode time on both `knowledge.ingest` and `knowledge.search`; on mismatch (or empty string) it raises `McpToolError(code=invalid_input, ...)` with `data.field`, `data.value`, and `data.allowed` populated, and the recovery probe (Step 2) confirms the adapter remains responsive after the rejection.
+**Existing scenario:** `tier2/error-envelope-probe.md` → "KB-ING-010 — malformed knowledge_type returns the error envelope" (L1-F1c).
+**Verdict:** ✅ PASS — backed by `tests/unit/test_knowledge_tool_errors.py` (L1-B4). The knowledge MCP adapter validates `knowledge_type` against the `KnowledgeType` enum at request-decode time on both `knowledge.ingest` and `knowledge.search`; on mismatch (or empty string) it raises `McpToolError(code=invalid_input, ...)` with `data.field`, `data.value`, and `data.allowed` populated, and the recovery probe (Step 2) confirms the adapter remains responsive after the rejection.
 
 #### Given
 - (none)
@@ -293,14 +293,14 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 2. `knowledge_ingest(content="ok", source_path="uat://kb/ing/010-after", knowledge_type="design_decision")` (recovery probe).
 
 #### Then
-- Step 1 returns a structured error matching the MET-385 envelope: `{ "code": "invalid_input"|-32602, "message": <enum-listing>, "data": {...} }`.
+- Step 1 returns a structured error matching the error envelope: `{ "code": "invalid_input"|-32602, "message": <enum-listing>, "data": {...} }`.
 - The error message lists at least the canonical `knowledge_type` enum members.
 - Step 2 succeeds — the server is uncrashed and responsive.
 
 ---
 
 ### KB-ING-011 — null source_path rejected  🔄 NEW
-**Validates:** MET-346, MET-385
+**Validates:**
 **Tier:** 2
 **Status:** 🔄 NEW.
 
@@ -318,7 +318,7 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 ---
 
 ### KB-ING-012 — ingest preserves UTF-8 / non-ASCII content  🔄 NEW
-**Validates:** MET-346
+**Validates:**
 **Tier:** 1
 **Status:** 🔄 NEW.
 
@@ -342,7 +342,7 @@ Source: `tool_registry/tools/knowledge/adapter.py` (search handler).
 Surface: `mcp__metaforge__knowledge_search`.
 
 ### KB-SRC-001 — top_k cap
-**Validates:** MET-293
+**Validates:**
 **Existing:** `tier1/knowledge.md` → "search respects top_k cap"; `tier1/retrieval.md` HP-RETR-01, HP-RETR-10.
 **Verdict:** ✅ PASS.
 
@@ -360,7 +360,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-002 — empty query returns deterministic empty list
-**Validates:** MET-346
+**Validates:**
 **Existing:** `tier1/knowledge.md` → "empty search produces deterministic empty list"; `tier1/retrieval.md` HP-RETR-09.
 **Verdict:** ✅ PASS.
 
@@ -370,12 +370,12 @@ Surface: `mcp__metaforge__knowledge_search`.
 
 #### Then
 - Both return either `hits=[]` cleanly or all returned hits have `similarity_score < 0.5`.
-- For step 2, may instead return `code="invalid_input"` per pinned MET-385 behavior — either is acceptable, no crash.
+- For step 2, may instead return `code="invalid_input"` per pinned error envelope behavior — either is acceptable, no crash.
 
 ---
 
 ### KB-SRC-003 — citation fields populated
-**Validates:** MET-293, MET-335
+**Validates:**
 **Existing:** `tier1/knowledge.md` → "knowledge.search response carries citation fields"; HP-RETR-04.
 **Verdict:** ✅ PASS.
 
@@ -386,7 +386,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-004 — knowledge_type filter
-**Validates:** MET-307, MET-346
+**Validates:**
 **Existing:** HP-RETR-02; KB-ING-002 cross-check.
 **Verdict:** ✅ PASS.
 
@@ -396,7 +396,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-005 — similarity threshold
-**Validates:** MET-335
+**Validates:**
 **Existing:** HP-RETR-03.
 **Verdict:** ✅ PASS.
 
@@ -407,7 +407,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-006 — hybrid BM25 catches literal MPN tokens
-**Validates:** MET-335
+**Validates:**
 **Existing:** HP-RETR-05.
 **Verdict:** ✅ PASS.
 
@@ -417,7 +417,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-007 — reranker improves top result
-**Validates:** MET-335 (reranker)
+**Validates:** see the linked scenario
 **Existing:** HP-RETR-06.
 **Verdict:** ⚠️ BLOCKED — reranker not yet wired (per `cycle3-knowledge-ssot-test-run-2026-04-30.md`).
 
@@ -427,7 +427,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-008 — MCP / REST parity
-**Validates:** MET-346
+**Validates:**
 **Existing:** HP-RETR-07.
 **Verdict:** ✅ PASS.
 
@@ -437,7 +437,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-009 — top hits ordered by descending similarity
-**Validates:** MET-293, MET-335
+**Validates:**
 **Existing:** HP-RETR-01.
 **Verdict:** ✅ PASS.
 
@@ -447,14 +447,14 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-010 — latency p95 < 200ms on 1k-doc corpus
-**Validates:** MET-335, MET-401
+**Validates:**
 **Existing:** HP-RETR-08.
-**Verdict:** ⚠️ BLOCKED — wall-clock captured but not gated against Prometheus histogram. Promote to PASS when MET-401 latency SLO is wired.
+**Verdict:** ⚠️ BLOCKED — wall-clock captured but not gated against Prometheus histogram. Promote to PASS when the latency SLO is wired.
 
 ---
 
 ### KB-SRC-011 — search returns hit even after re-edit  🔄 NEW
-**Validates:** MET-307, MET-346
+**Validates:**
 **Tier:** 1
 **Status:** 🔄 NEW — pairs with KB-ING-009.
 
@@ -472,9 +472,9 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-012 — multi-filter compound query  ✅ PASS
-**Validates:** MET-293, MET-307, MET-417
+**Validates:**
 **Existing scenario:** `tier1/retrieval.md` → "HP-RETR-11 — multi-filter compound query (AND across keys + type)" (L1-F1g).
-**Verdict:** ✅ PASS — backed by the pinned AND-across-keys contract (L1-B5, MET-417). `_matches_filters` and the pgvector `_search_pg` push-down both AND filter keys (knowledge_type + metadata equality) so a `(knowledge_type="component", project_id="A")` query cannot leak hits from project B or from `design_decision`.
+**Verdict:** ✅ PASS — backed by the pinned AND-across-keys contract (L1-B5). `_matches_filters` and the pgvector `_search_pg` push-down both AND filter keys (knowledge_type + metadata equality) so a `(knowledge_type="component", project_id="A")` query cannot leak hits from project B or from `design_decision`.
 
 #### Given
 - Corpus with `{component, design_decision} × {project_A, project_B}` pre-seeded.
@@ -490,7 +490,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-013 — invalid top_k handled  🔄 NEW
-**Validates:** MET-385
+**Validates:**
 **Tier:** 2
 **Status:** 🔄 NEW.
 
@@ -507,16 +507,16 @@ Surface: `mcp__metaforge__knowledge_search`.
 ---
 
 ### KB-SRC-014 — unknown filter key is silently ignored OR rejected (pinned)  ✅
-**Validates:** MET-346, MET-385, MET-417
+**Validates:**
 **Tier:** 2
 **Existing scenario:** `tier2/error-envelope-probe.md` → "KB-SRC-014 — unknown filter key behaviour pinned" (L1-F1c).
-**Verdict:** ✅ PASS — backed by `tests/unit/test_knowledge_filters.py` (L1-B5, MET-417). The pinned contract is documented in `docs/architecture/knowledge-ingestion-playbook.md#search-filters`: filters are AND-across-keys equality match; unknown keys pass through as literal metadata-key equality and naturally yield zero hits (no exception). Filter values are restricted to `str` / `int` / `bool` / `None`; `dict` and `list` values are rejected at the adapter boundary with the MET-385 `invalid_input` envelope listing the offending field and type. AND push-down lands in both the pgvector path (additional `c.file_path::jsonb->'x'->>'<key>' = $<n>` clauses in `_search_pg`) and the naive non-pg path (`_matches_filters` post-filter).
+**Verdict:** ✅ PASS — backed by `tests/unit/test_knowledge_filters.py` (L1-B5). The pinned contract is documented in `docs/architecture/knowledge-ingestion-playbook.md#search-filters`: filters are AND-across-keys equality match; unknown keys pass through as literal metadata-key equality and naturally yield zero hits (no exception). Filter values are restricted to `str` / `int` / `bool` / `None`; `dict` and `list` values are rejected at the adapter boundary with the `invalid_input` error envelope listing the offending field and type. AND push-down lands in both the pgvector path (additional `c.file_path::jsonb->'x'->>'<key>' = $<n>` clauses in `_search_pg`) and the naive non-pg path (`_matches_filters` post-filter).
 
 #### When
 1. `knowledge_search(query="x", filters={"banana": "yellow"})`.
 
 #### Then
-- Server returns zero hits with no exception (the pinned "silently ignore via literal-equality" behaviour). Filter values that aren't `str` / `int` / `bool` / `None` (e.g. `{"nested": {"a": "b"}}`) are rejected with the MET-385 `invalid_input` envelope.
+- Server returns zero hits with no exception (the pinned "silently ignore via literal-equality" behaviour). Filter values that aren't `str` / `int` / `bool` / `None` (e.g. `{"nested": {"a": "b"}}`) are rejected with the `invalid_input` error envelope.
 
 ---
 
@@ -525,7 +525,7 @@ Surface: `mcp__metaforge__knowledge_search`.
 Source: `cli/commands/ingest.ts` (calls `knowledge_ingest` under the hood).
 
 ### KB-CLI-001 — single markdown file ingest
-**Validates:** MET-336, MET-346
+**Validates:**
 **Existing:** `tier1/ingest.md` HP-INGEST-01.
 **Verdict:** ✅ PASS.
 
@@ -535,7 +535,7 @@ Source: `cli/commands/ingest.ts` (calls `knowledge_ingest` under the hood).
 ---
 
 ### KB-CLI-002 — recursive directory walk
-**Validates:** MET-336
+**Validates:**
 **Existing:** HP-INGEST-02.
 **Verdict:** ✅ PASS.
 
@@ -546,7 +546,7 @@ Source: `cli/commands/ingest.ts` (calls `knowledge_ingest` under the hood).
 ---
 
 ### KB-CLI-003 — PDF datasheet ingest
-**Validates:** MET-399
+**Validates:**
 **Existing:** HP-INGEST-03.
 **Status:** ✅ EXECUTABLE — pdfplumber wired in `LightRAGKnowledgeService.ingest` (L1-A3); raganything remains the long-term home.
 
@@ -556,7 +556,7 @@ Source: `cli/commands/ingest.ts` (calls `knowledge_ingest` under the hood).
 ---
 
 ### KB-CLI-004 — CSV BOM row-level chunks
-**Validates:** MET-336, MET-346, MET-340
+**Validates:**
 **Existing:** HP-INGEST-04.
 **Status:** ✅ EXECUTABLE — `chunk_csv` wired in
 `digital_twin/knowledge/chunker.py` and CSV detection branch added to
@@ -572,7 +572,7 @@ row, content rendered as `col=val; col=val`, `row_index` + `columns`
 ---
 
 ### KB-CLI-005 — CLI rejects nonexistent path  ✅
-**Validates:** MET-385 (CLI surface), MET-411 (L1-C2)
+**Validates:** see the linked scenario
 **Status:** ✅ PASS — pinned by `tests/unit/test_forge_ingest_errors.py::TestNonexistentPath`.
 
 #### When
@@ -586,7 +586,7 @@ row, content rendered as `col=val; col=val`, `row_index` + `columns`
 ---
 
 ### KB-CLI-006 — CLI handles binary file gracefully  ✅
-**Validates:** MET-336, MET-385, MET-411 (L1-C2)
+**Validates:** see the linked scenario
 **Status:** ✅ PASS — pinned by `tests/unit/test_forge_ingest_errors.py::TestBinaryFile` and `TestUnsupportedExtensionFiltered`.
 
 #### When
@@ -606,7 +606,7 @@ Source: `digital_twin/knowledge/consumer.py`.
 Trigger: `WORK_PRODUCT_CREATED` / `WORK_PRODUCT_UPDATED` events.
 
 ### KB-EVT-001 — Twin event triggers ingest
-**Validates:** MET-307
+**Validates:**
 **Existing:** `tier1/ingest.md` HP-INGEST-10.
 **Verdict:** ✅ PASS (when broker available).
 
@@ -617,7 +617,7 @@ Trigger: `WORK_PRODUCT_CREATED` / `WORK_PRODUCT_UPDATED` events.
 ---
 
 ### KB-EVT-002 — Consumer auto-classifies by `work_product_type`  🔄 NEW
-**Validates:** MET-307
+**Validates:**
 **Status:** 🔄 NEW.
 
 #### Given
@@ -634,7 +634,7 @@ Trigger: `WORK_PRODUCT_CREATED` / `WORK_PRODUCT_UPDATED` events.
 ---
 
 ### KB-EVT-003 — Update event supersedes prior ingest  🔄 NEW
-**Validates:** MET-307, MET-307 (supersede)
+**Validates:** see the linked scenario
 **Status:** 🔄 NEW.
 
 #### When
@@ -650,7 +650,7 @@ Trigger: `WORK_PRODUCT_CREATED` / `WORK_PRODUCT_UPDATED` events.
 ---
 
 ### KB-EVT-004 — Malformed event drops to DLQ, not poison-pill  🔄 NEW
-**Validates:** MET-307, MET-385
+**Validates:**
 **Tier:** 2
 **Status:** 🔄 NEW.
 
@@ -666,11 +666,11 @@ Trigger: `WORK_PRODUCT_CREATED` / `WORK_PRODUCT_UPDATED` events.
 
 ## §5 — Resources surface
 
-Source: MCP `resources/list` + `resources/read` (MET-384).
+Source: MCP `resources/list` + `resources/read`.
 URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 
 ### KB-RES-001 — `metaforge://knowledge/sources` lists indexed sources
-**Validates:** MET-384, MET-336
+**Validates:**
 **Existing:** referenced in HP-INGEST-01.
 **Verdict:** ✅ PASS.
 
@@ -680,9 +680,9 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 ---
 
 ### KB-RES-002 — single-source detail via `sources/{id}`  ✅
-**Validates:** MET-384
+**Validates:**
 **Existing scenario:** `tier1/full-capability.md` → "KB-RES-002 — single-source detail via `sources/{id}`" (L1-F1a).
-**Verdict:** ✅ PASS — `metaforge://knowledge/sources/{id}` URI registered in L1-B1 (MET-384, PR #169); detail handler returns metadata, chunk list, and content preview.
+**Verdict:** ✅ PASS — `metaforge://knowledge/sources/{id}` URI registered in L1-B1 (PR #169); detail handler returns metadata, chunk list, and content preview.
 
 #### When
 1. Ingest at `uat://kb/res/002-detail`.
@@ -696,9 +696,9 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 ---
 
 ### KB-RES-003 — resources/list advertises knowledge URIs in capabilities  ✅
-**Validates:** MET-384
+**Validates:**
 **Existing scenario:** `tier1/full-capability.md` → "KB-RES-003 — `resources/list` advertises knowledge URIs" (L1-F1a).
-**Verdict:** ✅ PASS — `metaforge://knowledge/sources` advertised in `resources/list` (L1-B1, MET-384, PR #169) with non-empty `name` and `description`.
+**Verdict:** ✅ PASS — `metaforge://knowledge/sources` advertised in `resources/list` (L1-B1, PR #169) with non-empty `name` and `description`.
 
 #### When
 1. Call `resources/list` at session start.
@@ -710,10 +710,10 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 ---
 
 ### KB-RES-004 — resources/read of unknown URI is structured error  ✅
-**Validates:** MET-384, MET-385
+**Validates:**
 **Tier:** 2
 **Existing scenario:** `tier2/error-envelope-probe.md` → "KB-RES-004 — resources/read of unknown URI is structured error" (L1-F1c).
-**Verdict:** ✅ PASS — `metaforge://knowledge/sources/{id}` URI registered in L1-B1 (MET-384, PR #169); unknown source ids resolve to a structured `not_found` MET-385 envelope referencing the offending URI. No transport-level crash; recovery probe via `resources/read("metaforge://knowledge/sources")` confirms the surface stays responsive.
+**Verdict:** ✅ PASS — `metaforge://knowledge/sources/{id}` URI registered in L1-B1 (PR #169); unknown source ids resolve to a structured `not_found` error envelope referencing the offending URI. No transport-level crash; recovery probe via `resources/read("metaforge://knowledge/sources")` confirms the surface stays responsive.
 
 #### When
 1. `resources/read("metaforge://knowledge/sources/00000000-not-real-0000")`.
@@ -724,13 +724,13 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 
 ---
 
-## §6 — Streaming progress (MET-388)
+## §6 — Streaming progress
 
 Source: just-shipped commit `cc0db58`.
 Capability: progress notifications on long-running tools (e.g. multi-file ingest).
 
 ### KB-PRG-001 — multi-file ingest emits ≥ 1 progress notification  ✅
-**Validates:** MET-388
+**Validates:**
 **Tier:** 2
 **Existing scenario:** `tier2/streaming-progress-probe.md` → "KB-PRG-001 — multi-file ingest emits ≥ 1 progress notification" (L1-F1d).
 **Verdict:** ✅ PASS — backed by `tests/integration/test_knowledge_streaming_progress.py::TestProgressOnMultiFileIngest::test_knowledge_ingest_emits_progress_per_file` (L1-B2, PR #170, merged).
@@ -749,7 +749,7 @@ Capability: progress notifications on long-running tools (e.g. multi-file ingest
 ---
 
 ### KB-PRG-002 — progress notifications carry the request id  ✅
-**Validates:** MET-388
+**Validates:**
 **Tier:** 2
 **Existing scenario:** `tier2/streaming-progress-probe.md` → "KB-PRG-002 — progress notifications carry the request id" (L1-F1d).
 **Verdict:** ✅ PASS — backed by `tests/integration/test_knowledge_streaming_progress.py::TestProgressOnMultiFileIngest::test_progress_carries_request_id` (L1-B2, PR #170, merged).
@@ -760,7 +760,7 @@ Capability: progress notifications on long-running tools (e.g. multi-file ingest
 ---
 
 ### KB-PRG-003 — capability advertised in tools/list  ✅
-**Validates:** MET-388
+**Validates:**
 **Tier:** 2
 **Existing scenario:** `tier2/streaming-progress-probe.md` → "KB-PRG-003 — supports_progress advertised on tools/list" (L1-F1d).
 **Verdict:** ✅ PASS — backed by `tests/integration/test_knowledge_streaming_progress.py::TestProgressCapabilityAdvertised::test_progress_capability_advertised_for_knowledge_ingest` (L1-B2, PR #170, merged); the `knowledge.ingest` tool entry exposes `supports_progress=true` while `knowledge.search` exposes `supports_progress=false`.
@@ -769,17 +769,17 @@ Capability: progress notifications on long-running tools (e.g. multi-file ingest
 1. `tools/list` at session start; inspect the `knowledge_ingest` tool entry.
 
 #### Then
-- The tool entry advertises support for progress notifications (per the MET-388 contract).
+- The tool entry advertises support for progress notifications (per the progress notification contract).
 - If absent, `KB-PRG-001` reports `BLOCKED`, not `FAIL`.
 
 ---
 
 ## §7 — Per-call context, project isolation, metadata pass-through
 
-Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
+Source: `mcp_core/` call-context plumbing.
 
 ### KB-CTX-001 — metadata round-trips through ingest+search
-**Validates:** MET-387
+**Validates:**
 **Existing:** HP-INGEST-08 (partial).
 **Verdict:** ✅ PASS.
 
@@ -789,10 +789,10 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 ---
 
 ### KB-CTX-002 — project isolation between ingest and search  ✅
-**Validates:** MET-401
+**Validates:**
 **Tier:** 1
 **Existing scenario:** `tier1/full-capability.md` → "KB-CTX-002 — project isolation between ingest and search" (L1-F1a).
-**Verdict:** ✅ PASS — project-scoped ingest/search wired in L1-A1 (MET-401, PR #163); `current_context().project_id` propagates from adapter through `LightRAGKnowledgeService` to the pgvector tenant filter.
+**Verdict:** ✅ PASS — project-scoped ingest/search wired in L1-A1 (PR #163); `current_context().project_id` propagates from adapter through `LightRAGKnowledgeService` to the pgvector tenant filter.
 
 #### Given
 - Two distinct project UUIDs `P_A`, `P_B`.
@@ -809,10 +809,10 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 ---
 
 ### KB-CTX-003 — actor_id propagates to span attributes  ✅ PASS
-**Validates:** MET-387
+**Validates:**
 **Tier:** 2
 **Existing scenario:** `tier2/observability-knowledge-probe.md` → "KB-CTX-003 — actor_id propagates to span attributes" (L1-F1e).
-**Verdict:** ✅ PASS — backed by L1-B3 (MET-387). Verified by `tests/unit/test_knowledge_call_context.py::TestOtelSpanAttributes`; `mcp.actor_id` propagates from the per-call `X-Actor-Id` header through `current_context().actor_id` onto both the ingest and search OTel spans (scope `tool_registry.tools.knowledge.adapter`).
+**Verdict:** ✅ PASS — backed by L1-B3. Verified by `tests/unit/test_knowledge_call_context.py::TestOtelSpanAttributes`; `mcp.actor_id` propagates from the per-call `X-Actor-Id` header through `current_context().actor_id` onto both the ingest and search OTel spans (scope `tool_registry.tools.knowledge.adapter`).
 
 #### When
 1. Call `knowledge_ingest` with header `X-Actor-Id: claude-uat-runner`.
@@ -825,7 +825,7 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 ---
 
 ### KB-CTX-004 — missing project_id falls back to default tenant  ✅ PASS
-**Validates:** MET-401
+**Validates:**
 **Existing scenario:** `tier1/retrieval.md` → "HP-RETR-12 — missing project_id falls back to default tenant" (L1-F1g).
 **Verdict:** ✅ PASS (L1-A1 + L1-B3). Adapter forwards `current_context().project_id` (None when unset) and the LightRAG service scopes to the `"default"` tenant on both ingest and search.
 
@@ -839,7 +839,7 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 
 ---
 
-## §8 — Error envelope (MET-385)
+## §8 — Error envelope
 
 Source: error-envelope contract.
 Existing scenarios: `tier2/error-envelope-probe.md` (Cycle 3 in flight).
@@ -847,21 +847,21 @@ Existing scenarios: `tier2/error-envelope-probe.md` (Cycle 3 in flight).
 ### KB-OBS- … see §9. Errors continue here.
 
 ### KB-ERR-001 — invalid_input on missing required arg
-**Validates:** MET-385
+**Validates:**
 **Existing:** referenced in `tier2/error-envelope-probe.md`.
-**Verdict:** ✅ PASS (after MET-385 envelope rollout).
+**Verdict:** ✅ PASS (after error envelope rollout).
 
 #### When
 1. `knowledge_ingest()` with no arguments.
 
 #### Then
 - Response includes `code="invalid_input"` (or JSON-RPC `-32602`) with a message naming the missing arg(s).
-- Error envelope shape matches MET-385 spec: `{ code, message, data: {...} }`.
+- Error envelope shape matches the error envelope spec: `{ code, message, data: {...} }`.
 
 ---
 
 ### KB-ERR-002 — server-side runtime error returns `internal_error`, not crash  🔄 NEW
-**Validates:** MET-385
+**Validates:**
 **Tier:** 2
 **Status:** 🔄 NEW.
 
@@ -873,14 +873,14 @@ Existing scenarios: `tier2/error-envelope-probe.md` (Cycle 3 in flight).
 2. Call `knowledge_search`.
 
 #### Then
-- Response is `code="internal_error"` per MET-385 envelope, NOT a raw stack trace.
+- Response is `code="internal_error"` per error envelope, NOT a raw stack trace.
 - No PII / secrets in the error message.
 - Server is responsive after fault clears.
 
 ---
 
 ### KB-ERR-003 — error envelope is JSON-serializable end-to-end  🔄 NEW
-**Validates:** MET-385
+**Validates:**
 **Status:** 🔄 NEW.
 
 #### When
@@ -939,21 +939,21 @@ Existing scenarios: `tier2/error-envelope-probe.md` (Cycle 3 in flight).
 ## §10 — Versioning / staleness / supersede
 
 ### KB-VER-001 — superseded fragments filtered from retrieval
-**Validates:** MET-323, MET-326
+**Validates:**
 **Existing:** `tier2/staleness-probe.md`.
 **Verdict:** ✅ PASS.
 
 ---
 
 ### KB-VER-002 — context_truncated metric increments on supersede
-**Validates:** MET-323
+**Validates:**
 **Existing:** `tier2/staleness-probe.md` and `tier2/versioning-probe.md`.
 **Verdict:** ✅ PASS.
 
 ---
 
 ### KB-VER-003 — staleness_threshold filter excludes old hits  🔄 NEW
-**Validates:** MET-323 / context-assembly
+**Validates:** see the linked scenario / context-assembly
 **Tier:** 1
 **Status:** 🔄 NEW.
 
@@ -1214,7 +1214,7 @@ them by file to minimise PR churn:
 | `tier1/full-capability.md` (new) | KB-ING-009, KB-ING-012, KB-CTX-002, KB-RES-002, KB-RES-003, KB-VER-003, KB-SRC-011 | High-value tier-1 gap fills |
 | `tier1/cli-error-paths.md` (new) | KB-CLI-005, KB-CLI-006 | CLI resilience |
 | `tier2/error-envelope-probe.md` (extend) | KB-ING-010, KB-ING-011, KB-ERR-002, KB-ERR-003, KB-RES-004, KB-SRC-013, KB-SRC-014 | Error envelope coverage |
-| `tier2/streaming-progress-probe.md` (new) | KB-PRG-001, KB-PRG-002, KB-PRG-003 | MET-388 just-shipped capability |
+| `tier2/streaming-progress-probe.md` (new) | KB-PRG-001, KB-PRG-002, KB-PRG-003 | just-shipped streaming progress capability |
 | `tier2/observability-knowledge-probe.md` (new) | KB-OBS-002, KB-OBS-003, KB-CTX-003 | Metrics + log labels |
 | `tier1/event-ingest.md` (new) | KB-EVT-002, KB-EVT-003, KB-EVT-004 | Kafka consumer surface |
 | `tier1/retrieval.md` (extend) | KB-SRC-012, KB-CTX-004 | Compound filters + fallback |
@@ -1227,13 +1227,13 @@ Each new file follows the parsing contract in
 ## Acceptance gates
 
 - **Cycle gate (tier-1):** 26/26 currently-PASS rows remain PASS.
-  Any regression to FAIL files a Linear follow-up under MET-409
+  Any regression to FAIL files a Linear follow-up under
   with the catalog id in the title (e.g. `UAT FAIL — KB-ING-001:
   round-trip search no longer matches`).
 - **Cycle gate (tier-2):** observability probes (`KB-OBS-001`,
   `KB-VER-001`, `KB-VER-002`) PASS.
 - **Cycle 3 close-out:** ≥ 75% of the 56 catalog rows in PASS state
-  (the 4 BLOCKED rows depend on MET-399 and reranker work outside
+  (the 4 BLOCKED rows depend on PDF ingest and reranker work outside
   Cycle 3 scope).
 
 ## Appendix A — files touched / referenced by this plan
@@ -1257,16 +1257,16 @@ Each new file follows the parsing contract in
 
 | Linear id | What it means in this plan |
 |---|---|
-| MET-409 | Cycle 3 UAT epic (parent for all FAIL follow-ups) |
-| MET-346 | `knowledge.ingest` tool contract |
-| MET-293 | `knowledge.search` tool contract (top_k, ordering) |
-| MET-307 | KnowledgeConsumer / dedup / supersede |
-| MET-335 | Citation enrichment + hybrid search + reranker |
-| MET-336 | CLI walker + multi-file ingest |
-| MET-384 | Resources surface (`metaforge://knowledge/...`) |
-| MET-385 | Error envelope contract |
-| MET-387 | Per-call context + metadata propagation |
-| MET-388 | Streaming progress notifications |
-| MET-399 | PDF / CSV ingest |
-| MET-401 | Project isolation, latency SLO |
-| MET-323/326 | Staleness & supersede metrics |
+| - | Cycle 3 UAT epic (parent for all FAIL follow-ups) |
+| - | `knowledge.ingest` tool contract |
+| - | `knowledge.search` tool contract (top_k, ordering) |
+| - | KnowledgeConsumer / dedup / supersede |
+| - | Citation enrichment + hybrid search + reranker |
+| - | CLI walker + multi-file ingest |
+| - | Resources surface (`metaforge://knowledge/...`) |
+| - | Error envelope contract |
+| - | Per-call context + metadata propagation |
+| - | Streaming progress notifications |
+| - | PDF / CSV ingest |
+| - | Project isolation, latency SLO |
+| - | Staleness & supersede metrics |

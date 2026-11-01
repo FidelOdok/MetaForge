@@ -1,0 +1,143 @@
+# hardware_v1 flow template (FORGE-397).
+#
+# Stages shared with every flow come from the spine
+# (templates/spine/spine_v1.yaml), pulled with `- use: <id>` plus any keys
+# this flow overrides; only this flow's own phases are written out here.
+# tests/unit/test_task_contract.py pins the compiled result against a golden
+# snapshot. Edit with care: `name` may be a folded multi-line scalar, and an
+# inserted key once landed inside it.
+#
+# `version` is recorded on every run started from this template. Bump it
+# when the phases or gates change, so a completed run can still say what
+# it actually ran.
+#
+# 1.2.0 (FORGE-694): spine_v1 1.1.0's manufacturing stage asks for a
+# manufacturer part number on every placed BOM line, and G8 lists it.
+id: hardware_v1
+version: 1.2.0
+extends: spine_v1
+name: ''
+label: Hardware & robotics
+description: A multidisciplinary flow for a complete hardware system.
+phases:
+- use: intent
+- use: needs
+- id: requirements
+  title: Requirements
+  objective: >-
+    Establish the engineering requirements for the product from the stated goal. Capture functional
+    requirements, the operating environment, and the key quantified constraints (mass, envelope,
+    payload, degrees of freedom, power/energy budget, runtime, cost target). For a robot,
+    capture the motion/task envelope: degrees of freedom, reach, speed, and payload. Record
+    the requirements and the top decisions into the digital twin (record-decision tool), scoped
+    to the project.
+  expected_artifacts:
+  - prd
+  - constraint_set
+  - design_decision
+  required_deliverables:
+  - design_decision
+  - constraint_set
+  gate:
+    name: Requirements sign-off
+    criteria:
+    - Functional requirements enumerated
+    - Key constraints quantified (mass/power/DOF/cost as applicable)
+    - Primary use / motion case defined
+    - Parent traceability exists (requirements trace to a need)
+- use: feasibility
+- use: architecture
+- use: concept_selection
+- use: industrial_design
+- id: design
+  title: Mechanical Design
+  objective: >-
+    Produce the mechanical design for the load-bearing / motion-critical structure (chassis
+    and mounts; for a robot, a representative link, joint, or leg). Author the geometry with
+    the CAD tools, name every part meaningfully, choose material and key dimensions against
+    a safety-factor target, and PERSIST the geometry with the commit-geometry tool so it becomes
+    a viewable cad_model in the twin — a described-but-uncommitted model does NOT count. Record
+    the design rationale. If you quantify a component-level spec derived from a system/subsystem
+    requirement (e.g. this part's load capacity or safety factor), record it with `twin.record_constraint_set`
+    and set `parent_refs` to the requirement it implements.
+  expected_artifacts:
+  - cad_model
+  - design_decision
+  required_deliverables:
+  - cad_model
+  disciplines:
+  - mechanical
+  gate:
+    name: Mechanical design review (G6)
+    criteria:
+    - Critical geometry authored and committed to the twin
+    - Material and key dimensions chosen with rationale
+    - Design traces to a requirement
+    gate_id: G6
+- id: electronics
+  title: Electronics Design
+  objective: >-
+    Design the electronics. Close the power budget (sources, rails, worst-case draw), define
+    the schematic topology for the main board (compute, motor drivers, sensors, power), and
+    select the key components. Run ERC on any available schematic. Record the power budget,
+    topology, and part decisions into the twin. (Phase-1 KiCad is read-only, so capture the
+    schematic plan as decisions.)
+  expected_artifacts:
+  - schematic
+  - pcb_layout
+  - bom
+  - design_decision
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - electronics
+  gate:
+    name: Electronics review
+    criteria:
+    - Power budget closed
+    - Schematic topology defined for compute / drivers / sensors / power
+    - Key components selected; ERC clean where applicable
+- id: firmware
+  title: Firmware & Control
+  objective: >-
+    Define the firmware and control architecture. Specify the control loop (for a robot: actuator
+    control and state-estimation approach), the task/RTOS structure, and the pin map / driver
+    list tying the compute platform to the actuators and sensors. Record the firmware architecture
+    and pinmap decisions into the twin.
+  expected_artifacts:
+  - firmware_source
+  - pinmap
+  - design_decision
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - firmware
+  gate:
+    name: Firmware review
+    criteria:
+    - Control approach defined
+    - Task structure and pin map specified
+    - Drivers for each actuator / sensor identified
+- id: simulation
+  title: Simulation & V&V
+  objective: >-
+    Validate the design against its requirements. Run structural FEA on the load-bearing part
+    (max stress / safety factor); for a robot, sanity-check the kinematics — reach, and joint
+    torque against the motion requirements; run ERC/DRC/thermal where applicable. Record a
+    pass/fail verdict against each key requirement into the twin.
+  expected_artifacts:
+  - simulation_result
+  - test_result
+  - design_decision
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - simulation
+  gate:
+    name: V&V sign-off (G7)
+    criteria:
+    - Analysis executed on the critical subsystem
+    - Key results extracted (stress / safety factor / torque / violations)
+    - Pass/fail verdict recorded against each requirement
+    gate_id: G7
+- use: manufacturing

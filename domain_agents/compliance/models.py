@@ -57,6 +57,38 @@ class ChecklistItem(BaseModel):
         default=None, description="UUID of linked evidence work_product"
     )
     notes: str = Field(default="", description="Free-form notes")
+    requires: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Product features this item applies to (radio, mains_powered, battery, "
+            "connected, body_worn); empty means every product"
+        ),
+    )
+    also_satisfies: list[str] = Field(
+        default_factory=list,
+        description="Ids of items in other regimes that name the same standard",
+    )
+
+
+#: Product features a regime item can be conditional on (FORGE-553).
+PRODUCT_FEATURES: frozenset[str] = frozenset(
+    {"radio", "mains_powered", "battery", "connected", "body_worn"}
+)
+
+
+class ExcludedItem(BaseModel):
+    """A regime item left out because the product lacks a feature it needs."""
+
+    id: str
+    requires: list[str]
+    reason: str
+
+
+class ItemEvidence(BaseModel):
+    """Evidence already held for one checklist item, by item id."""
+
+    status: EvidenceStatus = Field(default=EvidenceStatus.UPLOADED)
+    work_product_id: UUID | None = None
 
 
 class ComplianceChecklist(BaseModel):
@@ -69,6 +101,20 @@ class ComplianceChecklist(BaseModel):
     total_items: int = Field(default=0, description="Total number of items")
     evidenced_items: int = Field(default=0, description="Items with evidence uploaded or better")
     coverage_percent: float = Field(default=0.0, description="Evidence coverage percentage")
+    product_features: list[str] | None = Field(
+        default=None,
+        description="Features the items were filtered by; None means not stated",
+    )
+    excluded_items: list[ExcludedItem] = Field(
+        default_factory=list, description="Items left out, and why"
+    )
+    conditional_items: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Ids kept only because product_features was not stated; each applies "
+            "only if the product has the features in its requires"
+        ),
+    )
     generated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="When the checklist was generated",

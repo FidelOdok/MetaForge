@@ -59,6 +59,20 @@ _SAFE_BUILTINS: dict = {
 }
 
 
+#: What ``constraint_recorder`` stores for a requirement given only as a
+#: ``metric`` + ``limit`` binding (FORGE-259).
+PLACEHOLDER_EXPRESSION = "True"
+
+
+def is_placeholder_bound(constraint: Constraint) -> bool:
+    """A structured requirement whose expression is only the placeholder (FORGE-698)."""
+    return (
+        constraint.expression.strip() == PLACEHOLDER_EXPRESSION
+        and bool(constraint.metric)
+        and constraint.limit is not None
+    )
+
+
 class ConstraintEngine(ABC):
     """Abstract interface for constraint evaluation against the Digital Twin graph."""
 
@@ -120,6 +134,13 @@ class InMemoryConstraintEngine(ConstraintEngine):
         now = datetime.now(UTC)
 
         for constraint in constraints:
+            if is_placeholder_bound(constraint):
+                # FORGE-698: a structured requirement's ``True`` placeholder
+                # says nothing about the design. The gate's design checks
+                # measure it; counting it here reported it as evaluated.
+                skipped_count += 1
+                await self._update_constraint_status(constraint.id, ConstraintStatus.SKIPPED, now)
+                continue
             status, message = self._eval_expression(constraint.expression, ctx)
 
             if status == ConstraintStatus.SKIPPED:

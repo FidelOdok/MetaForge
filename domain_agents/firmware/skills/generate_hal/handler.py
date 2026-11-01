@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+from domain_agents.firmware.codegen import CodegenError, c_ident, generate_hal_files
 from skill_registry.skill_base import SkillBase
 
 from .schema import GenerateHalInput, GenerateHalOutput
 
 SUPPORTED_MCU_FAMILIES = {"STM32F4", "STM32H7", "ESP32", "nRF52", "RP2040", "ATSAMD"}
-SUPPORTED_PERIPHERALS = {"GPIO", "SPI", "I2C", "UART", "ADC", "DAC", "PWM", "TIMER", "DMA"}
 
 
 class GenerateHalHandler(SkillBase[GenerateHalInput, GenerateHalOutput]):
-    """Generates a Hardware Abstraction Layer for the target MCU.
+    """Generates the board's pin definitions for the target MCU (FORGE-545).
 
-    This skill is pure computation -- it generates HAL source code
-    based on the MCU family and requested peripherals without invoking
-    external MCP tools.
+    Pure computation over the caller's pin map: ``board_pins.h`` with the
+    vendor's own pin macros per signal, and ``board_peripherals.h`` naming
+    the peripheral instances in use. It used to return file paths with no
+    content and an invented ``<family>_DEFAULT`` pin for every peripheral.
+    The files are returned, not written; the caller stages or records them.
     """
 
     input_type = GenerateHalInput
@@ -32,52 +34,47 @@ class GenerateHalHandler(SkillBase[GenerateHalInput, GenerateHalOutput]):
         return errors
 
     async def execute(self, input_data: GenerateHalInput) -> GenerateHalOutput:
-        """Generate HAL source files for the specified MCU and peripherals."""
+        """Generate the pin definition headers from the pin map."""
         self.logger.info(
             "Generating HAL",
             work_product_id=input_data.work_product_id,
             mcu_family=input_data.mcu_family,
-            peripherals=input_data.peripherals,
+            pins=len(input_data.pin_map),
         )
-
         if input_data.mcu_family not in SUPPORTED_MCU_FAMILIES:
             raise ValueError(
                 f"Unsupported MCU family '{input_data.mcu_family}'. "
                 f"Supported: {', '.join(sorted(SUPPORTED_MCU_FAMILIES))}"
             )
+        try:
+            files, mapping = generate_hal_files(
+                input_data.mcu_family,
+                input_data.pin_map,
+                input_data.output_dir,
+                input_data.source,
+            )
+        except CodegenError as exc:
+            raise ValueError(str(exc)) from exc
 
-        generated_files: list[str] = []
-        pin_mappings: dict[str, str] = {}
-
-        # Generate a HAL header + source per peripheral
-        for peripheral in input_data.peripherals:
-            peripheral_upper = peripheral.upper()
-            peripheral_lower = peripheral.lower()
-
-            if peripheral_upper not in SUPPORTED_PERIPHERALS:
-                self.logger.warning(
-                    "Skipping unsupported peripheral",
-                    peripheral=peripheral,
-                )
-                continue
-
-            header = f"{input_data.output_dir}/hal_{peripheral_lower}.h"
-            source = f"{input_data.output_dir}/hal_{peripheral_lower}.c"
-            generated_files.extend([header, source])
-
-            # Assign a default pin mapping
-            pin_mappings[peripheral_upper] = f"{input_data.mcu_family}_DEFAULT"
+        mapped = {
+            c_ident(str(row["peripheral"])) for row in input_data.pin_map if row.get("peripheral")
+        }
+        absent = [p for p in input_data.peripherals if c_ident(p) not in mapped]
+        if absent:
+            raise ValueError(
+                f"peripheral(s) {', '.join(absent)} have no pins in pin_map; "
+                "add their pins rather than generating them unassigned"
+            )
 
         return GenerateHalOutput(
             work_product_id=input_data.work_product_id,
-            generated_files=generated_files,
-            pin_mappings=pin_mappings,
-            hal_version="0.1.0",
+            files=files,
+            generated_files=[f.path for f in files],
+            pin_mappings=mapping,
         )
 
     async def validate_output(self, output: GenerateHalOutput) -> list[str]:
-        """Verify that at least one file was generated."""
-        errors: list[str] = []
-        if not output.generated_files:
-            errors.append("No HAL files were generated")
-        return errors
+        """Verify that every listed file has content."""
+        if not output.files or any(not f.content for f in output.files):
+            return ["No HAL file content was generated"]
+        return []

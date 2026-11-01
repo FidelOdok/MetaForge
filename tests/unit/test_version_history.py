@@ -290,6 +290,51 @@ class TestVersionEndpoints:
         assert wp is not None
         assert wp.metadata["custom_field"] == "hello"
 
+    async def test_iterate_saves_a_robot_pose_readable_from_get_node(self, client, twin):
+        """FORGE-250: "Save current pose" reuses this generic /iterate
+        endpoint -- metadata_updates={"poses": {...}} merges into the
+        node's metadata and the new `poses` field on GET /nodes/{id}
+        (TwinNodeResponse.poses) surfaces it back to the dashboard."""
+        async with client:
+            wp_id = await self._import_step(client)
+
+            resp = await client.get(f"/v1/twin/nodes/{wp_id}")
+            assert resp.json()["poses"] is None
+
+            await client.post(
+                f"/v1/twin/nodes/{wp_id}/iterate",
+                json={
+                    "change_description": 'Saved pose "Home"',
+                    "metadata_updates": {"poses": {"Home": {"joint_1": 0.0, "joint_2": 2.0}}},
+                },
+            )
+            resp = await client.get(f"/v1/twin/nodes/{wp_id}")
+
+        assert resp.json()["poses"] == {"Home": {"joint_1": 0.0, "joint_2": 2.0}}
+
+    async def test_iterate_saving_a_second_pose_does_not_drop_the_first(self, client, twin):
+        async with client:
+            wp_id = await self._import_step(client)
+            await client.post(
+                f"/v1/twin/nodes/{wp_id}/iterate",
+                json={
+                    "change_description": 'Saved pose "Home"',
+                    "metadata_updates": {"poses": {"Home": {"joint_1": 0.0}}},
+                },
+            )
+            await client.post(
+                f"/v1/twin/nodes/{wp_id}/iterate",
+                json={
+                    "change_description": 'Saved pose "Extended"',
+                    "metadata_updates": {
+                        "poses": {"Home": {"joint_1": 0.0}, "Extended": {"joint_1": 1.0}}
+                    },
+                },
+            )
+            resp = await client.get(f"/v1/twin/nodes/{wp_id}")
+
+        assert resp.json()["poses"] == {"Home": {"joint_1": 0.0}, "Extended": {"joint_1": 1.0}}
+
     async def test_diff_between_revisions(self, client, twin):
         async with client:
             wp_id = await self._import_step(client)
@@ -320,3 +365,135 @@ class TestVersionEndpoints:
                 "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/diff?v1=1&v2=2"
             )
         assert resp.status_code == 404
+
+
+class TestGeometryDiffEndpoint:
+    """GET /v1/twin/nodes/{id}/geometry-diff (FORGE-301) -- the route layer
+    over api_gateway.twin.geometry_diff; the evaluator itself is unit-tested
+    directly in tests/unit/test_geometry_diff.py."""
+
+    @pytest.fixture
+    def app(self):
+        from fastapi import FastAPI
+
+        from api_gateway.twin.routes import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return app
+
+    @pytest.fixture
+    def client(self, app):
+        from httpx import ASGITransport, AsyncClient
+
+        transport = ASGITransport(app=app)
+        return AsyncClient(transport=transport, base_url="http://test")
+
+    @pytest.fixture(autouse=True)
+    def _reset_geometry_diff(self):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        yield
+        init_geometry_diff(None)  # never leak a test double into another test module
+
+    async def test_not_configured_returns_503(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        init_geometry_diff(None)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 503
+
+    async def test_no_previous_version_returns_empty_200(self, client):
+        """FORGE-709: the dashboard asks this for every selected node, and
+        almost none have a predecessor -- that answer must not read as an
+        error, so it is a 200 carrying has_previous_version false."""
+        from api_gateway.twin.geometry_diff import NoPreviousVersion
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            raise NoPreviousVersion(
+                f"work product {work_product_id} has no prior version (no SUPERSEDES edge)"
+            )
+
+        init_geometry_diff(fake_diff)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["has_previous_version"] is False
+        assert body["current_work_product_id"] == "00000000-0000-0000-0000-000000000099"
+        assert body["previous_work_product_id"] is None
+        assert body["volume_delta_mm3"] is None
+
+    async def test_missing_predecessor_still_returns_404(self, client):
+        """A SUPERSEDES edge pointing at a node that is gone is a real
+        integrity failure, not the ordinary empty answer above."""
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            raise LookupError("superseded work product no longer exists")
+
+        init_geometry_diff(fake_diff)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 404
+
+    async def test_value_error_returns_400(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            raise ValueError("current work product has format 'stl', expected step")
+
+        init_geometry_diff(fake_diff)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 400
+
+    async def test_unexpected_error_returns_502(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            raise RuntimeError("adapter unreachable")
+
+        init_geometry_diff(fake_diff)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 502
+
+    async def test_happy_path_returns_real_shape(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            return {
+                "current_work_product_id": work_product_id,
+                "previous_work_product_id": "11111111-1111-1111-1111-111111111111",
+                "current_volume_mm3": 1500.0,
+                "previous_volume_mm3": 1000.0,
+                "volume_delta_mm3": 500.0,
+                "current_area_mm2": 900.0,
+                "previous_area_mm2": 700.0,
+                "area_delta_mm2": 200.0,
+                "current_bounding_box": {"x_min": 0, "x_max": 10},
+                "previous_bounding_box": {"x_min": 0, "x_max": 8},
+            }
+
+        init_geometry_diff(fake_diff)
+        node_id = "00000000-0000-0000-0000-000000000099"
+        async with client:
+            resp = await client.get(f"/v1/twin/nodes/{node_id}/geometry-diff")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["current_work_product_id"] == node_id
+        assert body["volume_delta_mm3"] == 500.0
+        assert body["current_bounding_box"] == {"x_min": 0, "x_max": 10}

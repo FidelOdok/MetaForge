@@ -6,6 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api_gateway.server import ACTION_WORKFLOWS, create_app
+from api_gateway.version import gateway_version
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from orchestrator.dependency_engine import DependencyGraph
@@ -81,7 +82,7 @@ class TestCreateApp:
     def test_create_app_returns_fastapi(self):
         app = create_app()
         assert app.title == "MetaForge Gateway"
-        assert app.version == "0.1.0"
+        assert app.version == gateway_version()
 
     def test_create_app_custom_cors(self):
         app = create_app(cors_origins=["http://localhost:3000"])
@@ -125,7 +126,7 @@ class TestHealthEndpoint:
         data = response.json()
         assert data["status"] in ("healthy", "degraded", "unhealthy")
         assert "uptime_seconds" in data
-        assert data["version"] == "0.1.0"
+        assert data["version"] == gateway_version()
 
 
 class TestChatEndpoints:
@@ -255,3 +256,131 @@ class TestModuleLevelApp:
         from api_gateway.server import main
 
         assert callable(main)
+
+
+class TestLazyBridgeMeasure:
+    """FORGE-233: measure_tool has to be constructed before the real MCP
+    bridge exists (bootstrap_tool_registry needs it as an input; the bridge
+    is built FROM the registry that call constructs) -- verify the lazy
+    binding actually works: empty until set, reads the bridge at CALL time
+    not construction time, never raises even when the bridge call fails."""
+
+    async def test_returns_empty_dict_before_bridge_is_set(self):
+        from api_gateway.server import _LazyBridgeMeasure
+
+        measure = _LazyBridgeMeasure()
+        assert await measure("sess-1", "part_1") == {}
+
+    async def test_invokes_freecad_measure_once_bridge_is_set(self):
+        from api_gateway.server import _LazyBridgeMeasure
+
+        class _FakeBridge:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            async def invoke(self, tool_id: str, params: dict) -> dict:
+                self.calls.append((tool_id, params))
+                return {"volume_mm3": 1234.0}
+
+        measure = _LazyBridgeMeasure()
+        fake_bridge = _FakeBridge()
+        measure.bridge = fake_bridge  # set lazily, exactly as server.py does
+
+        result = await measure("sess-1", "part_1")
+
+        assert result == {"volume_mm3": 1234.0}
+        assert fake_bridge.calls == [
+            ("freecad.measure", {"session_id": "sess-1", "obj_id": "part_1"})
+        ]
+
+    async def test_a_failed_bridge_call_returns_empty_not_raises(self):
+        from api_gateway.server import _LazyBridgeMeasure
+
+        class _BoomBridge:
+            async def invoke(self, tool_id: str, params: dict) -> dict:
+                raise RuntimeError("adapter unreachable")
+
+        measure = _LazyBridgeMeasure()
+        measure.bridge = _BoomBridge()
+
+        assert await measure("sess-1", "part_1") == {}
+
+
+class TestLazyBridgeAssemblyInfo:
+    """FORGE-245: same lazy-binding contract as _LazyBridgeMeasure, for a
+    live FreeCAD session's assembly structure (parts + joints)."""
+
+    async def test_returns_empty_dict_before_bridge_is_set(self):
+        from api_gateway.server import _LazyBridgeAssemblyInfo
+
+        info = _LazyBridgeAssemblyInfo()
+        assert await info("sess-1") == {}
+
+    async def test_combines_describe_session_and_list_joints_once_bridge_is_set(self):
+        from api_gateway.server import _LazyBridgeAssemblyInfo
+
+        class _FakeBridge:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            async def invoke(self, tool_id: str, params: dict) -> dict:
+                self.calls.append((tool_id, params))
+                if tool_id == "freecad.describe_session":
+                    return {
+                        "session_id": params["session_id"],
+                        "objects": [
+                            {"obj_id": "o1", "kind": "part", "name": "base", "order": 0},
+                            {"obj_id": "o2", "kind": "part", "name": "arm", "order": 1},
+                        ],
+                    }
+                return {
+                    "joints": [
+                        {
+                            "name": "j1",
+                            "type": "revolute",
+                            "base": "base",
+                            "follower": "arm",
+                            "axis": [0, 0, 1],
+                            "anchor": [0, 0, 10],
+                        }
+                    ]
+                }
+
+        info = _LazyBridgeAssemblyInfo()
+        fake_bridge = _FakeBridge()
+        info.bridge = fake_bridge  # set lazily, exactly as server.py does
+
+        result = await info("sess-1")
+
+        assert result == {
+            "parts": [
+                {"name": "base", "obj_id": "o1", "kind": "part"},
+                {"name": "arm", "obj_id": "o2", "kind": "part"},
+            ],
+            "joints": [
+                {
+                    "name": "j1",
+                    "type": "revolute",
+                    "base": "base",
+                    "follower": "arm",
+                    "axis": [0, 0, 1],
+                    "anchor": [0, 0, 10],
+                }
+            ],
+        }
+        assert fake_bridge.calls == [
+            ("freecad.describe_session", {"session_id": "sess-1"}),
+            ("freecad.list_joints", {"session_id": "sess-1"}),
+        ]
+
+    async def test_a_failed_bridge_call_returns_empty_not_raises(self):
+        from api_gateway.server import _LazyBridgeAssemblyInfo
+
+        class _BoomBridge:
+            async def invoke(self, tool_id: str, params: dict) -> dict:
+                raise RuntimeError("adapter unreachable")
+
+        info = _LazyBridgeAssemblyInfo()
+        info.bridge = _BoomBridge()
+
+        assert await info("sess-1") == {}

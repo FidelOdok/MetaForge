@@ -45,6 +45,20 @@ class ApprovalWorkflow:
     # Event broadcasting
     # ------------------------------------------------------------------
 
+    def reset(self) -> None:
+        """Drop every proposal and listener (FORGE-391).
+
+        The module keeps one ``ApprovalWorkflow`` for the process and
+        ``create_app`` reuses it, so a second app inherited the first
+        app's pending proposals -- which is how the gateway smoke test
+        came to see a proposal it never created when run after the unit
+        suite. Cleared in place rather than replaced: ``server.py`` binds
+        this instance by name at import, and rebinding the module global
+        would leave that reference pointing at the old object.
+        """
+        self._proposals.clear()
+        self._listeners.clear()
+
     def subscribe(self, session_id: UUID) -> asyncio.Queue[WebSocketEvent]:
         """Register a new listener for *session_id* and return its queue."""
         queue: asyncio.Queue[WebSocketEvent] = asyncio.Queue()
@@ -136,6 +150,10 @@ class ApprovalWorkflow:
             proposals = [p for p in proposals if p.project_id == project_id]
         return proposals
 
+    def list_proposals(self) -> list[DesignChangeProposal]:
+        """Every proposal, whatever its status (the unified approvals audit view)."""
+        return list(self._proposals.values())
+
     def get_proposal(self, change_id: UUID) -> DesignChangeProposal | None:
         """Return a single proposal by *change_id*, or ``None``."""
         return self._proposals.get(change_id)
@@ -146,6 +164,11 @@ class ApprovalWorkflow:
         decision: ApprovalDecisionType,
         reason: str,
         reviewer: str,
+        *,
+        reviewer_verified: bool = False,
+        surface: str | None = None,
+        on_behalf_of: str | None = None,
+        agent: str | None = None,
     ) -> DesignChangeProposal | None:
         """Record an approval or rejection for the given proposal.
 
@@ -176,6 +199,10 @@ class ApprovalWorkflow:
         proposal.decided_at = now
         proposal.decision_reason = reason
         proposal.reviewer = reviewer
+        proposal.reviewer_verified = reviewer_verified
+        proposal.decision_surface = surface
+        proposal.decision_on_behalf_of = on_behalf_of
+        proposal.decision_agent = agent
 
         logger.info(
             "proposal_decided",

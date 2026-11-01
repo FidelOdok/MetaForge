@@ -1,6 +1,185 @@
 import { AxiosError, type AxiosAdapter, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
+import type { BomComponent } from '../types/bom';
+import type { HierarchyNode } from '../types/hierarchy';
 
 /* Offline sample workspace for the digital twin (`?demo=1`). Illustrative data only: no gateway, solver or agent is called. */
+
+// FORGE-287: illustrative shape of one persisted DesignLoopIteration --
+// mirrors twin_core.models.design_loop_iteration.DesignLoopIteration's own
+// field names (snake_case; this mock, unlike the rest of this file, mirrors
+// the REST route's pass-through shape rather than the dashboard's usual
+// camelCase contract, since the real route itself is a thin pass-through).
+interface SampleDesignLoopIteration {
+  id: string;
+  iteration_number: number;
+  parameter_name: string;
+  parameter_value: number;
+  metric: string;
+  objective_value: number;
+  constraints_status: Record<string, number>;
+  feasible: boolean;
+  status: 'candidate' | 'converged' | 'infeasible';
+  is_winner: boolean;
+  approved: boolean;
+  approved_by: string | null;
+}
+
+interface SampleDesignLoop {
+  loop_id: string;
+  status: 'optimal' | 'infeasible' | 'already_feasible_at_min';
+  iterations: SampleDesignLoopIteration[];
+}
+
+// FORGE-290: illustrative shape of one gate-review attempt -- mirrors
+// AttemptPromotionResponse's own camelCase REST contract (unlike the
+// design-loop mocks above, which mirror the MCP tool's snake_case
+// pass-through) since this route DOES wrap its response in a proper
+// Pydantic model server-side.
+interface SampleRequiredClaimResult {
+  requirementId: string;
+  requirementName: string;
+  decision: 'pass' | 'uncertain' | 'fail' | 'waived';
+  detail: string;
+  waiverId: string | null;
+}
+
+// FORGE-299 (gap G-I3): illustrative shape of one release package,
+// mirroring api_gateway/releases/routes.py's own snake_case response --
+// same convention SampleDecision below already uses.
+interface SampleReleasePackage {
+  node_id: string;
+  created_at: string;
+  title: string;
+  statement: string;
+  snapshot: {
+    hierarchy_node_ids: string[];
+    bom_item_ids: string[];
+    evidence_ids: string[];
+    decision_ids: string[];
+    drawing_ids: string[];
+  };
+  diff_from_previous: {
+    compared_to: string | null;
+    hierarchy_delta: number;
+    bom_delta: number;
+    evidence_delta: number;
+    decision_delta: number;
+  };
+  gate_status: string;
+}
+
+// FORGE-298 (gap G-I2): illustrative shape of one generated test-plan
+// entry, mirroring api_gateway/testplans/routes.py's own snake_case
+// response -- same convention SampleReleasePackage above uses.
+interface SampleTestPlanEntry {
+  node_id: string;
+  requirement_id: string;
+  step: string;
+  acceptance_value: string;
+  created_at: string;
+}
+
+// FORGE-295 (gap G-H3): illustrative shape of one generated bring-up
+// checklist, mirroring api_gateway/bringup/routes.py's own snake_case
+// response -- same convention SampleTestPlanEntry above uses.
+interface SampleBringupStep {
+  step_number: number;
+  joint_name: string;
+  joint_type: string;
+  base: string;
+  follower: string;
+  instruction: string;
+}
+
+interface SampleBringupChecklist {
+  node_id: string;
+  created_at: string;
+  title: string | null;
+  statement: string;
+  steps: SampleBringupStep[];
+}
+
+// FORGE-293 (gap G-H1): illustrative shape of one recorded technical_drawing
+// work product, mirroring api_gateway/technical_drawings/routes.py's own
+// snake_case response -- the real data (dimensions/GD&T/surface finishes/
+// inspection requirements) predates this ticket (PR #734); this mock just
+// gives the dashboard's new viewer something real-shaped to render.
+interface SampleTechnicalDrawingDimension {
+  feature: string;
+  nominal_mm: number;
+  tolerance_plus_mm: number;
+  tolerance_minus_mm: number;
+}
+
+interface SampleTechnicalDrawingGdtCallout {
+  feature: string;
+  symbol: string;
+  tolerance_value_mm: number;
+  datum_refs: string[];
+}
+
+interface SampleTechnicalDrawingSurfaceFinish {
+  feature: string;
+  ra_um: number;
+}
+
+interface SampleTechnicalDrawing {
+  node_id: string;
+  created_at: string;
+  name: string;
+  part_name: string;
+  dimensions: SampleTechnicalDrawingDimension[];
+  gdt_callouts: SampleTechnicalDrawingGdtCallout[];
+  surface_finishes: SampleTechnicalDrawingSurfaceFinish[];
+  inspection_requirements: string[];
+  approved: boolean;
+  approved_at: string | null;
+  approved_by: string | null;
+  work_product_id: string;
+}
+
+// FORGE-276 (gap G-E3): illustrative shape of one generated firmware
+// scaffold's per-joint table, mirroring api_gateway/firmware/routes.py's
+// own snake_case response.
+interface SampleFirmwareJoint {
+  joint_name: string;
+  joint_type: string;
+  can_id: number;
+  limits: { lower?: number; upper?: number } | null;
+}
+
+interface SampleMaturityGate {
+  gateId: string;
+  level: string;
+  promoted: boolean;
+  blockedReason: string | null;
+  decidedBy: string | null;
+  comment: string | null;
+  createdAt: string;
+  results?: SampleRequiredClaimResult[];
+}
+
+// FORGE-289 (gap G-G3): illustrative shape of one Decision, mirroring
+// api_gateway/twin/decision_routes.py's own GET /v1/decisions pass-through
+// (snake_case, same convention the design-loop mocks above use).
+interface SampleDecision {
+  id: string;
+  title: string;
+  rationale: string;
+  alternatives: { option: string; reason_rejected: string }[];
+  parent_refs: string[];
+  evidence_refs: string[];
+  created_at: string | null;
+}
+
+// FORGE-262 (gap G-B2): illustrative concept_option shape -- mirrors
+// GET /v1/trade-study/options's own pass-through (snake_case).
+interface SampleConceptOption {
+  id: string;
+  title: string;
+  criteria_scores: Record<string, number>;
+  evidence_backed_criteria: string[];
+}
 
 // Generated from the hosted console sample workspace (illustrative Drone FC data).
 const SAMPLE_WORKSPACE_SEED = {
@@ -132,6 +311,44 @@ const SAMPLE_WORKSPACE_SEED = {
       },
       updatedAt: '2026-09-22T10:00:00Z',
     },
+    // FORGE-305: the two FEA results below are the same two the
+    // /simulation/results handler serves, with the same ids -- so the Sim
+    // page's comparison and the Twin Viewer's inspector are talking about
+    // one analysis rather than two unrelated sets of numbers. Without a
+    // node of this wp_type the inspector's FEA panel had no demo path at
+    // all, which is also how it went unbuilt for so long.
+    {
+      id: 'sample-fea-rev1',
+      name: 'Rev 1 FEA \u2014 static 1g',
+      domain: 'simulation',
+      status: 'valid',
+      type: 'work_product',
+      properties: {
+        wp_type: 'simulation_result',
+        max_von_mises_mpa: 62.4,
+        max_displacement_mm: 0.41,
+        load_case: 'static_1g',
+        source: 'Synthetic result; no solver executed',
+      },
+      meshStats: { num_nodes: 12500, num_elements: 48000 },
+      updatedAt: '2026-09-20T10:00:00Z',
+    },
+    {
+      id: 'sample-fea-rev2',
+      name: 'Rev 2 FEA \u2014 static 1g',
+      domain: 'simulation',
+      status: 'valid',
+      type: 'work_product',
+      properties: {
+        wp_type: 'simulation_result',
+        max_von_mises_mpa: 45.1,
+        max_displacement_mm: 0.29,
+        load_case: 'static_1g',
+        source: 'Synthetic result; no solver executed',
+      },
+      meshStats: { num_nodes: 12500, num_elements: 48000 },
+      updatedAt: '2026-09-22T10:00:00Z',
+    },
     {
       id: 'sample-runtime',
       name: 'Flight duration requirement',
@@ -198,7 +415,42 @@ const SAMPLE_WORKSPACE_SEED = {
       },
     },
   ],
+  // FORGE-704: the far ends of edges that are not work products, as the gateway
+  // names them, so the demo shows the link switches too.
+  endpoints: {
+    'sample-baseline-rc1': { kind: 'baseline', name: 'Release candidate 1' },
+    'sample-part-imu': { kind: 'bom_item', name: 'ICM-42688-P' },
+    'sample-intent-flight': { kind: 'intent', name: 'Fly indoors for 10 minutes' },
+  } as Record<string, { kind: string; name: string }>,
   relationships: [
+    {
+      id: 'sample-edge-baseline-0',
+      sourceId: 'sample-pcb',
+      targetId: 'sample-baseline-rc1',
+      type: 'included_in_baseline',
+      label: 'included in baseline',
+    },
+    {
+      id: 'sample-edge-baseline-1',
+      sourceId: 'sample-firmware',
+      targetId: 'sample-baseline-rc1',
+      type: 'included_in_baseline',
+      label: 'included in baseline',
+    },
+    {
+      id: 'sample-edge-part-0',
+      sourceId: 'sample-pcb',
+      targetId: 'sample-part-imu',
+      type: 'contains',
+      label: 'contains',
+    },
+    {
+      id: 'sample-edge-intent-0',
+      sourceId: 'sample-intent-flight',
+      targetId: 'sample-battery',
+      type: 'depends_on',
+      label: 'depends on',
+    },
     {
       id: 'sample-edge-0',
       sourceId: 'sample-pcb',
@@ -658,6 +910,479 @@ const SAMPLE_WORKSPACE_SEED = {
     },
   },
   urdf: '<?xml version="1.0"?><robot name="sample_drone"><link name="base"><inertial><mass value="0.8"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/></inertial><visual><geometry><box size="0.18 0.14 0.04"/></geometry><material name="body"><color rgba="0.3 0.35 0.42 1"/></material></visual><collision><geometry><box size="0.18 0.14 0.04"/></geometry></collision></link><link name="rotor"><inertial><mass value="0.06"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial><visual><geometry><box size="0.16 0.018 0.006"/></geometry><material name="orange"><color rgba="1 0.35 0.04 1"/></material></visual><collision><geometry><box size="0.16 0.018 0.006"/></geometry></collision></link><joint name="rotor_joint" type="revolute"><parent link="base"/><child link="rotor"/><origin xyz="0.12 0 0.03"/><axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="1" velocity="4"/></joint></robot>',
+  // FORGE-257: two illustrative requirements for the Requirements panel --
+  // one clean, one with real lint issues and a bound-conflict, so the
+  // sample workspace can demonstrate flags/conflicts/completeness without
+  // a live gateway.
+  requirementsReport: {
+    requirements: [
+      {
+        id: 'sample-req-mass-max',
+        name: 'mass_limit',
+        text: 'The drone shall weigh at most 0.8 kg.',
+        severity: 'error',
+        clarity: 'pass',
+        atomicity: 'pass',
+        quantified: 'pass',
+        traceability: 'pass',
+        verificationReady: 'pass',
+        conflicts: ['sample-req-mass-min'],
+      },
+      {
+        id: 'sample-req-mass-min',
+        name: 'mass_floor',
+        text: 'The drone shall weigh at least 1 kg.',
+        severity: 'error',
+        clarity: 'pass',
+        atomicity: 'pass',
+        quantified: 'pass',
+        traceability: null,
+        verificationReady: 'pass',
+        conflicts: ['sample-req-mass-max'],
+      },
+      {
+        id: 'sample-req-speed',
+        name: 'vague_speed',
+        text: 'The drone should fly fast.',
+        severity: 'warning',
+        clarity: 'fail',
+        atomicity: 'pass',
+        quantified: 'fail',
+        traceability: null,
+        verificationReady: 'fail',
+        conflicts: [],
+      },
+    ],
+    conflicts: [
+      {
+        aId: 'sample-req-mass-max',
+        aName: 'mass_limit',
+        bId: 'sample-req-mass-min',
+        bName: 'mass_floor',
+        detail: 'one requires at most 0.8kg, the other at least 1kg',
+      },
+    ],
+    completeness: {
+      productType: 'generic',
+      covered: ['mechanical'],
+      missing: ['safety', 'power', 'environmental', 'verification'],
+    },
+  },
+  // FORGE-318: an illustrative evidence matrix -- one FAIL with real
+  // numbers, one PASS with tier-0 lineage, one STALE (evidence went stale
+  // after a change) -- so the sample workspace demonstrates the ticket's
+  // own acceptance example without a live gateway.
+  requirementMatrix: {
+    rows: [
+      {
+        requirementId: 'sample-req-mass-max',
+        requirementName: 'mass_limit',
+        limitText: '<= 0.8 kg',
+        status: 'fail',
+        detail: 'value 0.94 exceeds limit 0.8 (margin -0.14)',
+        artefactIds: ['sample-artefact-frame'],
+        evidence: [
+          {
+            id: 'sample-evidence-mass',
+            method: 'twin.rank_sensitivity',
+            tier: null,
+            value: 0.94,
+            limit: 0.8,
+            margin: -0.14,
+            staleness: 'current',
+          },
+        ],
+        // FORGE-258 (gap G-A2): not declared -- illustrates the "not
+        // declared" flag independently of the live pass/fail status.
+        verificationMethod: '',
+        expectedEvidence: '',
+      },
+      {
+        requirementId: 'sample-req-speed',
+        requirementName: 'vague_speed',
+        limitText: 'shall fly at ≥ 8 m/s cruise',
+        status: 'pass',
+        detail: 'value 9.2 within limit 8 (margin 1.2)',
+        artefactIds: ['sample-artefact-frame'],
+        evidence: [
+          {
+            id: 'sample-evidence-speed',
+            method: 'twin.evaluate_metric',
+            tier: 0,
+            value: 9.2,
+            limit: 8,
+            margin: 1.2,
+            staleness: 'current',
+          },
+        ],
+        // FORGE-258: a fully-declared requirement -- verification method
+        // AND expected evidence set, illustrating the complete case.
+        verificationMethod: 'analysis',
+        expectedEvidence: 'simulation',
+      },
+      {
+        requirementId: 'sample-req-mass-min',
+        requirementName: 'mass_floor',
+        limitText: '>= 1 kg',
+        status: 'stale',
+        detail: 'claim is supported, but at least one cited evidence entity is stale',
+        artefactIds: ['sample-artefact-frame'],
+        evidence: [
+          {
+            id: 'sample-evidence-mass-floor',
+            method: 'twin.evaluate_metric',
+            tier: 0,
+            value: 1.05,
+            limit: 1,
+            margin: 0.05,
+            staleness: 'stale',
+          },
+        ],
+        verificationMethod: '',
+        expectedEvidence: '',
+      },
+    ],
+  },
+  // FORGE-297 (gap G-I1): illustrative traceability coverage -- mixed
+  // percentages (not all 100%, not all 0%) so the heatmap's color banding
+  // is visible in the sample workspace without a live gateway.
+  // verification_to_evidence is deliberately null: no verification_case
+  // entities exist in this sample workspace, so that ratio's denominator
+  // is genuinely zero (not 0%, matching TraceabilityCoverage's own
+  // "empty denominator" discipline).
+  requirementCoverage: {
+    needs_to_requirements: 100,
+    requirements_to_architecture: 66.7,
+    requirements_to_verification: 33.3,
+    verification_to_evidence: null,
+    critical_requirements_to_evidence: 50,
+  },
+  // FORGE-287 (gap G-G1): started design loops live here, keyed by
+  // loop_id -- empty until the dashboard's "Start design loop" action
+  // creates one (see the POST /design-loop/start handler below).
+  designLoops: {} as Record<string, SampleDesignLoop>,
+  // FORGE-291 (gap G-G5): illustrative duplicate-commit guard -- maps a
+  // JSON-stringified request body to the loop_id it already produced, so
+  // resubmitting the exact same form mirrors the real guard's
+  // duplicate=true response instead of silently narrating a second run.
+  designLoopInputsSeen: {} as Record<string, string>,
+  // FORGE-290 (gap G-G4): gate-review attempts, newest first -- empty
+  // until the "Attempt promotion" action records one.
+  promotionGates: [] as SampleMaturityGate[],
+  // FORGE-299 (gap G-I3): one illustrative pre-existing release package,
+  // so the sample workspace can show a real "diff against previous
+  // release" the first time a viewer creates a second one via the UI --
+  // POST /releases below appends to this array.
+  releasePackages: [
+    {
+      node_id: 'sample-release-v1',
+      created_at: '2026-09-28T09:00:00Z',
+      title: 'v1.0 release candidate',
+      statement: 'Release package: 3 hierarchy nodes, 4 BOM items, 2 evidence, 1 decisions',
+      snapshot: {
+        hierarchy_node_ids: ['sample-hier-root', 'sample-hier-upper-arm', 'sample-hier-base'],
+        bom_item_ids: ['sample-bom-1', 'sample-bom-2', 'sample-bom-3', 'sample-bom-4'],
+        evidence_ids: ['sample-evidence-1', 'sample-evidence-2'],
+        decision_ids: ['sample-decision-wall-thickness'],
+        drawing_ids: [],
+      },
+      diff_from_previous: {
+        compared_to: null,
+        hierarchy_delta: 3,
+        bom_delta: 4,
+        evidence_delta: 2,
+        decision_delta: 1,
+      },
+      gate_status: 'passed',
+    },
+  ] as SampleReleasePackage[],
+  // FORGE-298 (gap G-I2): empty until "Generate test plan" is clicked --
+  // an honest empty-by-default matching the real system (this sample
+  // workspace's own requirement rows have no verification_method="test"
+  // requirement seeded, same as the real arm project before its own live
+  // validation added one).
+  testPlanEntries: [] as SampleTestPlanEntry[],
+  bringupChecklists: [] as SampleBringupChecklist[],
+  // FORGE-293 (gap G-H1): one real-shaped drawing already recorded for the
+  // demo's 'upper_arm' part (sample-wp-upper-arm) -- unlike bringupChecklists
+  // above (empty until generated), a technical_drawing is normally produced
+  // upstream by an agent skill this dashboard doesn't itself trigger, so an
+  // honest demo needs one pre-seeded to show the viewer actually works.
+  technicalDrawings: [
+    {
+      node_id: 'sample-technical-drawing-1',
+      created_at: '2026-09-25T10:00:00Z',
+      name: 'Upper Arm Drawing',
+      part_name: 'upper_arm',
+      dimensions: [
+        { feature: 'bore_diameter', nominal_mm: 10, tolerance_plus_mm: 0.02, tolerance_minus_mm: 0 },
+        { feature: 'overall_length', nominal_mm: 180, tolerance_plus_mm: 0.1, tolerance_minus_mm: 0.1 },
+      ],
+      gdt_callouts: [
+        { feature: 'mounting_face', symbol: 'flatness', tolerance_value_mm: 0.05, datum_refs: ['A'] },
+      ],
+      surface_finishes: [{ feature: 'bore_surface', ra_um: 1.6 }],
+      inspection_requirements: ['CMM bore diameter check', 'Surface finish verification'],
+      approved: false,
+      approved_at: null,
+      approved_by: null,
+      work_product_id: 'sample-wp-upper-arm',
+    },
+  ] as SampleTechnicalDrawing[],
+  // FORGE-289 (gap G-G3): decisions keyed by the node id they're related
+  // to (a hierarchy node's own id, or a converged design loop's winning
+  // iteration id) -- mirrors GET /v1/decisions?related_to=<node_id>'s own
+  // "what decisions touch this node" shape. Seeded with one decision on
+  // 'sample-hier-upper-arm' so the Structure tab has something to show
+  // without first running a design loop; the design-loop entry is added
+  // dynamically by the /design-loop/start handler below, same as the real
+  // optimizer records a Decision only once it finds a feasible winner.
+  decisions: {
+    'sample-hier-upper-arm': [
+      {
+        id: 'sample-decision-wall-thickness',
+        title: 'Upper arm wall thickness: 2.5mm (aluminum_6061)',
+        rationale:
+          'Minimum wall thickness meeting deflection <= 0.5mm and safety factor >= 2 for the upper arm link, found via bisection over the tier-0 hollow-tube hand-calc. Resulting mass: 1.4kg.',
+        alternatives: [
+          { option: 'wall_thickness_mm=1.0', reason_rejected: 'deflection_margin=-0.18mm, sf_margin=-0.2' },
+          { option: 'wall_thickness_mm=1.75', reason_rejected: 'deflection_margin=-0.04mm, sf_margin=0.3' },
+        ],
+        parent_refs: ['sample-hier-upper-arm'],
+        evidence_refs: ['sample-evidence-wall-thickness'],
+        created_at: '2026-09-20T10:00:00Z',
+      },
+    ],
+  } as Record<string, SampleDecision[]>,
+  // FORGE-292 (gap G-G6): illustrative eval report -- mirrors
+  // GET /v1/evals's own real shape (api_gateway/evals/routes.py), including
+  // a design_loop_v1 row proving the new outcome grader ran, not just the
+  // pre-existing keyword-based rubrics.
+  evals: {
+    scenarios: [
+      {
+        scenario_id: 'design_loop_wall_thickness',
+        suite: 'design_loop_v1',
+        run: '20260928-020000',
+        runs: 3,
+        completed_rate: 1.0,
+        avg_completeness: 1.0,
+      },
+      {
+        scenario_id: 'l0_bracket',
+        suite: 'runs_v1',
+        run: '20260928-020000',
+        runs: 3,
+        completed_rate: 0.667,
+        avg_completeness: 0.8,
+      },
+      {
+        scenario_id: 'mech_cantilever',
+        suite: 'runs_v1',
+        run: '20260928-020000',
+        runs: 3,
+        completed_rate: 1.0,
+        avg_completeness: 1.0,
+      },
+    ],
+    history: [
+      { run: '20260926-020000', suite: 'runs_v1', scenarios: 6, completed_rate: 0.72 },
+      { run: '20260927-020000', suite: 'runs_v1', scenarios: 6, completed_rate: 0.78 },
+      { run: '20260928-020000', suite: 'runs_v1', scenarios: 6, completed_rate: 0.83 },
+    ],
+  },
+  // FORGE-262 (gap G-B2): two candidate upper-arm architectures -- only
+  // mass_kg is evidence-backed (from a real committed CAD work product);
+  // cost/risk/performance are always asserted, matching the real route's
+  // own honesty discipline.
+  conceptOptions: [
+    {
+      id: 'sample-concept-solid-bar',
+      title: 'Solid bar',
+      criteria_scores: { mass_kg: 3.2, cost_usd: 40, risk: 2, performance: 6 },
+      evidence_backed_criteria: [],
+    },
+    {
+      id: 'sample-concept-hollow-tube',
+      title: 'Hollow tube',
+      criteria_scores: { mass_kg: 1.6, cost_usd: 55, risk: 3, performance: 8 },
+      evidence_backed_criteria: ['mass_kg'],
+    },
+  ] as SampleConceptOption[],
+  // FORGE-313: a small product hierarchy for the Structure tab -- mirrors
+  // the ticket's own acceptance example (an "upper_arm"/"shoulder"
+  // interface with a tip_deflection quantity, a mass allocation with an
+  // owner) so the sample workspace demonstrates the same thing the real
+  // arm project's live validation does.
+  hierarchyNodes: [
+    {
+      id: 'sample-hier-arm',
+      name: 'Arm',
+      kind: 'product',
+      parentId: null,
+      quantity: null,
+      placement: null,
+      massKg: 2.3,
+      cost: 145.0,
+      massBudgetKg: null,
+      massOverBudget: null,
+      costBudget: null,
+      costOverBudget: null,
+      massBudgetOwner: null,
+      massBudgetDiscipline: null,
+      costBudgetOwner: null,
+      costBudgetDiscipline: null,
+      interfaces: [],
+      realizedByWorkProductId: null,
+      instanceOfBomItemId: null,
+      drawPeakW: 0,
+      drawAverageW: 0,
+      outputW: 0,
+      dissipationW: 0,
+    },
+    {
+      id: 'sample-hier-upper-arm',
+      name: 'upper_arm',
+      kind: 'subsystem',
+      parentId: 'sample-hier-arm',
+      quantity: 1,
+      placement: null,
+      massKg: 1.4,
+      cost: 90.0,
+      massBudgetKg: 1.5,
+      massOverBudget: false,
+      costBudget: null,
+      costOverBudget: null,
+      massBudgetOwner: 'alice',
+      massBudgetDiscipline: 'mechanical',
+      costBudgetOwner: null,
+      costBudgetDiscipline: null,
+      interfaces: [
+        {
+          otherComponent: 'shoulder',
+          interfaceType: 'mechanical',
+          description: 'shoulder joint',
+          quantities: [{ metric: 'tip_deflection', unit: 'mm', limit: 0.5, op: '<=' }],
+        },
+      ],
+      // FORGE-273 (gap G-D5): real committed geometry, so the sample
+      // workspace demonstrates the "DFM check" button (which needs a real
+      // CAD_MODEL work product id, unlike a BOMItem-only INSTANCE_OF).
+      realizedByWorkProductId: 'sample-wp-upper-arm',
+      instanceOfBomItemId: null,
+      drawPeakW: 0,
+      drawAverageW: 0,
+      outputW: 0,
+      dissipationW: 0,
+    },
+    {
+      id: 'sample-hier-shoulder',
+      name: 'shoulder',
+      kind: 'subsystem',
+      parentId: 'sample-hier-arm',
+      quantity: 1,
+      placement: null,
+      massKg: 0.9,
+      cost: 55.0,
+      massBudgetKg: 0.8,
+      massOverBudget: true,
+      costBudget: null,
+      costOverBudget: null,
+      massBudgetOwner: 'bob',
+      massBudgetDiscipline: 'mechanical',
+      costBudgetOwner: null,
+      costBudgetDiscipline: null,
+      interfaces: [
+        {
+          otherComponent: 'upper_arm',
+          interfaceType: 'mechanical',
+          description: 'shoulder joint',
+          quantities: [
+            { metric: 'tip_deflection', unit: 'mm', limit: 0.5, op: '<=' },
+            { metric: 'J2_torque', unit: 'N*m', limit: 12.0, op: '<=' },
+          ],
+        },
+      ],
+      realizedByWorkProductId: null,
+      instanceOfBomItemId: null,
+      // FORGE-275 (gap G-E2): a real sample power draw, so the sample
+      // workspace demonstrates the Structure tree's new Power column.
+      drawPeakW: 331.2,
+      drawAverageW: 165.6,
+      outputW: 0,
+      dissipationW: 165.6,
+    },
+    // FORGE-266 (gap G-C2): a genuine placeholder leaf -- no REALIZED_BY/
+    // INSTANCE_OF edge yet -- so the sample workspace demonstrates "Replace
+    // placeholder with part" the same way the real arm project's own live
+    // validation does.
+    {
+      id: 'sample-hier-elbow-actuator',
+      name: 'elbow_actuator',
+      kind: 'assembly',
+      parentId: 'sample-hier-upper-arm',
+      quantity: 1,
+      placement: null,
+      massKg: 0,
+      cost: 0,
+      massBudgetKg: null,
+      massOverBudget: null,
+      costBudget: null,
+      costOverBudget: null,
+      massBudgetOwner: null,
+      massBudgetDiscipline: null,
+      costBudgetOwner: null,
+      costBudgetDiscipline: null,
+      interfaces: [],
+      realizedByWorkProductId: null,
+      instanceOfBomItemId: null,
+      drawPeakW: 0,
+      drawAverageW: 0,
+      outputW: 0,
+      dissipationW: 0,
+    },
+  ] as HierarchyNode[],
+  // FORGE-266: real-looking recorded parts a "Replace placeholder with
+  // part" action can pick from -- same shape POST /v1/component-selection/
+  // select (FORGE-265) would have produced.
+  bomComponents: [
+    {
+      id: 'sample-bom-ds3218mg',
+      designator: '',
+      partNumber: 'DS3218MG',
+      description: 'servo (cots_assembly)',
+      manufacturer: 'Miuzei',
+      quantity: 1,
+      unitPrice: 12.99,
+      priceCurrency: 'USD',
+      status: 'available',
+      category: 'servo',
+      projectId: 'sample-drone-fc',
+      imageUrl: null,
+      purchaseUrl: null,
+      datasheetUrl: null,
+      footprint: null,
+      cadModelUrl: null,
+    },
+    {
+      id: 'sample-bom-mg996r',
+      designator: '',
+      partNumber: 'MG996R',
+      description: 'servo (cots_assembly)',
+      manufacturer: 'TowerPro',
+      quantity: 1,
+      unitPrice: 5.49,
+      priceCurrency: 'USD',
+      status: 'available',
+      category: 'servo',
+      projectId: 'sample-drone-fc',
+      imageUrl: null,
+      purchaseUrl: null,
+      datasheetUrl: null,
+      footprint: null,
+      cadModelUrl: null,
+    },
+  ] as BomComponent[],
 };
 
 // ── Sample mode flag ────────────────────────────────────────────────────────
@@ -709,16 +1434,33 @@ const SAMPLE_REVISIONS = [
     created_at: '2026-09-22T11:00:00Z',
     content_hash: 'sample-r3',
     change_description: 'Sample: connector and telemetry revision',
-    metadata_snapshot: {},
+    metadata_snapshot: { wall_thickness_mm: 2.4, connector_count: 3 },
   },
   {
     revision: 2,
     created_at: '2026-09-20T10:00:00Z',
     content_hash: 'sample-r2',
     change_description: 'Sample: baseline evidence attached',
-    metadata_snapshot: {},
+    metadata_snapshot: { wall_thickness_mm: 3.0, connector_count: 2 },
   },
 ];
+
+// FORGE-301 (gap G-J2): illustrative geometry delta for the sample
+// SUPERSEDES-linked enclosure (the same pair FORGE-270's feature diff above
+// uses) -- every other sample node correctly has none (404/null).
+const SAMPLE_GEOMETRY_DIFF = {
+  current_work_product_id: 'sample-enclosure',
+  has_previous_version: true,
+  previous_work_product_id: 'sample-enclosure-v2',
+  current_volume_mm3: 48200,
+  previous_volume_mm3: 51500,
+  volume_delta_mm3: -3300,
+  current_area_mm2: 9840,
+  previous_area_mm2: 10120,
+  area_delta_mm2: -280,
+  current_bounding_box: { x_min: 0, x_max: 80, y_min: 0, y_max: 60, z_min: 0, z_max: 25 },
+  previous_bounding_box: { x_min: 0, x_max: 80, y_min: 0, y_max: 60, z_min: 0, z_max: 27 },
+};
 
 const SCRIPTED_REPLY = `Scripted sample response — no live agent or solver was called.
 
@@ -731,7 +1473,12 @@ function segment(path: string, index: number): string {
 }
 
 /** Resolve one request against the in-memory workspace; `undefined` = unsupported. */
-function route(method: string, path: string, body: Record<string, unknown>): unknown {
+function route(
+  method: string,
+  path: string,
+  body: Record<string, unknown>,
+  params: Record<string, unknown> = {},
+): unknown {
   const now = new Date().toISOString();
   const s = state;
   if (method === 'get') {
@@ -741,10 +1488,80 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
     if (path === '/projects') return { projects: [s.project], total: 1 };
     if (path === `/projects/${s.project.id}`) return s.project;
     if (path === '/twin/nodes') return { nodes: s.nodes, total: s.nodes.length };
-    if (path === '/twin/relationships') return { relationships: s.relationships };
+    if (path === '/twin/relationships') return { relationships: s.relationships, endpoints: s.endpoints };
     if (/^\/twin\/nodes\/[^/]+$/.test(path)) return s.nodes.find((n) => n.id === segment(path, 3));
     if (path.endsWith('/versions')) {
       return { work_product_id: segment(path, 3), revisions: SAMPLE_REVISIONS, total: SAMPLE_REVISIONS.length };
+    }
+    if (path.endsWith('/diff') && path.startsWith('/twin/nodes/')) {
+      // FORGE-301: metadata diff between two of SAMPLE_REVISIONS' own
+      // entries -- real added/changed/removed computed from the same two
+      // snapshots /versions above already returns, not hand-duplicated.
+      const v1 = Number(params.v1);
+      const v2 = Number(params.v2);
+      const a = SAMPLE_REVISIONS.find((r) => r.revision === v1);
+      const b = SAMPLE_REVISIONS.find((r) => r.revision === v2);
+      if (!a || !b) return undefined;
+      const keysA = Object.keys(a.metadata_snapshot);
+      const keysB = Object.keys(b.metadata_snapshot);
+      const changed: Record<string, { from_value: unknown; to_value: unknown }> = {};
+      for (const key of keysA.filter((k) => keysB.includes(k))) {
+        const av = (a.metadata_snapshot as Record<string, unknown>)[key];
+        const bv = (b.metadata_snapshot as Record<string, unknown>)[key];
+        if (av !== bv) changed[key] = { from_value: av, to_value: bv };
+      }
+      return {
+        work_product_id: segment(path, 3),
+        revision_a: v1,
+        revision_b: v2,
+        changed,
+        added: Object.fromEntries(
+          keysB.filter((k) => !keysA.includes(k)).map((k) => [k, (b.metadata_snapshot as Record<string, unknown>)[k]]),
+        ),
+        removed: Object.fromEntries(
+          keysA.filter((k) => !keysB.includes(k)).map((k) => [k, (a.metadata_snapshot as Record<string, unknown>)[k]]),
+        ),
+      };
+    }
+    if (path.endsWith('/geometry-diff') && path.startsWith('/twin/nodes/')) {
+      // FORGE-709: a node with no predecessor answers 200 with the
+      // discriminant false, exactly as the real gateway now does, rather
+      // than the 404 this used to stand in for.
+      if (segment(path, 3) !== 'sample-enclosure') {
+        return { current_work_product_id: segment(path, 3), has_previous_version: false };
+      }
+      return SAMPLE_GEOMETRY_DIFF;
+    }
+    if (path === '/twin/interference-check') {
+      // FORGE-272: a real-shaped boolean-intersection result -- the demo
+      // upper-arm part genuinely does not overlap its own illustrative
+      // "other part" id, same "real computation over mocked geometry"
+      // honesty the overhang-check mock below established.
+      const idA = String(params.work_product_id_a ?? '');
+      const idB = String(params.work_product_id_b ?? '');
+      return {
+        work_product_id_a: idA,
+        work_product_id_b: idB,
+        interferes: false,
+        interference_volume_mm3: 0,
+        interference_area_mm2: 0,
+      };
+    }
+    if (path.endsWith('/diff') && path.startsWith('/features/')) {
+      // FORGE-270 (gap G-D2): the sample enclosure is the only node with an
+      // illustrative SUPERSEDES-linked prior version -- every other sample
+      // node correctly has none, which FORGE-709 reports as an empty 200.
+      if (segment(path, 2) !== 'sample-enclosure') {
+        return { currentWorkProductId: segment(path, 2), hasPreviousVersion: false };
+      }
+      return {
+        currentWorkProductId: 'sample-enclosure',
+        hasPreviousVersion: true,
+        previousWorkProductId: 'sample-enclosure-v2',
+        changed: { wall_mm: { from_value: 3, to_value: 2 } },
+        added: {},
+        removed: {},
+      };
     }
     if (path.endsWith('/model')) {
       return { glb_url: '/samples/flight-controller.glb', metadata: s.modelMetadata, cached: true };
@@ -778,9 +1595,526 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
     if (path === '/assistant/proposals') return { proposals: [s.proposal], total: 1 };
     if (path === '/sessions') return { sessions: s.sessions, total: s.sessions.length };
     if (path === `/sessions/${s.sessions[0]?.id}`) return s.sessions[0];
+    if (path === '/simulation/results') {
+      // FORGE-279: two illustrative revisions of the same analysis, so the
+      // version-compare panel has something real to show.
+      return {
+        results: [
+          {
+            id: 'sample-fea-rev1',
+            name: 'Rev 1 FEA — static 1g',
+            maxVonMisesMpa: 62.4,
+            maxDisplacementMm: 0.41,
+            loadCase: 'static_1g',
+            meshStats: { num_nodes: 12500, num_elements: 48000 },
+            projectId: s.project.id,
+            createdAt: '2026-09-20T10:00:00Z',
+            updatedAt: '2026-09-20T10:00:00Z',
+          },
+          {
+            id: 'sample-fea-rev2',
+            name: 'Rev 2 FEA — static 1g',
+            maxVonMisesMpa: 45.1,
+            maxDisplacementMm: 0.29,
+            loadCase: 'static_1g',
+            meshStats: { num_nodes: 12500, num_elements: 48000 },
+            projectId: s.project.id,
+            createdAt: '2026-09-22T10:00:00Z',
+            updatedAt: '2026-09-22T10:00:00Z',
+          },
+        ],
+        total: 2,
+      };
+    }
+    if (path === '/requirements/quality') return s.requirementsReport;
+    if (path === '/requirements/matrix') return s.requirementMatrix;
+    if (path === '/requirements/coverage') return s.requirementCoverage;
+    if (path === '/releases') return { releases: s.releasePackages };
+    if (path === '/testplans') return { entries: s.testPlanEntries };
+    if (path === '/bringup') return { entries: s.bringupChecklists };
+    if (path === '/technical-drawings') {
+      // FORGE-293: filter by work_product_id, same real-backend behaviour
+      // api_gateway/technical_drawings/routes.py's list closure has (one
+      // part's drawings, not every drawing in the project) -- then strip the
+      // internal-only work_product_id field, which the real response schema
+      // doesn't carry (a drawing is already scoped to the query, not
+      // self-describing its own part id).
+      const workProductId = String(params.work_product_id ?? '');
+      const drawings = s.technicalDrawings
+        .filter((d) => d.work_product_id === workProductId)
+        .map((d) => {
+          const copy: Partial<SampleTechnicalDrawing> = { ...d };
+          delete copy.work_product_id;
+          return copy;
+        });
+      return { drawings };
+    }
+    if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
+    if (path === '/wiring/harness-estimate') {
+      // FORGE-275: the same illustrative two-joint chain /firmware/scaffold
+      // uses, now carrying real-shaped anchors so the mocked cumulative
+      // cable-length math is genuinely derived, not canned.
+      type AnchorJoint = {
+        name: string;
+        type: string;
+        base: string;
+        follower: string;
+        anchor: [number, number, number];
+      };
+      const joints: AnchorJoint[] = [
+        { name: 'joint_2', type: 'revolute', base: 'upper_arm_link', follower: 'elbow_actuator', anchor: [0, 0, 120] },
+        { name: 'joint_1', type: 'revolute', base: 'shoulder_mount', follower: 'upper_arm_link', anchor: [0, -40, 160] },
+      ];
+      const bases = new Set(joints.map((j) => j.base));
+      const followers = new Set(joints.map((j) => j.follower));
+      const placed = new Set([...bases].filter((b) => !followers.has(b)));
+      const remaining = [...joints];
+      const ordered: (AnchorJoint & { step_number: number })[] = [];
+      let step = 1;
+      while (remaining.length > 0) {
+        const buildable = remaining
+          .filter((j) => placed.has(j.base))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (buildable.length === 0) break; // cyclic -- won't happen for this illustrative chain
+        for (const j of buildable) {
+          ordered.push({ ...j, step_number: step });
+          placed.add(j.follower);
+          step += 1;
+          remaining.splice(remaining.indexOf(j), 1);
+        }
+      }
+      const cumulative = new Map<string, number>();
+      const resultJoints = ordered.map((j) => {
+        const [x, y, z] = j.anchor;
+        const segment = Math.sqrt(x * x + y * y + z * z);
+        const base = cumulative.get(j.base) ?? 0;
+        const total = base + segment;
+        cumulative.set(j.follower, total);
+        return {
+          step_number: j.step_number,
+          joint_name: j.name,
+          joint_type: j.type,
+          base: j.base,
+          follower: j.follower,
+          segment_length_mm: Math.round(segment * 100) / 100,
+          cable_length_estimate_mm: Math.round(total * 100) / 100,
+        };
+      });
+      return { work_product_id: params.work_product_id ?? 'sample-wp-upper-arm', joints: resultJoints };
+    }
+    if (path === '/bom') {
+      const category = params.category ? String(params.category).toLowerCase() : null;
+      const components = category
+        ? s.bomComponents.filter((c) => c.category.toLowerCase() === category)
+        : s.bomComponents;
+      return { components, total: components.length };
+    }
+    if (path === '/bom/risk') {
+      // FORGE-268: illustrative placeholder scores, not a real distributor
+      // resolution -- sample mode has no backend to call
+      // distributors.resolve_offers against. Real (non-demo) requests hit
+      // api_gateway.twin.bom_risk, which resolves real offers per part.
+      const partScores = s.bomComponents.map((c, i) => {
+        const overallScore = i === 0 ? 62 : 8;
+        return {
+          mpn: c.partNumber,
+          manufacturer: c.manufacturer,
+          overall_score: overallScore,
+          risk_level: overallScore > 50 ? 'high' : 'low',
+          factors: [
+            {
+              name: 'single_source',
+              weight: 0.25,
+              score: i === 0 ? 100 : 0,
+              description: i === 0 ? 'Single-source part -- high supply chain risk' : 'Multi-source -- low risk',
+            },
+          ],
+          flagged: overallScore > 50,
+        };
+      });
+      return {
+        project_id: String(params.project_id ?? ''),
+        total_parts: partScores.length,
+        overall_score: Math.round(
+          partScores.reduce((sum, p) => sum + p.overall_score, 0) / (partScores.length || 1),
+        ),
+        critical_count: 0,
+        high_count: partScores.filter((p) => p.risk_level === 'high').length,
+        medium_count: 0,
+        low_count: partScores.filter((p) => p.risk_level === 'low').length,
+        part_scores: partScores,
+      };
+    }
+    if (path === '/manufacture/release') {
+      // FORGE-294: illustrative placeholder bytes, not real geometry --
+      // sample mode has no backend/cadquery to actually export from. Real
+      // (non-demo) requests hit api_gateway.twin.manufacture_release,
+      // which stages and exports a real committed STEP file.
+      const process = String(params.process ?? '3d_print');
+      const format = process === 'cnc' ? 'step' : 'stl';
+      const placeholder =
+        format === 'stl'
+          ? 'solid demo\nendsolid demo\n'
+          : 'ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n';
+      return {
+        work_product_id: String(params.work_product_id ?? ''),
+        process,
+        format,
+        filename: `release.${format}`,
+        file_size_bytes: placeholder.length,
+        content_base64: btoa(placeholder),
+      };
+    }
+    if (/^\/design-loop\/[^/]+$/.test(path)) return s.designLoops[segment(path, 2)];
+    if (path === '/promotion') return { gates: s.promotionGates };
+    if (path === '/decisions') {
+      const relatedTo = String(params.related_to ?? '');
+      return { related_to: relatedTo, decisions: s.decisions[relatedTo] ?? [] };
+    }
+    if (path === '/evals') return s.evals;
+    if (path === '/trade-study/options') return { options: s.conceptOptions };
     return undefined;
   }
   if (method === 'post') {
+    const fixMatch = path.match(/^\/requirements\/([^/]+)\/fix$/);
+    if (fixMatch) {
+      const req = s.requirementsReport.requirements.find((r) => r.id === fixMatch[1]);
+      if (!req) return undefined;
+      return {
+        proposedText: `The drone shall fly at a cruise speed of at least 8 m/s.`,
+        rationale: 'weak_modal: should; ambiguous: fast',
+        conclusions: ['The drone shall fly at a cruise speed of at least 8 m/s.'],
+      };
+    }
+    if (path === '/requirements/constraints') {
+      // FORGE-259: the constraint editor's create action -- appends a
+      // real no_data row to the illustrative matrix, same as a fresh
+      // constraint with no claims yet on the real backend.
+      const payload = body as {
+        name?: string;
+        metric?: string;
+        operator?: string;
+        limit?: number;
+        unit?: string;
+        verificationMethod?: string;
+        expectedEvidence?: string;
+      };
+      const id = `sample-req-${Date.now()}`;
+      s.requirementMatrix.rows.push({
+        requirementId: id,
+        requirementName: payload.name ?? 'new_requirement',
+        limitText: `${payload.metric ?? ''} ${payload.operator ?? '<='} ${payload.limit ?? ''}${payload.unit ?? ''}`,
+        status: 'no_data',
+        detail: 'no claim recorded against this requirement',
+        artefactIds: [],
+        evidence: [],
+        // FORGE-258 (gap G-A2).
+        verificationMethod: payload.verificationMethod ?? '',
+        expectedEvidence: payload.expectedEvidence ?? '',
+      });
+      return { constraintId: id, setWorkProductId: `sample-set-${id}` };
+    }
+    if (path === '/features/generate') {
+      // FORGE-269: illustrative counts matching the two real macros
+      // (domain_agents/shared/design_ir_macros.py) exactly -- bolt_pattern
+      // is 6 entities (create_body, sketch, pad, sketch, pocket,
+      // polar_pattern), rib is 3 (create_body, sketch, pad).
+      const payload = body as { name?: string; feature?: { feature_type?: string } };
+      const featureType = payload.feature?.feature_type ?? 'rib';
+      const entityCount = featureType === 'bolt_pattern' ? 6 : 3;
+      return {
+        feature_type: featureType,
+        work_product_id: null,
+        cad_file: `output/${featureType}_${Date.now()}.step`,
+        entity_count: entityCount,
+        volume_mm3: featureType === 'bolt_pattern' ? 11760.0 : 900.0,
+        surface_area_mm2: featureType === 'bolt_pattern' ? 5200.0 : 1080.0,
+        bounding_box: { min_x: -30, min_y: -20, min_z: 0, max_x: 30, max_y: 20, max_z: 5 },
+        material: 'aluminum_6061',
+        committed: true,
+        twin_node_id: `sample-feature-${Date.now()}`,
+        model_url: '/samples/flight-controller.glb',
+        commit_error: null,
+        already_committed: false,
+      };
+    }
+    if (path === '/design-loop/start') {
+      // FORGE-291: duplicate-commit guard -- identical inputs (excluding
+      // nothing here, since this mock has no record_decision-equivalent
+      // toggle) return the prior loop untouched, same shape as the real
+      // guard's response.
+      const inputsHash = JSON.stringify(body, Object.keys(body).sort());
+      const priorLoopId = s.designLoopInputsSeen[inputsHash];
+      if (priorLoopId) {
+        const priorLoop = s.designLoops[priorLoopId];
+        const priorWinner = priorLoop?.iterations.find((it) => it.is_winner) ?? null;
+        return {
+          loop_id: priorLoopId,
+          status: priorLoop?.status ?? 'optimal',
+          detail: `duplicate of an earlier run with identical inputs (loop_id=${priorLoopId})`,
+          winner: priorWinner,
+          candidates: priorLoop?.iterations ?? [],
+          iteration_count: priorLoop?.iterations.length ?? 0,
+          iteration_ids: priorLoop?.iterations.map((it) => it.id) ?? [],
+          max_iterations: (body.maxIterations as number) ?? 60,
+          duplicate: true,
+        };
+      }
+
+      // FORGE-287: a small, illustrative bisection-like trace -- narrows
+      // toward a converged winner exactly like the real
+      // twin.start_design_loop tool's own bisection search, just without
+      // running the real hand-calc against a real work product.
+      const loopId = `sample-loop-${Date.now()}`;
+      const values = [0.5, 10.25, 5.375, 2.9375, 1.71875, 1.109375, 0.8046875];
+      const iterations: SampleDesignLoopIteration[] = values.map((v, i) => {
+        const feasible = v <= 1.5;
+        const isWinner = i === values.length - 1;
+        return {
+          id: `${loopId}-${i}`,
+          iteration_number: i,
+          parameter_name: 'wall_thickness_mm',
+          parameter_value: v,
+          metric: 'mass_kg',
+          objective_value: 0.156 + (v - 0.8046875) * 0.18,
+          constraints_status: {
+            deflection_margin_mm: feasible ? 0.02 : -0.31,
+            sf_margin: feasible ? 0.04 : -0.6,
+          },
+          feasible,
+          status: isWinner ? 'converged' : 'candidate',
+          is_winner: isWinner,
+          approved: false,
+          approved_by: null,
+        };
+      });
+      s.designLoops[loopId] = { loop_id: loopId, status: 'optimal', iterations };
+      s.designLoopInputsSeen[inputsHash] = loopId;
+      // FORGE-289: the real optimizer records a Decision (with evidence
+      // link) for a converged winner -- mirror that here so the Design
+      // Loop section's own DecisionList has something to show.
+      const winner = iterations[iterations.length - 1];
+      if (!winner) return undefined;
+      s.decisions[winner.id] = [
+        {
+          id: `sample-decision-${loopId}`,
+          title: `Optimised wall thickness: ${winner.parameter_value.toFixed(4)}mm (aluminum_6061)`,
+          rationale:
+            `Minimum wall thickness meeting deflection <= 0.5mm and safety factor >= 2, found via bisection over the tier-0 hollow-tube hand-calc. Resulting mass: ${winner.objective_value.toFixed(4)}kg.`,
+          alternatives: iterations
+            .filter((it) => !it.feasible)
+            .map((it) => ({
+              option: `wall_thickness_mm=${it.parameter_value.toFixed(4)}`,
+              reason_rejected: `deflection_margin=${it.constraints_status.deflection_margin_mm}mm, sf_margin=${it.constraints_status.sf_margin}`,
+            })),
+          parent_refs: [],
+          evidence_refs: [`sample-evidence-${loopId}`],
+          created_at: now,
+        },
+      ];
+      return {
+        loop_id: loopId,
+        status: 'optimal',
+        detail: 'minimum feasible wall thickness found via bisection: 0.8047mm',
+        winner,
+        candidates: iterations,
+        iteration_count: iterations.length,
+        iteration_ids: iterations.map((it) => it.id),
+        max_iterations: (body.maxIterations as number) ?? 60,
+        duplicate: false,
+      };
+    }
+    if (path === '/trade-study/options') {
+      const optionId = `sample-concept-${Date.now()}`;
+      const option: SampleConceptOption = {
+        id: optionId,
+        title: (body.title as string) ?? 'Untitled option',
+        criteria_scores: (body.criteriaScores as Record<string, number>) ?? {},
+        evidence_backed_criteria: (body.evidenceBackedCriteria as string[]) ?? [],
+      };
+      s.conceptOptions.push(option);
+      return { node_id: optionId, entity_type: 'concept_option', project_linked: true };
+    }
+    if (path === '/trade-study/select') {
+      const optionIds = (body.optionIds as string[]) ?? [];
+      const selectedOptionId = body.selectedOptionId as string;
+      const weights = (body.weights as Record<string, number>) ?? {};
+      const options = s.conceptOptions.filter((o) => optionIds.includes(o.id));
+      const scored = options
+        .map((o) => ({
+          ...o,
+          weighted_score: Object.entries(weights).reduce(
+            (sum, [k, w]) => sum + w * (o.criteria_scores[k] ?? 0),
+            0,
+          ),
+        }))
+        .sort((a, b) => b.weighted_score - a.weighted_score);
+      const selected = scored.find((o) => o.id === selectedOptionId);
+      const rejected = scored.filter((o) => o.id !== selectedOptionId);
+      const decisionId = `sample-decision-concept-${Date.now()}`;
+      s.decisions[selectedOptionId] = [
+        {
+          id: decisionId,
+          title: (body.title as string) ?? 'Concept selection',
+          rationale: (body.rationale as string) ?? '',
+          alternatives: rejected.map((o) => ({
+            option: o.title,
+            reason_rejected: `weighted score ${o.weighted_score.toFixed(3)} vs selected ${(selected?.weighted_score ?? 0).toFixed(3)}`,
+          })),
+          parent_refs: [],
+          evidence_refs: [],
+          created_at: now,
+        },
+      ];
+      return { node_id: decisionId, selected_option_id: selectedOptionId, scores: scored };
+    }
+    const realizeMatch = path.match(/^\/twin\/hierarchy\/([^/]+)\/realize$/);
+    if (realizeMatch) {
+      // FORGE-266 (gap G-C2): "Replace placeholder with part" -- mutates
+      // the matching hierarchy node in place, same REALIZED_BY/INSTANCE_OF
+      // "at most one of each, always replaces" semantics as the real
+      // twin.realize_hierarchy_node.
+      const nodeId = realizeMatch[1];
+      const node = s.hierarchyNodes.find((n) => n.id === nodeId);
+      if (!node) return undefined;
+      const workProductId = body.workProductId as string | undefined;
+      const bomItemId = body.bomItemId as string | undefined;
+      if (workProductId) node.realizedByWorkProductId = workProductId;
+      if (bomItemId) node.instanceOfBomItemId = bomItemId;
+      return {
+        nodeId,
+        realizedByWorkProductId: node.realizedByWorkProductId,
+        instanceOfBomItemId: node.instanceOfBomItemId,
+      };
+    }
+    if (path === '/component-selection/select') {
+      // FORGE-265: illustrative margin arithmetic mirrors
+      // api_gateway.twin.component_selection.check_spec_margin exactly (a
+      // positive margin always means "passes with this much headroom",
+      // regardless of '>=' vs '<=').
+      const candidates = (body.candidates as {
+        mpn: string;
+        manufacturer: string;
+        specs: Record<string, number>;
+      }[]) ?? [];
+      const requiredSpecs =
+        (body.requiredSpecs as Record<string, { op: '>=' | '<='; value: number }>) ?? {};
+      const selectedMpn = body.selectedMpn as string;
+      const scoredCandidates = candidates.map((c) => {
+        const margins: Record<
+          string,
+          { pass: boolean; required: number; actual: number | null; op: string; margin: number | null }
+        > = {};
+        for (const [name, req] of Object.entries(requiredSpecs)) {
+          const actual = c.specs[name];
+          if (actual === undefined) {
+            margins[name] = { pass: false, required: req.value, actual: null, op: req.op, margin: null };
+            continue;
+          }
+          const margin = req.op === '>=' ? actual - req.value : req.value - actual;
+          const pass = req.op === '>=' ? actual >= req.value : actual <= req.value;
+          margins[name] = { pass, required: req.value, actual, op: req.op, margin };
+        }
+        return { ...c, margins };
+      });
+      const selected = scoredCandidates.find((c) => c.mpn === selectedMpn);
+      const rejected = scoredCandidates.filter((c) => c.mpn !== selectedMpn);
+      const selectedMeetsRequirements = Object.values(selected?.margins ?? {}).every(
+        (m) => m.pass,
+      );
+      const bomItemId = `sample-bom-item-${Date.now()}`;
+      const decisionId = `sample-decision-component-${Date.now()}`;
+      s.decisions[bomItemId] = [
+        {
+          id: decisionId,
+          title: (body.title as string) ?? 'Component selection',
+          rationale: (body.rationale as string) ?? '',
+          alternatives: rejected.map((c) => ({
+            option: `${c.mpn} (${c.manufacturer})`,
+            reason_rejected: Object.entries(c.margins)
+              .map(([name, m]) => `${name}: ${m.pass ? 'PASS' : 'FAIL'}`)
+              .join(', '),
+          })),
+          parent_refs: [],
+          evidence_refs: [],
+          created_at: now,
+        },
+      ];
+      return {
+        node_id: bomItemId,
+        decision_node_id: decisionId,
+        selected_mpn: selectedMpn,
+        selected_meets_requirements: selectedMeetsRequirements,
+        candidates: scoredCandidates,
+      };
+    }
+    if (path === '/promotion/attempt') {
+      // FORGE-290: illustrative evidence-gated approval -- looks each
+      // requested requirement up on the SAME live-ish matrix the evidence
+      // matrix above renders, blocking on anything but 'pass' (matching
+      // the real attempt_promotion's own no_data-blocks discipline),
+      // unless the reviewer explicitly rejects (overrides even a pass).
+      const payload = body as {
+        requiredClaimIds?: string[];
+        level?: string;
+        comment?: string;
+        reject?: boolean;
+      };
+      // FORGE-393: the reviewer is resolved server-side from the request, not
+      // read off the body. The sample workspace stands in for that resolution
+      // with the same label a local gateway records for a dashboard click, so
+      // the demo shows what production would actually write down.
+      const decidedBy = 'local:dashboard';
+      const ids = payload.requiredClaimIds ?? [];
+      const results: SampleRequiredClaimResult[] = ids.map((id) => {
+        const row = s.requirementMatrix.rows.find((r) => r.requirementId === id);
+        const req = s.requirementsReport.requirements.find((r) => r.id === id);
+        const decision: SampleRequiredClaimResult['decision'] =
+          row?.status === 'pass' ? 'pass' : row?.status === 'uncertain' || row?.status === 'stale' ? 'uncertain' : 'fail';
+        return {
+          requirementId: id,
+          requirementName: req?.name ?? row?.requirementName ?? id,
+          decision,
+          detail: row?.detail ?? 'no claim recorded against this requirement',
+          waiverId: null,
+        };
+      });
+      const blocking = results.filter((r) => r.decision !== 'pass' && r.decision !== 'waived');
+      let promoted = false;
+      let blockedReason: string | null = null;
+      if (payload.reject) {
+        blockedReason = payload.comment ?? `rejected by ${decidedBy}`;
+      } else if (blocking.length > 0) {
+        blockedReason = blocking.map((r) => `${r.requirementName} (${r.decision}): ${r.detail}`).join('; ');
+      } else {
+        // The "no human authority supplied" branch is gone: there is no longer
+        // a way to submit without one, so it could only ever be dead code
+        // pretending to be a guardrail.
+        promoted = true;
+      }
+      const gate: SampleMaturityGate = {
+        gateId: `sample-gate-${Date.now()}`,
+        level: payload.level ?? 'concept',
+        promoted,
+        blockedReason,
+        decidedBy,
+        comment: payload.comment ?? null,
+        createdAt: now,
+        results,
+      };
+      s.promotionGates.unshift(gate);
+      return gate;
+    }
+    const approveLoopMatch = path.match(/^\/design-loop\/([^/]+)\/approve$/);
+    if (approveLoopMatch && approveLoopMatch[1]) {
+      const loop = s.designLoops[approveLoopMatch[1]];
+      if (!loop) return undefined;
+      const winner = loop.iterations.find((it) => it.is_winner);
+      if (!winner) return undefined;
+      winner.approved = true;
+      winner.approved_by = (body.approvedBy as string) ?? 'you';
+      return { ...winner, approved_at: now };
+    }
     if (path === '/chat/threads') {
       const thread = {
         id: `sample-thread-${Date.now()}`,
@@ -823,6 +2157,306 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
       }
       return s.proposal;
     }
+    if (path === '/simulation/named-faces') {
+      // FORGE-277: a small illustrative box mesh's two named faces — enough
+      // for the load-case dialog's 3D face picker to demonstrate a real
+      // pick without a live gmsh/freecad-adapter mesh.
+      return {
+        meshFile: String(body.meshFile ?? ''),
+        faces: [
+          {
+            name: 'Surface1',
+            centroidMm: [5, 5, 0],
+            normal: [0, 0, -1],
+            areaMm2: 100,
+            bboxMm: { min: [0, 0, 0], max: [10, 10, 0] },
+          },
+          {
+            name: 'Surface2',
+            centroidMm: [5, 5, 5],
+            normal: [0, 0, 1],
+            areaMm2: 100,
+            bboxMm: { min: [0, 0, 5], max: [10, 10, 5] },
+          },
+        ],
+      };
+    }
+    if (path === '/robot/joint-loads') {
+      // FORGE-283: mirrors tool_registry.tools.calculix.statics's real
+      // sum-of-moments quasi-static calc (not a canned number) so the demo
+      // button exercises the same physics the real gateway route does.
+      const GRAVITY_M_S2 = 9.80665;
+      const links =
+        (body.links as { name: string; com_world_mm: [number, number, number]; mass_kg: number }[]) ?? [];
+      const joints = (body.joints as { name: string; position_world_mm: [number, number, number] }[]) ?? [];
+      const payloadMassKg = (body.payload_mass_kg as number) ?? 0;
+      const payloadPos = body.payload_position_world_mm as [number, number, number] | undefined;
+
+      const masses = links.map((l) => l.mass_kg);
+      const coms = links.map((l) => l.com_world_mm);
+      if (payloadMassKg > 0 && payloadPos) {
+        masses.push(payloadMassKg);
+        coms.push(payloadPos);
+      }
+
+      const loads = joints.map((joint, i) => {
+        const outboardMasses = masses.slice(i);
+        const outboardComs = coms.slice(i);
+        const supportedMassKg = outboardMasses.reduce((sum, m) => sum + m, 0);
+        let momentX = 0;
+        let momentY = 0;
+        for (let k = 0; k < outboardMasses.length; k++) {
+          const com = outboardComs[k];
+          const m = outboardMasses[k];
+          if (!com || m === undefined) continue;
+          const rx = com[0] - joint.position_world_mm[0];
+          const ry = com[1] - joint.position_world_mm[1];
+          const fz = -m * GRAVITY_M_S2;
+          momentX += ry * fz;
+          momentY += -rx * fz;
+        }
+        return {
+          joint_name: joint.name,
+          supported_mass_kg: supportedMassKg,
+          reaction_force_n: [0, 0, supportedMassKg * GRAVITY_M_S2],
+          reaction_moment_n_mm: [-momentX, -momentY, 0],
+        };
+      });
+      const worst = loads.reduce((a, b) =>
+        Math.hypot(...b.reaction_moment_n_mm) > Math.hypot(...a.reaction_moment_n_mm) ? b : a,
+      );
+      return { loads, worst_joint: worst };
+    }
+    if (path === '/dfm/overhang-check') {
+      // FORGE-273: mirrors api_gateway.twin.dfm_evidence's real undirected
+      // tilt-from-vertical math (not a canned pass/fail) over the same
+      // illustrative two-face box mesh /simulation/named-faces uses above --
+      // Surface1's normal (0,0,-1) is a perfectly horizontal face (90 deg
+      // tilt, flagged); Surface2's normal (0,0,1) is the same story
+      // (also 90 deg, since the check is undirected -- see the real
+      // module's docstring on why the mesh normal's sense isn't trusted).
+      const buildAxis = (body.build_axis as [number, number, number] | undefined) ?? [0, 0, 1];
+      const thresholdDeg = (body.threshold_deg as number | undefined) ?? 45.0;
+      const faces = [
+        { name: 'Surface1', area_mm2: 100, normal: [0, 0, -1] as [number, number, number] },
+        { name: 'Surface2', area_mm2: 100, normal: [0, 0, 1] as [number, number, number] },
+      ];
+      const mag = (v: [number, number, number]) => Math.hypot(v[0], v[1], v[2]);
+      const dot = (a: [number, number, number], b: [number, number, number]) =>
+        a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      const bMag = mag(buildAxis);
+      const checked = faces.map((f) => {
+        const nMag = mag(f.normal);
+        const cos = nMag > 1e-12 && bMag > 1e-12 ? Math.abs(dot(f.normal, buildAxis)) / (nMag * bMag) : 0;
+        const angleFromAxisDeg = (Math.acos(Math.min(1, Math.max(-1, cos))) * 180) / Math.PI;
+        const tilt = 90 - angleFromAxisDeg;
+        return {
+          name: f.name,
+          area_mm2: f.area_mm2,
+          normal: f.normal,
+          tilt_from_vertical_deg: Math.round(tilt * 1000) / 1000,
+          flagged: tilt > thresholdDeg,
+        };
+      });
+      const flagged = checked.filter((f) => f.flagged);
+      return {
+        faces: checked,
+        flagged_count: flagged.length,
+        total_faces: checked.length,
+        threshold_deg: thresholdDeg,
+        build_axis: buildAxis,
+        dfm_pass: flagged.length === 0,
+        evidence_node_id: 'evidence-dfm-demo',
+      };
+    }
+    if (path === '/releases') {
+      // FORGE-299: sample mode has no real G8 gate to evaluate -- every
+      // create succeeds, diffing against the most recent existing
+      // package the same way api_gateway.twin.release_package's real
+      // count-delta diff does.
+      const prior = s.releasePackages[s.releasePackages.length - 1] as
+        | SampleReleasePackage
+        | undefined;
+      const notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null;
+      const createdAt = new Date().toISOString();
+      const snapshot = {
+        hierarchy_node_ids: s.hierarchyNodes.map((n) => n.id),
+        bom_item_ids: s.bomComponents.map((c) => c.id),
+        evidence_ids: prior ? [...prior.snapshot.evidence_ids, `sample-evidence-${Date.now()}`] : ['sample-evidence-1'],
+        decision_ids: Object.keys(s.decisions).flatMap((k) => (s.decisions[k] ?? []).map((d) => d.id)),
+        drawing_ids: [] as string[],
+      };
+      const diff = {
+        compared_to: prior ? prior.node_id : null,
+        hierarchy_delta: snapshot.hierarchy_node_ids.length - (prior?.snapshot.hierarchy_node_ids.length ?? 0),
+        bom_delta: snapshot.bom_item_ids.length - (prior?.snapshot.bom_item_ids.length ?? 0),
+        evidence_delta: snapshot.evidence_ids.length - (prior?.snapshot.evidence_ids.length ?? 0),
+        decision_delta: snapshot.decision_ids.length - (prior?.snapshot.decision_ids.length ?? 0),
+      };
+      const created: SampleReleasePackage = {
+        node_id: `sample-release-${Date.now()}`,
+        created_at: createdAt,
+        title: notes ?? `Release package ${createdAt}`,
+        statement: `Release package: ${snapshot.hierarchy_node_ids.length} hierarchy nodes, ${snapshot.bom_item_ids.length} BOM items, ${snapshot.evidence_ids.length} evidence, ${snapshot.decision_ids.length} decisions`,
+        snapshot,
+        diff_from_previous: diff,
+        gate_status: 'passed',
+      };
+      s.releasePackages.push(created);
+      return created;
+    }
+    if (path.endsWith('/approve-technical-drawing') && path.startsWith('/twin/nodes/')) {
+      // FORGE-293: flip the matching sample drawing's approved flag, same
+      // real state-transition shape api_gateway/twin/technical_drawing_
+      // viewer.py's approver returns -- a real find-and-mutate over the
+      // seeded sample, not a canned always-true response.
+      const nodeId = segment(path, 3);
+      const drawing = s.technicalDrawings.find((d) => d.node_id === nodeId);
+      if (!drawing) return undefined;
+      const approvedBy = typeof body.approved_by === 'string' ? body.approved_by : null;
+      drawing.approved = true;
+      drawing.approved_at = new Date().toISOString();
+      drawing.approved_by = approvedBy;
+      return { node_id: drawing.node_id, approved: true, approved_at: drawing.approved_at };
+    }
+    if (path === '/testplans') {
+      // FORGE-298: sample mode has no real Constraint objects with
+      // structured metric/operator/limit/unit/target_node_type to derive
+      // from -- one illustrative entry per click, same "every create
+      // succeeds" honesty as /releases above (no real gate to fail on).
+      const created: SampleTestPlanEntry = {
+        node_id: `sample-verification-case-${Date.now()}`,
+        requirement_id: 'sample-req-payload-capacity',
+        step: 'Measure payload_capacity_kg on robot_description; acceptance: payload_capacity_kg >= 2.0kg',
+        acceptance_value: '2.0kg',
+        created_at: new Date().toISOString(),
+      };
+      s.testPlanEntries.push(created);
+      return { project_id: s.project.id, entries: [created] };
+    }
+    if (path === '/bringup') {
+      // FORGE-295: real topological-sort math (mirroring
+      // api_gateway/twin/bringup_checklist.py's own base->follower
+      // dependency sort) over a small illustrative two-joint chain --
+      // provided here in reverse dependency order to prove the sort
+      // actually runs rather than just echoing input order, same "real
+      // math over canned/illustrative input" honesty
+      // /dfm/overhang-check above uses.
+      type Joint = { name: string; type: string; base: string; follower: string };
+      const joints: Joint[] = [
+        { name: 'joint_2', type: 'revolute', base: 'upper_arm_link', follower: 'elbow_actuator' },
+        { name: 'joint_1', type: 'revolute', base: 'shoulder_mount', follower: 'upper_arm_link' },
+      ];
+      const bases = new Set(joints.map((j) => j.base));
+      const followers = new Set(joints.map((j) => j.follower));
+      const placed = new Set([...bases].filter((b) => !followers.has(b)));
+      const remaining = [...joints];
+      const ordered: (Joint & { step_number: number })[] = [];
+      let stepNo = 1;
+      while (remaining.length > 0) {
+        const buildable = remaining
+          .filter((j) => placed.has(j.base))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (buildable.length === 0) break; // cyclic -- won't happen for this illustrative chain
+        for (const j of buildable) {
+          ordered.push({ ...j, step_number: stepNo });
+          placed.add(j.follower);
+          stepNo += 1;
+          remaining.splice(remaining.indexOf(j), 1);
+        }
+      }
+      const steps: SampleBringupStep[] = ordered.map((j) => ({
+        step_number: j.step_number,
+        joint_name: j.name,
+        joint_type: j.type,
+        base: j.base,
+        follower: j.follower,
+        instruction: `Step ${j.step_number}: attach ${j.follower} to ${j.base} via ${j.name} (${j.type} joint)`,
+      }));
+      const created: SampleBringupChecklist = {
+        node_id: `sample-bringup-checklist-${Date.now()}`,
+        created_at: new Date().toISOString(),
+        title: 'Bring-up checklist: upper_arm',
+        statement: `Bring-up checklist: ${steps.length} step(s) derived from ${joints.length} assembly joint(s) on upper_arm`,
+        steps,
+      };
+      s.bringupChecklists.push(created);
+      return { node_id: created.node_id, statement: created.statement, steps: created.steps };
+    }
+    if (path === '/firmware/scaffold') {
+      // FORGE-276: the SAME real topological-sort math /bringup above
+      // uses (deterministic CAN IDs = build-order index), over the same
+      // illustrative two-joint chain, now carrying real-shaped limits so
+      // the mocked header/pinmap content is genuinely derived rather
+      // than canned.
+      type Joint = {
+        name: string;
+        type: string;
+        base: string;
+        follower: string;
+        limits: { lower: number; upper: number };
+      };
+      const joints: Joint[] = [
+        {
+          name: 'joint_2',
+          type: 'revolute',
+          base: 'upper_arm_link',
+          follower: 'elbow_actuator',
+          limits: { lower: -1.0, upper: 1.0 },
+        },
+        {
+          name: 'joint_1',
+          type: 'revolute',
+          base: 'shoulder_mount',
+          follower: 'upper_arm_link',
+          limits: { lower: -1.57, upper: 1.57 },
+        },
+      ];
+      const bases = new Set(joints.map((j) => j.base));
+      const followers = new Set(joints.map((j) => j.follower));
+      const placed = new Set([...bases].filter((b) => !followers.has(b)));
+      const remaining = [...joints];
+      const ordered: (Joint & { can_id: number })[] = [];
+      let canId = 1;
+      while (remaining.length > 0) {
+        const buildable = remaining
+          .filter((j) => placed.has(j.base))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (buildable.length === 0) break; // cyclic -- won't happen for this illustrative chain
+        for (const j of buildable) {
+          ordered.push({ ...j, can_id: canId });
+          placed.add(j.follower);
+          canId += 1;
+          remaining.splice(remaining.indexOf(j), 1);
+        }
+      }
+      const resultJoints: SampleFirmwareJoint[] = ordered.map((j) => ({
+        joint_name: j.name,
+        joint_type: j.type,
+        can_id: j.can_id,
+        limits: j.limits,
+      }));
+      return {
+        pinmap_node_id: `sample-firmware-pinmap-${Date.now()}`,
+        firmware_source_node_id: `sample-firmware-source-${Date.now()}`,
+        joints: resultJoints,
+      };
+    }
+  }
+  if (method === 'patch') {
+    // FORGE-271: whole-list joint replace on an already-committed node.
+    const jointsMatch = path.match(/^\/twin\/nodes\/([^/]+)\/assembly-joints$/);
+    if (jointsMatch) {
+      const nodeId = jointsMatch[1];
+      const node = s.nodes.find((n) => n.id === nodeId) as
+        | { assembly?: { parts: unknown[]; joints: unknown[] } }
+        | undefined;
+      if (!node) return undefined;
+      const assembly = node.assembly ?? { parts: [], joints: [] };
+      assembly.joints = (body.joints as unknown[]) ?? [];
+      node.assembly = assembly;
+      return { nodeId, assembly };
+    }
   }
   return undefined;
 }
@@ -835,7 +2469,8 @@ export const sampleAdapter: AxiosAdapter = async (config: InternalAxiosRequestCo
     string,
     unknown
   >;
-  const data = route(method, path, body);
+  const params = (config.params ?? {}) as Record<string, unknown>;
+  const data = route(method, path, body, params);
   if (data === undefined) {
     throw new AxiosError(
       'This action is unavailable in sample mode. Exit sample mode to use your gateway.',

@@ -7,9 +7,9 @@ export type RunStatus =
   | 'completed'
   | 'failed'
   | 'rejected'
-  | 'canceled';
-
-export type ApprovalDecision = 'approve' | 'reject';
+  | 'canceled'
+  // FORGE-466: an approval whose waiter stopped waiting before anyone answered.
+  | 'timed_out';
 
 export interface HarnessRun {
   id: string;

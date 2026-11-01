@@ -105,6 +105,22 @@ class TestGeometryRecorder:
         assert result["minio_object_key"] is None
         assert result["project_linked"] is False  # no project_id / backend
 
+    async def test_require_blob_store_fails_loudly_and_creates_no_node(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-501: a deterministic fallback commit must not mint an unloadable cad_model."""
+        import digital_twin.storage.work_product_blobs as blobs
+
+        def boom(*a: object, **k: object) -> str:
+            raise RuntimeError("MinIO settings missing required env var: MINIO_ENDPOINT")
+
+        monkeypatch.setattr(blobs, "store_work_product_blob", boom)
+        twin = _FakeTwin()
+        record = make_geometry_recorder(twin, None)
+        with pytest.raises(RuntimeError, match="MINIO_ENDPOINT"):
+            await record(step_base64=_STEP_B64, name="Part", require_blob_store=True)
+        assert twin.created == []
+
     async def test_invalid_base64_raises(self) -> None:
         record = make_geometry_recorder(_FakeTwin(), None)
         with pytest.raises(ValueError, match="not valid base64"):
@@ -218,7 +234,7 @@ class TestCommitGeometryAdapter:
 
         twin = InMemoryTwinAPI.create()
         server = TwinServer(twin=twin, geometry_recorder=make_geometry_recorder(twin, None))
-        with pytest.raises(ValueError, match="step_base64"):
+        with pytest.raises(ValueError, match=r"Missing: session_id, obj_id, step_base64"):
             await server.commit_geometry({"name": "x"})
         with pytest.raises(ValueError, match="name"):
             await server.commit_geometry({"step_base64": _STEP_B64})
@@ -426,6 +442,148 @@ class TestScriptAndGeometryFeatures:
         assert "script_node_id" not in result
 
 
+class TestDuplicateContentIsANoOp:
+    """FORGE-237: live-observed one turn producing THREE "Upper Arm Link"
+    cad_model nodes (two generate_cad_ir auto-commits + one explicit
+    commit_geometry, all the same geometry) -- nothing compared content_hash
+    before creating a new node."""
+
+    async def test_identical_scriptless_recommit_returns_the_existing_node(
+        self, patched_blob_store: dict
+    ) -> None:
+        from uuid import UUID
+
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        record = make_geometry_recorder(twin, None)
+        project_id = "44444444-4444-4444-4444-444444444444"
+
+        v1 = await record(step_base64=_STEP_B64, name="Upper Arm Link", project_id=project_id)
+        v2 = await record(step_base64=_STEP_B64, name="Upper Arm Link", project_id=project_id)
+        v3 = await record(step_base64=_STEP_B64, name="Upper Arm Link", project_id=project_id)
+
+        assert v2["node_id"] == v1["node_id"]
+        assert v3["node_id"] == v1["node_id"]
+        assert v2["already_committed"] is True
+        assert v3["already_committed"] is True
+        assert "already_committed" not in v1
+
+        # Only ONE cad_model node ever got created -- not three.
+        cad_models = await twin.list_work_products(project_id=UUID(project_id))
+        assert len(cad_models) == 1
+
+    async def test_already_committed_message_names_the_existing_node(
+        self, patched_blob_store: dict
+    ) -> None:
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        record = make_geometry_recorder(twin, None)
+        project_id = "55555555-5555-5555-5555-555555555555"
+
+        v1 = await record(step_base64=_STEP_B64, name="Bracket", project_id=project_id)
+        v2 = await record(step_base64=_STEP_B64, name="Bracket", project_id=project_id)
+
+        assert v1["node_id"] in v2["message"]
+
+    async def test_different_geometry_same_name_still_versions_normally(
+        self, patched_blob_store: dict
+    ) -> None:
+        """A genuinely different STEP body under the same name must still
+        create a new node + SUPERSEDES link -- the short circuit is keyed
+        on content_hash, not just name."""
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        record = make_geometry_recorder(twin, None)
+        project_id = "66666666-6666-6666-6666-666666666666"
+        other_step_b64 = base64.b64encode(
+            b"ISO-10303-21;\nHEADER;\na genuinely different body\nENDSEC;\n"
+        ).decode("ascii")
+
+        v1 = await record(step_base64=_STEP_B64, name="Bracket", project_id=project_id)
+        v2 = await record(step_base64=other_step_b64, name="Bracket", project_id=project_id)
+
+        assert v2["node_id"] != v1["node_id"]
+        assert v2["supersedes_node_id"] == v1["node_id"]
+        assert "already_committed" not in v2
+
+    async def test_a_script_source_still_versions_even_with_identical_geometry(
+        self, patched_blob_store: dict, tmp_path
+    ) -> None:
+        """A caller supplying script_source is deliberately authoring a new
+        revision -- must still version even when the STEP bytes happen to
+        be byte-identical to the current node (mirrors
+        test_regenerating_same_name_links_supersedes_chain, just isolating
+        the "identical geometry" leg of it)."""
+        from api_gateway.twin.git_repo_registry import GitRepoRegistry
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        registry = GitRepoRegistry(twin.graph, tmp_path / "repo")
+        record = make_geometry_recorder(twin, None, registry)
+        project_id = "77777777-7777-7777-7777-777777777777"
+
+        v1 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(10)\n",
+        )
+        v2 = await record(
+            step_base64=_STEP_B64,  # byte-identical geometry
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(10)  # re-run, unchanged\n",
+        )
+
+        assert v2["node_id"] != v1["node_id"]
+        assert v2["supersedes_node_id"] == v1["node_id"]
+        assert "already_committed" not in v2
+
+
+class TestSupersedeTriggersStalenessPropagation:
+    """FORGE-314's literal acceptance criterion: editing (re-committing) a
+    named CAD part must make Evidence pinned to the old geometry stale."""
+
+    async def test_evidence_pinned_to_prior_geometry_goes_stale_on_recommit(
+        self, patched_blob_store: dict
+    ) -> None:
+        from api_gateway.twin.evidence_recorder import make_evidence_recorder
+        from twin_core.api import InMemoryTwinAPI
+        from twin_core.consistency.staleness import StalenessEngine
+
+        twin = InMemoryTwinAPI.create()
+        record_geometry = make_geometry_recorder(twin, None)
+        record_evidence = make_evidence_recorder(twin)
+        project_id = "44444444-4444-4444-4444-444444444444"
+
+        v1 = await record_geometry(step_base64=_STEP_B64, name="upper_arm", project_id=project_id)
+        evidence = await record_evidence(
+            evidence_type="inspection",
+            producer={"tool": "fit_check"},
+            inputs={},
+            result={"clearance_mm": 2.1},
+            valid_against=[{"ref": v1["node_id"], "entity_kind": "work_product"}],
+            project_id=project_id,
+        )
+
+        engine = StalenessEngine(twin)
+
+        # Re-committing DIFFERENT geometry for the same named part supersedes v1.
+        other_step = base64.b64encode(
+            b"ISO-10303-21;\nHEADER;\nrevised step body\nENDSEC;\n"
+        ).decode("ascii")
+        v2 = await record_geometry(step_base64=other_step, name="upper_arm", project_id=project_id)
+        assert v2["supersedes_node_id"] == v1["node_id"]
+
+        from uuid import UUID
+
+        status = await engine.get_status("engineering_entity", UUID(evidence["node_id"]))
+        assert status.value == "stale"
+
+
 @pytest.mark.asyncio
 async def test_unconstrained_warning_paths() -> None:
     from api_gateway.twin.geometry_recorder import _unconstrained_warning
@@ -440,3 +598,79 @@ async def test_unconstrained_warning_paths() -> None:
     assert await _unconstrained_warning(None, "p-1") is None
     assert await _unconstrained_warning(_WarnBackend(None), "p-1") is None
     assert await _unconstrained_warning(_WarnBackend(["x"]), None) is None
+
+
+class _AssemblyTwin(_FakeTwin):
+    """FORGE-511: a twin that knows part nodes and records edges."""
+
+    def __init__(self, parts: dict) -> None:
+        super().__init__()
+        self.parts = parts
+        self.edges: list = []
+
+    async def get_work_product(self, node_id):  # type: ignore[no-untyped-def]
+        return self.parts.get(node_id)
+
+    async def add_edge(self, src, dst, edge_type):  # type: ignore[no-untyped-def]
+        self.edges.append((src, dst, edge_type))
+
+
+def _part_wp(project_id: str, name: str = "Board", wp_type: str = "cad_model"):  # type: ignore[no-untyped-def]
+    from twin_core.models.enums import WorkProductType
+    from twin_core.models.work_product import WorkProduct
+
+    return WorkProduct(
+        name=name,
+        type=WorkProductType(wp_type),
+        domain="mechanical",
+        file_path="",
+        content_hash="h",
+        format="step",
+        metadata={"material": "birch ply", "bbox_mm": {"min": [0, 0, 0], "max": [1, 1, 1]}},
+        created_by="t",
+        project_id=project_id,
+    )
+
+
+class TestAssemblyParts:
+    async def test_links_assembly_to_parts(self, patched_blob_store: dict) -> None:
+        from twin_core.models.enums import EdgeType
+
+        pid = "6f1b1c9e-0000-4000-8000-000000000001"
+        part = _part_wp(pid)
+        twin = _AssemblyTwin({part.id: part})
+        record = make_geometry_recorder(twin, _FakeProjectBackend())
+        await record(
+            step_base64=_STEP_B64,
+            name="Shelf Assembly",
+            project_id=pid,
+            parts=[{"node_id": str(part.id)}],
+        )
+        asm = twin.created[0]
+        assert asm.metadata["parts"][0]["node_id"] == str(part.id)
+        assert asm.metadata["parts"][0]["material"] == "birch ply"
+        assert twin.edges == [(asm.id, part.id, EdgeType.PARENT_OF)]
+
+    async def test_rejects_missing_part_and_creates_nothing(self, patched_blob_store: dict) -> None:
+        twin = _AssemblyTwin({})
+        record = make_geometry_recorder(twin, _FakeProjectBackend())
+        with pytest.raises(ValueError, match="does not exist"):
+            await record(
+                step_base64=_STEP_B64,
+                name="A",
+                project_id="6f1b1c9e-0000-4000-8000-000000000001",
+                parts=[{"node_id": "6f1b1c9e-0000-4000-8000-0000000000ff"}],
+            )
+        assert twin.created == []
+
+    async def test_rejects_part_from_another_project(self, patched_blob_store: dict) -> None:
+        part = _part_wp("6f1b1c9e-0000-4000-8000-000000000002")
+        twin = _AssemblyTwin({part.id: part})
+        record = make_geometry_recorder(twin, _FakeProjectBackend())
+        with pytest.raises(ValueError, match="different project"):
+            await record(
+                step_base64=_STEP_B64,
+                name="A",
+                project_id="6f1b1c9e-0000-4000-8000-000000000001",
+                parts=[{"node_id": str(part.id)}],
+            )

@@ -153,3 +153,129 @@ class TestHttpMode:
         )
         with pytest.raises(RuntimeError, match="failed to connect"):
             await create_mcp_bridge(fallback=InMemoryMcpBridge())
+
+
+class TestConnectHttpBridge:
+    """FORGE-475: the design-flow worker connects to the sidecar directly."""
+
+    @pytest.mark.asyncio
+    async def test_connects_and_discovers_without_the_env_pair(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from skill_registry.bridge_factory import connect_http_bridge
+
+        list_payload = (
+            '{"jsonrpc":"2.0","id":"discover","result":{"tools":['
+            '{"tool_id":"twin.get_node","adapter_id":"metaforge","name":"get_node",'
+            '"description":"","capability":"twin"}]}}'
+        )
+        transport = _stub_transport(list_payload)
+        seen: dict[str, Any] = {}
+
+        def make(url: str, **kw: Any) -> Any:
+            seen.update(url=url, **kw)
+            return transport
+
+        monkeypatch.setattr("skill_registry.bridge_factory.HttpTransport", make)
+        bridge = await connect_http_bridge("http://mcp-http:8765", api_key="k", require=True)
+        assert isinstance(bridge, McpClientBridge)
+        assert await bridge.is_available("twin.get_node")
+        assert seen == {"url": "http://mcp-http:8765", "api_key": "k", "service_key": None}
+
+    @pytest.mark.asyncio
+    async def test_the_service_key_reaches_the_transport(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-487: the worker's credential rides beside the bearer key."""
+        from skill_registry.bridge_factory import connect_http_bridge
+
+        list_payload = (
+            '{"jsonrpc":"2.0","id":"discover","result":{"tools":['
+            '{"tool_id":"twin.get_node","adapter_id":"metaforge","name":"get_node",'
+            '"description":"","capability":"twin"}]}}'
+        )
+        seen: dict[str, Any] = {}
+
+        def make(url: str, **kw: Any) -> Any:
+            seen.update(kw)
+            return _stub_transport(list_payload)
+
+        monkeypatch.setattr("skill_registry.bridge_factory.HttpTransport", make)
+        await connect_http_bridge(
+            "http://mcp-http:8765", api_key="k", require=True, service_key="svc"
+        )
+        assert seen == {"api_key": "k", "service_key": "svc"}
+
+    @pytest.mark.asyncio
+    async def test_require_raises_instead_of_falling_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from skill_registry.bridge_factory import connect_http_bridge
+
+        transport = MagicMock()
+        transport.connect = AsyncMock(side_effect=ConnectionRefusedError())
+        transport.disconnect = AsyncMock()
+        monkeypatch.setattr(
+            "skill_registry.bridge_factory.HttpTransport", lambda url, **_kw: transport
+        )
+        with pytest.raises(RuntimeError, match="failed to connect"):
+            await connect_http_bridge("http://mcp-http:8765", require=True)
+
+
+class TestDiscoveredToolRouting:
+    """FORGE-483: tools reported with other adapter ids still route to the transport."""
+
+    @pytest.mark.asyncio
+    async def test_call_reaches_transport_for_foreign_adapter_ids(self) -> None:
+        import json
+
+        from mcp_core.client import McpClient
+        from skill_registry.bridge_factory import _discover_tools
+
+        calls: list[dict[str, Any]] = []
+        list_payload = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "discover",
+                "result": {
+                    "tools": [
+                        {"tool_id": "twin.get_node", "adapter_id": "twin", "name": "get_node"},
+                        {"tool_id": "health.check", "adapter_id": "health", "name": "check"},
+                    ]
+                },
+            }
+        )
+
+        class FakeTransport:
+            async def connect(self) -> None:
+                pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            def is_connected(self) -> bool:
+                return True
+
+            async def send(self, message: str) -> str:
+                req = json.loads(message)
+                if req["method"] == "tool/list":
+                    return list_payload
+                calls.append(req)
+                return json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req["id"],
+                        "result": {"tool_id": req["params"]["tool_id"], "data": {}},
+                    }
+                )
+
+        transport = FakeTransport()
+        client = McpClient()
+        await client.connect("metaforge", transport)  # type: ignore[arg-type]
+        await _discover_tools(client, transport)
+
+        from mcp_core.schemas import ToolCallRequest
+
+        await client.call_tool(ToolCallRequest(tool_id="twin.get_node", arguments={"id": "x"}))
+        assert [c["method"] for c in calls] == ["tool/call"]
+        assert calls[0]["params"]["tool_id"] == "twin.get_node"

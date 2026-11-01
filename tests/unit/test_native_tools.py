@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from orchestrator.harness import HarnessRuntime
-from orchestrator.harness.native_tools import _tool_schemas, run_native_tools
+from orchestrator.harness.native_tools import NATIVE_SYSTEM, _tool_schemas, run_native_tools
 from orchestrator.harness.providers import ProviderSpec, load_provider_config
 from orchestrator.harness.tools import ToolRegistry
 
@@ -380,3 +380,105 @@ async def test_tool_schemas_recomputed_each_round_trip_mid_turn() -> None:
     assert "triple" in seen_tool_names[1]  # registered mid-turn — visible on the very next call
     # The triple tool was actually driven, not just schema-visible.
     assert any(step.tool_call is not None and step.tool_call.name == "triple" for step in res.steps)
+
+
+# ---------------------------------------------------------------------------
+# FORGE-94 remainder: model-visible truncation notice
+# ---------------------------------------------------------------------------
+
+
+def _registry_over_cap(n: int) -> ToolRegistry:
+    tools = ToolRegistry()
+    for i in range(n):
+        tools.register_native(
+            f"tool_{i:03d}",
+            description="d",
+            input_schema={"type": "object", "properties": {}},
+            handler=_double,
+        )
+    return tools
+
+
+@pytest.mark.asyncio
+async def test_model_gets_a_note_the_round_a_truncation_happens() -> None:
+    """The structured log alone left the model no way to tell a dropped tool
+    apart from a capability that never existed -- it should see a note on
+    exactly the round(s) that actually truncated."""
+    rt = HarnessRuntime.build(CONFIG, tools=_registry_over_cap(130))
+    seen_systems: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        # FORGE-478: the note is a volatile suffix, the system stays cacheable.
+        assert request["system"] == NATIVE_SYSTEM
+        seen_systems.append(request["system_suffix"])
+        return {"model": spec.model, "text": "done", "tool_calls": []}
+
+    res = await run_native_tools(rt, "hello", invoke=invoke, max_tools=128)
+    assert res.status == "completed"
+    assert len(seen_systems) == 1
+    assert "search_tools" in seen_systems[0]
+    assert "2 tool(s) were omitted" in seen_systems[0]  # 130 - 128
+
+
+@pytest.mark.asyncio
+async def test_no_note_when_under_the_cap() -> None:
+    rt = _runtime_with_double()
+    seen_systems: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        seen_systems.append(request["system"])
+        return {"model": spec.model, "text": "done", "tool_calls": []}
+
+    res = await run_native_tools(rt, "hello", invoke=invoke, max_tools=128)
+    assert res.status == "completed"
+    assert seen_systems == [NATIVE_SYSTEM]  # unchanged -- no truncation occurred
+
+
+# ---------------------------------------------------------------------------
+# FORGE-235: output truncated at max_tokens must not read as "done"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_response_with_no_tool_calls_retries_instead_of_giving_up() -> None:
+    """Live-observed: a response cut off at the output-token limit mid a
+    large tool-call argument came back from the SDK with NO tool_calls at
+    all and empty/partial text. Treating that like a normal "done" produced
+    the wrong user-facing message after a single step. It must instead
+    consume a real step and retry, with the model told the actual cause."""
+    rt = _runtime_with_double()
+    calls = {"n": 0}
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"model": spec.model, "text": "", "tool_calls": [], "truncated": True}
+        return {"model": spec.model, "text": "done", "tool_calls": []}
+
+    result = await run_native_tools(rt, "go", invoke=invoke, max_steps=5)
+
+    assert result.status == "completed"
+    assert result.output == "done"
+    assert calls["n"] == 2  # the truncated round was retried, not treated as final
+    assert result.steps[0].tool_call is None
+    assert result.steps[0].error == "response truncated at the output token limit"
+
+
+@pytest.mark.asyncio
+async def test_truncation_retry_is_bounded_by_max_steps() -> None:
+    """A response that keeps truncating must not loop forever -- the
+    existing max_steps machinery already bounds it (every retry consumes a
+    real step), and the trace it hands back carries the real cause on every
+    step for the outer layer's summarize_trajectory to report (see
+    test_context_compression.py's own coverage of that surfacing)."""
+    rt = _runtime_with_double()
+
+    async def always_truncated(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        return {"model": spec.model, "text": "", "tool_calls": [], "truncated": True}
+
+    result = await run_native_tools(rt, "go", invoke=always_truncated, max_steps=3)
+
+    assert result.status == "completed"
+    assert result.stop_reason == "max_steps"
+    assert len(result.steps) == 3
+    assert all(s.error == "response truncated at the output token limit" for s in result.steps)

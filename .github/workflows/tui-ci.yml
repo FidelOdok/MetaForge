@@ -11,12 +11,24 @@ on:
 jobs:
   check:
     name: Typecheck & Test
-    runs-on: [self-hosted, linux, fidel-dev]
+    # GitHub-hosted — see the note in ci.yml. This workflow has a second
+    # reason: the "check" job's bun regression test silently skipped on the
+    # self-hosted runner because bun was not usable on its PATH
+    # (`spawn bun EACCES`), which is the kind of quiet no-op a shared,
+    # hand-maintained box produces (FORGE-308).
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: tui
     steps:
       - uses: actions/checkout@v4
+      # Bun is what the shipped `forge` binary actually runs on, and
+      # commands.test.ts has a writeAllSync regression test that needs it.
+      # Without this step that test does not fail — it calls `t.skip()` on
+      # ENOENT/EACCES and the suite still reports green, which is how it went
+      # unrun on the self-hosted box. Installing bun here is what makes the
+      # test a test (FORGE-308).
+      - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -28,7 +40,7 @@ jobs:
 
   binary:
     name: Build single binary (bun)
-    runs-on: [self-hosted, linux, fidel-dev]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: tui
@@ -45,6 +57,21 @@ jobs:
       # Verify the provenance stamp end-to-end — the check that makes
       # "is my CLI stale?" answerable (the trap the Python binary hit).
       - run: ./dist/forge --version
+      # FORGE-92: the "check" job's own writeAllSync-under-bun regression
+      # test can only run for real when bun happens to be usable on that
+      # job's PATH (observed: it wasn't, on this same self-hosted runner --
+      # `spawn bun EACCES`, silently skipped). This job's bun install IS
+      # guaranteed usable (bundle:bin above just proved it), so it's the one
+      # place a real bun-runtime check of the fix is certain to actually
+      # run — importing straight from src/ needs no build step; Bun runs TS
+      # natively.
+      - name: Verify writeAllSync delivers a large payload without truncation (bun)
+        run: |
+          bun -e '
+            import { writeAllSync } from "./src/commands.ts";
+            writeAllSync(1, "x".repeat(1500000));
+            process.exit(0);
+          ' | wc -c | grep -qx 1500000 || { echo "writeAllSync truncated output under bun"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: forge-linux-x64

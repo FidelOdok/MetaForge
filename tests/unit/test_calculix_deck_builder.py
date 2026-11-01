@@ -1,0 +1,450 @@
+"""Unit tests for building a complete CalculiX static-stress deck (FORGE-234).
+
+Live-validated separately (not in this unit suite -- no ccx/gmsh binaries
+here): a real deck built by this exact code, run through the real ccx
+solver on fidel-dev against a 100x20x10mm steel cantilever (fixed at
+Surface1/x=0, 100N in -Z at Surface2/x=100, gmsh element_size=1.2mm),
+matched Euler-Bernoulli beam theory (0.1mm tip deflection) within ~5% --
+comfortably inside the ticket's own 10% acceptance bar. See the PR/Jira
+comment for the full run.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from tool_registry.tools.calculix.deck_builder import (
+    build_modal_deck,
+    build_static_stress_deck,
+    build_thermal_deck,
+)
+from tool_registry.tools.calculix.inp_mesh import MeshData
+
+
+def _cantilever_mesh() -> MeshData:
+    """A minimal, hand-built cantilever-shaped mesh: two C3D4 tets forming a
+    tiny box, a CPS3 surface elset at each end (the "faces" a real
+    generate_mesh call would also emit), plus a T3D2 edge elset -- the same
+    mixed-element shape gmsh actually produces, so the volume-only
+    filtering logic is genuinely exercised."""
+    mesh = MeshData()
+    mesh.nodes = {
+        1: (0.0, 0.0, 0.0),
+        2: (0.0, 0.0, 10.0),
+        3: (0.0, 20.0, 0.0),
+        4: (0.0, 20.0, 10.0),
+        5: (100.0, 0.0, 0.0),
+        6: (100.0, 0.0, 10.0),
+        7: (100.0, 20.0, 0.0),
+        8: (100.0, 20.0, 10.0),
+        9: (50.0, 10.0, 5.0),
+        10: (50.0, 10.0, 6.0),  # an interior node only in the mesh, not on either face
+    }
+    mesh.elements = {
+        101: ("T3D2", [1, 2]),
+        201: ("CPS3", [1, 2, 3]),
+        202: ("CPS3", [2, 4, 3]),
+        203: ("CPS3", [5, 6, 7]),
+        204: ("CPS3", [6, 8, 7]),
+        301: ("C3D4", [1, 2, 3, 9]),
+        302: ("C3D4", [5, 6, 7, 9]),
+        303: ("C3D4", [3, 4, 9, 10]),
+        304: ("C3D4", [6, 8, 9, 10]),
+    }
+    mesh.elsets = {
+        "Line1": [101],
+        "Surface1": [201, 202],  # x=0 face -- nodes 1,2,3,4
+        "Surface2": [203, 204],  # x=100 face -- nodes 5,6,7,8
+        "Volume1": [301, 302, 303, 304],
+    }
+    return mesh
+
+
+class TestBuildStaticStressDeck:
+    def test_deck_contains_the_expected_cards_in_order(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_static_stress_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            fixed_node_set="Surface1",
+            load_node_set="Surface2",
+            load_force_n=(0.0, 0.0, -100.0),
+        )
+        for card in (
+            "*NODE",
+            "*ELEMENT, TYPE=C3D4, ELSET=Volume1",
+            "*NSET, NSET=FIXED_Surface1",
+            "*MATERIAL, NAME=MAT1",
+            "*ELASTIC, TYPE=ISO",
+            "*SOLID SECTION, ELSET=Volume1, MATERIAL=MAT1",
+            "*STEP",
+            "*STATIC",
+            "*BOUNDARY",
+            "FIXED_Surface1, 1, 3",
+            "*CLOAD",
+            "*NODE FILE",
+            "U",
+            "*EL FILE",
+            "S",
+            "*END STEP",
+        ):
+            assert card in deck, f"missing card: {card!r}"
+        # cards appear in the order CalculiX expects (material before
+        # section, section before step, boundary before load, end step last)
+        assert deck.index("*ELASTIC") < deck.index("*SOLID SECTION")
+        assert deck.index("*SOLID SECTION") < deck.index("*STEP")
+        assert deck.index("*BOUNDARY") < deck.index("*CLOAD")
+        assert deck.index("*CLOAD") < deck.index("*END STEP")
+
+    def test_only_volume_elements_are_included_not_surface_or_edge(self) -> None:
+        """The exact bug found live: leaving CPS3/T3D2 elements in a solved
+        deck makes ccx fail ('gen3delem: first thickness ... is zero') --
+        they're free face/edge markers gmsh emits, not meant to carry their
+        own section stiffness."""
+        mesh = _cantilever_mesh()
+        deck = build_static_stress_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            fixed_node_set="Surface1",
+            load_node_set="Surface2",
+            load_force_n=(0.0, 0.0, -100.0),
+        )
+        assert "TYPE=CPS3" not in deck
+        assert "TYPE=T3D2" not in deck
+        # element 101 (T3D2) and 201-204 (CPS3) must not appear as element
+        # definitions (their ids may legitimately appear as node ids, so
+        # scan only inside *ELEMENT blocks, not the whole deck text).
+        element_ids_present: set[int] = set()
+        in_element_block = False
+        for line in deck.splitlines():
+            if line.startswith("*ELEMENT"):
+                in_element_block = True
+                continue
+            if line.startswith("*"):
+                in_element_block = False
+                continue
+            if in_element_block and line.strip():
+                element_ids_present.add(int(line.split(",")[0]))
+        assert element_ids_present == {301, 302, 303, 304}
+
+    def test_load_force_is_divided_evenly_across_load_nodes(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_static_stress_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            fixed_node_set="Surface1",
+            load_node_set="Surface2",
+            load_force_n=(0.0, 0.0, -100.0),
+        )
+        # Surface2's node set is {5, 6, 7, 8} -- 4 nodes, -100N total in Z.
+        load_lines = deck.split("*CLOAD")[1].split("*NODE FILE")[0].strip().splitlines()
+        parsed = [tuple(p.strip() for p in line.split(",")) for line in load_lines]
+        assert parsed == [
+            ("5", "3", "-25"),
+            ("6", "3", "-25"),
+            ("7", "3", "-25"),
+            ("8", "3", "-25"),
+        ]
+
+    def test_zero_components_of_the_force_are_not_emitted(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_static_stress_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            fixed_node_set="Surface1",
+            load_node_set="Surface2",
+            load_force_n=(10.0, 0.0, 0.0),
+        )
+        load_lines = deck.split("*CLOAD")[1].split("*NODE FILE")[0].strip().splitlines()
+        # Only DOF 1 (X) lines, never DOF 2 or 3 with a zero magnitude.
+        assert all(line.split(",")[1].strip() == "1" for line in load_lines if line.strip())
+
+    def test_unknown_volume_elset_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(ValueError, match="NotAVolumeSet"):
+            build_static_stress_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                fixed_node_set="Surface1",
+                load_node_set="Surface2",
+                load_force_n=(0.0, 0.0, -100.0),
+                volume_elset="NotAVolumeSet",
+            )
+
+    def test_unknown_fixed_node_set_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(KeyError):
+            build_static_stress_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                fixed_node_set="NotAFace",
+                load_node_set="Surface2",
+                load_force_n=(0.0, 0.0, -100.0),
+            )
+
+    def test_volume_elset_with_no_c3d_elements_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        mesh.elsets["EmptyVolume"] = [201, 202]  # CPS3 only, no real volume elements
+        with pytest.raises(ValueError, match="no volume"):
+            build_static_stress_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                fixed_node_set="Surface1",
+                load_node_set="Surface2",
+                load_force_n=(0.0, 0.0, -100.0),
+                volume_elset="EmptyVolume",
+            )
+
+
+class TestBuildModalDeck:
+    def test_deck_contains_the_expected_cards_in_order(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_modal_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            density_tonne_mm3=7.85e-9,
+            fixed_node_set="Surface1",
+            num_modes=3,
+        )
+        for card in (
+            "*NODE",
+            "*ELEMENT, TYPE=C3D4, ELSET=Volume1",
+            "*NSET, NSET=FIXED_Surface1",
+            "*MATERIAL, NAME=MAT1",
+            "*ELASTIC, TYPE=ISO",
+            "*DENSITY",
+            "7.85E-09",
+            "*SOLID SECTION, ELSET=Volume1, MATERIAL=MAT1",
+            "*STEP",
+            "*FREQUENCY",
+            "3",
+            "*BOUNDARY",
+            "FIXED_Surface1, 1, 3",
+            "*NODE FILE",
+            "U",
+            "*END STEP",
+        ):
+            assert card in deck, f"missing card: {card!r}"
+        assert deck.index("*ELASTIC") < deck.index("*DENSITY")
+        assert deck.index("*DENSITY") < deck.index("*SOLID SECTION")
+        assert deck.index("*SOLID SECTION") < deck.index("*STEP")
+        assert deck.index("*FREQUENCY") < deck.index("*BOUNDARY")
+        assert deck.index("*BOUNDARY") < deck.index("*END STEP")
+
+    def test_no_cload_and_no_el_file_unlike_static_stress(self) -> None:
+        """A modal (eigenvalue) solve has no applied load and requests no
+        stress output -- both are static_stress-only cards."""
+        mesh = _cantilever_mesh()
+        deck = build_modal_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            density_tonne_mm3=7.85e-9,
+            fixed_node_set="Surface1",
+            num_modes=3,
+        )
+        assert "*CLOAD" not in deck
+        assert "*EL FILE" not in deck
+        assert "*STATIC" not in deck
+
+    def test_only_volume_elements_are_included(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_modal_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            density_tonne_mm3=7.85e-9,
+            fixed_node_set="Surface1",
+            num_modes=3,
+        )
+        assert "TYPE=CPS3" not in deck
+        assert "TYPE=T3D2" not in deck
+
+    def test_unknown_volume_elset_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(ValueError, match="NotAVolumeSet"):
+            build_modal_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                density_tonne_mm3=7.85e-9,
+                fixed_node_set="Surface1",
+                num_modes=3,
+                volume_elset="NotAVolumeSet",
+            )
+
+    def test_unknown_fixed_node_set_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(KeyError):
+            build_modal_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                density_tonne_mm3=7.85e-9,
+                fixed_node_set="NotAFace",
+                num_modes=3,
+            )
+
+    def test_num_modes_must_be_positive(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(ValueError, match="num_modes"):
+            build_modal_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                density_tonne_mm3=7.85e-9,
+                fixed_node_set="Surface1",
+                num_modes=0,
+            )
+
+    def test_density_card_never_emits_python_float_repr(self) -> None:
+        """Regression test for a real bug found live on fidel-dev: a density
+        computed as ``7850 * 1e-12`` (a normal materials-table conversion)
+        reprs in Python as ``'7.849999999999999e-09'`` -- 17 significant
+        digits -- which CalculiX's Fortran free-format *DENSITY reader
+        silently misparsed, understating the assembled mass by ~2.6e8x and
+        reporting modal frequencies ~16000x too low with no error at all.
+        The deck must never emit that raw repr."""
+        mesh = _cantilever_mesh()
+        raw_density = 7850 * 1e-12
+        assert raw_density == 7.849999999999999e-09  # the exact float this reproduces
+
+        deck = build_modal_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            density_tonne_mm3=raw_density,
+            fixed_node_set="Surface1",
+            num_modes=3,
+        )
+        assert "7.849999999999999e-09" not in deck
+        density_line = deck.splitlines()[deck.splitlines().index("*DENSITY") + 1]
+        assert len(density_line.replace("-", "").replace(".", "")) <= 11  # <=10 sig figs + sign
+
+
+class TestBuildThermalDeck:
+    def test_deck_contains_the_expected_cards_in_order(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_thermal_deck(
+            mesh,
+            conductivity_w_mm_k=0.235,
+            heat_source_node_set="Surface2",
+            power_dissipation_w=5.0,
+            sink_node_set="Surface1",
+            sink_temp_c=20.0,
+        )
+        for card in (
+            "*NODE",
+            "*ELEMENT, TYPE=C3D4, ELSET=Volume1",
+            "*NSET, NSET=SINK_Surface1",
+            "*MATERIAL, NAME=MAT1",
+            "*CONDUCTIVITY",
+            "0.235",
+            "*SOLID SECTION, ELSET=Volume1, MATERIAL=MAT1",
+            "*STEP",
+            "*HEAT TRANSFER, STEADY STATE",
+            "*BOUNDARY",
+            "SINK_Surface1, 11, 11, 20",
+            "*CFLUX",
+            "*NODE FILE",
+            "NT",
+            "*END STEP",
+        ):
+            assert card in deck, f"missing card: {card!r}"
+        assert deck.index("*CONDUCTIVITY") < deck.index("*SOLID SECTION")
+        assert deck.index("*SOLID SECTION") < deck.index("*STEP")
+        assert deck.index("*HEAT TRANSFER") < deck.index("*BOUNDARY")
+        assert deck.index("*BOUNDARY") < deck.index("*CFLUX")
+        assert deck.index("*CFLUX") < deck.index("*END STEP")
+
+    def test_no_elastic_density_or_el_file_unlike_structural_decks(self) -> None:
+        """A thermal solve has no stiffness/mass matrix and requests no
+        displacement/stress output -- all structural-only cards."""
+        mesh = _cantilever_mesh()
+        deck = build_thermal_deck(
+            mesh,
+            conductivity_w_mm_k=0.235,
+            heat_source_node_set="Surface2",
+            power_dissipation_w=5.0,
+            sink_node_set="Surface1",
+            sink_temp_c=20.0,
+        )
+        assert "*ELASTIC" not in deck
+        assert "*DENSITY" not in deck
+        assert "*EL FILE" not in deck
+        assert "*CLOAD" not in deck
+        assert "*STATIC" not in deck
+        assert "*FREQUENCY" not in deck
+
+    def test_heat_flux_is_divided_evenly_across_heat_source_nodes(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_thermal_deck(
+            mesh,
+            conductivity_w_mm_k=0.235,
+            heat_source_node_set="Surface2",  # nodes 5,6,7,8 -- 4 nodes
+            power_dissipation_w=8.0,
+            sink_node_set="Surface1",
+            sink_temp_c=20.0,
+        )
+        cflux_index = deck.splitlines().index("*CFLUX")
+        cflux_lines = deck.splitlines()[cflux_index + 1 : cflux_index + 5]
+        for node_id, line in zip((5, 6, 7, 8), cflux_lines):
+            assert line == f"{node_id}, 11, 2"  # 8.0 / 4 nodes = 2.0 W/node
+
+    def test_only_volume_elements_are_included(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_thermal_deck(
+            mesh,
+            conductivity_w_mm_k=0.235,
+            heat_source_node_set="Surface2",
+            power_dissipation_w=5.0,
+            sink_node_set="Surface1",
+            sink_temp_c=20.0,
+        )
+        assert "TYPE=CPS3" not in deck
+        assert "TYPE=T3D2" not in deck
+
+    def test_unknown_volume_elset_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(ValueError, match="NotAVolumeSet"):
+            build_thermal_deck(
+                mesh,
+                conductivity_w_mm_k=0.235,
+                heat_source_node_set="Surface2",
+                power_dissipation_w=5.0,
+                sink_node_set="Surface1",
+                sink_temp_c=20.0,
+                volume_elset="NotAVolumeSet",
+            )
+
+    def test_unknown_heat_source_node_set_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(KeyError):
+            build_thermal_deck(
+                mesh,
+                conductivity_w_mm_k=0.235,
+                heat_source_node_set="NotAFace",
+                power_dissipation_w=5.0,
+                sink_node_set="Surface1",
+                sink_temp_c=20.0,
+            )
+
+    def test_unknown_sink_node_set_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(KeyError):
+            build_thermal_deck(
+                mesh,
+                conductivity_w_mm_k=0.235,
+                heat_source_node_set="Surface2",
+                power_dissipation_w=5.0,
+                sink_node_set="NotAFace",
+                sink_temp_c=20.0,
+            )

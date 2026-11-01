@@ -98,8 +98,26 @@ async def check(
     return True, f"polling {queue!r} as {identities}"
 
 
-def main() -> int:
-    healthy, reason = asyncio.run(check())
+def main(argv: list[str] | None = None) -> int:
+    """Probe one task queue.
+
+    ``--task-queue`` matters now that there is more than one (FORGE-401 put
+    design flows on their own). Without it this probes the default queue
+    whatever container it runs in, so a design-flow worker would report the
+    health of the *agent-task* worker -- green while itself dead, which is
+    worse than no probe at all.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Is this container polling its task queue?")
+    parser.add_argument(
+        "--task-queue",
+        default=None,
+        help="Queue to probe. Defaults to $TEMPORAL_TASK_QUEUE, then the agent-task queue.",
+    )
+    args = parser.parse_args(argv)
+
+    healthy, reason = asyncio.run(check(task_queue=args.task_queue))
     print(("healthy: " if healthy else "unhealthy: ") + reason)
     return 0 if healthy else 1
 

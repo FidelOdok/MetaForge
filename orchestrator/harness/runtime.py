@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
@@ -36,14 +36,21 @@ from orchestrator.harness.providers.pipeline import (
     StreamEvents,
     StreamInvoke,
 )
+from orchestrator.harness.result_handles import ResultStore
 from orchestrator.harness.runs import (
-    ApprovalDecision,
+    ApprovalWait,
     InMemoryRunStore,
-    InvalidTransition,
-    RunNotFoundError,
-    RunStatus,
+    await_approval_decision,
 )
-from orchestrator.harness.tools import ApprovalDeniedError, GateCheck, ToolRegistry, ToolSpec
+from orchestrator.harness.tool_events import new_call_id, report_tool_event
+from orchestrator.harness.tools import (
+    NATIVE,
+    ApprovalDeniedError,
+    GateCheck,
+    ToolRegistry,
+    ToolSpec,
+)
+from orchestrator.harness.validation import validate_arguments
 from twin_core.policy.engine import PolicyEngine
 
 logger = structlog.get_logger(__name__)
@@ -87,9 +94,22 @@ class HarnessRuntime:
     on_approval_request: OnApprovalRequest | None = None
     approval_timeout_seconds: float = 120.0
     approval_poll_interval: float = 1.0
+    # FORGE-490: ``"hold"`` (default) parks a ``requires_approval`` call in
+    # ``runs`` until someone answers it. ``"forward"`` makes no in-process hold
+    # at all: the call goes straight to the tool, which for an MCP tool is the
+    # sidecar, where the service-caller policy decides (in-scope writes run,
+    # refused ones come back refused, human-authority tools go to the shared
+    # approval ledger). Used by unattended design-flow phase turns.
+    approval_mode: str = "hold"
+    # FORGE-490: whether anything can answer a hold in ``runs``. False in a
+    # process whose store no dashboard or person can reach (the design-flow
+    # worker); a hold created there is alarmed, because it can only time out.
+    approver_reachable: bool = True
     # Injectable so tests don't wait real wall-clock time (same seam as
     # ProviderPipeline's `sleep`).
     approval_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    # FORGE-479: tool results over the inline limit, addressable by handle.
+    results: ResultStore = field(default_factory=ResultStore)
 
     @classmethod
     def build(
@@ -109,6 +129,8 @@ class HarnessRuntime:
         approval_timeout_seconds: float = 120.0,
         approval_poll_interval: float = 1.0,
         approval_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        approval_mode: str = "hold",
+        approver_reachable: bool = True,
     ) -> HarnessRuntime:
         """Assemble a runtime from an optional provider config.
 
@@ -138,6 +160,8 @@ class HarnessRuntime:
             approval_timeout_seconds=approval_timeout_seconds,
             approval_poll_interval=approval_poll_interval,
             approval_sleep=approval_sleep,
+            approval_mode=approval_mode,
+            approver_reachable=approver_reachable,
         )
 
     def _effective_invoke(self, base_invoke: Invoke) -> Invoke:
@@ -201,6 +225,21 @@ class HarnessRuntime:
         all, an explicit rejection, or a timeout all raise
         :class:`ApprovalDeniedError` rather than ever silently proceeding.
         """
+        if not self.approver_reachable:
+            # FORGE-490: a hold nobody can answer. It will only time out and
+            # deny, so say so loudly instead of looking like a slow approver.
+            logger.error(
+                "approval_hold_unreachable",
+                tool=spec.name,
+                session_id=self.session_id,
+                detail="in-process approval store has no reachable approver; "
+                "the call will time out and be denied",
+            )
+            if self.metrics is not None:
+                try:
+                    self.metrics.record_unreachable_approval_hold(spec.name)
+                except Exception:  # noqa: BLE001 - metrics must never break a tool call
+                    pass
         run = self.runs.create({"tool": spec.name, "arguments": arguments})
         self.runs.start(run.id)
         self.runs.request_approval(run.id, reason=f"approval required for tool '{spec.name}'")
@@ -211,23 +250,20 @@ class HarnessRuntime:
                 logger.warning(
                     "approval_notify_failed", run_id=run.id, tool=spec.name, error=str(exc)
                 )
-        deadline = time.monotonic() + self.approval_timeout_seconds
-        while time.monotonic() < deadline:
-            status = self.runs.get(run.id).status
-            if status is RunStatus.RUNNING:
-                return
-            if status is RunStatus.REJECTED:
-                raise ApprovalDeniedError(spec.name, "rejected")
-            await self.approval_sleep(self.approval_poll_interval)
-        # Timed out — deny by default. A decision landing in the exact
-        # instant between the last poll and here is still honored (checked
-        # once more) rather than clobbered by a race with submit_approval.
-        try:
-            self.runs.submit_approval(run.id, ApprovalDecision.REJECT)
-        except (InvalidTransition, RunNotFoundError):
-            pass
-        if self.runs.get(run.id).status is RunStatus.RUNNING:
+        # FORGE-359: the wait itself lives in ``runs`` so the MCP path holds
+        # calls the same way. One copy of the loop means one copy of the
+        # race fix it carries.
+        outcome = await await_approval_decision(
+            self.runs,
+            run.id,
+            timeout_seconds=self.approval_timeout_seconds,
+            poll_interval=self.approval_poll_interval,
+            sleep=self.approval_sleep,
+        )
+        if outcome is ApprovalWait.APPROVED:
             return
+        if outcome is ApprovalWait.REJECTED:
+            raise ApprovalDeniedError(spec.name, "rejected")
         logger.warning("approval_timed_out", run_id=run.id, tool=spec.name)
         raise ApprovalDeniedError(spec.name, "timed out waiting for approval (denied by default)")
 
@@ -235,11 +271,38 @@ class HarnessRuntime:
         """Invoke a registered tool, enforcing this runtime's gate + approval policy."""
         start = time.monotonic()
         status = "ok"
+        call_id = new_call_id()
+        report_tool_event(call_id, name, "started")
         with tracer.start_as_current_span("harness.tool_call") as span:
             span.set_attribute("tool.name", name)
             try:
                 spec = self.tools.get(name)
-                if spec.requires_approval:
+                # FORGE-222: validate BEFORE pausing for approval, not after.
+                # A gated tool used to show the human an approval prompt for
+                # arguments that were going to be rejected anyway the moment
+                # the call actually ran (ToolRegistry.invoke below re-checks
+                # this same schema) -- live-observed asking a human to approve
+                # 13 large Design IR documents, most of which then failed
+                # validation, burning both the approval AND the retry. Raises
+                # the identical ToolValidationError either loop's existing
+                # error path already surfaces to the model -- this only moves
+                # *when* that check runs, not what it checks.
+                validate_arguments(name, spec.input_schema, arguments)
+                if spec.requires_approval and self.approval_mode == "forward":
+                    # FORGE-490: only an MCP tool reaches the sidecar's
+                    # service-caller policy. An in-process tool would run with
+                    # no check at all, so refuse it: not run, not held.
+                    if spec.origin == NATIVE:
+                        logger.warning(
+                            "approval_tool_refused_unattended",
+                            tool=spec.name,
+                            session_id=self.session_id,
+                        )
+                        raise ApprovalDeniedError(
+                            spec.name,
+                            "not available in an unattended design-flow turn",
+                        )
+                elif spec.requires_approval:
                     await self._await_approval(spec, arguments)
                 # FORGE-71: actor/state are deliberately minimal here -- a
                 # generic tool-dispatch layer has no domain-specific
@@ -265,6 +328,12 @@ class HarnessRuntime:
                 raise
             finally:
                 span.set_attribute("tool.status", status)
+                report_tool_event(
+                    call_id,
+                    name,
+                    "finished" if status == "ok" else "failed",
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                )
                 if self.metrics is not None:
                     try:
                         self.metrics.record_harness_tool_call(

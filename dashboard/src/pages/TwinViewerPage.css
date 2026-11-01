@@ -39,6 +39,39 @@
 .tw-workspace button {
   font: inherit;
 }
+/* FORGE-647: the live assembly panel floats over the view. It cannot be a grid
+   item: the workspace places its children by named area, and an unplaced one
+   lands in a column of no width. */
+.tw-live header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.tw-live header button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+.tw-live ol {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+}
+.tw-live {
+  position: absolute;
+  top: 92px;
+  right: calc(var(--tw-inspector) + var(--tw-chat) + 16px);
+  z-index: 6;
+  width: min(480px, calc(100% - var(--tw-inspector) - var(--tw-chat) - 48px));
+  max-height: calc(100% - 140px);
+  overflow: auto;
+  padding: 12px;
+  background: var(--tw-panel);
+  border: 1px solid var(--tw-line);
+  border-radius: 8px;
+}
 .tw-workspace h1,
 .tw-workspace h2,
 .tw-workspace h3,
@@ -191,6 +224,9 @@
   bottom: 155px;
   top: 24px;
   right: 18px;
+  /* The links bar is a row above the canvas, not a float over its top nodes. */
+  display: flex;
+  flex-direction: column;
 }
 .tw-render-area > .react-flow {
   background: transparent !important;
@@ -767,6 +803,50 @@
   display: flex;
   gap: 10px;
 }
+.tw-assembly-tree button {
+  cursor: pointer;
+  color: var(--tw-ink);
+  text-align: left;
+  align-items: center;
+}
+.tw-assembly-tree button[data-selected="true"] {
+  border-color: #ff5a0a;
+  background: rgba(255, 90, 10, 0.15);
+}
+.tw-latest-assembly {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--tw-line);
+  border-radius: 6px;
+  background: var(--tw-panel);
+  color: var(--tw-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.tw-latest-assembly[aria-current="true"] {
+  border-color: #ff5a0a;
+}
+.tw-latest-assembly > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+.tw-latest-assembly small,
+.tw-latest-assembly em {
+  color: var(--tw-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+.tw-latest-assembly em {
+  margin-left: auto;
+}
+.tw-latest-assembly strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tw-assembly-tree small {
   margin-left: auto;
   color: var(--tw-muted);
@@ -1053,6 +1133,11 @@
   .tw-render-area .react-flow__controls {
     left: var(--tw-rail);
     bottom: 12px;
+  }
+  /* The canvas runs under the nav and the explorer here; the bar must not. */
+  .tw-render-area > .tw-links {
+    margin-left: var(--tw-rail);
+    margin-right: 12px;
   }
   .tw-chat-position {
     left: calc(var(--tw-rail) + 12px);
@@ -1598,4 +1683,41 @@
   .sc-head {
     gap: 2px;
   }
+}
+
+/* FORGE-704: the graph's link controls. */
+.tw-links {
+  position: relative;
+  z-index: 7;
+  flex: none;
+  margin: 0 0 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: var(--tw-panel);
+  border: 1px solid var(--tw-line);
+  border-radius: 8px;
+}
+.tw-links-label,
+.tw-links-note {
+  color: var(--tw-muted);
+}
+.tw-links-warn {
+  color: var(--mf-c-f5a623);
+}
+.tw-links button {
+  padding: 2px 8px;
+  color: var(--tw-muted);
+  background: transparent;
+  border: 1px dashed var(--tw-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tw-links button[aria-pressed='true'] {
+  color: var(--tw-ink);
+  background: var(--tw-raised);
+  border-style: solid;
 }

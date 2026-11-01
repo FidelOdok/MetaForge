@@ -172,6 +172,22 @@ async def handle_run_fea(request: RunFeaRequest) -> ToolResponse:
                 error=str(exc),
             )
 
+        except FrdParseError as exc:
+            # FORGE-232: ccx "solving" an empty/incomplete deck exits 0 (not
+            # a SolverError) but writes an empty .frd -- parse_frd_file/
+            # extract_results now raise for that, same as an ordinary
+            # unparseable file. Report it the same honest way.
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            span.record_exception(exc)
+            logger.error("FRD parse failed", error=str(exc))
+            return ToolResponse(
+                tool_id="calculix.run_fea",
+                status="error",
+                data={"error_type": "parse_error"},
+                duration_ms=round(elapsed_ms, 1),
+                error=str(exc),
+            )
+
         except (FileNotFoundError, ValueError) as exc:
             elapsed_ms = (time.monotonic() - start_time) * 1000
             span.record_exception(exc)

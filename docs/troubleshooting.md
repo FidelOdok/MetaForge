@@ -38,6 +38,46 @@ If you need fallback to fail loudly instead of silently, set
 in the gateway environment — the server then refuses to start
 without them.
 
+The compose stack sets `METAFORGE_REQUIRE_NEO4J=true` on the gateway
+by default, because it ships Neo4j: there the in-memory
+twin is never what you want. The gateway retries the connection for
+just under two minutes (`METAFORGE_NEO4J_CONNECT_ATTEMPTS`, default
+32), which covers Neo4j's cold start after a host reboot, when Docker
+restarts every container at once without honouring `depends_on`. If
+Neo4j is still unreachable after that, the gateway exits and
+`restart: unless-stopped` brings it back until Neo4j is up. To boot
+the compose gateway without Neo4j on purpose, set
+`METAFORGE_REQUIRE_NEO4J=false` in `.env`.
+
+A gateway started with `--reload` (the dev override) does not exit
+on a startup failure, because the reloader process stays up. After a
+reboot, check that `/health` reports `twin_backend` as `neo4j
+(persistent)`, and restart the gateway if it does not.
+
+## A container stays unhealthy, or the host runs out of memory
+
+**Symptom:** a service reports `unhealthy` in `docker compose ps` and
+keeps running, or the host stops answering after memory runs low.
+
+**Diagnosis:** Docker restarts a container that exits, never one that
+keeps running in a bad state, and nothing in Docker watches host memory.
+
+**Fix:** the compose stack runs a `watchdog` service for this. It
+restarts a stack container that stays unhealthy for three checks, restarts
+the gateway when its twin has fallen back to memory, and reports host
+memory available (it never kills anything for memory). Restarts are rate
+limited, so a container that fails every start raises the
+`WatchdogRestartBlocked` alert instead of being restarted in a loop.
+Check what it has done with:
+
+```bash
+docker compose logs --tail 100 watchdog
+```
+
+Its alerts, settings and the security note about the Docker socket it
+mounts are in the
+[host watchdog runbook](https://github.com/FidelOdok/MetaForge/blob/main/docs/runbooks/host-watchdog.md).
+
 ## `knowledge.ingest` reports success but `knowledge.search` finds nothing
 
 **Symptom:** An ingest returns `chunks_indexed = N` (N > 0), yet a
@@ -85,7 +125,7 @@ invalid`, regardless of query or filters.
 encoded-JSON metadata blob the read paths parse. The known writer of
 such rows is **lightrag-hku 1.5.x**, which basenames `file_path` on
 write (keeps only the part after the last `/`) — `pyproject.toml` pins
-`lightrag-hku>=1.4,<1.5` for exactly this reason (MET-577). One bad row
+`lightrag-hku>=1.4,<1.5` for exactly this reason. One bad row
 used to make every `file_path::jsonb` cast in the workspace fatal.
 
 **Behaviour now:** the casting queries prefilter to JSON-shaped rows
@@ -161,7 +201,7 @@ usually your active shell or IDE.
 `'tool_name' is required and must be a string` (or similar) for
 every spec-compliant call.
 
-**Cause:** This was MET-420 — the unified MCP server was dropping
+**Cause:** This was a bug where the unified MCP server was dropping
 the `arguments` payload on `tools/call` for the standard MCP
 shape. The fix landed in PR #181.
 
@@ -313,6 +353,144 @@ Reaching for `OTEL_SDK_DISABLED` when you only meant "don't export" is
 the trap: it also makes the SDK hand out no-op tracers, which silently
 breaks any test that asserts on span attributes.
 
+## The MCP sidecar is serving old code
+
+Symptoms read like a *smaller deployment*, not like staleness: an older
+protocol version in the `initialize` result, tools missing from
+`tools/list`, a prompt that does not exist. The first time this happened,
+four bugs were filed against the run and two of their findings were not
+real.
+
+The cause is that `mcp-http` and `gateway` pick up a new checkout
+differently:
+
+| Service | How it loads code | A `git checkout` on the host |
+|---------|-------------------|------------------------------|
+| `gateway` | uvicorn's reloader supervises it (`--reload`) | picked up within seconds |
+| `mcp-http` | calls `uvicorn.Server.serve()` in the bootstrap's own event loop, so there is no reloader to supervise it | **ignored** until the container restarts |
+
+So the sidecar needs restarting on deploy. It is not a rebuild:
+
+```bash
+docker compose up -d --force-recreate mcp-http
+```
+
+`mcp-http` runs the CI-published gateway image rather than a local build,
+so after a merge the sequence is `docker compose pull mcp-http` then the
+command above. Do **not** `docker compose build mcp-http` — the service
+has no `build:` stanza on purpose, because the same Dockerfile built two
+ways can diverge without anything saying so.
+
+### Ask instead of inferring
+
+`health.check` answers it directly now — it is a tool, so any harness can
+call it with no shell:
+
+```json
+"code": {
+  "build_sha": "97020586ec2b",
+  "source_sha": "4f1ac0b77e91",
+  "stale": true,
+  "result": "stale",
+  "reloads": false
+}
+```
+
+A stale process reports `"status": "stale"` rather than `"healthy"`: it
+answers every request correctly, for code nobody is reading.
+
+Two caveats worth knowing before you trust it:
+
+- `result: "unknown"` means the image was built without
+  `--build-arg METAFORGE_BUILD_SHA=$(git rev-parse HEAD)`, so the check
+  cannot run at all. CI passes it; a hand-built image may not.
+- `reloads: true` (the gateway) never reports stale, because for a
+  supervised process a difference between the two SHAs is expected and
+  transient.
+
+Prometheus carries the same thing as
+`metaforge_mcp_code_version_check_total{result="stale"}`, which is what
+the `McpRunningStaleCode` alert fires on — the point being to be told
+without looking.
+
+## `docker compose` fails: `required variable <NAME> is missing a value`
+
+Every `docker compose` command fails, including ones that have nothing to do
+with the named service:
+
+```
+error while interpolating services.postgres.environment.POSTGRES_PASSWORD:
+required variable POSTGRES_PASSWORD is missing a value
+```
+
+**This is deliberate.** These credentials used to have
+working defaults — `metaforge`, `minioadmin`, `temporal` — committed to this
+public repository since the first compose commit. Every MetaForge install
+therefore shared passwords that any reader of the repository already knew, on
+services that publish host ports by default:
+
+| Variable | Old default | Service | Published on |
+|---|---|---|---|
+| `POSTGRES_PASSWORD` | `metaforge` | Postgres | `5432` |
+| `NEO4J_PASSWORD` | `metaforge` | Neo4j | `7474`, `7687` |
+| `MINIO_SECRET_KEY` | `minioadmin` | object store (`object-store`, SeaweedFS) | `9000` |
+| `TEMPORAL_POSTGRES_PASSWORD` | `temporal` | Temporal's database | not published |
+| `GRAFANA_PASSWORD` | `metaforge` | Grafana | `3001`, `--profile observability` |
+
+The defaults are gone, and compose refuses rather than picking one for you.
+Identifiers that are *not* secrets — `POSTGRES_USER`, `POSTGRES_DB`,
+`NEO4J_USER`, `MINIO_ACCESS_KEY` — keep their defaults.
+
+Compose interpolates the whole file before it decides which services to start,
+so the error appears even for `docker compose up gateway`, where the named
+service is not involved. That is a property of compose, not a bug here.
+
+Fix it in either direction:
+
+```bash
+scripts/install.sh            # fills every blank, in both --usage and --develop
+# or, by hand, for each one the error names:
+for v in POSTGRES_PASSWORD NEO4J_PASSWORD MINIO_SECRET_KEY \
+         TEMPORAL_POSTGRES_PASSWORD GRAFANA_PASSWORD; do
+  echo "$v=$(openssl rand -base64 24)" >> .env
+done
+```
+
+Fix them one at a time and compose will name the next one, since interpolation
+stops at the first failure.
+
+If you copied `.env.example` and skipped onboarding, you will hit this: the file
+ships these keys blank **on purpose**. `install.sh` generates secrets with
+`set_if_blank`, which returns early for any key that already has a value — so
+the old shipped defaults silently guaranteed the generator never fired, and
+every install kept the published passwords.
+
+**Already running services that used the old defaults?** Setting the variables is
+not enough. Postgres, Neo4j and Grafana all seed their credentials when
+they first provision their data directory, and those live in named volumes that
+survive `docker compose down`. An existing stack keeps the published passwords
+until each service is rotated in place, or its volume is deleted and the stack
+recreated from scratch (which destroys the data in it).
+
+The object store is the exception: it takes `MINIO_ACCESS_KEY` /
+`MINIO_SECRET_KEY` from the environment on every start, so a
+changed secret takes effect when the stack restarts, for the store and for the
+services that use it alike.
+
+For Grafana specifically: `GF_SECURITY_ADMIN_PASSWORD` seeds the admin user when Grafana first
+provisions its database; on later starts an existing admin keeps the password it
+already has. Since `grafana-data` is a named volume that survives
+`docker compose down`, an instance created before this change is still on the
+published default until you rotate it explicitly:
+
+```bash
+# Grafana 9+ (the `latest` image). Older images use `grafana-cli` instead.
+docker compose exec grafana grafana cli admin reset-admin-password '<new password>'
+```
+
+Confirm which one your image has with
+`docker compose exec grafana sh -c 'command -v grafana grafana-cli'`.
+
 ## When to escalate
 
 If the issue is:
@@ -323,4 +501,5 @@ If the issue is:
   bug-hunter agent (`/bug-hunt`) can help triage.
 - an ops-level outage — see [`docs/runbooks/`](https://github.com/FidelOdok/MetaForge/tree/main/docs/runbooks) for
   stack-specific runbooks (`gateway-down.md`, `neo4j-unreachable.md`,
-  `kafka-consumer-stopped.md`).
+  `kafka-consumer-stopped.md`,
+  `host-watchdog.md`).

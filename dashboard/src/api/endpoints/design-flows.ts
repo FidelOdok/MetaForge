@@ -1,77 +1,77 @@
 /**
- * Design-flow catalog for the "Start a design run" wizard.
+ * Design-flow catalogue (FORGE-395).
  *
- * The gateway has no flow-listing route, so this mirrors the launchable flows
- * defined in `orchestrator/design_flow/spec.py` (`FLOWS`). Phase titles match
- * the spec's `Phase.title`; every phase there ends in a human review `Gate`.
- * Keep this list in sync when a flow is added or re-phased.
+ * This file used to *be* the catalogue: a hand-maintained copy of
+ * `orchestrator/design_flow/spec.py` under a comment reading "Keep this list
+ * in sync when a flow is added or re-phased". It was not in sync, and nothing
+ * could have said so — `design_v1` (the default) was absent and four phase
+ * titles were paraphrased. It now fetches.
  */
 
-export interface DesignFlow {
-  id: string;
-  name: string;
-  description: string;
-  phases: string[];
+import apiClient from '../client';
+import type {
+  DesignFlow,
+  DesignFlowCatalog,
+  DesignFragmentCatalog,
+  EditFlowRequest,
+  FlowValidation,
+  FlowVersion,
+} from '../../types/design-flows';
+
+export async function getDesignFlows(): Promise<DesignFlowCatalog> {
+  const { data } = await apiClient.get<DesignFlowCatalog>('/design-flows');
+  return data;
 }
 
-const HARDWARE_V1: DesignFlow = {
-  id: 'hardware_v1',
-  name: 'Hardware & robotics',
-  description: 'A multidisciplinary flow for a complete hardware system.',
-  phases: [
-    'Intent',
-    'Stakeholder needs',
-    'Requirements',
-    'Preliminary feasibility',
-    'System architecture',
-    'Concept selection',
-    'Mechanical design',
-    'Electronics',
-    'Firmware & control',
-    'Simulation & V&V',
-    'Manufacturing preparation',
-  ],
-};
-
-/** The flow the wizard preselects. */
-export const DEFAULT_DESIGN_FLOW = HARDWARE_V1;
-
-export const DESIGN_FLOWS: DesignFlow[] = [
-  HARDWARE_V1,
-  {
-    id: 'mech_v1',
-    name: 'Mechanical design',
-    description: 'A focused flow for a load-bearing part or mechanical subsystem.',
-    phases: [
-      'Intent',
-      'Stakeholder needs',
-      'Requirements',
-      'Preliminary feasibility',
-      'Mechanical design',
-      'Simulation & V&V',
-    ],
-  },
-];
-
-export function findDesignFlow(id: unknown): DesignFlow | undefined {
-  return DESIGN_FLOWS.find((f) => f.id === id);
+/** The domain fragments a proposal can compose in (composable flows). */
+export async function getDesignFragments(): Promise<DesignFragmentCatalog> {
+  const { data } = await apiClient.get<DesignFragmentCatalog>('/design-flows/fragments');
+  return data;
 }
 
 /**
  * Build the `request` body for `POST /v1/runs`. The gateway only drives a run
- * through the design-flow executor when the request names a `flow` (or
+ * through the design-flow engine when the request names a `flow` (or
  * `kind: "design_flow"`); a bare goal would start and never progress (MET-671).
+ *
+ * The flow is validated against the fetched catalogue rather than a local
+ * list, so "select a supported design flow" means supported by the gateway
+ * that is about to run it.
  */
 export function buildDesignFlowRequest(
   goal: string,
   projectId: string,
   flowId: string,
+  flows: DesignFlow[],
 ): Record<string, unknown> {
   if (!goal.trim() || !projectId.trim()) {
     throw new Error('A goal and project are required.');
   }
-  if (!findDesignFlow(flowId)) {
+  if (!flows.some((f) => f.id === flowId)) {
     throw new Error('Select a supported design flow.');
   }
   return { kind: 'design_flow', flow: flowId, goal: goal.trim(), project_id: projectId };
+}
+
+/**
+ * Check an edit without saving it (FORGE-399).
+ *
+ * Called as the canvas changes so a rule break appears while the person is
+ * looking at the thing that broke it -- rather than at save, by which point
+ * they have made five more edits and have to work out which one it means.
+ */
+export async function validateFlowEdit(body: EditFlowRequest): Promise<FlowValidation> {
+  const { data } = await apiClient.post<FlowValidation>('/design-flows/validate', body);
+  return data;
+}
+
+/** Save an edit as a new version, held for approval. */
+export async function saveFlowVersion(body: EditFlowRequest): Promise<FlowVersion> {
+  const { data } = await apiClient.post<FlowVersion>('/design-flows/versions', body);
+  return data;
+}
+
+export async function getFlowVersion(versionId: string): Promise<FlowVersion> {
+  const { data } = await apiClient.get<FlowVersion>(`/design-flows/versions/${versionId}`);
+  return data;
 }

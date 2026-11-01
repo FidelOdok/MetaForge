@@ -1,0 +1,77 @@
+# electronics_v1 domain fragment (composable flows).
+#
+# Component selection -> power budget -> schematic check -> circuit
+# simulation. Phase 1 scope: KiCad is read-only, so the schematic task runs
+# ERC on the person's own schematic; nothing here generates one.
+#
+# `power_dissipation_w` is what a thermal fragment reads, so an electronics
+# flow composed with thermal_v1 feeds its heat load: a changed regulator
+# re-runs the power budget and the thermal tasks, and nothing else.
+#
+# Bump `version` when a task, its contract or a check changes.
+id: electronics_v1
+version: 1.0.0
+domain: electronics
+label: Electronics
+description: Component selection, power budget, schematic check and circuit simulation.
+keywords: [electronics, pcb, circuit, power board, schematic, regulator, sensor, microcontroller, mcu]
+disciplines: [electronics]
+tasks:
+- id: component_selection
+  stage: design
+  title: Component selection
+  objective: >-
+    Select the components the requirements call for (regulators, MCU, sensors, connectors)
+    from real, purchasable parts. Record the selection as the component_selection item
+    `electronics`, with each part's manufacturer part number and the requirement it serves.
+  outputs:
+  - component_selection:electronics
+  capabilities: [component.search_parametric, distributors.resolve_offers]
+  outcome: purchasable parts chosen for every electrical function
+- id: power_budget
+  stage: design
+  title: Power budget
+  objective: >-
+    Sum the worst-case load on each supply rail from the selected components' datasheet
+    currents and compare it with what the rail can deliver. Record the smallest rail margin
+    as the design value `rail_load_margin_pct` (%) and the total power dissipated on the
+    board as `power_dissipation_w` (W), both sourced to the datasheets used.
+  inputs:
+  - component_selection:electronics
+  outputs:
+  - design_value:rail_load_margin_pct
+  - design_value:power_dissipation_w
+  checks:
+  - rail_load_margin_pct >= 0 %
+  capabilities: [power.check_budget]
+  outcome: every rail shown to carry its worst-case load
+- id: schematic_check
+  stage: simulation
+  title: Schematic check (ERC)
+  objective: >-
+    Run the electrical rules check on the person's KiCad schematic for the selected parts.
+    Record the number of ERC errors as the design value `erc_error_count`, sourced to the
+    ERC report. Do not edit the schematic.
+  inputs:
+  - component_selection:electronics
+  outputs:
+  - design_value:erc_error_count
+  checks:
+  - erc_error_count == 0
+  capabilities: [kicad.run_erc]
+  outcome: schematic passes the electrical rules check
+- id: circuit_simulation
+  stage: simulation
+  title: Circuit simulation
+  objective: >-
+    Simulate the power stage with the selected parts and record the worst-case supply ripple
+    as the design value `supply_ripple_mv` (mV), sourced to the simulation result.
+  inputs:
+  - component_selection:electronics
+  outputs:
+  - design_value:supply_ripple_mv
+  records: [simulation_result]
+  checks:
+  - supply_ripple_mv <= max_supply_ripple_mv
+  capabilities: [spice.run_simulation]
+  outcome: supply ripple predicted and checked against its limit

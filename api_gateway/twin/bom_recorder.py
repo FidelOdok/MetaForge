@@ -24,6 +24,10 @@ from uuid import uuid4
 
 import structlog
 
+from api_gateway.twin.item_revisions import (
+    finish_definition_revision,
+    plan_definition_revision,
+)
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -58,6 +62,10 @@ def make_bom_recorder(twin: Any, project_backend: Any = None) -> Any:
         project_id: str | None = None,
         session_id: str | None = None,
         extra_metadata: dict[str, Any] | None = None,
+        item_key: str | None = None,
+        supersedes: str | None = None,
+        change_reason: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.enums import WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -68,6 +76,18 @@ def make_bom_recorder(twin: Any, project_backend: Any = None) -> Any:
             raise ValueError("bom recorder: at least one component row is required")
 
         content = bom_csv(rows).encode("utf-8")
+        # FORGE-523: a BOM is a definition; a re-record is its next revision.
+        plan = await plan_definition_revision(
+            twin,
+            item_type="bom",
+            name=name,
+            project_id=project_id,
+            default_author="electronics.design",
+            item_key=item_key,
+            supersedes=supersedes,
+            change_reason=change_reason,
+            run_id=run_id,
+        )
         with tracer.start_as_current_span("electronics.record_bom") as span:
             wp_id = uuid4()
             content_hash = hashlib.sha256(content).hexdigest()
@@ -98,6 +118,8 @@ def make_bom_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["session_id"] = session_id
             if extra_metadata:
                 metadata.update(extra_metadata)
+            if plan is not None:
+                metadata.update(plan.stamp())
 
             now = datetime.now(UTC)
             wp = WorkProduct(
@@ -126,19 +148,24 @@ def make_bom_recorder(twin: Any, project_backend: Any = None) -> Any:
                 except Exception as exc:  # noqa: BLE001 — link is best-effort
                     logger.warning("bom_project_link_failed", error=str(exc))
 
-            logger.info(
-                "bom_recorded",
-                node_id=node_id,
-                project_id=project_id,
-                linked=linked,
-                line_items=len(rows),
-            )
-            return {
+            result: dict[str, Any] = {
                 "node_id": node_id,
                 "minio_object_key": minio_object_key,
                 "content_hash": content_hash,
                 "line_items": len(rows),
                 "project_linked": linked,
             }
+            await finish_definition_revision(
+                twin, plan, getattr(created, "id", wp_id), name=name, result=result
+            )
+            logger.info(
+                "bom_recorded",
+                node_id=node_id,
+                project_id=project_id,
+                linked=linked,
+                line_items=len(rows),
+                item_ref=result.get("item_ref"),
+            )
+            return result
 
     return record

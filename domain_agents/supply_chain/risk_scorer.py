@@ -45,6 +45,18 @@ def _classify_risk_level(score: int) -> RiskLevel:
         return RiskLevel.CRITICAL
 
 
+#: Score of a factor whose input was not supplied (FORGE-550). Missing data
+#: used to score worst-case for some factors (sources, stock, compliance)
+#: and best-case for others (lead time, prices), so a part with no data
+#: came out mid-risk for reasons that had nothing to do with the part. Every
+#: factor now scores an unknown the same way, and says it was unknown.
+UNKNOWN_SCORE = 50
+
+
+def _missing(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 class BOMRiskScorer:
     """Scores supply chain risk for parts and BOMs.
 
@@ -65,6 +77,15 @@ class BOMRiskScorer:
     WEIGHT_STOCK_LEVEL = 0.10
     WEIGHT_COMPLIANCE = 0.10
 
+    def _unknown(self, name: str, weight: float, what: str) -> RiskFactor:
+        return RiskFactor(
+            name=name,
+            weight=weight,
+            score=UNKNOWN_SCORE,
+            description=f"Unknown: {what}",
+            known=False,
+        )
+
     def _score_single_source(self, part_data: dict[str, Any]) -> RiskFactor:
         """Score single-source risk based on number of distributors.
 
@@ -72,19 +93,26 @@ class BOMRiskScorer:
         2 distributors -> 50  (medium)
         3+ distributors -> 0  (low)
         """
-        num_sources = part_data.get("num_sources", 1)
+        num_sources = part_data.get("num_sources")
+        if _missing(num_sources):
+            return self._unknown(
+                "single_source", self.WEIGHT_SINGLE_SOURCE, "no source count supplied"
+            )
         if isinstance(num_sources, str):
             num_sources = int(num_sources)
 
-        if num_sources <= 1:
+        if num_sources <= 0:
             score = 100
-            desc = "Single-source part — high supply chain risk"
+            desc = "No distributor carries this part"
+        elif num_sources == 1:
+            score = 100
+            desc = "Single-source part, high supply chain risk"
         elif num_sources == 2:
             score = 50
-            desc = "Dual-source — moderate supply chain risk"
+            desc = "Dual-source, moderate supply chain risk"
         else:
             score = 0
-            desc = f"Multi-source ({num_sources} distributors) — low risk"
+            desc = f"Multi-source ({num_sources} distributors), low risk"
 
         return RiskFactor(
             name="single_source",
@@ -100,7 +128,9 @@ class BOMRiskScorer:
         2-8 weeks  -> 50
         > 8 weeks  -> 100
         """
-        lead_time_weeks = part_data.get("lead_time_weeks", 0)
+        lead_time_weeks = part_data.get("lead_time_weeks")
+        if _missing(lead_time_weeks):
+            return self._unknown("lead_time", self.WEIGHT_LEAD_TIME, "no lead time supplied")
         if isinstance(lead_time_weeks, str):
             lead_time_weeks = float(lead_time_weeks)
 
@@ -112,7 +142,7 @@ class BOMRiskScorer:
             desc = f"Moderate lead time ({lead_time_weeks} weeks)"
         else:
             score = 100
-            desc = f"Long lead time ({lead_time_weeks} weeks) — supply risk"
+            desc = f"Long lead time ({lead_time_weeks} weeks), supply risk"
 
         return RiskFactor(
             name="lead_time",
@@ -129,11 +159,13 @@ class BOMRiskScorer:
         EOL/obsolete -> 100
         unknown  -> 50
         """
-        lifecycle_raw = part_data.get("lifecycle", "unknown")
+        lifecycle_raw = part_data.get("lifecycle")
         try:
-            lifecycle = LifecycleStatus(lifecycle_raw.lower())
+            lifecycle = LifecycleStatus(str(lifecycle_raw or "unknown").lower())
         except ValueError:
             lifecycle = LifecycleStatus.UNKNOWN
+        if lifecycle is LifecycleStatus.UNKNOWN:
+            return self._unknown("lifecycle", self.WEIGHT_LIFECYCLE, "no lifecycle status supplied")
 
         lifecycle_scores = {
             LifecycleStatus.ACTIVE: 0,
@@ -158,23 +190,19 @@ class BOMRiskScorer:
 
         Uses coefficient of variation (std_dev / mean) when prices are available.
         """
-        prices = part_data.get("prices", [])
-        if not prices or len(prices) < 2:
-            return RiskFactor(
-                name="price_volatility",
-                weight=self.WEIGHT_PRICE_VOLATILITY,
-                score=0,
-                description="Insufficient price data to assess volatility",
+        prices = part_data.get("prices") or []
+        if len(prices) < 2:
+            return self._unknown(
+                "price_volatility",
+                self.WEIGHT_PRICE_VOLATILITY,
+                "volatility needs prices from two or more sources",
             )
 
         prices_float = [float(p) for p in prices]
         mean_price = sum(prices_float) / len(prices_float)
         if mean_price <= 0:
-            return RiskFactor(
-                name="price_volatility",
-                weight=self.WEIGHT_PRICE_VOLATILITY,
-                score=0,
-                description="Invalid price data",
+            return self._unknown(
+                "price_volatility", self.WEIGHT_PRICE_VOLATILITY, "no valid (positive) price"
             )
 
         variance = sum((p - mean_price) ** 2 for p in prices_float) / len(prices_float)
@@ -206,8 +234,12 @@ class BOMRiskScorer:
         < 10x MOQ   -> 50
         >= 10x MOQ  -> 0
         """
-        stock = part_data.get("stock", 0)
-        moq = part_data.get("moq", 1)
+        stock = part_data.get("stock")
+        if _missing(stock):
+            return self._unknown("stock_level", self.WEIGHT_STOCK_LEVEL, "no stock level supplied")
+        moq = part_data.get("moq")
+        if _missing(moq):
+            moq = 1
         if isinstance(stock, str):
             stock = int(stock)
         if isinstance(moq, str):
@@ -238,8 +270,14 @@ class BOMRiskScorer:
         Missing RoHS or REACH -> 100
         All present -> 0
         """
-        has_rohs = part_data.get("rohs_compliant", False)
-        has_reach = part_data.get("reach_compliant", False)
+        has_rohs = part_data.get("rohs_compliant")
+        has_reach = part_data.get("reach_compliant")
+        if has_rohs is None and has_reach is None:
+            # No source in MetaForge reports RoHS/REACH today, so this was
+            # +10 risk on every part for data nobody supplied (FORGE-550).
+            return self._unknown(
+                "compliance", self.WEIGHT_COMPLIANCE, "no RoHS/REACH status supplied"
+            )
 
         if has_rohs and has_reach:
             score = 0
@@ -300,6 +338,7 @@ class BOMRiskScorer:
 
             risk_level = _classify_risk_level(overall_score)
             flagged = risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)
+            unknown = [f.name for f in factors if not f.known]
 
             logger.info(
                 "Part risk scored",
@@ -307,6 +346,7 @@ class BOMRiskScorer:
                 overall_score=overall_score,
                 risk_level=risk_level.value,
                 flagged=flagged,
+                unknown_factors=unknown,
             )
 
             return PartRiskScore(
@@ -316,6 +356,7 @@ class BOMRiskScorer:
                 risk_level=risk_level,
                 factors=factors,
                 flagged=flagged,
+                unknown_factors=unknown,
             )
 
     def score_bom(self, parts: list[dict[str, Any]], project_id: str = "") -> BOMRiskReport:

@@ -7,8 +7,8 @@
   "phase": 1,
   "tools_required": [
     {
-      "tool_id": "distributor_search",
-      "capability": "part_lookup",
+      "tool_id": "distributors.resolve_offers",
+      "capability": "distributor_offer_resolution",
       "required": false
     }
   ],
@@ -17,5 +17,10 @@
   "timeout_seconds": 60,
   "retries": 1,
   "idempotent": true,
-  "tags": ["bom", "risk", "supply-chain", "scoring"]
+  "tags": [
+    "bom",
+    "risk",
+    "supply-chain",
+    "scoring"
+  ]
 }

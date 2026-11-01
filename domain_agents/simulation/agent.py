@@ -102,12 +102,18 @@ multi-physics simulation.
 
 You have access to the following tools:
 
-- **run_fea**: Run FEA structural analysis using CalculiX. Provide mesh_file, \
-load_cases, analysis_type (static/modal/thermal), and material.
+- **run_fea**: Run FEA with CalculiX. Provide mesh_file, load_case, material, \
+fixed_node_set, and for static_stress load_node_set and load_force_n [Fx, Fy, Fz] \
+(N); modal takes num_modes. Give a cited yield_strength_mpa for a safety factor.
 - **run_spice**: Run SPICE circuit simulation. Provide netlist_path, \
 analysis_type (dc/ac/transient), and optional params.
-- **run_cfd**: Run CFD thermal/flow analysis. Provide geometry_file, \
-fluid_properties, boundary_conditions, and mesh_resolution.
+- **run_cfd**: One of two analyses per call. `conduction`: steady conduction to a \
+fixed-temperature sink (CalculiX; mesh_file, material, heat_source_node_set, \
+power_dissipation_w, sink_node_set, sink_temp_c). `internal_flow`: steady \
+incompressible flow through a bounded domain (OpenFOAM; inlet, outlet and wall STL \
+surfaces that close, stl_units, inside_point, fluid density and viscosity, \
+inlet_velocity_m_s, turbulence laminar or kOmegaSST). Convection, external flow and \
+compressible flow are not solved.
 
 Given a user request, determine which simulation tools to run. \
 Analyze convergence, safety factors, and key results. Provide clear \
@@ -144,17 +150,27 @@ def _get_or_create_pydantic_agent() -> Any:
     async def run_fea(
         ctx: RunContext[AgentDependencies],
         mesh_file: str,
-        load_cases: list[dict[str, Any]] | None = None,
-        analysis_type: str = "static",
-        material: str = "steel_1018",
+        load_case: str,
+        material: dict[str, Any],
+        fixed_node_set: str,
+        analysis_type: str = "static_stress",
+        load_node_set: str | None = None,
+        load_force_n: list[float] | None = None,
+        num_modes: int = 3,
+        yield_strength_mpa: float | None = None,
     ) -> dict[str, Any]:
-        """Run FEA structural analysis using CalculiX.
+        """Run FEA with CalculiX: calculix.run_fea's own arguments (FORGE-561).
 
         Args:
-            mesh_file: Path to the mesh file (.inp format).
-            load_cases: List of load case definitions.
-            analysis_type: Type of analysis ('static', 'modal', 'thermal').
-            material: Material identifier.
+            mesh_file: Volume mesh (.inp), e.g. from generate_mesh.
+            load_case: Name of the load case.
+            material: {'name': ...} or explicit youngs_modulus_mpa/poissons_ratio.
+            fixed_node_set: Face held fixed (a surface set from generate_mesh).
+            analysis_type: 'static_stress' or 'modal'.
+            load_node_set: Loaded face (static_stress).
+            load_force_n: [Fx, Fy, Fz] in N (static_stress).
+            num_modes: Modes to extract (modal).
+            yield_strength_mpa: Cited yield strength; gives a safety factor.
         """
         skill_ctx = SkillContext(
             twin=ctx.deps.twin,
@@ -167,9 +183,14 @@ def _get_or_create_pydantic_agent() -> Any:
         skill_input = RunFeaInput(
             work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             mesh_file=mesh_file,
-            load_cases=load_cases or [],
+            load_case=load_case,
             analysis_type=analysis_type,
             material=material,
+            fixed_node_set=fixed_node_set,
+            load_node_set=load_node_set,
+            load_force_n=load_force_n,
+            num_modes=num_modes,
+            yield_strength_mpa=yield_strength_mpa,
         )
 
         handler = RunFeaHandler(skill_ctx)
@@ -182,9 +203,12 @@ def _get_or_create_pydantic_agent() -> Any:
         return {
             "skill": "run_fea",
             "success": True,
+            "analysis_type": output.analysis_type,
             "max_stress_mpa": output.max_stress_mpa,
             "max_displacement_mm": output.max_displacement_mm,
             "safety_factor": output.safety_factor,
+            "frequencies_hz": output.frequencies_hz,
+            "frd_path": output.frd_path,
             "solver_time_s": output.solver_time_s,
         }
 
@@ -240,18 +264,22 @@ def _get_or_create_pydantic_agent() -> Any:
     @agent.tool
     async def run_cfd(
         ctx: RunContext[AgentDependencies],
-        geometry_file: str,
+        conduction: dict[str, Any] | None = None,
+        internal_flow: dict[str, Any] | None = None,
+        geometry_file: str | None = None,
         fluid_properties: dict[str, Any] | None = None,
         boundary_conditions: dict[str, Any] | None = None,
-        mesh_resolution: str = "medium",
     ) -> dict[str, Any]:
-        """Run CFD thermal/flow analysis.
+        """Steady conduction (CalculiX) or steady internal flow (OpenFOAM, FORGE-557).
 
         Args:
-            geometry_file: Path to the geometry file (.step, .stl).
-            fluid_properties: Fluid properties (density, viscosity).
-            boundary_conditions: Boundary conditions (inlet velocity, etc.).
-            mesh_resolution: Mesh resolution ('coarse', 'medium', 'fine').
+            conduction: calculix.run_thermal's case: mesh_file, material,
+                heat_source_node_set, power_dissipation_w, sink_node_set, sink_temp_c.
+            internal_flow: openfoam.run_internal_flow's case: inlet_stl, outlet_stl,
+                wall_stls, stl_units, inside_point, fluid, inlet_velocity_m_s, turbulence.
+            geometry_file: Geometry the case came from, for the record.
+            fluid_properties: Free-form flow input; refused, use internal_flow.
+            boundary_conditions: Free-form flow input; refused, use internal_flow.
         """
         skill_ctx = SkillContext(
             twin=ctx.deps.twin,
@@ -266,7 +294,8 @@ def _get_or_create_pydantic_agent() -> Any:
             geometry_file=geometry_file,
             fluid_properties=fluid_properties or {},
             boundary_conditions=boundary_conditions or {},
-            mesh_resolution=mesh_resolution,
+            conduction=conduction,
+            internal_flow=internal_flow,
         )
 
         handler = RunCfdHandler(skill_ctx)
@@ -279,10 +308,16 @@ def _get_or_create_pydantic_agent() -> Any:
         return {
             "skill": "run_cfd",
             "success": True,
-            "max_velocity_ms": output.max_velocity_ms,
-            "pressure_drop_pa": output.pressure_drop_pa,
+            "analysis": output.analysis,
             "max_temperature_c": output.max_temperature_c,
-            "convergence_residual": output.convergence_residual,
+            "min_temperature_c": output.min_temperature_c,
+            "pressure_drop_pa": output.pressure_drop_pa,
+            "volumetric_flow_m3_s": output.volumetric_flow_m3_s,
+            "converged": output.converged,
+            "solution_stable": output.solution_stable,
+            "mesh_cells": output.mesh_cells,
+            "case_dir": output.case_dir,
+            "warnings": output.warnings,
         }
 
     _pydantic_agent = agent
@@ -475,12 +510,13 @@ class SimulationAgent:
     async def _run_spice(self, request: TaskRequest) -> TaskResult:
         """Run SPICE circuit simulation."""
         netlist_path: str = request.parameters.get("netlist_path", "")
-        if not netlist_path:
+        netlist: str = request.parameters.get("netlist", "")
+        if not netlist_path and not netlist:
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
                 success=False,
-                errors=["Missing required parameter: netlist_path"],
+                errors=["Missing required parameter: netlist_path (or netlist)"],
             )
 
         self.logger.info("SPICE simulation requested", netlist_path=netlist_path)
@@ -488,9 +524,11 @@ class SimulationAgent:
         ctx = self._create_skill_context(request.branch)
         skill_input = RunSpiceInput(
             work_product_id=str(request.work_product_id),
-            netlist_path=netlist_path,
+            netlist_path=netlist_path or None,
+            netlist=netlist or None,
             analysis_type=request.parameters.get("analysis_type", "dc"),
             params=request.parameters.get("params", {}),
+            probes=request.parameters.get("probes", []),
         )
 
         handler = RunSpiceHandler(ctx)
@@ -513,18 +551,22 @@ class SimulationAgent:
                 {
                     "skill": "run_spice",
                     "results": output.results,
+                    "waveform_data": output.waveform_data,
+                    "scale": output.scale,
                     "waveforms": output.waveforms,
                     "convergence": output.convergence,
                     "sim_time_s": output.sim_time_s,
                 }
             ],
-            warnings=[] if output.convergence else ["SPICE simulation did not converge"],
+            warnings=[]
+            if output.convergence
+            else [f"SPICE simulation did not converge: {output.log}".rstrip(": ")],
         )
 
     async def _run_fea(self, request: TaskRequest) -> TaskResult:
-        """Run FEA structural analysis."""
-        mesh_file: str = request.parameters.get("mesh_file", "")
-        if not mesh_file:
+        """Run FEA with calculix.run_fea's own arguments (FORGE-561)."""
+        params = request.parameters
+        if not params.get("mesh_file"):
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
@@ -532,16 +574,29 @@ class SimulationAgent:
                 errors=["Missing required parameter: mesh_file"],
             )
 
-        self.logger.info("FEA simulation requested", mesh_file=mesh_file)
+        self.logger.info("FEA simulation requested", mesh_file=params.get("mesh_file"))
 
         ctx = self._create_skill_context(request.branch)
-        skill_input = RunFeaInput(
-            work_product_id=str(request.work_product_id),
-            mesh_file=mesh_file,
-            load_cases=request.parameters.get("load_cases", []),
-            analysis_type=request.parameters.get("analysis_type", "static"),
-            material=request.parameters.get("material", "steel_1018"),
-        )
+        try:
+            skill_input = RunFeaInput(
+                work_product_id=str(request.work_product_id),
+                mesh_file=params["mesh_file"],
+                load_case=params.get("load_case", ""),
+                analysis_type=params.get("analysis_type", "static_stress"),
+                material=params.get("material") or {},
+                fixed_node_set=params.get("fixed_node_set", ""),
+                load_node_set=params.get("load_node_set"),
+                load_force_n=params.get("load_force_n"),
+                num_modes=params.get("num_modes", 3),
+                yield_strength_mpa=params.get("yield_strength_mpa"),
+            )
+        except ValueError as exc:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=[str(exc)],
+            )
 
         handler = RunFeaHandler(ctx)
         result = await handler.run(skill_input)
@@ -555,46 +610,49 @@ class SimulationAgent:
             )
 
         output = result.data
-        passed = output.safety_factor >= 1.0
+        warnings: list[str] = []
+        passed = True
+        if output.safety_factor is not None and output.safety_factor < 1.0:
+            passed = False
+            warnings.append(f"Safety factor {output.safety_factor:.2f} is below 1.0")
+        if output.analysis_type == "static_stress" and output.safety_factor is None:
+            warnings.append("No safety factor: give a cited yield_strength_mpa")
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
             success=passed,
-            skill_results=[
-                {
-                    "skill": "run_fea",
-                    "max_stress_mpa": output.max_stress_mpa,
-                    "max_displacement_mm": output.max_displacement_mm,
-                    "safety_factor": output.safety_factor,
-                    "solver_time_s": output.solver_time_s,
-                }
-            ],
-            warnings=(
-                [f"Safety factor {output.safety_factor:.2f} is below 1.0"] if not passed else []
-            ),
+            skill_results=[{"skill": "run_fea", **output.model_dump(mode="json")}],
+            warnings=warnings,
         )
 
     async def _run_cfd(self, request: TaskRequest) -> TaskResult:
-        """Run CFD thermal/flow analysis."""
-        geometry_file: str = request.parameters.get("geometry_file", "")
-        if not geometry_file:
+        """Steady conduction (CalculiX) or steady internal flow (OpenFOAM, FORGE-557)."""
+        conduction = request.parameters.get("conduction")
+        internal_flow = request.parameters.get("internal_flow")
+        self.logger.info(
+            "run_cfd requested",
+            geometry_file=request.parameters.get("geometry_file"),
+            conduction=conduction is not None,
+            internal_flow=internal_flow is not None,
+        )
+
+        ctx = self._create_skill_context(request.branch)
+        try:
+            skill_input = RunCfdInput(
+                work_product_id=str(request.work_product_id),
+                geometry_file=request.parameters.get("geometry_file"),
+                fluid_properties=request.parameters.get("fluid_properties", {}),
+                boundary_conditions=request.parameters.get("boundary_conditions", {}),
+                conduction=conduction,
+                internal_flow=internal_flow,
+            )
+        except ValueError as exc:
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
                 success=False,
-                errors=["Missing required parameter: geometry_file"],
+                errors=[str(exc)],
             )
-
-        self.logger.info("CFD simulation requested", geometry_file=geometry_file)
-
-        ctx = self._create_skill_context(request.branch)
-        skill_input = RunCfdInput(
-            work_product_id=str(request.work_product_id),
-            geometry_file=geometry_file,
-            fluid_properties=request.parameters.get("fluid_properties", {}),
-            boundary_conditions=request.parameters.get("boundary_conditions", {}),
-            mesh_resolution=request.parameters.get("mesh_resolution", "medium"),
-        )
 
         handler = RunCfdHandler(ctx)
         result = await handler.run(skill_input)
@@ -608,25 +666,26 @@ class SimulationAgent:
             )
 
         output = result.data
-        converged = output.convergence_residual < 1e-3
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
-            success=converged,
+            success=True,
             skill_results=[
                 {
                     "skill": "run_cfd",
-                    "max_velocity_ms": output.max_velocity_ms,
-                    "pressure_drop_pa": output.pressure_drop_pa,
+                    "analysis": output.analysis,
                     "max_temperature_c": output.max_temperature_c,
-                    "convergence_residual": output.convergence_residual,
+                    "min_temperature_c": output.min_temperature_c,
+                    "pressure_drop_pa": output.pressure_drop_pa,
+                    "volumetric_flow_m3_s": output.volumetric_flow_m3_s,
+                    "converged": output.converged,
+                    "solution_stable": output.solution_stable,
+                    "mesh_cells": output.mesh_cells,
+                    "case_dir": output.case_dir,
+                    "solver": output.solver,
                 }
             ],
-            warnings=(
-                [f"CFD residual {output.convergence_residual:.2e} exceeds threshold"]
-                if not converged
-                else []
-            ),
+            warnings=output.warnings,
         )
 
     async def _run_full_simulation(self, request: TaskRequest) -> TaskResult:
@@ -657,8 +716,8 @@ class SimulationAgent:
                 overall_success = False
             sims_run += 1
 
-        # Run CFD if geometry_file is provided
-        if request.parameters.get("geometry_file"):
+        # Run the thermal case if one is given (flow requests are refused inside)
+        if request.parameters.get("conduction") or request.parameters.get("geometry_file"):
             cfd_result = await self._run_cfd(request)
             all_results.extend(cfd_result.skill_results)
             all_errors.extend(cfd_result.errors)
@@ -674,7 +733,7 @@ class SimulationAgent:
                 success=False,
                 errors=[
                     "No simulations could be run. "
-                    "Provide at least one of: netlist_path, mesh_file, geometry_file"
+                    "Provide at least one of: netlist_path, mesh_file, conduction"
                 ],
             )
 

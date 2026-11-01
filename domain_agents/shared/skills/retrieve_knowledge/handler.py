@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+import math
+
 import structlog
 
 from digital_twin.knowledge.embedding_service import EmbeddingService
 from digital_twin.knowledge.store import KnowledgeStore
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
-from twin_core.knowledge.models import KnowledgeType
 
 from .schema import KnowledgeResult, RetrieveKnowledgeInput, RetrieveKnowledgeOutput
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("skill.retrieve_knowledge")
+
+
+def _similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity clamped to the 0-1 the output schema allows."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    return round(max(0.0, min(1.0, dot / norm)), 4) if norm else 0.0
 
 
 class RetrieveKnowledgeHandler(SkillBase[RetrieveKnowledgeInput, RetrieveKnowledgeOutput]):
@@ -37,48 +47,45 @@ class RetrieveKnowledgeHandler(SkillBase[RetrieveKnowledgeInput, RetrieveKnowled
         with tracer.start_as_current_span("retrieve_knowledge.execute") as span:
             span.set_attribute("skill.name", "retrieve_knowledge")
             span.set_attribute("knowledge.query_length", len(input_data.query))
-            span.set_attribute("knowledge.limit", input_data.limit)
-
-            # Resolve optional knowledge_type filter
-            knowledge_type_filter: KnowledgeType | None = None
-            if input_data.knowledge_type:
-                try:
-                    knowledge_type_filter = KnowledgeType(input_data.knowledge_type)
-                except ValueError:
-                    self.logger.warning(
-                        "Unknown knowledge_type filter, searching all types",
-                        knowledge_type=input_data.knowledge_type,
-                    )
+            span.set_attribute("knowledge.top_k", input_data.top_k)
 
             self.logger.info(
                 "Searching knowledge store",
                 query=input_data.query[:100],
                 knowledge_type=input_data.knowledge_type,
-                limit=input_data.limit,
+                top_k=input_data.top_k,
             )
 
-            # Embed the query text, then search by embedding vector
-            if self._embedding_service is not None:
-                query_embedding = await self._embedding_service.embed(input_data.query)
-            else:
-                # Fallback: use a zero vector (will match nothing meaningfully)
-                query_embedding = [0.0] * 384
+            # FORGE-552: with no embedding service this searched with a zero
+            # vector, which scores every entry alike and returns an arbitrary
+            # set. Refuse instead of returning results that mean nothing.
+            if self._embedding_service is None:
+                raise ValueError(
+                    "retrieve_knowledge needs an embedding service; without one there "
+                    "is no similarity to rank by"
+                )
+            query_embedding = await self._embedding_service.embed(input_data.query)
 
             search_results = await self._store.search(
                 embedding=query_embedding,
-                knowledge_type=knowledge_type_filter,
-                limit=input_data.limit,
+                knowledge_type=input_data.knowledge_type,
+                limit=input_data.top_k,
             )
 
+            # The store ranks by cosine similarity but returns entries only;
+            # the score was hard-coded to 0.0, so recompute it (FORGE-552).
             results = [
                 KnowledgeResult(
                     entry_id=str(entry.id),
                     content=entry.content,
                     knowledge_type=str(entry.knowledge_type),
-                    source=str(entry.source_work_product_id)
-                    if entry.source_work_product_id
-                    else "",
-                    score=0.0,
+                    source_path=entry.source_path
+                    or (
+                        f"work_product://{entry.source_work_product_id}"
+                        if entry.source_work_product_id
+                        else ""
+                    ),
+                    score=_similarity(query_embedding, entry.embedding),
                     metadata=entry.metadata or {},
                 )
                 for entry in search_results

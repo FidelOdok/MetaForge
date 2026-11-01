@@ -27,6 +27,12 @@ import structlog
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 
+from domain_agents.mechanical.skills.check_manufacturability.handler import (
+    CheckManufacturabilityHandler,
+)
+from domain_agents.mechanical.skills.check_manufacturability.schema import (
+    CheckManufacturabilityInput,
+)
 from domain_agents.mechanical.skills.check_tolerance.handler import (
     CheckToleranceHandler,
 )
@@ -58,6 +64,12 @@ from domain_agents.mechanical.skills.generate_mesh.handler import (
 )
 from domain_agents.mechanical.skills.generate_mesh.schema import (
     GenerateMeshInput,
+)
+from domain_agents.mechanical.skills.rank_manufacturing_processes.handler import (
+    RankManufacturingProcessesHandler,
+)
+from domain_agents.mechanical.skills.rank_manufacturing_processes.schema import (
+    RankManufacturingProcessesInput,
 )
 from observability.tracing import get_tracer
 from skill_registry.mcp_bridge import McpBridge
@@ -133,11 +145,18 @@ tolerance stack-up analysis, mesh generation, and manufacturing processes.
 You have access to the following tools:
 
 - **validate_stress**: Run FEA stress validation on a meshed CAD model using \
-CalculiX. Provide mesh_file_path, load_case, and stress constraints.
+CalculiX. Provide mesh_file_path, load_case, stress constraints, material_name, \
+fixed_node_set, load_node_set, and load_force_n.
 - **generate_mesh**: Generate a finite element mesh from a CAD file using \
 FreeCAD/Netgen. Provide cad_file path and meshing parameters.
 - **check_tolerance**: Check dimensional tolerances against manufacturing \
 process capabilities. Provide tolerance specs and manufacturing process details.
+- **rank_manufacturing_processes**: Before designing, rank candidate processes \
+for the part on fit, availability on the route and cost at quantity. Give only \
+sourced capability values; leave unknown ones empty.
+- **check_manufacturability**: After designing, check the design's features \
+against the chosen process's sourced limits (DFM). Say for each value whether \
+it was measured, declared or stated.
 - **generate_cad**: Generate a CAD model from parametric specifications. \
 Provide shape_type, dimensions, and material. Only covers box/plate/enclosure/cylinder.
 - **generate_cad_script**: Generate a CAD model from a natural language \
@@ -200,6 +219,10 @@ def create_mechanical_agent(
         mesh_file_path: str,
         load_case: str,
         constraints: list[dict[str, Any]],
+        material_name: str,
+        fixed_node_set: str,
+        load_node_set: str,
+        load_force_n: list[float],
     ) -> dict[str, Any]:
         """Run FEA stress validation using CalculiX.
 
@@ -208,6 +231,12 @@ def create_mechanical_agent(
             load_case: Load case identifier (e.g. 'gravity', 'thermal').
             constraints: List of stress constraints, each with
                 max_von_mises_mpa (float) and safety_factor (float).
+            material_name: Material name for FEA elastic properties (e.g.
+                'steel', 'aluminium_6061_t6').
+            fixed_node_set: Mesh element set name to fully constrain (e.g.
+                'Surface1', gmsh's own per-STEP-face group).
+            load_node_set: Mesh element set name to apply load_force_n to.
+            load_force_n: [Fx, Fy, Fz] total applied force in Newtons.
         """
         with tracer.start_as_current_span("tool.validate_stress") as span:
             span.set_attribute("mesh_file", mesh_file_path)
@@ -224,6 +253,10 @@ def create_mechanical_agent(
                     "mesh_file": mesh_file_path,
                     "load_case": load_case,
                     "analysis_type": "static_stress",
+                    "material": {"name": material_name},
+                    "fixed_node_set": fixed_node_set,
+                    "load_node_set": load_node_set,
+                    "load_force_n": load_force_n,
                 },
             )
 
@@ -308,6 +341,68 @@ def create_mechanical_agent(
                 "quality_acceptable": output.quality_acceptable,
             }
 
+    # -- Tools: process ranking and DFM (FORGE-611) ----------------------------
+
+    def _skill_ctx(ctx: RunContext[MechanicalAgentDeps]) -> SkillContext:
+        return SkillContext(
+            twin=ctx.deps.twin,
+            mcp=ctx.deps.mcp_bridge,
+            logger=logger,
+            session_id=UUID(ctx.deps.session_id) if ctx.deps.session_id else UUID(int=0),
+            branch=ctx.deps.branch,
+        )
+
+    @agent.tool
+    async def rank_manufacturing_processes(
+        ctx: RunContext[MechanicalAgentDeps], ranking_input: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Rank candidate manufacturing processes for a part before it is designed.
+
+        Args:
+            ranking_input: quantity, material_class, part_envelope_mm, min_feature_mm,
+                tightest_tolerance_mm and candidates (each with sourced capabilities).
+        """
+        with tracer.start_as_current_span("tool.rank_manufacturing_processes"):
+            data = RankManufacturingProcessesInput.model_validate(ranking_input)
+            result = await RankManufacturingProcessesHandler(_skill_ctx(ctx)).run(data)
+            if not result.success:
+                return {
+                    "skill": "rank_manufacturing_processes",
+                    "success": False,
+                    "errors": result.errors,
+                }
+            return {
+                "skill": "rank_manufacturing_processes",
+                "success": True,
+                **result.data.model_dump(mode="json"),
+            }
+
+    @agent.tool
+    async def check_manufacturability(
+        ctx: RunContext[MechanicalAgentDeps], dfm_input: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Check a design's features against the chosen process's sourced limits (DFM).
+
+        Args:
+            dfm_input: process, features (name, kind, value or dims_mm, basis) and limits
+                (kind, min / max / max_dims_mm, source_ref).
+        """
+        with tracer.start_as_current_span("tool.check_manufacturability"):
+            wp = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
+            data = CheckManufacturabilityInput.model_validate({"work_product_id": wp, **dfm_input})
+            result = await CheckManufacturabilityHandler(_skill_ctx(ctx)).run(data)
+            if not result.success:
+                return {
+                    "skill": "check_manufacturability",
+                    "success": False,
+                    "errors": result.errors,
+                }
+            return {
+                "skill": "check_manufacturability",
+                "success": True,
+                **result.data.model_dump(mode="json"),
+            }
+
     # -- Tool: check_tolerance ------------------------------------------------
 
     @agent.tool
@@ -315,7 +410,7 @@ def create_mechanical_agent(
         ctx: RunContext[MechanicalAgentDeps],
         tolerances: list[dict[str, Any]],
         manufacturing_process: dict[str, Any],
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
     ) -> dict[str, Any]:
         """Check dimensional tolerances against manufacturing process capabilities.
 
@@ -369,7 +464,8 @@ def create_mechanical_agent(
         ctx: RunContext[MechanicalAgentDeps],
         shape_type: str,
         dimensions: dict[str, Any],
-        material: str = "aluminum_6061",
+        name: str = "",
+        material: str = "aluminium_6061_t6",
         output_path: str = "",
     ) -> dict[str, Any]:
         """Generate a CAD model from parametric specifications.
@@ -377,6 +473,9 @@ def create_mechanical_agent(
         Args:
             shape_type: Type of shape to generate (e.g. 'box', 'cylinder').
             dimensions: Dimension parameters for the shape.
+            name: Part name for this geometry (e.g. 'Shoulder Yoke') -- be
+                specific, never a generic placeholder like the shape type
+                alone.
             material: Material identifier.
             output_path: Output file path for the CAD file.
         """
@@ -394,6 +493,10 @@ def create_mechanical_agent(
 
             _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
             skill_input = GenerateCadInput(
+                # FORGE-97: name is now required on the skill's own input;
+                # fall back to the same synthetic pattern the skill itself
+                # used to hardcode when the model doesn't supply one.
+                name=name or f"{shape_type} ({material})",
                 work_product_id=_wp_id,
                 shape_type=shape_type,
                 dimensions=dimensions,
@@ -426,7 +529,7 @@ def create_mechanical_agent(
         script: str = "",
         backend: str = "cadquery",
         constraints: dict[str, Any] | None = None,
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
     ) -> dict[str, Any]:
         """Generate a CAD script from a natural language description and execute it.
 
@@ -504,7 +607,8 @@ def create_mechanical_agent(
     async def generate_cad_ir(
         ctx: RunContext[MechanicalAgentDeps],
         entities: list[dict[str, Any]],
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
+        name: str = "",
     ) -> dict[str, Any]:
         """Generate CAD geometry from a structured Design IR feature tree (FreeCAD).
 
@@ -535,6 +639,7 @@ def create_mechanical_agent(
             entities: The Design IR entity list, ordered so every ``*_ref``
                 points to an entity earlier in this same list.
             material: Material name for metadata.
+            name: Name for the generated part (e.g. "Shoulder Yoke").
         """
         with tracer.start_as_current_span("tool.generate_cad_ir") as span:
             span.set_attribute("entity_count", len(entities))
@@ -550,7 +655,14 @@ def create_mechanical_agent(
 
             _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
             skill_input = GenerateCadIrInput(
-                work_product_id=_wp_id, entities=entities, material=material
+                # FORGE-97/100: name is now required on the skill's own
+                # input; this legacy pydantic-ai tool predates that, so fall
+                # back to the same synthetic pattern the skill itself used
+                # to hardcode when the caller doesn't supply one.
+                name=name or f"design_ir ({material})",
+                work_product_id=_wp_id,
+                entities=entities,
+                material=material,
             )
 
             handler = GenerateCadIrHandler(skill_ctx)

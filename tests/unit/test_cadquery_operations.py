@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
 from tool_registry.tools.cadquery.operations import (
     _BLOCKED_NAMES,
     _SAFE_BUILTINS,
@@ -19,6 +20,7 @@ from tool_registry.tools.cadquery.operations import (
     _build_assembly_sdf,
     _build_assembly_urdf,
     _build_single_link_urdf,
+    _link_world_offsets_mm,
     _stl_export_kwargs,
 )
 
@@ -143,6 +145,18 @@ class TestCadqueryOperationsWithCadquery:
         assert result["surface_area_mm2"] > 0
         assert result["material"] == "aluminum"
         assert "bounding_box" in result
+        # FORGE-100: a constraint like `moving_mass_kg <= 4.5` always read
+        # the default 0 because nothing ever converted volume -> mass.
+        assert result["mass_kg"] == pytest.approx(result["volume_mm3"] * 1e-9 * 2700.0)
+
+    def test_create_parametric_omits_mass_kg_without_material(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        result = ops.create_parametric(
+            shape_type="box",
+            parameters={"length": 20.0, "width": 10.0, "height": 5.0},
+            output_path=str(tmp_path / "box.step"),
+        )
+        assert "mass_kg" not in result
 
     def test_create_parametric_cylinder(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path))
@@ -237,6 +251,54 @@ class TestCadqueryOperationsWithCadquery:
         assert "volume_mm3" in result["properties"]
         assert "surface_area_mm2" in result["properties"]
         assert "bounding_box" in result["properties"]
+
+    def test_generate_enclosure_computes_mass_kg(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+
+        result = ops.generate_enclosure(
+            pcb_length=80.0,
+            pcb_width=50.0,
+            output_path=str(tmp_path / "enclosure.step"),
+        )
+
+        assert result["volume_mm3"] > 0
+        # FORGE-100: material defaults to "ABS", so mass_kg is always present.
+        assert result["mass_kg"] == pytest.approx(
+            result["volume_mm3"] * 1e-9 * resolve_density_kg_m3("ABS")
+        )
+
+    def test_create_assembly_computes_mass_kg_from_summed_volume(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+
+        part_path = str(tmp_path / "part.step")
+        ops.create_parametric(
+            "box", {"length": 20.0, "width": 10.0, "height": 5.0}, output_path=part_path
+        )
+
+        result = ops.create_assembly(
+            parts=[{"name": "base", "file": part_path}],
+            output_path=str(tmp_path / "assembly.step"),
+            material="aluminum",
+        )
+
+        assert result["part_count"] == 1
+        assert result["volume_mm3"] == pytest.approx(result["total_volume"])
+        assert result["mass_kg"] == pytest.approx(result["volume_mm3"] * 1e-9 * 2700.0)
+
+    def test_create_assembly_omits_mass_kg_without_material(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+
+        part_path = str(tmp_path / "part.step")
+        ops.create_parametric(
+            "box", {"length": 20.0, "width": 10.0, "height": 5.0}, output_path=part_path
+        )
+
+        result = ops.create_assembly(
+            parts=[{"name": "base", "file": part_path}],
+            output_path=str(tmp_path / "assembly.step"),
+        )
+
+        assert "mass_kg" not in result
 
 
 class _FakeBoundBox:
@@ -568,7 +630,7 @@ class TestExportUrdf:
             result = ops.export_urdf(
                 "part.step",
                 link_name="widget_link",
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
                 output_path=output_path,
             )
 
@@ -599,25 +661,28 @@ class TestExportUrdf:
         ):
             result = ops.export_urdf(
                 "part.step",
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
                 density_kg_m3=1234.0,
                 output_path=str(tmp_path / "part2.urdf"),
             )
         assert result["density_kg_m3"] == 1234.0
         assert result["mass_kg"] == pytest.approx(1_000_000.0 * 1e-9 * 1234.0)
 
-    def test_unrecognized_material_falls_back_to_default_density(self, tmp_path):
+    def test_unrecognized_material_is_refused_not_given_water(self, tmp_path):
+        """FORGE-457: an unknown material used to get 1000 kg/m3, silently."""
+        from tool_registry.tools.cadquery.materials import MaterialNotResolvedError
+
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         with (
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            result = ops.export_urdf(
-                "part.step",
-                material="some unlisted unobtainium alloy",
-                output_path=str(tmp_path / "part3.urdf"),
-            )
-        assert result["density_kg_m3"] == 1000.0  # DEFAULT_DENSITY_KG_M3
+            with pytest.raises(MaterialNotResolvedError, match="unobtainium"):
+                ops.export_urdf(
+                    "part.step",
+                    material="some unlisted unobtainium alloy",
+                    output_path=str(tmp_path / "part3.urdf"),
+                )
 
     def test_mesh_uri_prefix_is_applied(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
@@ -630,6 +695,7 @@ class TestExportUrdf:
                 "part.step",
                 mesh_uri_prefix="package://widget/meshes/",
                 output_path=output_path,
+                density_kg_m3=1000.0,
             )
         urdf_text = Path(output_path).read_text()
         assert 'filename="package://widget/meshes/part4.stl"' in urdf_text
@@ -640,7 +706,9 @@ class TestExportUrdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            result = ops.export_urdf("part.step", link_name="widget_link", xacro=True)
+            result = ops.export_urdf(
+                "part.step", link_name="widget_link", xacro=True, density_kg_m3=1000.0
+            )
         assert result["output_file"].endswith(".xacro")
         text = Path(result["output_file"]).read_text()
         assert 'xmlns:xacro="http://www.ros.org/wiki/xacro"' in text
@@ -651,7 +719,7 @@ class TestExportUrdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            result = ops.export_urdf("part.step", link_name="widget_link")
+            result = ops.export_urdf("part.step", link_name="widget_link", density_kg_m3=1000.0)
         assert result["output_file"].endswith(".urdf")
         text = Path(result["output_file"]).read_text()
         assert "xacro" not in text
@@ -663,7 +731,10 @@ class TestExportUrdf:
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
             result = ops.export_urdf(
-                "part.step", link_name="widget_link", color_rgba=(0.9, 0.1, 0.1, 1.0)
+                "part.step",
+                link_name="widget_link",
+                color_rgba=(0.9, 0.1, 0.1, 1.0),
+                density_kg_m3=1000.0,
             )
         text = Path(result["output_file"]).read_text()
         assert '<material name="widget_link_material">' in text
@@ -676,7 +747,9 @@ class TestExportUrdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            ops.export_urdf("part.step", link_name="widget_link", mesh_tolerance=0.01)
+            ops.export_urdf(
+                "part.step", link_name="widget_link", mesh_tolerance=0.01, density_kg_m3=1000.0
+            )
         assert _FakeUrdfExporters.kwargs_calls[-1] == {"tolerance": 0.01}
 
 
@@ -720,7 +793,7 @@ class TestBuildAssemblyUrdf:
                 "anchor": (0, 0, 0),
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'scale="0.001 0.001 0.001"' in xml
         assert xml.count('scale="0.001 0.001 0.001"') == 4  # 2 links x (visual+collision)
 
@@ -735,7 +808,7 @@ class TestBuildAssemblyUrdf:
                 "anchor": (10.0, 0.0, 0.0),
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
         assert '<robot name="bot">' in xml
         assert '<link name="base">' in xml
         assert '<link name="arm">' in xml
@@ -758,10 +831,67 @@ class TestBuildAssemblyUrdf:
                 "anchor": (0, 0, 0),
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        xml, emitted = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'type="continuous"' in xml
         assert "<axis" in xml
         assert "<limit" not in xml
+        assert emitted == [{"name": "j1", "type": "continuous", "limits": None}]
+
+    def test_revolute_with_real_limits_maps_to_revolute_not_continuous(self):
+        """FORGE-240: a revolute joint with CALLER-SUPPLIED limits must not
+        be silently downgraded to unlimited continuous -- that's real data,
+        not the fabricated-limit case the continuous mapping exists to
+        avoid. Reported live: a user-specified +/-170deg/+/-110deg range
+        was dropped, exported as unlimited continuous, and the agent then
+        reported fabricated +/-180deg limits that matched neither the
+        request nor the file."""
+        joints = [
+            {
+                "name": "J1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+                "limits": {"lower": -2.9670597, "upper": 2.9670597},  # +/-170deg
+            },
+        ]
+        xml, emitted = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        assert 'name="J1" type="revolute"' in xml
+        assert "<axis" in xml
+        assert 'lower="-2.9670597"' in xml
+        assert 'upper="2.9670597"' in xml
+        # Default effort/velocity fill in the same way prismatic's already do.
+        assert 'effort="100"' in xml
+        assert 'velocity="1"' in xml
+        assert emitted == [
+            {
+                "name": "J1",
+                "type": "revolute",
+                "limits": {
+                    "lower": -2.9670597,
+                    "upper": 2.9670597,
+                    "effort": 100.0,
+                    "velocity": 1.0,
+                },
+            }
+        ]
+
+    def test_revolute_with_limits_honors_explicit_effort_and_velocity(self):
+        joints = [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+                "limits": {"lower": -1.0, "upper": 1.0, "effort": 50.0, "velocity": 2.5},
+            },
+        ]
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        assert 'effort="50"' in xml
+        assert 'velocity="2.5"' in xml
 
     def test_slider_maps_to_prismatic_with_limits(self):
         joints = [
@@ -775,7 +905,7 @@ class TestBuildAssemblyUrdf:
                 "limits": {"lower": -0.05, "upper": 0.05},
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'type="prismatic"' in xml
         assert 'lower="-0.05"' in xml
         assert 'upper="0.05"' in xml
@@ -824,7 +954,7 @@ class TestBuildAssemblyUrdf:
                 "anchor": (0, 0, 0),
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=links, joints=joints)
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=links, joints=joints)
         assert '<material name="base_material">' in xml
         assert 'rgba="0.2 0.25 0.3 1"' in xml
         assert "arm_material" not in xml
@@ -835,6 +965,169 @@ class TestBuildAssemblyUrdf:
         base_link = next(el for el in root.findall("link") if el.get("name") == "base")
         assert base_link.find("visual/material") is not None
         assert base_link.find("collision/material") is None
+
+
+class TestLinkWorldOffsetsMm:
+    """FORGE-243: the shared FK-offset helper, in isolation."""
+
+    def test_root_link_never_a_follower_is_zero(self):
+        links = [{"name": "base"}, {"name": "arm"}]
+        joints = [{"name": "j1", "base": "base", "follower": "arm", "anchor": (10.0, 20.0, 30.0)}]
+        offsets = _link_world_offsets_mm(links, joints)
+        assert offsets["base"] == (0.0, 0.0, 0.0)
+        assert offsets["arm"] == (10.0, 20.0, 30.0)
+
+    def test_a_chain_accumulates_by_anchor_not_by_walking(self):
+        # T[link] never depends on T[parent] -- it's just that link's own
+        # incoming joint's anchor, however deep in the chain.
+        links = [{"name": "base"}, {"name": "l1"}, {"name": "l2"}]
+        joints = [
+            {"name": "j1", "base": "base", "follower": "l1", "anchor": (1.0, 0.0, 0.0)},
+            {"name": "j2", "base": "l1", "follower": "l2", "anchor": (1.0, 5.0, 0.0)},
+        ]
+        offsets = _link_world_offsets_mm(links, joints)
+        assert offsets["l1"] == (1.0, 0.0, 0.0)
+        assert offsets["l2"] == (1.0, 5.0, 0.0)
+
+    def test_a_link_with_no_incoming_joint_and_no_anchor_field_defaults_zero(self):
+        links = [{"name": "solo"}]
+        offsets = _link_world_offsets_mm(links, [])
+        assert offsets["solo"] == (0.0, 0.0, 0.0)
+
+
+class TestBuildAssemblyUrdfFkCorrectness:
+    """FORGE-243: a 3-link chain built from world-frame parts must FK back
+    to the original input anchors, and every world-frame value (mesh
+    origin, inertial origin) must be re-expressed relative to each link's
+    own chain position -- not left raw, which is what previously left
+    every link's mesh in its unrotated world position while the joint
+    chain moved the link *frames* out from under them.
+    """
+
+    _LINKS = [
+        {
+            "name": "base",
+            "mesh_uri": "base.stl",
+            "mass_kg": 1.0,
+            "com_m": (0.0, 0.0, 0.0),
+            "inertia_kgm2": (1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+        },
+        {
+            "name": "l1",
+            "mesh_uri": "l1.stl",
+            "mass_kg": 0.5,
+            # World-frame COM -- authored where the part physically sits,
+            # not relative to any link-local frame.
+            "com_m": (0.05, 0.0, 0.1),
+            "inertia_kgm2": (0.1, 0.0, 0.0, 0.1, 0.0, 0.1),
+        },
+        {
+            "name": "l2",
+            "mesh_uri": "l2.stl",
+            "mass_kg": 0.25,
+            "com_m": (0.15, -0.02, 0.28),
+            "inertia_kgm2": (0.05, 0.0, 0.0, 0.05, 0.0, 0.05),
+        },
+    ]
+
+    # World-frame anchors (mm), a non-trivial chain (not axis-aligned,
+    # not starting at the origin).
+    _J1_ANCHOR_MM = (0.0, 0.0, 100.0)
+    _J2_ANCHOR_MM = (0.0, 0.0, 280.0)
+
+    def _joints(self):
+        return [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "l1",
+                "axis": (0, 1, 0),
+                "anchor": self._J1_ANCHOR_MM,
+            },
+            {
+                "name": "j2",
+                "type": "revolute",
+                "base": "l1",
+                "follower": "l2",
+                "axis": (0, 1, 0),
+                "anchor": self._J2_ANCHOR_MM,
+            },
+        ]
+
+    def _joint_origins_m(self, xml: str) -> dict[str, tuple[float, float, float]]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        origins = {}
+        for joint_el in root.findall("joint"):
+            xyz = joint_el.find("origin").get("xyz")
+            origins[joint_el.get("name")] = tuple(float(v) for v in xyz.split())
+        return origins
+
+    def _link_section_origin_m(self, xml: str, link_name: str, tag: str) -> tuple[float, ...]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        link_el = next(el for el in root.findall("link") if el.get("name") == link_name)
+        xyz = link_el.find(f"{tag}/origin").get("xyz")
+        return tuple(float(v) for v in xyz.split())
+
+    def test_joint_origins_fk_back_to_the_input_anchors(self):
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        origins = self._joint_origins_m(xml)
+
+        # j1's parent (base) is a chain root -> origin is the raw anchor.
+        j1_expected = tuple(v * 1e-3 for v in self._J1_ANCHOR_MM)
+        assert origins["j1"] == pytest.approx(j1_expected)
+
+        # j2's parent (l1) sits at j1's anchor -> origin is the DIFFERENCE,
+        # not the raw j2 anchor (the previously-reported bug: writing raw
+        # anchors made every link's offset stack instead of accumulate).
+        j2_expected = tuple(
+            (self._J2_ANCHOR_MM[i] - self._J1_ANCHOR_MM[i]) * 1e-3 for i in range(3)
+        )
+        assert origins["j2"] == pytest.approx(j2_expected)
+        assert origins["j2"] != pytest.approx(tuple(v * 1e-3 for v in self._J2_ANCHOR_MM))
+
+        # FK reconstruction: accumulating the (parent-relative) joint
+        # origins down the chain must recover each link's original
+        # world-frame anchor exactly.
+        base_world = (0.0, 0.0, 0.0)
+        l1_world = tuple(base_world[i] + origins["j1"][i] for i in range(3))
+        l2_world = tuple(l1_world[i] + origins["j2"][i] for i in range(3))
+        assert l1_world == pytest.approx(tuple(v * 1e-3 for v in self._J1_ANCHOR_MM))
+        assert l2_world == pytest.approx(tuple(v * 1e-3 for v in self._J2_ANCHOR_MM))
+
+    def test_mesh_origins_compensate_so_world_frame_geometry_lands_correctly(self):
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        # base is a chain root -- no compensation needed.
+        assert self._link_section_origin_m(xml, "base", "visual") == pytest.approx((0, 0, 0))
+        assert self._link_section_origin_m(xml, "base", "collision") == pytest.approx((0, 0, 0))
+        # l1's mesh (authored in world frame) must be pulled back by
+        # -T[l1] so it renders at its original world position once the
+        # link frame itself sits at T[l1] via the joint chain.
+        l1_expected = tuple(-v * 1e-3 for v in self._J1_ANCHOR_MM)
+        assert self._link_section_origin_m(xml, "l1", "visual") == pytest.approx(l1_expected)
+        assert self._link_section_origin_m(xml, "l1", "collision") == pytest.approx(l1_expected)
+        l2_expected = tuple(-v * 1e-3 for v in self._J2_ANCHOR_MM)
+        assert self._link_section_origin_m(xml, "l2", "visual") == pytest.approx(l2_expected)
+
+    def test_inertial_origin_is_com_relative_to_the_link_frame_not_world(self):
+        import xml.etree.ElementTree as ET
+
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        root = ET.fromstring(xml)
+        l1_el = next(el for el in root.findall("link") if el.get("name") == "l1")
+        xyz = l1_el.find("inertial/origin").get("xyz")
+        got = tuple(float(v) for v in xyz.split())
+        world_com_m = self._LINKS[1]["com_m"]
+        offset_m = tuple(v * 1e-3 for v in self._J1_ANCHOR_MM)
+        expected = tuple(world_com_m[i] - offset_m[i] for i in range(3))
+        assert got == pytest.approx(expected)
+        # Must not still be the raw world-frame COM (the previously-reported
+        # bug's shape).
+        assert got != pytest.approx(world_com_m)
 
 
 class TestBuildSingleLinkUrdf:
@@ -914,7 +1207,7 @@ class TestExportUrdfAssembly:
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         output_path = str(tmp_path / "robot.urdf")
         parts = [
-            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "base.step", "link_name": "base", "material": "aluminium_6061_t6"},
             {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
         ]
         joints = [
@@ -949,7 +1242,7 @@ class TestExportUrdfAssembly:
 
     def test_xacro_flag_writes_xacro_extension_and_namespace(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
-        parts = [{"input_file": "base.step", "link_name": "base"}]
+        parts = [{"input_file": "base.step", "link_name": "base", "density_kg_m3": 1000.0}]
         with (
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
@@ -971,8 +1264,13 @@ class TestExportUrdfAssembly:
     def test_per_part_color_rgba_reaches_the_urdf(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         parts = [
-            {"input_file": "base.step", "link_name": "base", "color_rgba": [0.1, 0.2, 0.3, 1.0]},
-            {"input_file": "arm.step", "link_name": "arm"},
+            {
+                "input_file": "base.step",
+                "link_name": "base",
+                "color_rgba": [0.1, 0.2, 0.3, 1.0],
+                "density_kg_m3": 1000.0,
+            },
+            {"input_file": "arm.step", "link_name": "arm", "density_kg_m3": 1000.0},
         ]
         with (
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
@@ -988,8 +1286,8 @@ class TestExportUrdfAssembly:
         _FakeUrdfExporters.kwargs_calls = []
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         parts = [
-            {"input_file": "base.step", "link_name": "base"},
-            {"input_file": "arm.step", "link_name": "arm"},
+            {"input_file": "base.step", "link_name": "base", "density_kg_m3": 1000.0},
+            {"input_file": "arm.step", "link_name": "arm", "density_kg_m3": 1000.0},
         ]
         with (
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
@@ -1048,7 +1346,7 @@ class TestExportSdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            result = ops.export_sdf("part.step", world_name="my_world")
+            result = ops.export_sdf("part.step", world_name="my_world", density_kg_m3=1000.0)
 
         assert result["output_file"].endswith(".world")
         sdf_text = Path(result["output_file"]).read_text()
@@ -1062,7 +1360,7 @@ class TestExportSdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            ops.export_sdf("part.step", static=True, output_path=output_path)
+            ops.export_sdf("part.step", static=True, output_path=output_path, density_kg_m3=1000.0)
         sdf_text = Path(output_path).read_text()
         assert "<static>true</static>" in sdf_text
 
@@ -1077,6 +1375,7 @@ class TestExportSdf:
                 "part.step",
                 mesh_uri="model://widget/meshes/part.stl",
                 output_path=output_path,
+                density_kg_m3=1000.0,
             )
         sdf_text = Path(output_path).read_text()
         assert "<uri>model://widget/meshes/part.stl</uri>" in sdf_text
@@ -1109,7 +1408,7 @@ class TestBuildAssemblySdf:
         joints = [
             {"name": "base_to_arm", "type": "fixed", "base": "base", "follower": "arm"},
         ]
-        xml = _build_assembly_sdf(
+        xml, _ = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
         )
         assert '<model name="bot">' in xml
@@ -1131,18 +1430,46 @@ class TestBuildAssemblySdf:
                 "axis": (0, 0, 1),
             },
         ]
-        xml = _build_assembly_sdf(
+        xml, emitted = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
         )
         assert 'type="continuous"' in xml
         assert "<axis>" in xml
         assert "<limit" not in xml
+        assert emitted == [{"name": "j1", "type": "continuous", "limits": None}]
+
+    def test_revolute_with_real_limits_maps_to_revolute_not_continuous(self):
+        """FORGE-240: same fix as URDF's -- caller-supplied limits on a
+        revolute joint must not be dropped in favor of unlimited continuous."""
+        joints = [
+            {
+                "name": "J2",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "limits": {"lower": -1.9198622, "upper": 1.9198622},  # +/-110deg
+            },
+        ]
+        xml, emitted = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
+        )
+        assert 'name="J2" type="revolute"' in xml
+        assert "<lower>-1.9198622</lower>" in xml
+        assert "<upper>1.9198622</upper>" in xml
+        assert emitted == [
+            {
+                "name": "J2",
+                "type": "revolute",
+                "limits": {"lower": -1.9198622, "upper": 1.9198622},
+            }
+        ]
 
     def test_ball_joint_is_supported_natively(self):
         joints = [
             {"name": "j1", "type": "ball", "base": "base", "follower": "arm"},
         ]
-        xml = _build_assembly_sdf(
+        xml, _ = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
         )
         assert 'type="ball">' in xml
@@ -1159,7 +1486,7 @@ class TestBuildAssemblySdf:
                 "limits": {"lower": -0.05, "upper": 0.05},
             },
         ]
-        xml = _build_assembly_sdf(
+        xml, _ = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
         )
         assert 'type="prismatic"' in xml
@@ -1185,11 +1512,141 @@ class TestBuildAssemblySdf:
             )
 
     def test_world_name_wraps_model(self):
-        xml = _build_assembly_sdf(
+        xml, _ = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=[], static=False, world_name="my_world"
         )
         assert '<world name="my_world">' in xml
         assert "<model" in xml
+
+
+class TestBuildAssemblySdfPoseCorrectness:
+    """FORGE-304: a 3-link chain built from world-frame parts must emit a
+    real <pose> on every <link> and <joint> -- previously omitted entirely,
+    leaving every link rendered wherever its raw STEP world-frame vertices
+    happened to put it and every joint with no spatial origin at all.
+
+    Per the primary source (gazebosim/sdf_tutorials' pose_frame_semantics
+    tutorial, fetched while fixing this), a link's <pose> defaults to being
+    relative to the model frame -- so it's simply each link's
+    `_link_world_offsets_mm()` position in metres, no accumulation. A
+    joint's default pose frame is the *child* link's frame (the one SDF
+    exception to "relative to parent entity"), so this fix sidesteps that
+    by writing every joint <pose relative_to="__model__">, making it (like
+    the link poses) simply the joint's real-world anchor in metres.
+    """
+
+    _LINKS = [
+        {
+            "name": "base",
+            "mesh_uri": "base.stl",
+            "mass_kg": 1.0,
+            "com_m": (0.0, 0.0, 0.0),
+            "inertia_kgm2": (1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+        },
+        {
+            "name": "l1",
+            "mesh_uri": "l1.stl",
+            "mass_kg": 0.5,
+            # World-frame COM -- authored where the part physically sits,
+            # not relative to any link-local frame.
+            "com_m": (0.05, 0.0, 0.1),
+            "inertia_kgm2": (0.1, 0.0, 0.0, 0.1, 0.0, 0.1),
+        },
+        {
+            "name": "l2",
+            "mesh_uri": "l2.stl",
+            "mass_kg": 0.25,
+            "com_m": (0.15, -0.02, 0.28),
+            "inertia_kgm2": (0.05, 0.0, 0.0, 0.05, 0.0, 0.05),
+        },
+    ]
+
+    # World-frame anchors (mm), a non-trivial chain (not axis-aligned, not
+    # starting at the origin) -- same values as FORGE-243's URDF FK test.
+    _J1_ANCHOR_MM = (0.0, 0.0, 100.0)
+    _J2_ANCHOR_MM = (0.0, 0.0, 280.0)
+
+    def _joints(self):
+        return [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "l1",
+                "axis": (0, 1, 0),
+                "anchor": self._J1_ANCHOR_MM,
+            },
+            {
+                "name": "j2",
+                "type": "revolute",
+                "base": "l1",
+                "follower": "l2",
+                "axis": (0, 1, 0),
+                "anchor": self._J2_ANCHOR_MM,
+            },
+        ]
+
+    @staticmethod
+    def _link_pose_m(xml: str, link_name: str) -> tuple[float, ...]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        link_el = next(el for el in root.findall(".//link") if el.get("name") == link_name)
+        return tuple(float(v) for v in link_el.find("pose").text.split())
+
+    @staticmethod
+    def _inertial_pose_m(xml: str, link_name: str) -> tuple[float, ...]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        link_el = next(el for el in root.findall(".//link") if el.get("name") == link_name)
+        return tuple(float(v) for v in link_el.find("inertial/pose").text.split())
+
+    @staticmethod
+    def _joint_pose(xml: str, joint_name: str) -> tuple[tuple[float, ...], str | None]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        joint_el = next(el for el in root.findall(".//joint") if el.get("name") == joint_name)
+        pose_el = joint_el.find("pose")
+        return tuple(float(v) for v in pose_el.text.split()), pose_el.get("relative_to")
+
+    def test_link_poses_are_the_real_world_frame_anchors_no_accumulation(self):
+        xml, _ = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=self._joints(), static=False, world_name=""
+        )
+        # base is a chain root -> pose is the origin.
+        assert self._link_pose_m(xml, "base") == pytest.approx((0, 0, 0, 0, 0, 0))
+        # l1 sits at j1's anchor (its own single lookup, unlike URDF's
+        # parent-relative chain -- SDF link poses are each independently
+        # model-frame, so this is the raw anchor, not a difference).
+        assert self._link_pose_m(xml, "l1") == pytest.approx((0, 0, 0.1, 0, 0, 0))
+        # l2 sits at j2's anchor, likewise un-accumulated.
+        assert self._link_pose_m(xml, "l2") == pytest.approx((0, 0, 0.28, 0, 0, 0))
+
+    def test_joint_poses_are_model_relative_real_world_anchors(self):
+        xml, _ = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=self._joints(), static=False, world_name=""
+        )
+        j1_pose, j1_rel = self._joint_pose(xml, "j1")
+        j2_pose, j2_rel = self._joint_pose(xml, "j2")
+        assert j1_rel == "__model__"
+        assert j2_rel == "__model__"
+        assert j1_pose == pytest.approx((0, 0, 0.1, 0, 0, 0))
+        assert j2_pose == pytest.approx((0, 0, 0.28, 0, 0, 0))
+
+    def test_inertial_poses_are_re_expressed_relative_to_each_links_own_frame(self):
+        xml, _ = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=self._joints(), static=False, world_name=""
+        )
+        # base is a chain root (link pose == origin) -> inertial pose is
+        # unchanged from its raw world-frame COM.
+        assert self._inertial_pose_m(xml, "base") == pytest.approx((0, 0, 0, 0, 0, 0))
+        # l1's link pose is (0, 0, 0.1) -- its COM (0.05, 0, 0.1) must be
+        # re-expressed relative to that, not left as the raw world value.
+        assert self._inertial_pose_m(xml, "l1") == pytest.approx((0.05, 0.0, 0.0, 0, 0, 0))
+        # l2's link pose is (0, 0, 0.28) -- same re-expression.
+        assert self._inertial_pose_m(xml, "l2") == pytest.approx((0.15, -0.02, 0.0, 0, 0, 0))
 
 
 class TestExportSdfAssembly:
@@ -1199,7 +1656,7 @@ class TestExportSdfAssembly:
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         output_path = str(tmp_path / "robot.sdf")
         parts = [
-            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "base.step", "link_name": "base", "material": "aluminium_6061_t6"},
             {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
         ]
         joints = [
@@ -1279,7 +1736,7 @@ class TestExportUsd:
             result = ops.export_usd(
                 "part.step",
                 prim_name="widget",
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
                 output_path=output_path,
             )
 
@@ -1320,7 +1777,9 @@ class TestExportUsd:
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqTilted()),
             pytest.raises(NonAxisAlignedInertiaError),
         ):
-            ops.export_usd("part.step", output_path=str(tmp_path / "tilted.usda"))
+            ops.export_usd(
+                "part.step", output_path=str(tmp_path / "tilted.usda"), density_kg_m3=1000.0
+            )
 
 
 class TestExportUsdAssembly:
@@ -1331,7 +1790,7 @@ class TestExportUsdAssembly:
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         output_path = str(tmp_path / "robot.usda")
         parts = [
-            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "base.step", "link_name": "base", "material": "aluminium_6061_t6"},
             {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
         ]
         joints = [
@@ -1393,3 +1852,136 @@ class TestGenerateRos2Launch:
                 "widget", "/tmp/widget.urdf", output_path=str(tmp_path / "w.launch.py")
             )
         assert Path(result["output_file"]).exists()
+
+
+class _FakeEmptySolid:
+    """A test double for a genuinely empty CadQuery/OCCT shape (e.g. the
+    result of intersect()-ing two non-overlapping solids) -- real OCCT's
+    own Volume()/Area() return 0.0 safely for this, but BoundingBox()
+    raises Standard_ConstructionError: Bnd_Box is void (confirmed live
+    against the real cadquery-adapter on fidel-dev, FORGE-272)."""
+
+    def Solids(self):
+        return []
+
+    def Volume(self):
+        return 0.0
+
+    def Area(self):
+        return 0.0
+
+    def BoundingBox(self):
+        raise AssertionError(
+            "BoundingBox() must not be called on a shape with no Solids() -- "
+            "real OCCT raises Standard_ConstructionError: Bnd_Box is void here"
+        )
+
+
+class _FakeNonEmptySolid:
+    """A test double for a real, non-empty shape -- the existing (pre-
+    FORGE-272) code path, confirming the guard doesn't change behavior
+    for the common case."""
+
+    def Solids(self):
+        return [object()]
+
+    def Volume(self):
+        return 500.0
+
+    def Area(self):
+        return 400.0
+
+    def BoundingBox(self):
+        class _BB:
+            xmin, ymin, zmin = 0.0, -5.0, -5.0
+            xmax, ymax, zmax = 5.0, 5.0, 5.0
+
+        return _BB()
+
+
+class TestGetShapePropertiesEmptyShapeGuard:
+    """FORGE-272: _get_shape_properties must describe a genuinely empty
+    shape (zero Solids()) as zero volume/area with no bounding box,
+    rather than crashing on BoundingBox()'s OCCT exception -- the real
+    bug a real, non-overlapping interference check hit live on
+    fidel-dev (two real AR4 arm links, 'Bnd_Box is void')."""
+
+    def test_empty_shape_returns_zero_volume_no_bounding_box(self):
+        ops = CadqueryOperations()
+        props = ops._get_shape_properties(_FakeEmptySolid())
+        assert props == {
+            "volume_mm3": 0.0,
+            "surface_area_mm2": 0.0,
+            "bounding_box": None,
+        }
+
+    def test_non_empty_shape_still_computes_real_bounding_box(self):
+        ops = CadqueryOperations()
+        props = ops._get_shape_properties(_FakeNonEmptySolid())
+        assert props["volume_mm3"] == 500.0
+        assert props["surface_area_mm2"] == 400.0
+        assert props["bounding_box"] == {
+            "min_x": 0.0,
+            "min_y": -5.0,
+            "min_z": -5.0,
+            "max_x": 5.0,
+            "max_y": 5.0,
+            "max_z": 5.0,
+        }
+
+
+class TestAssemblyInterferenceForge547:
+    """FORGE-547: real interference check, and rotations honoured."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_cadquery(self) -> None:
+        pytest.importorskip("cadquery")
+
+    def _box(self, ops: CadqueryOperations, tmp_path: Path, name: str) -> str:
+        path = str(tmp_path / f"{name}.step")
+        ops.create_parametric(
+            "box", {"length": 20.0, "width": 10.0, "height": 10.0}, output_path=path
+        )
+        return path
+
+    def test_overlapping_parts_fail_the_check_with_the_overlap(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        a, b = self._box(ops, tmp_path, "a"), self._box(ops, tmp_path, "b")
+        result = ops.create_assembly(
+            parts=[{"name": "a", "file": a}, {"name": "b", "file": b, "location": {"x": 10}}],
+            output_path=str(tmp_path / "assy.step"),
+        )
+        assert result["interference_check_passed"] is False
+        (hit,) = result["interferences"]
+        assert {hit["part_a"], hit["part_b"]} == {"a", "b"}
+        assert hit["volume_mm3"] == pytest.approx(10 * 10 * 10, rel=1e-3)
+
+    def test_separated_parts_pass(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        a, b = self._box(ops, tmp_path, "a"), self._box(ops, tmp_path, "b")
+        result = ops.create_assembly(
+            parts=[{"name": "a", "file": a}, {"name": "b", "file": b, "location": {"x": 50}}],
+            output_path=str(tmp_path / "assy.step"),
+        )
+        assert result["interference_check_passed"] is True
+        assert result["interferences"] == []
+
+    def test_a_rotation_moves_a_part_out_of_the_way(self, tmp_path):
+        # Two 20x10x10 boxes side by side along y overlap; rotating b 90
+        # degrees about z swings it out of a. Without rotation support the
+        # overlap would remain.
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        a, b = self._box(ops, tmp_path, "a"), self._box(ops, tmp_path, "b")
+        overlapping = ops.create_assembly(
+            parts=[{"name": "a", "file": a}, {"name": "b", "file": b, "location": {"x": 15}}],
+            output_path=str(tmp_path / "one.step"),
+        )
+        rotated = ops.create_assembly(
+            parts=[
+                {"name": "a", "file": a},
+                {"name": "b", "file": b, "location": {"x": 15, "y": 20, "rz": 90}},
+            ],
+            output_path=str(tmp_path / "two.step"),
+        )
+        assert overlapping["interference_check_passed"] is False
+        assert rotated["interference_check_passed"] is True

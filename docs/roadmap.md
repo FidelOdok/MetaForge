@@ -1,314 +1,189 @@
-# MetaForge Phased Delivery Roadmap
+# MetaForge Roadmap
 
-> **Version**: 0.1 (Phase 0 — Spec & Design)
-> **Status**: Draft
-> **Last Updated**: 2026-03-02
-> **Depends on**: [`architecture.md`](architecture.md), [`twin_schema.md`](twin_schema.md), [`skill_spec.md`](skill_spec.md), [`mcp_spec.md`](mcp_spec.md)
-> **Referenced by**: [`governance.md`](governance.md)
+> **Status:** reviewed 2026-10-28 against the code on `main` and the project's
+> open work. Releases are 0.3.x. **No delivery dates are committed.** Where a
+> date appears below it is the original plan, labelled as such.
+>
+> **Depends on:** [`architecture.md`](architecture.md), [`capability-matrix.md`](capability-matrix.md)
+> **Referenced by:** [`governance.md`](governance.md)
 
-## 1. Phase Overview
+## 1. How to read this roadmap
 
-MetaForge is delivered in four phases, each building on the previous:
+This page says what is **released**, what is **in progress**, what is **planned**
+and what is **not started**. It is a statement of intent, not a promise.
 
-| Phase | Version | Timeline | Agents | Disciplines | Key Milestone |
-|-------|---------|----------|--------|-------------|---------------|
-| **Phase 0** | — | Month 0-1 | 0 | 0 | Specs finalized, architecture frozen |
-| **Phase 1** | v0.1-0.3 | Month 2-7 | 6-7 | 6-7 | Mechanical vertical end-to-end |
-| **Phase 2** | v0.4-0.6 | Month 8-13 | 19 | 19 | KiCad write, IDE extensions |
-| **Phase 3** | v0.7-1.0 | Month 14-18 | 25 | 25 | Full 25-discipline coverage |
+| Label | Means |
+|---|---|
+| **Released** | In `main`, tested, and listed in the [capability matrix](capability-matrix.md) |
+| **Early** | Released but narrow, or not yet proven on real projects. The matrix says where |
+| **In progress** | Being built now. It may change before release |
+| **Planned** | Agreed direction, not started. No date |
+| **Not started** | In the original plan, with no work behind it yet |
 
----
+Two rules keep it honest. A feature moves to *Released* only when it is in the
+capability matrix. A date is added only when someone has agreed to it.
 
-## 2. Phase 0 — Spec & Design (Month 0-1)
+The detailed plans, specifications and vision live in the separate
+`MetaForge-Planner` repository. This page describes what is built and where it is
+heading, so it will not match every item in that repository.
 
-### Objective
+## 2. Where MetaForge stands
 
-Finalize all specification documents before development begins. No code is written in Phase 0.
+The first roadmap (written in early 2026) planned four phases over about 18 months.
+Development did not follow those phases in order. Several Phase 2 and Phase 3 items
+shipped early, and some Phase 1 ideas were replaced by something better.
 
-### Deliverables
+| Original phase | Original scope | Status today |
+|---|---|---|
+| **Phase 0**: specifications | Twin schema, skill spec, MCP rules, governance | **Done** |
+| **Phase 1**: core platform (v0.1 to 0.3) | Twin graph, MCP tools, skills, mechanical vertical, CLI | **Done**, and well beyond: seven specialist agents and a gated design-flow engine |
+| **Phase 2**: expansion | More agents, KiCad write, IDE extensions, approval workflow, container tools | **Mostly done**: KiCad write, approvals and container tools are released. Agents stop at seven. IDE extensions are experimental |
+| **Phase 3**: collaboration and scale | Web dashboard, diffing, multi-user, optimisation, composition | **Partly done**: the dashboard, revision compare, an optimisation loop and composable flows are released. Multi-user is the hosted service, outside this repository |
+| **Phase 4**: ecosystem | Skill marketplace, tool SDK, remote compute | **Not started**, apart from a plugin marketplace for Claude Code and Codex |
 
-| Deliverable | Document | Status |
-|-------------|----------|--------|
-| System architecture | [`architecture.md`](architecture.md) | In Progress |
-| Digital Twin schema | [`twin_schema.md`](twin_schema.md) | In Progress |
-| Skill system spec | [`skill_spec.md`](skill_spec.md) | In Progress |
-| MCP protocol spec | [`mcp_spec.md`](mcp_spec.md) | In Progress |
-| Delivery roadmap | [`roadmap.md`](roadmap.md) (this document) | In Progress |
-| Governance model | [`governance.md`](governance.md) | In Progress |
+## 3. Released
 
-### Exit Criteria
+### The platform
 
-- All 6 spec documents reviewed and approved.
-- Architecture diagram finalized.
-- ADR-001 (PydanticAI + Temporal) ratified.
-- Development environment setup documented.
-- CI/CD pipeline configured.
+- Gateway (FastAPI), orchestrator on Temporal, a skill registry and an MCP tool
+  registry. Every tool call passes the registry, and all tools run in containers.
+- Seven specialist agents: mechanical, electronics, firmware, simulation, industrial
+  design, compliance and supply chain.
+- Signed container images, an image-only host for servers, and credentials that are
+  generated rather than shipped with defaults.
 
----
+### Design flows
 
-## 3. Phase 1 — MVP (v0.1-0.3, Month 2-7)
+- Three versioned flows (`design_v1`, `hardware_v1`, `mech_v1`), built from a shared
+  spine and per-discipline fragments, frozen at approval, with a visual editor.
+- Review gates with approve, retry, rework and reject, and one approvals surface for
+  the dashboard, the CLI and agents.
+- Live progress: tool calls and assemblies appear as a run proceeds.
+- Per-run token and cost accounting, per-role model routing and prompt caching.
 
-### Objective
+### The digital twin
 
-Deliver the first end-to-end vertical: **Mechanical Agent** (MET-8). A user can submit a CAD model, run FEA stress analysis, validate against constraints, and see results committed to the Digital Twin.
+- Items with numbered revisions, baselines and drafts that become the baseline only
+  at a gate; revision compare; requirement, evidence and constraint records.
+- A requirements and intent harness: typed requirements, completeness and conflict
+  checks, and a completion verdict that treats "no data" as not passed.
+- A design loop that proposes, builds, simulates and evaluates against constraints.
+- The twin graph on the dashboard, with links to constraints, baselines and parts.
 
-### Timeline: 6 months total
+### Engineering tools
 
-- **Months 2-5** (3-4 months): Core development
-- **Months 6-7** (1-2 months): Testing, documentation, stabilization
+- CAD: CadQuery and FreeCAD authoring, STEP and GLB viewing, named parts, a material
+  library, and studio renders (Blender).
+- Analysis: CalculiX (static, modal, thermal), SPICE, and steady internal flow with
+  OpenFOAM (**Early**: turbulence is not validated).
+- Electronics: KiCad ERC and DRC, BOM and Gerber export, and generation of new
+  schematic, board and routed projects (**Early**: new projects only). Firmware
+  build, static check and emulation.
+- Manufacturing: process ranking before design, DFM review after it, a machine and
+  process library, and distributor lookups (Digi-Key, Mouser, Nexar, Farnell, Arrow).
+- Knowledge: document and datasheet ingestion with cited search.
 
-### Scope
+### Using it
 
-| What's Included | What's Excluded |
-|-----------------|-----------------|
-| 6-7 specialist agents (1:1 ratio to disciplines) | Industrial Design, Prototyping agents |
-| Digital Twin with Neo4j graph engine | Multi-user collaboration |
-| Skill system with registry and loader | IDE extensions |
-| MCP protocol with 4 tool adapters | KiCad write capabilities |
-| Gateway Service (FastAPI) | Production deployment tooling |
-| Orchestrator (Temporal) | Auto-scaling |
-| CLI (`forge` binary) | Web dashboard |
-| Assistant Mode + Autonomous Mode | Advanced approval workflows |
+- Dashboard (20 routes), `forge` CLI and interactive TUI, and an offline sample
+  workspace.
+- Claude Code and Codex plugins, over HTTP or on the local machine, with writes held
+  for approval. Every agent session is captured and reviewable.
 
-### Phase 1 Agents and Disciplines
+## 4. In progress
 
-| # | Discipline | Agent | Key Skills | Epic |
-|---|-----------|-------|------------|------|
-| 1 | Mechanical Engineering | Mechanical Agent | validate_stress, check_tolerances, export_mesh | MET-8 |
-| 2 | Electronics Engineering | Electronics Agent | run_erc, run_drc, export_bom | MET-9 |
-| 3 | Embedded Software/Firmware | Firmware Agent | validate_pinmap, generate_scaffold, check_memory_budget | — |
-| 4 | Simulation & Validation | Simulation Agent | run_thermal, run_circuit_sim, compare_results | — |
-| 5 | Systems Engineering | Systems Agent | check_interfaces, validate_power_budget, resolve_dependencies | — |
-| 6 | Testing & Reliability | Testing Agent | generate_test_plan, validate_test_coverage, create_bringup_checklist | — |
+| Theme | What is being built |
+|---|---|
+| **Work product identity** | One truth per project: stable keys, revisions and baselines extended to every record type |
+| **Skill fidelity** | Making each skill and tool do exactly what its documentation says, with tests that prove it |
+| **Airflow analysis** | Validating turbulence models, and deriving fluid surfaces from solid models |
+| **Generative simulation** | Gazebo and Omniverse simulation behind the opt-in adapters |
+| **Headless CAD authoring** | Deeper FreeCAD authoring and a kinematic-solver backend |
+| **Hosted plugin** | Moving the hosted-service plugin to the hosted repository, with its own marketplace |
+| **Hardening** | Binding every published port of a server install to loopback, behind a tunnel |
 
-**Note**: The exact count is 6-7 agents depending on whether Product Definition is included as a standalone agent or handled by the Orchestrator in Phase 1.
+## 5. Planned
 
-### Phase 1 Tool Adapters
+None of these has a date.
 
-| Adapter | Capabilities | Read/Write |
-|---------|-------------|------------|
-| CalculiX | Stress analysis, thermal analysis, mesh validation | Read-only |
-| FreeCAD | Mesh export, STEP/STL conversion, measurement | Read-only |
-| KiCad | ERC, DRC, BOM export, Gerber export | **Read-only** |
-| SPICE | DC/AC analysis, transient simulation | Read-only |
-
-### Phase 1 Milestones
-
-| Version | Milestone | Key Deliverables |
-|---------|-----------|-----------------|
-| v0.1 | Foundation | Twin Core, Skill Registry, MCP Client, Gateway shell |
-| v0.2 | First Vertical | Mechanical Agent end-to-end (CAD → FEA → Twin) |
-| v0.3 | Expansion | Remaining agents, CLI polish, test coverage ≥ 80% |
-
-### Linear Epics (Phase 1)
-
-| Epic | Scope |
-|------|-------|
-| MET-5: Digital Twin Core | Graph engine, versioning, constraints, Twin API |
-| MET-6: Skill System | Registry, loader, schema validator, MCP bridge |
-| MET-7: MCP Infrastructure | Client, wire protocol, tool registry, adapters |
-| MET-8: Mechanical Agent | Stress validation, meshing, tolerances (first vertical) |
-
----
-
-## 4. Phase 2 — Expansion (v0.4-0.6, Month 8-13)
-
-### Objective
-
-Expand to 19 agents covering 19 disciplines. Add KiCad write capabilities, IDE extensions, and multi-domain constraint validation.
-
-### New in Phase 2
-
-| Category | Additions |
-|----------|----------|
-| Agents | 12 new agents (19 total) |
-| Tools | KiCad write (schematic generation, PCB auto-routing) |
-| Interface | VS Code extension, KiCad plugin, FreeCAD plugin |
-| Twin | Cross-domain constraint engine, advanced versioning |
-| Workflow | Approval workflow UI, multi-agent coordination |
-
-### Phase 2 New Agents
-
-| # | Discipline | Layer | Rationale for Phase 2 |
-|---|-----------|-------|-----------------------|
-| 7 | Product Definition | Layer 1 | PRD parsing, requirements traceability |
-| 8 | Industrial Design | Layer 1 | Form factor decisions, EVT/DVT gates |
-| 9 | Prototyping & Fabrication | Layer 1 | Prototype planning, fab house selection |
-| 10 | Manufacturing & Supply Chain | Layer 1 | DFM checks, supplier qualification |
-| 11 | Certification & Compliance | Layer 1 | Regulatory pre-screening, test planning |
-| 12 | Lifecycle Support | Layer 1 | Maintenance planning, spare parts |
-| 13 | Product Management | Layer 2 | Feature prioritization, market alignment |
-| 14 | Cost Engineering | Layer 2 | BOM costing, should-cost analysis |
-| 15 | Supplier Management | Layer 2 | Supplier evaluation, alternate sourcing |
-| 16 | Operations Planning | Layer 2 | Production planning, capacity modeling |
-| 17 | Quality Management | Layer 2 | Quality gates, inspection planning |
-| 18 | UX/Ergonomics | Layer 3 | Usability assessment, ergonomic checks |
-
-### Linear Epics (Phase 2)
-
-| Epic | Scope |
-|------|-------|
-| MET-9: Electronics Agent | ERC, DRC, power budget, KiCad write adapter |
-| MET-10: Assistant Layer | IDE extensions, approval workflow, CLI enhancements |
-
----
-
-## 5. Phase 3 — Full Coverage (v0.7-1.0, Month 14-18)
-
-### Objective
-
-Complete the 25-discipline framework. All Layer 3 and Layer 4 disciplines are covered.
-
-### Phase 3 New Agents
-
-| # | Discipline | Layer |
-|---|-----------|-------|
-| 19 | Field Engineering | Layer 3 |
-| 20 | Safety Engineering | Layer 3 |
-| 21 | Reliability Engineering | Layer 3 |
-| 22 | Regulatory Compliance | Layer 4 |
-| 23 | After-Sales Support | Layer 4 |
-| 24 | Product Telemetry | Layer 4 |
-| 25 | Sustainability | Layer 4 |
-
-### Phase 3 Additions
-
-- Multi-user collaboration
-- Production deployment tooling
-- Web dashboard
-- Advanced analytics and reporting
-- Field data integration (telemetry)
-- Sustainability tracking and reporting
-
----
+| Theme | Direction |
+|---|---|
+| **Manufacturing integration** | Per-process capability packs, manufacturing outputs and connectors to fabricators and vendors |
+| **Reference library** | Materials, components, stock, organisations, processes, standards and reference designs in one library |
+| **Client intelligence mode** | Policy-based approvals so an external agent can be trusted with defined kinds of write |
+| **Harness plugins, next versions** | Production authentication, team gateways and relays; claude.ai and ChatGPT connectors; in-chat widgets, design loop, optimisation and manufacturing tools |
+| **Target lifecycle** | Typed lifecycle objects, guardrails and evidence-backed maturity levels |
+| **Robot-grade simulation** | Modal and contact analysis, motion loads and dynamics |
+| **Industrial design depth** | Ergonomics data, so form-factor checks use sourced figures |
+| **Workflow quality** | Test suites for generated workflows and the lifecycle |
+| **Large twins** | A layout that scales to graphs of hundreds of links |
+| **Setup** | An installer that detects the machine and offers the adapters and profiles that suit it (suggested, not scheduled) |
 
 ## 6. 25-Discipline Framework
 
-Complete taxonomy of engineering disciplines covered by MetaForge, organized by layer:
+The long-term aim is one agent per engineering discipline. Today seven exist, and
+several other disciplines are partly served by tools without a dedicated agent.
+Status is judged from the [capability matrix](capability-matrix.md).
 
-### Layer 1: Core Engineering (12 disciplines)
+### Layer 1: Core engineering
 
-| # | Discipline | Phase | Agent | Key Focus |
-|---|-----------|-------|-------|-----------|
-| 1 | Product Definition | Phase 2 | Product Definition Agent | PRD parsing, requirements |
-| 2 | Industrial Design | Phase 2 | Industrial Design Agent | Form factor, aesthetics |
-| 3 | Mechanical Engineering | Phase 1 | Mechanical Agent | Stress, tolerances, mesh |
-| 4 | Electronics Engineering | Phase 1 | Electronics Agent | ERC, DRC, BOM |
-| 5 | Embedded Software/Firmware | Phase 1 | Firmware Agent | Pinmap, scaffolding |
-| 6 | Systems Engineering | Phase 1 | Systems Agent | Interfaces, power budget |
-| 7 | Simulation & Validation | Phase 1 | Simulation Agent | FEA, SPICE |
-| 8 | Prototyping & Fabrication | Phase 2 | Prototyping Agent | Fab planning, EVT/DVT |
-| 9 | Testing & Reliability | Phase 1 | Testing Agent | Test plans, coverage |
-| 10 | Manufacturing & Supply Chain | Phase 2 | Manufacturing Agent | DFM, supplier qual |
-| 11 | Certification & Compliance | Phase 2 | Compliance Agent | Regulatory, standards |
-| 12 | Lifecycle Support | Phase 2 | Lifecycle Agent | Maintenance, spares |
+| # | Discipline | Status |
+|---|-----------|--------|
+| 1 | Product Definition | Partial: requirements and intent harness, no standalone agent |
+| 2 | Industrial Design | Released: agent and renders. Ergonomics data not yet available |
+| 3 | Mechanical Engineering | Released |
+| 4 | Electronics Engineering | Released |
+| 5 | Embedded Software and Firmware | Released |
+| 6 | Systems Engineering | Partial: power budget and interface tools, no standalone agent |
+| 7 | Simulation and Validation | Released |
+| 8 | Prototyping and Fabrication | Early: machine library and job dispatch |
+| 9 | Testing and Reliability | Partial: test plans and bring-up checklists; no reliability analysis |
+| 10 | Manufacturing and Supply Chain | Early: process ranking, DFM and sourcing |
+| 11 | Certification and Compliance | Early: checklists, not certification |
+| 12 | Lifecycle Support | Not started |
 
-### Layer 2: Productization & Business (5 disciplines)
+### Layer 2: Productization and business
 
-| # | Discipline | Phase | Agent | Key Focus |
-|---|-----------|-------|-------|-----------|
-| 13 | Product Management | Phase 2 | Product Mgmt Agent | Feature priority |
-| 14 | Cost Engineering | Phase 2 | Cost Agent | BOM costing |
-| 15 | Supplier Management | Phase 2 | Supplier Agent | Vendor evaluation |
-| 16 | Operations Planning | Phase 2 | Operations Agent | Production planning |
-| 17 | Quality Management | Phase 2 | Quality Agent | Quality gates |
+| # | Discipline | Status |
+|---|-----------|--------|
+| 13 | Product Management | Not started |
+| 14 | Cost Engineering | Early: BOM pricing and manufacturing cost estimates |
+| 15 | Supplier Management | Early: distributor lookups and vendor connectors |
+| 16 | Operations Planning | Not started |
+| 17 | Quality Management | Not started |
 
-### Layer 3: Deployment & Field Reality (4 disciplines)
+### Layer 3: Deployment and field reality
 
-| # | Discipline | Phase | Agent | Key Focus |
-|---|-----------|-------|-------|-----------|
-| 18 | Field Engineering | Phase 3 | Field Agent | Installation, commissioning |
-| 19 | Safety Engineering | Phase 3 | Safety Agent | Hazard analysis, FMEA |
-| 20 | UX/Ergonomics | Phase 2 | UX Agent | Usability, ergonomics |
-| 21 | Reliability Engineering | Phase 3 | Reliability Agent | MTBF, failure analysis |
+| # | Discipline | Status |
+|---|-----------|--------|
+| 18 | Field Engineering | Not started |
+| 19 | Safety Engineering | Early: hazard analysis records |
+| 20 | UX and Ergonomics | Not started |
+| 21 | Reliability Engineering | Not started |
 
-### Layer 4: Scale & Sustainability (4 disciplines)
+### Layer 4: Scale and sustainability
 
-| # | Discipline | Phase | Agent | Key Focus |
-|---|-----------|-------|-------|-----------|
-| 22 | Regulatory Compliance | Phase 3 | Regulatory Agent | Certification, filings |
-| 23 | After-Sales Support | Phase 3 | After-Sales Agent | Warranty, returns |
-| 24 | Product Telemetry | Phase 3 | Telemetry Agent | Field data, analytics |
-| 25 | Sustainability | Phase 3 | Sustainability Agent | Carbon footprint, recycling |
+| # | Discipline | Status |
+|---|-----------|--------|
+| 22 | Regulatory Compliance | Early: CE, UKCA, FCC and PSTI coverage tracking |
+| 23 | After-Sales Support | Not started |
+| 24 | Product Telemetry | Not started |
+| 25 | Sustainability | Not started |
 
----
+## 7. Not planned
 
-## 7. Cost Estimates
+MetaForge will not:
 
-### Phase 1 (MVP): ~$470K
+- certify a design or stand in for a notified body, a test lab or physical testing;
+- act without approval: any action with a real-world effect is held for a person;
+- output anything that cannot be versioned, reviewed and built.
 
-| Category | Cost | Details |
-|----------|------|---------|
-| Engineering | $400K | 4 engineers x 6 months |
-| Infrastructure | $50K | Neo4j, Temporal, CI/CD, Docker registry |
-| LLM API costs | $15K | Development and testing usage |
-| Miscellaneous | $5K | Tools, licenses |
+## 8. Risks to the plan
 
-### Phase 2 (Expansion): +$360K
-
-| Category | Cost | Details |
-|----------|------|---------|
-| Engineering | $300K | 3 engineers x 6 months |
-| Infrastructure | $50K | Scaling, monitoring, IDE extension hosting |
-| LLM API costs | $10K | Expanded testing |
-
-### Phase 3 (Full Coverage): +$540K
-
-| Category | Cost | Details |
-|----------|------|---------|
-| Engineering | $300K | 3 engineers x 6 months |
-| Infrastructure | $180K | Production deployment, multi-tenant, SLA monitoring |
-| LLM API costs | $50K | Full coverage testing, field validation |
-| Miscellaneous | $10K | Certifications, compliance |
-
-### Total: ~$1.37M over 18 months
-
----
-
-## 8. Success Metrics
-
-### Phase 1
-
-| Metric | Target |
-|--------|--------|
-| Mechanical vertical completes end-to-end | CAD → FEA → Constraint check → Twin commit |
-| Test coverage | ≥ 80% across core modules |
-| Skill execution success rate | ≥ 95% on valid inputs |
-| Tool adapter availability | ≥ 99% during development |
-| CLI usability | `forge setup` → first validation in < 5 minutes |
-
-### Phase 2
-
-| Metric | Target |
-|--------|--------|
-| 19 agents operational | All pass integration tests |
-| KiCad schematic generation | Valid schematics from PRD |
-| IDE extension adoption | VS Code extension installable from marketplace |
-| Cross-domain constraint evaluation | < 10 seconds for typical design |
-| Agent coordination | 3+ agents collaborating on a single workflow |
-
-### Phase 3
-
-| Metric | Target |
-|--------|--------|
-| 25 agents operational | All pass integration tests |
-| End-to-end product design | PRD → manufacturing files in < 1 hour (simple designs) |
-| Field data integration | Telemetry from deployed devices feeds Twin |
-| Multi-user support | 5+ concurrent users on same project |
-| Documentation coverage | 100% of public APIs documented |
-
----
-
-## 9. Risk Register
-
-| Risk | Impact | Probability | Mitigation |
-|------|--------|------------|------------|
-| LLM quality degrades for domain tasks | High | Medium | Skill system is deterministic — LLM only selects skills, doesn't execute logic. Multi-provider support via PydanticAI. |
-| CalculiX/FreeCAD container performance | Medium | Medium | Warm container pool, timeout tuning, async execution. |
-| Neo4j scaling limits for large designs | Medium | Low | Index strategy, query optimization, sharding plan for Phase 3. |
-| Temporal complexity for simple workflows | Low | Medium | Simple workflows bypass Temporal and run inline. |
-| KiCad write adapter reliability | High | Medium | Extensive validation, snapshot/rollback, human review gate. |
-| Team ramp-up on PydanticAI + Temporal | Medium | Medium | ADR-001 includes spike/POC. Training budget allocated. |
-| Scope creep in Phase 1 | High | High | Strict 6-7 agent limit. No Phase 2 features in Phase 1. Weekly scope reviews. |
-| LLM API cost overruns | Medium | Medium | Token budgets per skill, caching, local model fallback investigation. |
-| Docker security vulnerabilities | High | Low | Base image scanning, no network access, read-only mounts, regular updates. |
+| Risk | How it is handled |
+|---|---|
+| AI output is wrong or invented | Gates, held writes, sourced material figures, and a completion verdict that treats missing evidence as not passed |
+| Tool integrations drift | Every tool goes through the MCP registry, and a test fails when plugin guidance names a tool that is not registered |
+| Claims outrun the code | This page and the capability matrix are reviewed together, and a feature is *Released* only when it is listed there |
+| Scope grows faster than review capacity | Work is ordered by theme, with the in-progress list kept short |
+| Analysis is trusted beyond its validation | Limits are stated per tool (for example, airflow turbulence is not validated) |

@@ -12,14 +12,29 @@ shape it answers in plain English so the LLM can match intent fast.
 
 from __future__ import annotations
 
+import base64
+import os
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import structlog
 
 from mcp_core.context import current_context
+from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
+    REQUIRE_PART_COLOURS_ARG,
+    HumanAuthorityRequiredError,
+    reject_caller_supplied_approver,
+)
+from mcp_core.live_events import publish_live_event
 from observability.tracing import get_tracer
-from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
+from tool_registry.mcp_server.handlers import (
+    ResourceLimits,
+    ResourceManifestEntry,
+    ResourceNotFoundError,
+    ToolManifest,
+)
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.twin.queries import (
     detect_mutations,
@@ -27,9 +42,123 @@ from tool_registry.tools.twin.queries import (
     serialise_subgraph,
     serialise_violation,
 )
+from tool_registry.tools.twin.urdf import UrdfParseError, parse_urdf
 
 logger = structlog.get_logger()
 tracer = get_tracer("tool_registry.tools.twin.adapter")
+
+
+def undeclared_requirement_fields(constraints: list[Any]) -> list[dict[str, Any]]:
+    """Per constraint, which checkable fields were not declared (FORGE-344).
+
+    D1 asks for "typed requirements with units, acceptance criteria and
+    verification method". Two of those three were real fields on
+    ``Constraint``, read by the recorder and by the gate engine, and absent
+    from this tool's input schema -- supported, undocumented, invisible to
+    any client reading ``tools/list``.
+    """
+    out: list[dict[str, Any]] = []
+    for entry in constraints:
+        if not isinstance(entry, dict):
+            continue
+        missing: list[str] = []
+        has_binding = bool(entry.get("expression")) or (
+            bool(entry.get("metric")) and entry.get("limit") is not None
+        )
+        if not has_binding:
+            # Neither an expression nor a metric/limit pair: nothing to
+            # evaluate, so this one can never pass or fail.
+            missing.append("expression or metric+limit")
+        elif entry.get("limit") is not None and not entry.get("unit"):
+            # A limit of 1 is not a requirement. The matrix compares
+            # margins and cannot compare a bare number to a quantity.
+            missing.append("unit")
+        if not entry.get("verification_method"):
+            missing.append("verification_method")
+        if not entry.get("acceptance_criteria"):
+            missing.append("acceptance_criteria")
+        if missing:
+            out.append({"name": str(entry.get("name") or "?"), "missing": missing})
+    return out
+
+
+# FORGE-523: optional item arguments every definition write tool accepts.
+# None are required -- with none given, a write revises the same-named item
+# in the project, so the normal path needs nothing new from the caller.
+_ITEM_WRITE_TOOLS = (
+    "twin.commit_geometry",
+    "twin.record_constraint_set",
+    "twin.record_engineering_entity",
+    "twin.record_component_selection",
+)
+# Nullable: models often send an omitted optional field as null, and a
+# plain "string" made validation refuse the whole write (FORGE-523 live check).
+_ITEM_ARG_PROPERTIES: dict[str, Any] = {
+    "item_key": {
+        "type": ["string", "null"],
+        "description": (
+            "Optional. The item this write revises, as returned by an earlier write "
+            "('CAD-BRACKET'), or 'KEY@n' to also check the head is still revision n. "
+            "Use it when the name has changed but it is the same thing; omit it "
+            "otherwise (the same name in the project is the same item)."
+        ),
+    },
+    "supersedes": {
+        "type": ["string", "null"],
+        "description": (
+            "Optional. Node id of an earlier revision this replaces; the write "
+            "becomes the next revision of that node's item."
+        ),
+    },
+    "change_reason": {
+        "type": ["string", "null"],
+        "description": "Optional. Why this revision differs from the previous one.",
+    },
+}
+_ITEM_RESULT_PROPERTIES: dict[str, Any] = {
+    "item_key": {"type": "string"},
+    "revision": {"type": "integer"},
+    "item_ref": {"type": "string", "description": "KEY@revision"},
+}
+
+
+def _item_kwargs(arguments: dict[str, Any]) -> dict[str, Any]:
+    """The optional FORGE-523 item arguments, only those actually given."""
+    return {
+        name: arguments[name]
+        for name in ("item_key", "supersedes", "change_reason")
+        if isinstance(arguments.get(name), str) and arguments[name].strip()
+    }
+
+
+def _depends_on_property(inferred: str, extra: str = "") -> dict[str, Any]:
+    """FORGE-527: the optional ``depends_on`` input of a record tool."""
+    return {
+        "type": ["array", "null"],
+        "items": {"type": "string"},
+        "description": (
+            "Optional: the item revisions this record is about, as 'KEY@n' (or a bare "
+            "'KEY' for the current revision, a revision's node id, or a requirement "
+            "id, which pins its constraint set revision). Usually not "
+            f"needed: {inferred} are pinned automatically. A newer revision of a "
+            "pinned item marks this record stale." + extra
+        ),
+    }
+
+
+def _string_list(value: Any, tool: str) -> list[str]:
+    """FORGE-527: an optional ``depends_on``; null or absent means none."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{tool}: 'depends_on' must be an array of item references")
+    return [str(v).strip() for v in value if isinstance(v, str) and v.strip()]
+
+
+def _depends_on_kwarg(arguments: dict[str, Any], tool: str) -> dict[str, Any]:
+    """``{"depends_on": [...]}`` when the caller gave any, else ``{}``."""
+    refs = _string_list(arguments.get("depends_on"), tool)
+    return {"depends_on": refs} if refs else {}
 
 
 class TwinServer(McpToolServer):
@@ -42,6 +171,8 @@ class TwinServer(McpToolServer):
         allow_mutations: bool = False,
         decision_recorder: Any = None,
         geometry_recorder: Any = None,
+        measure_tool: Any = None,
+        assembly_info_tool: Any = None,
         proposal_recorder: Any = None,
         constraint_recorder: Any = None,
         engineering_entity_recorder: Any = None,
@@ -58,6 +189,34 @@ class TwinServer(McpToolServer):
         evidence_recorder: Any = None,
         claim_recorder: Any = None,
         ect_bridge: Any = None,
+        hierarchy_node_recorder: Any = None,
+        hierarchy_rollup_fn: Any = None,
+        hierarchy_geometry_linker: Any = None,
+        metric_evaluator: Any = None,
+        thermal_evaluator: Any = None,
+        overhang_evaluator: Any = None,
+        work_product_renderer: Any = None,
+        revalidation_executor: Any = None,
+        sensitivity_ranker: Any = None,
+        promotion_attempter: Any = None,
+        brief_provider: Any = None,
+        parameter_optimizer: Any = None,
+        device_instance_registrar: Any = None,
+        measurement_recorder: Any = None,
+        design_loop_starter: Any = None,
+        design_loop_reader: Any = None,
+        design_loop_approver: Any = None,
+        tube_height_design_loop_starter: Any = None,
+        concept_selector: Any = None,
+        component_selector: Any = None,
+        release_package_creator: Any = None,
+        baseline_creator: Any = None,
+        test_plan_generator: Any = None,
+        bringup_checklist_creator: Any = None,
+        firmware_scaffold_creator: Any = None,
+        harness_estimate_getter: Any = None,
+        item_history_reader: Any = None,
+        design_files_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -75,6 +234,27 @@ class TwinServer(McpToolServer):
         # node + project link — so it renders in the viewer. Same injection seam
         # as decision_recorder; None keeps tool_registry free of api_gateway.
         self._geometry_recorder = geometry_recorder
+        # FORGE-233: an injected async ``measure(session_id, obj_id) -> dict``
+        # that measures a still-live session object (freecad.measure) at
+        # commit time, so commit_geometry can derive volume_mm3/mass_kg/
+        # bbox_mm itself instead of trusting the caller to forward a prior
+        # measurement (FORGE-100) -- the chat agent doesn't reliably do
+        # that. Built in api_gateway over a lazily-bound MCP bridge
+        # reference (the bridge doesn't exist yet when this adapter is
+        # constructed -- see api_gateway/server.py's _LazyBridgeMeasure).
+        # None keeps tool_registry free of api_gateway/bridge imports, same
+        # injection seam as every recorder above.
+        self._measure_tool = measure_tool
+        # FORGE-245: an injected async ``assembly_info(session_id) -> dict``
+        # (``{"parts": [...], "joints": [...]}``) that reads a still-live
+        # FreeCAD session's assembly structure (freecad.describe_session +
+        # freecad.list_joints) at commit time, so a commit-by-reference call
+        # carries the parts/joints defined in the session instead of losing
+        # them the moment the session's TTL expires. Same lazily-bound
+        # MCP-bridge seam as measure_tool -- see
+        # api_gateway/server.py's _LazyBridgeAssemblyInfo. None skips the
+        # derivation (an explicit 'assembly' in extra_metadata still wins).
+        self._assembly_info_tool = assembly_info_tool
         # MET-548: an injected async ``propose(...)`` that files a reviewable
         # design-change proposal (HITL) instead of mutating the twin directly.
         # Built in api_gateway over the ApprovalWorkflow; None keeps
@@ -164,7 +344,177 @@ class TwinServer(McpToolServer):
         # imports (see twin_core.transactions.ect's own callers -- this
         # bridge is built in api_gateway, which may import twin_core).
         self._ect_bridge = ect_bridge
+        # FORGE-260 (gap G-B1): an injected async ``record(...)`` that
+        # creates one HierarchyNode + its CONTAINS/REALIZED_BY/INSTANCE_OF
+        # edges (api_gateway/twin/hierarchy_recorder.py). Same injection
+        # seam as every recorder above; None keeps tool_registry free of
+        # twin_core imports (a HierarchyNode instance must be constructed
+        # to persist it, same reason document_recorder is injected rather
+        # than built here).
+        self._hierarchy_node_recorder = hierarchy_node_recorder
+        # FORGE-260: an injected async ``rollup(root_id: str) -> dict``
+        # wrapping ``twin_core.consistency.hierarchy_rollup.
+        # compute_hierarchy_rollup`` -- same injection seam, same reason.
+        self._hierarchy_rollup_fn = hierarchy_rollup_fn
+        # FORGE-266: an injected async ``realize(*, hierarchy_node_id, ...)``
+        # (make_hierarchy_geometry_linker) -- attaches/replaces a node's
+        # REALIZED_BY/INSTANCE_OF geometry after the node already exists,
+        # same injection seam, same reason.
+        self._hierarchy_geometry_linker = hierarchy_geometry_linker
+        # FORGE-315: an injected async ``evaluate_tip_deflection(...)``
+        # (make_metric_evaluator) -- a tier-0 closed-form hand-calc against
+        # a CAD work product's own recorded geometry, escalating to a real
+        # tier-2 calculix.run_fea call (via a lazily-bound MCP bridge) when
+        # the tier-0 estimate falls within its error band of the limit.
+        # Same injection seam as every recorder above; None keeps
+        # tool_registry free of twin_core.prediction imports.
+        self._metric_evaluator = metric_evaluator
+        # FORGE-297: an injected async ``evaluate_thermal(...)``
+        # (make_thermal_evidence_recorder) -- runs a real calculix.
+        # run_thermal call (via a lazily-bound MCP bridge, same seam as
+        # metric_evaluator's tier-2) and records its real output as
+        # Evidence against a work product. Deliberately single-tier (no
+        # hand-calc-first escalation ladder like tip_deflection) -- see
+        # api_gateway/twin/thermal_evidence.py's module docstring. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of api_gateway imports.
+        self._thermal_evaluator = thermal_evaluator
+        # FORGE-273: an injected async ``evaluate_overhang(...)``
+        # (make_overhang_evidence_recorder) -- runs a real freecad.
+        # list_named_faces call (via a lazily-bound MCP bridge, same seam
+        # as metric_evaluator/thermal_evaluator) and records the per-face
+        # 3D-print overhang check as Evidence against a work product. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of api_gateway imports.
+        self._overhang_evaluator = overhang_evaluator
+        # FORGE-630: an injected async ``render(*, work_product_id, ...)``
+        # (make_work_product_renderer) -- a work product rendered by
+        # blender.render over MCP and kept as a ``render`` work product.
+        self._work_product_renderer = work_product_renderer
+        # FORGE-316: an injected async ``execute(ect_id) -> dict``
+        # (make_revalidation_executor) -- re-runs exactly the Evidence a
+        # committed ECT's real revalidation_plan marked stale, for any
+        # entity carrying a replayable metadata["replay"] recipe (e.g.
+        # twin.evaluate_metric's own evidence); anything else is reported
+        # needing manual review. Same injection seam as every recorder
+        # above; None keeps tool_registry free of api_gateway imports.
+        self._revalidation_executor = revalidation_executor
+        # FORGE-317: an injected async ``rank(...)`` (make_sensitivity_ranker)
+        # -- one-at-a-time finite-difference sensitivity of a metric's
+        # margin against named parameters (wall_thickness_mm/length_mm for
+        # tip_deflection, wall_thickness_mm/material for mass), against a
+        # CAD work product's own recorded geometry. Same injection seam as
+        # every recorder above; None keeps tool_registry free of
+        # twin_core.prediction/tool_registry.tools.cadquery imports.
+        self._sensitivity_ranker = sensitivity_ranker
+        # FORGE-319: an injected async ``attempt_promotion(...)``
+        # (api_gateway.requirement_intelligence.promotion) -- the first
+        # gate in this codebase that actually REFUSES rather than only
+        # reports, checking required claims against FORGE-318's own live
+        # requirement matrix and an approved-waiver override. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of api_gateway imports.
+        self._promotion_attempter = promotion_attempter
+        # FORGE-355: renders metaforge://twin/brief/{project_id}. Injected
+        # like every recorder above, because the brief lives in the gateway
+        # (api_gateway.projects.brief) and tool_registry does not import
+        # upward.
+        self._brief_provider = brief_provider
+        # FORGE-320: an injected async ``optimize(...)``
+        # (make_wall_thickness_optimizer) -- bisection search for the
+        # minimum-mass wall_thickness_mm satisfying deflection/safety-
+        # factor constraints, against a CAD work product's own recorded
+        # geometry. Same injection seam as every recorder above; None
+        # keeps tool_registry free of twin_core.prediction/tool_registry.
+        # tools.cadquery imports.
+        self._parameter_optimizer = parameter_optimizer
+        # FORGE-321: an injected async ``register(...)``
+        # (make_device_instance_registrar) -- persists a DeviceInstance and
+        # an optional INSTANCE_OF edge to the design revision it was built
+        # from. Same injection seam as every recorder above.
+        self._device_instance_registrar = device_instance_registrar
+        # FORGE-321: an injected async ``record(...)``
+        # (make_measurement_recorder) -- appends a real measurement to an
+        # interface quantity, links the measuring DeviceInstance via
+        # MEASURED_BY, and (when a predicted value is available) records
+        # the residual for calibration. Same injection seam as every
+        # recorder above.
+        self._measurement_recorder = measurement_recorder
+        # FORGE-287: injected async callables (api_gateway.twin.design_loop)
+        # -- start/read/approve a closed design loop's persisted iteration
+        # timeline. Same injection seam as every recorder above; three
+        # separate callables (not one mega-tool) so the CLI/dashboard can
+        # drive stop/continue/approve step by step.
+        self._design_loop_starter = design_loop_starter
+        self._design_loop_reader = design_loop_reader
+        self._design_loop_approver = design_loop_approver
+        # FORGE-288: a second real optimizer (height_mm) plugged into the
+        # SAME design-loop persistence/read/approve machinery above --
+        # get_design_loop/approve_design_loop need no separate tube-height
+        # variant, they already work on any DesignLoopIteration by loop_id.
+        self._tube_height_design_loop_starter = tube_height_design_loop_starter
+        self._concept_selector = concept_selector
+        self._component_selector = component_selector
+        # FORGE-299: an injected async ``create(*, project_id, notes=None)``
+        # (make_release_package_creator) -- bundles the project's current
+        # hierarchy/BOM/evidence/decision node ids into one new
+        # release_package EngineeringEntity, gated at creation time on a
+        # real evaluate_g8_release(...) == PASSED check. Same injection
+        # seam as every recorder above; None keeps tool_registry free of
+        # api_gateway imports.
+        self._release_package_creator = release_package_creator
+        # FORGE-405: an injected async ``create(*, project_id, approved_by,
+        # reason, name=None) -> dict`` (make_baseline_creator) -- wraps the
+        # real, pre-existing ``twin_core.transactions.baseline.
+        # create_baseline`` (auto-discovering the project's constraints +
+        # engineering entities as members) so G8's "configuration baseline
+        # fixed" check, and FORGE-299's release_package creation, have a
+        # real way to become satisfiable outside unit tests. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of twin_core.transactions imports.
+        self._baseline_creator = baseline_creator
+        # FORGE-298: an injected async ``generate(*, project_id) -> dict``
+        # (make_test_plan_generator) -- for every Constraint on the project
+        # with verification_method == "test", records one new
+        # verification_case entity whose metadata carries a mechanically-
+        # derived {step, acceptance_value, requirement_id}. Same injection
+        # seam as every recorder above; None keeps tool_registry free of
+        # api_gateway imports.
+        self._test_plan_generator = test_plan_generator
+        # FORGE-295: an injected async ``create(*, work_product_id,
+        # project_id=None) -> dict`` (make_bringup_checklist_creator) --
+        # topologically sorts a work product's real
+        # metadata.assembly.joints (base->follower dependency) into a real
+        # step order and records one new bringup_checklist entity. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of api_gateway imports.
+        self._bringup_checklist_creator = bringup_checklist_creator
+        # FORGE-276: an injected async ``create(*, work_product_id,
+        # project_id=None) -> dict`` (make_firmware_scaffold_creator) --
+        # assigns deterministic per-joint CAN IDs from a work product's real
+        # metadata.assembly.joints and records a PINMAP + FIRMWARE_SOURCE
+        # work product pair. Same injection seam as every recorder above;
+        # None keeps tool_registry free of api_gateway imports.
+        self._firmware_scaffold_creator = firmware_scaffold_creator
+        # FORGE-687: an injected async ``record(*, work_product_type, file_path,
+        # name, ...)`` (make_design_files_recorder) -- KiCad and firmware files
+        # from the adapter workspace kept as schematic / pcb_layout / gerber /
+        # pick_and_place / pinmap / firmware_source work products.
+        self._design_files_recorder = design_files_recorder
+        # FORGE-275: an injected async ``get(*, work_product_id) -> dict``
+        # (make_harness_estimate_getter) -- derives a per-joint cumulative
+        # cable-length estimate along the real base->follower kinematic
+        # chain from a work product's real metadata.assembly.joints. Same
+        # injection seam as every recorder above.
+        self._harness_estimate_getter = harness_estimate_getter
+        # FORGE-523: an injected async ``read(*, item_key=None, node_id=None,
+        # project_id=None) -> dict`` (make_item_history_reader) backing
+        # twin.item_history. Same injection seam as every recorder above; the
+        # item logic lives in twin_core.items, which this layer can't import.
+        self._item_history_reader = item_history_reader
         self._register_tools()
+        self._register_place_part()
+        self._register_thread_questions()
         if decision_recorder is not None:
             self._register_record_decision()
         if geometry_recorder is not None:
@@ -185,6 +535,9 @@ class TwinServer(McpToolServer):
             self._register_commit_hazard_analysis()
         if system_architecture_recorder is not None:
             self._register_commit_system_architecture()
+            # FORGE-347: the import path onto the same recorder -- a URDF
+            # is links and joints, which is components and interfaces.
+            self._register_import_urdf()
         if technical_drawing_recorder is not None:
             self._register_commit_technical_drawing()
         if compliance_checklist_recorder is not None:
@@ -201,6 +554,77 @@ class TwinServer(McpToolServer):
             self._register_record_claim()
         if ect_bridge is not None:
             self._register_ect_tools()
+        if hierarchy_node_recorder is not None:
+            self._register_record_hierarchy_node()
+        if hierarchy_rollup_fn is not None:
+            self._register_compute_hierarchy_rollup()
+        if hierarchy_geometry_linker is not None:
+            self._register_realize_hierarchy_node()
+        if metric_evaluator is not None:
+            self._register_evaluate_metric()
+        if thermal_evaluator is not None:
+            self._register_evaluate_thermal_metric()
+        if overhang_evaluator is not None:
+            self._register_evaluate_overhang_metric()
+        if work_product_renderer is not None:
+            self._register_render_work_product()
+        if revalidation_executor is not None:
+            self._register_execute_revalidation_plan()
+        if sensitivity_ranker is not None:
+            self._register_rank_sensitivity()
+        if promotion_attempter is not None:
+            self._register_attempt_promotion()
+        if brief_provider is not None:
+            self._register_brief_resource()
+        if parameter_optimizer is not None:
+            self._register_optimize_parameter()
+        if device_instance_registrar is not None:
+            self._register_device_instance_registrar()
+        if measurement_recorder is not None:
+            self._register_measurement_recorder()
+        if design_loop_starter is not None:
+            self._register_start_design_loop()
+        if design_loop_reader is not None:
+            self._register_get_design_loop()
+        if design_loop_approver is not None:
+            self._register_approve_design_loop()
+        if tube_height_design_loop_starter is not None:
+            self._register_start_tube_height_design_loop()
+        if concept_selector is not None:
+            self._register_select_concept()
+        if component_selector is not None:
+            self._register_select_component()
+        if release_package_creator is not None:
+            self._register_create_release_package()
+        if baseline_creator is not None:
+            self._register_create_baseline()
+        if test_plan_generator is not None:
+            self._register_generate_test_plan()
+        if bringup_checklist_creator is not None:
+            self._register_create_bringup_checklist()
+        if firmware_scaffold_creator is not None:
+            self._register_create_firmware_scaffold()
+        if harness_estimate_getter is not None:
+            self._register_get_harness_estimate()
+        if item_history_reader is not None:
+            self._register_item_history()
+        if design_files_recorder is not None:
+            self._register_record_design_files()
+        self._add_item_arguments()
+
+    def _add_item_arguments(self) -> None:
+        """Advertise the optional item arguments/results on each definition write tool."""
+        for tool_id in _ITEM_WRITE_TOOLS:
+            registration = self._tools.get(tool_id)
+            if registration is None:
+                continue
+            manifest = registration.manifest
+            manifest.input_schema.setdefault("properties", {}).update(
+                {k: dict(v) for k, v in _ITEM_ARG_PROPERTIES.items()}
+            )
+            manifest.output_schema.setdefault("properties", {}).update(
+                {k: dict(v) for k, v in _ITEM_RESULT_PROPERTIES.items()}
+            )
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -215,7 +639,10 @@ class TwinServer(McpToolServer):
                 description=(
                     "Fetch a graph node by id from the digital twin. Returns "
                     "properties + first-hop neighbours. Use when you have a "
-                    "node id and want to inspect it."
+                    "node id and want to inspect it. Or pass item_key "
+                    "('CAD-BRACKET' for the current revision, 'CAD-BRACKET@2' for one "
+                    "revision) instead of node_id; inside a design-flow run the "
+                    "current revision includes that run's own drafts."
                 ),
                 capability="twin_inspect",
                 input_schema={
@@ -226,8 +653,18 @@ class TwinServer(McpToolServer):
                             "format": "uuid",
                             "description": "UUID of the node to fetch.",
                         },
+                        "item_key": {
+                            "type": "string",
+                            "description": (
+                                "Instead of node_id: an item key a write returned, "
+                                "'KEY' or 'KEY@n'."
+                            ),
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Scopes item_key when the key exists in several.",
+                        },
                     },
-                    "required": ["node_id"],
                 },
                 output_schema={
                     "type": "object",
@@ -462,10 +899,39 @@ class TwinServer(McpToolServer):
     # Handlers
     # ------------------------------------------------------------------
 
+    async def _node_id_for_item_key(self, item_key: str, project_id: Any) -> str:
+        """FORGE-525: the node an item key names, as the caller sees it.
+
+        Resolved by the injected item-history reader (tool_registry may not
+        import twin_core), which applies the run's view: a bare key is that
+        run's draft when it has one, else the head.
+        """
+        if self._item_history_reader is None:
+            raise ValueError("twin.get_node: item_key is not supported here; pass node_id")
+        data: dict[str, Any] = await self._item_history_reader(
+            item_key=item_key, project_id=project_id if isinstance(project_id, str) else None
+        )
+        _, _, pinned = item_key.strip().rpartition("@")
+        if "@" in item_key and pinned.isdigit():
+            for revision in data.get("revisions") or []:
+                if int(revision.get("revision") or 0) == int(pinned):
+                    return str(revision["node_id"])
+            raise ValueError(f"twin.get_node: {item_key} is not a revision you can read")
+        current = data.get("current")
+        if not current:
+            raise ValueError(
+                f"twin.get_node: {item_key} has no current revision yet "
+                "(its only revisions are another run's drafts)"
+            )
+        return str(current["node_id"])
+
     async def get_node(self, arguments: dict[str, Any]) -> dict[str, Any]:
         raw_id = arguments.get("node_id")
+        item_key = arguments.get("item_key")
+        if not raw_id and isinstance(item_key, str) and item_key.strip():
+            raw_id = await self._node_id_for_item_key(item_key, arguments.get("project_id"))
         if not raw_id:
-            raise ValueError("node_id is required")
+            raise ValueError("node_id is required (or pass item_key)")
         try:
             node_id = UUID(str(raw_id))
         except (ValueError, AttributeError) as exc:
@@ -739,12 +1205,75 @@ class TwinServer(McpToolServer):
                                 "selected concept satisfies -- by name/title or node id."
                             ),
                         },
+                        "evidence_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-289: Evidence node id(s) (twin.record_evidence's "
+                                "own node_id) that support this decision -- linked via "
+                                "EdgeType.SUPPORTED_BY, a real graph edge a reader can "
+                                "walk instead of a rationale string mentioning evidence."
+                            ),
+                        },
                         "relation": {
                             "type": "string",
                             "description": (
                                 "Edge type linking this decision to each parent_ref "
                                 "(default 'satisfies')."
                             ),
+                        },
+                        "depends_on": {
+                            "type": ["array", "null"],
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-528: item revisions this decision rests on, as "
+                                "'KEY@n' (or a bare 'KEY' for the current revision, a "
+                                "revision's node id, or a requirement id, which pins "
+                                "its constraint set revision), e.g. the constraint "
+                                "set's item_ref. Linked with a depends_on edge and "
+                                "pinned to the exact revision, so the rationale can "
+                                "name the choice without restating requirement values. "
+                                "FORGE-527: parent_refs that are item revisions are "
+                                "pinned too, and a newer revision of a pinned item "
+                                "marks this decision stale."
+                            ),
+                        },
+                        "process_ranking": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-611: on the route decision, the candidate processes "
+                                "compared (rank_manufacturing_processes output): candidates "
+                                "[{process, route, verdict, cost_at_quantity, reasons}] and "
+                                "recommended. The route gate needs it unless the route is "
+                                "deferred."
+                            ),
+                        },
+                        "dfm_review": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-611: on the DFM review decision: process, verdict "
+                                "(manufacturable | not_manufacturable | incomplete), findings "
+                                "{pass, fail, unknown}, unknowns, and plan {stock, operations, "
+                                "quantity, unit_cost_estimate, cost_source}. The DFM gate "
+                                "reads it."
+                            ),
+                        },
+                        "manufacturing_route": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-608: on the manufacturing route decision, what was "
+                                "decided. Either route ('in_house' or 'vendor') with process "
+                                "and material_class, or deferred: true with a reason. The "
+                                "route-selection gate reads this; without it the gate is not "
+                                "ready."
+                            ),
+                            "properties": {
+                                "route": {"type": "string", "enum": ["in_house", "vendor"]},
+                                "process": {"type": "string"},
+                                "material_class": {"type": "string"},
+                                "deferred": {"type": "boolean"},
+                                "reason": {"type": "string"},
+                            },
                         },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
@@ -763,6 +1292,8 @@ class TwinServer(McpToolServer):
                         "content_hash": {"type": "string"},
                         "project_linked": {"type": "boolean"},
                         "parent_refs": {"type": "array", "items": {"type": "string"}},
+                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                        "depends_on": {"type": "array", "items": {"type": "string"}},
                     },
                 },
                 phase=1,
@@ -784,6 +1315,9 @@ class TwinServer(McpToolServer):
         parent_refs = arguments.get("parent_refs")
         if parent_refs is not None and not isinstance(parent_refs, list):
             raise ValueError("twin.record_decision: 'parent_refs' must be an array")
+        evidence_refs = arguments.get("evidence_refs")
+        if evidence_refs is not None and not isinstance(evidence_refs, list):
+            raise ValueError("twin.record_decision: 'evidence_refs' must be an array")
         relation = arguments.get("relation")
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
@@ -793,12 +1327,31 @@ class TwinServer(McpToolServer):
             "rationale": rationale,
             "alternatives": alternatives,
             "parent_refs": parent_refs,
+            "evidence_refs": evidence_refs,
             "project_id": project_id if isinstance(project_id, str) else None,
             "session_id": session_id if isinstance(session_id, str) else None,
             "supersedes": supersedes if isinstance(supersedes, str) else None,
         }
         if isinstance(relation, str) and relation:
             kwargs["relation"] = relation
+        depends_on = _string_list(arguments.get("depends_on"), "twin.record_decision")
+        if depends_on:
+            kwargs["depends_on"] = depends_on
+        route = arguments.get("manufacturing_route")
+        if route is not None:
+            if not isinstance(route, dict):
+                raise ValueError("twin.record_decision: 'manufacturing_route' must be an object")
+            kwargs["manufacturing_route"] = route
+        ranking = arguments.get("process_ranking")
+        if ranking is not None:
+            if not isinstance(ranking, dict | list):
+                raise ValueError("twin.record_decision: 'process_ranking' must be an object")
+            kwargs["process_ranking"] = ranking
+        review = arguments.get("dfm_review")
+        if review is not None:
+            if not isinstance(review, dict):
+                raise ValueError("twin.record_decision: 'dfm_review' must be an object")
+            kwargs["dfm_review"] = review
         return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------
@@ -904,6 +1457,36 @@ class TwinServer(McpToolServer):
                         "mpn": {"type": "string"},
                         "category": {"type": "string"},
                         "project_linked": {"type": "boolean"},
+                        "requirement_margins": {
+                            "type": "array",
+                            "description": (
+                                "FORGE-346: each typed project requirement this part's "
+                                "specs could be held against, with signed headroom in "
+                                "the requirement's own unit. `unit_assumed` means the "
+                                "spec was a bare number read as that unit."
+                            ),
+                        },
+                        "unchecked_requirements": {
+                            "type": "array",
+                            "description": (
+                                "Requirements no margin could be computed for, each "
+                                "with a reason: no_matching_spec, spec_not_numeric, "
+                                "incompatible_units, requirement_not_bound. Reported "
+                                "rather than skipped -- 'no margin shown' and 'no "
+                                "requirement' otherwise look the same."
+                            ),
+                        },
+                        "violates": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Requirements this part does NOT meet. The selection is "
+                                "still recorded -- choosing the best available part and "
+                                "then revising the requirement is normal -- but the "
+                                "violation is named here rather than first surfacing at "
+                                "a gate with nothing linking it to this decision."
+                            ),
+                        },
                         "bom_work_product_id": {
                             "type": ["string", "null"],
                             "description": (
@@ -988,6 +1571,7 @@ class TwinServer(McpToolServer):
             ),
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            **_item_kwargs(arguments),
         )
 
     # ------------------------------------------------------------------
@@ -1007,7 +1591,15 @@ class TwinServer(McpToolServer):
                     "constraint_set work product summarising the set. Use "
                     "during requirements capture so quantified limits (mass, "
                     "power, cost, safety factor, ...) become machine-checked "
-                    "gate criteria instead of prose."
+                    "gate criteria instead of prose. Each entry needs EITHER a "
+                    "raw 'expression' OR a structured 'metric'+'limit' binding "
+                    "(FORGE-259) -- the latter is what the dashboard's "
+                    "constraint editor writes; live pass/fail/no_data status "
+                    "for a requirement comes from twin.evaluate_metric/Claims "
+                    "(GET /v1/requirements/matrix), never from evaluating this "
+                    "expression, so a structured-only entry records a benign "
+                    "placeholder expression rather than requiring the caller "
+                    "to also hand-write Python."
                 ),
                 capability="twin_constraint_set",
                 input_schema={
@@ -1036,7 +1628,92 @@ class TwinServer(McpToolServer):
                                             'evaluates (e.g. "all(float(wp.metadata.get('
                                             "'mass_g', 0)) <= 60 for wp in "
                                             "ctx.work_products(type='cad_model'))\"). "
-                                            "Must compile; validated at record time."
+                                            "Must compile; validated at record time. "
+                                            "Omit when supplying a structured 'metric'+"
+                                            "'limit' binding instead."
+                                        ),
+                                    },
+                                    "metric": {
+                                        "type": "string",
+                                        "description": (
+                                            "FORGE-259: the property this requirement is "
+                                            "about (e.g. 'tip_deflection', 'moving_mass')."
+                                        ),
+                                    },
+                                    "operator": {
+                                        "type": "string",
+                                        "enum": ["<=", ">=", "==", "<", ">", "!="],
+                                        "description": "Comparison against 'limit'. Default '<='.",
+                                    },
+                                    "limit": {
+                                        "type": "number",
+                                        "description": "The numeric limit 'metric' is compared to.",
+                                    },
+                                    "unit": {
+                                        "type": "string",
+                                        "description": (
+                                            "Must be a unit twin_core.models.quantity "
+                                            "recognizes (e.g. 'mm', 'kg')."
+                                        ),
+                                    },
+                                    "target_node_type": {
+                                        "type": "string",
+                                        "description": (
+                                            "The kind of node 'metric' is measured on "
+                                            "(e.g. 'cad_model'). Free text, not enforced."
+                                        ),
+                                    },
+                                    "limit_source": {
+                                        "type": "object",
+                                        "description": (
+                                            "FORGE-586: where 'limit' came from, as "
+                                            "{kind, ...}: kind user | project_document | "
+                                            "standard | past_work | component | analysis "
+                                            "| measurement | assumption, with the fields "
+                                            "that kind needs (see design_value in "
+                                            "twin.record_engineering_entity)."
+                                        ),
+                                    },
+                                    "acceptance_criteria": {
+                                        "type": "string",
+                                        "description": (
+                                            "FORGE-344: what counts as meeting this "
+                                            "requirement, in the engineer's own words "
+                                            "(e.g. 'tip deflection under 0.5 mm at rated "
+                                            "load, measured at the end effector'). A real "
+                                            "typed field on Constraint, read by the gate "
+                                            "engine -- supported since FORGE-312 but not "
+                                            "declared here, so no client could discover it."
+                                        ),
+                                    },
+                                    "verification_method": {
+                                        "type": "string",
+                                        "description": (
+                                            "FORGE-344: HOW it will be shown to hold -- "
+                                            "test, analysis, inspection, demonstration. "
+                                            "Distinct from 'expected_evidence', which is "
+                                            "the kind of artefact that would count: "
+                                            "'analysis' is the method, 'simulation' the "
+                                            "evidence. Free text, like the gate engine "
+                                            "reads it."
+                                        ),
+                                    },
+                                    "expected_evidence": {
+                                        "type": "string",
+                                        "enum": [
+                                            "calculation",
+                                            "simulation",
+                                            "test",
+                                            "inspection",
+                                            "demonstration",
+                                            "datasheet",
+                                            "external_reference",
+                                        ],
+                                        "description": (
+                                            "FORGE-258: the KIND of evidence that would "
+                                            "actually verify this requirement -- same "
+                                            "values twin.record_evidence's own "
+                                            "evidence_type accepts."
                                         ),
                                     },
                                     "severity": {
@@ -1066,7 +1743,7 @@ class TwinServer(McpToolServer):
                                         ),
                                     },
                                 },
-                                "required": ["name", "expression"],
+                                "required": ["name"],
                             },
                         },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
@@ -1089,6 +1766,25 @@ class TwinServer(McpToolServer):
                         "minio_object_key": {"type": ["string", "null"]},
                         "content_hash": {"type": "string"},
                         "project_linked": {"type": "boolean"},
+                        "incomplete": {
+                            "type": "array",
+                            "description": (
+                                "FORGE-344: constraints that were recorded but cannot "
+                                "be checked yet, each with the fields it is missing. "
+                                "Present only when something is missing. A requirement "
+                                "with no limit or no verification method sits in the "
+                                "matrix as `no_data` indefinitely, which looks the same "
+                                "as one whose evidence has not arrived -- so say which "
+                                "it is rather than letting the caller assume."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "missing": {"type": "array", "items": {"type": "string"}},
+                                },
+                            },
+                        },
                     },
                 },
                 phase=1,
@@ -1108,12 +1804,26 @@ class TwinServer(McpToolServer):
             )
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
-        return await self._constraint_recorder(
+        result = await self._constraint_recorder(
             title=title,
             constraints=constraints,
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            **_item_kwargs(arguments),
         )
+        gaps = undeclared_requirement_fields(constraints)
+        if gaps:
+            # FORGE-344: the write succeeded, and some of what was written
+            # cannot be checked by anything. Only `name` is required, which
+            # is right -- a half-specified requirement is a normal step in a
+            # conversation. What was missing is anyone saying so: an untyped
+            # one is written, appears in the matrix as `no_data`, and looks
+            # exactly like a properly-specified requirement whose evidence
+            # has not arrived yet.
+            result = dict(result)
+            result["incomplete"] = gaps
+            logger.info("twin_mcp_constraints_incomplete", title=title, count=len(gaps))
+        return result
 
     # ------------------------------------------------------------------
     # twin.record_engineering_entity (FORGE-45/47, epic FORGE-35)
@@ -1135,7 +1845,11 @@ class TwinServer(McpToolServer):
                     "derives_from/satisfies/motivates/etc. via parent_refs so the "
                     "chain from stated intent to a specific requirement stays "
                     "traceable. A 'budget' (extra: metric, unit, system_total, "
-                    "optional allocations=[{target, amount}]) or 'invariant' "
+                    "optional allocations=[{target, amount}] -- FORGE-264: pass a "
+                    "HierarchyNode id as target to make an allocation checkable "
+                    "against that branch's real rolled-up mass/cost "
+                    "(twin.compute_hierarchy_rollup); a free-text label like "
+                    "'frame' still works but can't be checked) or 'invariant' "
                     "(extra: metric, unit, limit, optional comparison='<='/'>='/"
                     "'==') persists as a numeric limit the G3 Preliminary "
                     "Feasibility gate reads automatically -- give it a `title` "
@@ -1145,7 +1859,22 @@ class TwinServer(McpToolServer):
                     "'release_approval' (release-to-manufacture sign-off) only "
                     "counts toward the G8 Release gate once approved with "
                     "twin.approve_engineering_entity -- creating one alone leaves "
-                    "it PROPOSED, which FAILS an outstanding waiver's check."
+                    "it PROPOSED, which FAILS an outstanding waiver's check. A "
+                    "'concept_option' (FORGE-262) is one candidate architecture in "
+                    "a trade study -- extra: criteria_scores={metric: number, ...} "
+                    "(e.g. mass_kg/cost_usd/risk/performance) and optional "
+                    "evidence_backed_criteria=[metric, ...] naming which scores "
+                    "came from a real measured source rather than an assertion; "
+                    "record 2-4 of these then call twin.select_concept. A "
+                    "'design_value' (FORGE-586) is one engineering value and where "
+                    "it came from -- extra: name, value, optional unit, and source "
+                    "= {kind, ...} where kind is user | project_document "
+                    "(document, optional locator) | standard (standard, optional "
+                    "clause/url) | past_work (node_id, or project_id + ref) | "
+                    "component (mpn or stock) | analysis (evidence, or method + "
+                    "inputs) | measurement (artefact) | assumption (rationale). A "
+                    "value whose source cannot be identified is refused; an "
+                    "'assumption' source is flagged for the person to review."
                 ),
                 capability="twin_engineering_entity",
                 input_schema={
@@ -1166,6 +1895,8 @@ class TwinServer(McpToolServer):
                                 "invariant",
                                 "waiver",
                                 "release_approval",
+                                "concept_option",
+                                "design_value",
                             ],
                         },
                         "statement": {
@@ -1185,7 +1916,8 @@ class TwinServer(McpToolServer):
                             "type": "object",
                             "description": (
                                 "Type-specific fields (e.g. objective's metric/direction/"
-                                "target, risk's probability/severity/mitigation, "
+                                "target, risk's severity (1-5), likelihood (1-5) and "
+                                "mitigation -- the names the G3 gate reads, "
                                 "evidence's evidence_type/result) -- stored in metadata."
                             ),
                         },
@@ -1254,6 +1986,7 @@ class TwinServer(McpToolServer):
             relation=relation if isinstance(relation, str) else "derives_from",
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            **_item_kwargs(arguments),
         )
 
     # ------------------------------------------------------------------
@@ -1344,7 +2077,31 @@ class TwinServer(McpToolServer):
     # twin.record_document (MET-588)
     # ------------------------------------------------------------------
 
-    _DOCUMENT_TYPES = ("prd", "documentation")
+    _DOCUMENT_TYPES = (
+        "prd",
+        "documentation",
+        "robot_description",
+        "simulation_result",
+        "load_case",
+    )
+    _DOCUMENT_TYPE_DOMAIN = {
+        "prd": "requirements",
+        "robot_description": "mechanical",
+        "simulation_result": "mechanical",
+        "load_case": "mechanical",
+    }
+    _DOCUMENT_TYPE_DEFAULT_FORMAT = {
+        "robot_description": "urdf",
+        "simulation_result": "json",
+        "load_case": "json",
+    }
+    # FORGE-246: a simulation_result's real dependency on its source
+    # cad_model is "derives_from" (the ticket's own naming), not the
+    # generic "parent_of" every other document_type defaults to.
+    _DOCUMENT_TYPE_EDGE_TYPE = {"simulation_result": "derives_from"}
+    # FORGE-241: formats commit_geometry must refuse -- see its guard, and
+    # twin.record_document(document_type="robot_description") above.
+    _ROBOT_DESCRIPTION_FORMATS = frozenset({"urdf", "xacro", "sdf", "usd", "usda"})
 
     def _register_record_document(self) -> None:
         self.register_tool(
@@ -1353,15 +2110,48 @@ class TwinServer(McpToolServer):
                 adapter_id="twin",
                 name="Record Document",
                 description=(
-                    "Persist a text/markdown artifact (requirements, notes, a "
-                    "spec) as a first-class PRD or DOCUMENTATION work product: "
-                    "stores it in MinIO and links it to a project so it shows on "
-                    "the project's work-product list. Writes immediately — no "
-                    "approval gate, same as twin.record_decision. Use this "
-                    "instead of twin.propose_change for saving a document; "
-                    "propose_change's apply-on-approve step only implements a "
-                    "'record_decision' action, so any other diff (including a "
-                    "document) silently does nothing even after a human approves it."
+                    "Persist a text artifact (requirements, notes, a spec, a "
+                    "robot-description export like URDF/SDF/a ROS2 launch file, "
+                    "an FEA results summary, or a reusable FEA boundary-condition "
+                    "definition) as a first-class PRD, DOCUMENTATION, "
+                    "ROBOT_DESCRIPTION, SIMULATION_RESULT, or LOAD_CASE work "
+                    "product: stores it in MinIO and links it to a project "
+                    "so it shows on the project's work-product list. Writes "
+                    "immediately — no approval gate, same as "
+                    "twin.record_decision. Use this instead of "
+                    "twin.propose_change for saving a document; propose_change's "
+                    "apply-on-approve step only implements a 'record_decision' "
+                    "action, so any other diff (including a document) silently "
+                    "does nothing even after a human approves it. FORGE-241: use "
+                    "this — not twin.commit_geometry — for a URDF/SDF/launch "
+                    "file: commit_geometry is STEP-oriented and rejects those "
+                    "formats, since committing them as cad_model previously "
+                    "inflated CAD counts and left the twin unable to answer "
+                    "'which robot description belongs to this assembly'. "
+                    "FORGE-246: use document_type='simulation_result' after "
+                    "calculix.extract_results + twin.record_evidence -- without "
+                    "this, a completed run_fea/extract_results chain leaves the "
+                    "twin with only an evidence entity (numbers restated as "
+                    "text) and no versioned, loadable result the dashboard's "
+                    "Sim tab can show. FORGE-532: for a simulation_result also "
+                    "pass field_file (the 'field.file' calculix.run_fea/run_thermal "
+                    "returned) and analysed_geometry_node_id, so the result shows "
+                    "as a 3D contour pinned to the geometry it analysed. FORGE-278: use "
+                    "document_type='load_case' to persist a boundary-condition "
+                    "definition (material, fixed_node_set, load_node_set, "
+                    "load_force_n, source_of_loads) ONCE so it can be reused "
+                    "across design versions instead of retyped inline on every "
+                    "calculix.run_fea call -- pass those fields as top-level "
+                    "'metadata' keys (mirrors 'simulation_result'); this is "
+                    "unrelated to a simulation_result's own free-text "
+                    "'load_case' summary field, which just NAMES which load "
+                    "case a result came from. FORGE-528: a 'prd' stores only "
+                    "prose (background, scope, what is out of scope) as the "
+                    "next revision of the project's prd; requirement values "
+                    "belong in twin.record_constraint_set, and the prd a "
+                    "reader sees is rendered from the prose plus the current "
+                    "constraint set. Values in the prd text that the "
+                    "constraint set lacks come back in 'requirement_warning'."
                 ),
                 capability="twin_decision",
                 input_schema={
@@ -1375,17 +2165,155 @@ class TwinServer(McpToolServer):
                         "content": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "The document body, as markdown.",
+                            "description": (
+                                "The document body: markdown for prd/documentation, "
+                                "the raw XML/text of a robot-description export, "
+                                "a JSON summary (max_von_mises_mpa, "
+                                "max_displacement_mm, load_case, mesh_stats, ...) "
+                                "for a simulation_result -- calculix.extract_results' "
+                                "own structured output, not a restated assertion -- "
+                                "or, for a load_case, a JSON encoding of the same "
+                                "fields passed in 'metadata' below (kept in sync so "
+                                "the record is loadable as a file too)."
+                            ),
                         },
                         "document_type": {
                             "type": "string",
                             "enum": list(self._DOCUMENT_TYPES),
                             "description": (
-                                "'prd' for a requirements/product doc, "
-                                "'documentation' for general notes/specs. "
+                                "'prd' for the product doc's prose (requirement "
+                                "values go in twin.record_constraint_set), "
+                                "'documentation' for general notes/specs, "
+                                "'robot_description' for a URDF/SDF/ROS2-launch "
+                                "export (e.g. from cadquery.export_urdf_assembly), "
+                                "'simulation_result' for an FEA results summary "
+                                "(e.g. from calculix.extract_results), 'load_case' "
+                                "for a reusable FEA boundary-condition definition. "
                                 "Defaults to 'documentation'."
                             ),
                         },
+                        "format": {
+                            "type": "string",
+                            "description": (
+                                "File extension of 'content' (e.g. 'urdf', 'sdf', "
+                                "'xacro', 'launch.py', 'json'). Only meaningful for "
+                                "'robot_description'/'simulation_result'/"
+                                "'load_case'; other document types are always "
+                                "stored as markdown."
+                            ),
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": (
+                                "Extra structured metadata to attach — for "
+                                "'robot_description', pass 'robot_name' and the "
+                                "{parts, joints} assembly shape "
+                                "cadquery.export_urdf_assembly took/returned; for "
+                                "'simulation_result', pass the same summary fields "
+                                "as top-level keys (mirrors 'content') so a "
+                                "constraint expression can read them directly "
+                                "(e.g. wp.metadata.get('max_von_mises_mpa')); for "
+                                "'load_case', pass 'material' (name or explicit "
+                                "properties, matching calculix.run_fea's own "
+                                "'material' shape), 'fixed_node_set', "
+                                "'load_node_set', 'load_force_n' ([x, y, z] "
+                                "newtons), and optionally 'source_of_loads' (a "
+                                "short note on where the load figure came from, "
+                                "e.g. a requirement or hand calc) as top-level "
+                                "keys, so the dashboard's Sim-tab load-case list "
+                                "can render them without fetching the blob."
+                            ),
+                        },
+                        "source_part_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Twin node ids this document was derived from -- "
+                                "the assembly's committed parts for a "
+                                "'robot_description', or the source cad_model for "
+                                "a 'simulation_result' -- recorded as PARENT_OF "
+                                "edges (DERIVES_FROM for 'simulation_result') so "
+                                "the twin can answer 'which document belongs to "
+                                "this part'."
+                            ),
+                        },
+                        "evidence_node_id": {
+                            "type": "string",
+                            "description": (
+                                "Twin node id of the EngineeringEntity "
+                                "twin.record_evidence already created for this "
+                                "result (FORGE-246) -- recorded as a GENERATED_FROM "
+                                "edge from the evidence to this new work product, "
+                                "so the twin can answer 'what real artifact backs "
+                                "this evidence claim'. Only meaningful for "
+                                "'simulation_result'."
+                            ),
+                        },
+                        "field_file": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-532, 'simulation_result' only: the 3D result "
+                                "field to store with this result -- pass the "
+                                "'field.file' path calculix.run_fea/run_thermal "
+                                "returned, as-is (absolute, or relative to the "
+                                "shared adapter workspace). Stored in MinIO beside "
+                                "the summary so the dashboard can draw stress/"
+                                "displacement/temperature contours. Prefer this "
+                                "over field_base64."
+                            ),
+                        },
+                        "field_base64": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-532: the same field payload inline (the "
+                                "'field.base64' value). Only for programmatic "
+                                "callers; field_file wins when both are given."
+                            ),
+                        },
+                        "analysed_geometry_node_id": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-532, 'simulation_result' only: the cad_model "
+                                "node this analysis meshed and solved. Pinned with "
+                                "its revision and content hash so a later geometry "
+                                "revision can mark the result stale; also recorded "
+                                "as a DERIVES_FROM edge."
+                            ),
+                        },
+                        "analysed_geometry_revision": {
+                            "type": ["string", "integer"],
+                            "description": (
+                                "Optional revision label of that geometry, if the "
+                                "caller knows it (otherwise taken from the node)."
+                            ),
+                        },
+                        "load_case_spec": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-532, 'simulation_result' only: the boundary "
+                                "conditions actually solved (material, "
+                                "fixed_node_set, load_node_set, load_force_n, or the "
+                                "thermal source/sink), as passed to calculix."
+                            ),
+                        },
+                        "fixtures": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": (
+                                "FORGE-532: the supports, e.g. [{'label': "
+                                "'Surface1', 'kind': 'fixture'}]. Derived from the "
+                                "field's own markers when omitted."
+                            ),
+                        },
+                        "depends_on": _depends_on_property(
+                            "for a simulation_result, analysed_geometry_node_id and "
+                            "source_part_node_ids",
+                            extra=(
+                                " Requirements are not pinned automatically: name the "
+                                "constraint set (CS-KEY@n) or the requirement ids this "
+                                "result verifies to pin them."
+                            ),
+                        ),
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                     },
@@ -1399,6 +2327,20 @@ class TwinServer(McpToolServer):
                         "content_hash": {"type": "string"},
                         "size_bytes": {"type": "integer"},
                         "project_linked": {"type": "boolean"},
+                        "field_stored": {"type": "boolean"},
+                        "field_object_key": {"type": ["string", "null"]},
+                        "field_content_hash": {"type": ["string", "null"]},
+                        # FORGE-528, prd only.
+                        "item_key": {"type": "string"},
+                        "revision": {"type": "integer"},
+                        "item_ref": {"type": "string"},
+                        "requirements_home": {"type": "string"},
+                        "requirement_refs": {"type": "array", "items": {"type": "string"}},
+                        "stray_requirement_values": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "requirement_warning": {"type": "string"},
                     },
                 },
                 phase=1,
@@ -1421,17 +2363,102 @@ class TwinServer(McpToolServer):
             )
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
+        fmt = arguments.get("format")
+        fmt = (
+            fmt
+            if isinstance(fmt, str) and fmt
+            else self._DOCUMENT_TYPE_DEFAULT_FORMAT.get(document_type, "md")
+        )
+        metadata = arguments.get("metadata")
+        source_ids = arguments.get("source_part_node_ids")
+        evidence_node_id = arguments.get("evidence_node_id")
+        # FORGE-532: the 3D result field and what was analysed. Passed only
+        # when present, so recorders without these parameters keep working.
+        result_kwargs = self._simulation_result_kwargs(document_type, arguments)
         return await self._document_recorder(
             content=content,
             name=name,
             wp_type=document_type,
-            domain="requirements" if document_type == "prd" else "documentation",
-            fmt="md",
+            domain=self._DOCUMENT_TYPE_DOMAIN.get(document_type, "documentation"),
+            fmt=fmt,
             link_type=document_type,
             source_tool="twin.record_document",
             session_id=session_id if isinstance(session_id, str) else None,
             project_id=project_id if isinstance(project_id, str) else None,
+            extra_metadata=metadata if isinstance(metadata, dict) else None,
+            source_part_node_ids=(
+                [str(s) for s in source_ids] if isinstance(source_ids, list) else None
+            ),
+            source_edge_type=self._DOCUMENT_TYPE_EDGE_TYPE.get(document_type, "parent_of"),
+            evidence_node_id=(
+                evidence_node_id if isinstance(evidence_node_id, str) and evidence_node_id else None
+            ),
+            **result_kwargs,
+            **_depends_on_kwarg(arguments, "twin.record_document"),
         )
+
+    _FIELD_ARGS = (
+        "field_file",
+        "field_base64",
+        "analysed_geometry_node_id",
+        "analysed_geometry_revision",
+        "load_case_spec",
+        "fixtures",
+    )
+
+    def _simulation_result_kwargs(
+        self, document_type: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """``field_blob`` / ``analysis`` recorder kwargs for a simulation_result.
+
+        Reads ``field_file`` server-side from the shared adapter workspace
+        (same resolution as commit_geometry's ``file_path``, FORGE-224), so
+        the model never has to carry the payload between two tool calls.
+        """
+        given = [k for k in self._FIELD_ARGS if arguments.get(k) not in (None, "", [], {})]
+        if not given:
+            return {}
+        if document_type != "simulation_result":
+            raise ValueError(
+                f"twin.record_document: {', '.join(given)} only apply to "
+                "document_type='simulation_result'"
+            )
+        kwargs: dict[str, Any] = {}
+        field_file = arguments.get("field_file")
+        field_b64 = arguments.get("field_base64")
+        if isinstance(field_file, str) and field_file:
+            resolved = Path(field_file)
+            if not resolved.is_absolute():
+                resolved = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace")) / field_file
+            try:
+                kwargs["field_blob"] = resolved.read_bytes()
+            except OSError as exc:
+                raise ValueError(
+                    f"twin.record_document: could not read field_file {field_file!r} "
+                    f"(resolved to {resolved}): {exc}"
+                ) from exc
+        elif isinstance(field_b64, str) and field_b64:
+            try:
+                kwargs["field_blob"] = base64.b64decode(field_b64, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    "twin.record_document: field_base64 is not valid base64 -- pass "
+                    "field_file (the 'field.file' path) instead"
+                ) from exc
+        analysis: dict[str, Any] = {}
+        geometry_id = arguments.get("analysed_geometry_node_id")
+        if isinstance(geometry_id, str) and geometry_id:
+            analysis["geometry_node_id"] = geometry_id
+        revision = arguments.get("analysed_geometry_revision")
+        if isinstance(revision, str | int) and not isinstance(revision, bool):
+            analysis["geometry_revision"] = revision
+        if isinstance(arguments.get("load_case_spec"), dict):
+            analysis["load_case_spec"] = arguments["load_case_spec"]
+        if isinstance(arguments.get("fixtures"), list):
+            analysis["fixtures"] = arguments["fixtures"]
+        if analysis or "field_blob" in kwargs:
+            kwargs["analysis"] = analysis
+        return kwargs
 
     # ------------------------------------------------------------------
     # twin.propose_change (MET-548) — gated HITL modification
@@ -1539,11 +2566,22 @@ class TwinServer(McpToolServer):
                     "together on every call, including retries — obj_id alone is "
                     "NOT unique (it's a per-session counter, not a global id), so "
                     "omitting session_id will not match your prior export even "
-                    "though obj_id is correct. (Passing step_base64 directly also "
-                    "works and needs neither id — but when it names an export "
-                    "the server already holds, the server's copy is used, "
-                    "because a copied 30,000-character blob can only be equal "
-                    "or damaged.)"
+                    "though obj_id is correct. For a STATELESS tool's output "
+                    "(freecad.create_parametric / cadquery.create_parametric / "
+                    "cadquery.execute_script / cadquery.generate_enclosure — none "
+                    "of which use a session), pass that tool's own 'cad_file' "
+                    "return value as file_path instead: the server reads it "
+                    "directly from the shared workspace (FORGE-224), no base64 "
+                    "and no session needed. (Passing step_base64 directly also "
+                    "works and needs neither id nor file_path — but when it "
+                    "names an export the server already holds, the server's "
+                    "copy is used, because a copied 30,000-character blob can "
+                    "only be equal or damaged.) COLOURS (FORGE-637): the viewer "
+                    "shows only colours written in the STEP, and a call from a "
+                    "harness plugin is refused while any part is uncoloured. Pass "
+                    "part_colours {part name: '#RRGGBB'} (each part's library "
+                    "appearance srgb_hex) or color for the whole model, and they are "
+                    "written into the STEP here; a part name the STEP lacks is refused."
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -1571,6 +2609,28 @@ class TwinServer(McpToolServer):
                                 "anyway (MET-684)."
                             ),
                         },
+                        "part_colours": {
+                            "type": "object",
+                            "description": (
+                                "Part (STEP product) name -> '#RRGGBB' or [r, g, b]; "
+                                "written into the STEP before it is stored."
+                            ),
+                        },
+                        "color": {
+                            "description": "One colour for every part: '#RRGGBB' or [r, g, b].",
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": (
+                                "Commit-by-reference for a STATELESS tool's output (no "
+                                "session_id/obj_id) — pass the 'cad_file' path that tool's "
+                                "own result already gave you (e.g. "
+                                "'output/bracket_None.step'), unchanged. The server reads "
+                                "it from the shared adapter workspace and base64-encodes "
+                                "it itself; ignored when step_base64 or a resolvable "
+                                "session_id+obj_id is also given (FORGE-224)."
+                            ),
+                        },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                         "format": {"type": "string", "description": "Format (def step)."},
                         "script_source": {
@@ -1589,12 +2649,65 @@ class TwinServer(McpToolServer):
                                 "hole_diameter) — stored on the node as queryable metadata."
                             ),
                         },
+                        "stored_properties": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-505. Measurement of the exact STEP freecad.export_model "
+                                "wrote (volume_mm3, surface_area_mm2, center_of_mass, "
+                                "bounding_box). Filled in automatically from the export result "
+                                "on commit-by-reference; preferred over session properties."
+                            ),
+                        },
                         "properties": {
                             "type": "object",
                             "description": (
-                                "Derived geometric measurements (volume_mm3, bounding_box, "
-                                "mass properties, etc.) — stored on the node as queryable "
-                                "metadata alongside 'parameters'."
+                                "REQUIRED for any constraint to be meaningful — this tool "
+                                "cannot measure the geometry itself. Pass the result of a "
+                                "prior freecad.measure/freecad.export_model/cadquery "
+                                "get_properties call here directly (export_model's own "
+                                "response already carries volume_mm3/surface_area_mm2/"
+                                "bounding_box — reuse it, or call freecad.measure first if "
+                                "you don't have it). volume_mm3, surface_area_mm2, mass_kg, "
+                                "and bounding_box are ALSO flattened onto the node's "
+                                "top-level metadata (FORGE-100) so a constraint expression "
+                                "(e.g. mass_kg <= 4.5) reads a real measured value instead of "
+                                "a missing-key default. Omitting this when you have the "
+                                "measurement leaves that constraint unable to ever genuinely "
+                                "pass or fail — it will be flagged "
+                                "measured_properties_missing=true rather than silently "
+                                "trusted."
+                            ),
+                        },
+                        "parts": {
+                            "type": "array",
+                            "description": (
+                                "FORGE-511. Commit an ASSEMBLY: the part cad_models it is "
+                                "made of, as [{node_id, name?, material?, "
+                                "position_bbox_mm?}]. Each node_id must be an existing "
+                                "cad_model in the same project; the assembly is linked to "
+                                "each with a parent_of edge and records them as "
+                                "metadata.parts. position_bbox_mm is the part's box in the "
+                                "assembly frame ({min:[x,y,z], max:[x,y,z]})."
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "part_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-511. Shorthand for 'parts' when only the ids are "
+                                "known; name and material are read from each part node."
+                            ),
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-717. What this part is made of, e.g. 'oak' or "
+                                "'aluminium 6061-T6': the material chosen at the route "
+                                "gate. Stored on the node as its material, which the "
+                                "design gate's material requirement checks; a part "
+                                "committed without one fails that check. A 'material' "
+                                "inside properties is used when this is not given."
                             ),
                         },
                         "source_tool": {
@@ -1607,6 +2720,35 @@ class TwinServer(McpToolServer):
                                 "'freecad.export_model', so pass it explicitly when the "
                                 "geometry came from CadQuery — otherwise the node claims "
                                 "a tool that never touched it (MET-693)."
+                            ),
+                        },
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-705: the work products this geometry was "
+                                "generated from, linked GENERATED_FROM; e.g. the "
+                                "pcb_layout a board STEP from kicad.export_3d came "
+                                "from. For a board model, omitted means the project's "
+                                "one current pcb_layout."
+                            ),
+                        },
+                        "model_role": {
+                            "type": "string",
+                            "enum": ["design", "analysis"],
+                            "description": (
+                                "FORGE-596: 'design' (default) is product geometry. "
+                                "'analysis' is a model built only to analyse the design, "
+                                "e.g. an FEA idealisation of a part with simplified "
+                                "supports. Analysis models are left out of the gate's "
+                                "geometry and assembly checks, which judge the product."
+                            ),
+                        },
+                        "idealises": {
+                            "type": "string",
+                            "description": (
+                                "For model_role 'analysis': the design cad_model it "
+                                "stands in for (node id or item key), e.g. CAD-TABLETOP."
                             ),
                         },
                     },
@@ -1631,6 +2773,30 @@ class TwinServer(McpToolServer):
     async def commit_geometry(self, arguments: dict[str, Any]) -> dict[str, Any]:
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
+        # FORGE-224: a STATELESS tool (freecad.create_parametric,
+        # cadquery.create_parametric/execute_script/generate_enclosure, ...)
+        # has no session_id/obj_id -- its result is just a 'cad_file' path on
+        # the adapter workspace both this gateway process and the adapter
+        # container mount. Read it server-side, mirroring
+        # domain_agents.shared.commit_geometry.commit_geometry's own relative-
+        # path resolution (FORGE-79) so a model calling this tool DIRECTLY
+        # (not through a skill) gets the same commit-by-reference ergonomics
+        # session_id+obj_id already has, instead of hand-copying a base64 blob
+        # it was never given in the first place.
+        file_path = arguments.get("file_path")
+        has_step_base64 = bool(step_base64) and isinstance(step_base64, str)
+        if not has_step_base64 and isinstance(file_path, str) and file_path:
+            resolved_path = Path(file_path)
+            if not resolved_path.is_absolute():
+                workspace_root = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
+                resolved_path = workspace_root / file_path
+            try:
+                step_base64 = base64.b64encode(resolved_path.read_bytes()).decode("ascii")
+            except OSError as exc:
+                raise ValueError(
+                    f"twin.commit_geometry: could not read file_path {file_path!r} "
+                    f"(resolved to {resolved_path}): {exc}"
+                ) from exc
         if not step_base64 or not isinstance(step_base64, str):
             # MET-642 S4 finding: reproduced live TWICE with the identical
             # mechanism -- the model retried commit_geometry with obj_id but
@@ -1657,16 +2823,104 @@ class TwinServer(McpToolServer):
                     "alone is not unique across sessions). Re-call with the same "
                     "session_id you used for export_model, or pass step_base64 directly."
                 )
+            missing = [
+                field
+                for field, value in (
+                    ("session_id", given_session_id),
+                    ("obj_id", given_obj_id),
+                    ("step_base64", None),
+                )
+                if not value
+            ]
             raise ValueError(
-                "twin.commit_geometry: no geometry to commit — call freecad.export_model "
-                "first, then commit with the same session_id + obj_id (or pass step_base64)."
+                "twin.commit_geometry: no geometry to commit. Missing: "
+                + ", ".join(missing)
+                + ". Pass session_id + obj_id (exactly as given to the freecad.export_model "
+                "call that produced them), or step_base64, or file_path. If you have not "
+                "exported yet, call freecad.export_model first."
             )
         if not name or not isinstance(name, str):
             raise ValueError("twin.commit_geometry: 'name' is required (non-empty string)")
+        # FORGE-637: a harness plugin's geometry must carry a colour for every
+        # part. The viewer shows only the colours written in the STEP, so an
+        # uncoloured part arrives grey. The MCP server sets the reserved flag
+        # for external clients (never the client itself); nothing is coloured
+        # here, because a colour has to be chosen, not invented.
+        part_colours = arguments.get("part_colours")
+        whole_colour = arguments.get("color")
+        if part_colours or whole_colour is not None:
+            # FORGE-637: colour at commit, so every CAD route (a stateless
+            # CadQuery or FreeCAD tool writes no colour) can be coloured where
+            # it enters the twin. A part name the STEP does not have is refused
+            # rather than skipped, which would leave that part grey unnoticed.
+            from tool_registry.tools.freecad.materials_appearance import (
+                apply_step_colours,
+                resolve_rgb,
+                step_part_names,
+            )
+
+            if part_colours is not None and not isinstance(part_colours, dict):
+                raise ValueError(
+                    "twin.commit_geometry: part_colours must map a part name to "
+                    "'#RRGGBB' or [r, g, b]"
+                )
+            step_bytes = base64.b64decode(step_base64)
+            known = step_part_names(step_bytes)
+            unknown = sorted(set(part_colours or {}) - set(known))
+            if unknown:
+                raise ValueError(
+                    f"twin.commit_geometry: part_colours names {', '.join(unknown)}, which this "
+                    f"STEP does not have; its parts are: {', '.join(known) or '(none named)'}"
+                )
+            try:
+                part_rgb = {str(k): resolve_rgb(v) for k, v in (part_colours or {}).items()}
+                default_rgb = resolve_rgb(whole_colour) if whole_colour is not None else None
+            except ValueError as exc:
+                raise ValueError(f"twin.commit_geometry: {exc}") from exc
+            step_base64 = base64.b64encode(
+                apply_step_colours(step_bytes, default_rgb, part_rgb)
+            ).decode("ascii")
+            extra_colours = {"part_colours": part_colours or {}, "color": whole_colour}
+            logger.info("commit_geometry_coloured", name=name, **extra_colours)
+        if arguments.get(REQUIRE_PART_COLOURS_ARG):
+            from tool_registry.tools.freecad.materials_appearance import uncoloured_products
+
+            try:
+                step_bytes = base64.b64decode(step_base64, validate=False)
+            except (ValueError, TypeError) as exc:
+                raise ValueError("twin.commit_geometry: step_base64 is not valid base64") from exc
+            if uncoloured := uncoloured_products(step_bytes):
+                logger.warning("commit_geometry_uncoloured_refused", name=name, parts=uncoloured)
+                raise ValueError(
+                    "twin.commit_geometry: every part must carry a colour, and these do not: "
+                    + ", ".join(uncoloured)
+                    + ". Choose each part's finish (library.list_appearances / "
+                    "library.get_appearance, the colour-material-finish skill) and export "
+                    "again with freecad.export_model part_colours {part Label: the "
+                    "appearance's srgb_hex}, or pass part_colours (or color for the whole "
+                    "model) to this commit, which writes them into the STEP."
+                )
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
         domain = arguments.get("domain")
         fmt = arguments.get("format")
+        # FORGE-241: commit_geometry is STEP-oriented (its recorder always
+        # types the result as cad_model) -- a URDF/SDF/ROS2-launch export
+        # committed through it landed as a cad_model work product despite
+        # the twin having a real ROBOT_DESCRIPTION type, inflating CAD
+        # counts and leaving the twin unable to answer "which robot
+        # description belongs to this assembly". Reject the known
+        # robot-description formats here rather than silently mistyping
+        # them; twin.record_document(document_type="robot_description")
+        # is the correct tool for that content.
+        if isinstance(fmt, str) and fmt.lower().lstrip(".") in self._ROBOT_DESCRIPTION_FORMATS:
+            raise ValueError(
+                f"twin.commit_geometry: format {fmt!r} is not STEP-oriented CAD "
+                "geometry -- commit_geometry always types its result as cad_model, "
+                "which is wrong for a robot-description export (URDF/SDF/USD "
+                "assembly). Use twin.record_document(document_type="
+                f"'robot_description', format={fmt!r}, ...) instead."
+            )
         script_source = arguments.get("script_source")
         parameters = arguments.get("parameters")
         properties = arguments.get("properties")
@@ -1680,6 +2934,195 @@ class TwinServer(McpToolServer):
         # stored script belongs to.
         source_tool = arguments.get("source_tool")
         source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
+        # FORGE-705: kicad.export_3d writes the board to <work_dir>/3d/<board>.step.
+        # A board committed from there without a source_tool was stamped
+        # freecad.export_model, and its link to the layout was never looked for.
+        if source_tool is None and isinstance(file_path, str) and file_path:
+            if Path(file_path).parent.name == "3d" and Path(file_path).suffix.lower() in (
+                ".step",
+                ".stp",
+                ".glb",
+            ):
+                source_tool = "kicad.export_3d"
+        raw_sources = arguments.get("source_node_ids")
+        source_node_ids = (
+            [str(s) for s in raw_sources if s] if isinstance(raw_sources, list) else []
+        )
+        # FORGE-245: a caller (e.g. domain_agents.shared.commit_geometry,
+        # used by the create_assembly/generate_cad/generate_enclosure
+        # skills) has always sent its own 'extra_metadata' argument
+        # (measured properties, and now assembly {parts, joints}), but
+        # this handler never read it back out -- it was silently dropped
+        # on every commit-by-reference AND commit-by-blob call. Read it as
+        # the base every derivation below adds to (never replaces), so an
+        # explicit caller value always survives.
+        caller_metadata = arguments.get("extra_metadata")
+        extra_metadata: dict[str, Any] = (
+            dict(caller_metadata) if isinstance(caller_metadata, dict) else {}
+        )
+        _MEASURED_KEYS = ("volume_mm3", "surface_area_mm2", "mass_kg", "bbox_mm")
+
+        def _has_measured_keys(d: dict[str, Any]) -> bool:
+            return any(k in d for k in _MEASURED_KEYS)
+
+        # FORGE-100 remainder: 'properties' already accepted measured values
+        # (volume_mm3, mass_kg, ...), but the recorder only ever nested them
+        # under metadata.geometry_features.properties -- never the top-level
+        # keys a constraint expression actually reads
+        # (wp.metadata.get('mass_kg', 0)). Re-test 2026-09-25 confirmed a
+        # node committed by session_id+obj_id still had no measured keys.
+        # Flatten the same canonical keys measured_metadata_from_cad_result()
+        # (domain_agents/shared/commit_geometry.py) uses for the skill paths,
+        # in ADDITION to the existing nested structure kept for back-compat.
+        if isinstance(properties, dict):
+            flattened = {
+                key: properties[key]
+                for key in ("volume_mm3", "surface_area_mm2", "mass_kg")
+                if key in properties
+            }
+            bbox = properties.get("bounding_box")
+            if isinstance(bbox, dict):
+                flattened["bbox_mm"] = bbox
+            extra_metadata.update(flattened)
+        # FORGE-717: the geometry check reads metadata["material"], and nothing
+        # here ever set it -- the flattening above dropped the "material" the
+        # freecad/cadquery result carries, and there was no argument for it -- so
+        # every agent-committed part failed a material requirement at the gate.
+        material = arguments.get("material")
+        if not (isinstance(material, str) and material.strip()) and isinstance(properties, dict):
+            material = properties.get("material")
+        if isinstance(material, str) and material.strip():
+            extra_metadata["material"] = material.strip()
+        # FORGE-100/FORGE-233: the model still doesn't reliably pass
+        # 'properties' on a commit-by-reference call, even though
+        # freecad.export_model's own response already carried the measured
+        # values moments earlier -- so constraints on chat-authored parts
+        # kept reading defaults. FORGE-233 resolved the bootstrap-ordering
+        # blocker (geometry_recorder used to be built before the bridge that
+        # would be needed to reach freecad even existed) -- when a
+        # measure_tool is available, derive the measurement server-side by
+        # calling freecad.measure on the still-live session object instead
+        # of trusting the caller. measure() has no material argument, so
+        # this recovers volume_mm3/surface_area_mm2/bbox_mm but NOT mass_kg
+        # -- a caller wanting mass must still pass it via 'properties'.
+        obj_id = arguments.get("obj_id")
+        has_session_ref = (
+            isinstance(session_id, str) and session_id and isinstance(obj_id, str) and obj_id
+        )
+        if not _has_measured_keys(extra_metadata) and has_session_ref and self._measure_tool:
+            try:
+                measured = await self._measure_tool(session_id, obj_id)
+            except Exception as exc:  # noqa: BLE001 — a commit must not fail over a measurement
+                logger.warning(
+                    "commit_geometry_measure_derivation_failed",
+                    session_id=session_id,
+                    obj_id=obj_id,
+                    error=str(exc),
+                )
+                measured = None
+            if isinstance(measured, dict) and measured:
+                flattened = {
+                    key: measured[key]
+                    for key in ("volume_mm3", "surface_area_mm2", "mass_kg")
+                    if key in measured
+                }
+                bbox = measured.get("bounding_box")
+                if isinstance(bbox, dict):
+                    flattened["bbox_mm"] = bbox
+                if flattened:
+                    extra_metadata.update(flattened)
+                    if not isinstance(properties, dict):
+                        properties = measured
+        # FORGE-505: freecad.export_model measured the exact STEP it wrote
+        # (threaded in by the geometry stash). Record that, not the session
+        # object's properties, so the commit describes the stored file.
+        stored_props = arguments.get("stored_properties")
+        if isinstance(stored_props, dict) and stored_props:
+            session_view = {k: extra_metadata[k] for k in _MEASURED_KEYS if k in extra_metadata}
+            stored_flat = {
+                key: stored_props[key]
+                for key in ("volume_mm3", "surface_area_mm2")
+                if key in stored_props
+            }
+            stored_bbox = stored_props.get("bounding_box")
+            if isinstance(stored_bbox, dict):
+                stored_flat["bbox_mm"] = stored_bbox
+            if stored_props.get("center_of_mass") is not None:
+                stored_flat["center_of_mass_mm"] = stored_props["center_of_mass"]
+            session_bbox = session_view.get("bbox_mm")
+            if isinstance(session_bbox, dict) and isinstance(stored_bbox, dict):
+                diffs = {
+                    k: abs(float(session_bbox[k]) - float(stored_bbox[k]))
+                    for k in stored_bbox
+                    if k in session_bbox
+                }
+                if diffs and max(diffs.values()) > 0.01:
+                    logger.warning(
+                        "commit_geometry_session_stored_bbox_diverge",
+                        session_id=session_id,
+                        name=name,
+                        session_bbox=session_bbox,
+                        stored_bbox=stored_bbox,
+                    )
+                    extra_metadata["session_properties"] = session_view
+            extra_metadata.update(stored_flat)
+            merged = dict(properties) if isinstance(properties, dict) else {}
+            merged.update(
+                {
+                    k: v
+                    for k, v in stored_props.items()
+                    if k in (*_MEASURED_KEYS, "bounding_box", "center_of_mass")
+                }
+            )
+            properties = merged
+            extra_metadata.pop("measured_properties_missing", None)
+        # Same "unobserved, not vacuous" flag as before (FORGE-105 tracks
+        # making the constraint evaluator itself honest about it) -- now
+        # only reached when derivation above wasn't available or found
+        # nothing, not on every commit-by-reference call.
+        if not _has_measured_keys(extra_metadata) and has_session_ref:
+            extra_metadata["measured_properties_missing"] = True
+        # FORGE-245: same lazy-derivation idea as measure_tool above, for
+        # the parts/joints a live FreeCAD session's assembly is made of --
+        # otherwise they're lost the moment the session's TTL expires,
+        # since the STEP alone carries only merged geometry. An explicit
+        # caller-supplied 'assembly' (skill paths that already know their
+        # own parts/joints) always wins over this derivation.
+        if "assembly" not in extra_metadata and has_session_ref and self._assembly_info_tool:
+            try:
+                assembly_info = await self._assembly_info_tool(session_id)
+            except Exception as exc:  # noqa: BLE001 — a commit must not fail over this
+                logger.warning(
+                    "commit_geometry_assembly_info_derivation_failed",
+                    session_id=session_id,
+                    error=str(exc),
+                )
+                assembly_info = None
+            if isinstance(assembly_info, dict) and (
+                assembly_info.get("parts") or assembly_info.get("joints")
+            ):
+                extra_metadata["assembly"] = assembly_info
+        # FORGE-596: an analysis model (an FEA idealisation) is not product
+        # geometry; the gate's geometry and assembly checks skip it.
+        role = arguments.get("model_role")
+        if role not in (None, "", "design", "analysis"):
+            raise ValueError("twin.commit_geometry: 'model_role' must be 'design' or 'analysis'")
+        idealises = arguments.get("idealises")
+        if role == "analysis":
+            extra_metadata["model_role"] = "analysis"
+            if isinstance(idealises, str) and idealises.strip():
+                extra_metadata["idealises"] = idealises.strip()
+        elif idealises:
+            raise ValueError("twin.commit_geometry: 'idealises' applies to model_role 'analysis'")
+        # FORGE-511: an assembly names the part cad_models it contains.
+        assembly_parts: list[dict[str, Any]] = []
+        raw_parts = arguments.get("parts")
+        if isinstance(raw_parts, list):
+            assembly_parts = [p for p in raw_parts if isinstance(p, dict) and p.get("node_id")]
+        raw_ids = arguments.get("part_node_ids")
+        if isinstance(raw_ids, list):
+            known = {str(p["node_id"]) for p in assembly_parts}
+            assembly_parts += [{"node_id": str(i)} for i in raw_ids if i and str(i) not in known]
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -1691,6 +3134,10 @@ class TwinServer(McpToolServer):
             parameters=parameters if isinstance(parameters, dict) else None,
             properties=properties if isinstance(properties, dict) else None,
             **({"source_tool": source_tool} if source_tool else {}),
+            **({"extra_metadata": extra_metadata} if extra_metadata else {}),
+            **({"parts": assembly_parts} if assembly_parts else {}),
+            **({"source_node_ids": source_node_ids} if source_node_ids else {}),
+            **_item_kwargs(arguments),
         )
 
     # ------------------------------------------------------------------
@@ -1923,6 +3370,47 @@ class TwinServer(McpToolServer):
                                     "to": {"type": "string"},
                                     "interface_type": {"type": "string"},
                                     "description": {"type": "string"},
+                                    # FORGE-313: the interface's own
+                                    # measurable properties -- e.g. "tip
+                                    # deflection <= 0.5mm", owned by
+                                    # mechanical. Optional.
+                                    "quantities": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "metric": {"type": "string"},
+                                                "unit": {"type": "string"},
+                                                "limit": {"type": ["number", "null"]},
+                                                "op": {"type": "string"},
+                                                "owner": {"type": "string"},
+                                                "discipline": {"type": "string"},
+                                                "predicted": {
+                                                    "type": ["object", "null"],
+                                                    "properties": {
+                                                        "value": {"type": "number"},
+                                                        "band": {"type": ["number", "null"]},
+                                                        "tier": {"type": "string"},
+                                                        "evidence": {"type": "string"},
+                                                    },
+                                                    "required": ["value"],
+                                                },
+                                                "measured": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "value": {"type": "number"},
+                                                            "source": {"type": "string"},
+                                                            "timestamp": {"type": "string"},
+                                                        },
+                                                        "required": ["value"],
+                                                    },
+                                                },
+                                            },
+                                            "required": ["metric"],
+                                        },
+                                    },
                                 },
                                 "required": ["from", "to"],
                             },
@@ -1974,6 +3462,102 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             **({"domain": domain} if isinstance(domain, str) and domain else {}),
         )
+
+    def _register_import_urdf(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.import_urdf",
+                adapter_id="twin",
+                name="Import URDF Reference Design",
+                description=(
+                    "Import a URDF robot description as a reference design: "
+                    "links become components, joints become interfaces, "
+                    "recorded as a system architecture you can design "
+                    "against. Pass the XML in 'urdf'. GEOMETRY IS NOT "
+                    "IMPORTED -- a URDF references meshes by path (usually "
+                    "package:// URIs that only resolve inside a ROS "
+                    "workspace), so every skipped mesh is listed in "
+                    "'not_imported' along with any joint whose type or "
+                    "link references could not be resolved. Read it: the "
+                    "structure came in, the shapes did not."
+                ),
+                capability="twin_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "urdf": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The URDF document's XML.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "Name for the recorded architecture. Defaults to the "
+                                "URDF's own <robot name>."
+                            ),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                    },
+                    "required": ["urdf"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "robot_name": {"type": "string"},
+                        "component_count": {"type": "integer"},
+                        "interface_count": {"type": "integer"},
+                        "not_imported": {
+                            "type": "array",
+                            "description": (
+                                "Meshes left behind and joints that could not be "
+                                "mapped, each with a reason. Present only when "
+                                "something was skipped."
+                            ),
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.import_urdf,
+        )
+
+    async def import_urdf(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        source = arguments.get("urdf")
+        if not source or not isinstance(source, str):
+            raise ValueError("twin.import_urdf: 'urdf' is required (non-empty string)")
+        try:
+            model = parse_urdf(source)
+        except UrdfParseError as exc:
+            # A parse failure is the caller's answer, not a crash: they
+            # handed us a file and need to know why it was not a URDF.
+            raise ValueError(f"twin.import_urdf: {exc}") from exc
+
+        project_id = arguments.get("project_id")
+        name = arguments.get("name")
+        recorded = await self._system_architecture_recorder(
+            name=str(name) if isinstance(name, str) and name.strip() else model.name,
+            system_name=model.name,
+            components=model.components,
+            interfaces=model.interfaces or None,
+            project_id=project_id if isinstance(project_id, str) else None,
+        )
+        result: dict[str, Any] = {
+            "node_id": (recorded or {}).get("node_id"),
+            "robot_name": model.name,
+            "component_count": len(model.components),
+            "interface_count": len(model.interfaces),
+        }
+        if model.not_imported:
+            result["not_imported"] = model.not_imported
+            logger.info(
+                "twin_mcp_urdf_partial_import",
+                robot=model.name,
+                skipped=len(model.not_imported),
+            )
+        return result
 
     def _register_commit_technical_drawing(self) -> None:
         self.register_tool(
@@ -2249,6 +3833,134 @@ class TwinServer(McpToolServer):
             **({"domain": domain} if isinstance(domain, str) and domain else {}),
         )
 
+    # ------------------------------------------------------------------
+    # twin.place_part (FORGE-647)
+    # ------------------------------------------------------------------
+
+    def _register_place_part(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.place_part",
+                adapter_id="twin",
+                name="Place Part In Live Assembly",
+                description=(
+                    "Place, move or remove one committed part (a cad_model node) in an "
+                    "assembly that is being put together, and show it in the twin viewer "
+                    "as it happens. Call it once per part: the viewer composes each "
+                    "part's stored model at the given position (mm) and rotation (degrees "
+                    "about x, y, z), so a person watching sees the assembly come together. "
+                    "Calling it again for the same part moves it; remove=true takes it "
+                    "out. This is the live picture only. It does not create the "
+                    "assembly: when the layout is final, build it with "
+                    "cadquery.create_assembly and commit it with twin.commit_geometry "
+                    "(parts=[...]). 'live' in the result says whether anything could "
+                    "show the placement."
+                ),
+                capability="twin_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "description": "The part's cad_model node UUID.",
+                        },
+                        "assembly": {
+                            "type": "string",
+                            "description": "Name of the assembly being built.",
+                        },
+                        "position": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "x, y, z in mm. Default 0, 0, 0.",
+                        },
+                        "rotation": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Rotation about x, y, z in degrees. Default 0, 0, 0.",
+                        },
+                        "remove": {
+                            "type": "boolean",
+                            "description": "Take the part out of the live assembly.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Defaults to the call's project.",
+                        },
+                    },
+                    "required": ["node_id", "assembly"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "assembly": {"type": "string"},
+                        "node_id": {"type": "string"},
+                        "action": {"type": "string"},
+                        "live": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.place_part,
+        )
+
+    async def place_part(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        raw_id = str(arguments.get("node_id") or "").strip()
+        assembly = str(arguments.get("assembly") or "").strip()
+        if not raw_id or not assembly:
+            raise ValueError("twin.place_part: 'node_id' and 'assembly' are required")
+        try:
+            node_id = UUID(raw_id)
+        except ValueError as exc:
+            raise ValueError(f"twin.place_part: node_id {raw_id!r} is not a UUID") from exc
+
+        project_id = arguments.get("project_id")
+        if not project_id:
+            ctx_project = current_context().project_id
+            project_id = str(ctx_project) if ctx_project else None
+        if not project_id:
+            raise ValueError(
+                "twin.place_part: no project. Pass project_id or run inside a project."
+            )
+
+        position = _vec3(arguments.get("position"), "position")
+        rotation = _vec3(arguments.get("rotation"), "rotation")
+
+        node = await self._twin.get_work_product(node_id)
+        if node is None:
+            raise ValueError(f"twin.place_part: part {raw_id} does not exist in the twin")
+        node_type = getattr(node.type, "value", node.type)
+        if str(node_type) != "cad_model":
+            raise ValueError(f"twin.place_part: part {raw_id} is a {node_type}, not a cad_model")
+        node_project = getattr(node, "project_id", None)
+        if node_project is not None and str(node_project) != str(project_id):
+            raise ValueError(f"twin.place_part: part {raw_id} belongs to a different project")
+
+        remove = bool(arguments.get("remove"))
+        action = "removed" if remove else "placed"
+        live = await publish_live_event(
+            str(project_id),
+            {
+                "type": "assembly.part_removed" if remove else "assembly.part_placed",
+                "assembly": assembly,
+                "part": {"node_id": str(node_id), "name": node.name},
+                "position": position,
+                "rotation": rotation,
+            },
+        )
+        return {
+            "assembly": assembly,
+            "node_id": str(node_id),
+            "action": action,
+            "position": position,
+            "rotation": rotation,
+            "live": live,
+        }
+
     def _register_stage_work_product_file(self) -> None:
         self.register_tool(
             manifest=ToolManifest(
@@ -2300,7 +4012,17 @@ class TwinServer(McpToolServer):
             raise ValueError(
                 "twin.stage_work_product_file: 'node_id' is required (non-empty string)"
             )
-        return await self._blob_stager(node_id)
+        result = dict(await self._blob_stager(node_id))
+        # FORGE-518: a staged file is useless until it is loaded; name the next
+        # step so a model does not recreate the geometry instead.
+        staged_path = result.get("file_path")
+        if staged_path:
+            result["next_step"] = (
+                "To edit or re-export this part, call freecad.import_step with "
+                f"session_id (from freecad.open_session) and file_path={staged_path!r}. "
+                "To only inspect it, call freecad.describe_step_file with that file_path."
+            )
+        return result
 
     # ------------------------------------------------------------------
     # twin.record_evidence (FORGE-64, epic FORGE-35)
@@ -2376,7 +4098,11 @@ class TwinServer(McpToolServer):
                                     "ref": {"type": "string"},
                                     "entity_kind": {
                                         "type": "string",
-                                        "enum": ["constraint", "engineering_entity"],
+                                        "enum": [
+                                            "constraint",
+                                            "engineering_entity",
+                                            "work_product",
+                                        ],
                                     },
                                     "revision": {"type": "integer"},
                                 },
@@ -2385,7 +4111,10 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "Revision-pinned dependencies (e.g. the requirement "
                                 "whose current revision this evidence was computed "
-                                "against) -- omit 'revision' to pin the current one."
+                                "against) -- omit 'revision' to pin the current one. "
+                                "'work_product' pins a CAD/artefact revision (FORGE-314, "
+                                "the doc's own CAD-BODY-003@7 example) -- its revision is "
+                                "0 while it's the current tip, 1 once superseded."
                             ),
                         },
                         "supersedes": {
@@ -2395,6 +4124,9 @@ class TwinServer(McpToolServer):
                                 "fresh run replaces -- flips that evidence to SUPERSEDED."
                             ),
                         },
+                        "depends_on": _depends_on_property(
+                            "valid_against work products and the project's constraint sets"
+                        ),
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                     },
@@ -2457,6 +4189,7 @@ class TwinServer(McpToolServer):
             supersedes=supersedes if isinstance(supersedes, str) else None,
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            **_depends_on_kwarg(arguments, "twin.record_evidence"),
         )
 
     # ------------------------------------------------------------------
@@ -2807,3 +4540,2845 @@ class TwinServer(McpToolServer):
         self, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         return await self._ect_bridge.mark_rolled_back(arguments)
+
+    # ------------------------------------------------------------------
+    # twin.record_hierarchy_node / twin.compute_hierarchy_rollup
+    # (FORGE-260, gap G-B1)
+    # ------------------------------------------------------------------
+
+    _HIERARCHY_NODE_KINDS = ("product", "system", "subsystem", "assembly")
+
+    def _register_record_hierarchy_node(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_hierarchy_node",
+                adapter_id="twin",
+                name="Record Hierarchy Node",
+                description=(
+                    "Persist one position in the project's product hierarchy "
+                    "tree (product/system/subsystem/assembly) -- the "
+                    "organizational structure a design's real parts and "
+                    "components hang off of, distinct from the twin's other "
+                    "'by type' views. Pass parent_id to nest this node under "
+                    "an existing one (creates a CONTAINS edge carrying "
+                    "quantity -- how many of THIS child the parent has); "
+                    "pass realized_by_node_id (a cad_model/robot_description "
+                    "work product id) once this position has real geometry; "
+                    "pass instance_of_node_id (a BOMItem id) for a COTS leaf "
+                    "position, so repeated identical parts (e.g. 3 actuators) "
+                    "share one canonical component record instead of each "
+                    "duplicating it. Use twin.compute_hierarchy_rollup "
+                    "afterwards to total mass/cost over a branch."
+                ),
+                capability="twin_hierarchy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Human-readable name, e.g. 'Upper Arm'.",
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": list(self._HIERARCHY_NODE_KINDS),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "parent_id": {
+                            "type": "string",
+                            "description": (
+                                "An existing HierarchyNode's id to nest this one under. "
+                                "Omit only for the tree's own root (e.g. the Product node)."
+                            ),
+                        },
+                        "quantity": {
+                            "type": "number",
+                            "default": 1,
+                            "description": (
+                                "How many of this child the parent has -- weights this "
+                                "whole branch's rolled-up mass/cost by this factor. "
+                                "Only meaningful with parent_id."
+                            ),
+                        },
+                        "placement": {
+                            "type": "object",
+                            "description": (
+                                "Optional placement/transform for this child within its "
+                                "parent (e.g. {'x':0,'y':0,'z':120,'rotation_deg':90}). "
+                                "Only meaningful with parent_id."
+                            ),
+                        },
+                        "realized_by_node_id": {
+                            "type": "string",
+                            "description": (
+                                "A cad_model/robot_description work product id giving "
+                                "this position its real geometry (REALIZED_BY edge)."
+                            ),
+                        },
+                        "instance_of_node_id": {
+                            "type": "string",
+                            "description": (
+                                "A BOMItem id this COTS leaf position is an instance of "
+                                "(INSTANCE_OF edge)."
+                            ),
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": (
+                                "Extra structured fields (maturity, lifecycle risk, ...)."
+                            ),
+                        },
+                    },
+                    "required": ["name", "kind"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "parent_linked": {"type": "boolean"},
+                        "realized_by_linked": {"type": "boolean"},
+                        "instance_of_linked": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.record_hierarchy_node,
+        )
+
+    async def record_hierarchy_node(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        kind = arguments.get("kind")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.record_hierarchy_node: 'name' is required (non-empty string)")
+        if kind not in self._HIERARCHY_NODE_KINDS:
+            raise ValueError(
+                f"twin.record_hierarchy_node: 'kind' must be one of {self._HIERARCHY_NODE_KINDS}"
+            )
+        project_id = arguments.get("project_id")
+        parent_id = arguments.get("parent_id")
+        quantity = arguments.get("quantity", 1)
+        placement = arguments.get("placement")
+        realized_by_node_id = arguments.get("realized_by_node_id")
+        instance_of_node_id = arguments.get("instance_of_node_id")
+        metadata = arguments.get("metadata")
+        return await self._hierarchy_node_recorder(
+            name=name,
+            kind=kind,
+            project_id=project_id if isinstance(project_id, str) else None,
+            parent_id=parent_id if isinstance(parent_id, str) else None,
+            quantity=quantity if isinstance(quantity, (int, float)) else 1,
+            placement=placement if isinstance(placement, dict) else None,
+            realized_by_node_id=(
+                realized_by_node_id if isinstance(realized_by_node_id, str) else None
+            ),
+            instance_of_node_id=(
+                instance_of_node_id if isinstance(instance_of_node_id, str) else None
+            ),
+            metadata=metadata if isinstance(metadata, dict) else None,
+        )
+
+    def _register_compute_hierarchy_rollup(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.compute_hierarchy_rollup",
+                adapter_id="twin",
+                name="Compute Hierarchy Rollup",
+                description=(
+                    "Total mass/cost over one branch of the product hierarchy "
+                    "tree (root_id and everything it CONTAINS, recursively, "
+                    "weighted by each CONTAINS edge's own quantity). Reads "
+                    "mass_kg from each node's REALIZED_BY-linked cad_model and "
+                    "cost from each node's INSTANCE_OF-linked BOMItem -- "
+                    "computed live, never cached, so it can't go stale "
+                    "relative to its children. Every BOM line is listed in "
+                    "cost_lines; when any has no price, cost_partial is true, "
+                    "unpriced_lines names them and cost is the priced lines "
+                    "only, a lower bound. Never report a partial cost as the "
+                    "branch's cost: say how many of total_lines are priced."
+                ),
+                capability="twin_hierarchy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "root_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "The HierarchyNode id to total from.",
+                        },
+                    },
+                    "required": ["root_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "root_id": {"type": "string"},
+                        "mass_kg": {"type": "number"},
+                        "cost": {"type": "number"},
+                        "node_count": {"type": "integer"},
+                        "skipped_node_ids": {"type": "array", "items": {"type": "string"}},
+                        "cost_lines": {"type": "array", "items": {"type": "object"}},
+                        "total_lines": {"type": "integer"},
+                        "priced_lines": {"type": "integer"},
+                        "unpriced_lines": {"type": "array", "items": {"type": "object"}},
+                        "cost_partial": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.compute_hierarchy_rollup,
+        )
+
+    async def compute_hierarchy_rollup(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        root_id = arguments.get("root_id")
+        if not root_id or not isinstance(root_id, str):
+            raise ValueError(
+                "twin.compute_hierarchy_rollup: 'root_id' is required (non-empty string)"
+            )
+        return await self._hierarchy_rollup_fn(root_id)
+
+    # ------------------------------------------------------------------
+    # twin.realize_hierarchy_node (FORGE-266, gap G-C2)
+    # ------------------------------------------------------------------
+
+    def _register_realize_hierarchy_node(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.realize_hierarchy_node",
+                adapter_id="twin",
+                name="Realize Hierarchy Node",
+                description=(
+                    "Attach or REPLACE a hierarchy position's real geometry -- "
+                    "REALIZED_BY (a cad_model work product, e.g. from "
+                    "twin.import_work_product / the FreeCAD authoring tools) "
+                    "and/or INSTANCE_OF (a BOMItem, e.g. from "
+                    "twin.record_component_selection / twin.select_component) "
+                    "-- after the node already exists. "
+                    "twin.record_hierarchy_node only ever sets these once, at "
+                    "creation time; this is the missing 'replace placeholder "
+                    "with part' half -- any existing REALIZED_BY/INSTANCE_OF "
+                    "edge on the node is removed first, so a node always has "
+                    "at most one of each, never an accumulating history. "
+                    "twin.compute_hierarchy_rollup and the hierarchical BOM "
+                    "(gap G-C3) read exactly these edges, so realizing a node "
+                    "here makes it show up there with no further action."
+                ),
+                capability="twin_hierarchy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "hierarchy_node_id": {"type": "string"},
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "A cad_model work product id -- sets/replaces "
+                                "REALIZED_BY. At least one of work_product_id/"
+                                "bom_item_id is required; both may be given."
+                            ),
+                        },
+                        "bom_item_id": {
+                            "type": "string",
+                            "description": ("A BOMItem id -- sets/replaces INSTANCE_OF."),
+                        },
+                    },
+                    "required": ["hierarchy_node_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "realized_by_work_product_id": {"type": ["string", "null"]},
+                        "instance_of_bom_item_id": {"type": ["string", "null"]},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.realize_hierarchy_node,
+        )
+
+    async def realize_hierarchy_node(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        hierarchy_node_id = arguments.get("hierarchy_node_id")
+        if not hierarchy_node_id or not isinstance(hierarchy_node_id, str):
+            raise ValueError(
+                "twin.realize_hierarchy_node: 'hierarchy_node_id' is required (non-empty string)"
+            )
+        work_product_id = arguments.get("work_product_id")
+        bom_item_id = arguments.get("bom_item_id")
+        return await self._hierarchy_geometry_linker(
+            hierarchy_node_id=hierarchy_node_id,
+            work_product_id=work_product_id if isinstance(work_product_id, str) else None,
+            bom_item_id=bom_item_id if isinstance(bom_item_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.evaluate_metric (FORGE-315)
+    # ------------------------------------------------------------------
+
+    def _register_evaluate_metric(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.evaluate_metric",
+                adapter_id="twin",
+                name="Evaluate Metric (Tiered)",
+                description=(
+                    "Tier-0 closed-form estimate for a metric against a CAD work "
+                    "product's own recorded geometry (MET-630 bounding box), "
+                    "escalating to a real tier-2 calculix.run_fea call when the "
+                    "estimate falls within its error band of 'limit_mm' -- the "
+                    "minimum-sufficient-fidelity guardrail (spec §30): only escalate "
+                    "when the cheap tier's evidence quality demands it. Only "
+                    "metric='tip_deflection' (cantilever beam) is implemented. "
+                    "Every tier's result is recorded as Evidence, pinned to the "
+                    "work product's current revision."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "metric": {
+                            "type": "string",
+                            "enum": ["tip_deflection"],
+                            "description": "Which tier-0 hand-calc to run.",
+                        },
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "CAD_MODEL work product id -- its recorded bounding "
+                                "box supplies the beam's length/width/height."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "load_n": {
+                            "type": "number",
+                            "description": "Tip load, Newtons.",
+                        },
+                        "youngs_modulus_mpa": {
+                            "type": "number",
+                            "description": "Material Young's modulus, MPa (N/mm^2).",
+                        },
+                        "limit_mm": {
+                            "type": "number",
+                            "description": (
+                                "The requirement/interface-quantity limit to check "
+                                "against (e.g. the HierarchyNode interface's own "
+                                "tip_deflection <= 0.5mm, FORGE-313). Omit to get "
+                                "just the raw tier-0 estimate with no escalation."
+                            ),
+                        },
+                        "band_fraction": {
+                            "type": "number",
+                            "description": (
+                                "Error band as a fraction of limit_mm -- a fixed "
+                                "prior for now (calibrated bands are Step 11 scope). "
+                                "Default 0.2."
+                            ),
+                        },
+                        "escalation_k": {
+                            "type": "number",
+                            "description": "Escalate when |margin| < k * band. Default 1.0.",
+                        },
+                        "tier2": {
+                            "type": "object",
+                            "description": (
+                                "Tier-2 FEA inputs, used only if escalation triggers. "
+                                "Requires an already-generated mesh (freecad."
+                                "generate_mesh) for this part -- this tool does not "
+                                "derive node sets on its own. Omit to get a "
+                                "tier-0-only result even when escalation triggers."
+                            ),
+                            "properties": {
+                                "mesh_file": {"type": "string"},
+                                "fixed_node_set": {"type": "string"},
+                                "load_node_set": {"type": "string"},
+                                "load_force_n": {
+                                    "type": "array",
+                                    "items": {"type": "number"},
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                },
+                                "material": {"type": "object"},
+                                "load_case": {"type": "string"},
+                            },
+                        },
+                    },
+                    "required": ["metric", "work_product_id", "load_n", "youngs_modulus_mpa"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string"},
+                        "tier": {"type": "integer"},
+                        "value_mm": {"type": "number"},
+                        "band_mm": {"type": "number"},
+                        "limit_mm": {"type": ["number", "null"]},
+                        "margin_mm": {"type": ["number", "null"]},
+                        "escalated": {"type": "boolean"},
+                        "evidence_node_id": {"type": "string"},
+                        "tier2": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.evaluate_metric,
+        )
+
+    async def evaluate_metric(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        metric = arguments.get("metric")
+        if metric != "tip_deflection":
+            raise ValueError(
+                "twin.evaluate_metric: 'metric' must be 'tip_deflection' -- no other "
+                "metric has a tier-0 hand-calc implemented yet"
+            )
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.evaluate_metric: 'work_product_id' is required")
+        load_n = arguments.get("load_n")
+        youngs_modulus_mpa = arguments.get("youngs_modulus_mpa")
+        if not isinstance(load_n, (int, float)) or not isinstance(youngs_modulus_mpa, (int, float)):
+            raise ValueError(
+                "twin.evaluate_metric: 'load_n' and 'youngs_modulus_mpa' are required numbers"
+            )
+        project_id = arguments.get("project_id")
+        limit_mm = arguments.get("limit_mm")
+        band_fraction = arguments.get("band_fraction", 0.2)
+        escalation_k = arguments.get("escalation_k", 1.0)
+        tier2 = arguments.get("tier2")
+        return await self._metric_evaluator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+            load_n=float(load_n),
+            youngs_modulus_mpa=float(youngs_modulus_mpa),
+            limit_mm=float(limit_mm) if isinstance(limit_mm, (int, float)) else None,
+            band_fraction=float(band_fraction),
+            escalation_k=float(escalation_k),
+            tier2=tier2 if isinstance(tier2, dict) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.evaluate_thermal_metric (FORGE-297)
+    # ------------------------------------------------------------------
+
+    def _register_evaluate_thermal_metric(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.evaluate_thermal_metric",
+                adapter_id="twin",
+                name="Evaluate Thermal Metric",
+                description=(
+                    "Runs a real calculix.run_thermal steady-state conduction "
+                    "analysis and records its real peak-temperature result as "
+                    "Evidence pinned to a work product's current revision -- the "
+                    "same 'run a real tool, record its output as graph-checkable "
+                    "Evidence' pattern twin.evaluate_metric established for "
+                    "tip_deflection (FORGE-315), applied to thermal analysis "
+                    "(FORGE-297). Unlike evaluate_metric, this is single-tier: "
+                    "there is no cheap hand-calc gate before running the real "
+                    "solver -- every call invokes calculix.run_thermal directly. "
+                    "Pass 'cross_check' to also run calculix."
+                    "cross_check_thermal_steady_state against the same result."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id the analysis validates.",
+                        },
+                        "project_id": {"type": "string"},
+                        "mesh_file": {
+                            "type": "string",
+                            "description": "Mesh file path from freecad.generate_mesh.",
+                        },
+                        "material": {
+                            "type": "object",
+                            "description": (
+                                "{'name': <material library name>} or explicit "
+                                "{'thermal_conductivity_w_mk': ...} (SI W/(m*K))."
+                            ),
+                        },
+                        "heat_source_node_set": {
+                            "type": "string",
+                            "description": "Element set where power_dissipation_w is applied.",
+                        },
+                        "power_dissipation_w": {
+                            "type": "number",
+                            "description": (
+                                "TOTAL heat generation in Watts -- typically a BOM "
+                                "component's specifications.powerDissipationW."
+                            ),
+                        },
+                        "sink_node_set": {
+                            "type": "string",
+                            "description": "Element set held at a fixed sink_temp_c.",
+                        },
+                        "sink_temp_c": {
+                            "type": "number",
+                            "description": "Fixed temperature (Celsius) of sink_node_set.",
+                        },
+                        "rated_max_temp_c": {
+                            "type": "number",
+                            "description": (
+                                "The analyzed component's rated max operating "
+                                "temperature, Celsius -- if given, the result "
+                                "reports within_rating (peak <= rated_max_temp_c)."
+                            ),
+                        },
+                        "cross_check": {
+                            "type": "object",
+                            "description": (
+                                "Optional. Runs calculix.cross_check_thermal_"
+                                "steady_state against this same result -- needs "
+                                "'conduction_length_mm' and 'cross_section_area_"
+                                "mm2' (power_dissipation_w/sink_temp_c/"
+                                "fea_peak_temp_c are filled in automatically)."
+                            ),
+                            "properties": {
+                                "conduction_length_mm": {"type": "number"},
+                                "cross_section_area_mm2": {"type": "number"},
+                                "tolerance_pct": {"type": "number"},
+                            },
+                        },
+                    },
+                    "required": [
+                        "work_product_id",
+                        "mesh_file",
+                        "material",
+                        "heat_source_node_set",
+                        "power_dissipation_w",
+                        "sink_node_set",
+                        "sink_temp_c",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "result": {"type": "object"},
+                        "peak_temperature_c": {"type": ["number", "null"]},
+                        "rated_max_temp_c": {"type": "number"},
+                        "within_rating": {"type": "boolean"},
+                        "cross_check": {"type": "object"},
+                        "evidence_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=600),
+            ),
+            handler=self.evaluate_thermal_metric,
+        )
+
+    async def evaluate_thermal_metric(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.evaluate_thermal_metric: 'work_product_id' is required")
+        mesh_file = arguments.get("mesh_file")
+        if not mesh_file or not isinstance(mesh_file, str):
+            raise ValueError("twin.evaluate_thermal_metric: 'mesh_file' is required")
+        material = arguments.get("material")
+        if not isinstance(material, dict):
+            raise ValueError("twin.evaluate_thermal_metric: 'material' must be an object")
+        heat_source_node_set = arguments.get("heat_source_node_set")
+        power_dissipation_w = arguments.get("power_dissipation_w")
+        sink_node_set = arguments.get("sink_node_set")
+        sink_temp_c = arguments.get("sink_temp_c")
+        if not isinstance(heat_source_node_set, str) or not heat_source_node_set:
+            raise ValueError("twin.evaluate_thermal_metric: 'heat_source_node_set' is required")
+        if not isinstance(sink_node_set, str) or not sink_node_set:
+            raise ValueError("twin.evaluate_thermal_metric: 'sink_node_set' is required")
+        if not isinstance(power_dissipation_w, (int, float)) or not isinstance(
+            sink_temp_c, (int, float)
+        ):
+            raise ValueError(
+                "twin.evaluate_thermal_metric: 'power_dissipation_w' and 'sink_temp_c' "
+                "are required numbers"
+            )
+        project_id = arguments.get("project_id")
+        rated_max_temp_c = arguments.get("rated_max_temp_c")
+        cross_check = arguments.get("cross_check")
+        return await self._thermal_evaluator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+            mesh_file=mesh_file,
+            material=material,
+            heat_source_node_set=heat_source_node_set,
+            power_dissipation_w=float(power_dissipation_w),
+            sink_node_set=sink_node_set,
+            sink_temp_c=float(sink_temp_c),
+            rated_max_temp_c=(
+                float(rated_max_temp_c) if isinstance(rated_max_temp_c, (int, float)) else None
+            ),
+            cross_check=cross_check if isinstance(cross_check, dict) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.evaluate_overhang_metric (FORGE-273)
+    # ------------------------------------------------------------------
+
+    def _register_evaluate_overhang_metric(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.evaluate_overhang_metric",
+                adapter_id="twin",
+                name="Evaluate Overhang Metric",
+                description=(
+                    "Runs a real freecad.list_named_faces mesh face-table lookup "
+                    "and flags faces tilted more than a threshold (default 45 "
+                    "degrees) from the vertical build axis as 3D-print overhang "
+                    "risks, recording the result as Evidence pinned to a work "
+                    "product's current revision -- the same 'run a real tool, "
+                    "record its output as graph-checkable Evidence' pattern "
+                    "twin.evaluate_thermal_metric established (FORGE-297), "
+                    "applied to DFM (FORGE-273, gap G-D5). Deliberately "
+                    "undirected (see api_gateway/twin/dfm_evidence.py's module "
+                    "docstring): the underlying mesh normal isn't guaranteed to "
+                    "point outward, so this flags any near-horizontal face -- "
+                    "both real unsupported overhangs and harmless flat top "
+                    "surfaces -- rather than risk a confidently-wrong directed "
+                    "check. Advisory only, not wired into twin.attempt_promotion."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id the check validates.",
+                        },
+                        "project_id": {"type": "string"},
+                        "mesh_file": {
+                            "type": "string",
+                            "description": "Mesh file path from freecad.generate_mesh.",
+                        },
+                        "build_axis": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Unit build-up direction. Default [0, 0, 1] (Z-up).",
+                        },
+                        "threshold_deg": {
+                            "type": "number",
+                            "description": (
+                                "Max printable tilt from vertical, degrees. Default 45.0 "
+                                "(the standard FDM self-supporting overhang convention)."
+                            ),
+                        },
+                    },
+                    "required": ["work_product_id", "mesh_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "faces": {"type": "array"},
+                        "flagged_count": {"type": "integer"},
+                        "total_faces": {"type": "integer"},
+                        "threshold_deg": {"type": "number"},
+                        "build_axis": {"type": "array"},
+                        "dfm_pass": {"type": "boolean"},
+                        "evidence_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=120),
+            ),
+            handler=self.evaluate_overhang_metric,
+        )
+
+    async def evaluate_overhang_metric(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.evaluate_overhang_metric: 'work_product_id' is required")
+        mesh_file = arguments.get("mesh_file")
+        if not mesh_file or not isinstance(mesh_file, str):
+            raise ValueError("twin.evaluate_overhang_metric: 'mesh_file' is required")
+        project_id = arguments.get("project_id")
+        build_axis = arguments.get("build_axis")
+        if build_axis is not None and (not isinstance(build_axis, list) or len(build_axis) != 3):
+            raise ValueError(
+                "twin.evaluate_overhang_metric: 'build_axis' must be a 3-element array"
+            )
+        threshold_deg = arguments.get("threshold_deg")
+        return await self._overhang_evaluator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+            mesh_file=mesh_file,
+            build_axis=[float(v) for v in build_axis] if build_axis is not None else None,
+            threshold_deg=float(threshold_deg) if isinstance(threshold_deg, (int, float)) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.render_work_product (FORGE-630)
+    # ------------------------------------------------------------------
+
+    def _register_render_work_product(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.render_work_product",
+                adapter_id="twin",
+                name="Render Work Product",
+                description=(
+                    "Studio renders of a work product in the twin (a STEP part or "
+                    "assembly, or a mesh) by blender.render: the STEP is converted to "
+                    "GLB the same way the dashboard viewer does, so colours and part "
+                    "names come from the model. Stores the PNGs as a 'render' work "
+                    "product linked to the model (GENERATED_FROM) and returns them as "
+                    "images. Views: iso, front, back, left, right, top, bottom, "
+                    "turntable. store=false renders without recording anything."
+                ),
+                capability="twin_render",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "The work product to render (STEP, GLB, STL, OBJ, PLY).",
+                        },
+                        "views": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "iso",
+                                    "front",
+                                    "back",
+                                    "left",
+                                    "right",
+                                    "top",
+                                    "bottom",
+                                    "turntable",
+                                ],
+                            },
+                            "description": "Default ['iso'].",
+                        },
+                        "turntable_frames": {"type": "integer", "minimum": 1, "maximum": 36},
+                        "resolution": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 64},
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "description": "[width, height]. Default [1280, 960].",
+                        },
+                        "samples": {"type": "integer", "minimum": 1, "maximum": 1024},
+                        "projection": {"type": "string", "enum": ["perspective", "orthographic"]},
+                        "transparent": {"type": "boolean"},
+                        "background": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                        },
+                        "colours": {
+                            "type": "object",
+                            "description": (
+                                "Override part colours for this render only: {part-name "
+                                "substring: [r, g, b, a]} in 0..1. The model is unchanged."
+                            ),
+                        },
+                        "appearances": {
+                            "type": "object",
+                            "description": (
+                                "Show parts in library appearances (FORGE-632): {part-name "
+                                "substring: appearance name or id}. The appearance's "
+                                "colour, roughness and metallic are used, and the render "
+                                "records which appearance and version. A part may have a "
+                                "colour or an appearance, not both."
+                            ),
+                        },
+                        "store": {
+                            "type": "boolean",
+                            "description": "Record the images in the twin. Default true.",
+                        },
+                        "name": {"type": "string", "description": "Name of the render node."},
+                        "project_id": {
+                            "type": "string",
+                            "description": "Default: the rendered work product's project.",
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "stored": {"type": "boolean"},
+                        "images": {"type": "array"},
+                        "files": {"type": "array"},
+                        "source_work_product_id": {"type": "string"},
+                        "source_content_hash": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=900),
+            ),
+            handler=self.render_work_product,
+        )
+
+    async def render_work_product(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.render_work_product: 'work_product_id' is required")
+        options = {
+            key: arguments[key]
+            for key in (
+                "views",
+                "turntable_frames",
+                "resolution",
+                "samples",
+                "projection",
+                "transparent",
+                "background",
+                "colours",
+                "appearances",
+                "name",
+                "project_id",
+            )
+            if arguments.get(key) is not None
+        }
+        result: dict[str, Any] = await self._work_product_renderer(
+            work_product_id=work_product_id,
+            store=arguments.get("store") is not False,
+            **options,
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # twin.record_design_files (FORGE-687)
+    # ------------------------------------------------------------------
+
+    def _register_record_design_files(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_design_files",
+                adapter_id="twin",
+                name="Record Design Files",
+                description=(
+                    "Record KiCad or firmware files the adapters wrote on the workspace as a "
+                    "twin work product: 'schematic' (a .kicad_sch or its project folder), "
+                    "'pcb_layout' (a .kicad_pcb), 'gerber' (the export_gerber + export_drill "
+                    "folder), 'pick_and_place' (export_pos file), 'pinmap' (CSV/JSON) or "
+                    "'firmware_source' (a PlatformIO project folder; its build output is "
+                    "kept too), or 'purchased_model' (the folder simready.import wrote: a "
+                    "bought part's OpenUSD package with a GLB preview; its licence, "
+                    "attribution and mass are read from the folder, not from metadata). "
+                    "Recording the same name again is that item's next revision. "
+                    "source_node_ids are what it was made from (the BOM for a schematic, the "
+                    "schematic for a board, the board for gerbers and placement, the pinmap "
+                    "for firmware), linked GENERATED_FROM. A schematic or board also gets an "
+                    "SVG preview."
+                ),
+                capability="twin_record_design_files",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_type": {
+                            "type": "string",
+                            "enum": [
+                                "schematic",
+                                "pcb_layout",
+                                "gerber",
+                                "pick_and_place",
+                                "pinmap",
+                                "firmware_source",
+                                "purchased_model",
+                            ],
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": "A file or folder on the adapter workspace.",
+                        },
+                        "name": {"type": "string"},
+                        "project_id": {"type": "string"},
+                        "source_node_ids": {"type": "array", "items": {"type": "string"}},
+                        "metadata": {
+                            "type": "object",
+                            "description": (
+                                "Facts to keep with it, e.g. ERC/DRC counts, layer count, "
+                                "firmware.build's flash/ram use."
+                            ),
+                        },
+                        "preview": {"type": "boolean", "description": "Default true."},
+                        "item_key": {"type": "string"},
+                        "supersedes": {"type": "string"},
+                        "change_reason": {"type": "string"},
+                    },
+                    "required": ["work_product_type", "file_path", "name"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "files": {"type": "integer"},
+                        "previews": {"type": "array"},
+                        "generated_from": {"type": "array"},
+                        "item_ref": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=180),
+            ),
+            handler=self.record_design_files,
+        )
+
+    async def record_design_files(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        for key in ("work_product_type", "file_path", "name"):
+            if not arguments.get(key) or not isinstance(arguments.get(key), str):
+                raise ValueError(f"twin.record_design_files: '{key}' is required")
+        sources = arguments.get("source_node_ids") or []
+        if not isinstance(sources, list):
+            raise ValueError("twin.record_design_files: 'source_node_ids' must be a list")
+        metadata = arguments.get("metadata")
+        options = {
+            key: arguments[key]
+            for key in ("project_id", "item_key", "supersedes", "change_reason")
+            if arguments.get(key)
+        }
+        result: dict[str, Any] = await self._design_files_recorder(
+            work_product_type=arguments["work_product_type"],
+            file_path=arguments["file_path"],
+            name=arguments["name"],
+            source_node_ids=[str(s) for s in sources],
+            metadata=metadata if isinstance(metadata, dict) else None,
+            preview=arguments.get("preview") is not False,
+            **options,
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # twin.create_release_package (FORGE-299)
+    # ------------------------------------------------------------------
+
+    def _register_create_release_package(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.create_release_package",
+                adapter_id="twin",
+                name="Create Release Package",
+                description=(
+                    "Bundles a project's current hierarchy/BOM/evidence/decision "
+                    "node ids into one new release_package entity -- a versioned "
+                    "snapshot, never a deep copy of the referenced items' content. "
+                    "Gated at creation time on twin_core.consistency.gates."
+                    "evaluate_g8_release(...) returning PASSED (a real, pre-"
+                    "existing but previously purely-advisory check: baseline "
+                    "fixed, no stale evidence, verification coverage complete, "
+                    "waivers approved, a release_approval entity approved) -- "
+                    "raises with the failing check(s) named if not. Includes a "
+                    "simple count-delta diff against the immediately-prior "
+                    "release_package for the same project, if any. Drawings are "
+                    "always an empty list (FORGE-293 not yet shipped); this is "
+                    "not a full structural diff, only counts."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project to snapshot and release-gate.",
+                        },
+                        "notes": {
+                            "type": "string",
+                            "description": "Optional human-readable title for this release.",
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "entity_type": {"type": "string"},
+                        "snapshot": {"type": "object"},
+                        "diff_from_previous": {"type": "object"},
+                        "gate_status": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.create_release_package,
+        )
+
+    async def create_release_package(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = arguments.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("twin.create_release_package: 'project_id' is required")
+        notes = arguments.get("notes")
+        return await self._release_package_creator(
+            project_id=project_id,
+            notes=notes if isinstance(notes, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.create_baseline (FORGE-405, follow-up to FORGE-299)
+    # ------------------------------------------------------------------
+
+    def _register_create_baseline(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.create_baseline",
+                adapter_id="twin",
+                name="Create Baseline",
+                description=(
+                    "Creates an agreed, approved reference configuration: pins "
+                    "the current revision of every Constraint and "
+                    "EngineeringEntity currently recorded for the project, and "
+                    "advances each one's authority to 'baselined'. Real "
+                    "optimistic-concurrency guarantee -- if any member changed "
+                    "underneath this call, nothing is created and the conflict "
+                    "is reported. This is the 'configuration baseline fixed' "
+                    "check twin_core.consistency.gates.evaluate_g8_release "
+                    "requires (and, through it, twin.create_release_package) -- "
+                    "a project with zero baselines can never pass G8."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project whose constraints/entities to baseline.",
+                        },
+                        "approved_by": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Who approved this baseline (at least one name).",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why this baseline is being created now.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": ("Optional label. Defaults to 'Baseline <timestamp>'."),
+                        },
+                    },
+                    "required": ["project_id", "approved_by", "reason"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "member_count": {"type": "integer"},
+                        "constraint_count": {"type": "integer"},
+                        "entity_count": {"type": "integer"},
+                        "approved_by": {"type": "array", "items": {"type": "string"}},
+                        "reason": {"type": "string"},
+                        "created_at": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.create_baseline,
+        )
+
+    async def create_baseline(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = arguments.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("twin.create_baseline: 'project_id' is required")
+        approved_by = arguments.get("approved_by")
+        if not approved_by or not isinstance(approved_by, list):
+            raise ValueError("twin.create_baseline: 'approved_by' is required (non-empty array)")
+        reason = arguments.get("reason")
+        if not reason or not isinstance(reason, str):
+            raise ValueError("twin.create_baseline: 'reason' is required")
+        name = arguments.get("name")
+        return await self._baseline_creator(
+            project_id=project_id,
+            approved_by=[str(a) for a in approved_by],
+            reason=reason,
+            name=name if isinstance(name, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.generate_test_plan (FORGE-298)
+    # ------------------------------------------------------------------
+
+    def _register_generate_test_plan(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.generate_test_plan",
+                adapter_id="twin",
+                name="Generate Test Plan",
+                description=(
+                    "For every Constraint (requirement) on a project with "
+                    "verification_method == 'test', mechanically derives one "
+                    "new verification_case entity from the requirement's own "
+                    "structured metric/operator/limit/unit/target_node_type "
+                    "fields -- a test step ('Measure {metric} on "
+                    "{target_node_type}; acceptance: {metric} {operator} "
+                    "{limit}{unit}') plus its acceptance value, no new "
+                    "authoring/synthesis. Out of scope: FMEA, HALT/HASS, "
+                    "reliability modeling (later-phase per MetaForge-"
+                    "Planner); bench-equipment/procedure authoring; wiring "
+                    "generated cases into evaluate_g8_release's "
+                    "verification-complete check."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": (
+                                "Project whose test-method requirements to derive a plan from."
+                            ),
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "entries": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.generate_test_plan,
+        )
+
+    async def generate_test_plan(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = arguments.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("twin.generate_test_plan: 'project_id' is required")
+        return await self._test_plan_generator(project_id=project_id)
+
+    # ------------------------------------------------------------------
+    # twin.create_bringup_checklist (FORGE-295)
+    # ------------------------------------------------------------------
+
+    def _register_create_bringup_checklist(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.create_bringup_checklist",
+                adapter_id="twin",
+                name="Create Bring-up Checklist",
+                description=(
+                    "Derives a step-by-step assembly sequence from a work "
+                    "product's real metadata.assembly.joints (FORGE-271) by "
+                    "topologically sorting the base->follower dependency "
+                    "graph, then records one new bringup_checklist entity "
+                    "whose metadata carries the ordered steps (each "
+                    "'attach {follower} to {base} via {name} ({type} "
+                    "joint)'). Raises if the joint graph is cyclic rather "
+                    "than guessing at an order. Out of scope: any 3D "
+                    "visualization (exploded or cross-highlight -- neither "
+                    "exists as reusable infrastructure in this codebase); "
+                    "EVT/DVT/PVT staging distinctions; writing to the "
+                    "literal tests/bringup.md project-structure file."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "Work product carrying metadata.assembly.joints "
+                                "to derive a checklist from."
+                            ),
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Optional project to scope the recorded entity to.",
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "statement": {"type": "string"},
+                        "steps": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.create_bringup_checklist,
+        )
+
+    async def create_bringup_checklist(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.create_bringup_checklist: 'work_product_id' is required")
+        project_id = arguments.get("project_id")
+        return await self._bringup_checklist_creator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.create_firmware_scaffold (FORGE-276)
+    # ------------------------------------------------------------------
+
+    def _register_create_firmware_scaffold(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.create_firmware_scaffold",
+                adapter_id="twin",
+                name="Create Firmware Scaffold",
+                description=(
+                    "Derives a per-joint CAN node table from a work "
+                    "product's real metadata.assembly.joints (FORGE-271), "
+                    "assigning each joint a deterministic 1-indexed CAN "
+                    "node ID (the same topological build order "
+                    "twin.create_bringup_checklist derives -- a "
+                    "placeholder scheme, not a real hardware-specific "
+                    "allocation). Records a PINMAP work product (CSV: "
+                    "joint name/type/CAN ID/limits) and a FIRMWARE_SOURCE "
+                    "work product (a minimal C header: a per-joint struct "
+                    "with CAN ID + limit constants from the real joint "
+                    "'limits' data), both linked to the source work "
+                    "product. Raises if the joint graph is cyclic rather "
+                    "than guessing at an order. Out of scope: real CAN bus "
+                    "protocol/message-format implementation; "
+                    "control-loop/PID logic; real GPIO/MCU-specific pin "
+                    "assignment beyond the CAN-ID placeholder; RTOS "
+                    "configuration (see firmware.configure_rtos); "
+                    "hardware-in-the-loop testing."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "Work product carrying metadata.assembly.joints "
+                                "to derive a firmware scaffold from."
+                            ),
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Optional project to link the new work products to.",
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "pinmap_node_id": {"type": "string"},
+                        "firmware_source_node_id": {"type": "string"},
+                        "joints": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.create_firmware_scaffold,
+        )
+
+    async def create_firmware_scaffold(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.create_firmware_scaffold: 'work_product_id' is required")
+        project_id = arguments.get("project_id")
+        return await self._firmware_scaffold_creator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.get_harness_estimate (FORGE-275)
+    # ------------------------------------------------------------------
+
+    def _register_get_harness_estimate(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.get_harness_estimate",
+                adapter_id="twin",
+                name="Get Harness Estimate",
+                description=(
+                    "Derives a per-joint cable-length estimate from a work "
+                    "product's real metadata.assembly.joints (FORGE-271). "
+                    "Each joint's anchor is relative to its own parent "
+                    "frame (URDF convention), so this sums segment lengths "
+                    "along the real base->follower kinematic chain (the "
+                    "same topological order twin.create_bringup_checklist "
+                    "derives) rather than taking a single straight-line "
+                    "distance from a fixed origin, which would be "
+                    "physically meaningless on relative coordinates. This "
+                    "is a straight-segment-along-the-chain ESTIMATE, not a "
+                    "real routed path. Out of scope: real connector/"
+                    "wire-gauge selection (no schema concept exists); a "
+                    "real routed cable path; motor-driver component "
+                    "selection/sizing."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "Work product carrying metadata.assembly.joints "
+                                "to derive a harness estimate from."
+                            ),
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {"type": "string"},
+                        "joints": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.get_harness_estimate,
+        )
+
+    async def get_harness_estimate(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.get_harness_estimate: 'work_product_id' is required")
+        return await self._harness_estimate_getter(work_product_id=work_product_id)
+
+    # ------------------------------------------------------------------
+    # twin.item_history (FORGE-523)
+    # ------------------------------------------------------------------
+
+    def _register_item_history(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.item_history",
+                adapter_id="twin",
+                name="Item History",
+                description=(
+                    "List every revision of one item (a part, assembly, constraint set, "
+                    "intent, need, objective, BOM or component selection), oldest first, "
+                    "with revision number, node id, change_reason, run_id and author. "
+                    "Pass the item_key a write returned ('CAD-BRACKET'), or any revision's "
+                    "node_id. Use for 'what changed on this part' or 'which revision was "
+                    "current before'. Each revision carries its status (committed, approved, "
+                    "draft, rejected or abandoned); 'lessons' lists rejected revisions as "
+                    "'already tried, failed because' so a new attempt does not repeat them. "
+                    "Reads only."
+                ),
+                capability="twin_inspect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "item_key": {
+                            "type": "string",
+                            "description": "Item key, e.g. 'CAD-BRACKET' ('@n' is ignored).",
+                        },
+                        "node_id": {
+                            "type": "string",
+                            "description": "Node id of any revision of the item.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project UUID; only needed for a key in several.",
+                        },
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "item": {"type": "object"},
+                        "revisions": {"type": "array"},
+                        "lessons": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=128, max_cpu_seconds=10, max_disk_mb=16
+                ),
+            ),
+            handler=self.item_history,
+        )
+
+    async def item_history(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        item_key = arguments.get("item_key")
+        node_id = arguments.get("node_id")
+        project_id = arguments.get("project_id")
+        if not (isinstance(item_key, str) and item_key) and not (
+            isinstance(node_id, str) and node_id
+        ):
+            raise ValueError("twin.item_history: pass 'item_key' or 'node_id'")
+        with tracer.start_as_current_span("twin.item_history") as span:
+            if isinstance(item_key, str) and item_key:
+                span.set_attribute("twin.item_key", item_key)
+            result: dict[str, Any] = await self._item_history_reader(
+                item_key=item_key if isinstance(item_key, str) and item_key else None,
+                node_id=node_id if isinstance(node_id, str) and node_id else None,
+                project_id=project_id if isinstance(project_id, str) and project_id else None,
+            )
+            span.set_attribute("twin.revision_count", len(result.get("revisions") or []))
+            return result
+
+    # ------------------------------------------------------------------
+    # twin.execute_revalidation_plan (FORGE-316)
+    # ------------------------------------------------------------------
+
+    def _register_execute_revalidation_plan(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.execute_revalidation_plan",
+                adapter_id="twin",
+                name="Execute Revalidation Plan",
+                description=(
+                    "After a committed twin.commit_engineering_change, automatically "
+                    "re-run exactly the Evidence that ECT's real post-commit "
+                    "revalidation_plan marked stale -- only for entities carrying a "
+                    "replayable provenance recipe (e.g. twin.evaluate_metric's own "
+                    "evidence). Records fresh Evidence superseding the stale one for "
+                    "each; anything without a replay recipe (hand-authored evidence, "
+                    "or a non-evidence entity the impact walk reached) is reported as "
+                    "needing manual review, never guessed at. Requires the ECT to "
+                    "already be COMMITTED."
+                ),
+                capability="twin_revalidate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "ect_id": {
+                            "type": "string",
+                            "description": "The COMMITTED EngineeringChangeTransaction id.",
+                        },
+                    },
+                    "required": ["ect_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "re_run": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "entity_id": {"type": "string"},
+                                    "tool_id": {"type": "string"},
+                                    "new_evidence_node_id": {"type": ["string", "null"]},
+                                },
+                            },
+                        },
+                        "manual_review_needed": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.execute_revalidation_plan,
+        )
+
+    async def execute_revalidation_plan(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        ect_id = arguments.get("ect_id")
+        if not ect_id or not isinstance(ect_id, str):
+            raise ValueError("twin.execute_revalidation_plan: 'ect_id' is required")
+        return await self._revalidation_executor(ect_id)
+
+    # ------------------------------------------------------------------
+    # twin.rank_sensitivity (FORGE-317)
+    # ------------------------------------------------------------------
+
+    def _register_rank_sensitivity(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.rank_sensitivity",
+                adapter_id="twin",
+                name="Rank Parameter Sensitivity",
+                description=(
+                    "One-at-a-time finite-difference sensitivity of a metric's margin "
+                    "against its critical parameters, against a CAD work product's own "
+                    "recorded geometry (spec App. A Solver, step 15). "
+                    "metric='tip_deflection' ranks wall_thickness_mm and length_mm; "
+                    "metric='mass' ranks wall_thickness_mm and candidate materials "
+                    "(swap-and-compare, not a derivative). Records the ranking as "
+                    "Evidence pinned to the work product. wall_thickness_mm has no "
+                    "recorded home on a solid-beam CAD part -- supply the value you "
+                    "want evaluated, this tool does not guess it."
+                ),
+                capability="twin_sensitivity",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "metric": {
+                            "type": "string",
+                            "enum": ["tip_deflection", "mass"],
+                        },
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id.",
+                        },
+                        "wall_thickness_mm": {"type": "number"},
+                        "project_id": {"type": "string"},
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Baseline material library name (library.list_materials), "
+                                "e.g. 'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
+                            ),
+                        },
+                        "load_n": {
+                            "type": "number",
+                            "description": "Required for metric='tip_deflection'.",
+                        },
+                        "deflection_limit_mm": {
+                            "type": "number",
+                            "description": "Required for metric='tip_deflection'.",
+                        },
+                        "mass_limit_kg": {
+                            "type": "number",
+                            "description": "Required for metric='mass'.",
+                        },
+                        "candidate_materials": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Library materials to rank against for metric='mass' "
+                                "(library.list_materials); required for that metric."
+                            ),
+                        },
+                        "delta_fraction": {
+                            "type": "number",
+                            "description": "Finite-difference step as a fraction. Default 0.1.",
+                        },
+                    },
+                    "required": ["metric", "work_product_id", "wall_thickness_mm"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string"},
+                        "baseline_value": {"type": "number"},
+                        "limit": {"type": "number"},
+                        "baseline_margin": {"type": "number"},
+                        "rankings": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        },
+                        "evidence_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.rank_sensitivity,
+        )
+
+    async def rank_sensitivity(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        metric = arguments.get("metric")
+        if not isinstance(metric, str):
+            raise ValueError("twin.rank_sensitivity: 'metric' is required")
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.rank_sensitivity: 'work_product_id' is required")
+        wall_thickness_mm = arguments.get("wall_thickness_mm")
+        if not isinstance(wall_thickness_mm, (int, float)):
+            raise ValueError("twin.rank_sensitivity: 'wall_thickness_mm' is required (number)")
+        project_id = arguments.get("project_id")
+        material = arguments.get("material", "aluminium_6061_t6")
+        load_n = arguments.get("load_n")
+        deflection_limit_mm = arguments.get("deflection_limit_mm")
+        mass_limit_kg = arguments.get("mass_limit_kg")
+        candidate_materials = arguments.get("candidate_materials")
+        delta_fraction = arguments.get("delta_fraction", 0.1)
+        return await self._sensitivity_ranker(
+            metric=metric,
+            work_product_id=work_product_id,
+            wall_thickness_mm=float(wall_thickness_mm),
+            project_id=project_id if isinstance(project_id, str) else None,
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
+            load_n=float(load_n) if isinstance(load_n, (int, float)) else None,
+            deflection_limit_mm=(
+                float(deflection_limit_mm)
+                if isinstance(deflection_limit_mm, (int, float))
+                else None
+            ),
+            mass_limit_kg=float(mass_limit_kg) if isinstance(mass_limit_kg, (int, float)) else None,
+            candidate_materials=(
+                candidate_materials if isinstance(candidate_materials, list) else None
+            ),
+            delta_fraction=float(delta_fraction),
+        )
+
+    # ------------------------------------------------------------------
+    # Digital-thread questions (FORGE-357)
+    # ------------------------------------------------------------------
+    #
+    # twin.thread_for can already answer both of these — but only if the
+    # caller knows which way to walk. Its own docstring says a requirement
+    # "sees nothing with outgoing-only traversal", and outgoing is the
+    # default. So a model asking "what verifies REQ-3?" calls thread_for with
+    # the defaults, gets an empty subgraph, and reports that nothing verifies
+    # it. The traversal was wrong; the answer looked complete.
+    #
+    # The direction is a property of the question, not something the asker
+    # should have to know. These two name the question and encode the walk.
+
+    #: Edges that mean "this supports/verifies that".
+    _VERIFIES_EDGES = ("satisfies", "verifies", "validates", "supports", "implements")
+    #: Edges that mean "this contains/depends on that".
+    _USED_BY_EDGES = ("contains", "composed_of", "depends_on", "derives_from", "references")
+
+    def _register_thread_questions(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.what_verifies",
+                adapter_id="twin",
+                name="What Verifies This",
+                description=(
+                    "What evidence, tests or claims support a requirement or "
+                    "constraint. Walks the thread in the direction these edges "
+                    "actually point (evidence SATISFIES a requirement, so the "
+                    "requirement is the target) — twin.thread_for with its "
+                    "default outgoing walk returns nothing for a requirement, "
+                    "which reads as 'unverified' rather than 'asked the wrong "
+                    "way'. Returns an explicit empty result with `verified: "
+                    "false` when there genuinely is nothing."
+                ),
+                capability="twin_thread",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "The requirement or constraint being asked about.",
+                        },
+                        "depth": {"type": "integer", "default": 2, "minimum": 1, "maximum": 5},
+                    },
+                    "required": ["node_id"],
+                },
+            ),
+            handler=self.what_verifies,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.where_used",
+                adapter_id="twin",
+                name="Where Is This Used",
+                description=(
+                    "Which assemblies, designs or work products depend on this "
+                    "node. Walks incoming edges, because containment points "
+                    "parent-to-child and the part is the target. Use before "
+                    "changing or superseding something, to see what a change "
+                    "reaches."
+                ),
+                capability="twin_thread",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "The part or work product being asked about.",
+                        },
+                        "depth": {"type": "integer", "default": 2, "minimum": 1, "maximum": 5},
+                    },
+                    "required": ["node_id"],
+                },
+            ),
+            handler=self.where_used,
+        )
+
+    async def _thread_question(
+        self, arguments: dict[str, Any], *, edge_types: tuple[str, ...], answer_key: str
+    ) -> dict[str, Any]:
+        raw_id = arguments.get("node_id")
+        if not raw_id:
+            raise ValueError("node_id is required")
+        try:
+            node_id = UUID(str(raw_id))
+        except (ValueError, AttributeError) as exc:
+            raise ValueError(f"node_id must be a valid UUID: {exc}") from exc
+
+        depth = int(arguments.get("depth", 2))
+        if depth < 1 or depth > 5:
+            raise ValueError("depth must be between 1 and 5 inclusive")
+
+        subgraph = await self._twin.get_subgraph(
+            node_id, depth=depth, edge_types=list(edge_types), direction="incoming"
+        )
+        result = serialise_subgraph(subgraph)
+        # Everything except the node that was asked about.
+        related = [n for n in result.get("nodes", []) if str(n.get("id")) != str(node_id)]
+        result[answer_key] = bool(related)
+        result["related_count"] = len(related)
+        if not related:
+            # Say which question was asked and how it was walked, so an empty
+            # answer is legible as "nothing recorded" rather than as a tool
+            # that did not work.
+            result["note"] = (
+                f"Nothing found. Walked incoming edges of type "
+                f"{', '.join(edge_types)} to depth {depth}. This means nothing "
+                f"is recorded, not that the question could not be asked."
+            )
+        return result
+
+    async def what_verifies(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._thread_question(
+            arguments, edge_types=self._VERIFIES_EDGES, answer_key="verified"
+        )
+
+    async def where_used(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._thread_question(
+            arguments, edge_types=self._USED_BY_EDGES, answer_key="used"
+        )
+
+    # ------------------------------------------------------------------
+    # Project resources: metaforge://twin/<kind>/{project_id}  (FORGE-355)
+    # ------------------------------------------------------------------
+    #
+    # One injected renderer rather than a seam per kind. Four near-identical
+    # providers would be four places to forget the same thing, and the first
+    # one forgotten is the one nobody notices missing from resources/list.
+
+    #: kind -> (title, what it answers)
+    PROJECT_RESOURCES: dict[str, tuple[str, str]] = {
+        "brief": (
+            "Project brief",
+            "What this project is, what has been built in it, and the most "
+            "recent requirement documents inline, newest work first. The same "
+            "brief the chat harness gives its agent.",
+        ),
+        "hierarchy": (
+            "Product hierarchy",
+            "The product breakdown — assemblies and parts — with mass and cost rolled up the tree.",
+        ),
+        "requirements": (
+            "Requirement matrix",
+            "Requirements against the claims and evidence that verify them, "
+            "with each row's live status (pass / uncertain / fail / no_data / "
+            "stale). Absence of evidence shows as no_data, never as pass.",
+        ),
+        "decisions": (
+            "Design decisions",
+            "Recorded decisions with their rationale and the alternatives that were considered.",
+        ),
+        "risks": (
+            "Risks",
+            "Recorded risk entities and their scores.",
+        ),
+    }
+
+    _RESOURCE_PREFIX = "metaforge://twin/"
+
+    def _register_brief_resource(self) -> None:
+        for kind, (title, description) in self.PROJECT_RESOURCES.items():
+            self.register_resource(
+                manifest=ResourceManifestEntry(
+                    uri_template=f"{self._RESOURCE_PREFIX}{kind}/{{project_id}}",
+                    adapter_id="twin",
+                    name=title,
+                    description=description,
+                    mime_type="text/markdown",
+                ),
+                reader=self._read_project_resource,
+                matcher=self._make_matcher(kind),
+            )
+
+    @staticmethod
+    def _make_matcher(kind: str) -> Any:
+        prefix = f"metaforge://twin/{kind}/"
+        # Bound as a default argument: a closure over the loop variable would
+        # give every matcher the last kind.
+        return lambda uri, _p=prefix: uri.startswith(_p)
+
+    async def _read_project_resource(self, uri: str) -> list[dict[str, Any]]:
+        rest = uri[len(self._RESOURCE_PREFIX) :]
+        kind, _, project_id = rest.partition("/")
+        project_id = project_id.strip("/")
+        if kind not in self.PROJECT_RESOURCES or not project_id:
+            raise ResourceNotFoundError(uri)
+        text = await self._brief_provider(kind, project_id)
+        if text is None:
+            # A project that does not exist and a project with nothing
+            # recorded are different answers, and the second is legitimate —
+            # "no requirements yet" is information.
+            raise ResourceNotFoundError(f"{uri} (no project {project_id!r})")
+        return [{"uri": uri, "mimeType": "text/markdown", "text": text}]
+
+    # ------------------------------------------------------------------
+    # twin.attempt_promotion (FORGE-319)
+    # ------------------------------------------------------------------
+
+    def _register_attempt_promotion(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.attempt_promotion",
+                adapter_id="twin",
+                name="Attempt Maturity Gate Promotion",
+                description=(
+                    "Attempt to promote a project to a maturity level (target lifecycle "
+                    "spec §29: concept -> sim_validated -> physically_validated -> "
+                    "released), spec step 17. Checks each 'required_claim_id' "
+                    "(a requirement/Constraint id) against the live requirement matrix "
+                    "(twin.rank_sensitivity/twin.evaluate_metric evidence, FORGE-318) -- "
+                    "every one must be 'pass', or 'fail' covered by an approved waiver "
+                    "(twin.record_engineering_entity entity_type='waiver' + "
+                    "twin.approve_engineering_entity) naming that requirement. This is a "
+                    "REAL gate: with any required claim unsatisfied promotion is REFUSED "
+                    "-- the attempt is still persisted (with exactly why it was blocked), "
+                    "'promoted' is just false. The deciding human is NOT an argument "
+                    "(FORGE-393): this call is always held for a person, and whoever "
+                    "approves it is recorded as the authority. Passing 'decided_by' is an "
+                    "error, not a shortcut."
+                ),
+                capability="twin_promotion",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "level": {
+                            "type": "string",
+                            "enum": [
+                                "concept",
+                                "sim_validated",
+                                "physically_validated",
+                                "released",
+                            ],
+                        },
+                        "required_claim_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Requirement (Constraint) ids that must all pass.",
+                        },
+                        "k": {
+                            "type": "number",
+                            "description": (
+                                "Recorded for this attempt (band multiplier context). Default 1.0."
+                            ),
+                        },
+                        "comment": {
+                            "type": "string",
+                            "description": (
+                                "A reviewer's own rationale, distinct from the system-derived "
+                                "blocked_reason -- recorded on either outcome (FORGE-290)."
+                            ),
+                        },
+                        "reject": {
+                            "type": "boolean",
+                            "description": (
+                                "Human veto (FORGE-290): refuse promotion even if every "
+                                "required claim is satisfied. The rejecting human is the "
+                                "approver, taken from the approval. Default false."
+                            ),
+                        },
+                    },
+                    "required": ["project_id", "level", "required_claim_ids"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "gate_id": {"type": "string"},
+                        "level": {"type": "string"},
+                        "promoted": {"type": "boolean"},
+                        "blocked_reason": {"type": ["string", "null"]},
+                        "decided_by": {"type": ["string", "null"]},
+                        "comment": {"type": ["string", "null"]},
+                        "results": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.attempt_promotion,
+        )
+
+    async def attempt_promotion(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = arguments.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("twin.attempt_promotion: 'project_id' is required")
+        level = arguments.get("level")
+        if not isinstance(level, str):
+            raise ValueError("twin.attempt_promotion: 'level' is required")
+        required_claim_ids = arguments.get("required_claim_ids")
+        if not isinstance(required_claim_ids, list) or not required_claim_ids:
+            raise ValueError(
+                "twin.attempt_promotion: 'required_claim_ids' is required (non-empty array)"
+            )
+        k = arguments.get("k", 1.0)
+        comment = arguments.get("comment")
+        reject = arguments.get("reject", False)
+
+        # FORGE-393: the deciding human is whoever answered the approval, and
+        # the dispatcher puts them here. `decided_by` used to be a plain tool
+        # argument, which meant the model typed the name of the person the
+        # gate recorded as its authority. Refuse it outright rather than drop
+        # it quietly -- a model that passed it believes it set the authority.
+        reject_caller_supplied_approver("twin.attempt_promotion", arguments)
+        decided_by = arguments.get(APPROVED_BY_ARG)
+        if not isinstance(decided_by, str) or not decided_by.strip():
+            raise HumanAuthorityRequiredError(
+                "twin.attempt_promotion",
+                "no approver reached the tool, so nothing ran",
+            )
+        return await self._promotion_attempter(
+            project_id=project_id,
+            level=level,
+            required_claim_ids=[str(c) for c in required_claim_ids],
+            k=float(k),
+            decided_by=decided_by,
+            comment=comment if isinstance(comment, str) else None,
+            reject=bool(reject),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.optimize_parameter (FORGE-320)
+    # ------------------------------------------------------------------
+
+    def _register_optimize_parameter(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.optimize_parameter",
+                adapter_id="twin",
+                name="Optimize Wall Thickness",
+                description=(
+                    "Bisection search for the minimum-mass wall_thickness_mm meeting "
+                    "deflection_limit_mm and sf_limit (safety factor), against a CAD work "
+                    "product's own recorded geometry (target lifecycle spec App. A "
+                    "Optimiser, step 10). Both constraints are monotonic in wall "
+                    "thickness, so the winner is the exact minimum feasible value, not a "
+                    "heuristic search. Records the search as Evidence pinned to the work "
+                    "product; when a feasible winner is found, also records it as a "
+                    "Decision (twin.record_decision) with each rejected candidate as an "
+                    "alternative. Does NOT propose or commit a geometry change -- the "
+                    "result is a numeric recommendation only."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id.",
+                        },
+                        "load_n": {"type": "number"},
+                        "deflection_limit_mm": {"type": "number"},
+                        "sf_limit": {
+                            "type": "number",
+                            "description": "Minimum acceptable safety factor. Default 2.0.",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
+                            ),
+                        },
+                        "wall_min_mm": {
+                            "type": "number",
+                            "description": "Search lower bound. Default 0.5.",
+                        },
+                        "wall_max_mm": {
+                            "type": "number",
+                            "description": (
+                                "Search upper bound. Default: half the smaller cross-"
+                                "section extent, minus a margin (leaves a real cavity)."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Requirement (Constraint) ids to link the resulting "
+                                "Decision to (parent_refs), when a winner is found."
+                            ),
+                        },
+                        "record_decision": {
+                            "type": "boolean",
+                            "description": "Record a Decision when feasible. Default true.",
+                        },
+                        "max_iterations": {
+                            "type": "integer",
+                            "description": (
+                                "Bisection iteration budget. Default 60 -- the real, "
+                                "measurable budget for this loop (FORGE-291); it makes "
+                                "zero LLM calls, so there is no token cost to report."
+                            ),
+                        },
+                    },
+                    "required": ["work_product_id", "load_n", "deflection_limit_mm"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "detail": {"type": "string"},
+                        "winner": {"type": ["object", "null"]},
+                        "candidates": {"type": "array", "items": {"type": "object"}},
+                        "material": {"type": "string"},
+                        "evidence_node_id": {"type": "string"},
+                        "decision_node_id": {"type": "string"},
+                        "max_iterations": {"type": "integer"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.optimize_parameter,
+        )
+
+    async def optimize_parameter(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.optimize_parameter: 'work_product_id' is required")
+        load_n = arguments.get("load_n")
+        if not isinstance(load_n, (int, float)):
+            raise ValueError("twin.optimize_parameter: 'load_n' is required (number)")
+        deflection_limit_mm = arguments.get("deflection_limit_mm")
+        if not isinstance(deflection_limit_mm, (int, float)):
+            raise ValueError("twin.optimize_parameter: 'deflection_limit_mm' is required (number)")
+        sf_limit = arguments.get("sf_limit", 2.0)
+        material = arguments.get("material", "aluminium_6061_t6")
+        wall_min_mm = arguments.get("wall_min_mm", 0.5)
+        wall_max_mm = arguments.get("wall_max_mm")
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        record_decision = arguments.get("record_decision", True)
+        max_iterations = arguments.get("max_iterations", 60)
+        return await self._parameter_optimizer(
+            work_product_id=work_product_id,
+            load_n=float(load_n),
+            deflection_limit_mm=float(deflection_limit_mm),
+            sf_limit=float(sf_limit),
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
+            wall_min_mm=float(wall_min_mm),
+            wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
+            max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+            record_decision=bool(record_decision),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.start_design_loop / twin.get_design_loop /
+    # twin.approve_design_loop (FORGE-287)
+    # ------------------------------------------------------------------
+
+    def _register_start_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.start_design_loop",
+                adapter_id="twin",
+                name="Start Design Loop",
+                description=(
+                    "Closed loop: propose -> build -> simulate -> evaluate against "
+                    "constraints -> revise -> repeat, until pass or proven infeasible "
+                    "(target lifecycle spec's 'dual state machine', gap G-G1). Runs the "
+                    "same bisection search as twin.optimize_parameter, but persists "
+                    "EVERY candidate it evaluates as a real, queryable DesignLoopIteration "
+                    "-- fetch the timeline afterward with twin.get_design_loop, then "
+                    "approve the winner with twin.approve_design_loop."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id.",
+                        },
+                        "load_n": {"type": "number"},
+                        "deflection_limit_mm": {"type": "number"},
+                        "sf_limit": {
+                            "type": "number",
+                            "description": "Minimum acceptable safety factor. Default 2.0.",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
+                            ),
+                        },
+                        "wall_min_mm": {
+                            "type": "number",
+                            "description": "Search lower bound. Default 0.5.",
+                        },
+                        "wall_max_mm": {
+                            "type": "number",
+                            "description": (
+                                "Search upper bound. Default: half the smaller cross-"
+                                "section extent, minus a margin."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Requirement (Constraint) ids this loop is evaluated "
+                                "against -- linked to every iteration via CONSTRAINED_BY."
+                            ),
+                        },
+                        "max_iterations": {
+                            "type": "integer",
+                            "description": "Bisection iteration budget. Default 60.",
+                        },
+                    },
+                    "required": ["work_product_id", "load_n", "deflection_limit_mm"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "loop_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "detail": {"type": "string"},
+                        "winner": {"type": ["object", "null"]},
+                        "iteration_count": {"type": "integer"},
+                        "iteration_ids": {"type": "array", "items": {"type": "string"}},
+                        "max_iterations": {"type": "integer"},
+                        "duplicate": {
+                            "type": "boolean",
+                            "description": (
+                                "FORGE-291: true when this call had identical inputs to an "
+                                "earlier run -- loop_id/iteration_ids/winner are that prior "
+                                "run's, and nothing new was written."
+                            ),
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.start_design_loop,
+        )
+
+    async def start_design_loop(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.start_design_loop: 'work_product_id' is required")
+        load_n = arguments.get("load_n")
+        if not isinstance(load_n, (int, float)):
+            raise ValueError("twin.start_design_loop: 'load_n' is required (number)")
+        deflection_limit_mm = arguments.get("deflection_limit_mm")
+        if not isinstance(deflection_limit_mm, (int, float)):
+            raise ValueError("twin.start_design_loop: 'deflection_limit_mm' is required (number)")
+        sf_limit = arguments.get("sf_limit", 2.0)
+        material = arguments.get("material", "aluminium_6061_t6")
+        wall_min_mm = arguments.get("wall_min_mm", 0.5)
+        wall_max_mm = arguments.get("wall_max_mm")
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        max_iterations = arguments.get("max_iterations", 60)
+        return await self._design_loop_starter(
+            work_product_id=work_product_id,
+            load_n=float(load_n),
+            deflection_limit_mm=float(deflection_limit_mm),
+            sf_limit=float(sf_limit),
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
+            wall_min_mm=float(wall_min_mm),
+            wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
+            max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.start_tube_height_design_loop (FORGE-288)
+    # ------------------------------------------------------------------
+
+    def _register_start_tube_height_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.start_tube_height_design_loop",
+                adapter_id="twin",
+                name="Start Tube-Height Design Loop",
+                description=(
+                    "Closed loop over a SECOND real parameter (gap G-G2): sweeps "
+                    "height_mm, wall_thickness_mm held fixed, over the same real "
+                    "hollow-tube hand-calc twin.optimize_parameter/twin.start_design_loop "
+                    "already use. Same closed-loop machinery as twin.start_design_loop "
+                    "(persists every candidate as a real DesignLoopIteration, "
+                    "twin.get_design_loop/twin.approve_design_loop work unchanged) -- "
+                    "proof the loop generalizes beyond a single hardcoded parameter, not "
+                    "a second, separate loop implementation."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id.",
+                        },
+                        "wall_thickness_mm": {
+                            "type": "number",
+                            "description": "Held fixed while height_mm is swept.",
+                        },
+                        "load_n": {"type": "number"},
+                        "deflection_limit_mm": {"type": "number"},
+                        "sf_limit": {
+                            "type": "number",
+                            "description": "Minimum acceptable safety factor. Default 2.0.",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
+                            ),
+                        },
+                        "height_min_mm": {
+                            "type": "number",
+                            "description": "Search lower bound. Default 1.0.",
+                        },
+                        "height_max_mm": {
+                            "type": "number",
+                            "description": "Search upper bound. Default: width_mm * 4.",
+                        },
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Requirement (Constraint) ids this loop is evaluated "
+                                "against -- linked to every iteration via CONSTRAINED_BY."
+                            ),
+                        },
+                        "max_iterations": {
+                            "type": "integer",
+                            "description": "Bisection iteration budget. Default 60.",
+                        },
+                    },
+                    "required": [
+                        "work_product_id",
+                        "wall_thickness_mm",
+                        "load_n",
+                        "deflection_limit_mm",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "loop_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "detail": {"type": "string"},
+                        "winner": {"type": ["object", "null"]},
+                        "iteration_count": {"type": "integer"},
+                        "iteration_ids": {"type": "array", "items": {"type": "string"}},
+                        "max_iterations": {"type": "integer"},
+                        "duplicate": {
+                            "type": "boolean",
+                            "description": (
+                                "FORGE-291: true when this call had identical inputs to an "
+                                "earlier run -- loop_id/iteration_ids/winner are that prior "
+                                "run's, and nothing new was written."
+                            ),
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.start_tube_height_design_loop,
+        )
+
+    async def start_tube_height_design_loop(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.start_tube_height_design_loop: 'work_product_id' is required")
+        wall_thickness_mm = arguments.get("wall_thickness_mm")
+        if not isinstance(wall_thickness_mm, (int, float)):
+            raise ValueError(
+                "twin.start_tube_height_design_loop: 'wall_thickness_mm' is required (number)"
+            )
+        load_n = arguments.get("load_n")
+        if not isinstance(load_n, (int, float)):
+            raise ValueError("twin.start_tube_height_design_loop: 'load_n' is required (number)")
+        deflection_limit_mm = arguments.get("deflection_limit_mm")
+        if not isinstance(deflection_limit_mm, (int, float)):
+            raise ValueError(
+                "twin.start_tube_height_design_loop: 'deflection_limit_mm' is required (number)"
+            )
+        sf_limit = arguments.get("sf_limit", 2.0)
+        material = arguments.get("material", "aluminium_6061_t6")
+        height_min_mm = arguments.get("height_min_mm", 1.0)
+        height_max_mm = arguments.get("height_max_mm")
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        max_iterations = arguments.get("max_iterations", 60)
+        return await self._tube_height_design_loop_starter(
+            work_product_id=work_product_id,
+            wall_thickness_mm=float(wall_thickness_mm),
+            load_n=float(load_n),
+            deflection_limit_mm=float(deflection_limit_mm),
+            sf_limit=float(sf_limit),
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
+            height_min_mm=float(height_min_mm),
+            height_max_mm=float(height_max_mm) if isinstance(height_max_mm, (int, float)) else None,
+            max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.select_concept (FORGE-262, gap G-B2)
+    # ------------------------------------------------------------------
+
+    def _register_select_concept(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.select_concept",
+                adapter_id="twin",
+                name="Select Concept",
+                description=(
+                    "Trade-study selection (gap G-B2): given 2-4 recorded "
+                    "concept_option entities (twin.record_engineering_entity, "
+                    "entity_type='concept_option') and a weight per criterion, "
+                    "computes each option's weighted score from its own recorded "
+                    "criteria_scores and records the selected one as a real "
+                    "Decision (twin.record_decision) -- every non-selected option "
+                    "becomes a real alternatives entry with its weighted score as "
+                    "reason_rejected, which is exactly what "
+                    "twin_core.consistency.gates's G5 'Trade study performed' "
+                    "check reads. Concept GENERATION is not this tool -- record "
+                    "each candidate architecture separately via "
+                    "twin.record_engineering_entity first."
+                ),
+                capability="twin_trade_study",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "option_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "2-4 concept_option entity ids to compare.",
+                        },
+                        "selected_option_id": {
+                            "type": "string",
+                            "description": "Must be one of option_ids.",
+                        },
+                        "weights": {
+                            "type": "object",
+                            "additionalProperties": {"type": "number"},
+                            "description": (
+                                "Criterion name -> weight, e.g. "
+                                "{'mass_kg': -1.0, 'cost_usd': -0.01, 'risk': -1.0, "
+                                "'performance': 1.0}. Sign encodes direction -- a "
+                                "criterion to MINIMIZE (mass, cost, risk) needs a "
+                                "negative weight so a higher weighted_score always "
+                                "means better, matching the design loop's own "
+                                "'higher objective = better' convention nowhere "
+                                "else in this codebase."
+                            ),
+                        },
+                        "title": {"type": "string", "minLength": 1},
+                        "rationale": {"type": "string", "minLength": 1},
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Linked to the Decision via parent_refs.",
+                        },
+                    },
+                    "required": [
+                        "option_ids",
+                        "selected_option_id",
+                        "weights",
+                        "title",
+                        "rationale",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "selected_option_id": {"type": "string"},
+                        "scores": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.select_concept,
+        )
+
+    async def select_concept(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        option_ids = arguments.get("option_ids")
+        if not isinstance(option_ids, list) or not option_ids:
+            raise ValueError("twin.select_concept: 'option_ids' is required (non-empty array)")
+        selected_option_id = arguments.get("selected_option_id")
+        if not selected_option_id or not isinstance(selected_option_id, str):
+            raise ValueError("twin.select_concept: 'selected_option_id' is required")
+        weights = arguments.get("weights")
+        if not isinstance(weights, dict) or not weights:
+            raise ValueError("twin.select_concept: 'weights' is required (non-empty object)")
+        title = arguments.get("title")
+        if not title or not isinstance(title, str):
+            raise ValueError("twin.select_concept: 'title' is required (non-empty string)")
+        rationale = arguments.get("rationale")
+        if not rationale or not isinstance(rationale, str):
+            raise ValueError("twin.select_concept: 'rationale' is required (non-empty string)")
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        return await self._concept_selector(
+            option_ids=[str(o) for o in option_ids],
+            selected_option_id=selected_option_id,
+            weights={str(k): float(v) for k, v in weights.items()},
+            title=title,
+            rationale=rationale,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.select_component (FORGE-265, gap G-C1)
+    # ------------------------------------------------------------------
+
+    def _register_select_component(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.select_component",
+                adapter_id="twin",
+                name="Select Component",
+                description=(
+                    "Requirement-driven component selection (gap G-C1): given "
+                    "2+ real candidate parts (each an mpn + caller-asserted "
+                    "datasheet specs, e.g. a servo's published torque_kg_cm) "
+                    "and the specs the design actually requires (a threshold "
+                    "+ '>='/'<=' direction per spec, e.g. 'torque_kg_cm >= "
+                    "24.5'), computes a real numeric margin per requirement "
+                    "per candidate, records the selection as a real Decision "
+                    "(twin.record_decision, alternatives = every non-selected "
+                    "candidate's margin summary) and persists the selected "
+                    "candidate as a real BOMItem (twin.record_component_"
+                    "selection's own recorder) -- unlike that tool alone, "
+                    "which persists whatever was already decided with zero "
+                    "requirement comparison. Spec values are caller-asserted "
+                    "real datasheet numbers, not scraped by any in-repo "
+                    "parsing pipeline."
+                ),
+                capability="twin_component_selection",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "candidates": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "mpn": {"type": "string"},
+                                    "manufacturer": {"type": "string"},
+                                    "specs": {
+                                        "type": "object",
+                                        "additionalProperties": {"type": "number"},
+                                    },
+                                },
+                                "required": ["mpn", "manufacturer"],
+                            },
+                            "description": "2+ real candidates to compare.",
+                        },
+                        "required_specs": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                    "op": {"type": "string", "enum": [">=", "<="]},
+                                    "value": {"type": "number"},
+                                },
+                                "required": ["op", "value"],
+                            },
+                            "description": (
+                                "Spec name -> {op, value}, e.g. "
+                                "{'torque_kg_cm': {'op': '>=', 'value': 24.5}}."
+                            ),
+                        },
+                        "selected_mpn": {
+                            "type": "string",
+                            "description": "Must be one of candidates' mpn values.",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": (
+                                "digital_twin.catalog.taxonomy category, e.g. 'servo'."
+                            ),
+                        },
+                        "purchase_unit": {"type": "string"},
+                        "title": {"type": "string", "minLength": 1},
+                        "rationale": {"type": "string", "minLength": 1},
+                        "quantity": {"type": "integer"},
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Linked to the Decision via parent_refs.",
+                        },
+                    },
+                    "required": [
+                        "candidates",
+                        "required_specs",
+                        "selected_mpn",
+                        "category",
+                        "purchase_unit",
+                        "title",
+                        "rationale",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "decision_node_id": {"type": "string"},
+                        "selected_mpn": {"type": "string"},
+                        "selected_meets_requirements": {"type": "boolean"},
+                        "candidates": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.select_component,
+        )
+
+    async def select_component(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        candidates = arguments.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise ValueError("twin.select_component: 'candidates' is required (non-empty array)")
+        required_specs = arguments.get("required_specs")
+        if not isinstance(required_specs, dict) or not required_specs:
+            raise ValueError(
+                "twin.select_component: 'required_specs' is required (non-empty object)"
+            )
+        selected_mpn = arguments.get("selected_mpn")
+        if not selected_mpn or not isinstance(selected_mpn, str):
+            raise ValueError("twin.select_component: 'selected_mpn' is required")
+        category = arguments.get("category")
+        if not category or not isinstance(category, str):
+            raise ValueError("twin.select_component: 'category' is required")
+        purchase_unit = arguments.get("purchase_unit")
+        if not purchase_unit or not isinstance(purchase_unit, str):
+            raise ValueError("twin.select_component: 'purchase_unit' is required")
+        title = arguments.get("title")
+        if not title or not isinstance(title, str):
+            raise ValueError("twin.select_component: 'title' is required (non-empty string)")
+        rationale = arguments.get("rationale")
+        if not rationale or not isinstance(rationale, str):
+            raise ValueError("twin.select_component: 'rationale' is required (non-empty string)")
+        quantity = arguments.get("quantity", 1)
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        return await self._component_selector(
+            candidates=candidates,
+            required_specs=required_specs,
+            selected_mpn=selected_mpn,
+            category=category,
+            purchase_unit=purchase_unit,
+            title=title,
+            rationale=rationale,
+            quantity=int(quantity) if isinstance(quantity, (int, float)) else 1,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+        )
+
+    def _register_get_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.get_design_loop",
+                adapter_id="twin",
+                name="Get Design Loop",
+                description=(
+                    "The full iteration timeline of one twin.start_design_loop run -- "
+                    "every candidate evaluated, its parameter/objective values, "
+                    "feasibility, and (for the winner) approval state."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {"loop_id": {"type": "string"}},
+                    "required": ["loop_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "loop_id": {"type": "string"},
+                        "iterations": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=10),
+            ),
+            handler=self.get_design_loop,
+        )
+
+    async def get_design_loop(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        loop_id = arguments.get("loop_id")
+        if not loop_id or not isinstance(loop_id, str):
+            raise ValueError("twin.get_design_loop: 'loop_id' is required")
+        return await self._design_loop_reader(loop_id=loop_id)
+
+    def _register_approve_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.approve_design_loop",
+                adapter_id="twin",
+                name="Approve Design Loop",
+                description=(
+                    "Record a human's approval of a converged design loop's winning "
+                    "candidate -- the gate-approval half of the closed loop (gap G-G1). "
+                    "Raises if the loop never converged (no winning candidate to approve)."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "loop_id": {"type": "string"},
+                        "approved_by": {"type": "string"},
+                    },
+                    "required": ["loop_id", "approved_by"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=10),
+            ),
+            handler=self.approve_design_loop,
+        )
+
+    async def approve_design_loop(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        loop_id = arguments.get("loop_id")
+        if not loop_id or not isinstance(loop_id, str):
+            raise ValueError("twin.approve_design_loop: 'loop_id' is required")
+        # FORGE-393/400: the approving human comes from the approval record,
+        # not from an argument the model filled in.
+        reject_caller_supplied_approver("twin.approve_design_loop", arguments)
+        approved_by = arguments.get(APPROVED_BY_ARG)
+        if not isinstance(approved_by, str) or not approved_by.strip():
+            raise HumanAuthorityRequiredError(
+                "twin.approve_design_loop",
+                "no approver reached the tool, so nothing was approved",
+            )
+        return await self._design_loop_approver(loop_id=loop_id, approved_by=approved_by)
+
+    # ------------------------------------------------------------------
+    # twin.register_device_instance (FORGE-321)
+    # ------------------------------------------------------------------
+
+    def _register_device_instance_registrar(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.register_device_instance",
+                adapter_id="twin",
+                name="Register Device Instance",
+                description=(
+                    "Register a specific manufactured unit (serial-number-level) of a "
+                    "product as a DeviceInstance (target lifecycle spec App. B REALISE, "
+                    "step 11). Optionally links it via an INSTANCE_OF edge to the design "
+                    "revision (a WorkProduct -- CAD assembly, robot_description, ...) it "
+                    "was built from, when 'design_revision_ref' resolves to one. "
+                    "'product_id' is a free-text identifier, not assumed to be a graph ref."
+                ),
+                capability="twin_device_instance",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "serial_number": {"type": "string"},
+                        "product_id": {"type": "string"},
+                        "firmware_version": {"type": "string"},
+                        "hardware_revision": {"type": "string"},
+                        "manufactured_at": {
+                            "type": "string",
+                            "description": "ISO-8601 timestamp.",
+                        },
+                        "provisioned_at": {
+                            "type": "string",
+                            "description": "ISO-8601 timestamp.",
+                        },
+                        "design_revision_ref": {
+                            "type": "string",
+                            "description": (
+                                "Name or id of the WorkProduct this unit was built from. "
+                                "Optional -- omit when no born-digital design record exists."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "metadata": {"type": "object"},
+                    },
+                    "required": ["serial_number", "product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "serial_number": {"type": "string"},
+                        "product_id": {"type": "string"},
+                        "global_asset_id": {"type": "string"},
+                        "design_revision_id": {"type": ["string", "null"]},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=30),
+            ),
+            handler=self.register_device_instance,
+        )
+
+    async def register_device_instance(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        serial_number = arguments.get("serial_number")
+        if not serial_number or not isinstance(serial_number, str):
+            raise ValueError("twin.register_device_instance: 'serial_number' is required")
+        product_id = arguments.get("product_id")
+        if not product_id or not isinstance(product_id, str):
+            raise ValueError("twin.register_device_instance: 'product_id' is required")
+        metadata = arguments.get("metadata")
+        return await self._device_instance_registrar(
+            serial_number=serial_number,
+            product_id=product_id,
+            firmware_version=arguments.get("firmware_version", ""),
+            hardware_revision=arguments.get("hardware_revision", ""),
+            manufactured_at=arguments.get("manufactured_at"),
+            provisioned_at=arguments.get("provisioned_at"),
+            design_revision_ref=arguments.get("design_revision_ref"),
+            project_id=arguments.get("project_id"),
+            metadata=metadata if isinstance(metadata, dict) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.record_measurement (FORGE-321)
+    # ------------------------------------------------------------------
+
+    def _register_measurement_recorder(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_measurement",
+                adapter_id="twin",
+                name="Record Measurement",
+                description=(
+                    "Record a real-world measurement against an interface quantity "
+                    "(target lifecycle spec App. B REALISE/LEARN, step 11) -- e.g. a "
+                    "measured tip deflection on a built unit. Appends the measurement to "
+                    "the named metric on the {from_component, to_component} interface of "
+                    "a system_architecture work product (explicit 'work_product_id', or "
+                    "the project's one such document), and links the measuring "
+                    "DeviceInstance via a MEASURED_BY edge. When 'predicted_value' is "
+                    "supplied (e.g. from a prior twin.evaluate_metric call), also records "
+                    "the residual for calibration -- future twin.evaluate_metric calls for "
+                    "that metric/tier use the resulting calibrated band once enough "
+                    "measurements exist, narrowing it over the fixed prior."
+                ),
+                capability="twin_measurement",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "device_instance_id": {"type": "string"},
+                        "from_component": {"type": "string"},
+                        "to_component": {"type": "string"},
+                        "metric": {"type": "string"},
+                        "value": {"type": "number"},
+                        "unit": {"type": "string", "description": "Default 'mm'."},
+                        "source": {"type": "string"},
+                        "timestamp": {"type": "string", "description": "ISO-8601 timestamp."},
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "system_architecture work product id.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": (
+                                "Used to find the project's system_architecture document "
+                                "when 'work_product_id' is omitted."
+                            ),
+                        },
+                        "predicted_value": {
+                            "type": "number",
+                            "description": (
+                                "The predicted value this measurement should be compared "
+                                "against (e.g. from twin.evaluate_metric). Omit to record "
+                                "the measurement without computing a calibration residual."
+                            ),
+                        },
+                        "predicted_tier": {
+                            "type": "integer",
+                            "description": "Tier the prediction came from. Default 0.",
+                        },
+                    },
+                    "required": [
+                        "device_instance_id",
+                        "from_component",
+                        "to_component",
+                        "metric",
+                        "value",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {"type": "string"},
+                        "interface": {"type": "string"},
+                        "metric": {"type": "string"},
+                        "value": {"type": "number"},
+                        "residual": {"type": "number"},
+                        "evidence_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=30),
+            ),
+            handler=self.record_measurement,
+        )
+
+    async def record_measurement(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        device_instance_id = arguments.get("device_instance_id")
+        if not device_instance_id or not isinstance(device_instance_id, str):
+            raise ValueError("twin.record_measurement: 'device_instance_id' is required")
+        from_component = arguments.get("from_component")
+        to_component = arguments.get("to_component")
+        if not from_component or not to_component:
+            raise ValueError(
+                "twin.record_measurement: 'from_component' and 'to_component' are required"
+            )
+        metric = arguments.get("metric")
+        if not metric or not isinstance(metric, str):
+            raise ValueError("twin.record_measurement: 'metric' is required")
+        value = arguments.get("value")
+        if not isinstance(value, (int, float)):
+            raise ValueError("twin.record_measurement: 'value' is required (number)")
+        predicted_value = arguments.get("predicted_value")
+        return await self._measurement_recorder(
+            device_instance_id=device_instance_id,
+            from_component=from_component,
+            to_component=to_component,
+            metric=metric,
+            value=float(value),
+            unit=arguments.get("unit", "mm"),
+            source=arguments.get("source", ""),
+            timestamp=arguments.get("timestamp", ""),
+            work_product_id=arguments.get("work_product_id"),
+            project_id=arguments.get("project_id"),
+            predicted_value=(
+                float(predicted_value) if isinstance(predicted_value, (int, float)) else None
+            ),
+            predicted_tier=int(arguments.get("predicted_tier", 0)),
+        )
+
+
+def _vec3(value: Any, label: str) -> list[float]:
+    """A three-number vector, ``[0, 0, 0]`` when none is given."""
+    if value is None:
+        return [0.0, 0.0, 0.0]
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"twin.place_part: {label} must be three numbers [x, y, z]")
+    try:
+        return [float(v) for v in value]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"twin.place_part: {label} must be three numbers [x, y, z]") from exc

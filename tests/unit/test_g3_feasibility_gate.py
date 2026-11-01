@@ -121,6 +121,15 @@ class TestBudgetFromEntity:
         with pytest.raises(ValueError, match="malformed metadata"):
             budget_from_entity(e, project_id)
 
+    def test_unrecognized_unit_raises(self, project_id):
+        # FORGE-311: "compile"-time unit check.
+        e = _budget_entity(
+            project_id,
+            metadata={"metric": "mass", "unit": "not_a_real_unit_xyz", "system_total": 5.0},
+        )
+        with pytest.raises(ValueError, match="not a recognized unit"):
+            budget_from_entity(e, project_id)
+
 
 class TestInvariantFromEntity:
     def test_reads_metric_unit_limit_and_comparison(self, project_id):
@@ -147,6 +156,14 @@ class TestInvariantFromEntity:
     def test_requires_metric_unit_and_limit_in_metadata(self, project_id):
         e = _invariant_entity(project_id, metadata={"metric": "mass"})
         with pytest.raises(ValueError, match="missing"):
+            invariant_from_entity(e)
+
+    def test_unrecognized_unit_raises(self, project_id):
+        # FORGE-311: "compile"-time unit check.
+        e = _invariant_entity(
+            project_id, metadata={"metric": "mass", "unit": "not_a_real_unit_xyz", "limit": 5.0}
+        )
+        with pytest.raises(ValueError, match="not a recognized unit"):
             invariant_from_entity(e)
 
 
@@ -253,6 +270,20 @@ class TestBudgetChecks:
         assert check.status == GateCheckStatus.FAIL
         assert result.status == GateStatus.FAILED
 
+    async def test_dimension_mismatch_degrades_to_not_evaluated_not_a_crash(self, twin, project_id):
+        # FORGE-311: a WorkProduct storing this metric under an
+        # incompatible-dimension unit is a real data error -- the gate
+        # degrades that one check to NOT_EVALUATED rather than raising out
+        # of evaluate_g3_feasibility entirely.
+        await twin.graph.add_node(_wp("frame", project_id, {"mass_mm": 12.0}))
+        budget = Budget(
+            id="mass", project_id=project_id, metric="mass", unit="kg", system_total=5.0
+        )
+        result = await evaluate_g3_feasibility(twin, project_id, budgets=[budget])
+        check = next(c for c in result.checks if c.id == "budget:mass")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+        assert "incompatible" in check.detail
+
 
 class TestInvariantChecks:
     async def test_violated_invariant_fails_the_gate(self, twin, project_id):
@@ -268,6 +299,16 @@ class TestInvariantChecks:
         check = next(c for c in result.checks if c.id == "invariant:INV-COST")
         assert check.status == GateCheckStatus.FAIL
         assert result.status == GateStatus.FAILED
+
+    async def test_dimension_mismatch_degrades_to_not_evaluated_not_a_crash(self, twin, project_id):
+        await twin.graph.add_node(_wp("frame", project_id, {"mass_mm": 12.0}))
+        inv = Invariant(
+            id="INV-MASS", metric="mass", unit="kg", limit=5.0, comparison=InvariantComparison.LTE
+        )
+        result = await evaluate_g3_feasibility(twin, project_id, invariants=[inv])
+        check = next(c for c in result.checks if c.id == "invariant:INV-MASS")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+        assert "incompatible" in check.detail
 
 
 class TestRiskChecks:
@@ -308,6 +349,66 @@ class TestRiskChecks:
         )
         result = await evaluate_g3_feasibility(twin, project_id)
         check = next(c for c in result.checks if c.id == f"risk:{risk.id}")
+        assert check.status == GateCheckStatus.PASS
+
+
+class TestAssumptionChecks:
+    async def test_no_assumptions_recorded_is_not_evaluated(self, twin, project_id):
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == "assumptions:none-recorded")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+
+    async def test_non_safety_critical_assumption_is_never_flagged(self, twin, project_id):
+        await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="assumption",
+                statement="ambient temperature is nominal",
+                project_id=project_id,
+                metadata={"value": "20C"},
+            )
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == "assumptions:none-safety-critical")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+
+    async def test_unresolved_safety_critical_assumption_fails(self, twin, project_id):
+        assumption = await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="assumption",
+                statement="battery cells are within spec",
+                project_id=project_id,
+                metadata={"safety_critical": True},
+            )
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"assumption:{assumption.id}")
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+    async def test_safety_critical_assumption_with_expiry_passes(self, twin, project_id):
+        assumption = await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="assumption",
+                statement="battery cells are within spec",
+                project_id=project_id,
+                metadata={"safety_critical": True, "expiry": "2026-12-31"},
+            )
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"assumption:{assumption.id}")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_safety_critical_assumption_with_resolution_passes(self, twin, project_id):
+        assumption = await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="assumption",
+                statement="battery cells are within spec",
+                project_id=project_id,
+                metadata={"safety_critical": True, "resolution": "confirmed via datasheet rev C"},
+            )
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"assumption:{assumption.id}")
         assert check.status == GateCheckStatus.PASS
 
 
@@ -352,3 +453,54 @@ class TestGateStatus:
     async def test_gate_id_is_g3(self, twin, project_id):
         result = await evaluate_g3_feasibility(twin, project_id)
         assert result.gate_id == "G3"
+
+
+class TestRiskSourcesForge549:
+    """FORGE-549: risks recorded as the tool described, and hazard analyses."""
+
+    async def test_probability_counts_as_likelihood(self, twin, project_id):
+        await twin.create_engineering_entity(
+            _risk(project_id, {"severity": 5, "probability": 5}, title="pinch point")
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id.startswith("risk:"))
+        assert check.status is GateCheckStatus.FAIL  # critical, no mitigation
+
+    async def test_a_non_numeric_score_is_not_evaluated_not_a_crash(self, twin, project_id):
+        await twin.create_engineering_entity(
+            _risk(project_id, {"severity": "high", "likelihood": "low"})
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id.startswith("risk:"))
+        assert check.status is GateCheckStatus.NOT_EVALUATED
+
+    async def test_hazard_analysis_rows_reach_the_gate(self, twin, project_id):
+        analysis = WorkProduct(
+            name="hazards",
+            type=WorkProductType.HAZARD_ANALYSIS,
+            domain="compliance",
+            file_path="hazards.md",
+            content_hash="h",
+            format="markdown",
+            created_by="user",
+            project_id=project_id,
+            metadata={
+                "hazards": [
+                    {"hazard": "arm crush", "severity": 5, "likelihood": 4, "mitigation": ""},
+                    {
+                        "hazard": "sharp edge",
+                        "severity": 2,
+                        "likelihood": 2,
+                        "mitigation": "deburr",
+                    },
+                ]
+            },
+        )
+        await twin.create_work_product(analysis)
+        result = await evaluate_g3_feasibility(twin, project_id)
+        hazards = {c.label: c.status for c in result.checks if c.id.startswith("hazard:")}
+        assert hazards == {
+            "Risk mitigated: arm crush": GateCheckStatus.FAIL,
+            "Risk mitigated: sharp edge": GateCheckStatus.PASS,
+        }
+        assert not any(c.id == "risks:none-recorded" for c in result.checks)

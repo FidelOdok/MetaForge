@@ -1,13 +1,13 @@
 # Agent session capture
 
 Capturing what an agent *does* and *thinks* while driving MetaForge over MCP,
-into the digital thread's `/sessions`. Three layers (see MET-492):
+into the digital thread's `/sessions`. Three layers:
 
 | Layer | Mechanism | Captures | Clients |
 |-------|-----------|----------|---------|
-| **A** | MCP server middleware (MET-496) | actions (every tool call) | **all** MCP clients, zero config |
-| **B** | client capture core + adapters (MET-497/498) | actions **+ reasoning** | any client with hooks or a local transcript |
-| **C** | `session.*` / `twin.record_decision` tools (MET-494/495) | curated thoughts + typed decisions | any cooperating agent |
+| **A** | MCP server middleware | actions (every tool call) | **all** MCP clients, zero config |
+| **B** | client capture core + adapters | actions **+ reasoning** | any client with hooks or a local transcript |
+| **C** | `session.*` / `twin.record_decision` tools | curated thoughts + typed decisions | any cooperating agent |
 
 Layer A is always on (server-side). Layer B is what this doc covers.
 
@@ -43,12 +43,12 @@ One-shot (cron-friendly) by default; `--follow` polls.
 
 | Client | Mechanism | Actions | Thoughts | Status |
 |--------|-----------|---------|----------|--------|
-| **Claude Code** | hooks (`tools/session_capture/claude_code_adapter.py`) | ✅ | ✅ transcript | shipped (MET-497) |
+| **Claude Code** | hooks (`tools/session_capture/claude_code_adapter.py`) | ✅ | ✅ transcript | shipped |
 | **Codex CLI** | `tail` parser over `~/.codex/sessions/*.jsonl` | via tailer | ✅ | parser shipped (best-effort schema); `notify` adapter TODO |
 | **Cursor** | native `hooks.json` | ✅ | ⚠️ | **deferred** — use `tail` if Cursor writes a local transcript; native hook adapter pending schema verification |
 | **OpenCode** | TS plugin on its event bus | ✅ | ✅ | **deferred** — plugin pending; `tail` works if it persists a transcript |
 | **Gemini CLI** | (no stable hook system at time of writing) | — | ⚠️ | **deferred** — `tail` + a parser once its chat-log format is confirmed |
-| **claude.ai web** | none (cloud, no local exec) | via Layer A | ✗ | **not adaptable** client-side — Layer A only; sessions labelled by OAuth subject (MET-480) |
+| **claude.ai web** | none (cloud, no local exec) | via Layer A | ✗ | **not adaptable** client-side — Layer A only; sessions labelled by OAuth subject |
 
 ### Why Cursor / OpenCode / Gemini are deferred
 
@@ -56,11 +56,11 @@ Their native hook/plugin schemas and local-transcript formats move fast and
 weren't verifiable at implementation time. Rather than ship guesses, the
 **`tail` fallback + parser registry** is the supported path for them today:
 point `tail` at their transcript directory and add a parser. Native adapters
-(richer, real-time) are follow-ups tracked on MET-498.
+(richer, real-time) are follow-ups tracked on.
 
 ## Install (Claude Code)
 
-### From the cloud — no clone (MET-500)
+### From the cloud — no clone
 
 Install the tool straight from the repo (private → uses your GitHub auth):
 
@@ -72,14 +72,14 @@ metaforge-capture install --user --gateway-url http://fidel-dev:8000
 `pip install "git+…#subdirectory=tools/session_capture"` works too. This puts a
 `metaforge-capture` console script on PATH — handy on a fresh machine or a
 **cloud Claude Code** sandbox (point `--gateway-url` at the Cloudflare tunnel
-hostname, MET-482, so the sandbox can reach the gateway). Note: the claude.ai
+hostname, so the sandbox can reach the gateway). Note: the claude.ai
 **web** connector can't run a local install — it's covered by Layer A
 server-side capture over the tunnel.
 
 ### From a clone
 
 One command sets up the hook across **every** Claude Code session in **every**
-repo (MET-499):
+repo:
 
 ```
 python -m tools.session_capture.metaforge_capture install --user --gateway-url http://fidel-dev:8000
@@ -98,7 +98,7 @@ python -m tools.session_capture.metaforge_capture install --user --gateway-url h
 Manual alternative: merge `tools/session_capture/claude_code/settings.snippet.json`
 into `.claude/settings.json` yourself.
 
-## Scope: bind capture to a project (MET-501)
+## Scope: bind capture to a project
 
 The hook is installed `--user`, so it *fires* in every session — but capture is
 **bound to an active project**, and most sessions aren't project work, so by
@@ -131,4 +131,42 @@ project** on `/projects` instead of only in the global `/sessions` stream.
 > active project from inside a conversation only works when the MCP server runs
 > **locally** (stdio) — a remote `mcp-http` sidecar can't write your laptop's
 > filesystem. For a remote sidecar, set it from the agent via Bash
-> (`metaforge-capture use <id>`). Tracked as a follow-up to MET-501.
+> (`metaforge-capture use <id>`). Tracked as a follow-up to.
+
+## Tracing a claim back to a call
+
+Every MCP tool call returns `_meta.callId`, and the captured `action`
+event carries the same value as `data.call_id`. That makes a claimed
+action checkable: given a call id from a reply, either the timeline has
+an event with it or the claim has nothing behind it.
+
+This is the server-side half of F4. Flagging a reply that made *no* tool
+calls at all is a client-side concern — the server never sees the reply —
+but the session record is what any such check has to read.
+
+## Who a captured action is attributed to
+
+Every call carries an `actor_id` in the form `<kind>:<name>` —
+`user:fidel`, `agent:claude_code`, `system:cron` — and that is what the
+session record shows.
+
+Where it comes from depends on what the server can verify:
+
+| Situation | `actor_id` | Trust |
+|---|---|---|
+| OAuth bearer token accepted | the actor bound to that token | verified by the server |
+| `X-MetaForge-Actor` header, no token | whatever the header says | an unverified claim |
+| Static API key only | the header, if any | an unverified claim |
+| Nothing supplied | `system:unattributed` | explicit absence |
+
+**A verified token always wins.** It used to be the other way round: the
+actor bound to the token was discarded and the header was taken at face
+value, so a remote caller could send `X-MetaForge-Actor: user:anyone` and
+that is what landed in the record. Self-asserted attribution is not an
+audit trail.
+
+A static API key authorises a call without identifying anyone, so it does
+not manufacture an identity and does not promote the header into one —
+authorised and attributable are different claims. When reading a session
+for a review, treat an actor that arrived without a verified token as the
+claim it is.

@@ -1,0 +1,30 @@
+{
+  "_comment": "EXAMPLE of per-role model routes (FORGE-477); it is not loaded. Copy it to a file and point METAFORGE_MODEL_ROUTES_PATH at it to opt in, and only after the providers named here have credentials on that deployment. A route whose provider is not configured is refused at call time and reported by GET /v1/harness/routing and health.check. Each value is {provider, model}. Roles with no route use the durable harness selection. Single roles can also be set with METAFORGE_ROUTE_<ROLE>=provider:model (role upper-cased, ':' and '-' as '_'). A project can carry its own routes under projects.<project_id>.roles. Routes are checked at load with the provider/model family rule (FORGE-468).",
+  "roles": {
+    "flow_generator": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "gate_check": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "classification": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "summarisation": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "phase_brain:mechanical": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8"
+    },
+    "phase_brain:simulation": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8"
+    }
+  },
+  "projects": {}
+}

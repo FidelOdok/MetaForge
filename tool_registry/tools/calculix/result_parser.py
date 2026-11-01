@@ -1,13 +1,16 @@
-"""Parser for CalculiX .frd output files -- extracts stress and displacement fields."""
+"""Parser for CalculiX .frd/.dat output files -- extracts stress,
+displacement, and (FORGE-281) modal-frequency fields."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 import structlog
 
 from observability.tracing import get_tracer
+from tool_registry.tools.calculix.accuracy import assess_stress_accuracy
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.calculix.result_parser")
@@ -15,6 +18,10 @@ tracer = get_tracer("tool_registry.tools.calculix.result_parser")
 
 class FrdParseError(Exception):
     """Raised when .frd file parsing fails."""
+
+
+class DatParseError(Exception):
+    """Raised when .dat file parsing fails."""
 
 
 def parse_frd_file(frd_path: str) -> dict[str, Any]:
@@ -66,6 +73,29 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
         )
         span.set_attribute("calculix.node_count", node_count)
 
+        if node_count == 0:
+            # FORGE-232: a mesh-only deck (no *STEP/*STATIC/*BOUNDARY/*CLOAD,
+            # or no *NODE FILE/*EL FILE output request) makes CalculiX "solve"
+            # an empty analysis and exit 0 in a fraction of a second -- the
+            # .frd it writes parses fine, it's just genuinely empty. Returning
+            # that as a normal, successful result (as this used to) is worse
+            # than an ordinary parse failure: every caller reports "success"
+            # on a stress/displacement finding that was never actually
+            # computed. Fail loudly instead of silently reporting nothing.
+            span.set_attribute("calculix.empty_result", True)
+            logger.error(
+                "FRD file has no result data for any node",
+                frd_file=frd_path,
+                file_size_bytes=path.stat().st_size,
+            )
+            raise FrdParseError(
+                f"{frd_path}: no stress/displacement/temperature data for any node "
+                "(node_count == 0). This means the solver ran against an empty or "
+                "incomplete analysis deck -- no *STEP/*STATIC/*BOUNDARY/*CLOAD, or no "
+                "*NODE FILE/*EL FILE output request -- not a genuine, if uninteresting, "
+                "result. Treat this as a solver failure, not a successful analysis."
+            )
+
         result: dict[str, Any] = {
             "stress": stress_data,
             "displacement": displacement_data,
@@ -88,6 +118,95 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
         )
 
         return result
+
+
+# FORGE-281 (corrected post-merge after live validation on fidel-dev -- see
+# the Jira comment): a CalculiX *FREQUENCY step's eigenvalues/frequencies
+# are printed to the .dat file (not the .frd) as a block headed by a line
+# containing "E I G E N V A L U E   O U T P U T" (ccx spaces out section
+# titles) -- NOT "FREQUENCIES" as originally assumed before a real capture
+# was available. Confirmed against real ccx 2.20 output:
+#
+#      E I G E N V A L U E   O U T P U T
+#
+#  MODE NO    EIGENVALUE                       FREQUENCY
+#                                      REAL PART            IMAGINARY PART
+#                            (RAD/TIME)      (CYCLES/TIME     (RAD/TIME)
+#
+#       1   0.1012618E+00   0.3182166E+00   0.5064575E-01   0.0000000E+00
+#
+# Each mode line has FOUR numeric columns after the mode number, not one:
+# eigenvalue (== omega^2, (rad/time)^2), frequency real part in rad/time,
+# frequency real part in cycles/time (== Hz, the value this function
+# returns), and frequency imaginary part in rad/time (0 for a real,
+# undamped mode). The Hz value is the THIRD data column, not the last --
+# the original assumption (a 2-column mode/eigenvalue/frequency shape,
+# taking the last column) would have silently returned the imaginary part
+# (always 0.0) instead.
+_FREQUENCY_HEADER_RE = re.compile(
+    r"E\s*I\s*G\s*E\s*N\s*V\s*A\s*L\s*U\s*E\s+O\s*U\s*T\s*P\s*U\s*T", re.IGNORECASE
+)
+_MODE_LINE_RE = re.compile(
+    r"^\s*(\d+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s*$"
+)
+
+
+def parse_frequencies_dat(dat_path: str) -> list[float]:
+    """Parse a CalculiX .dat file's eigenfrequency block into a list of
+    frequencies in Hz, lowest mode first.
+
+    Raises ``FileNotFoundError`` if the file doesn't exist, ``DatParseError``
+    if no frequency block is found or it contains no mode lines -- same
+    "never report success on an empty/missing result" discipline
+    ``parse_frd_file`` already applies (FORGE-232).
+    """
+    path = Path(dat_path)
+    if not path.exists():
+        raise FileNotFoundError(f"DAT file not found: {dat_path}")
+
+    with tracer.start_as_current_span("calculix.parse_frequencies_dat") as span:
+        span.set_attribute("calculix.dat_file", dat_path)
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            span.record_exception(exc)
+            raise DatParseError(f"Failed to read DAT file: {exc}") from exc
+
+        lines = content.splitlines()
+        header_idx = next(
+            (i for i, line in enumerate(lines) if _FREQUENCY_HEADER_RE.search(line)), None
+        )
+        if header_idx is None:
+            raise DatParseError(
+                f"{dat_path}: no frequency block found -- this means the solve wasn't "
+                "a *FREQUENCY step, or produced no eigenvalues (an empty/incomplete "
+                "modal deck, mirroring FORGE-232's own 'never report success on "
+                "nothing solved' rule for .frd files)."
+            )
+
+        frequencies: list[float] = []
+        for line in lines[header_idx + 1 :]:
+            match = _MODE_LINE_RE.match(line)
+            if match:
+                # group(4): FREQUENCY, REAL PART, (CYCLES/TIME) -- Hz.
+                # group(2)/group(3) are the eigenvalue and rad/time forms;
+                # group(5) is the (always-zero, for a real mode) imaginary part.
+                frequencies.append(float(match.group(4)))
+            elif frequencies:
+                # The mode-number sequence ended (next section starts) --
+                # stop rather than scanning the rest of the file for
+                # coincidentally-matching lines.
+                break
+
+        if not frequencies:
+            raise DatParseError(
+                f"{dat_path}: found a frequency block header but no mode data lines "
+                "under it -- solver may have failed to converge on any eigenvalue."
+            )
+
+        span.set_attribute("calculix.mode_count", len(frequencies))
+        logger.info("Parsed DAT frequencies", dat_file=dat_path, mode_count=len(frequencies))
+        return frequencies
 
 
 def _extract_stress(lines: list[str]) -> dict[str, Any]:
@@ -268,6 +387,12 @@ def extract_results(frd_path: str, include_node_data: bool = True) -> dict[str, 
         Structured dict with stress/displacement summaries.
     """
     result = parse_frd_file(frd_path)
+
+    # FORGE-280: computed from the full nodal field, before it's optionally
+    # stripped below -- the accuracy summary survives include_node_data=False
+    # even though the raw per-node values it was computed from don't.
+    if "stress" in result:
+        result["stress"]["accuracy"] = assess_stress_accuracy(result["stress"])
 
     if not include_node_data:
         # Strip per-node data to reduce payload size

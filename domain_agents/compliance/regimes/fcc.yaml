@@ -20,6 +20,7 @@ categories:
         standard: "47 CFR 15.19"
         evidence_type: declaration
   - name: part15_subpartc
+    requires: [radio]
     items:
       - id: "FCC-15C-001"
         requirement: "Intentional radiator certification"
@@ -34,6 +35,7 @@ categories:
         standard: "47 CFR 15.247"
         evidence_type: test_report
   - name: sar
+    requires: [radio, body_worn]
     items:
       - id: "FCC-SAR-001"
         requirement: "SAR evaluation for portable devices"
@@ -42,6 +44,7 @@ categories:
   - name: labeling
     items:
       - id: "FCC-LBL-001"
+        requires: [radio]
         requirement: "FCC ID labeling on device"
         standard: "47 CFR 2.925"
         evidence_type: declaration

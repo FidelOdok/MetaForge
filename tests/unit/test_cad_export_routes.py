@@ -85,6 +85,22 @@ class _FakeBridge:
                 "robot_name": params.get("robot_name", "robot"),
                 "link_names": [p["link_name"] for p in params["parts"]],
                 "joint_names": [j["name"] for j in params["joints"]],
+                # FORGE-240: mirrors the real tool's type-resolution just
+                # enough to exercise the route's passthrough wiring -- the
+                # resolution logic itself is unit-tested directly against
+                # _build_assembly_urdf in test_cadquery_operations.py.
+                "joints": [
+                    {
+                        "name": j["name"],
+                        "type": (
+                            "continuous"
+                            if j["type"] == "revolute" and not j.get("limits")
+                            else j["type"]
+                        ),
+                        "limits": j.get("limits"),
+                    }
+                    for j in params["joints"]
+                ],
             }
 
         if tool_id == "cadquery.generate_ros2_launch":
@@ -208,6 +224,10 @@ def test_export_urdf_assembly_stages_every_part(
     assert body["robot_name"] == "my_robot"
     assert body["link_names"] == ["base", "arm"]
     assert body["joint_names"] == ["shoulder"]
+    # FORGE-240: the request's "shoulder" joint carries no limits, so the
+    # emitted type is the honest unlimited "continuous" -- and the route
+    # echoes back what was actually written, not just the input name.
+    assert body["joints"] == [{"name": "shoulder", "type": "continuous", "limits": None}]
     assert len(body["mesh_files"]) == 2
     assert all(m["download_url"].startswith("/v1/cad-export/download/") for m in body["mesh_files"])
 
@@ -223,6 +243,50 @@ def test_export_urdf_assembly_stages_every_part(
         "/workspace/_staged_work_products/wp-b/part.step",
     ]
     assert export_args["joints"][0]["type"] == "revolute"
+
+
+def test_export_urdf_assembly_echoes_real_revolute_limits_not_continuous(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """FORGE-240: a revolute joint WITH caller-supplied limits must be
+    reported back as the real bounded type, not silently as continuous."""
+    monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+    bridge = _FakeBridge()
+    _patch_bridge(monkeypatch, bridge)
+
+    resp = client.post(
+        "/v1/cad-export/urdf-assembly",
+        json={
+            "parts": [{"node_id": "wp-a", "link_name": "base"}],
+            "joints": [
+                {
+                    "name": "J1",
+                    "type": "revolute",
+                    "base": "base",
+                    "follower": "base",
+                    "axis": [0, 0, 1],
+                    "anchor": [0, 0, 0],
+                    "limits": {"lower": -2.9670597, "upper": 2.9670597},
+                }
+            ],
+            "robot_name": "my_robot",
+        },
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["joints"] == [
+        {
+            "name": "J1",
+            "type": "revolute",
+            "limits": {
+                "lower": -2.9670597,
+                "upper": 2.9670597,
+                "effort": None,
+                "velocity": None,
+            },
+        }
+    ]
 
 
 def test_export_urdf_assembly_rejects_empty_parts(client: TestClient) -> None:

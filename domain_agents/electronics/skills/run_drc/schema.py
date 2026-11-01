@@ -28,7 +28,17 @@ class RunDrcInput(BaseModel):
     pcb_file: str = Field(..., min_length=1, description="Path to the KiCad PCB file (.kicad_pcb)")
     severity_filter: str = Field(
         default="all",
-        description="Filter violations by severity: 'all', 'error', or 'warning'",
+        description=(
+            "Filter the listed violations by severity: 'all', 'error', or 'warning'. "
+            "It does not change `passed`, which always counts every error"
+        ),
+    )
+    rule_set: str | None = Field(
+        default=None,
+        description=(
+            "Optional custom design rules (a .kicad_dru path or its text), passed "
+            "to kicad.run_drc, which runs DRC with them beside a copy of the board"
+        ),
     )
 
 
@@ -43,7 +53,17 @@ class RunDrcOutput(BaseModel):
     total_violations: int = Field(..., ge=0, description="Total number of violations found")
     total_errors: int = Field(..., ge=0, description="Number of error-severity violations")
     total_warnings: int = Field(..., ge=0, description="Number of warning-severity violations")
+    unconnected_items: int = Field(
+        default=0, ge=0, description="Connections KiCad reports as missing (unrouted nets)"
+    )
+    rule_set_applied: bool = Field(
+        default=False, description="Whether KiCad ran with the custom rule_set"
+    )
     passed: bool = Field(
-        ..., description="Whether the PCB passed DRC (no errors; warnings allowed)"
+        ...,
+        description=(
+            "Whether the PCB passed DRC: no error-severity violation (before the "
+            "severity filter) and nothing unconnected; warnings allowed"
+        ),
     )
     summary: str = Field(default="", description="Human-readable summary of DRC results")

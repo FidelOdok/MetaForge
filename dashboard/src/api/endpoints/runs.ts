@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 import apiClient from '../client';
-import type { ApprovalDecision, HarnessRun, RunStatus } from '../../types/run';
+import type { HarnessRun, RunStatus } from '../../types/run';
 
 interface RunRaw {
   id: string;
@@ -17,6 +17,8 @@ interface RunRaw {
 
 interface RunListRaw {
   runs: RunRaw[];
+  /** Runs omitted for having no project, when the list was scoped to one. */
+  unscoped_count?: number;
 }
 
 function mapRun(raw: RunRaw): HarnessRun {
@@ -34,9 +36,22 @@ function mapRun(raw: RunRaw): HarnessRun {
 }
 
 /** List all runs via `GET /v1/runs`. */
-export async function listRuns(): Promise<HarnessRun[]> {
-  const { data } = await apiClient.get<RunListRaw>('/runs');
-  return data.runs.map(mapRun);
+/** Runs, optionally scoped to one project.
+ *
+ * `unscopedCount` is how many were left out for carrying no project. It is
+ * returned rather than discarded so the page can say so: a run that silently
+ * vanishes when you pick a project reads as "there are none".
+ */
+export interface RunList {
+  runs: HarnessRun[];
+  unscopedCount: number;
+}
+
+export async function listRuns(projectId?: string): Promise<RunList> {
+  const { data } = await apiClient.get<RunListRaw>('/runs', {
+    params: projectId ? { project_id: projectId } : undefined,
+  });
+  return { runs: data.runs.map(mapRun), unscopedCount: data.unscoped_count ?? 0 };
 }
 
 /**
@@ -60,14 +75,5 @@ export async function createRun(
   start = true,
 ): Promise<HarnessRun> {
   const { data } = await apiClient.post<RunRaw>('/runs', { request, start });
-  return mapRun(data);
-}
-
-/** Approve or reject a paused run via `POST /v1/runs/{id}/approval`. */
-export async function submitRunApproval(
-  id: string,
-  decision: ApprovalDecision,
-): Promise<HarnessRun> {
-  const { data } = await apiClient.post<RunRaw>(`/runs/${id}/approval`, { decision });
   return mapRun(data);
 }

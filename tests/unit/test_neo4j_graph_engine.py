@@ -14,6 +14,7 @@ from twin_core.models.engineering_change_transaction import (
 )
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
+from twin_core.models.hierarchy_node import HierarchyNode
 from twin_core.models.patch import Patch, PatchOp, PatchOperation
 from twin_core.models.work_product import WorkProduct
 from twin_core.neo4j_graph_engine import (
@@ -276,6 +277,24 @@ class TestNodeOperations:
         assert isinstance(result, EngineeringEntity)
         assert result.entity_type == "intent"
         assert result.title == "Desktop quadruped intent"
+
+    async def test_get_node_reconstructs_hierarchy_node(self, engine, mock_session) -> None:
+        """FORGE-260/FORGE-68 failure mode: without this branch a
+        HierarchyNode read back from Neo4j degrades to a bare NodeBase,
+        losing kind/name entirely -- compute_hierarchy_rollup's tree walk
+        would then silently treat every node past the first hop as
+        massless/costless instead of raising."""
+        node = HierarchyNode(name="Upper Arm", kind="subsystem")
+        record = _make_mock_record(node)
+
+        mock_result = AsyncMock()
+        mock_result.single = AsyncMock(return_value=record)
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        result = await engine.get_node(node.id)
+        assert isinstance(result, HierarchyNode)
+        assert result.kind == "subsystem"
+        assert result.name == "Upper Arm"
 
     async def test_get_node_reconstructs_engineering_change_transaction(
         self, engine, mock_session
@@ -804,6 +823,72 @@ class TestSerialization:
         assert restored.source_id == edge.source_id
         assert restored.target_id == edge.target_id
         assert restored.edge_type == EdgeType.DEPENDS_ON
+
+    def test_bom_item_round_trip(self):
+        """FORGE-242: the exact FORGE-68 failure mode recurring for
+        BOM_ITEM -- without this branch a BOMItem read back from Neo4j
+        degrades to a bare NodeBase, losing part_number/specifications/etc,
+        and api_gateway/bom/routes.py's _item_to_component then raises
+        AttributeError on the first such row, 500ing GET /v1/bom for every
+        project."""
+        from twin_core.models.bom_item import BOMItem
+
+        item = BOMItem(
+            part_number="STM32F405RGT6",
+            manufacturer="STMicroelectronics",
+            specifications={"status": "low_stock"},
+        )
+        props = Neo4jGraphEngine._node_to_props(item)
+        restored = Neo4jGraphEngine._props_to_node(props)
+        assert isinstance(restored, BOMItem)
+        assert restored.part_number == "STM32F405RGT6"
+        assert restored.specifications == {"status": "low_stock"}
+
+    def test_datasheet_round_trip(self):
+        """Same FORGE-68 failure mode -- ingest_datasheet's idempotency
+        check and get_current_datasheet/list_datasheets (twin_core/api.py)
+        all read NodeType.DATASHEET rows back and use them as real
+        Datasheet objects without this branch."""
+        from twin_core.models.datasheet import Datasheet
+
+        sheet = Datasheet(
+            mpn="STM32F405RGT6",
+            manufacturer="STMicroelectronics",
+            revision="rev9",
+            file_hash="abc123",
+        )
+        props = Neo4jGraphEngine._node_to_props(sheet)
+        restored = Neo4jGraphEngine._props_to_node(props)
+        assert isinstance(restored, Datasheet)
+        assert restored.mpn == "STM32F405RGT6"
+        assert restored.file_hash == "abc123"
+
+    def test_device_instance_round_trip(self):
+        from twin_core.models.device_instance import DeviceInstance
+
+        instance = DeviceInstance(serial_number="SN-001", product_id="arm-01")
+        props = Neo4jGraphEngine._node_to_props(instance)
+        restored = Neo4jGraphEngine._props_to_node(props)
+        assert isinstance(restored, DeviceInstance)
+        assert restored.serial_number == "SN-001"
+
+    def test_design_element_round_trip(self):
+        from twin_core.models.design_element import DesignElement
+
+        element = DesignElement(name="shoulder-yoke", element_type="part")
+        props = Neo4jGraphEngine._node_to_props(element)
+        restored = Neo4jGraphEngine._props_to_node(props)
+        assert isinstance(restored, DesignElement)
+        assert restored.name == "shoulder-yoke"
+
+    def test_twin_model_round_trip(self):
+        from twin_core.models.twin_model import TwinModel
+
+        model = TwinModel(product_id="arm", version="v1", name="arm-model-v1")
+        props = Neo4jGraphEngine._node_to_props(model)
+        restored = Neo4jGraphEngine._props_to_node(props)
+        assert isinstance(restored, TwinModel)
+        assert restored.name == "arm-model-v1"
 
 
 # ---------------------------------------------------------------------------

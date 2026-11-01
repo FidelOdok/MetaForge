@@ -10,6 +10,10 @@ vi.mock('../../../hooks/use-projects', () => ({
 const mockUseBom = vi.fn();
 vi.mock('../../../hooks/use-bom', () => ({
   useBom: (projectId?: string) => mockUseBom(projectId),
+  // FORGE-267: BomPage always calls this too (flat is the default view, but
+  // the hook itself is unconditional) — an unset mock crashes BomPage's
+  // very first render here, the same as it did in BomPage.test.tsx.
+  useHierarchicalBom: () => ({ data: undefined, isLoading: false }),
 }));
 
 import { ProjectSwitcher } from '../ProjectSwitcher';

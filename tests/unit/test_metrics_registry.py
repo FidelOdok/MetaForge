@@ -57,7 +57,25 @@ class TestMetricsRegistryGroupedAccess:
         # + 4 constraint + 5 retrieval (MET-326) + 1 knowledge (MET-401)
         # + 1 twin (MET-439) + 6 consolidation (MET-454/455)
         # + 5 harness (production-harness audit follow-up)
-        assert len(all_metrics) == 50
+        # + 5 MCP (FORGE-379, FORGE-411) + 3 design-flow (FORGE-401)
+        # + 1 provider fallback (FORGE-468) + 1 approval resolution (FORGE-466)
+        # + 1 approval gate without runtime (FORGE-469)
+        # + 1 iteration gate without approval workflow (FORGE-470)
+        # + 4 LLM token/cost accounting (FORGE-476)
+        # + 1 design-flow tool refusal (FORGE-492)
+        # + 1 design-flow gate announcement (FORGE-489)
+        # + 1 unified approval decision (FORGE-507)
+        # + 1 chat ungrounded claim (FORGE-520)
+        # + 1 twin item revisions (FORGE-523)
+        # + 1 twin run change sets (FORGE-525)
+        # + 1 design-flow item slots (FORGE-524)
+        # + 3 simulation result field payload/store (FORGE-532)
+        # + 1 prd requirement values (FORGE-528)
+        # + 2 project brief count/size (FORGE-530)
+        # + 1 twin record staleness (FORGE-527)
+        # + 1 client-mode phase tasks (FORGE-581)
+        # + 5 host watchdog (FORGE-713).
+        assert len(all_metrics) == 90
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -71,8 +89,13 @@ class TestMetricsRegistryGroupedAccess:
     def test_kafka_metrics_returns_5(self) -> None:
         assert len(MetricsRegistry.kafka_metrics()) == 5
 
-    def test_harness_metrics_returns_5(self) -> None:
-        assert len(MetricsRegistry.harness_metrics()) == 5
+    def test_harness_metrics_returns_14(self) -> None:
+        # +1 provider fallback (FORGE-468), +1 approval resolution (FORGE-466),
+        # +4 LLM token/cost accounting (FORGE-476)
+        # +1 design-flow tool refusal (FORGE-492)
+        # +1 unreachable approval hold (FORGE-490)
+        # +1 unified approval decision (FORGE-507)
+        assert len(MetricsRegistry.harness_metrics()) == 15
 
     def test_all_metrics_equals_sum_of_groups(self) -> None:
         total = (
@@ -88,8 +111,41 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.twin_metrics())
             + len(MetricsRegistry.consolidation_metrics())
             + len(MetricsRegistry.harness_metrics())
+            + len(MetricsRegistry.mcp_metrics())
+            + len(MetricsRegistry.design_flow_metrics())
+            + len(MetricsRegistry.sim_field_metrics())
+            + len(MetricsRegistry.watchdog_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
+
+    def test_no_metric_is_in_a_group_but_missing_from_all_metrics(self) -> None:
+        """The invariant the count above is a proxy for, stated directly.
+
+        A metric defined and grouped but left out of ``all_metrics`` is never
+        instrumented, so it reports nothing and no alert on it can ever fire
+        -- while the definition sitting in the registry makes it look wired.
+        """
+        groups = [
+            MetricsRegistry.gateway_metrics(),
+            MetricsRegistry.agent_metrics(),
+            MetricsRegistry.skill_metrics(),
+            MetricsRegistry.kafka_metrics(),
+            MetricsRegistry.datastore_metrics(),
+            MetricsRegistry.telemetry_metrics(),
+            MetricsRegistry.constraint_metrics(),
+            MetricsRegistry.retrieval_metrics(),
+            MetricsRegistry.knowledge_metrics(),
+            MetricsRegistry.twin_metrics(),
+            MetricsRegistry.consolidation_metrics(),
+            MetricsRegistry.harness_metrics(),
+            MetricsRegistry.mcp_metrics(),
+            MetricsRegistry.design_flow_metrics(),
+            MetricsRegistry.sim_field_metrics(),
+            MetricsRegistry.watchdog_metrics(),
+        ]
+        grouped = {m.name for group in groups for m in group}
+        registered = {m.name for m in MetricsRegistry.all_metrics()}
+        assert grouped == registered
 
 
 # ── Naming convention validation ───────────────────────────────────────

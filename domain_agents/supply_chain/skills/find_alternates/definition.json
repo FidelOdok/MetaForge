@@ -7,8 +7,13 @@
   "phase": 1,
   "tools_required": [
     {
-      "tool_id": "distributor_search",
-      "capability": "part_search",
+      "tool_id": "distributors.resolve_offers",
+      "capability": "distributor_offer_resolution",
+      "required": false
+    },
+    {
+      "tool_id": "component.search_parametric",
+      "capability": "component_search_parametric",
       "required": false
     }
   ],
@@ -17,5 +22,10 @@
   "timeout_seconds": 60,
   "retries": 1,
   "idempotent": true,
-  "tags": ["bom", "alternates", "supply-chain", "sourcing"]
+  "tags": [
+    "bom",
+    "alternates",
+    "supply-chain",
+    "sourcing"
+  ]
 }

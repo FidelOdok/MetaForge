@@ -181,6 +181,62 @@ class TestSystemArchitectureRecorder:
         with pytest.raises(ValueError, match="components"):
             await commit(name="x", system_name="x", components=[])
 
+    async def test_interface_quantities_are_validated_and_kept(
+        self, patched_blob_store: dict
+    ) -> None:
+        # FORGE-313
+        twin = _FakeTwin()
+        commit = make_system_architecture_recorder(twin, None)
+        interfaces = [
+            {
+                "from": "MCU",
+                "to": "Motor Driver",
+                "interface_type": "SPI",
+                "quantities": [
+                    {
+                        "metric": "tip_deflection",
+                        "unit": "mm",
+                        "limit": 0.5,
+                        "op": "<=",
+                        "owner": "mech",
+                    }
+                ],
+            }
+        ]
+        result = await commit(
+            name="Drone Arch", system_name="Drone", components=_COMPONENTS, interfaces=interfaces
+        )
+        assert result["interface_count"] == 1
+        stored = twin.created[0].metadata["interfaces"][0]["quantities"][0]
+        assert stored["metric"] == "tip_deflection"
+        assert stored["unit"] == "mm"
+        assert stored["owner"] == "mech"
+
+    async def test_invalid_interface_quantity_unit_rejected(self) -> None:
+        commit = make_system_architecture_recorder(_FakeTwin(), None)
+        interfaces = [
+            {
+                "from": "MCU",
+                "to": "Motor Driver",
+                "quantities": [{"metric": "tip_deflection", "unit": "not_a_real_unit_xyz"}],
+            }
+        ]
+        with pytest.raises(ValueError, match="invalid quantity"):
+            await commit(name="x", system_name="x", components=_COMPONENTS, interfaces=interfaces)
+
+    async def test_markdown_renders_quantities(self) -> None:
+        interfaces = [
+            {
+                "from": "MCU",
+                "to": "Motor Driver",
+                "quantities": [
+                    {"metric": "tip_deflection", "unit": "mm", "limit": 0.5, "op": "<="}
+                ],
+            }
+        ]
+        md, _ = render_system_architecture_markdown("Drone Arch", "Drone", _COMPONENTS, interfaces)
+        assert "tip_deflection <= 0.5mm" in md
+
 
 class TestTechnicalDrawingRecorder:
     async def test_commit_persists_and_links_source_cad(self, patched_blob_store: dict) -> None:

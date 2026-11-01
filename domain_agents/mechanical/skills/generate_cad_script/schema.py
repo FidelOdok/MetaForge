@@ -52,7 +52,7 @@ class GenerateCadScriptInput(BaseModel):
         description="Design constraints (max dimensions, wall thickness, hole sizes, etc.)",
     )
     material: str = Field(
-        default="aluminum_6061",
+        default="aluminium_6061_t6",
         description="Material name for metadata",
     )
     output_format: str = Field(

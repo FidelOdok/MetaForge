@@ -17,13 +17,38 @@ from uuid import UUID
 import structlog
 
 from api_gateway.projects.backend import ProjectBackend
+from api_gateway.runs.analysis_constraints import (
+    AnalysisCheck,
+    SimResult,
+    check_analysis_constraints,
+)
+from api_gateway.runs.analysis_constraints import classify as classify_analysis
+from api_gateway.runs.design_fact_constraints import (
+    DesignFact,
+    DesignFactCheck,
+    check_design_fact_constraints,
+    read_design_facts,
+    states_metric,
+)
+from api_gateway.runs.geometry_constraints import (
+    GeometryCheck,
+    check_assembly,
+    check_geometry_constraints,
+    is_analysis_model,
+)
+from api_gateway.runs.geometry_constraints import classify as classify_geometry
 from orchestrator.design_flow.executor import ConsistencyGateReport, ConstraintReport
 from twin_core.consistency import (
     evaluate_g3_feasibility,
     evaluate_g4_architecture,
     evaluate_g5_concept_selection,
+    evaluate_g6_design_sketch,
+    evaluate_g7_verification_readiness,
     evaluate_g8_release,
 )
+from twin_core.consistency.record_pins import is_valid_evidence
+from twin_core.models.enums import EdgeType
+from twin_core.models.quantity import is_currency_code
 
 logger = structlog.get_logger(__name__)
 
@@ -61,6 +86,26 @@ async def _is_loadable(twin: object, wp_id: object) -> bool:
     return bool(
         meta.get("minio_object_key") or meta.get("file_path") or getattr(wp, "content_hash", None)
     )
+
+
+#: Deliverables that are evidence about other revisions (FORGE-527).
+_EVIDENCE_DELIVERABLES = frozenset({"simulation_result", "verification_report"})
+
+
+async def _is_valid_evidence(twin: object, wp_id: object) -> bool:
+    """Whether an evidence record is still current (not stale, superseded, invalid).
+
+    Fail-open when it cannot be read: loadability and the analysis check are
+    the fail-closed paths; this one only removes records known to be stale.
+    """
+    getter = getattr(twin, "get_work_product", None)
+    if getter is None or wp_id is None:
+        return True
+    try:
+        wp = await getter(UUID(str(wp_id)))
+    except Exception:  # noqa: BLE001 - unreadable here is not "stale"
+        return True
+    return wp is None or is_valid_evidence(getattr(wp, "metadata", None))
 
 
 def _to_epoch(value: object) -> float | None:
@@ -115,6 +160,18 @@ class ProjectGateEvaluator:
                     wp_id=getattr(wp, "id", None),
                 )
                 continue
+            # FORGE-527: a stale analysis or verification record is not a
+            # deliverable; it was for a revision that is no longer current.
+            if type_str in _EVIDENCE_DELIVERABLES and not await _is_valid_evidence(
+                self._twin, getattr(wp, "id", None)
+            ):
+                logger.info(
+                    "gate_eval_stale_evidence_skipped",
+                    project_id=project_id,
+                    wp_id=getattr(wp, "id", None),
+                    wp_type=type_str,
+                )
+                continue
             present.add(type_str)
         logger.info(
             "gate_eval_present_types",
@@ -123,6 +180,80 @@ class ProjectGateEvaluator:
             since_ts=since_ts,
         )
         return present
+
+    async def _latest_decision(self, project_id: str | None, key: str, parse: Any) -> Any:
+        """The newest ``design_decision`` whose ``metadata[key]`` parses, with its metadata.
+
+        Returns ``(parsed, metadata)`` or ``None``. A decision whose value does
+        not parse is skipped: a malformed record is not a decision.
+        """
+        getter = getattr(self._twin, "get_work_product", None)
+        if not project_id or getter is None:
+            return None
+        project = await self._backend.get_project(project_id)
+        if project is None:
+            return None
+        decisions = [
+            wp
+            for wp in project.work_products
+            if str(getattr(getattr(wp, "type", None), "value", getattr(wp, "type", None)))
+            == "design_decision"
+        ]
+        decisions.sort(key=lambda wp: _to_epoch(getattr(wp, "updated_at", None)) or 0.0)
+        for wp in reversed(decisions):
+            try:
+                node = await getter(UUID(str(getattr(wp, "id", ""))))
+            except Exception as exc:  # noqa: BLE001 - one unreadable node must not crash a gate
+                logger.warning("gate_eval_decision_read_failed", key=key, error=str(exc))
+                continue
+            metadata = dict(getattr(node, "metadata", None) or {})
+            if metadata.get(key) is None:
+                continue
+            try:
+                return parse(metadata[key]), metadata
+            except ValueError:
+                continue
+        return None
+
+    async def route_decision(self, project_id: str | None) -> Any:
+        """The project's latest usable manufacturing route decision (FORGE-608).
+
+        The newest ``design_decision`` whose metadata carries a valid
+        ``manufacturing_route``, or ``None``. A decision without one (a
+        free-text "route NOT SELECTED") does not count: that is the case the
+        route-selection gate exists to stop. FORGE-611: the process ranking
+        recorded on the same decision comes with it.
+        """
+        from dataclasses import replace
+
+        from orchestrator.design_flow.context import parse_process_ranking, parse_route_decision
+
+        found = await self._latest_decision(project_id, "manufacturing_route", parse_route_decision)
+        if found is None:
+            logger.info("gate_eval_route_decision_missing", project_id=project_id)
+            return None
+        decision, metadata = found
+        if metadata.get("process_ranking") is not None:
+            try:
+                decision = replace(
+                    decision, ranking=parse_process_ranking(metadata["process_ranking"])
+                )
+            except ValueError:
+                pass
+        logger.info("gate_eval_route_decision", project_id=project_id, decision=decision.summary())
+        return decision
+
+    async def dfm_review(self, project_id: str | None) -> Any:
+        """The project's latest DFM review (FORGE-611), or ``None``."""
+        from orchestrator.design_flow.context import parse_dfm_review
+
+        found = await self._latest_decision(project_id, "dfm_review", parse_dfm_review)
+        if found is None:
+            logger.info("gate_eval_dfm_review_missing", project_id=project_id)
+            return None
+        review = found[0]
+        logger.info("gate_eval_dfm_review", project_id=project_id, review=review.summary())
+        return review
 
 
 class TwinConstraintChecker:
@@ -162,7 +293,330 @@ class TwinConstraintChecker:
             return None
         return {str(getattr(wp, "id", "")) for wp in project.work_products}
 
-    async def check(self, project_id: str | None) -> ConstraintReport:
+    async def _current_cad_models(self, project_id: str) -> list[tuple[str, dict[str, Any]]]:
+        """The latest cad_model per name for the project, as ``(name, metadata)``."""
+        return [(n, m) for _, n, m in await self._current_cad_entries(project_id)]
+
+    async def _closed_draft(self, node_id: str) -> bool:
+        """Whether ``node_id`` is a revision whose draft was closed (FORGE-597)."""
+        try:
+            from twin_core.items.change_sets import CLOSED_STATUSES
+            from twin_core.items.service import revision_status
+
+            status = await revision_status(self._twin, UUID(node_id))
+        except Exception as exc:  # noqa: BLE001 - an unreadable status keeps the node
+            logger.warning("gate_eval_revision_status_failed", node_id=node_id, error=str(exc))
+            return False
+        return status in CLOSED_STATUSES
+
+    async def _current_cad_entries(
+        self, project_id: str, since_ts: float = 0.0, *, drop_superseded: bool = False
+    ) -> list[tuple[str, str, dict[str, Any]]]:
+        """Like ``_current_cad_models`` but ``(node_id, name, metadata)`` (FORGE-511).
+
+        ``since_ts`` keeps only cad_models recorded in that window (an
+        unparseable timestamp counts, as in ``present_types``); with
+        ``drop_superseded`` a node that another node's ``supersedes`` /
+        ``revision_of`` metadata or an incoming SUPERSEDES edge replaces is dropped.
+        """
+        getter = getattr(self._twin, "get_work_product", None)
+        if self._backend is None or getter is None:
+            return []
+        project = await self._backend.get_project(project_id)
+        if project is None:
+            return []
+        by_name: dict[str, list[tuple[float, Any]]] = {}
+        for wp in project.work_products:
+            wp_type = getattr(wp, "type", None)
+            if str(getattr(wp_type, "value", wp_type)) != "cad_model":
+                continue
+            raw_ts = _to_epoch(getattr(wp, "updated_at", None))
+            if raw_ts is not None and raw_ts < since_ts:
+                continue
+            ts = raw_ts or 0.0
+            name = str(getattr(wp, "name", "") or getattr(wp, "id", ""))
+            by_name.setdefault(name, []).append((ts, wp))
+        models: list[tuple[str, str, dict[str, Any]]] = []
+        for name, candidates in by_name.items():
+            # Newest first. FORGE-597: a revision a retry or rework turned
+            # down (its draft closed as rejected/abandoned) is not part of the
+            # design any more, so it is skipped and the newest revision that
+            # is still open or approved stands for the name instead. Without
+            # this an abandoned attempt's model kept failing every later
+            # attempt's gate.
+            for _, wp in sorted(candidates, key=lambda c: c[0], reverse=True):
+                node_id = str(getattr(wp, "id", ""))
+                if await self._closed_draft(node_id):
+                    logger.info("gate_eval_closed_draft_skipped", name=name, node_id=node_id)
+                    continue
+                try:
+                    node = await getter(UUID(node_id))
+                except Exception as exc:  # noqa: BLE001 - one unreadable model must not crash the gate
+                    logger.warning("gate_eval_cad_read_failed", name=name, error=str(exc))
+                    break
+                if node is not None:
+                    models.append((node_id, name, dict(getattr(node, "metadata", None) or {})))
+                break
+        if drop_superseded:
+            replaced: set[str] = set()
+            for _, _, meta in models:
+                for key in ("supersedes", "revision_of"):
+                    value = meta.get(key)
+                    values = value if isinstance(value, list) else [value]
+                    replaced.update(str(v) for v in values if v)
+            graph = getattr(self._twin, "graph", None)
+            if graph is not None:
+                from twin_core.models.enums import EdgeType
+
+                for node_id, _, _ in models:
+                    try:
+                        incoming = await graph.get_edges(
+                            UUID(node_id), direction="incoming", edge_type=EdgeType.SUPERSEDES
+                        )
+                    except Exception as exc:  # noqa: BLE001 - edge lookup is best-effort
+                        logger.warning(
+                            "gate_eval_supersedes_failed", node_id=node_id, error=str(exc)
+                        )
+                        continue
+                    if incoming:
+                        replaced.add(node_id)
+            models = [m for m in models if m[0] not in replaced]
+        return models
+
+    async def _geometry_check(
+        self,
+        project_id: str | None,
+        since_ts: float = 0.0,
+        facts: dict[str, DesignFact] | None = None,
+    ) -> GeometryCheck:
+        lister = getattr(self._twin, "list_constraints", None)
+        if lister is None or not project_id:
+            return GeometryCheck()
+        try:
+            # FORGE-698: a size a design record states (a board's length) is
+            # measured by the design-record check, not against a cad_model.
+            constraints = [
+                c
+                for c in await lister(project_id=UUID(project_id))
+                if not states_metric(c, facts or {})
+            ]
+            # FORGE-515: only this phase window's current parts (not every
+            # cad_model name ever used in the project).
+            window = await self._current_cad_entries(project_id, since_ts, drop_superseded=True)
+            # FORGE-596: an analysis model (an FEA idealisation) is not product
+            # geometry, so it is neither held to the design's limits nor
+            # counted as a loose design part.
+            window = [e for e in window if not is_analysis_model(e[2])]
+            models = [(n, m) for _, n, m in window]
+        except Exception as exc:  # noqa: BLE001 - geometry comparison is best-effort
+            logger.warning(
+                "gate_eval_geometry_constraints_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="geometry constraints not compared at this gate",
+            )
+            return GeometryCheck()
+        outcome = check_geometry_constraints(constraints, models)
+        # FORGE-511: several parts with no assembly (or a badly placed one).
+        assembly = check_assembly(window)
+        outcome.violations += assembly.violations
+        outcome.warnings += assembly.warnings
+        outcome.evaluated += assembly.evaluated
+        logger.info(
+            "gate_eval_geometry_constraints",
+            project_id=project_id,
+            evaluated=outcome.evaluated,
+            violations=len(outcome.violations),
+            not_evaluated=outcome.not_evaluated,
+        )
+        return outcome
+
+    async def _analysis_check(self, project_id: str | None) -> AnalysisCheck:
+        """FORGE-498: analysis constraints vs the latest simulation_result per cad_model."""
+        lister = getattr(self._twin, "list_constraints", None)
+        getter = getattr(self._twin, "get_work_product", None)
+        if lister is None or getter is None or self._backend is None or not project_id:
+            return AnalysisCheck()
+        try:
+            constraints = await lister(project_id=UUID(project_id))
+            project = await self._backend.get_project(project_id)
+            if project is None:
+                return AnalysisCheck()
+            latest: dict[str, tuple[float, str]] = {}
+            sim_wps: list[Any] = []
+            for wp in project.work_products:
+                wp_type = getattr(wp, "type", None)
+                type_str = str(getattr(wp_type, "value", wp_type))
+                if type_str == "simulation_result":
+                    sim_wps.append(wp)
+                elif type_str == "cad_model":
+                    ts = _to_epoch(getattr(wp, "updated_at", None)) or 0.0
+                    name = str(getattr(wp, "name", "") or getattr(wp, "id", ""))
+                    if name not in latest or ts >= latest[name][0]:
+                        latest[name] = (ts, str(getattr(wp, "id", "")))
+            sims = [await self._read_sim(wp, getter) for wp in sim_wps]
+            model_keys = await self._item_keys([cad_id for _, cad_id in latest.values()], getter)
+        except Exception as exc:  # noqa: BLE001 - analysis comparison is best-effort
+            logger.warning(
+                "gate_eval_analysis_constraints_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="analysis constraints not compared at this gate",
+            )
+            return AnalysisCheck()
+        models = [(cad_id, name) for name, (_, cad_id) in latest.items()]
+        outcome = check_analysis_constraints(
+            constraints, models, [s for s in sims if s], model_keys=model_keys
+        )
+        logger.info(
+            "gate_eval_analysis_constraints",
+            project_id=project_id,
+            evaluated=outcome.evaluated,
+            violations=len(outcome.violations),
+            not_evaluated=outcome.not_evaluated,
+        )
+        return outcome
+
+    @staticmethod
+    async def _item_keys(cad_ids: list[str], getter: Any) -> dict[str, str]:
+        """``cad_id -> item key`` from each model's FORGE-523 stamp (FORGE-527)."""
+        keys: dict[str, str] = {}
+        for cad_id in cad_ids:
+            try:
+                node = await getter(UUID(cad_id))
+            except Exception:  # noqa: BLE001 - a missing key only loses the pin link
+                continue
+            key = (getattr(node, "metadata", None) or {}).get("item_key") if node else None
+            if key:
+                keys[cad_id] = str(key)
+        return keys
+
+    async def _read_sim(self, wp: Any, getter: Any) -> SimResult | None:
+        """A simulation_result with the cad_models it derives from, or None if unreadable."""
+        sim_id = str(getattr(wp, "id", ""))
+        try:
+            node = await getter(UUID(sim_id))
+        except Exception as exc:  # noqa: BLE001 - one unreadable result must not crash the gate
+            logger.warning("gate_eval_sim_read_failed", sim_id=sim_id, error=str(exc))
+            return None
+        if node is None:
+            return None
+        meta = dict(getattr(node, "metadata", None) or {})
+        cad_ids: set[str] = set()
+        if meta.get("source_cad_model_id"):
+            cad_ids.add(str(meta["source_cad_model_id"]))
+        edges = getattr(self._twin, "get_edges", None)
+        if edges is not None:
+            try:
+                for edge in await edges(UUID(sim_id), "outgoing", EdgeType.DERIVES_FROM):
+                    cad_ids.add(str(edge.target_id))
+            except Exception as exc:  # noqa: BLE001 - metadata link may still resolve
+                logger.warning("gate_eval_sim_edges_failed", sim_id=sim_id, error=str(exc))
+        ts = _to_epoch(getattr(wp, "updated_at", None)) or 0.0
+        name = str(getattr(wp, "name", "") or sim_id)
+        return SimResult(id=sim_id, name=name, updated_at=ts, metadata=meta, cad_ids=cad_ids)
+
+    async def _undeclared_items(self, project_id: str | None, since_ts: float) -> list[str]:
+        """Writes in this phase window that matched no declared slot (FORGE-524).
+
+        Reported as warnings: the reviewer decides whether each is a real new
+        part or a renamed declared one. Never a violation, so never a failed gate.
+        """
+        getter = getattr(self._twin, "get_work_product", None)
+        if not project_id or self._backend is None or getter is None:
+            return []
+        try:
+            project = await self._backend.get_project(project_id)
+        except Exception as exc:  # noqa: BLE001 - advisory only
+            logger.warning(
+                "gate_eval_undeclared_scan_failed", project_id=project_id, error=str(exc)
+            )
+            return []
+        if project is None:
+            return []
+        findings: dict[str, str] = {}
+        for wp in project.work_products:
+            ts = _to_epoch(getattr(wp, "updated_at", None))
+            if ts is not None and ts < since_ts:
+                continue
+            try:
+                node = await getter(UUID(str(getattr(wp, "id", ""))))
+            except Exception:  # noqa: BLE001, S112 - one unreadable node must not hide the rest
+                continue
+            meta = dict(getattr(node, "metadata", None) or {})
+            if not meta.get("undeclared_item"):
+                continue
+            declared = ", ".join(meta.get("declared_item_keys") or []) or "none"
+            key = str(meta.get("item_key") or getattr(wp, "id", "?"))
+            findings[key] = (
+                f"undeclared item {key} "
+                f"({meta.get('item_type', '?')} '{getattr(wp, 'name', '')}'): not one of the "
+                f"phase's declared items ({declared}); review whether it is a new part or a "
+                "renamed declared one"
+            )
+        if findings:
+            logger.info("gate_eval_undeclared_items", project_id=project_id, count=len(findings))
+        return list(findings.values())
+
+    async def _read_design_facts(self, project_id: str | None) -> dict[str, DesignFact]:
+        if not project_id:
+            return {}
+        try:
+            return await read_design_facts(self._twin, project_id)
+        except Exception as exc:  # noqa: BLE001 - design comparison is best-effort
+            logger.warning(
+                "gate_eval_design_facts_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="design-record constraints not compared at this gate",
+            )
+            return {}
+
+    async def _design_fact_check(
+        self, project_id: str | None, facts: dict[str, DesignFact]
+    ) -> DesignFactCheck:
+        """FORGE-698: structured constraints vs what the current design records state.
+
+        A metric a design record states is measured here. Otherwise the
+        constraints the geometry or analysis check owns, and cost limits, are
+        left to those checks.
+        """
+        lister = getattr(self._twin, "list_constraints", None)
+        if lister is None or not project_id:
+            return DesignFactCheck()
+
+        def _owned_elsewhere(constraint: Any) -> bool:
+            if states_metric(constraint, facts):
+                return False
+            unit = str(getattr(constraint, "unit", "") or "")
+            metric = str(getattr(constraint, "metric", "") or "")
+            return (
+                is_currency_code(unit)
+                or classify_geometry(metric) is not None
+                or classify_analysis(constraint) is not None
+            )
+
+        try:
+            constraints = await lister(project_id=UUID(project_id))
+        except Exception as exc:  # noqa: BLE001 - design comparison is best-effort
+            logger.warning(
+                "gate_eval_design_fact_constraints_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="design-record constraints not compared at this gate",
+            )
+            return DesignFactCheck()
+        outcome = check_design_fact_constraints(constraints, facts, skip=_owned_elsewhere)
+        logger.info(
+            "gate_eval_design_fact_constraints",
+            project_id=project_id,
+            evaluated=outcome.evaluated,
+            violations=len(outcome.violations),
+            not_evaluated=len(outcome.not_evaluated),
+        )
+        return outcome
+
+    async def check(self, project_id: str | None, since_ts: float = 0.0) -> ConstraintReport:
         evaluate = getattr(self._twin, "evaluate_constraints", None)
         if evaluate is None:
             return ConstraintReport(checked=False)
@@ -182,12 +636,32 @@ class TwinConstraintChecker:
 
         violations = [_fmt(v) for v in result.violations if _in_scope(v)]
         warnings = [_fmt(v) for v in result.warnings if _in_scope(v)]
+        # FORGE-496: structured metric/limit constraints carry a placeholder
+        # expression the engine can never fail, so compare them to the
+        # committed cad_model here.
+        facts = await self._read_design_facts(project_id)
+        geometry = await self._geometry_check(project_id, since_ts, facts)
+        violations += geometry.violations
+        warnings += geometry.warnings
+        analysis = await self._analysis_check(project_id)
+        violations += analysis.violations
+        warnings += analysis.warnings
+        design = await self._design_fact_check(project_id, facts)
+        violations += design.violations
+        warnings += design.warnings
         report = ConstraintReport(
             checked=True,
             passed=not violations,
-            evaluated_count=int(getattr(result, "evaluated_count", 0)),
+            evaluated_count=int(getattr(result, "evaluated_count", 0))
+            + geometry.evaluated
+            + analysis.evaluated
+            + design.evaluated,
             violations=violations,
             warnings=warnings,
+            satisfied=analysis.satisfied,
+            not_evaluated=geometry.not_evaluated + analysis.not_evaluated + design.not_evaluated,
+            assumptions=analysis.assumptions,
+            undeclared_items=await self._undeclared_items(project_id, since_ts),
         )
         logger.info(
             "gate_eval_constraints",
@@ -202,10 +676,12 @@ class TwinConstraintChecker:
 
 class TwinConsistencyGateChecker:
     """`ConsistencyGateChecker` backed by `twin_core.consistency.gates`
-    (FORGE-73). Only four ``gate_id``s are mapped today -- see
-    :class:`~orchestrator.design_flow.spec.Gate`'s own docstring for why
-    G6/G7 aren't (yet). Purely informational: the executor never fails a
-    gate on this checker's result (no ``enforce_*`` flag exists for it).
+    (FORGE-73/91). Six ``gate_id``s (G3-G8) are mapped; G0-G2 have no
+    dedicated evaluator module yet. Purely informational: the executor
+    never fails a gate on this checker's result (no ``enforce_*`` flag
+    exists for it). G6/G7 don't inject a ``traceability_coverage``
+    accessor -- same posture as every other gate here, none do -- so their
+    requirement-coverage check stays ``NOT_EVALUATED`` until that's wired.
     """
 
     def __init__(self, twin: Any) -> None:
@@ -225,6 +701,10 @@ class TwinConsistencyGateChecker:
             evaluation = await evaluate_g4_architecture(self._twin, pid)
         elif gate_id == "G5":
             evaluation = await evaluate_g5_concept_selection(self._twin, pid)
+        elif gate_id == "G6":
+            evaluation = await evaluate_g6_design_sketch(self._twin, pid)
+        elif gate_id == "G7":
+            evaluation = await evaluate_g7_verification_readiness(self._twin, pid)
         elif gate_id == "G8":
             evaluation = await evaluate_g8_release(self._twin, pid)
         else:
@@ -237,3 +717,74 @@ class TwinConsistencyGateChecker:
             status=evaluation.status.value,
         )
         return ConsistencyGateReport(checked=True, evaluation=evaluation)
+
+
+#: Revision statuses that are no longer part of the design (FORGE-525).
+_CLOSED_REVISIONS = frozenset({"rejected", "abandoned"})
+
+
+class TwinDesignValueReader:
+    """`DesignValueReader` over the twin's ``design_value`` entities (composable flows).
+
+    A design value is recorded with ``name``, ``value``, ``unit`` and a
+    ``source`` (FORGE-586); each changed value is a new record. ``values``
+    returns the latest record per name; ``history`` every record per name,
+    oldest first, which is what a coupled block's iterations leave behind.
+
+    A revision a gate turned down (``rejected``) or a run left behind
+    (``abandoned``, FORGE-525) is not part of the design and is skipped, so a
+    reworked block is judged on the passes that are still live. Open drafts
+    are kept: they are the run's own work, which its gate is reviewing.
+
+    Fails loudly rather than open: the caller turns a failed read into
+    no_data for every check, which blocks the gate.
+    """
+
+    def __init__(self, twin: object) -> None:
+        self._twin = twin
+
+    async def _records(self, project_id: str | None) -> dict[str, list[tuple[float, int, object]]]:
+        lister = getattr(self._twin, "list_engineering_entities", None)
+        if lister is None or project_id is None:
+            return {}
+        entities = await lister(project_id=UUID(str(project_id)), entity_type="design_value")
+        by_name: dict[str, list[tuple[float, int, object]]] = {}
+        skipped = 0
+        for index, entity in enumerate(entities):
+            meta = getattr(entity, "metadata", None) or {}
+            name = str(meta.get("name") or "").strip()
+            if not name or "value" not in meta:
+                continue
+            if await self._closed(entity):
+                skipped += 1
+                continue
+            when = _to_epoch(getattr(entity, "created_at", None)) or 0.0
+            by_name.setdefault(name, []).append((when, index, meta.get("value")))
+        for rows in by_name.values():
+            rows.sort(key=lambda r: (r[0], r[1]))
+        if skipped:
+            logger.info("gate_design_values_closed_drafts_skipped", count=skipped)
+        return by_name
+
+    async def _closed(self, entity: object) -> bool:
+        """True for a revision that was rejected or abandoned (FORGE-525)."""
+        from twin_core.items.service import revision_status, supports_items
+
+        node_id = getattr(entity, "id", None)
+        if not isinstance(node_id, UUID) or not supports_items(self._twin):
+            return False
+        try:
+            status = await revision_status(self._twin, node_id)
+        except Exception as exc:  # noqa: BLE001 - an unreadable status is kept, and said
+            logger.warning("gate_design_value_status_unread", node=str(node_id), error=str(exc))
+            return False
+        return status in _CLOSED_REVISIONS
+
+    async def values(self, project_id: str | None) -> dict[str, object]:
+        records = await self._records(project_id)
+        logger.info("gate_design_values_read", project_id=project_id, count=len(records))
+        return {name: rows[-1][2] for name, rows in records.items() if rows}
+
+    async def history(self, project_id: str | None, names: list[str]) -> dict[str, list[object]]:
+        records = await self._records(project_id)
+        return {name: [r[2] for r in records.get(name, [])] for name in names}

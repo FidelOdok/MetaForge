@@ -89,13 +89,21 @@ class TestBootstrapToolRegistry:
         Gazebo (3 tools, opt-in like freecad/kicad -- registers regardless
         of whether a real `gz` binary is present) for 7 adapters.
         MET-635/636 added the Isaac Sim adapter (2 tools, opt-in like
-        freecad/kicad) for 8.
+        freecad/kicad) for 8. FORGE-544 added the in-process power budget
+        adapter for 9, FORGE-542 the ngspice adapter for 10, and FORGE-615 the
+        in-process cost estimate adapter for 11, and FORGE-628 the Blender
+        render adapter for 12, and FORGE-557 the OpenFOAM flow adapter for 13.
+        The composable-flows follow-up added the in-process optimize adapter for 14,
+        and FORGE-671 the in-process robot drive adapter for 15, and FORGE-672 the
+        in-process packaging adapter for 16, and FORGE-670 the in-process aircraft
+        adapter for 17, and FORGE-674/677 the firmware build/emulation adapter for 18,
+        and FORGE-711 the SimReady asset adapter for 19.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 8
+        assert len(adapters) == 19
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -106,6 +114,17 @@ class TestBootstrapToolRegistry:
             "omniverse_usd",
             "gazebo",
             "isaac_sim",
+            "power",
+            "spice",
+            "cost",
+            "blender",
+            "openfoam",
+            "optimize",
+            "robot",
+            "packaging",
+            "aircraft",
+            "firmware",
+            "simready",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -113,7 +132,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 8
+        assert len(registry.list_adapters()) == 19
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -213,11 +232,33 @@ class TestBootstrapToolRegistry:
         validate_world, extract_results) for 75. MET-635/636 adds the
         Isaac Sim adapter's 2 tools (run_physics, render_scene) for 77.
         MET-740 Phase 2 adds cadquery.validate_physics_stability for 78.
+        FORGE-231 adds freecad.import_step for 79. FORGE-277 adds
+        freecad.list_named_faces for 80. FORGE-280 adds
+        calculix.cross_check_cantilever_beam + calculix.check_mesh_
+        convergence for 82. FORGE-281 adds
+        calculix.cross_check_cantilever_frequency for 83. FORGE-283 adds
+        calculix.compute_joint_loads for 84. FORGE-282 adds
+        calculix.cross_check_thermal_steady_state for 85. FORGE-544 adds
+        power.check_budget for 86. FORGE-542 adds spice.run_simulation
+        for 87. FORGE-615 adds cost.estimate_manufacturing for 88. FORGE-628 adds
+        blender.render and blender.export_blend for 90.
+        FORGE-557 adds openfoam.run_internal_flow for 91. The composable-flows
+        follow-up adds optimize.suggest for 92. FORGE-671 adds robot.size_drive and
+        robot.diff_drive_kinematics for 94. FORGE-672 adds packaging.box_compression
+        and packaging.rsc_dieline for 96. FORGE-670 adds the four aircraft.* estimates
+        for 100. FORGE-674/677 add firmware.build and firmware.run_emulated for 102.
+        FORGE-675 adds firmware.static_check for 103.
+        FORGE-680 adds kicad.export_drill and kicad.export_pos for 105.
+        FORGE-681 adds power.runtime for 106. FORGE-683 adds kicad.generate_schematic,
+        kicad.generate_pcb and kicad.autoroute_pcb for 109. FORGE-684 adds
+        kicad.export_3d, kicad.render_pcb and kicad.update_components for 112.
+        FORGE-687 adds kicad.export_svg for 113. FORGE-711 adds the SimReady
+        adapter's search, inspect, import and attribution for 117.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 78
+        assert len(tools) == 117
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
@@ -233,3 +274,40 @@ class TestBootstrapToolRegistry:
         health = await registry.check_health("cadquery")
         assert health.status == "healthy"
         assert health.tools_available == 15
+
+    async def test_bootstrap_forwards_every_twin_injection_kwarg_without_raising(self):
+        """Regression test for the exact class of bug FORGE-405's own fix
+        addressed (and FORGE-298 nearly repeated, and FORGE-295 closes the
+        loop on a third occurrence of): api_gateway/server.py's real
+        startup passes every one of these as a keyword argument to THIS
+        function, not directly to TwinServer.__init__ -- a new
+        TwinServer.__init__ parameter with no matching parameter here (and
+        no matching forward into the internal TwinServer(...) call below)
+        passes every unit test that only exercises TwinServer directly, and
+        only raises TypeError at real gateway startup. This test calls
+        bootstrap_tool_registry() with a representative, growing sample of
+        twin-adapter injection kwargs (including the newest,
+        bringup_checklist_creator) and asserts it doesn't raise -- the
+        cheapest possible net for "does this kwarg actually reach
+        TwinServer."
+        """
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+
+        async def _noop_test_plan_generator(*, project_id: str):
+            return {"project_id": project_id, "entries": []}
+
+        async def _noop_bringup_checklist_creator(*, work_product_id: str, project_id=None):
+            return {"node_id": "noop", "statement": "", "steps": []}
+
+        registry = await bootstrap_tool_registry(
+            adapter_ids=["twin"],
+            twin=twin,
+            test_plan_generator=_noop_test_plan_generator,
+            bringup_checklist_creator=_noop_bringup_checklist_creator,
+        )
+
+        tool_ids = {t.tool_id for t in registry.list_tools()}
+        assert "twin.generate_test_plan" in tool_ids
+        assert "twin.create_bringup_checklist" in tool_ids

@@ -1,8 +1,12 @@
 # Using a ChatGPT subscription with the harness (openai-codex)
 
 Drive the MetaForge harness on a **ChatGPT Plus/Pro subscription** — no API key
-— via the `openai-codex` provider (MET-550). This mirrors how Hermes/OpenClaw
+— via the `openai-codex` provider. This mirrors how Hermes/OpenClaw
 use a subscription: the subscription itself pays for model calls.
+
+This provider serves the harness model only. The knowledge and memory
+consolidation models keep using OpenRouter; see
+[model usage](architecture/model-usage.md).
 
 > **Caveats.** The Codex backend is an **undocumented API that can change
 > without notice**, and subscription-driven programmatic use is a **gray area**
@@ -73,3 +77,12 @@ credentials from `~/.codex/auth.json` and calls the Responses API.
 - **HTTP 400/401** — the subscription is the subsidy; ensure the logged-in
   account has an active ChatGPT Plus/Pro plan, and that the token refreshed
   (delete `~/.codex/auth.json` and re-login if it's stale/revoked).
+- **Model must be a bare slug, never `vendor/model`** — Codex uses
+  its own model ids (`gpt-5.5`, `gpt-5-codex`, ...), not OpenRouter-style
+  `vendor/model` slugs like `openai/gpt-4o`. `PUT /v1/harness/selection`
+  (and therefore `forge auth use openai-codex --model ...` /
+  `forge auth login --provider openai-codex --model ...`) rejects a slashed
+  model for this provider with a 400 before it can become the durable active
+  selection — previously an invalid pairing like `openai-codex` +
+  `openai/gpt-4o` silently 400'd on every call and fell back to a different
+  provider, with `forge auth list` still reporting Codex as active.

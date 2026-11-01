@@ -20,10 +20,10 @@ updated before committing.
 
 ## Migration catalogue
 
-### `backfill_project_id` — MET-442
+### `backfill_project_id` —
 
 Sets `project_id` on every legacy graph node that pre-dates the
-MET-428 partitioning column. Without this, scoped reads filter out
+`project_id` partitioning column. Without this, scoped reads filter out
 those nodes and they become invisible to users.
 
 ```bash

@@ -46,7 +46,10 @@ class _Bridge:
 
 @pytest.mark.asyncio
 async def test_handler_output_scores_full_on_requirements_rubric() -> None:
+    prose: list[str] = []
+
     async def doc_recorder(**kwargs):
+        prose.append(kwargs["content"])
         return {"node_id": "prd1"}
 
     async def fake_extract(goal, prior, *, provider, model):
@@ -85,8 +88,17 @@ async def test_handler_output_scores_full_on_requirements_rubric() -> None:
 
     assert outcome.status == "completed"
     assert any(a.startswith("prd:") for a in outcome.artifacts)
-    rationale = bridge.calls[0][1]["rationale"]
-    checks = evaluate_requirements(decision_text=rationale, artifact_types={"prd"}, goal=ctx.goal)
+    # FORGE-528: the requirements are scored as the reader sees them, the
+    # derived prd: its prose plus the constraint set's rows. The decision
+    # only names the choice and links the set.
+    cs = next(a for t, a in bridge.calls if t == "twin.record_constraint_set")
+    table = " ".join(
+        f"{c['name']} {c.get('acceptance_criteria', '')} {c['verification_method']}"
+        for c in cs["constraints"]
+    )
+    rationale = next(a for t, a in bridge.calls if t == "twin.record_decision")["rationale"]
+    text = f"{prose[0]} {table} {rationale}"
+    checks = evaluate_requirements(decision_text=text, artifact_types={"prd"}, goal=ctx.goal)
     assert checks["verification_criteria"], "each constraint must carry an acceptance method"
     assert requirements_score(checks) == 1.0, checks
 
@@ -125,6 +137,31 @@ def test_non_quantified_limits_become_info_only() -> None:
     assert entries[0]["expression"] == "True"
     assert "per the outline" in entries[0]["message"]
     assert "inspect" in entries[0]["message"]
+
+
+def test_quantified_limit_populates_real_verification_and_acceptance_fields() -> None:
+    # FORGE-312: `verify` used to only land inside the free-text `message`
+    # suffix -- now it's also a real `verification_method` entry field, and
+    # the condition itself becomes a real `acceptance_criteria` entry field.
+    entries = constraint_entries_from_spec(
+        [{"param": "mass", "limit": "<= 60", "unit": "g", "verify": "scale"}]
+    )
+    entry = entries[0]
+    assert entry["verification_method"] == "scale"
+    assert entry["acceptance_criteria"] == "mass <= 60 g"
+    assert "(verify: scale)" in entry["message"]  # human-readable suffix kept
+
+
+def test_non_quantified_limit_still_gets_verification_method_field() -> None:
+    entries = constraint_entries_from_spec(
+        [{"param": "board size", "limit": "per the outline", "unit": "mm", "verify": "inspect"}]
+    )
+    assert entries[0]["verification_method"] == "inspect"
+
+
+def test_missing_verify_defaults_to_empty_string() -> None:
+    entries = constraint_entries_from_spec([{"param": "mass", "limit": "<= 60", "unit": "g"}])
+    assert entries[0]["verification_method"] == ""
 
 
 def test_duplicate_params_get_unique_names() -> None:

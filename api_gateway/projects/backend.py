@@ -25,6 +25,28 @@ from api_gateway.projects.schemas import (
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
+
+#: The longest work-product label a project link stores (the
+#: ``project_work_products.name`` column).
+WORK_PRODUCT_LABEL_MAX = 255
+
+
+def work_product_label(name: str) -> str:
+    """``name`` shortened to fit the link's label column.
+
+    FORGE-595: recorders pass a work product's statement as its label, and an
+    evidence statement of 500-700 characters made Postgres reject the insert.
+    The recorder caught that as best-effort, so the evidence existed in the
+    twin and never appeared in the project. The label is only for display (the
+    node keeps the full text), so it is shortened here, for every backend
+    alike, rather than letting a long statement cost the link.
+    """
+    text = " ".join(str(name or "").split())
+    if len(text) <= WORK_PRODUCT_LABEL_MAX:
+        return text
+    return text[: WORK_PRODUCT_LABEL_MAX - 1].rstrip() + "\u2026"
+
+
 tracer = get_tracer("api_gateway.projects.backend")
 
 
@@ -206,7 +228,7 @@ class InMemoryProjectBackend(ProjectBackend):
         project.work_products.append(
             ProjectWorkProductResponse(
                 id=wp_id,
-                name=wp_name,
+                name=work_product_label(wp_name),
                 type=wp_type,
                 status="created",
                 updated_at=now,
@@ -418,7 +440,7 @@ class PgProjectBackend(ProjectBackend):
                 id=str(uuid4()),
                 project_id=project_id,
                 work_product_id=wp_id,
-                name=wp_name,
+                name=work_product_label(wp_name),
                 type=wp_type,
                 status="created",
                 updated_at=now,

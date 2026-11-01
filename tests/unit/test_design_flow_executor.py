@@ -19,6 +19,7 @@ from orchestrator.design_flow.executor import (
     GateCoordinator,
     PhaseOutcome,
 )
+from orchestrator.design_flow.grounding import UNGROUNDED_BANNER
 from orchestrator.design_flow.spec import FLOWS, FlowDefinition, Gate, Phase
 from orchestrator.harness.runs import ApprovalDecision, InMemoryRunStore, RunStatus
 
@@ -216,12 +217,17 @@ async def test_gate_fails_when_required_deliverable_missing() -> None:
         coordinator=coord,
         gate_evaluator=FakeEvaluator({"design_decision"}),
     )
-    await asyncio.wait_for(executor.run(run.id), timeout=2.0)
+    task = asyncio.create_task(executor.run(run.id))
+    # FORGE-495: a gate that is not ready parks with its findings (retry or
+    # reject) rather than failing the run; reject still ends it.
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "NOT READY" in (store.get(run.id).approval_reason or "")
+    assert "cad_model" in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.REJECT)
+    await asyncio.wait_for(task, timeout=2.0)
 
-    run_ = store.get(run.id)
-    assert run_.status is RunStatus.FAILED
-    assert "cad_model" in (run_.error or "")
-    assert brain.seen == ["requirements"]  # failed at the first gate
+    assert store.get(run.id).status is RunStatus.REJECTED
+    assert brain.seen == ["requirements"]  # stopped at the first gate
 
 
 @pytest.mark.asyncio
@@ -261,7 +267,7 @@ class FakeConstraintChecker:
         self._report = report or ConstraintReport(checked=True, passed=True, evaluated_count=2)
         self._boom = boom
 
-    async def check(self, project_id: str | None) -> ConstraintReport:
+    async def check(self, project_id: str | None, since_ts: float = 0.0) -> ConstraintReport:
         if self._boom:
             raise RuntimeError("constraint engine down")
         return self._report
@@ -329,11 +335,12 @@ async def test_enforced_gate_fails_on_error_violation() -> None:
     executor = DesignFlowExecutor(
         store=store, brain=ScriptedBrain(), coordinator=coord, constraint_checker=checker
     )
-    await asyncio.wait_for(executor.run(run.id), timeout=2.0)
-
-    run_ = store.get(run.id)
-    assert run_.status is RunStatus.FAILED
-    assert "sf_min" in (run_.error or "")
+    task = asyncio.create_task(executor.run(run.id))
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "sf_min" in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.REJECT)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.REJECTED
 
 
 @pytest.mark.asyncio
@@ -573,3 +580,33 @@ async def test_consistency_checker_failure_is_best_effort() -> None:
     store.submit_approval(run.id, ApprovalDecision.APPROVE)
     await asyncio.wait_for(task, timeout=2.0)
     assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+class _UngroundedBrain(ScriptedBrain):
+    async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
+        out = await super().run_phase(goal=goal, phase=phase, context=context)
+        out.summary = f"{UNGROUNDED_BANNER}\n\n{out.summary}"
+        return out
+
+
+@pytest.mark.asyncio
+async def test_ungrounded_reply_is_never_passed() -> None:
+    """FORGE-484: a reply flagged ungrounded fails an enforcing gate even when
+    the deliverable happens to exist, and the status is not 'completed'."""
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    brain = _UngroundedBrain()
+    flow_id = _register_flow("test_ungrounded", required=("cad_model",))
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+    executor = DesignFlowExecutor(
+        store=store,
+        brain=brain,
+        coordinator=coord,
+        gate_evaluator=FakeEvaluator({"cad_model"}),
+    )
+    task = asyncio.create_task(executor.run(run.id))
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "ungrounded" in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.REJECT)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.REJECTED

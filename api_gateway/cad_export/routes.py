@@ -413,6 +413,7 @@ async def export_urdf_assembly(body: UrdfAssemblyExportRequest) -> UrdfAssemblyE
         robot_name=data["robot_name"],
         link_names=data["link_names"],
         joint_names=data["joint_names"],
+        joints=data.get("joints", []),
         robot_description_node_id=node_id,
     )
 
@@ -454,6 +455,7 @@ async def export_sdf_assembly(body: SdfAssemblyExportRequest) -> SdfAssemblyExpo
         model_name=data["model_name"],
         link_names=data["link_names"],
         joint_names=data["joint_names"],
+        joints=data.get("joints", []),
         robot_description_node_id=node_id,
     )
 
@@ -491,6 +493,7 @@ async def export_usd_assembly(body: UsdAssemblyExportRequest) -> UsdAssemblyExpo
         robot_name=data["robot_name"],
         link_names=data["link_names"],
         joint_names=data["joint_names"],
+        joints=data.get("joints", []),
         robot_description_node_id=node_id,
     )
 

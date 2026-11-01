@@ -38,7 +38,11 @@ from orchestrator.harness.providers.pipeline import (
     RetryPolicy,
     RoleModelSlots,
 )
-from orchestrator.harness.providers.registry import UnknownProviderError, resolve_provider
+from orchestrator.harness.providers.registry import (
+    UnknownProviderError,
+    model_family_mismatch,
+    resolve_provider,
+)
 from orchestrator.harness.providers.rotation import AuthProfile, ProfileRotor
 
 
@@ -96,6 +100,11 @@ def _parse_spec(entry: Any, role: str, index: int) -> ProviderSpec:
     # when not given explicitly. Unknown ids fall back to the raw values, so
     # arbitrary/custom providers still work.
     try:
+        # FORGE-468: a pair the provider family cannot serve fails here, at
+        # load time, instead of 400ing on every call behind a fallback.
+        mismatch = model_family_mismatch(provider, model)
+        if mismatch is not None:
+            raise ConfigError(f"{where}: {mismatch}")
         resolved = resolve_provider(
             provider,
             model,

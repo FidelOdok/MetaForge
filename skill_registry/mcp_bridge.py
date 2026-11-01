@@ -6,6 +6,20 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
+def exc_details(exc: BaseException) -> str:
+    """A non-empty description of ``exc`` for an ``McpToolError`` message.
+
+    FORGE-249: a bare transport-level exception (e.g. aiohttp's
+    ``ServerDisconnectedError``, raised with no args under connection
+    contention) stringifies to ``""``. Building ``McpToolError(tool_id, "")``
+    then renders as ``"MCP tool 'x' failed: "`` -- a trailing space where the
+    reason should be, reported live as "freecad.open_session failed:
+    (empty message)" under 9-way concurrent load. Falling back to the
+    exception's own class name keeps the message diagnosable either way.
+    """
+    return str(exc) or type(exc).__name__
+
+
 class McpToolError(Exception):
     """Raised when an MCP tool call fails.
 

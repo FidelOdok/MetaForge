@@ -1,0 +1,92 @@
+name: mirror-images
+
+# Copies third-party images a MetaForge host cannot run without into our own
+# GHCR (FORGE-577).
+#
+# MinIO's community images were discontinued and then deleted from Docker
+# Hub, and every host that pulled `minio/minio` broke at once. An image we
+# depend on should not be one an upstream can delete from under us, so the
+# ones that hold data or that nothing can replace quickly are mirrored here:
+# pinned to a release AND a digest, checked against the upstream's own
+# signature before copying, then signed again as ours.
+#
+# Images: ghcr.io/fidelodok/metaforge-<name>:<upstream tag>.
+#
+# To add or bump one: edit the matrix (tag + digest + the upstream's signing
+# identity), then run the workflow. docker-compose.yml names the mirrored
+# image, never the upstream.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/mirror-images.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: mirror ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: seaweedfs
+            source: docker.io/chrislusf/seaweedfs
+            tag: "4.48"
+            digest: sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
+            # Who upstream says signed it: SeaweedFS's own release workflow.
+            identity: '^https://github\.com/seaweedfs/seaweedfs/\.github/workflows/'
+    steps:
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Verify the upstream signature
+        env:
+          SOURCE: ${{ matrix.source }}@${{ matrix.digest }}
+          IDENTITY: ${{ matrix.identity }}
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$SOURCE" > /dev/null
+          echo "upstream signature verified for $SOURCE"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Copy every platform, byte for byte
+        id: copy
+        env:
+          SOURCE: ${{ matrix.source }}@${{ matrix.digest }}
+          TARGET: ghcr.io/fidelodok/metaforge-${{ matrix.name }}:${{ matrix.tag }}
+        run: |
+          docker buildx imagetools create --tag "$TARGET" "$SOURCE"
+          digest=$(docker buildx imagetools inspect "$TARGET" --format '{{.Manifest.Digest}}')
+          # A byte-for-byte copy keeps the upstream digest; anything else
+          # means the copy is not the image that was verified.
+          if [ "$digest" != "${{ matrix.digest }}" ]; then
+            echo "copied digest $digest differs from the verified ${{ matrix.digest }}" >&2
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Sign the mirrored image as ours
+        env:
+          IMAGE: ghcr.io/fidelodok/metaforge-${{ matrix.name }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"

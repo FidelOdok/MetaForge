@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 import structlog
+from pydantic import ValidationError
 
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from skill_registry.skill_base import SkillContext
@@ -21,6 +22,11 @@ ASSEMBLY_RESULT = {
     "part_count": 3,
     "total_volume": 45000.0,
     "interference_check_passed": True,
+    # Real cadquery.create_assembly also returns these (FORGE-100): a
+    # volume_mm3 alias of total_volume, and a first-order mass_kg estimate
+    # (summed volume x one material's density -- not per-part-accurate).
+    "volume_mm3": 45000.0,
+    "mass_kg": 0.1215,
 }
 
 
@@ -65,6 +71,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[
                     AssemblyPart(name="base", file="parts/base.step"),
@@ -93,6 +100,7 @@ class TestCreateAssemblyHandler:
 
         errors = await handler.validate_preconditions(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[
                     AssemblyPart(name="base", file="parts/base.step"),
@@ -108,6 +116,7 @@ class TestCreateAssemblyHandler:
 
         errors = await handler.validate_preconditions(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[
                     AssemblyPart(name="base", file="parts/base.step"),
@@ -136,6 +145,7 @@ class TestCreateAssemblyHandler:
 
         errors = await handler.validate_preconditions(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", file="parts/base.step")],
             )
@@ -148,6 +158,7 @@ class TestCreateAssemblyHandler:
 
         result = await handler.run(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[
                     AssemblyPart(name="base", file="parts/base.step"),
@@ -171,12 +182,16 @@ class TestCreateAssemblyHandler:
         _ctx, handler, _work_product = await _make_ctx_and_handler()
 
         errors = await handler.validate_preconditions(
-            CreateAssemblyInput(parts=[AssemblyPart(name="base", file="parts/base.step")])
+            CreateAssemblyInput(
+                name="Test Assembly", parts=[AssemblyPart(name="base", file="parts/base.step")]
+            )
         )
         assert errors == []
 
         output = await handler.execute(
-            CreateAssemblyInput(parts=[AssemblyPart(name="base", file="parts/base.step")])
+            CreateAssemblyInput(
+                name="Test Assembly", parts=[AssemblyPart(name="base", file="parts/base.step")]
+            )
         )
         assert output.work_product_id is None
 
@@ -196,6 +211,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", node_id="abc-123")],
             )
@@ -210,6 +226,7 @@ class TestCreateAssemblyHandler:
 
         errors = await handler.validate_preconditions(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", node_id="abc-123")],
             )
@@ -224,6 +241,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", file="parts/base.step")],
             )
@@ -250,6 +268,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", file="parts/base.step")],
                 project_id="13d60463-433b-4735-af07-690cbf8e07b9",
@@ -261,6 +280,96 @@ class TestCreateAssemblyHandler:
         assert output.model_url == "https://twin.local/models/node-789"
         assert output.commit_error is None
 
+    async def test_commit_uses_the_caller_supplied_name_not_a_generic_one(self, tmp_path):
+        """FORGE-97: never the old synthetic "Assembly (material)" pattern."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "assembly.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_assembly", {**ASSEMBLY_RESULT, "assembly_file": str(step_file)}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-789"})
+
+        await handler.execute(
+            CreateAssemblyInput(
+                name="Gripper Assembly",
+                work_product_id=work_product.id,
+                parts=[AssemblyPart(name="base", file="parts/base.step")],
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["name"] == "Gripper Assembly"
+
+    async def test_commit_threads_measured_properties_as_extra_metadata(self, tmp_path):
+        """FORGE-100: measured properties from the tool result reach the Twin
+        as top-level work-product metadata."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "assembly.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_assembly", {**ASSEMBLY_RESULT, "assembly_file": str(step_file)}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-789"})
+
+        await handler.execute(
+            CreateAssemblyInput(
+                name="Gripper Assembly",
+                work_product_id=work_product.id,
+                parts=[AssemblyPart(name="base", file="parts/base.step")],
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        extra_metadata = commit_call[1]["extra_metadata"]
+        assert extra_metadata["volume_mm3"] == 45000.0
+        assert extra_metadata["mass_kg"] == 0.1215
+        # FORGE-245: the committed node also carries which parts (and
+        # mating constraints) made up the assembly, not just measured
+        # properties -- the dashboard Assembly tab needs this without a
+        # live (TTL-bound) FreeCAD/CadQuery session.
+        assert extra_metadata["assembly"]["parts"] == [
+            {"name": "base", "file": "parts/base.step", "location": {}}
+        ]
+        assert extra_metadata["assembly"]["joints"] == []
+
+    async def test_commit_threads_constraints_as_assembly_joints(self, tmp_path):
+        """FORGE-245: mating constraints are this skill's own joint-like
+        concept -- they must reach the committed node's assembly metadata
+        alongside the parts list, not be silently dropped."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "assembly.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_assembly", {**ASSEMBLY_RESULT, "assembly_file": str(step_file)}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-789"})
+
+        await handler.execute(
+            CreateAssemblyInput(
+                name="Gripper Assembly",
+                work_product_id=work_product.id,
+                parts=[
+                    AssemblyPart(name="base", file="parts/base.step"),
+                    AssemblyPart(name="arm", file="parts/arm.step"),
+                ],
+                constraints=[AssemblyConstraint(part_a="base", part_b="arm", type="Point")],
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        joints = commit_call[1]["extra_metadata"]["assembly"]["joints"]
+        assert joints == [{"part_a": "base", "part_b": "arm", "type": "Point"}]
+
+    def test_name_is_required_and_non_empty(self):
+        with pytest.raises(ValidationError):
+            CreateAssemblyInput(parts=[AssemblyPart(name="base", file="parts/base.step")])
+        with pytest.raises(ValidationError):
+            CreateAssemblyInput(name="", parts=[AssemblyPart(name="base", file="parts/base.step")])
+
     async def test_commit_false_skips_persistence(self):
         """FORGE-85: commit=False never attempts to persist."""
         _ctx, handler, work_product = await _make_ctx_and_handler()
@@ -269,6 +378,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", file="parts/base.step")],
                 commit=False,

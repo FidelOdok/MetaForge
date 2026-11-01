@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -44,6 +45,23 @@ def server_with_mocks() -> FreecadServer:
                 "max_aspect_ratio": 4.2,
                 "avg_quality": 0.87,
             },
+        }
+    )
+    s._execute_list_named_faces = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "mesh_file": "/tmp/freecad/bracket.inp",
+            "faces": [
+                {
+                    "name": "Surface1",
+                    "element_type": "CPS3",
+                    "num_elements": 2,
+                    "num_nodes": 4,
+                    "bbox_mm": {"min": [0.0, 0.0, 0.0], "max": [10.0, 10.0, 0.0]},
+                    "centroid_mm": [5.0, 5.0, 0.0],
+                    "area_mm2": 100.0,
+                    "normal": [0.0, 0.0, 1.0],
+                },
+            ],
         }
     )
     s._execute_boolean = AsyncMock(  # type: ignore[method-assign]
@@ -188,15 +206,17 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 6 stateless (incl. describe_step_file, MET-629) + 8 auth + 8 feature
-        # + 4 asm + 2 inspect + 2 param + script + 7 skills = 44.
-        assert len(server.tool_ids) == 44
+        # 7 stateless (incl. describe_step_file, MET-629; list_named_faces,
+        # FORGE-277) + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param +
+        # script + 7 skills + import_step (FORGE-231) = 46.
+        assert len(server.tool_ids) == 46
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
             # stateless file-based
             "freecad.export_geometry",
             "freecad.generate_mesh",
+            "freecad.list_named_faces",
             "freecad.boolean_operation",
             "freecad.get_properties",
             "freecad.describe_step_file",
@@ -207,6 +227,7 @@ class TestFreecadServer:
             "freecad.describe_session",
             "freecad.create_primitive",
             "freecad.create_body",
+            "freecad.import_step",
             "freecad.create_sketch",
             "freecad.pad_sketch",
             "freecad.pocket_sketch",
@@ -244,6 +265,25 @@ class TestFreecadServer:
             "freecad.set_expression",
         }
         assert set(server.tool_ids) == expected
+
+
+# ---------------------------------------------------------------------------
+# TestListNamedFaces
+# ---------------------------------------------------------------------------
+
+
+class TestListNamedFaces:
+    async def test_list_named_faces_success(self, server_with_mocks: FreecadServer) -> None:
+        result = await server_with_mocks.list_named_faces({"mesh_file": "/tmp/freecad/bracket.inp"})
+        assert result["mesh_file"] == "/tmp/freecad/bracket.inp"
+        assert result["faces"][0]["name"] == "Surface1"
+        assert result["faces"][0]["centroid_mm"] == [5.0, 5.0, 0.0]
+
+    async def test_list_named_faces_missing_mesh_file_raises(
+        self, server_with_mocks: FreecadServer
+    ) -> None:
+        with pytest.raises(ValueError, match="mesh_file is required"):
+            await server_with_mocks.list_named_faces({"mesh_file": ""})
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +347,15 @@ class TestGenerateMesh:
         assert call_args[0][1] == 1.0  # default element_size
         assert call_args[0][2] == "netgen"  # default algorithm
         assert call_args[0][3] == "inp"  # default output_format
+        assert call_args[0][4] == 1  # default element_order (FORGE-280)
+
+    async def test_generate_mesh_unsupported_element_order_raises(
+        self, server_with_mocks: FreecadServer
+    ) -> None:
+        with pytest.raises(ValueError, match="Unsupported element_order"):
+            await server_with_mocks.generate_mesh(
+                {"input_file": "/models/bracket.step", "element_order": 3}
+            )
 
     async def test_generate_mesh_missing_input_raises(
         self, server_with_mocks: FreecadServer
@@ -321,6 +370,20 @@ class TestGenerateMesh:
             await server_with_mocks.generate_mesh(
                 {"input_file": "/models/bracket.step", "algorithm": "tetgen"}
             )
+
+    def test_input_file_schema_tells_the_model_work_product_id_is_not_accepted(
+        self, server_with_mocks: FreecadServer
+    ) -> None:
+        """FORGE-223: re-test 2026-09-25 found the model retried
+        freecad.generate_mesh with work_product_id instead of input_file 11
+        times across two sessions -- the schema never mentioned
+        work_product_id at all, giving no clue what to do differently. This
+        adapter has no Twin access to resolve one itself, so the fix is a
+        self-documenting schema pointing at twin.stage_work_product_file."""
+        schema = server_with_mocks._tools["freecad.generate_mesh"].manifest.input_schema
+        description = schema["properties"]["input_file"]["description"]
+        assert "work_product_id" in description
+        assert "twin.stage_work_product_file" in description
 
 
 # ---------------------------------------------------------------------------
@@ -502,8 +565,9 @@ class TestUnmockedMethodsDegrade:
 class _FakeObj:
     """Stand-in for a live FreeCAD object."""
 
-    def __init__(self, tag: str) -> None:
+    def __init__(self, tag: str, label: str | None = None) -> None:
         self.tag = tag
+        self.Label = label if label is not None else tag
 
 
 class TestStatefulAuthoring:
@@ -535,6 +599,7 @@ class TestStatefulAuthoring:
             "bounding_box": {"min_x": 0, "max_x": 10},
         }
         ops.export_object_step_bytes.return_value = b"ISO-10303-21;\nfake-step\n"
+        ops.measure_step_bytes.return_value = ops.shape_props.return_value
         ops.create_assembly.return_value = _FakeObj("assembly")
         ops.add_part_to_assembly.return_value = _FakeObj("part")
         ops.pocket_sketch.return_value = _FakeObj("pocket")
@@ -548,14 +613,28 @@ class TestStatefulAuthoring:
         ops.mirror_feature.return_value = _FakeObj("mirror")
         ops.measure.return_value = {"volume_mm3": 1000.0, "edge_count": 12, "face_count": 6}
         ops.describe_model.return_value = {"dimensions_mm": {"x": 10, "y": 10, "z": 10}}
-        ops.execute_code.return_value = None  # script touched the doc, surfaced nothing
+        ops.execute_code.return_value = (None, None)  # script touched the doc, surfaced nothing
         ops.generate_enclosure.return_value = _FakeObj("enclosure")
         ops.fastener_hole.return_value = _FakeObj("body")
         ops.thread_insert.return_value = _FakeObj("body")
         ops.generate_gear.return_value = _FakeObj("gear")
         ops.lattice_perforation.return_value = (_FakeObj("body"), 9)
+        ops.import_step.return_value = [_FakeObj("part", label="Turntable Disc")]
         s._ops = ops  # type: ignore[assignment]
         return s
+
+    async def test_create_body_result_names_the_body_and_next_step(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """FORGE-501: the result must say the body exists and how to sketch on it."""
+        s = authoring_server
+        sid = (await s.open_session({"name": "widget"}))["session_id"]
+        body = await s.create_body({"session_id": sid, "name": "Bracket"})
+        assert body["body_id"] == body["obj_id"]
+        assert body["label"] == "Bracket"
+        assert f"body_id='{body['obj_id']}'" in body["message"]
+        assert "create_sketch" in body["message"]
+        assert "Do NOT call create_body again" in body["message"]
 
     async def test_full_authoring_flow(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -591,6 +670,68 @@ class TestStatefulAuthoring:
         desc = await s.describe_session({"session_id": sid})
         assert [o["obj_id"] for o in desc["objects"]] == ["body_1", "sketch_2", "feature_3"]
 
+    async def test_import_step_registers_each_component_by_its_step_label(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """FORGE-231: a staged/committed part had no way back into a session --
+        import_step loads it and hands back a real obj_id, usable by
+        add_part_to_assembly, keyed by the STEP file's own Label."""
+        s = authoring_server
+        sid = (await s.open_session({"name": "assembly"}))["session_id"]
+
+        result = await s.import_step(
+            {"session_id": sid, "file_path": "/workspace/_staged_work_products/disc.step"}
+        )
+
+        assert result["parts"] == [{"obj_id": "part_1", "name": "Turntable Disc", "color": None}]
+        assert result["obj_ids"] == ["part_1"]
+        s._ops.import_step.assert_called_once_with(
+            s._sessions.get(sid).document, "/workspace/_staged_work_products/disc.step"
+        )
+
+        # The registered obj_id is real and usable downstream (e.g. by
+        # add_part_to_assembly, which only needs a session-registered obj_id).
+        desc = await s.describe_session({"session_id": sid})
+        assert desc["objects"][0]["obj_id"] == "part_1"
+        assert desc["objects"][0]["name"] == "Turntable Disc"
+
+    async def test_import_step_rename_hint_applies_only_to_a_single_part(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({"name": "assembly"}))["session_id"]
+
+        result = await s.import_step(
+            {
+                "session_id": sid,
+                "file_path": "/workspace/disc.step",
+                "name": "Renamed Disc",
+            }
+        )
+
+        assert result["parts"] == [{"obj_id": "part_1", "name": "Renamed Disc", "color": None}]
+
+    async def test_import_step_multipart_keeps_each_step_label_ignoring_rename_hint(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """A rename hint can't cover several parts, so a multipart STEP keeps
+        each component's own STEP-authored label instead of applying it."""
+        s = authoring_server
+        s._ops.import_step.return_value = [
+            _FakeObj("part", label="LegA"),
+            _FakeObj("part", label="LegB"),
+        ]
+        sid = (await s.open_session({"name": "assembly"}))["session_id"]
+
+        result = await s.import_step(
+            {"session_id": sid, "file_path": "/workspace/legs.step", "name": "Ignored"}
+        )
+
+        assert result["parts"] == [
+            {"obj_id": "part_1", "name": "LegA", "color": None},
+            {"obj_id": "part_2", "name": "LegB", "color": None},
+        ]
+
     async def test_export_model_returns_base64_step(self, authoring_server: FreecadServer) -> None:
         import base64
 
@@ -606,6 +747,135 @@ class TestStatefulAuthoring:
         # built from this result alone, without needing to recall the
         # arguments this call was originally made with.
         assert result["session_id"] == sid
+
+    async def test_export_model_material_colours_the_step(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """FORGE-517: a known material/colour is written into the exported STEP;
+        an unknown material leaves the bytes untouched."""
+        import base64
+        from unittest.mock import patch
+
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        prim = await s.create_primitive({"session_id": sid, "kind": "box", "parameters": {}})
+        base = {"session_id": sid, "obj_id": prim["obj_id"]}
+        with patch(
+            "tool_registry.tools.freecad.adapter.apply_step_colours",
+            side_effect=lambda b, d, p, **_kw: b + repr((d, p)).encode(),
+        ):
+            r = await s.export_model({**base, "material": "18 mm birch plywood"})
+            assert b"0.87" in base64.b64decode(r["step_base64"])
+            r = await s.export_model({**base, "color": [255, 0, 0]})
+            assert b"(1.0, 0.0, 0.0)" in base64.b64decode(r["step_base64"])
+            r = await s.export_model(
+                {**base, "part_materials": {"Board": "PETG", "Odd": "unobtainium"}}
+            )
+            body = base64.b64decode(r["step_base64"])
+            assert b"'Board'" in body and b"Odd" not in body
+        r = await s.export_model({**base, "material": "unobtainium"})
+        assert base64.b64decode(r["step_base64"]) == b"ISO-10303-21;\nfake-step\n"
+
+    async def test_import_step_keeps_the_source_colour_and_export_writes_it_back(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """FORGE-519: headless Import.insert drops colours, so import_step reads
+        them from the file and export_model (no colour args) writes them back."""
+        import base64
+
+        from tests.unit.test_freecad_material_colour import (
+            _BIRCH_BOX,
+            _colour_of,
+            strip_step_colours,
+        )
+
+        s = authoring_server
+        s._ops.import_step.return_value = [_FakeObj("part", label="Board")]
+        s._ops.export_object_step_bytes.return_value = strip_step_colours(_BIRCH_BOX.read_bytes())
+        sid = (await s.open_session({"name": "box"}))["session_id"]
+        result = await s.import_step({"session_id": sid, "file_path": str(_BIRCH_BOX)})
+
+        tan = (0.87, 0.74, 0.54)
+        assert result["parts"] == [{"obj_id": "part_1", "name": "Board", "color": list(tan)}]
+        entry = s._sessions.get_entry(sid, "part_1")
+        assert entry.metadata == {"color": list(tan), "color_source": "imported_step"}
+
+        base = {"session_id": sid, "obj_id": "part_1"}
+        out = base64.b64decode((await s.export_model(base))["step_base64"])
+        assert _colour_of(out, 15) == tan
+        # Explicit colour / material override the imported one.
+        out = base64.b64decode(
+            (await s.export_model({**base, "color": [255, 0, 0]}))["step_base64"]
+        )
+        assert _colour_of(out, 15) == (1.0, 0.0, 0.0)
+        out = base64.b64decode((await s.export_model({**base, "material": "PETG"}))["step_base64"])
+        assert _colour_of(out, 15) == (0.30, 0.55, 0.80)
+        out = base64.b64decode(
+            (await s.export_model({**base, "part_materials": {"Board": "steel"}}))["step_base64"]
+        )
+        assert _colour_of(out, 15) == (0.35, 0.36, 0.38)
+
+    async def test_single_component_takes_the_files_only_colour_despite_rename(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        from tests.unit.test_freecad_material_colour import _BIRCH_BOX
+
+        s = authoring_server
+        s._ops.import_step.return_value = [_FakeObj("part", label="Imported Shape")]
+        sid = (await s.open_session({}))["session_id"]
+        result = await s.import_step(
+            {"session_id": sid, "file_path": str(_BIRCH_BOX), "name": "Lid"}
+        )
+        assert result["parts"][0]["color"] == [0.87, 0.74, 0.54]
+
+    async def test_assembly_of_imported_parts_keeps_each_part_colour(
+        self, authoring_server: FreecadServer, tmp_path: Path
+    ) -> None:
+        """FORGE-519: the live shelf case. Parts imported from a coloured
+        multi-product STEP, assembled, exported with no colour args."""
+        import base64
+
+        from tests.unit.test_freecad_material_colour import _STEP, _colour_of
+        from tool_registry.tools.freecad.materials_appearance import apply_step_colours
+
+        tan, grey = (0.87, 0.74, 0.54), (0.78, 0.79, 0.81)
+        src = tmp_path / "shelf.step"
+        src.write_bytes(apply_step_colours(_STEP.encode(), None, {"Board": tan, "Bracket": grey}))
+
+        s = authoring_server
+        board, bracket = _FakeObj("part", label="Board"), _FakeObj("part", label="Bracket")
+        s._ops.import_step.return_value = [board, bracket]
+        s._ops.export_object_step_bytes.return_value = _STEP.encode()  # FreeCAD: no colours
+        sid = (await s.open_session({"name": "shelf"}))["session_id"]
+        result = await s.import_step({"session_id": sid, "file_path": str(src)})
+        assert [p["color"] for p in result["parts"]] == [list(tan), list(grey)]
+        asm = await s.create_assembly({"session_id": sid, "name": "Shelf"})
+        for part_id in result["obj_ids"]:
+            await s.add_part_to_assembly(
+                {"session_id": sid, "assembly_id": asm["obj_id"], "part_id": part_id}
+            )
+
+        base = {"session_id": sid, "obj_id": asm["obj_id"]}
+        out = base64.b64decode((await s.export_model(base))["step_base64"])
+        assert (_colour_of(out, 11), _colour_of(out, 26)) == (tan, grey)
+        # part_materials overrides one part; the other keeps its imported colour.
+        out = base64.b64decode(
+            (await s.export_model({**base, "part_materials": {"Board": "PETG"}}))["step_base64"]
+        )
+        assert (_colour_of(out, 11), _colour_of(out, 26)) == ((0.30, 0.55, 0.80), grey)
+        # An explicit assembly colour beats every imported colour.
+        out = base64.b64decode(
+            (await s.export_model({**base, "color": [0, 0, 255]}))["step_base64"]
+        )
+        assert (_colour_of(out, 11), _colour_of(out, 26)) == ((0.0, 0.0, 1.0), (0.0, 0.0, 1.0))
+
+    async def test_import_of_an_unreadable_file_records_no_colour(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        await s.import_step({"session_id": sid, "file_path": "/nonexistent/x.step"})
+        assert s._sessions.get_entry(sid, "part_1").metadata == {}
 
     async def test_create_primitive_passes_document_and_kind(
         self, authoring_server: FreecadServer
@@ -1113,7 +1383,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 44
+        assert len(response["result"]["tools"]) == 46
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -1160,7 +1430,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 44
+        assert response["result"]["tools_available"] == 46
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

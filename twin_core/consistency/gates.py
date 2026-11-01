@@ -35,6 +35,16 @@ than inventing a second, competing one -- even though that convention lives
 on a different node type (a hazard-analysis work product, not a ``"risk"``
 ``EngineeringEntity``).
 
+**G3 safety-critical assumptions (FORGE-312)**: spec section 30's guardrail
+("never silently fill safety-critical unknowns") gets its own check --
+``_evaluate_assumption_checks`` FAILs any ``"assumption"``
+``EngineeringEntity`` whose ``metadata.safety_critical`` is truthy and has
+neither ``expiry`` nor ``resolution`` recorded. Same FAIL-only-informs-the-
+human-reviewer posture as every other check in this module (see the "does
+NOT ever BLOCK a gate transition" note above) -- this doesn't invent new
+enforcement, it gives the human reviewer a real, visible signal where today
+an unresolved safety-critical assumption is invisible to G3 entirely.
+
 **G3 budget/invariant persistence (FORGE-73)**: ``evaluate_g3_feasibility``'s
 ``budgets``/``invariants`` params default to ``None``, which now means
 "auto-load this project's persisted 'budget'/'invariant' ``EngineeringEntity``
@@ -124,23 +134,34 @@ reads ``.requirements_to_architecture`` (does the requirement bind to a
 returns.
 
 **G7 (Verification Readiness)**: per critical (``ConstraintSeverity.ERROR``)
-requirement in the project, two real per-requirement checks reusing
-``TraceabilityAgent``'s own established conventions rather than inventing
-new ones -- "verification method defined" (``Constraint.metadata
-["verification_method"]``, the exact field ``RequirementAuthorAgent``
-(FORGE-55) already writes and ``TraceabilityAgent`` already reads) and
-"ownership defined" (``Constraint.source`` -- confirmed the closest real
-owner field this codebase has; ``TraceabilityAgent``'s own docstring says
-so explicitly). Both are a real FAIL when missing on a critical requirement,
-not a hedge -- unlike G5's alternatives, there's no legitimate "not
-applicable" case for a critical requirement lacking a verification method or
-an owner. "Acceptance criteria defined", "measurement method defined", and
-"expected evidence defined" come back ``NOT_EVALUATED``: grepped the whole
-repo for ``acceptance_criteria``/``expected_evidence``/``measurement_method``
-as metadata keys -- zero hits anywhere. ``entity_type="verification_case"``
-is a real, usable ``EngineeringEntity`` literal with a fully generic
-recorder (``engineering_entity_recorder.py``) but no dedicated field
-convention of its own, same situation G4 found for "subsystem"/"interface".
+requirement in the project, four real per-requirement checks -- "verification
+method defined" and "acceptance criteria defined" read ``Constraint.
+verification_method``/``Constraint.acceptance_criteria`` (real typed fields,
+FORGE-312), falling back to the same-named ``metadata`` keys for data
+``RequirementAuthorAgent`` (FORGE-55) already wrote there before those fields
+existed -- "ownership defined" (``Constraint.source`` -- confirmed the
+closest real owner field this codebase has; ``TraceabilityAgent``'s own
+docstring says so explicitly) -- and "expected evidence defined"
+(``Constraint.expected_evidence``, FORGE-258, gap G-A2, validated against
+``twin_core.models.enums.EVIDENCE_TYPES`` -- the same set
+``twin.record_evidence`` itself accepts, no metadata-key fallback since
+grepping the whole repo found zero prior uses of this key). All four are a
+real FAIL when missing on a critical requirement, not a hedge -- unlike G5's
+alternatives, there's no legitimate "not applicable" case for a critical
+requirement lacking a verification method, acceptance criteria, an owner, or
+a declared expected evidence kind. "Measurement method defined" still comes
+back ``NOT_EVALUATED``: no field or metadata-key convention exists for it
+anywhere in this codebase, and FORGE-258's own scope is specifically
+verification method + expected evidence, not measurement method (a related
+but separate, still-unclaimed concept). ``entity_type="verification_case"``
+is a real, usable ``EngineeringEntity`` literal with a fully generic recorder
+(``engineering_entity_recorder.py``) but no dedicated field convention of its
+own, same situation G4 found for "subsystem"/"interface" -- and
+``api_gateway.requirement_intelligence.traceability``'s own
+``TraceabilityAgent``/``TraceabilityCoverage`` (FORGE-56) is a real, working
+"which requirements lack verification" engine with zero REST route or
+dashboard consumer today; surfacing it is real, separable follow-up work,
+not this ticket's own scope.
 
 **G8 (Release)**: "configuration baseline fixed" is real --
 ``TwinAPI.list_baselines(project_id=...)`` (FORGE-51) already exists and is
@@ -192,7 +213,9 @@ from twin_core.api import TwinAPI
 from twin_core.consistency.budgets import BudgetEngine, budget_from_entity
 from twin_core.consistency.invariants import InvariantEngine, invariant_from_entity
 from twin_core.consistency.models import Budget, Invariant
+from twin_core.models.constraint import Constraint
 from twin_core.models.enums import AuthorityState, ConstraintSeverity, WorkProductType
+from twin_core.models.quantity import IncompatibleUnitsError
 
 
 class GateCheckStatus(StrEnum):
@@ -277,56 +300,150 @@ async def _evaluate_invariant_check(
     )
 
 
+def _risk_score(severity: Any, likelihood: Any) -> int | None:
+    """``severity * likelihood``, or ``None`` when either is missing or not a number."""
+    if severity is None or likelihood is None:
+        return None
+    try:
+        return int(severity) * int(likelihood)
+    except (TypeError, ValueError):
+        return None
+
+
+def _risk_check(
+    check_id: str, label: str, severity: Any, likelihood: Any, mitigation: Any
+) -> GateCheck:
+    score = _risk_score(severity, likelihood)
+    if score is None:
+        return GateCheck(
+            id=check_id,
+            label=f"Risk assessed: {label}",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no numeric severity/likelihood recorded yet",
+        )
+    level = _risk_level(score)
+    mitigated = bool(str(mitigation or "").strip())
+    return GateCheck(
+        id=check_id,
+        label=f"Risk mitigated: {label}",
+        status=(
+            GateCheckStatus.FAIL if level == "critical" and not mitigated else GateCheckStatus.PASS
+        ),
+        detail=(
+            f"severity={severity}, likelihood={likelihood}, level={level}, mitigated={mitigated}"
+        ),
+    )
+
+
 async def _evaluate_risk_checks(twin: TwinAPI, project_id: UUID) -> list[GateCheck]:
-    """One check per recorded 'risk' EngineeringEntity: FAIL if it scores
-    critical (severity*likelihood) with no mitigation recorded;
-    NOT_EVALUATED if the risk hasn't been scored yet (metadata missing
-    severity/likelihood) -- never a silent PASS for an un-assessed risk. No
-    risks recorded at all also surfaces as one NOT_EVALUATED check, not an
-    empty, invisible pass.
+    """One check per recorded risk: FAIL if it scores critical
+    (severity*likelihood) with no mitigation; NOT_EVALUATED if it has not been
+    scored -- never a silent PASS for an un-assessed risk.
+
+    Risks come from two places (FORGE-549): 'risk' EngineeringEntities, and
+    the hazard rows of the project's HAZARD_ANALYSIS work products (what
+    analyze_hazards and twin.commit_hazard_analysis record), which the gate
+    used to ignore. An entity's score may be recorded as ``likelihood`` or
+    ``probability`` (the tool description used to say the latter). No risks
+    recorded at all is one NOT_EVALUATED check, not an empty, invisible pass.
     """
     entities = await twin.list_engineering_entities(project_id=project_id)
     risks = [e for e in entities if e.entity_type == "risk"]
-    if not risks:
+    analyses = await twin.list_work_products(
+        work_product_type=WorkProductType.HAZARD_ANALYSIS, project_id=project_id
+    )
+    if not risks and not any((a.metadata or {}).get("hazards") for a in analyses):
         return [
             GateCheck(
                 id="risks:none-recorded",
                 label="Major risks identified",
                 status=GateCheckStatus.NOT_EVALUATED,
-                detail="no 'risk' entities recorded for this project yet",
+                detail="no 'risk' entities or hazard analyses recorded for this project yet",
             )
         ]
 
     checks: list[GateCheck] = []
     for risk in risks:
-        severity = risk.metadata.get("severity")
-        likelihood = risk.metadata.get("likelihood")
-        label = risk.title or risk.statement or str(risk.id)
-        if severity is None or likelihood is None:
+        meta = risk.metadata
+        likelihood = meta.get("likelihood", meta.get("probability"))
+        checks.append(
+            _risk_check(
+                f"risk:{risk.id}",
+                risk.title or risk.statement or str(risk.id),
+                meta.get("severity"),
+                likelihood,
+                meta.get("mitigation"),
+            )
+        )
+    for analysis in analyses:
+        for index, hazard in enumerate((analysis.metadata or {}).get("hazards") or []):
+            if not isinstance(hazard, dict):
+                continue
             checks.append(
-                GateCheck(
-                    id=f"risk:{risk.id}",
-                    label=f"Risk assessed: {label}",
-                    status=GateCheckStatus.NOT_EVALUATED,
-                    detail="no severity/likelihood recorded in metadata yet",
+                _risk_check(
+                    f"hazard:{analysis.id}:{index}",
+                    str(hazard.get("hazard") or hazard.get("name") or f"hazard {index + 1}"),
+                    hazard.get("severity"),
+                    hazard.get("likelihood", hazard.get("probability")),
+                    hazard.get("mitigation"),
                 )
             )
+    return checks
+
+
+async def _evaluate_assumption_checks(twin: TwinAPI, project_id: UUID) -> list[GateCheck]:
+    """One check per recorded 'assumption' EngineeringEntity whose metadata
+    marks it ``safety_critical`` (spec section 30 guardrail: "never silently
+    fill safety-critical unknowns") -- FAIL when it has neither an
+    ``expiry`` nor a ``resolution`` recorded (an unresolved safety-critical
+    unknown with no plan to resolve or revisit it), PASS otherwise. A
+    non-safety-critical assumption is never flagged -- this check exists
+    for the guardrail's specific safety-critical case, not as a blanket
+    "assumptions must be resolved" rule. No assumptions recorded at all
+    surfaces as one NOT_EVALUATED check, same convention as
+    ``_evaluate_risk_checks``.
+    """
+    entities = await twin.list_engineering_entities(project_id=project_id)
+    assumptions = [e for e in entities if e.entity_type == "assumption"]
+    if not assumptions:
+        return [
+            GateCheck(
+                id="assumptions:none-recorded",
+                label="Safety-critical assumptions resolved or scheduled",
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no 'assumption' entities recorded for this project yet",
+            )
+        ]
+
+    checks: list[GateCheck] = []
+    for assumption in assumptions:
+        label = assumption.title or assumption.statement or str(assumption.id)
+        if not assumption.metadata.get("safety_critical"):
             continue
-        score = int(severity) * int(likelihood)
-        level = _risk_level(score)
-        mitigated = bool(str(risk.metadata.get("mitigation", "")).strip())
-        is_critical_unmitigated = level == "critical" and not mitigated
+        has_resolution_plan = bool(
+            assumption.metadata.get("expiry") or assumption.metadata.get("resolution")
+        )
         checks.append(
             GateCheck(
-                id=f"risk:{risk.id}",
-                label=f"Risk mitigated: {label}",
-                status=GateCheckStatus.FAIL if is_critical_unmitigated else GateCheckStatus.PASS,
+                id=f"assumption:{assumption.id}",
+                label=f"Safety-critical assumption resolved or scheduled: {label}",
+                status=GateCheckStatus.PASS if has_resolution_plan else GateCheckStatus.FAIL,
                 detail=(
-                    f"severity={severity}, likelihood={likelihood}, "
-                    f"level={level}, mitigated={mitigated}"
+                    "expiry/resolution recorded"
+                    if has_resolution_plan
+                    else "safety_critical assumption has no expiry or resolution recorded"
                 ),
             )
         )
+    if not checks:
+        return [
+            GateCheck(
+                id="assumptions:none-safety-critical",
+                label="Safety-critical assumptions resolved or scheduled",
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no assumption entity is marked metadata.safety_critical for this project",
+            )
+        ]
     return checks
 
 
@@ -431,11 +548,37 @@ async def evaluate_g3_feasibility(
 
     checks: list[GateCheck] = []
     for budget in budgets:
-        checks.append(await _evaluate_budget_check(budget_engine, budget))
+        try:
+            checks.append(await _evaluate_budget_check(budget_engine, budget))
+        except IncompatibleUnitsError as exc:
+            # FORGE-311: a WorkProduct storing this metric under a
+            # dimensionally-incompatible unit (e.g. a length where the
+            # budget's own unit is a mass) is a real data error -- degrade
+            # to NOT_EVALUATED with the reason, same as a malformed budget
+            # entity above, never a crashed gate or a silent pass.
+            checks.append(
+                GateCheck(
+                    id=f"budget:{budget.id}",
+                    label=f"{budget.metric.title()} budget ({budget.unit})",
+                    status=GateCheckStatus.NOT_EVALUATED,
+                    detail=str(exc),
+                )
+            )
     for invariant in invariants:
-        checks.append(await _evaluate_invariant_check(invariant_engine, project_id, invariant))
+        try:
+            checks.append(await _evaluate_invariant_check(invariant_engine, project_id, invariant))
+        except IncompatibleUnitsError as exc:
+            checks.append(
+                GateCheck(
+                    id=f"invariant:{invariant.id}",
+                    label=invariant.id,
+                    status=GateCheckStatus.NOT_EVALUATED,
+                    detail=str(exc),
+                )
+            )
     checks.extend(extra_checks)
     checks.extend(await _evaluate_risk_checks(twin, project_id))
+    checks.extend(await _evaluate_assumption_checks(twin, project_id))
     for check_id, label in _G3_NOT_EVALUATED_CHECKS:
         checks.append(
             GateCheck(
@@ -699,11 +842,25 @@ async def evaluate_g6_design_sketch(
     return GateEvaluation(gate_id="G6", status=_status_from_checks(checks), checks=checks)
 
 
-_G7_NOT_EVALUATED_CHECKS = (
-    ("acceptance_criteria_defined", "Acceptance criteria defined"),
-    ("measurement_method_defined", "Measurement method defined"),
-    ("expected_evidence_defined", "Expected evidence defined"),
-)
+_G7_NOT_EVALUATED_CHECKS = (("measurement_method_defined", "Measurement method defined"),)
+
+
+def _verification_method_of(req: Constraint) -> str:
+    # FORGE-312: prefer the real typed field; fall back to the metadata key
+    # RequirementAuthorAgent (FORGE-55) already wrote before this field
+    # existed, so already-recorded requirements don't regress to FAIL.
+    return req.verification_method or str(req.metadata.get("verification_method") or "")
+
+
+def _acceptance_criteria_of(req: Constraint) -> str:
+    return req.acceptance_criteria or str(req.metadata.get("acceptance_criteria") or "")
+
+
+def _expected_evidence_of(req: Constraint) -> str:
+    # FORGE-258: no pre-existing metadata-key convention to fall back to --
+    # confirmed via this module's own docstring grep, `expected_evidence`
+    # had zero hits anywhere before this field existed.
+    return req.expected_evidence
 
 
 async def _evaluate_critical_requirement_checks(twin: TwinAPI, project_id: UUID) -> list[GateCheck]:
@@ -721,15 +878,15 @@ async def _evaluate_critical_requirement_checks(twin: TwinAPI, project_id: UUID)
 
     checks: list[GateCheck] = []
     for req in critical:
-        has_verification = bool(req.metadata.get("verification_method"))
+        verification_method = _verification_method_of(req)
         checks.append(
             GateCheck(
                 id=f"requirement:{req.id}:verification_method",
                 label=f"Verification method defined: {req.name}",
-                status=GateCheckStatus.PASS if has_verification else GateCheckStatus.FAIL,
+                status=GateCheckStatus.PASS if verification_method else GateCheckStatus.FAIL,
                 detail=(
-                    str(req.metadata.get("verification_method"))
-                    if has_verification
+                    verification_method
+                    if verification_method
                     else "no verification_method recorded on this critical requirement"
                 ),
             )
@@ -744,6 +901,38 @@ async def _evaluate_critical_requirement_checks(twin: TwinAPI, project_id: UUID)
                     f"source={req.source}"
                     if has_owner
                     else "no source recorded on this critical requirement"
+                ),
+            )
+        )
+        # FORGE-312: real check, replacing what used to be a permanent
+        # NOT_EVALUATED placeholder -- acceptance_criteria is now a real
+        # field a caller can (and, for a critical requirement, should) set.
+        acceptance_criteria = _acceptance_criteria_of(req)
+        checks.append(
+            GateCheck(
+                id=f"requirement:{req.id}:acceptance_criteria",
+                label=f"Acceptance criteria defined: {req.name}",
+                status=GateCheckStatus.PASS if acceptance_criteria else GateCheckStatus.FAIL,
+                detail=(
+                    acceptance_criteria
+                    if acceptance_criteria
+                    else "no acceptance_criteria recorded on this critical requirement"
+                ),
+            )
+        )
+        # FORGE-258 (gap G-A2): real check, replacing what used to be a
+        # permanent NOT_EVALUATED placeholder -- expected_evidence is now a
+        # real, validated field (twin_core.models.enums.EVIDENCE_TYPES).
+        expected_evidence = _expected_evidence_of(req)
+        checks.append(
+            GateCheck(
+                id=f"requirement:{req.id}:expected_evidence",
+                label=f"Expected evidence defined: {req.name}",
+                status=GateCheckStatus.PASS if expected_evidence else GateCheckStatus.FAIL,
+                detail=(
+                    expected_evidence
+                    if expected_evidence
+                    else "no expected_evidence recorded on this critical requirement"
                 ),
             )
         )
@@ -812,8 +1001,23 @@ async def _evaluate_baseline_check(twin: TwinAPI, project_id: UUID) -> GateCheck
 
 
 async def _evaluate_stale_evidence_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
+    """FORGE-527: ``simulation_result`` work products are evidence too, and the
+    detail names each stale record and the revision it was for, so the
+    reviewer knows what to re-run. Superseded records are replaced, not
+    outstanding, so they do not fail the check."""
+    from twin_core.consistency.record_pins import describe_staleness
+    from twin_core.models.enums import WorkProductType
+
     entities = await twin.list_engineering_entities(project_id=project_id)
-    evidence = [e for e in entities if e.entity_type == "evidence"]
+    evidence: list[tuple[str, dict]] = [
+        (e.statement or e.title or str(e.id), e.metadata)
+        for e in entities
+        if e.entity_type == "evidence"
+    ]
+    sims = await twin.list_work_products(
+        work_product_type=WorkProductType.SIMULATION_RESULT, project_id=project_id
+    )
+    evidence += [(w.name, w.metadata) for w in sims]
     if not evidence:
         return GateCheck(
             id="stale_evidence_resolved",
@@ -821,20 +1025,29 @@ async def _evaluate_stale_evidence_check(twin: TwinAPI, project_id: UUID) -> Gat
             status=GateCheckStatus.NOT_EVALUATED,
             detail="no 'evidence' entities recorded for this project yet",
         )
-    stale = [e for e in evidence if e.metadata.get("staleness", "current") in ("stale", "invalid")]
+    stale = [
+        describe_staleness(name, meta) or name
+        for name, meta in evidence
+        if (meta or {}).get("staleness", "current") in ("stale", "invalid")
+    ]
     return GateCheck(
         id="stale_evidence_resolved",
         label="Stale evidence resolved",
         status=GateCheckStatus.FAIL if stale else GateCheckStatus.PASS,
         detail=(
-            f"{len(stale)} of {len(evidence)} evidence entit(ies) stale/invalid"
+            f"{len(stale)} of {len(evidence)} evidence record(s) stale/invalid: "
+            + "; ".join(stale[:5])
+            + (f"; and {len(stale) - 5} more" if len(stale) > 5 else "")
             if stale
-            else f"all {len(evidence)} evidence entit(ies) current"
+            else f"all {len(evidence)} evidence record(s) current"
         ),
     )
 
 
-_APPROVED_AUTHORITY = (AuthorityState.APPROVED, AuthorityState.BASELINED)
+# Public (FORGE-319): also used by api_gateway.requirement_intelligence.
+# promotion's own waiver-approval check -- one place decides what
+# "approved" means for a waiver/release_approval entity's authority.
+APPROVED_AUTHORITY = (AuthorityState.APPROVED, AuthorityState.BASELINED)
 
 
 async def _evaluate_waivers_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
@@ -853,7 +1066,7 @@ async def _evaluate_waivers_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
             status=GateCheckStatus.PASS,
             detail="no waivers recorded for this project -- nothing outstanding",
         )
-    unapproved = [w for w in entities if w.authority not in _APPROVED_AUTHORITY]
+    unapproved = [w for w in entities if w.authority not in APPROVED_AUTHORITY]
     return GateCheck(
         id="waivers_approved",
         label="Waivers approved",
@@ -878,7 +1091,7 @@ async def _evaluate_release_approval_check(twin: TwinAPI, project_id: UUID) -> G
     entities = await twin.list_engineering_entities(
         project_id=project_id, entity_type="release_approval"
     )
-    approved = [r for r in entities if r.authority in _APPROVED_AUTHORITY]
+    approved = [r for r in entities if r.authority in APPROVED_AUTHORITY]
     return GateCheck(
         id="release_approved",
         label="Build/manufacturing release approved",

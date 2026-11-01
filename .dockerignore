@@ -41,6 +41,15 @@ tests
 *.md
 LICENSE
 
+# ...except the files pyproject.toml names as packaging metadata
+# (FORGE-648). `readme` and `license-files` are read while the wheel's
+# metadata is generated, so `pip install .` inside the image fails with
+# "Readme file does not exist" if they are not in the build context --
+# which is invisible to CI, where every file is present.
+# Keep in step with pyproject.toml; tests/unit/test_docker_build.py checks.
+!README.md
+!LICENSE
+
 # Claude
 .claude
 

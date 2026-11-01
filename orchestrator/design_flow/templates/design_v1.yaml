@@ -1,0 +1,25 @@
+# design_v1 flow template (FORGE-397).
+#
+# Stages shared with every flow come from the spine
+# (templates/spine/spine_v1.yaml), pulled with `- use: <id>` plus any keys
+# this flow overrides; only this flow's own phases are written out here.
+# tests/unit/test_task_contract.py pins the compiled result against a golden
+# snapshot. Edit with care: `name` may be a folded multi-line scalar, and an
+# inserted key once landed inside it.
+#
+# `version` is recorded on every run started from this template. Bump it
+# when the phases or gates change, so a completed run can still say what
+# it actually ran.
+id: design_v1
+version: 1.0.0
+extends: spine_v1
+name: Design vertical (Requirements -> Design -> Simulation)
+label: General design
+description: 'A product-agnostic lifecycle: intent through requirements, design and V&V.'
+phases:
+- use: intent
+- use: needs
+- use: requirements
+- use: feasibility
+- use: design
+- use: simulation

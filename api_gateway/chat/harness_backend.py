@@ -12,6 +12,7 @@ network; production defaults to the real provider adapters.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -26,9 +27,16 @@ import structlog
 from api_gateway.chat.backend import ChatBackend
 from api_gateway.chat.experience_adapter import record_chat_experience
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
-from api_gateway.chat.skill_tools import skill_tools_from_registry
-from api_gateway.chat.tool_approvals import get_approval_store
+from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_registry
+from api_gateway.chat.tool_approvals import approver_reachable, get_approval_store
+from mcp_core.profiles import MAX_TOOLS as PHASE_TOOL_CAP
 from observability.metrics import MetricsCollector
+from orchestrator.design_flow.grounding import (
+    NO_TWIN_COMMIT_BANNER,
+    UNGROUNDED_BANNER,
+    UNVERIFIED_NODE_ID_BANNER,
+    UNVERIFIED_NODE_ID_NOTE,
+)
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
 from orchestrator.harness.compression import default_token_count, summarize_trajectory
 from orchestrator.harness.native_tools import NATIVE_SYSTEM, run_native_tools
@@ -48,13 +56,20 @@ from orchestrator.harness.providers import (
 from orchestrator.harness.providers.adapters import default_stream_events
 from orchestrator.harness.providers.auth_store import AuthStore
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
+from orchestrator.harness.providers.provenance import record_fallback
 from orchestrator.harness.providers.registry import (
     ANTHROPIC,
     OPENAI,
+    InvalidModelError,
     get_profile,
     max_tools_for,
+    model_family_mismatch,
+    validate_model,
 )
-from orchestrator.harness.react import run_react
+from orchestrator.harness.providers.routing import resolve_route, routing_scope
+from orchestrator.harness.providers.usage import usage_scope
+from orchestrator.harness.react import ReActStep, ToolCall, run_react
+from orchestrator.harness.result_handles import READER_INPUT_SCHEMA, READER_TOOL_NAME
 from orchestrator.harness.runtime import OnApprovalRequest
 from orchestrator.harness.tools import DuplicateToolError, Handler, ToolRegistry
 from skill_registry.mcp_bridge import McpBridge
@@ -154,11 +169,12 @@ def make_set_project_scope_tool(thread_id: str, backend: ChatBackend) -> NativeT
 
 # Three-tier permissions, "ask" (production-harness audit follow-up): a
 # starter, conservative set of tool ids that mutate persistent state outside
-# the ephemeral adapter workspace. Everything else stays auto-allow. Deliberately
-# narrow for v1 -- expanding tier assignment to more tools (or to skill-layer
-# tools, which currently bypass this since they call twin.commit_geometry
-# internally rather than as a separately model-callable step) is flagged as
-# a real, known gap, not silently dropped.
+# the ephemeral adapter workspace. Everything else stays auto-allow.
+# Deliberately narrow for v1 -- expanding tier assignment to more tools is a
+# call-site change here. Skill-layer tools (which call twin.commit_geometry
+# internally rather than as a separately model-callable step, so a name-based
+# list here could never cover them) get the same "ask" tier a different way --
+# see skill_tools.py's _tool_for_registration (FORGE-97).
 _REQUIRES_APPROVAL_TOOL_IDS = frozenset(
     {
         "twin.commit_geometry",
@@ -175,7 +191,9 @@ _REQUIRES_APPROVAL_TOOL_IDS = frozenset(
 # ``ToolRegistry.invoke`` -> ``GateBlockedError``) and nothing ever declared a
 # gate, so the mechanism was dead code and "read-only by default" described the
 # MCP sidecar's CLI flag only -- chat itself could always write.
-GATE_TWIN_WRITE = "twin_write"
+# GATE_TWIN_WRITE's canonical definition lives in skill_tools.py (FORGE-97) --
+# that module needs it too and this one already imports from it, so defining
+# it there and importing it here avoids a circular import.
 GATE_PROJECT_WRITE = "project_write"
 
 _GATED_TOOL_IDS: dict[str, tuple[str, ...]] = {
@@ -195,6 +213,8 @@ _GATED_TOOL_IDS: dict[str, tuple[str, ...]] = {
     "twin.record_document": (GATE_TWIN_WRITE,),
     "twin.propose_change": (GATE_TWIN_WRITE,),
     "twin.stage_work_product_file": (GATE_TWIN_WRITE,),
+    # FORGE-687: design files kept as work products.
+    "twin.record_design_files": (GATE_TWIN_WRITE,),
     # FORGE-70 (epic FORGE-35): the ECT lifecycle -- same gate tier as every
     # other twin-writing tool above, no new stricter tier invented (see
     # api_gateway/twin/ect_tools.py's module docstring for why).
@@ -259,6 +279,22 @@ _CORE_ADAPTER_SERVERS = frozenset(
     }
 )
 
+# FORGE-518: tool ids that stay visible under domain scoping even though no
+# skill declares them. ``twin.stage_work_product_file`` is a core tool, so a
+# domain-scoped chat turn could stage a stored part yet have no way to load it
+# (``freecad.import_step`` is in no skill's ``tools_required``). These are the
+# FreeCAD stage/import/export round-trip, kept with their twin counterparts.
+_ALWAYS_VISIBLE_TOOL_IDS = frozenset(
+    {
+        "freecad.open_session",
+        "freecad.close_session",
+        "freecad.import_step",
+        "freecad.describe_step_file",
+        "freecad.describe_session",
+        "freecad.export_model",
+    }
+)
+
 _skill_cards_cache: list[SkillCard] | None = None
 
 
@@ -281,6 +317,7 @@ async def mcp_tools_from_bridge(
     bridge: McpBridge,
     enabled: set[str] | None = None,
     domains: tuple[str, ...] | None = None,
+    tool_allowlist: frozenset[str] | None = None,
 ) -> list[tuple[str, NativeToolDef]]:
     """Adapt a provider's MCP bridge tools into harness ``NativeToolDef``s.
 
@@ -307,6 +344,12 @@ async def mcp_tools_from_bridge(
     mid-turn escape hatch for when a scoped turn genuinely needs a tool
     outside its discipline. ``None`` (the default) registers every available
     tool, unchanged from before this parameter existed.
+
+    ``tool_allowlist`` (FORGE-479), when given, is an exact set of tool ids and
+    replaces the domain logic: nothing outside it is registered, not even a
+    core adapter. Design-flow phases pass ``mcp_core.profiles
+    .tools_for_disciplines`` so a phase carries 40 tools or fewer instead of
+    every core adapter plus its skills' tools.
     """
     domain_allow: set[str] | None = None
     if domains:
@@ -328,10 +371,14 @@ async def mcp_tools_from_bridge(
         server, _, tool = tool_id.partition(".")
         if not tool:
             server, tool = "mcp", tool_id
+        if tool_allowlist is not None and tool_id not in tool_allowlist:
+            continue
         if (
-            domain_allow is not None
+            tool_allowlist is None
+            and domain_allow is not None
             and server not in _CORE_ADAPTER_SERVERS
             and tool_id not in domain_allow
+            and tool_id not in _ALWAYS_VISIBLE_TOOL_IDS
         ):
             continue
         capability = entry.get("capability")
@@ -374,10 +421,45 @@ async def mcp_tools_from_bridge(
 _MAX_TOOL_SEARCH_RESULTS = 8
 
 
+_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _query_tokens(query: str) -> list[str]:
+    """Lower-case alphanumeric words of a search query, without duplicates."""
+    return list(dict.fromkeys(t for t in _TOKEN_SPLIT.split(query.lower()) if t))
+
+
+def _match_score(tokens: list[str], server: str, tdef: NativeToolDef) -> int:
+    """How many query tokens hit a tool's id, name or description (0 unless all do).
+
+    FORGE-502: the old check was one substring of the whole query against
+    ``name + description``, so 'freecad assembly' never matched
+    ``freecad.create_assembly`` (the words are not adjacent in any field).
+    Every token must now appear somewhere in the id/name/description; tokens
+    found in the id rank a tool higher.
+    """
+    tool_id = f"{server}.{tdef.name}".lower()
+    haystack = f"{tool_id} {tdef.name} {tdef.description}".lower()
+    if not all(t in haystack for t in tokens):
+        return 0
+    return len(tokens) + sum(1 for t in tokens if t in tool_id)
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split())[:160]
+
+
+def _service_refused(tool_id: str) -> bool:
+    from mcp_core.profiles import _service_refused as refused
+
+    return refused(tool_id)
+
+
 def make_search_tools_tool(
     bridge: McpBridge,
     enabled: set[str] | None,
     runtime_cell: dict[str, Any],
+    max_total_tools: int | None = None,
 ) -> NativeToolDef:
     """``search_tools`` — dynamic mid-turn tool discovery (MET-747 follow-up).
 
@@ -399,28 +481,62 @@ def make_search_tools_tool(
     once the loop starts) — the caller populates
     ``runtime_cell["runtime"] = ctx.runtime`` immediately after
     ``build_agent_runtime`` returns.
+
+    ``max_total_tools`` (FORGE-479), when given, stops registration once the
+    registry holds that many tools, so the escape hatch cannot grow a
+    phase-scoped turn back past its tool budget. The instruction says so.
     """
 
     async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
         query = str(arguments.get("query", "")).strip().lower()
-        if not query:
+        tokens = _query_tokens(query)
+        if not tokens:
             raise ValueError("search_tools: 'query' is required (non-empty string)")
         runtime = runtime_cell.get("runtime")
         if runtime is None:
             raise RuntimeError("search_tools: runtime not ready yet")
+        # FORGE-502: the whole MCP catalog from the bridge, never the phase
+        # allowlist (that is what the phase already has).
         catalog = await mcp_tools_from_bridge(bridge, enabled)
         known = {t.name for t in runtime.tools.all_tools()}
+        matches: list[dict[str, str]] = []
         registered: list[str] = []
         already: list[str] = []
-        for server, tdef in catalog:
-            haystack = f"{tdef.name} {tdef.description}".lower()
-            if query not in haystack:
-                continue
+        over_budget: list[str] = []
+        unavailable: list[str] = []
+        ranked = sorted(
+            (
+                (hits, server, tdef)
+                for server, tdef in catalog
+                if (hits := _match_score(tokens, server, tdef)) > 0
+            ),
+            key=lambda item: -item[0],
+        )
+        for _hits, server, tdef in ranked:
+            tool_id = f"{server}.{tdef.name}"
             full_name = ToolRegistry.mcp_name(server, tdef.name)
+            if len(matches) >= _MAX_TOOL_SEARCH_RESULTS and full_name not in known:
+                continue
+            matches.append({"id": tool_id, "description": _one_line(tdef.description)})
             if full_name in known:
+                # FORGE-94: "registered" only means present in the
+                # ToolRegistry, NOT present in the schema array a provider
+                # actually receives -- `_select_tools` (native_tools.py)
+                # truncates that array separately, per turn, against the
+                # provider's tools-array cap. Pinning closes the gap: once
+                # pinned, `_select_tools` keeps it unconditionally.
+                runtime.tools.pin(full_name)
                 already.append(full_name)
                 continue
+            if max_total_tools is not None and _service_refused(tool_id):
+                # The sidecar always refuses these for the design-flow service
+                # caller, so registering them would only produce a failing call.
+                unavailable.append(tool_id)
+                continue
             if len(registered) >= _MAX_TOOL_SEARCH_RESULTS:
+                continue
+            if max_total_tools is not None and len(known) >= max_total_tools:
+                over_budget.append(full_name)
                 continue
             try:
                 runtime.tools.register_mcp(
@@ -433,22 +549,58 @@ def make_search_tools_tool(
                     requires_approval=tdef.requires_approval,
                 )
             except DuplicateToolError:
+                runtime.tools.pin(full_name)
                 already.append(full_name)
                 continue
+            runtime.tools.pin(full_name)
             registered.append(full_name)
             known.add(full_name)
-        if not registered and not already:
-            return {
-                "registered": [],
-                "already_available": [],
-                "instruction": f"No tool matched '{query}'. Try a different keyword.",
-            }
-        instruction = (
-            f"Registered {len(registered)} tool(s) — call them directly by name now."
-            if registered
-            else "All matching tools were already available — call them directly by name."
+        # FORGE-501: a phase hunting for a missing tool was invisible. Log the
+        # query and what it found, so the hunt shows up next to the step count.
+        logger.info(
+            "search_tools_query",
+            query=query,
+            matched=[m["id"] for m in matches],
+            registered=registered,
+            already_available=already,
+            not_registered=over_budget[:_MAX_TOOL_SEARCH_RESULTS],
+            unavailable=unavailable,
         )
-        return {"registered": registered, "already_available": already, "instruction": instruction}
+        result: dict[str, Any] = {
+            "matches": matches,
+            "registered": registered,
+            "already_available": already,
+        }
+        if over_budget:
+            result["not_registered"] = over_budget[:_MAX_TOOL_SEARCH_RESULTS]
+        if unavailable:
+            result["unavailable"] = unavailable
+        if not matches:
+            result["instruction"] = f"No tool matched '{query}'. Try a different keyword."
+            return result
+        parts: list[str] = []
+        if registered:
+            parts.append(f"Registered {len(registered)} tool(s); call them directly by name now.")
+        if already:
+            parts.append("Already available (call directly): " + ", ".join(already) + ".")
+        if over_budget:
+            parts.append(
+                "These tools EXIST in the catalog but are NOT available to this phase: "
+                f"it is capped at {max_total_tools} tools and they are all in use, so "
+                f"they were NOT registered and calling them will fail: {', '.join(over_budget)}."
+            )
+        if unavailable:
+            parts.append(
+                "These tools EXIST but are unavailable: the design-flow service caller is "
+                f"always refused them, so they were NOT registered: {', '.join(unavailable)}."
+            )
+        if not registered and not already:
+            parts.append(
+                "Work with the tools you have, and say in your summary which capability "
+                "was missing."
+            )
+        result["instruction"] = " ".join(parts)
+        return result
 
     return NativeToolDef(
         name="search_tools",
@@ -673,11 +825,22 @@ def resolve_active_provider(provider: str | None = None) -> str:
     selection = store.get_selection()
     sel_provider = selection.provider.strip().lower() if selection else ""
     env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
-    return ((provider or "").strip().lower()) or sel_provider or env_provider or "anthropic"
+    explicit = (provider or "").strip().lower()
+    if not explicit:
+        # FORGE-477: the role's route (phase, project, table) sits between an
+        # explicit per-turn choice and the durable selection, and the
+        # native-vs-ReAct decision must see it for the same MET-575 reason.
+        routed = resolve_route()
+        if routed is not None:
+            explicit = routed.route.provider
+    return explicit or sel_provider or env_provider or "anthropic"
 
 
 def provider_config_from_env(
-    *, provider: str | None = None, model: str | None = None
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    metrics: MetricsCollector | None = None,
 ) -> HarnessProviderConfig:
     """Build the 'generator' role's provider fallback chain from (in precedence
     order): per-turn UI override → the gateway auth store (`forge auth login` /
@@ -696,7 +859,27 @@ def provider_config_from_env(
     next to it. Returns a real chain instead: primary, then the env default
     (if it's a different provider), then every other provider with a stored
     raw key, each deduped by id.
+
+    FORGE-468: a candidate whose model its provider's family cannot serve
+    (e.g. ``openai-codex`` + ``claude-opus-4-8``, the live fidel-dev pairing)
+    is dropped here with a warning, instead of being sent and 400ing on every
+    call. Dropping the primary raises the fallback alarm (reason
+    ``model_mismatch``) so it is never silent. If nothing usable is left,
+    :class:`InvalidModelError` is raised.
     """
+    if not provider and not model:
+        # FORGE-477: route by role. An explicit per-turn provider/model wins;
+        # no route at all falls through to the durable selection below.
+        routed = resolve_route()
+        if routed is not None:
+            provider, model = routed.route.provider, routed.route.model
+            logger.info(
+                "llm_route_resolved",
+                role=routed.role,
+                source=routed.source,
+                provider=provider,
+                model=model,
+            )
     store = AuthStore()
     selection = store.get_selection()
     env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
@@ -704,11 +887,48 @@ def provider_config_from_env(
     prov = resolve_active_provider(provider)
     # Only take the selection's model when it belongs to the active provider.
     sel_model = selection.model if (selection and sel_provider == prov) else None
+    if sel_model:
+        # FORGE-93: PUT /v1/harness/selection rejects a new invalid pairing
+        # (e.g. openai-codex + a slashed OpenRouter-style slug), but a
+        # pairing stored *before* that validation existed stays durable and
+        # silently 400s+falls-back on every single default-provider call
+        # forever. Re-validating the already-stored selection on every read
+        # is what actually stops that -- a one-off startup check wouldn't
+        # catch a store written by a still-running older gateway process or
+        # edited out-of-band, and this is no more expensive than the
+        # provider-config build already happening per turn.
+        try:
+            validate_model(prov, sel_model)
+        except InvalidModelError as exc:
+            logger.warning(
+                "harness_stored_selection_invalid_model_ignored",
+                provider=prov,
+                model=sel_model,
+                error=str(exc),
+            )
+            sel_model = None
     default_model = (os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
-    mdl = (model or sel_model or default_model).strip()
 
     def _is_env_default(name: str) -> bool:
         return name == env_provider or not env_provider
+
+    # FORGE-93 (re-test 2026-09-26, confirmed live against fidel-dev's real
+    # env + store): METAFORGE_LLM_MODEL is configured as a matched PAIR with
+    # METAFORGE_LLM_PROVIDER (e.g. openrouter + openai/gpt-4o) -- but when the
+    # store overrides the PRIMARY provider (e.g. to openai-codex) while
+    # carrying NO model override of its own, sel_model above is already None,
+    # and mdl fell through to the env's model default regardless of which
+    # provider it was actually configured for -- silently pairing
+    # openai-codex with an OpenRouter-style slug forever. That pairing was
+    # never re-validated: the #830 fix only re-checks sel_model, and this
+    # case never sets sel_model at all. Only trust default_model as the
+    # PRIMARY candidate's fallback when the resolved provider IS the one env
+    # vars describe -- default_model's OTHER use just below, pairing it with
+    # env_default to build the fallback chain's second candidate, is
+    # unaffected (that candidate's own provider IS env_default by
+    # construction, so they always describe the same configured pair).
+    primary_default_model = default_model if _is_env_default(prov) else "claude-opus-4-8"
+    mdl = (model or sel_model or primary_default_model).strip()
 
     def _spec_for(name: str, model_: str) -> ProviderSpec:
         if _is_env_default(name):
@@ -747,9 +967,60 @@ def provider_config_from_env(
         candidates.append(_spec_for(other, mdl))
         seen.add(other)
 
+    candidates = _drop_unservable_candidates(candidates, metrics=metrics)
     return HarnessProviderConfig(
         slots=RoleModelSlots(slots={"generator": candidates}), retry=RetryPolicy(), rotor=None
     )
+
+
+def _drop_unservable_candidates(
+    candidates: list[ProviderSpec], *, metrics: MetricsCollector | None
+) -> list[ProviderSpec]:
+    """Remove pairs the provider family cannot serve (FORGE-468).
+
+    Each one is logged as ``harness_provider_model_mismatch``. When the
+    primary is among them, the fallback alarm is raised here, at config time,
+    because the pipeline will only ever see the survivors and would otherwise
+    take the first of them for the primary.
+    """
+    kept: list[ProviderSpec] = []
+    rejected: list[tuple[ProviderSpec, str]] = []
+    for spec in candidates:
+        try:
+            reason = model_family_mismatch(spec.name, spec.model)
+        except UnknownProviderError:
+            reason = None
+        if reason is None:
+            kept.append(spec)
+            continue
+        logger.warning(
+            "harness_provider_model_mismatch",
+            provider=spec.name,
+            model=spec.model,
+            primary=spec is candidates[0],
+            error=reason,
+        )
+        rejected.append((spec, reason))
+    if not kept:
+        _, reason = rejected[0]
+        raise InvalidModelError(
+            f"no usable provider for the chat harness: {reason} "
+            f"(every configured candidate was rejected: "
+            f"{', '.join(f'{s.name}:{s.model}' for s, _ in rejected)})"
+        )
+    if rejected and rejected[0][0] is candidates[0]:
+        primary, reason = rejected[0]
+        record_fallback(
+            role="generator",
+            primary=primary.name,
+            primary_model=primary.model,
+            fallback=kept[0].name,
+            fallback_model=kept[0].model,
+            error=reason,
+            reason="model_mismatch",
+            metrics=metrics,
+        )
+    return kept
 
 
 def _tool_families(runtime: Any) -> list[str]:
@@ -792,6 +1063,30 @@ def _public_url_notice() -> str:
     )
 
 
+def _design_flow_nudge(families: list[str]) -> str:
+    """Proactively surface run.start_design_flow for full-project asks (FORGE-90).
+
+    Gap-analysis finding: the tool (MET-587) is real and works, but its own
+    schema description only catches the model's attention when the user says
+    "start/run the full design process" in close to those exact words. A user
+    who instead just states a broad product goal ("design a weather station",
+    "I need a drone flight controller") got ad-hoc single-skill work instead
+    of the gated, multi-phase lifecycle that exists for exactly that ask —
+    the tool was reachable, just never discoverable from intent alone.
+    """
+    if "run" not in families:
+        return ""
+    return (
+        "When the user describes a broad, multi-part hardware/product goal "
+        '(e.g. "design a X", "build me a Y") rather than asking for one '
+        "specific document, model, or calculation, proactively suggest "
+        "starting a full design-flow run with run.start_design_flow — don't "
+        'wait for the user to literally say "start the full design process." '
+        "It pauses for human approval at every phase gate, so offering it "
+        "costs nothing; if the user prefers ad-hoc work instead, respect that."
+    )
+
+
 def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> str:
     """Layered system prompt for the native path (MET-566).
 
@@ -814,6 +1109,9 @@ def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> st
         sections.append(
             "You have tools from these families available: " + ", ".join(families) + "."
         )
+        nudge = _design_flow_nudge(families)
+        if nudge:
+            sections.append(nudge)
     if project_brief:
         sections.append(f"[project context]\n{project_brief}")
     sections.append(
@@ -889,6 +1187,8 @@ async def _build_context(
     on_approval_request: OnApprovalRequest | None = None,
     approval_timeout_seconds: float | None = None,
     domains: tuple[str, ...] | None = None,
+    tool_allowlist: frozenset[str] | None = None,
+    approval_mode: str = "hold",
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -918,7 +1218,9 @@ async def _build_context(
     in an out-of-scope tool mid-turn if the task genuinely needs one."""
     enabled = set(enabled_tools) if enabled_tools is not None else None
     mcp_tools = (
-        await mcp_tools_from_bridge(mcp_bridge, enabled, domains) if mcp_bridge is not None else []
+        await mcp_tools_from_bridge(mcp_bridge, enabled, domains, tool_allowlist)
+        if mcp_bridge is not None
+        else []
     )
     native_tools = (
         [make_set_project_scope_tool(session_id, chat_backend)] if chat_backend is not None else []
@@ -927,13 +1229,25 @@ async def _build_context(
     # (built_agent_runtime constructs it below) -- populated right after.
     runtime_cell: dict[str, Any] = {}
     if mcp_bridge is not None:
-        native_tools = native_tools + [make_search_tools_tool(mcp_bridge, enabled, runtime_cell)]
+        native_tools = native_tools + [
+            make_search_tools_tool(
+                mcp_bridge,
+                enabled,
+                runtime_cell,
+                max_total_tools=PHASE_TOOL_CAP if tool_allowlist is not None else None,
+            )
+        ]
+    native_tools = native_tools + [make_read_tool_result_tool(runtime_cell)]
     if chat_skills_enabled() and twin is not None and mcp_bridge is not None:
         native_tools = native_tools + await skill_tools_from_registry(
-            twin=twin, mcp_bridge=mcp_bridge, session_id=session_id
+            twin=twin,
+            mcp_bridge=mcp_bridge,
+            session_id=session_id,
+            # FORGE-633: industrial design's three checks beside mechanical's.
+            domain=("mechanical", "industrial_design"),
         )
     ctx = build_agent_runtime(
-        provider_config_from_env(provider=provider, model=model),
+        provider_config_from_env(provider=provider, model=model, metrics=metrics),
         credentials=store,
         session_id=session_id,
         # MET-569: without an evaluator a gated tool never runs (fail safe),
@@ -950,12 +1264,300 @@ async def _build_context(
             if approval_timeout_seconds is not None
             else chat_approval_timeout_seconds()
         ),
+        # FORGE-490: "forward" (design-flow phase turns) makes no in-process
+        # hold; the sidecar's service-caller policy decides. "hold" (chat)
+        # is unchanged, and alarms if this process has no approver.
+        approval_mode=approval_mode,
+        approver_reachable=approver_reachable(),
     )
     runtime_cell["runtime"] = ctx.runtime
     return ctx
 
 
-async def run_chat_turn(
+def make_read_tool_result_tool(runtime_cell: dict[str, Any]) -> NativeToolDef:
+    """``read_tool_result``: read back a large tool result by handle (FORGE-479).
+
+    A tool result over the inline limit reaches the model as a summary plus a
+    ``result_handle`` (see ``orchestrator.harness.result_handles``). This is how
+    it gets the rest, a window or one key at a time. Like ``search_tools`` it
+    reads the live runtime out of ``runtime_cell`` at call time.
+    """
+
+    async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
+        runtime = runtime_cell.get("runtime")
+        if runtime is None:
+            raise RuntimeError("read_tool_result: runtime not ready yet")
+        handle = str(arguments.get("handle", "")).strip()
+        if not handle:
+            raise ValueError("read_tool_result: 'handle' is required")
+        key = arguments.get("key")
+        try:
+            return runtime.results.read(
+                handle,
+                offset=int(arguments.get("offset") or 0),
+                limit=int(arguments["limit"]) if arguments.get("limit") else None,
+                key=str(key) if key else None,
+            )
+        except KeyError as exc:
+            raise ValueError(str(exc.args[0])) from exc
+
+    return NativeToolDef(
+        name=READER_TOOL_NAME,
+        description=(
+            "Read a large tool result you were given a result_handle for. Pass the "
+            "handle, and either offset/limit for a window of the text or key for one "
+            "top-level field. Read only what you need; results are large on purpose."
+        ),
+        input_schema=READER_INPUT_SCHEMA,
+        handler=handler,
+    )
+
+
+# FORGE-98: a chat agent can claim a design action was performed ("Assembled
+# the available parts... Added revolute joints...") with ZERO tool calls that
+# turn -- confirmed live (a T6 turn made no tool calls, no tool events in the
+# gateway log, yet reported a fully assembled 6-component robot). Nothing in
+# the harness flagged this; the TUI showed a confident assistant message and
+# the user had to cross-check the tool trace themselves to find out it was
+# false. For a hardware design tool this is the worst failure mode: a user
+# who trusts the summary moves on believing work exists that doesn't.
+#
+# This is a deterministic, provider-agnostic heuristic, not a formal claim
+# checker -- promoting evals/judge.py's own LLM-graded "grounding" dimension
+# into a live per-turn check (this ticket's other suggested direction) is a
+# separate, heavier change (an extra judged model call on every turn), not
+# folded in here.
+_COMPLETION_CLAIM_VERBS = (
+    "assembled",
+    "created",
+    "committed",
+    "recorded",
+    "generated",
+    "built",
+    "added",
+    "designed",
+    "exported",
+)
+
+
+def _has_successful_tool_call(steps: list[ReActStep]) -> bool:
+    return any(s.tool_call is not None and s.error is None for s in steps)
+
+
+# FORGE-520: the coarse check above passes any turn with one successful tool
+# call. Live, a turn made many successful FreeCAD session calls (import_step,
+# create_assembly, export_model), never called twin.commit_geometry, then said
+# the assembly was saved and quoted "assembly_4" (a FreeCAD session obj_id) as
+# its node id. So two claim-specific checks run as well, still deterministic
+# and with no extra model call:
+#   * a reply that claims a twin write needs a successful twin write call;
+#   * a node id the reply quotes must come back from a tool this turn.
+# The twin write set is the tool-gate classification (GATE_TWIN_WRITE), read
+# from the turn's own tool registry when there is one, so a commit-capable
+# skill counts without a second hand-kept list.
+_TWIN_WRITE_TOOL_IDS = frozenset(
+    tool_id for tool_id, gates in _GATED_TOOL_IDS.items() if GATE_TWIN_WRITE in gates
+)
+_TWIN_WRITE_TOOL_NAMES = _TWIN_WRITE_TOOL_IDS | frozenset(
+    ToolRegistry.mcp_name(*tool_id.split(".", 1)) for tool_id in _TWIN_WRITE_TOOL_IDS
+)
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+# Words that make a sentence about a write a non-claim: a negation, a plan, an
+# offer or a condition ("not committed yet", "I will save it", "once saved").
+_NON_CLAIM = re.compile(
+    r"n't\b|\b(?:not|never|without|yet|will|would|could|should|can|shall|if|once|want)\b",
+    re.IGNORECASE,
+)
+# "committed"/"persisted" only ever describe a twin write here; "saved" or
+# "stored" can mean a file on disk, so they count only when the reply also
+# talks about the twin, a node id or a work product.
+_STRONG_WRITE_VERB = re.compile(r"\b(?:committed|persisted)\b", re.IGNORECASE)
+_WEAK_WRITE_VERB = re.compile(r"\b(?:saved|stored|recorded|written)\b", re.IGNORECASE)
+_TWIN_MENTION = re.compile(
+    r"\b(?:(?:digital )?twin|node[ _-]?ids?|work[ -]products?)\b", re.IGNORECASE
+)
+_UUID = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE
+)
+_LABELLED_NODE_ID = re.compile(
+    r"\b(?:node|work[ -]product|wp)[ _-]?id\b\s*(?:is|was|=|:)?\s*[`'\"*\[(]*"
+    r"([A-Za-z0-9][\w.:-]*[A-Za-z0-9])",
+    re.IGNORECASE,
+)
+# FreeCAD session object ids: never a twin node id, whatever returned them.
+_SESSION_OBJ_ID = re.compile(
+    r"^(?:part|assembly|body|sketch|obj|object|feature|shape)_\d+$", re.IGNORECASE
+)
+
+
+def _step_succeeded(step: ReActStep) -> bool:
+    """A tool call that ran and did not report failure in its own envelope."""
+    if step.tool_call is None or step.error is not None:
+        return False
+    obs = step.observation
+    if isinstance(obs, dict) and (
+        obs.get("success") is False or obs.get("status") == "error" or obs.get("is_error") is True
+    ):
+        return False
+    return True
+
+
+def _is_twin_write_call(call: ToolCall, tools: ToolRegistry | None) -> bool:
+    spec = None
+    if tools is not None:
+        try:
+            spec = tools.get(call.name)
+        except KeyError:
+            spec = None
+    if spec is not None:
+        if GATE_TWIN_WRITE not in spec.required_gates:
+            return False
+        # A commit-capable skill called with commit=false wrote nothing.
+        return call.arguments.get("commit", True) is not False
+    return call.name in _TWIN_WRITE_TOOL_NAMES
+
+
+def _claims_twin_write(answer: str) -> bool:
+    mentions_twin = bool(_TWIN_MENTION.search(answer))
+    for sentence in _SENTENCE_SPLIT.split(answer):
+        if not sentence or sentence.rstrip().endswith("?") or _NON_CLAIM.search(sentence):
+            continue
+        if _STRONG_WRITE_VERB.search(sentence):
+            return True
+        if mentions_twin and _WEAK_WRITE_VERB.search(sentence):
+            return True
+    return False
+
+
+def _turn_evidence_text(
+    user_content: str,
+    *,
+    system: str | None = None,
+    history: list[dict[str, Any]] | None = None,
+    project_brief: str | None = None,
+    project_id: str | None = None,
+) -> str:
+    """Everything the model was shown before this turn's tool calls.
+
+    The user's message, the system prompt (which carries the project brief on
+    the native path), the conversation history (prior user/assistant messages
+    and any prior tool results, plus the brief pair on the ReAct path), the
+    brief itself and the active project id. An id quoted from any of these is
+    one the model was given, not one it made up.
+    """
+    parts = [user_content, system or "", project_brief or "", project_id or ""]
+    for message in history or []:
+        parts.append(json.dumps(message, default=str))
+    return "\n".join(parts)
+
+
+def _unverified_node_ids(answer: str, steps: list[ReActStep], context_text: str) -> list[str]:
+    """Node ids the reply quotes that no successful tool call this turn returned.
+
+    The evidence is the text of every successful call's arguments and result,
+    plus ``context_text`` (see :func:`_turn_evidence_text`: the user's message,
+    system prompt with the project brief, conversation history including prior
+    turns' tool results, and the active project id), so an id the user pasted,
+    the brief listed, an earlier turn returned, or the model looked up is
+    grounded. A session obj_id quoted as a node id is never grounded.
+    """
+    evidence_parts = [context_text]
+    for step in steps:
+        if _step_succeeded(step) and step.tool_call is not None:
+            evidence_parts.append(json.dumps(step.tool_call.arguments, default=str))
+            evidence_parts.append(json.dumps(step.observation, default=str))
+    evidence = "\n".join(evidence_parts).lower()
+
+    found: list[str] = []
+    for match in _LABELLED_NODE_ID.finditer(answer):
+        candidate = match.group(1)
+        if not re.search(r"[\d_-]", candidate):
+            continue  # a word after "node id", not an id
+        if _SESSION_OBJ_ID.match(candidate) or candidate.lower() not in evidence:
+            found.append(candidate)
+    for match in _UUID.finditer(answer):
+        if match.group(0).lower() not in evidence:
+            found.append(match.group(0))
+    return list(dict.fromkeys(found))
+
+
+def _record_ungrounded(kind: str, metrics: MetricsCollector | None, **fields: Any) -> None:
+    logger.warning("chat_ungrounded_claim", kind=kind, **fields)
+    if metrics is not None:
+        try:
+            metrics.record_chat_ungrounded_claim(kind)
+        except Exception:  # noqa: BLE001 - metrics must never break a turn
+            pass
+
+
+def _flag_if_unfounded_completion_claim(
+    answer: str,
+    steps: list[ReActStep],
+    *,
+    tools: ToolRegistry | None = None,
+    context_text: str = "",
+    metrics: MetricsCollector | None = None,
+) -> str:
+    """Prepend a visible warning when ``answer`` claims work the turn did not do.
+
+    Three checks, each with its own banner:
+
+    * FORGE-98: a completed design action, but no successful tool call at all;
+    * FORGE-520: a twin write (saved, committed, in the twin) but no successful
+      twin write call, even though other tools ran;
+    * FORGE-520: a node id that no successful tool call returned this turn, or
+      a FreeCAD session obj_id presented as a node id.
+
+    A false positive here (the reply happens to use one of these verbs in an
+    unrelated, non-claim sense) costs the user one extra banner line; a false
+    negative is the actual bug this fixes -- a fabricated claim rendered with
+    the same confidence as a real one. That asymmetry is why this leans
+    toward over-flagging rather than trying to parse intent.
+    """
+    if not answer:
+        return answer
+    lowered = answer.lower()
+    if not _has_successful_tool_call(steps) and any(
+        verb in lowered for verb in _COMPLETION_CLAIM_VERBS
+    ):
+        _record_ungrounded("no_tool_call", metrics, steps=len(steps))
+        return UNGROUNDED_BANNER + "\n\n" + answer
+
+    banners: list[str] = []
+    if _claims_twin_write(answer) and not any(
+        _step_succeeded(s) and s.tool_call is not None and _is_twin_write_call(s.tool_call, tools)
+        for s in steps
+    ):
+        _record_ungrounded(
+            "twin_write",
+            metrics,
+            tools_called=[s.tool_call.name for s in steps if s.tool_call is not None],
+        )
+        banners.append(NO_TWIN_COMMIT_BANNER)
+    unverified = _unverified_node_ids(answer, steps, context_text)
+    if unverified:
+        _record_ungrounded("node_id", metrics, node_ids=unverified)
+        banners.append(UNVERIFIED_NODE_ID_BANNER + ", ".join(unverified) + UNVERIFIED_NODE_ID_NOTE)
+    if not banners:
+        return answer
+    return "\n\n".join([*banners, answer])
+
+
+def _attributed_as_chat(fn: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
+    """FORGE-476: model calls in this turn are role ``chat`` unless a caller
+    already attributed them (a design-flow phase brain sets ``phase_brain``)."""
+
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> str:
+        # FORGE-477: a turn scoped to a project routes with that project's routes.
+        with usage_scope(default_role="chat"), routing_scope(project_id=kwargs.get("project_id")):
+            return await fn(*args, **kwargs)
+
+    return wrapper
+
+
+async def _run_chat_turn(
     user_content: str,
     *,
     invoke: Invoke = default_invoke,
@@ -976,6 +1578,8 @@ async def run_chat_turn(
     approval_timeout_seconds: float | None = None,
     project_id: str | None = None,
     domains: tuple[str, ...] | None = None,
+    tool_allowlist: frozenset[str] | None = None,
+    approval_mode: str = "hold",
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -999,6 +1603,9 @@ async def run_chat_turn(
     chat, not just from the orchestrator's Temporal path. ``domains``
     (MET-747 follow-up) scopes the registered MCP tools to those disciplines
     plus the always-visible core adapters -- see ``_build_context``.
+    ``approval_mode`` (FORGE-490) is ``"hold"`` for chat (park a
+    `requires_approval` call for a human) or ``"forward"`` for an unattended
+    design-flow phase turn (no in-process hold; the sidecar decides).
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
@@ -1017,6 +1624,8 @@ async def run_chat_turn(
         metrics=metrics,
         approval_timeout_seconds=approval_timeout_seconds,
         domains=domains,
+        tool_allowlist=tool_allowlist,
+        approval_mode=approval_mode,
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.
@@ -1078,7 +1687,22 @@ async def run_chat_turn(
         except Exception:  # noqa: BLE001 - metrics must never break a turn
             pass
     if result.output:
-        answer = str(result.output)
+        # FORGE-98: only the model's own final text can fabricate a claim --
+        # summarize_trajectory/_FALLBACK_ANSWER below are generated FROM the
+        # step trace itself, so they're inherently grounded.
+        answer = _flag_if_unfounded_completion_claim(
+            str(result.output),
+            result.steps,
+            tools=ctx.runtime.tools,
+            context_text=_turn_evidence_text(
+                user_content,
+                system=system,
+                history=full_history,
+                project_brief=project_brief,
+                project_id=project_id,
+            ),
+            metrics=metrics,
+        )
     elif result.stop_reason in ("max_steps", "timeout", "budget_exceeded"):
         answer = summarize_trajectory(result.steps)
     else:
@@ -1100,6 +1724,8 @@ async def run_chat_turn(
     )
     return answer
 
+
+run_chat_turn = _attributed_as_chat(_run_chat_turn)
 
 _FALLBACK_ANSWER = "I couldn't converge on an answer within the step budget."
 _STREAM_CHUNK_CHARS = 48
@@ -1337,6 +1963,7 @@ def compute_context_stats(
     }
 
 
+@_attributed_as_chat
 async def run_chat_turn_streaming(
     user_content: str,
     *,
@@ -1365,6 +1992,7 @@ async def run_chat_turn_streaming(
     wall_clock_seconds: float | None = None,
     project_id: str | None = None,
     domains: tuple[str, ...] | None = None,
+    tool_allowlist: frozenset[str] | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -1411,6 +2039,7 @@ async def run_chat_turn_streaming(
         metrics=metrics,
         on_approval_request=on_approval_request,
         domains=domains,
+        tool_allowlist=tool_allowlist,
     )
 
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
@@ -1610,6 +2239,22 @@ async def run_chat_turn_streaming(
         await _record_turn_experience(answer)
         await on_delta(answer)
         return answer
+    # FORGE-98: only the model's own final text can fabricate a claim -- the
+    # empty-answer branch above is generated FROM the step trace itself, so
+    # it's inherently grounded.
+    answer = _flag_if_unfounded_completion_claim(
+        answer,
+        result.steps,
+        tools=ctx.runtime.tools,
+        context_text=_turn_evidence_text(
+            user_content,
+            system=system,
+            history=full_history,
+            project_brief=project_brief,
+            project_id=project_id,
+        ),
+        metrics=metrics,
+    )
     await _record_turn_experience(answer)
     # Emit the loop's own answer as chunked deltas. This used to re-generate
     # the final text with a second, context-free model call (no history, no

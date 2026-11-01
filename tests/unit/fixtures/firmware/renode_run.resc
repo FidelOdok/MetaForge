@@ -1,0 +1,8 @@
+mach create "metaforge"
+machine LoadPlatformDescription @platforms/boards/stm32f4_discovery-kit.repl
+sysbus LoadELF @/tmp/tmp6gclb_4o/firmware/87e528278d47/project/.pio/build/disco/firmware.elf
+sysbus.usart2 CreateFileBackend @/tmp/tmp6gclb_4o/firmware/emulation/0448a9fbe37e/uart.txt true
+emulation RunFor "0.5"
+echo "MFREAD 0x40020C14"
+sysbus ReadDoubleWord 0x40020C14
+quit

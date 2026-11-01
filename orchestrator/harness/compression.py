@@ -80,6 +80,15 @@ def summarize_trajectory(steps: Sequence[ReActStep]) -> str:
     lines = ["I ran out of turns before finishing. Here's what I did:"]
     for i, step in enumerate(steps, 1):
         if step.tool_call is None:
+            # FORGE-235: a plain final-answer step (no error) is not
+            # hand-off-worthy and stays silent -- but a step that recorded a
+            # real failure with no tool_call (e.g. the response was
+            # truncated at the output token limit before any tool call
+            # completed) is exactly the "what went wrong" this summary
+            # exists to report; dropping it silently was how "response
+            # truncated" turned into the misleading "couldn't converge".
+            if step.error is not None:
+                lines.append(f"{i}. {step.error}")
             continue
         name = step.tool_call.name
         if step.error is not None:

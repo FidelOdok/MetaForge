@@ -17,13 +17,13 @@ Generate finite element mesh from CAD geometry using FreeCAD.
 ## Input
 
 - `work_product_id` -- ID of the CAD model work_product in the Digital Twin
-- `cad_file` -- Path to the input CAD file (.step, .stp, .stl, .brep)
+- `cad_file` -- Path to the input CAD file (.step or .stp; STL and BREP are refused)
 - `element_size` -- Target element size in mm (default: 1.0)
-- `algorithm` -- Meshing algorithm: netgen, gmsh, or mefisto (default: netgen)
+- `algorithm` -- netgen, gmsh, or mefisto (default: netgen). All three run gmsh; netgen and mefisto are accepted names, not separate meshers
 - `output_format` -- Output mesh format: inp, unv, or stl (default: inp)
-- `min_angle_threshold` -- Minimum acceptable element angle in degrees (default: 15.0)
+- `min_angle_threshold` -- Minimum acceptable dihedral angle in degrees (default: 10.0; a plain gmsh tet mesh of a box measures about 13)
 - `max_aspect_ratio_threshold` -- Maximum acceptable aspect ratio (default: 10.0)
-- `refinement_regions` -- Optional list of refinement region definitions
+- `refinement_regions` -- Not supported yet; a non-empty list is refused
 
 ## Output
 
@@ -31,7 +31,7 @@ Generate finite element mesh from CAD geometry using FreeCAD.
 - `num_nodes` -- Number of mesh nodes
 - `num_elements` -- Number of mesh elements
 - `element_types` -- List of element types used (e.g., C3D10, C3D4)
-- `quality_metrics` -- Mesh quality metrics (min_angle, max_aspect_ratio, avg_quality, jacobian_ratio)
+- `quality_metrics` -- Measured from the element geometry of `.inp` output: min_angle (minimum dihedral angle, deg), max_aspect_ratio (longest over shortest edge), avg_quality (mean radius ratio, 1.0 is a regular tet). jacobian_ratio is not measured and stays 0
 - `quality_acceptable` -- Whether the mesh meets all quality thresholds
 - `quality_issues` -- List of human-readable quality issues found
 - `algorithm_used` -- The meshing algorithm that was used
@@ -39,7 +39,8 @@ Generate finite element mesh from CAD geometry using FreeCAD.
 
 ## Limitations
 
-- Supported input formats: STEP (.step/.stp), STL (.stl), BREP (.brep)
-- Quality assessment is based on min_angle and max_aspect_ratio thresholds only
-- Refinement regions are passed through to FreeCAD but not validated locally
+- Supported input format: STEP (.step/.stp) only
+- Quality is measured only for `.inp` output. For `unv` or `stl` output the metrics are absent, and the skill reports "element quality was not measured" and `quality_acceptable: false` rather than passing an unmeasured mesh
+- Quality assessment uses min_angle, max_aspect_ratio and degenerate (zero-volume) elements; meshes above 200,000 elements are sampled evenly
+- Refinement regions are not supported
 - Does not perform adaptive mesh refinement based on error estimation

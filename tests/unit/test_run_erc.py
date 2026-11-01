@@ -544,3 +544,22 @@ class TestSkillRunPipeline:
         # But the ERC itself failed
         assert result.data.passed is False
         assert result.data.total_errors == 1
+
+
+class TestErcFilterVerdictForge551:
+    async def test_warning_filter_cannot_pass_a_sheet_with_errors(
+        self, mock_context: SkillContext
+    ) -> None:
+        viols = [
+            {"rule_id": "pin_not_connected", "severity": "error", "message": "e"},
+            {"rule_id": "lib_symbol_issues", "severity": "warning", "message": "w"},
+        ]
+        mock_context.twin.get_work_product.return_value = {"id": "x"}
+        mock_context.mcp.register_tool("kicad.run_erc", "erc_validation")
+        mock_context.mcp.register_tool_response("kicad.run_erc", _make_erc_response(viols))
+        inp = RunErcInput(
+            work_product_id=str(uuid4()), schematic_file="a.kicad_sch", severity_filter="warning"
+        )
+        out = await RunErcHandler(mock_context).execute(inp)
+        assert out.total_errors == 0
+        assert out.passed is False

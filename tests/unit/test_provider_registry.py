@@ -5,9 +5,11 @@ from __future__ import annotations
 import pytest
 
 from orchestrator.harness.providers import (
+    InvalidModelError,
     UnknownProviderError,
     available_providers,
     resolve_provider,
+    validate_model,
 )
 from orchestrator.harness.providers.adapters import default_invoke  # noqa: F401 (dispatch check)
 from orchestrator.harness.providers.registry import ANTHROPIC, OPENAI, get_profile
@@ -67,3 +69,29 @@ def test_custom_api_key_env_override() -> None:
 def test_unknown_provider_raises() -> None:
     with pytest.raises(UnknownProviderError):
         resolve_provider("nope", "m")
+
+
+# FORGE-93: Codex (ChatGPT-subscription auth) 400s on any OpenRouter-style
+# 'vendor/model' slug -- validate_model rejects the pairing before it can
+# become a durable, silently-failing active selection.
+def test_validate_model_rejects_slashed_slug_for_codex() -> None:
+    with pytest.raises(InvalidModelError, match="openai/gpt-4o"):
+        validate_model("openai-codex", "openai/gpt-4o")
+    with pytest.raises(InvalidModelError):
+        validate_model("codex", "anthropic/claude-opus-4")  # alias resolves the same way
+
+
+def test_validate_model_accepts_bare_slug_for_codex() -> None:
+    validate_model("openai-codex", "gpt-5.5")  # must not raise
+    validate_model("openai-codex", "gpt-5-codex")
+
+
+def test_validate_model_slash_is_fine_for_non_codex_providers() -> None:
+    # The '/' rule is Codex-specific; this is OpenRouter's normal slug shape.
+    validate_model("openrouter", "openai/gpt-4o")
+    validate_model("openai", "gpt-5")
+
+
+def test_validate_model_unknown_provider_raises() -> None:
+    with pytest.raises(UnknownProviderError):
+        validate_model("nope", "m")

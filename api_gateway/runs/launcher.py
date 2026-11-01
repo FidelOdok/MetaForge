@@ -45,7 +45,7 @@ class RunLauncher:
         if session_id:
             request["session_id"] = session_id
         run = routes._store.create(request)
-        routes._launch_flow(run.id)
+        await routes._launch_flow(run.id)
         definition = FLOWS[flow]
         logger.info(
             "design_flow_launched_from_tool",
@@ -66,6 +66,7 @@ class RunLauncher:
 
     async def status(self, *, run_id: str) -> dict[str, Any]:
         from api_gateway.runs import routes
+        from tool_registry.tools.design_flow.gates import last_gate_decision
 
         run = routes._store.get(run_id)
         out: dict[str, Any] = {
@@ -73,13 +74,22 @@ class RunLauncher:
             "status": run.status.value,
             "flow": run.request.get("flow"),
             "goal": run.request.get("goal"),
+            # Which engine drives it, and the exact flow it runs (FORGE-474).
+            "engine": run.request.get("flow_engine"),
+            "flow_version": run.request.get("flow_version"),
+            "flow_content_hash": run.request.get("flow_content_hash"),
         }
+        if run.request.get("flow_version_id"):
+            out["flow_version_id"] = run.request["flow_version_id"]
         if run.approval_reason:
             out["awaiting_approval_reason"] = run.approval_reason
         if run.error:
             out["error"] = run.error
         if run.result:
             out["result"] = run.result
+        last = last_gate_decision(run.request)
+        if last:
+            out["last_gate_decision"] = last
         return out
 
 

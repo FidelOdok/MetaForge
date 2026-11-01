@@ -13,7 +13,27 @@ concurrency:
 jobs:
   lint:
     name: Lint & Format
-    runs-on: [self-hosted, linux, fidel-dev]
+    # GitHub-hosted. Nothing in this workflow needs the self-hosted
+    # fidel-dev box, and being on it was actively harmful:
+    #
+    #   - fidel-dev has 7.8 GB of RAM and sits at ~2.5 GB available before
+    #     any job starts, because the gateway, Neo4j and the observability
+    #     stack are resident on it permanently. A build that wants more
+    #     takes the machine down: twice now the host stopped answering SSH
+    #     *and* ICMP mid-job (a freecad-adapter image build on 2026-09-23,
+    #     the first Docusaurus docs build on 2026-09-27), recording no log
+    #     and no step conclusion.
+    #   - It is a single runner shared by every workflow, so whatever kills
+    #     it blocks all of CI, not just its own job. The 2026-09-27 outage
+    #     left this workflow queued and undispatched for ~16 hours until
+    #     someone rebooted the box by hand.
+    #
+    # The container-backed tests are gated on DATABASE_URL / METAFORGE_MCP_URL
+    # and this workflow sets neither, so they skipped on fidel-dev exactly as
+    # they skip anywhere else — being next to the containers bought nothing.
+    # Keep a job here only if it genuinely needs something installed on that
+    # host (FORGE-308).
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,7 +46,7 @@ jobs:
 
   typecheck:
     name: Type Check
-    runs-on: [self-hosted, linux, fidel-dev]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -65,7 +85,7 @@ jobs:
 
   test:
     name: Tests
-    runs-on: [self-hosted, linux, fidel-dev]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -74,6 +94,10 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: pytest tests/unit/ -x --tb=short -q
+      # FORGE-560: the skills' own tests.py, beside each handler.
+      - run: pytest domain_agents/ -x --tb=short -q
+      # FORGE-562: workflow generation and lifecycle suites (scenario-driven).
+      - run: pytest tests/workflow/ --tb=short -q
       - name: Run contract tests (if they exist)
         run: |
           if [ -d "tests/contract" ]; then
@@ -104,11 +128,10 @@ jobs:
 
   changes:
     name: Detect Changes
-    runs-on: [self-hosted, linux, fidel-dev]
+    runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     outputs:
       dashboard: ${{ steps.filter.outputs.dashboard }}
-      marketing: ${{ steps.filter.outputs.marketing }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -124,15 +147,10 @@ jobs:
               # a PR that adds a step to this job cannot exercise the step it
               # adds.
               - '.github/workflows/ci.yml'
-            marketing:
-              - 'marketing/**'
-              # Same reasoning as the dashboard filter above: a change to this
-              # workflow counts as a change to what it tests.
-              - '.github/workflows/ci.yml'
 
   dashboard:
     name: Dashboard Checks
-    runs-on: [self-hosted, linux, fidel-dev]
+    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.dashboard == 'true'
     steps:
@@ -162,29 +180,8 @@ jobs:
       # and there is no eslint.config.*, so the script cannot run at all
       # (MET-732). Repairing it means choosing a lint policy, which is not a
       # decision to make inside a CI wiring change.
-      - run: cd dashboard && npx vitest run
+      # FORGE-389: `npm test` is the guarded run -- it fails when fewer
+      # test files ran than exist, which `vitest run` reports only in its
+      # exit code and not in its summary.
+      - run: cd dashboard && npm test
 
-  marketing:
-    name: Marketing Site Checks
-    runs-on: [self-hosted, linux, fidel-dev]
-    needs: changes
-    if: needs.changes.outputs.marketing == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: marketing/package-lock.json
-      - run: cd marketing && npm ci
-      - run: cd marketing && npx tsc --noEmit
-      - run: cd marketing && npx eslint .
-      # src/__tests__/claims.test.tsx guards the scope claims CLAUDE.md marks
-      # as things this project must never overstate -- Phase 1 is 6-7
-      # disciplines, KiCad is read-only until Phase 2, the timeline is six
-      # months. A landing page is exactly where those drift, so the assertions
-      # have to run somewhere that blocks a merge.
-      - run: cd marketing && npx vitest run
-      # The deployed artefact is the build output, so build it here rather
-      # than discovering a broken build in Vercel's logs.
-      - run: cd marketing && npm run build

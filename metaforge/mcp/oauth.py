@@ -19,10 +19,14 @@ connector work:
 
 **Identity is dev-grade** (the "self-issued + shared secret" choice in
 MET-480): one ``METAFORGE_OAUTH_LOGIN_SECRET`` gates ``/authorize`` and
-every token maps to one configurable actor. **Storage is in-memory** —
-tokens reset on restart, which claude.ai recovers from transparently via
-the refresh / re-auth flow. Federating to a real IdP and persisting
-clients/tokens to postgres are tracked follow-ups.
+every token maps to one configurable actor. Requests are answered from
+memory; registered clients and issued tokens are also written through to an
+:class:`~metaforge.mcp.oauth_store.OAuthPersistence` (Postgres when
+``DATABASE_URL`` is set) and loaded back at startup, so a restart neither
+signs clients out nor forgets a ``client_id`` they keep reusing (FORGE-697).
+Tokens are held by their SHA-256 only, in memory and in the database.
+Authorization codes stay in memory: they live for minutes. Federating to a
+real IdP is a tracked follow-up.
 
 The module is framework-agnostic: it returns plain dicts and raises
 :class:`OAuthError`; the HTTP routes in ``metaforge.mcp.__main__`` map
@@ -32,14 +36,23 @@ without binding a port.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
+from typing import Any
+
+import structlog
+
+from metaforge.mcp.oauth_store import ClientRecord, OAuthPersistence, TokenRecord
+
+logger = structlog.get_logger(__name__)
 
 __all__ = [
     "OAuthConfig",
@@ -112,6 +125,26 @@ def verify_pkce_s256(verifier: str, challenge: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+#: Characters allowed in an operator label. Anything else is dropped --
+#: this ends up in log lines and session records, and a name carrying
+#: newlines or control characters would let a caller forge entries.
+_ACTOR_SAFE = re.compile(r"[^A-Za-z0-9._@+-]")
+
+#: Enough to identify a colleague, short enough not to bloat every event.
+_ACTOR_MAX = 64
+
+
+def _actor_for(operator: str | None, fallback: str) -> str:
+    """``user:<name>`` from what was typed, or the configured default.
+
+    Sanitised, not trusted: the login is one shared secret, so the name is
+    a label for the timeline, never an identity claim the server stands
+    behind.
+    """
+    cleaned = _ACTOR_SAFE.sub("", (operator or "").strip())[:_ACTOR_MAX]
+    return f"user:{cleaned}" if cleaned else fallback
+
+
 @dataclass(frozen=True)
 class OAuthConfig:
     """OAuth server settings, sourced from the environment.
@@ -124,6 +157,16 @@ class OAuthConfig:
     login_secret: str
     issuer: str | None = None
     actor_id: str = "oauth:web"
+    #: Whether this deployment's login proves *who* the caller is.
+    #:
+    #: False for the shared-secret login below, and that is not a
+    #: temporary shortcoming to paper over: one secret shared by a team
+    #: authorises the call and identifies nobody, exactly like the static
+    #: API key. The operator name typed at login is recorded so a timeline
+    #: says something more useful than ``oauth:web`` for everyone, but it
+    #: is a label, not a claim the server stands behind. An upstream
+    #: identity provider (the Phase-2 broker) is what flips this.
+    verified_identity: bool = False
     scope: str = "mcp"
     code_ttl: int = 600
     access_ttl: int = 3600
@@ -181,6 +224,7 @@ class _Code:
     code_challenge: str
     scope: str
     expires_at: float
+    actor_id: str = "oauth:web"
 
 
 @dataclass
@@ -208,21 +252,100 @@ class _Refresh:
 class _Store:
     clients: dict[str, _Client] = field(default_factory=dict)
     codes: dict[str, _Code] = field(default_factory=dict)
+    #: Keyed by :func:`_token_hash`, never by the token itself.
     access: dict[str, _Token] = field(default_factory=dict)
     refresh: dict[str, _Refresh] = field(default_factory=dict)
 
 
-class OAuthProvider:
-    """In-memory OAuth 2.1 + PKCE provider.
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
-    One instance per running HTTP server. All protocol state (registered
-    clients, live codes, issued tokens) lives in process memory.
+
+class OAuthProvider:
+    """OAuth 2.1 + PKCE provider, answered from memory.
+
+    One instance per running HTTP server. With a ``persistence``, every
+    registered client and issued token is written through to it, and
+    :meth:`load` brings them back after a restart (FORGE-697). The state is
+    one process's: a second replica would not see tokens this one issues
+    until it restarts.
     """
 
-    def __init__(self, config: OAuthConfig, *, now: Callable[[], float] | None = None) -> None:
+    def __init__(
+        self,
+        config: OAuthConfig,
+        *,
+        now: Callable[[], float] | None = None,
+        persistence: OAuthPersistence | None = None,
+    ) -> None:
         self.config = config
         self._store = _Store()
         self._now = now or time.time
+        self._persistence = persistence
+        self._pending: set[asyncio.Task[None]] = set()
+
+    # -- persistence (FORGE-697) -------------------------------------------
+
+    async def load(self) -> None:
+        """Bring back the clients and live tokens a previous process recorded."""
+        if self._persistence is None:
+            return
+        clients, tokens = await self._persistence.load(self._now())
+        for c in clients:
+            self._store.clients[c.client_id] = _Client(
+                client_id=c.client_id,
+                redirect_uris=c.redirect_uris,
+                client_name=c.client_name,
+                issued_at=c.issued_at,
+            )
+        for t in tokens:
+            if t.kind == "access":
+                self._store.access[t.token_hash] = _Token(
+                    actor_id=t.actor_id,
+                    scope=t.scope,
+                    client_id=t.client_id,
+                    expires_at=t.expires_at,
+                )
+            elif t.kind == "refresh":
+                self._store.refresh[t.token_hash] = _Refresh(
+                    actor_id=t.actor_id,
+                    scope=t.scope,
+                    client_id=t.client_id,
+                    expires_at=t.expires_at,
+                )
+        logger.info("mcp_oauth_state_loaded", clients=len(clients), tokens=len(tokens))
+
+    async def flush(self) -> None:
+        """Wait for every write-through still in flight."""
+        while self._pending:
+            await asyncio.gather(*list(self._pending), return_exceptions=True)
+
+    def _persist(self, write: Callable[[OAuthPersistence], Coroutine[Any, Any, None]]) -> None:
+        """Write through to the persistence, if there is one.
+
+        The provider's methods are synchronous (the HTTP routes call them
+        directly), so the write runs as a task on the running loop. Memory is
+        already updated, so the request in hand never waits on the database;
+        a failed write is logged, and costs only that the record would not
+        survive a restart.
+        """
+        if self._persistence is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("mcp_oauth_persist_skipped", reason="no running event loop")
+            return
+        task = loop.create_task(self._write(write(self._persistence)))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    @staticmethod
+    async def _write(op: Coroutine[Any, Any, None]) -> None:
+        try:
+            await op
+        except Exception as exc:  # noqa: BLE001 -- memory stays authoritative
+            logger.warning("mcp_oauth_persist_failed", error=str(exc))
 
     # -- discovery metadata ------------------------------------------------
 
@@ -270,6 +393,8 @@ class OAuthProvider:
             client_name=name,
             issued_at=issued,
         )
+        record = ClientRecord(client_id, tuple(uris), name, issued)
+        self._persist(lambda p: p.save_client(record))
         # Public client + PKCE: no secret issued (token_endpoint_auth_method=none).
         return {
             "client_id": client_id,
@@ -333,8 +458,22 @@ class OAuthProvider:
         return hmac.compare_digest(secret, self.config.login_secret)
 
     def issue_code(
-        self, client: _Client, redirect_uri: str, code_challenge: str, scope: str | None
+        self,
+        client: _Client,
+        redirect_uri: str,
+        code_challenge: str,
+        scope: str | None,
+        operator: str | None = None,
     ) -> str:
+        """Mint an authorization code, optionally labelled with who logged in.
+
+        FORGE-330: ``operator`` is the name typed on the login form. It is
+        NOT a verified identity -- the login is one shared secret, so
+        whoever knows it can type any name -- but a timeline that says
+        "ana" is worth more than one that says ``oauth:web`` for the whole
+        team. It rides through to the token as ``actor_id`` and is marked
+        unverified everywhere it surfaces.
+        """
         code = secrets.token_urlsafe(32)
         self._store.codes[code] = _Code(
             client_id=client.client_id,
@@ -342,6 +481,7 @@ class OAuthProvider:
             code_challenge=code_challenge,
             scope=scope or self.config.scope,
             expires_at=self._now() + self.config.code_ttl,
+            actor_id=_actor_for(operator, self.config.actor_id),
         )
         return code
 
@@ -369,35 +509,49 @@ class OAuthProvider:
         verifier = params.get("code_verifier")
         if not verifier or not verify_pkce_s256(verifier, record.code_challenge):
             raise OAuthError("invalid_grant", "PKCE verification failed")
-        return self._issue_tokens(record.client_id, record.scope)
+        return self._issue_tokens(record.client_id, record.scope, record.actor_id)
 
     def _grant_refresh(self, params: dict[str, str]) -> dict[str, object]:
         token = params.get("refresh_token")
-        record = self._store.refresh.pop(token, None) if token else None
+        key = _token_hash(token) if token else ""
+        record = self._store.refresh.pop(key, None) if token else None
         if record is None:
             raise OAuthError("invalid_grant", "unknown refresh token")
+        self._persist(lambda p: p.delete_token(key))
         if record.expires_at < self._now():
             raise OAuthError("invalid_grant", "refresh token expired")
         if params.get("client_id") and params.get("client_id") != record.client_id:
             raise OAuthError("invalid_grant", "client_id mismatch")
-        return self._issue_tokens(record.client_id, record.scope)
+        return self._issue_tokens(record.client_id, record.scope, record.actor_id)
 
-    def _issue_tokens(self, client_id: str, scope: str) -> dict[str, object]:
+    def _issue_tokens(
+        self, client_id: str, scope: str, actor_id: str | None = None
+    ) -> dict[str, object]:
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(32)
         now = self._now()
-        self._store.access[access] = _Token(
-            actor_id=self.config.actor_id,
+        bound_actor = actor_id or self.config.actor_id
+        access_key, refresh_key = _token_hash(access), _token_hash(refresh)
+        access_until = now + self.config.access_ttl
+        refresh_until = now + self.config.refresh_ttl
+        self._store.access[access_key] = _Token(
+            actor_id=bound_actor,
             scope=scope,
             client_id=client_id,
-            expires_at=now + self.config.access_ttl,
+            expires_at=access_until,
         )
-        self._store.refresh[refresh] = _Refresh(
-            actor_id=self.config.actor_id,
+        self._store.refresh[refresh_key] = _Refresh(
+            actor_id=bound_actor,
             scope=scope,
             client_id=client_id,
-            expires_at=now + self.config.refresh_ttl,
+            expires_at=refresh_until,
         )
+        access_rec = TokenRecord(access_key, "access", bound_actor, scope, client_id, access_until)
+        refresh_rec = TokenRecord(
+            refresh_key, "refresh", bound_actor, scope, client_id, refresh_until
+        )
+        self._persist(lambda p: p.save_token(access_rec))
+        self._persist(lambda p: p.save_token(refresh_rec))
         return {
             "access_token": access,
             "token_type": "Bearer",
@@ -412,10 +566,12 @@ class OAuthProvider:
         """Return the bound ``actor_id`` for a live access token, else None."""
         if not token:
             return None
-        record = self._store.access.get(token)
+        key = _token_hash(token)
+        record = self._store.access.get(key)
         if record is None:
             return None
         if record.expires_at < self._now():
-            self._store.access.pop(token, None)
+            self._store.access.pop(key, None)
+            self._persist(lambda p: p.delete_token(key))
             return None
         return record.actor_id

@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from api_gateway.chat.skill_tools import skill_tools_from_registry
+from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_registry
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from skill_registry.registry import SkillRegistration, SkillRegistry
 from skill_registry.skill_base import SkillBase
@@ -35,6 +35,25 @@ class _EchoSkill(SkillBase[_EchoInput, _EchoOutput]):
         return _EchoOutput(echoed=input_data.message)
 
 
+class _CommittingInput(BaseModel):
+    """A stub skill input shaped like a real CAD-generating skill's -- the
+    `commit` field is the FORGE-97 signal that this skill can persist to the
+    Twin internally."""
+
+    message: str
+    commit: bool = True
+
+
+class _CommittingSkill(SkillBase[_CommittingInput, _EchoOutput]):
+    """A stub skill that declares `commit`, for approval-gate bridge testing."""
+
+    input_type = _CommittingInput
+    output_type = _EchoOutput
+
+    async def execute(self, input_data: _CommittingInput) -> _EchoOutput:
+        return _EchoOutput(echoed=input_data.message)
+
+
 class _FailingSkill(SkillBase[_EchoInput, _EchoOutput]):
     """A stub skill that always fails a precondition, for error-path testing."""
 
@@ -49,7 +68,10 @@ class _FailingSkill(SkillBase[_EchoInput, _EchoOutput]):
 
 
 def _registration(
-    name: str, handler_class: type[SkillBase], domain: str = "mechanical"
+    name: str,
+    handler_class: type[SkillBase],
+    domain: str = "mechanical",
+    input_schema: type[BaseModel] = _EchoInput,
 ) -> SkillRegistration:
     return SkillRegistration(
         name=name,
@@ -58,7 +80,7 @@ def _registration(
         agent=domain,
         description=f"Stub skill {name}",
         phase=1,
-        input_schema=_EchoInput,
+        input_schema=input_schema,
         output_schema=_EchoOutput,
         handler_class=handler_class,
         tools_required=[],
@@ -136,6 +158,38 @@ class TestSkillToolsFromRegistry:
         assert tools == []
 
 
+class TestApprovalGating:
+    """FORGE-97: a skill that can persist to the Twin (declares `commit` in
+    its input schema) must require the same "ask" approval + twin_write gate
+    a raw twin.commit_geometry tool call does -- previously skill wrappers
+    bypassed both entirely, since they call twin.commit_geometry internally
+    via McpBridge.invoke rather than as a separately model-callable step."""
+
+    async def test_a_skill_with_a_commit_field_requires_approval(self):
+        registry = await _fake_registry(
+            _registration("committer", _CommittingSkill, input_schema=_CommittingInput)
+        )
+        tools = await skill_tools_from_registry(
+            twin=InMemoryTwinAPI.create(),
+            mcp_bridge=InMemoryMcpBridge(),
+            session_id=str(uuid4()),
+            registry=registry,
+        )
+        assert tools[0].requires_approval is True
+        assert tools[0].required_gates == (GATE_TWIN_WRITE,)
+
+    async def test_a_skill_without_a_commit_field_is_unaffected(self):
+        registry = await _fake_registry(_registration("echo", _EchoSkill))
+        tools = await skill_tools_from_registry(
+            twin=InMemoryTwinAPI.create(),
+            mcp_bridge=InMemoryMcpBridge(),
+            session_id=str(uuid4()),
+            registry=registry,
+        )
+        assert tools[0].requires_approval is False
+        assert tools[0].required_gates == ()
+
+
 class TestRealMechanicalSkillBridging:
     """Integration-style: a real skill's registration bridges cleanly."""
 
@@ -155,3 +209,24 @@ class TestRealMechanicalSkillBridging:
         assert tool.name == "skill_mechanical_generate_cad_ir"
         assert tool.input_schema["type"] == "object"
         assert "entities" in tool.input_schema["properties"]
+        # FORGE-97: generate_cad_ir also declares `commit`, so it must be
+        # gated exactly like every other commit-capable skill.
+        assert tool.requires_approval is True
+        assert tool.required_gates == (GATE_TWIN_WRITE,)
+
+    async def test_generate_cad_requires_approval_and_a_name(self):
+        registry = SkillRegistry()
+        await registry.register("domain_agents/mechanical/skills/generate_cad")
+
+        tools = await skill_tools_from_registry(
+            twin=InMemoryTwinAPI.create(),
+            mcp_bridge=InMemoryMcpBridge(),
+            session_id=str(uuid4()),
+            registry=registry,
+        )
+
+        assert len(tools) == 1
+        tool = tools[0]
+        assert tool.requires_approval is True
+        assert tool.required_gates == (GATE_TWIN_WRITE,)
+        assert tool.input_schema["required"] and "name" in tool.input_schema["required"]

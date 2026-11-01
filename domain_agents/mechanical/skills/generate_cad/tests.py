@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 import structlog
+from pydantic import ValidationError
 
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from skill_registry.skill_base import SkillContext
@@ -101,10 +102,11 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
                 backend="cadquery",
             )
         )
@@ -113,7 +115,7 @@ class TestGenerateCadHandler:
         assert output.volume_mm3 == 12500.0
         assert output.surface_area_mm2 == 8400.0
         assert output.shape_type == "bracket"
-        assert output.material == "aluminum_6061"
+        assert output.material == "aluminium_6061_t6"
         assert output.bounding_box.max_x == 50.0
 
     async def test_execute_bracket_freecad(self):
@@ -124,6 +126,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
@@ -141,6 +144,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
@@ -158,6 +162,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="plate",
                 dimensions={"width": 100.0, "height": 80.0, "thickness": 2.0},
@@ -176,6 +181,7 @@ class TestGenerateCadHandler:
         with pytest.raises(RuntimeError, match="No CAD backend available"):
             await handler.execute(
                 GenerateCadInput(
+                    name="Test Bracket",
                     work_product_id=work_product.id,
                     shape_type="bracket",
                     dimensions={"width": 50.0},
@@ -185,6 +191,7 @@ class TestGenerateCadHandler:
     async def test_default_backend_is_cadquery(self):
         """Default backend is cadquery."""
         inp = GenerateCadInput(
+            name="Test Bracket",
             work_product_id=uuid4(),
             shape_type="bracket",
             dimensions={"width": 50.0},
@@ -197,6 +204,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="plate",
                 dimensions={"width": 100.0, "height": 80.0, "thickness": 2.0},
@@ -213,6 +221,7 @@ class TestGenerateCadHandler:
         with pytest.raises(ValueError, match="Unsupported shape type"):
             await handler.execute(
                 GenerateCadInput(
+                    name="Test Bracket",
                     work_product_id=work_product.id,
                     shape_type="gearbox",
                     dimensions={"width": 10.0},
@@ -225,6 +234,7 @@ class TestGenerateCadHandler:
 
         errors = await handler.validate_preconditions(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=uuid4(),
                 shape_type="bracket",
                 dimensions={"width": 50.0},
@@ -249,6 +259,7 @@ class TestGenerateCadHandler:
 
         errors = await handler.validate_preconditions(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0},
@@ -262,6 +273,7 @@ class TestGenerateCadHandler:
 
         result = await handler.run(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
@@ -288,7 +300,7 @@ class TestGenerateCadHandler:
                 surface_area_mm2=50.0,
                 bounding_box=BoundingBox(),
                 parameters_used={},
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         )
         assert any("empty" in e for e in errors)
@@ -299,6 +311,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
@@ -326,6 +339,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
@@ -338,6 +352,79 @@ class TestGenerateCadHandler:
         assert output.model_url == "https://twin.local/models/node-123"
         assert output.commit_error is None
 
+    async def test_commit_uses_the_caller_supplied_name_not_a_generic_one(self, tmp_path):
+        """FORGE-97: the committed work product's name must be the caller's
+        real part name, never the old synthetic "shape_type (material)"
+        pattern -- two differently-named parts ('Shoulder Yoke', 'Upper Arm
+        Link') both landed as 'plate (aluminium_6061_t6)' in the live repro."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "bracket_test.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_parametric", {**CADQUERY_CAD_RESULT, "cad_file": str(step_file)}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-123"})
+
+        await handler.execute(
+            GenerateCadInput(
+                name="Shoulder Yoke",
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+                material="aluminium_6061_t6",
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["name"] == "Shoulder Yoke"
+
+    async def test_commit_threads_measured_properties_as_extra_metadata(self, tmp_path):
+        """FORGE-100: a constraint like `moving_mass_kg <= 4.5` must be able
+        to read a REAL value off the committed node -- the tool's own
+        already-computed volume/area/bbox (and mass, when there's a
+        material) must land as top-level metadata, not get dropped."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "bracket_test.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_parametric",
+            {**CADQUERY_CAD_RESULT, "cad_file": str(step_file), "mass_kg": 0.03375},
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-123"})
+
+        await handler.execute(
+            GenerateCadInput(
+                name="Shoulder Yoke",
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+                material="aluminium_6061_t6",
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["extra_metadata"] == {
+            "volume_mm3": 12500.0,
+            "surface_area_mm2": 8400.0,
+            "mass_kg": 0.03375,
+            "bbox_mm": CADQUERY_CAD_RESULT["bounding_box"],
+        }
+
+    def test_name_is_required_and_non_empty(self):
+        with pytest.raises(ValidationError):
+            GenerateCadInput(
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+            )
+        with pytest.raises(ValidationError):
+            GenerateCadInput(
+                name="",
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+            )
+
     async def test_commit_false_skips_persistence(self):
         """commit=False never attempts to persist, even when the tool is available."""
         ctx, handler, work_product = await _make_ctx_and_handler()
@@ -346,6 +433,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
@@ -364,6 +452,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
@@ -400,6 +489,7 @@ class TestGenerateCadHandler:
 
         output = await handler.execute(
             GenerateCadInput(
+                name="Test Bracket",
                 work_product_id=work_product.id,
                 shape_type="plate",
                 dimensions={"width": 596.0, "height": 335.0, "thickness": 10.0},
@@ -425,7 +515,7 @@ class TestGenerateCadHandler:
                 surface_area_mm2=50.0,
                 bounding_box=BoundingBox(),
                 parameters_used={},
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         )
         assert any("volume" in e.lower() for e in errors)

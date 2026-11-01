@@ -22,6 +22,37 @@ from skill_registry.mcp_bridge import McpBridge
 
 logger = structlog.get_logger(__name__)
 
+# FORGE-100: canonical measured-property keys a constraint expression can
+# read directly off a committed cad_model's metadata (e.g.
+# `float(wp.metadata.get('mass_kg', 0)) <= 4.5`). Previously nothing wrote
+# these at all -- a CAD tool computed volume/mass/bounding-box and returned
+# them in its own response, but commit_geometry() never threaded them
+# through, so every constraint referencing a measured property silently
+# read the default the expression's own `.get(key, 0)` supplied: an ==/>=
+# comparison always FAILED (nothing ever equals/exceeds 0), and a <=/<
+# comparison always vacuously PASSED, regardless of the design's real
+# dimensions. Neither is a real engineering verdict.
+_CANONICAL_MEASURED_KEYS = ("volume_mm3", "surface_area_mm2", "mass_kg")
+
+
+def measured_metadata_from_cad_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Extract the canonical measured-property keys a CAD tool's own result
+    already computed, shaped for ``commit_geometry()``'s ``extra_metadata``.
+
+    Deliberately narrow: only copies keys the tool result actually contains
+    (``create_parametric``/``generate_enclosure``/``create_assembly`` all
+    return ``volume_mm3``/``surface_area_mm2``/``bounding_box``; ``mass_kg``
+    only when the tool was given a ``material`` to look up a density for) --
+    never fabricates a value the tool didn't itself compute.
+    """
+    metadata: dict[str, Any] = {
+        key: result[key] for key in _CANONICAL_MEASURED_KEYS if key in result
+    }
+    bbox = result.get("bounding_box")
+    if isinstance(bbox, dict):
+        metadata["bbox_mm"] = bbox
+    return metadata
+
 
 async def commit_geometry(
     mcp: McpBridge,
@@ -30,6 +61,7 @@ async def commit_geometry(
     name: str,
     project_id: str | None,
     domain: str = "mechanical",
+    extra_metadata: dict[str, Any] | None = None,
 ) -> tuple[bool, str | None, str | None, str | None]:
     """Best-effort persist an exported STEP file via ``twin.commit_geometry``.
 
@@ -43,6 +75,11 @@ async def commit_geometry(
     that shared root, mirroring
     ``api_gateway.twin.regenerate_geometry._regenerate_via_cadquery``
     (FORGE-79).
+
+    ``extra_metadata`` (FORGE-100) lands as top-level keys on the committed
+    work product's metadata -- pass ``measured_metadata_from_cad_result()``'s
+    output here so a constraint expression can read real measured values
+    instead of a default.
 
     Returns:
         (committed, twin_node_id, model_url, commit_error).
@@ -74,6 +111,8 @@ async def commit_geometry(
     }
     if project_id:
         arguments["project_id"] = project_id
+    if extra_metadata:
+        arguments["extra_metadata"] = extra_metadata
 
     try:
         result = await mcp.invoke("twin.commit_geometry", arguments, timeout=60)

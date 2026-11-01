@@ -70,6 +70,57 @@ The top recurring gaps become the next development: deliverable creation tools
 for the missing types, constraint-as-gate-criteria, skill depth, adapter
 reliability.
 
+## Design-loop outcome eval (FORGE-292, gap G-G6)
+
+Every rubric above (`mechanical_rubric.py` etc.) grades free-text decision
+content with substring/regex matches -- real, but exactly the "graders
+keyword-based" gap FORGE-292 named. The closed design loop
+(FORGE-287/288/289/291) has something those domains don't: a fully
+structured, deterministic result (`status`/`winner.<parameter>_mm`), so
+`design_loop_rubric.py` grades the OUTCOME directly instead -- it runs the
+real orchestration, independently recomputes the expected winner via a
+direct call to the pure bisection math
+(`twin_core.prediction.optimizer.optimize_wall_thickness`), and compares the
+two numerically. A parameter dropped or mis-threaded anywhere in the
+orchestration layer shows up as a real mismatch, not just "did something get
+persisted."
+
+`design_loop_scenarios.py` exercises this end to end against a real CAD work
+product:
+
+```bash
+# Against a real Neo4j-backed twin (set NEO4J_URI etc.), e.g. the real arm's
+# "Upper Arm Link" work product on fidel-dev
+python3 evals/design_loop_scenarios.py --work-product-id <id> \
+    --out evals/reports/manual/report_design_loop.json
+```
+
+Deliberately NOT a new `scenarios/*.json` entry driven through the full
+agentic `POST /v1/runs` harness like the fixtures above: the design loop's
+own bisection is deterministic math with nothing for an LLM to decide, so
+routing it through an agentic run would add cost and flakiness without
+adding signal. It talks to the twin directly
+(`twin_core.api.InMemoryTwinAPI.create_from_env()`), the same pattern this
+project's own live-validation scripts already use, and writes a report in
+the exact same `summary` shape `run_scenarios.py` does, so `evals/trend.py
+history` and the dashboard's `GET /v1/evals` (below) read either suite's
+reports interchangeably.
+
+## Eval dashboard: `GET /v1/evals`
+
+The dashboard's Evals page (`/evals`) reads whatever `evals/reports/*/
+report*.json` files exist on disk via a small gateway route
+(`api_gateway/evals/routes.py`) -- no new persistence, since the reports
+already carry everything needed. One real correction against the ticket's
+own wording: this pipeline has no concept of a CI "release" to key history
+by (`nightly.sh` runs on a timestamp, not a release tag), so the page shows
+pass rate per scenario over recorded **nightly runs** instead of "releases."
+
+`evals/reports/` is gitignored and host-local (`nightly.sh` writes it by
+running ON the box, not inside the gateway container), so the deployed
+gateway sees it via a read-only bind mount (`docker-compose.yml`) rather
+than anything baked into the image.
+
 ## Chat context-engineering suite (MET-570)
 
 A second, independent suite: multi-turn conversation evals for the

@@ -29,6 +29,12 @@ from domain_agents.base_agent import (
     get_llm_model,
     is_llm_available,
 )
+from domain_agents.mechanical.skills.check_manufacturability.handler import (
+    CheckManufacturabilityHandler,
+)
+from domain_agents.mechanical.skills.check_manufacturability.schema import (
+    CheckManufacturabilityInput,
+)
 from domain_agents.mechanical.skills.check_tolerance.handler import (
     CheckToleranceHandler,
 )
@@ -60,6 +66,12 @@ from domain_agents.mechanical.skills.generate_mesh.handler import (
 )
 from domain_agents.mechanical.skills.generate_mesh.schema import (
     GenerateMeshInput,
+)
+from domain_agents.mechanical.skills.rank_manufacturing_processes.handler import (
+    RankManufacturingProcessesHandler,
+)
+from domain_agents.mechanical.skills.rank_manufacturing_processes.schema import (
+    RankManufacturingProcessesInput,
 )
 from domain_agents.mechanical.workflows import (
     DesignWorkflowParams,
@@ -144,7 +156,8 @@ tolerance stack-up analysis, mesh generation, and manufacturing processes.
 You have access to the following tools:
 
 - **validate_stress**: Run FEA stress validation on a meshed CAD model using \
-CalculiX. Provide mesh_file_path, load_case, and stress constraints.
+CalculiX. Provide mesh_file_path, load_case, stress constraints, material_name, \
+fixed_node_set, load_node_set, and load_force_n.
 - **generate_mesh**: Generate a finite element mesh from a CAD file using \
 FreeCAD/Netgen. Provide cad_file path and meshing parameters.
 - **check_tolerance**: Check dimensional tolerances against manufacturing \
@@ -216,6 +229,10 @@ def _get_or_create_pydantic_agent() -> Any:
         mesh_file_path: str,
         load_case: str,
         constraints: list[dict[str, Any]],
+        material_name: str,
+        fixed_node_set: str,
+        load_node_set: str,
+        load_force_n: list[float],
     ) -> dict[str, Any]:
         """Run FEA stress validation using CalculiX.
 
@@ -224,6 +241,12 @@ def _get_or_create_pydantic_agent() -> Any:
             load_case: Load case identifier (e.g. 'gravity', 'thermal').
             constraints: List of stress constraints, each with
                 max_von_mises_mpa (float) and safety_factor (float).
+            material_name: Material name for FEA elastic properties (e.g.
+                'steel', 'aluminium_6061_t6').
+            fixed_node_set: Mesh element set name to fully constrain (e.g.
+                'Surface1', gmsh's own per-STEP-face group).
+            load_node_set: Mesh element set name to apply load_force_n to.
+            load_force_n: [Fx, Fy, Fz] total applied force in Newtons.
         """
         fea_result = await ctx.deps.mcp_bridge.invoke(
             "calculix.run_fea",
@@ -231,6 +254,10 @@ def _get_or_create_pydantic_agent() -> Any:
                 "mesh_file": mesh_file_path,
                 "load_case": load_case,
                 "analysis_type": "static_stress",
+                "material": {"name": material_name},
+                "fixed_node_set": fixed_node_set,
+                "load_node_set": load_node_set,
+                "load_force_n": load_force_n,
             },
         )
 
@@ -317,7 +344,7 @@ def _get_or_create_pydantic_agent() -> Any:
         ctx: RunContext[AgentDependencies],
         tolerances: list[dict[str, Any]],
         manufacturing_process: dict[str, Any],
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
     ) -> dict[str, Any]:
         """Check dimensional tolerances against manufacturing process capabilities.
 
@@ -368,7 +395,7 @@ def _get_or_create_pydantic_agent() -> Any:
         script: str = "",
         backend: str = "cadquery",
         constraints: dict[str, Any] | None = None,
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
     ) -> dict[str, Any]:
         """Generate a CAD script from a natural language description and execute it.
 
@@ -435,7 +462,8 @@ def _get_or_create_pydantic_agent() -> Any:
     async def generate_cad_ir(
         ctx: RunContext[AgentDependencies],
         entities: list[dict[str, Any]],
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
+        name: str = "",
     ) -> dict[str, Any]:
         """Generate CAD geometry from a structured Design IR feature tree (FreeCAD).
 
@@ -466,6 +494,7 @@ def _get_or_create_pydantic_agent() -> Any:
             entities: The Design IR entity list, ordered so every ``*_ref``
                 points to an entity earlier in this same list.
             material: Material name for metadata.
+            name: Name for the generated part (e.g. "Shoulder Yoke").
         """
         skill_ctx = SkillContext(
             twin=ctx.deps.twin,
@@ -475,7 +504,15 @@ def _get_or_create_pydantic_agent() -> Any:
             branch=ctx.deps.branch,
         )
 
-        skill_input = GenerateCadIrInput(entities=entities, material=material)
+        skill_input = GenerateCadIrInput(
+            # FORGE-97/100: name is now required on the skill's own input;
+            # this legacy pydantic-ai tool predates that, so fall back to
+            # the same synthetic pattern the skill itself used to hardcode
+            # when the caller doesn't supply one.
+            name=name or f"design_ir ({material})",
+            entities=entities,
+            material=material,
+        )
 
         handler = GenerateCadIrHandler(skill_ctx)
         result = await handler.run(skill_input)
@@ -527,6 +564,9 @@ class MechanicalAgent:
     SUPPORTED_TASKS = {
         "validate_stress",
         "check_tolerances",
+        # FORGE-611: choose the process before design, check the design after.
+        "rank_manufacturing_processes",
+        "check_manufacturability",
         "generate_mesh",
         "generate_cad",
         "generate_cad_script",
@@ -748,6 +788,8 @@ class MechanicalAgent:
         handlers: dict[str, Callable[[TaskRequest], Coroutine[Any, Any, TaskResult]]] = {
             "validate_stress": self._run_validate_stress,
             "check_tolerances": self._run_check_tolerances,
+            "rank_manufacturing_processes": self._run_rank_manufacturing_processes,
+            "check_manufacturability": self._run_check_manufacturability,
             "generate_mesh": self._run_generate_mesh,
             "generate_cad": self._run_generate_cad,
             "generate_cad_script": self._run_generate_cad_script,
@@ -769,7 +811,12 @@ class MechanicalAgent:
             "constraints": request.parameters.get("constraints", []),
         }
 
-        # Invoke via MCP bridge (CalculiX FEA)
+        # Invoke via MCP bridge (CalculiX FEA). FORGE-234: run_fea builds a
+        # complete, solvable deck around the mesh -- material/fixed_node_set/
+        # load_node_set/load_force_n are required for 'static_stress', with
+        # Surface1/Surface2 (gmsh's own default per-STEP-face ELSET names)
+        # as reasonable defaults when the caller doesn't know the real face
+        # names yet.
         try:
             fea_result = await self.mcp.invoke(
                 "calculix.run_fea",
@@ -777,6 +824,14 @@ class MechanicalAgent:
                     "mesh_file": skill_input_data["mesh_file_path"],
                     "load_case": skill_input_data["load_case"],
                     "analysis_type": "static_stress",
+                    "material": {
+                        "name": request.parameters.get("material_name", "aluminium_6061_t6")
+                    },
+                    "fixed_node_set": request.parameters.get("fixed_node_set", "Surface1"),
+                    "load_node_set": request.parameters.get("load_node_set", "Surface2"),
+                    "load_force_n": list(
+                        request.parameters.get("load_force_n", (0.0, 0.0, -100.0))
+                    ),
                 },
             )
         except Exception as exc:
@@ -872,7 +927,7 @@ class MechanicalAgent:
             work_product_id=request.work_product_id,
             tolerances=tolerances,
             manufacturing_process=process,
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=request.parameters.get("material", "aluminium_6061_t6"),
             check_stack_up=request.parameters.get("check_stack_up", False),
         )
 
@@ -919,6 +974,61 @@ class MechanicalAgent:
             warnings=([output.summary] if output.overall_status == "marginal" else []),
         )
 
+    async def _run_pure_skill(
+        self, request: TaskRequest, skill: str, handler_cls: Any, input_data: Any
+    ) -> TaskResult:
+        """Run a computation-only skill and report its output (FORGE-611)."""
+        result = await handler_cls(self._create_skill_context(request.branch)).run(input_data)
+        if not result.success:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=result.errors,
+            )
+        return TaskResult(
+            task_type=request.task_type,
+            work_product_id=request.work_product_id,
+            success=True,
+            skill_results=[{"skill": skill, **result.data.model_dump(mode="json")}],
+        )
+
+    async def _run_rank_manufacturing_processes(self, request: TaskRequest) -> TaskResult:
+        """Rank candidate processes for a part before it is designed (FORGE-611)."""
+        try:
+            data = RankManufacturingProcessesInput.model_validate(request.parameters)
+        except Exception as exc:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=[f"Invalid rank_manufacturing_processes input: {exc}"],
+            )
+        return await self._run_pure_skill(
+            request, "rank_manufacturing_processes", RankManufacturingProcessesHandler, data
+        )
+
+    async def _run_check_manufacturability(self, request: TaskRequest) -> TaskResult:
+        """DFM review of a design against its chosen process (FORGE-611)."""
+        try:
+            data = CheckManufacturabilityInput.model_validate(
+                {"work_product_id": request.work_product_id, **request.parameters}
+            )
+        except Exception as exc:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=[f"Invalid check_manufacturability input: {exc}"],
+            )
+        outcome = await self._run_pure_skill(
+            request, "check_manufacturability", CheckManufacturabilityHandler, data
+        )
+        if outcome.success and outcome.skill_results:
+            # A design that cannot be made by its process is not a success.
+            outcome.success = outcome.skill_results[0].get("verdict") != "not_manufacturable"
+        return outcome
+
     async def _run_generate_mesh(self, request: TaskRequest) -> TaskResult:
         """Run mesh generation using the generate_mesh skill."""
         ctx = self._create_skill_context(request.branch)
@@ -938,7 +1048,7 @@ class MechanicalAgent:
             element_size=request.parameters.get("element_size", 1.0),
             algorithm=request.parameters.get("algorithm", "netgen"),
             output_format=request.parameters.get("output_format", "inp"),
-            min_angle_threshold=request.parameters.get("min_angle_threshold", 15.0),
+            min_angle_threshold=request.parameters.get("min_angle_threshold", 10.0),
             max_aspect_ratio_threshold=request.parameters.get("max_aspect_ratio_threshold", 10.0),
             refinement_regions=request.parameters.get("refinement_regions", []),
         )
@@ -1025,11 +1135,17 @@ class MechanicalAgent:
                 errors=["Missing required parameter: dimensions"],
             )
 
+        material = request.parameters.get("material", "aluminium_6061_t6")
         skill_input = GenerateCadInput(
+            # FORGE-97: name is now required on the skill's own input; this
+            # generic TaskRequest interface predates that, so fall back to
+            # the same synthetic pattern the skill itself used to hardcode
+            # when the caller doesn't supply one.
+            name=request.parameters.get("name") or f"{shape_type} ({material})",
             work_product_id=request.work_product_id,
             shape_type=shape_type,
             dimensions=dimensions,
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=material,
             output_path=request.parameters.get("output_path", ""),
             constraints=request.parameters.get("constraints", {}),
             backend=request.parameters.get("backend", "cadquery"),
@@ -1122,7 +1238,7 @@ class MechanicalAgent:
             script=request.parameters.get("script", ""),
             backend=request.parameters.get("backend", "cadquery"),
             constraints=request.parameters.get("constraints", {}),
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=request.parameters.get("material", "aluminium_6061_t6"),
             output_format=request.parameters.get("output_format", "step"),
         )
 
@@ -1202,10 +1318,16 @@ class MechanicalAgent:
                 errors=["Missing required parameter: entities"],
             )
 
+        material = request.parameters.get("material", "aluminium_6061_t6")
         skill_input = GenerateCadIrInput(
+            # FORGE-97/100: name is now required on the skill's own input;
+            # this generic TaskRequest interface predates that, so fall back
+            # to the same synthetic pattern the skill itself used to
+            # hardcode when the caller doesn't supply one.
+            name=request.parameters.get("name") or f"design_ir ({material})",
             work_product_id=request.work_product_id,
             entities=entities,
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=material,
             project_id=request.parameters.get("project_id"),
         )
 
@@ -1345,13 +1467,16 @@ class MechanicalAgent:
             branch=request.branch,
             shape_type=shape_type,
             dimensions=dimensions,
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=request.parameters.get("material", "aluminium_6061_t6"),
             output_path=request.parameters.get("output_path", ""),
             element_size=request.parameters.get("element_size", 1.0),
             mesh_algorithm=request.parameters.get("mesh_algorithm", "netgen"),
             output_format=request.parameters.get("output_format", "inp"),
             load_case=request.parameters.get("load_case", "default"),
             stress_constraints=request.parameters.get("stress_constraints", []),
+            fixed_node_set=request.parameters.get("fixed_node_set", "Surface1"),
+            load_node_set=request.parameters.get("load_node_set", "Surface2"),
+            load_force_n=tuple(request.parameters.get("load_force_n", (0.0, 0.0, -100.0))),
         )
 
         workflow = MechanicalDesignWorkflow(

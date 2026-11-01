@@ -266,7 +266,23 @@ class TestAllMetricsCombined:
         # + 4 constraint + 5 retrieval (MET-326) + 1 knowledge (MET-401)
         # + 1 twin (MET-439) + 6 consolidation (MET-454/455)
         # + 5 harness (production-harness audit follow-up)
-        assert len(MetricsRegistry.all_metrics()) == 50
+        # + 5 MCP (FORGE-379, FORGE-411) + 3 design-flow (FORGE-401)
+        # + 1 provider fallback (FORGE-468) + 1 approval resolution (FORGE-466)
+        # + 1 approval gate without runtime (FORGE-469)
+        # + 1 iteration gate without approval workflow (FORGE-470)
+        # + 1 design-flow tool refusal (FORGE-492)
+        # + 1 unreachable approval hold (FORGE-490)
+        # + 1 unified approval decision (FORGE-507)
+        # + 1 chat ungrounded claim (FORGE-520)
+        # + 1 twin item revisions (FORGE-523)
+        # + 1 twin run change sets (FORGE-525)
+        # + 1 design-flow item slots (FORGE-524)
+        # + 3 simulation result field payload/store (FORGE-532)
+        # + 1 prd requirement values (FORGE-528)
+        # + 2 project brief count/size (FORGE-530)
+        # + 1 twin record staleness (FORGE-527)
+        # + 1 client-mode phase tasks (FORGE-581).
+        assert len(MetricsRegistry.all_metrics()) == 90  # + 5 host watchdog (FORGE-713)
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
@@ -282,6 +298,10 @@ class TestAllMetricsCombined:
             + len(MetricsRegistry.twin_metrics())
             + len(MetricsRegistry.consolidation_metrics())
             + len(MetricsRegistry.harness_metrics())
+            + len(MetricsRegistry.mcp_metrics())
+            + len(MetricsRegistry.design_flow_metrics())
+            + len(MetricsRegistry.sim_field_metrics())
+            + len(MetricsRegistry.watchdog_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 

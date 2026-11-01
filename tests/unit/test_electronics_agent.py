@@ -288,39 +288,49 @@ class TestRunDrc:
 class TestCheckPowerBudget:
     """Tests for the check_power_budget task type."""
 
-    async def test_not_yet_implemented(self, agent: ElectronicsAgent):
-        """Power budget check should return a not-yet-implemented stub error."""
+    async def test_runs_the_budget_tool(
+        self, agent: ElectronicsAgent, mcp_bridge: InMemoryMcpBridge
+    ):
+        """FORGE-544: the skill runs; it used to answer 'not yet implemented'."""
+        from tool_registry.tools.power.budget import check_budget_dict
+
+        params = {
+            "rails": _POWER_RAILS,
+            "loads": [{"name": "MCU", "rail": "3V3", "power_mw": 150.0}],
+            "derating": 0.8,
+        }
+        mcp_bridge.register_tool("power.check_budget", "power_budget")
+        mcp_bridge.register_tool_response("power.check_budget", check_budget_dict(params))
         request = TaskRequest(
-            task_type="check_power_budget",
-            work_product_id=uuid4(),
-            parameters={
-                "components": [
-                    {"name": "MCU", "power_mw": 150.0},
-                    {"name": "IMU", "power_mw": 25.0},
-                    {"name": "Radio", "power_mw": 200.0},
-                ]
-            },
+            task_type="check_power_budget", work_product_id=uuid4(), parameters=params
         )
         result = await agent.run_task(request)
 
-        assert result.success is False
-        assert any("not yet implemented" in e for e in result.errors)
-        assert result.task_type == "check_power_budget"
-        assert len(result.skill_results) == 1
-        assert result.skill_results[0]["skill"] == "check_power_budget"
-        assert result.skill_results[0]["status"] == "not_implemented"
-        assert result.skill_results[0]["num_components"] == 3
+        assert result.success is True
+        out = result.skill_results[0]
+        assert out["skill"] == "check_power_budget"
+        assert out["verdict"] == "pass"
+        assert out["worst_rail"] == "3V3"
 
-    async def test_missing_components(self, agent: ElectronicsAgent):
-        """Power budget check should fail when components parameter is missing."""
-        request = TaskRequest(
-            task_type="check_power_budget",
-            work_product_id=uuid4(),
-        )
+    async def test_missing_rails_or_derating(self, agent: ElectronicsAgent):
+        request = TaskRequest(task_type="check_power_budget", work_product_id=uuid4())
         result = await agent.run_task(request)
 
         assert result.success is False
-        assert any("components" in e for e in result.errors)
+        assert any("rails" in e and "derating" in e for e in result.errors)
+
+
+_POWER_RAILS = [
+    {"name": "5V0", "voltage_v": 5.0, "source_kind": "supply", "rated_current_ma": 1000},
+    {
+        "name": "3V3",
+        "voltage_v": 3.3,
+        "source_kind": "ldo",
+        "rated_current_ma": 300,
+        "input_rail": "5V0",
+        "quiescent_ma": 0.05,
+    },
+]
 
 
 # --- Full validation ---
@@ -338,17 +348,22 @@ class TestFullValidation:
             parameters={
                 "schematic_file": "eda/kicad/main.kicad_sch",
                 "pcb_file": "eda/kicad/main.kicad_pcb",
-                "components": [
-                    {"name": "MCU", "power_mw": 150.0},
-                    {"name": "IMU", "power_mw": 25.0},
-                ],
+                "rails": _POWER_RAILS,
+                "loads": [{"name": "MCU", "rail": "3V3", "current_ma": 400.0}],
+                "derating": 0.8,
             },
+        )
+        from tool_registry.tools.power.budget import check_budget_dict
+
+        agent.mcp.register_tool("power.check_budget", "power_budget")  # type: ignore[attr-defined]
+        agent.mcp.register_tool_response(  # type: ignore[attr-defined]
+            "power.check_budget", check_budget_dict(request.parameters)
         )
         result = await agent.run_task(request)
 
         assert result.task_type == "full_validation"
         assert result.work_product_id == work_product_id
-        # ERC and DRC pass (clean responses), but power budget is not yet implemented
+        # ERC and DRC pass (clean responses); 400 mA on a 300 mA LDO fails the budget
         assert result.success is False
         # Should have results from all three checks
         assert len(result.skill_results) == 3

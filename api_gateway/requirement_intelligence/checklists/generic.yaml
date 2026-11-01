@@ -1,0 +1,65 @@
+# FORGE-257 generic completeness checklist -- the fallback used when a
+# project's product_type has no dedicated checklist file of its own. Five
+# concern categories broad enough to apply to any hardware product, matching
+# this repo's own core-discipline set (mechanical/electrical/firmware/
+# thermal + verification).
+product_type: generic
+categories:
+  - id: safety
+    label: Safety
+    keywords:
+      - safety
+      - hazard
+      - emergency
+      - fail-safe
+      - failsafe
+      - injury
+      - protection
+      - guard
+  - id: mechanical
+    label: Mechanical / structural
+    keywords:
+      - mass
+      - weight
+      - weigh
+      - load
+      - stress
+      - strength
+      - torque
+      - dimension
+      - dimensions
+      - size
+  - id: power
+    label: Power / electrical
+    keywords:
+      - power
+      - voltage
+      - current
+      - battery
+      - watt
+      - watts
+      - amp
+      - amps
+      - volt
+      - volts
+  - id: environmental
+    label: Environmental
+    keywords:
+      - temperature
+      - humidity
+      - ip rating
+      - dust
+      - water
+      - vibration
+      - altitude
+  - id: verification
+    label: Verification
+    keywords:
+      - test
+      - inspection
+      - analysis
+      - demonstration
+      - verify
+      - verified
+      - validate
+      - validated

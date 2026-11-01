@@ -40,6 +40,8 @@ from orchestrator.harness.tool_exec import (
     cached_view,
     dedup_key,
     error_content,
+    note_service_refusal,
+    observation_failure_reason,
 )
 from orchestrator.harness.tools import NATIVE
 
@@ -64,65 +66,207 @@ NATIVE_SYSTEM = (
     "Whenever a turn generates or modifies geometry, you must call "
     "twin.commit_geometry before giving your final answer, or explicitly tell "
     "the user it was not committed and why. "
+    "Report measurements, dimensions, and counts only from an actual tool "
+    "result, never a guess at what you intended to ask for — if a tool's "
+    "result doesn't match what you expected (wrong dimensions, wrong "
+    "feature count), say so explicitly instead of reporting the intended "
+    "values as if they were achieved. "
     "Always give the user a clear final answer."
 )
 
 
-def _select_tools(specs: list[Any], max_tools: int) -> tuple[list[Any], list[str]]:
+# FORGE-94 remainder (re-test 2026-09-25): protecting only ``_open_session``
+# stopped the session opener itself from being dropped, but the round-robin
+# still exhausted the global budget partway through FreeCAD's large,
+# alphabetically-ordered queue before ever reaching these -- an agent could
+# open a session and create a sketch, then find every tool that actually
+# turns a sketch into a feature (or inspects the joints it just added) still
+# uncallable. Each name here is a *sketch-to-feature* verb -- the exact class
+# the original _open_session reasoning already argued for, just incomplete --
+# plus list_joints, which pairs with add_assembly_joint the same way
+# close_session pairs with open_session: needed to verify what an earlier
+# call in the same session actually did.
+_SESSION_CRITICAL_VERBS = frozenset(
+    {
+        "pad_sketch",
+        "pocket_sketch",
+        "revolve_sketch",
+        "loft_sketches",
+        "sweep_sketch",
+        "list_joints",
+    }
+)
+
+
+# FORGE-518: tools that only work as a group. If any trigger is kept, every
+# companion present in the registry is kept too, so a cap can never split a
+# round trip (stage a part, then have no way to load it).
+_COMPANION_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("twin_stage_work_product_file", "freecad_import_step"),
+        (
+            "twin_stage_work_product_file",
+            "freecad_import_step",
+            "freecad_describe_step_file",
+            "freecad_open_session",
+            "freecad_close_session",
+            "freecad_export_model",
+            "twin_commit_geometry",
+        ),
+    ),
+    (
+        ("freecad_export_model", "twin_commit_geometry"),
+        ("freecad_export_model", "twin_commit_geometry"),
+    ),
+    (
+        ("freecad_open_session", "freecad_close_session"),
+        ("freecad_open_session", "freecad_close_session"),
+    ),
+)
+
+# Families that lose to the FreeCAD authoring set when the cap bites.
+_NICHE_ORIGINS = ("gazebo", "isaac_sim", "omniverse_usd")
+
+
+def _select_tools(
+    specs: list[Any], max_tools: int, *, pinned: frozenset[str] = frozenset()
+) -> tuple[list[Any], list[str]]:
     """Choose at most ``max_tools`` specs -> (kept, dropped names).
 
     Naive truncation is not acceptable here. ``all_tools()`` returns specs
     sorted by name, so slicing the tail deletes whole adapters alphabetically
     — ``twin.*`` and ``web.*`` go first, which is precisely backwards.
 
-    Policy instead: keep every native tool (few, curated, session-critical —
-    ``chat.set_project_scope`` and the skill layer), then fill the remaining
-    budget round-robin across MCP origins so each adapter keeps a share and
-    no capability disappears wholesale.
-    """
-    natives = [s for s in specs if s.origin == NATIVE]
-    mcp = [s for s in specs if s.origin != NATIVE]
+    Policy: keep every native tool (few, curated, session-critical —
+    ``chat.set_project_scope`` and the skill layer) plus three more protected
+    classes (FORGE-94), then fill the remaining budget round-robin across MCP
+    origins so each adapter keeps a share and no capability disappears
+    wholesale:
 
-    if len(natives) >= max_tools:
+    - ``pinned`` — names ``search_tools``'s handler has already promised the
+      model are available (``ToolRegistry.pin``). A round-robin cap that
+      drops one of these on a *later* turn would make that promise a lie the
+      model has no way to detect.
+    - any tool whose name ends ``_open_session`` — a structural dependency
+      for every OTHER tool its own adapter registers: an agent that can't
+      open a session can't use any of that adapter's stateful tools at all,
+      so dropping just the session opener while keeping its siblings is
+      actively harmful in a way dropping any other single tool isn't. (This
+      is what let FreeCAD's whole stateful authoring surface — pad/pocket/
+      revolve included — go uncallable in practice: the round-robin's
+      one-per-adapter-per-round pass exhausts the global budget partway
+      through FreeCAD's large, alphabetically-ordered queue, and
+      ``open_session`` and the sketch verbs it gates all happen to sort into
+      that dropped tail.)
+    - any tool whose name ends one of ``_SESSION_CRITICAL_VERBS`` — protecting
+      ``open_session`` alone wasn't enough (re-test 2026-09-25): the verbs
+      that actually turn an open session's sketch into geometry, and the one
+      that inspects joints just added, still sorted into the dropped tail.
+    - any tool whose ``input_schema`` requires ``session_id`` (FORGE-94
+      remainder, re-test 2026-09-26): the curated verb list above is the same
+      whack-a-mole class of fix it already replaced ``_open_session``-only
+      protection for -- it moves the gap around (measure/set_expression/
+      linear_pattern/... still dropped) instead of closing it, and every new
+      stateful tool (e.g. FORGE-231's ``import_step``) starts out unprotected
+      by construction until someone remembers to add it here. A tool that
+      requires ``session_id`` is *structurally* the same class as
+      ``_open_session`` and the curated verbs: it can only be called inside
+      an already-open session, so it belongs with them by definition, not by
+      name -- this is a superset of the two checks above, kept for
+      belt-and-suspenders since not every adapter's schema is guaranteed to
+      mark ``session_id`` required the same way.
+    """
+
+    def _protected(spec: Any) -> bool:
+        name = spec.name
+        if name in pinned or name.endswith("_open_session"):
+            return True
+        if any(name.endswith(f"_{verb}") for verb in _SESSION_CRITICAL_VERBS):
+            return True
+        schema = spec.input_schema if isinstance(spec.input_schema, dict) else {}
+        return "session_id" in (schema.get("required") or [])
+
+    natives = [s for s in specs if s.origin == NATIVE]
+    rest = [s for s in specs if s.origin != NATIVE]
+    protected_mcp = [s for s in rest if _protected(s)]
+    # FORGE-518: a trigger that is protected or merely present pulls in its
+    # whole group before the round-robin runs.
+    wanted: set[str] = set()
+    for spec in rest:
+        for triggers, companions in _COMPANION_GROUPS:
+            if any(spec.name.endswith(t) for t in triggers):
+                wanted.update(companions)
+    have = {id(s) for s in protected_mcp}
+    for spec in rest:
+        if id(spec) not in have and any(spec.name.endswith(w) for w in wanted):
+            protected_mcp.append(spec)
+            have.add(id(spec))
+    protected_ids = {id(s) for s in protected_mcp}
+    mcp = [s for s in rest if id(s) not in protected_ids]
+
+    always_kept = natives + protected_mcp
+    if len(always_kept) >= max_tools:
         # Pathological, but never silently send an over-long array.
-        kept = natives[:max_tools]
+        kept = always_kept[:max_tools]
         dropped = [s.name for s in specs if s not in kept]
         return kept, dropped
 
     by_origin: dict[str, list[Any]] = {}
     for spec in mcp:
         by_origin.setdefault(spec.origin, []).append(spec)
-
-    budget = max_tools - len(natives)
+    budget = max_tools - len(always_kept)
     chosen: list[Any] = []
-    queues = list(by_origin.values())
-    while budget > 0 and any(queues):
-        for queue in queues:
-            if not queue:
-                continue
-            chosen.append(queue.pop(0))
-            budget -= 1
-            if budget == 0:
-                break
+    # Niche families only get what the other adapters leave over, so the cap
+    # bites them first.
+    for tier in (
+        [q for o, q in by_origin.items() if o.lower() not in _NICHE_ORIGINS],
+        [q for o, q in by_origin.items() if o.lower() in _NICHE_ORIGINS],
+    ):
+        while budget > 0 and any(tier):
+            for queue in tier:
+                if not queue:
+                    continue
+                chosen.append(queue.pop(0))
+                budget -= 1
+                if budget == 0:
+                    break
 
-    kept_set = {id(s) for s in natives} | {id(s) for s in chosen}
+    kept_set = {id(s) for s in always_kept} | {id(s) for s in chosen}
     kept = [s for s in specs if id(s) in kept_set]
     dropped = [s.name for s in specs if id(s) not in kept_set]
     return kept, dropped
 
 
-def _tool_schemas(runtime: HarnessRuntime, max_tools: int | None = None) -> list[dict[str, Any]]:
+def _tool_schemas(
+    runtime: HarnessRuntime,
+    max_tools: int | None = None,
+    *,
+    on_truncate: Callable[[list[str]], None] | None = None,
+) -> list[dict[str, Any]]:
     """Build OpenAI-style function schemas from the runtime's registered tools.
 
     ``max_tools`` enforces the provider's hard cap on the ``tools`` array
     (see ``providers.registry.max_tools_for``). Exceeding it is a 400 that
     kills the turn before the model sees a token, so the cap is applied here
     — loudly, never as a silent slice.
+
+    ``on_truncate`` (FORGE-94 remainder), when given, is called with the
+    dropped tool names whenever truncation actually happens this round --
+    the native loop uses it to tell the MODEL (not just the structured log)
+    that some tools are missing this turn, so it knows to reach for
+    ``search_tools`` instead of silently assuming a capability doesn't
+    exist. A no-op default keeps every existing caller (including the ones
+    that only check the returned schema list) unaffected.
     """
     specs = runtime.tools.all_tools()
     dropped: list[str] = []
     if max_tools is not None and len(specs) > max_tools:
-        specs, dropped = _select_tools(specs, max_tools)
+        specs, dropped = _select_tools(specs, max_tools, pinned=runtime.tools.pinned_names())
+        # FORGE-518: say what was dropped, once per turn (the registry lives
+        # for the turn; this runs every model round).
+        if getattr(runtime.tools, "_drops_logged", None) != dropped:
+            runtime.tools._drops_logged = list(dropped)  # type: ignore[attr-defined]
+            logger.info("chat_tools_dropped", limit=max_tools, dropped_tools=dropped)
         logger.warning(
             "tool_schemas_truncated",
             limit=max_tools,
@@ -134,6 +278,8 @@ def _tool_schemas(runtime: HarnessRuntime, max_tools: int | None = None) -> list
                 "this turn — narrow the enabled tool set to choose deliberately"
             ),
         )
+        if on_truncate is not None:
+            on_truncate(dropped)
 
     schemas: list[dict[str, Any]] = []
     for t in specs:
@@ -216,6 +362,17 @@ def _declares_project_id(runtime: HarnessRuntime, name: str) -> bool:
     return "project_id" in spec.input_schema.get("properties", {})
 
 
+def _model_content(runtime: HarnessRuntime, tool: str, observation: Any) -> str:
+    """The text the model receives for one tool result (FORGE-479).
+
+    Over the configured inline limit the result becomes a summary plus a
+    handle readable through ``read_tool_result``; otherwise it renders exactly
+    as before. The recorded trace step keeps the full observation either way.
+    """
+    handled = runtime.results.offer(tool, observation)
+    return handled if handled is not None else _json_safe(observation)
+
+
 async def _execute_calls(
     runtime: HarnessRuntime,
     calls: list[dict[str, Any]],
@@ -269,7 +426,10 @@ async def _execute_calls(
             try:
                 return await runtime.call_tool(call_name, call_args), None
             except Exception as exc:  # noqa: BLE001 - surface to the model, don't abort
-                logger.warning("native_tool_error", tool=call_name, error=str(exc))
+                # FORGE-492: a guardrail refusal is an answer, not a fault; it
+                # is logged and counted, then handed to the model below.
+                if not note_service_refusal(getattr(runtime, "metrics", None), call_name, exc):
+                    logger.warning("native_tool_error", tool=call_name, error=str(exc))
                 return None, exc
 
         # A tool that pauses for a human decision must not do so alongside
@@ -299,9 +459,12 @@ async def _execute_calls(
                 continue
             cache.put(key, observation)
             step = ReActStep(
-                thought=thought, tool_call=ToolCall(name, args), observation=observation
+                thought=thought,
+                tool_call=ToolCall(name, args),
+                observation=observation,
+                error=observation_failure_reason(observation),
             )
-            results.append((step, _json_safe(observation), cid))
+            results.append((step, _model_content(runtime, name, observation), cid))
             continue
 
         if not cache.has(key):
@@ -324,8 +487,13 @@ async def _execute_calls(
         # invisible to every observer and unassertable in the eval suite.
         view = cached_view(cache.get(key))
         logger.info("native_tool_call_deduplicated", tool=name)
-        step = ReActStep(thought=thought, tool_call=ToolCall(name, args), observation=view)
-        results.append((step, _json_safe(view), cid))
+        step = ReActStep(
+            thought=thought,
+            tool_call=ToolCall(name, args),
+            observation=view,
+            error=observation_failure_reason(cache.get(key)),
+        )
+        results.append((step, _model_content(runtime, name, view), cid))
     return results
 
 
@@ -383,6 +551,10 @@ async def run_native_tools(
     (``providers.registry.max_tools_for``). Without it, a runtime holding
     more tools than the provider accepts fails every turn with a 400 before
     the model reads a token — see ``_select_tools`` for which tools survive.
+    A round that actually truncates gets a one-round system-prompt note
+    telling the model to use ``search_tools`` for anything missing (FORGE-94
+    remainder) rather than silently treating the gap as a real capability
+    limit.
     """
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
@@ -472,11 +644,67 @@ async def run_native_tools(
             # re-applied on every recompute too, since a mid-turn
             # registration can just as easily push the live count back over
             # the provider's cap (#747).
-            tools = _tool_schemas(runtime, max_tools=max_tools)
-            resp = await _model_call({"system": system, "messages": messages, "tools": tools})
+            dropped_this_round: list[str] = []
+            tools = _tool_schemas(
+                runtime, max_tools=max_tools, on_truncate=dropped_this_round.extend
+            )
+            # FORGE-94 remainder: the structured log already records a
+            # truncation, but the MODEL never saw it -- it just found a tool
+            # missing with no explanation, indistinguishable from "this
+            # capability doesn't exist." A one-round system-prompt note (not
+            # a permanent addition -- only present on rounds that actually
+            # truncated) tells it the omission is provider-cap noise, not a
+            # real gap, and to reach for ``search_tools`` instead of quietly
+            # working around it or telling the user something isn't possible.
+            # FORGE-478: the note rides as ``system_suffix`` so it never
+            # mutates the cached system prefix on a truncating round.
+            request: dict[str, Any] = {"system": system, "messages": messages, "tools": tools}
+            if dropped_this_round:
+                request["system_suffix"] = (
+                    f"NOTE: {len(dropped_this_round)} tool(s) were omitted from "
+                    "your tool list this turn because the provider's tools-array cap was "
+                    "exceeded. If a capability you need isn't in your list, call "
+                    "search_tools with a relevant keyword before assuming it doesn't exist."
+                )
+            resp = await _model_call(request)
             _tally(resp)
             text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
             calls = resp.get("tool_calls") if isinstance(resp, dict) else None
+            truncated = bool(isinstance(resp, dict) and resp.get("truncated"))
+
+            if not calls and truncated:
+                # FORGE-235: finish_reason == "length" / stop_reason ==
+                # "max_tokens" with no tool_calls means the provider cut the
+                # response off mid-generation (usually mid a large tool-call
+                # argument) -- NOT the model choosing to stop. Treating this
+                # like a normal "done" produced the wrong user-facing message
+                # ("couldn't converge within the step budget" after a single
+                # step) and silently threw the truncated call away with no
+                # hint to the model. Feed the real cause back as a genuine
+                # step instead -- max_steps/deadline still bound how many
+                # times this can happen, and THAT path already reports the
+                # correct cause via summarize_trajectory.
+                logger.warning("native_tools_output_truncated", steps=step_no)
+                messages.append({"role": "assistant", "content": text or None})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was truncated at the output token "
+                            "limit before it finished -- no tool call completed. Split "
+                            "the work into a smaller step (e.g. a shorter tool argument, "
+                            "or fewer entities per call) and try again."
+                        ),
+                    }
+                )
+                step = ReActStep(
+                    thought=text,
+                    tool_call=None,
+                    error="response truncated at the output token limit",
+                )
+                steps.append(step)
+                await _emit(step)
+                continue
 
             if not calls:
                 logger.info("native_tools_completed", steps=step_no)

@@ -101,12 +101,18 @@ multi-physics simulation.
 
 You have access to the following tools:
 
-- **run_fea**: Run FEA structural analysis using CalculiX. Provide mesh_file, \
-load_cases, analysis_type (static/modal/thermal), and material.
+- **run_fea**: Run FEA with CalculiX. Provide mesh_file, load_case, material, \
+fixed_node_set, and for static_stress load_node_set and load_force_n [Fx, Fy, Fz] \
+(N); modal takes num_modes. Give a cited yield_strength_mpa for a safety factor.
 - **run_spice**: Run SPICE circuit simulation. Provide netlist_path, \
 analysis_type (dc/ac/transient), and optional params.
-- **run_cfd**: Run CFD thermal/flow analysis. Provide geometry_file, \
-fluid_properties, boundary_conditions, and mesh_resolution.
+- **run_cfd**: One of two analyses per call. `conduction`: steady conduction to a \
+fixed-temperature sink (CalculiX; mesh_file, material, heat_source_node_set, \
+power_dissipation_w, sink_node_set, sink_temp_c). `internal_flow`: steady \
+incompressible flow through a bounded domain (OpenFOAM; inlet, outlet and wall STL \
+surfaces that close, stl_units, inside_point, fluid density and viscosity, \
+inlet_velocity_m_s, turbulence laminar or kOmegaSST). Convection, external flow and \
+compressible flow are not solved.
 
 Given a user request, determine which simulation tools to run. \
 Analyze convergence, safety factors, and key results. Provide clear \
@@ -144,17 +150,27 @@ def create_simulation_agent(
     async def run_fea(
         ctx: RunContext[SimulationAgentDeps],
         mesh_file: str,
-        load_cases: list[dict[str, Any]] | None = None,
-        analysis_type: str = "static",
-        material: str = "steel_1018",
+        load_case: str,
+        material: dict[str, Any],
+        fixed_node_set: str,
+        analysis_type: str = "static_stress",
+        load_node_set: str | None = None,
+        load_force_n: list[float] | None = None,
+        num_modes: int = 3,
+        yield_strength_mpa: float | None = None,
     ) -> dict[str, Any]:
-        """Run FEA structural analysis using CalculiX.
+        """Run FEA with CalculiX: calculix.run_fea's own arguments (FORGE-561).
 
         Args:
-            mesh_file: Path to the mesh file (.inp format).
-            load_cases: List of load case definitions.
-            analysis_type: Type of analysis ('static', 'modal', 'thermal').
-            material: Material identifier.
+            mesh_file: Volume mesh (.inp), e.g. from generate_mesh.
+            load_case: Name of the load case.
+            material: {'name': ...} or explicit youngs_modulus_mpa/poissons_ratio.
+            fixed_node_set: Face held fixed (a surface set from generate_mesh).
+            analysis_type: 'static_stress' or 'modal'.
+            load_node_set: Loaded face (static_stress).
+            load_force_n: [Fx, Fy, Fz] in N (static_stress).
+            num_modes: Modes to extract (modal).
+            yield_strength_mpa: Cited yield strength; gives a safety factor.
         """
         with tracer.start_as_current_span("tool.run_fea") as span:
             span.set_attribute("mesh_file", mesh_file)
@@ -172,9 +188,14 @@ def create_simulation_agent(
             skill_input = RunFeaInput(
                 work_product_id=str(UUID(int=0)),
                 mesh_file=mesh_file,
-                load_cases=load_cases or [],
+                load_case=load_case,
                 analysis_type=analysis_type,
                 material=material,
+                fixed_node_set=fixed_node_set,
+                load_node_set=load_node_set,
+                load_force_n=load_force_n,
+                num_modes=num_modes,
+                yield_strength_mpa=yield_strength_mpa,
             )
 
             handler = RunFeaHandler(skill_ctx)
@@ -187,9 +208,12 @@ def create_simulation_agent(
             return {
                 "skill": "run_fea",
                 "success": True,
+                "analysis_type": output.analysis_type,
                 "max_stress_mpa": output.max_stress_mpa,
                 "max_displacement_mm": output.max_displacement_mm,
                 "safety_factor": output.safety_factor,
+                "frequencies_hz": output.frequencies_hz,
+                "frd_path": output.frd_path,
                 "solver_time_s": output.solver_time_s,
             }
 
@@ -250,22 +274,26 @@ def create_simulation_agent(
     @agent.tool
     async def run_cfd(
         ctx: RunContext[SimulationAgentDeps],
-        geometry_file: str,
+        conduction: dict[str, Any] | None = None,
+        internal_flow: dict[str, Any] | None = None,
+        geometry_file: str | None = None,
         fluid_properties: dict[str, Any] | None = None,
         boundary_conditions: dict[str, Any] | None = None,
-        mesh_resolution: str = "medium",
     ) -> dict[str, Any]:
-        """Run CFD thermal/flow analysis.
+        """Steady conduction (CalculiX) or steady internal flow (OpenFOAM, FORGE-557).
 
         Args:
-            geometry_file: Path to the geometry file (.step, .stl).
-            fluid_properties: Fluid properties (density, viscosity).
-            boundary_conditions: Boundary conditions (inlet velocity, etc.).
-            mesh_resolution: Mesh resolution ('coarse', 'medium', 'fine').
+            conduction: calculix.run_thermal's case: mesh_file, material,
+                heat_source_node_set, power_dissipation_w, sink_node_set, sink_temp_c.
+            internal_flow: openfoam.run_internal_flow's case: inlet_stl, outlet_stl,
+                wall_stls, stl_units, inside_point, fluid, inlet_velocity_m_s, turbulence.
+            geometry_file: Geometry the case came from, for the record.
+            fluid_properties: Free-form flow input; refused, use internal_flow.
+            boundary_conditions: Free-form flow input; refused, use internal_flow.
         """
         with tracer.start_as_current_span("tool.run_cfd") as span:
-            span.set_attribute("geometry_file", geometry_file)
-            logger.info("Running CFD", geometry_file=geometry_file)
+            span.set_attribute("geometry_file", geometry_file or "")
+            logger.info("Running run_cfd", geometry_file=geometry_file)
 
             skill_ctx = SkillContext(
                 twin=ctx.deps.twin,
@@ -280,7 +308,8 @@ def create_simulation_agent(
                 geometry_file=geometry_file,
                 fluid_properties=fluid_properties or {},
                 boundary_conditions=boundary_conditions or {},
-                mesh_resolution=mesh_resolution,
+                conduction=conduction,
+                internal_flow=internal_flow,
             )
 
             handler = RunCfdHandler(skill_ctx)
@@ -293,10 +322,16 @@ def create_simulation_agent(
             return {
                 "skill": "run_cfd",
                 "success": True,
-                "max_velocity_ms": output.max_velocity_ms,
-                "pressure_drop_pa": output.pressure_drop_pa,
+                "analysis": output.analysis,
                 "max_temperature_c": output.max_temperature_c,
-                "convergence_residual": output.convergence_residual,
+                "min_temperature_c": output.min_temperature_c,
+                "pressure_drop_pa": output.pressure_drop_pa,
+                "volumetric_flow_m3_s": output.volumetric_flow_m3_s,
+                "converged": output.converged,
+                "solution_stable": output.solution_stable,
+                "mesh_cells": output.mesh_cells,
+                "case_dir": output.case_dir,
+                "warnings": output.warnings,
             }
 
     logger.debug("simulation_pydantic_ai_agent_created")

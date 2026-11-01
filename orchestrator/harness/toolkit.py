@@ -73,6 +73,8 @@ def build_agent_runtime(
     approval_timeout_seconds: float = 120.0,
     approval_poll_interval: float = 1.0,
     approval_sleep: Callable[[float], Awaitable[None]] | None = None,
+    approval_mode: str = "hold",
+    approver_reachable: bool = True,
 ) -> AgentContext:
     """Assemble the tools + skills layer into a ready `AgentContext`.
 
@@ -121,6 +123,8 @@ def build_agent_runtime(
         approval_timeout_seconds=approval_timeout_seconds,
         approval_poll_interval=approval_poll_interval,
         approval_sleep=approval_sleep or asyncio.sleep,
+        approval_mode=approval_mode,
+        approver_reachable=approver_reachable,
     )
 
     skills = SkillRegistry()

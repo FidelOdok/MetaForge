@@ -154,9 +154,58 @@ jobs:
           path: out/${{ matrix.asset }}
           if-no-files-found: error
 
+  build-plugin:
+    # FORGE-576: the plugin bundle ChatGPT cloud uploads was only ever built by
+    # running a script on someone's laptop, which meant the published artefact
+    # for a release depended on who cut it and what their checkout looked like.
+    # It is a build output like the binaries, so it is built here.
+    name: build plugin bundle
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No dependencies: the packager is stdlib only, so it cannot be broken by
+      # a resolver change in a release job that has nothing else to install.
+      - name: Build the portable bundle
+        run: python scripts/package_plugin_bundle.py
+
+      # A bundle that unpacks to loose files has no plugin in it to install,
+      # and a host says so only at upload time. Checked here instead.
+      - name: Check the archives carry one plugin root
+        run: |
+          python - <<'PY'
+          import pathlib, tarfile, zipfile
+          dist = pathlib.Path("dist")
+          archives = sorted(dist.glob("metaforge-plugin-*"))
+          assert archives, "packager produced no archive"
+          for path in archives:
+              if path.suffix == ".zip":
+                  names = zipfile.ZipFile(path).namelist()
+              else:
+                  names = [m.name for m in tarfile.open(path).getmembers()]
+              roots = {n.split("/")[0] for n in names}
+              assert roots == {"metaforge"}, f"{path.name}: roots {roots}"
+              assert "metaforge/plugin.json" in names, f"{path.name}: no root manifest"
+              skills = {n for n in names if n.endswith("/SKILL.md")}
+              assert len(skills) >= 20, f"{path.name}: only {len(skills)} skills"
+              print(f"{path.name}: ok, {len(skills)} skills")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          # Named to match the `forge-*` pattern the release job collects on.
+          name: forge-plugin-bundle
+          path: dist/metaforge-plugin-*
+          if-no-files-found: error
+
   release:
     name: publish release
-    needs: [version, build, build-tui]
+    needs: [version, build, build-tui, build-plugin]
     runs-on: ubuntu-latest
     if: needs.version.outputs.should_release == 'true'
     steps:
@@ -178,7 +227,7 @@ jobs:
           fail_on_unmatched_files: true
 
   docker-publish:
-    # Publishes the gateway image to GHCR so `onboarding.sh` (usage mode) and
+    # Publishes the gateway image to GHCR so `install.sh` (usage mode) and
     # docker-compose.yml's `image:` reference can pull instead of building
     # from source (MET-638). Runs on every push to main (tags `:latest`) and
     # additionally tags the resolved version when this run is release-worthy,
@@ -190,6 +239,12 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Required for keyless signing: cosign exchanges this token for a
+      # short-lived Fulcio certificate. Without it the sign step fails with an
+      # OIDC error rather than silently publishing something unsigned.
+      id-token: write
+    env:
+      IMAGE: ghcr.io/fidelodok/metaforge-gateway
     steps:
       - uses: actions/checkout@v4
 
@@ -208,7 +263,7 @@ jobs:
           SHOULD_RELEASE: ${{ needs.version.outputs.should_release }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          image="ghcr.io/fidelodok/metaforge-gateway"
+          image="$IMAGE"
           tags="${image}:latest"
           [ "$SHOULD_RELEASE" = "true" ] && tags="${tags}
           ${image}:${VERSION}"
@@ -218,12 +273,68 @@ jobs:
             echo "EOF"
           } >>"$GITHUB_OUTPUT"
 
+      # The image installs the package (`pip install .`), so `/health` reports
+      # whatever `[project].version` said at build time. That literal is a
+      # committed floor and does not move with the tags, so a released image
+      # claimed a version no release had carried. Stamp the resolved one in
+      # before the context is sent. Builds that are not releases get the last
+      # version plus their commit, because they are after that release rather
+      # than being it. Deriving this from git instead is not open to us here:
+      # `.dockerignore` excludes `.git`.
+      - name: Stamp the version into the package
+        env:
+          SHOULD_RELEASE: ${{ needs.version.outputs.should_release }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [ "$SHOULD_RELEASE" = "true" ]; then
+            python3 scripts/stamp_version.py "$VERSION"
+          else
+            python3 scripts/stamp_version.py "$VERSION" --sha "${{ github.sha }}"
+          fi
+
       - name: Build + push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          # Attestations travel with the image: what built it, from which
+          # source, and what is inside it. `mode=max` records the build
+          # arguments and base images too, which is the difference between
+          # "a workflow built this" and a bill of materials you can audit
+          # when a CVE lands against something three layers down.
+          provenance: mode=max
+          sbom: true
+          # FORGE-411: stamp the commit, so a running container can say
+          # whether it matches the checkout beside it. Without this the
+          # staleness check in health/check reports "cannot be detected"
+          # rather than a false pass -- honest, but not useful.
+          build-args: |
+            METAFORGE_BUILD_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Sign the image with Sigstore, keyless (FORGE-585).
+      #
+      # Not `docker trust`: Docker Content Trust is being retired and the
+      # notary.docker.io service closes 2026-12-08, so a signature made with
+      # it would outlive its own verifier by weeks.
+      #
+      # Keyless means there is no private key to store, rotate or leak. Cosign
+      # exchanges this job's GitHub OIDC token for a short-lived certificate
+      # from Fulcio, signs with it, and records the result in the Rekor
+      # transparency log. What a verifier checks is therefore not "someone had
+      # the key" but "this workflow, in this repository, on this ref, produced
+      # this digest" -- which is the claim actually worth making.
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign the pushed image
+        env:
+          # By DIGEST, never by tag. A tag is a moving pointer: signing
+          # `:latest` says nothing about what `:latest` is tomorrow, and a
+          # verifier resolving the tag would be trusting the registry to hand
+          # it the same bytes. The digest IS the bytes.
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"

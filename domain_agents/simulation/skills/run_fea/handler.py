@@ -8,8 +8,6 @@ from skill_registry.skill_base import SkillBase
 
 from .schema import RunFeaInput, RunFeaOutput
 
-SUPPORTED_ANALYSIS_TYPES = {"static", "modal", "thermal"}
-
 
 class RunFeaHandler(SkillBase[RunFeaInput, RunFeaOutput]):
     """Runs FEA structural analysis via the MCP bridge.
@@ -47,35 +45,49 @@ class RunFeaHandler(SkillBase[RunFeaInput, RunFeaOutput]):
             material=input_data.material,
         )
 
-        if input_data.analysis_type not in SUPPORTED_ANALYSIS_TYPES:
-            raise ValueError(
-                f"Unsupported analysis type '{input_data.analysis_type}'. "
-                f"Supported: {', '.join(sorted(SUPPORTED_ANALYSIS_TYPES))}"
-            )
-
-        # Invoke CalculiX FEA via MCP
+        # FORGE-561: calculix.run_fea's own arguments; it used to get
+        # load_cases / "static" / a material name and refuse every call.
+        arguments: dict[str, Any] = {
+            "mesh_file": input_data.mesh_file,
+            "load_case": input_data.load_case,
+            "analysis_type": input_data.analysis_type,
+            "material": input_data.material,
+            "fixed_node_set": input_data.fixed_node_set,
+        }
+        if input_data.analysis_type == "static_stress":
+            arguments["load_node_set"] = input_data.load_node_set
+            arguments["load_force_n"] = list(input_data.load_force_n or [])
+        else:
+            arguments["num_modes"] = input_data.num_modes
         fea_result: dict[str, Any] = await self.context.mcp.invoke(
-            "calculix.run_fea",
-            {
-                "mesh_file": input_data.mesh_file,
-                "load_cases": input_data.load_cases,
-                "analysis_type": input_data.analysis_type,
-                "material": input_data.material,
-            },
-            timeout=300,
+            "calculix.run_fea", arguments, timeout=300
         )
 
+        # The tool reports max_von_mises.global and displacement.max; it has
+        # no yield data, so a safety factor exists only when one was given.
+        stress_raw = (fea_result.get("max_von_mises") or {}).get("global")
+        stress = float(stress_raw) if stress_raw is not None else None
+        disp_raw = (fea_result.get("displacement") or {}).get("max")
+        safety = (
+            round(input_data.yield_strength_mpa / stress, 3)
+            if input_data.yield_strength_mpa and stress
+            else None
+        )
         return RunFeaOutput(
             work_product_id=input_data.work_product_id,
-            max_stress_mpa=float(fea_result.get("max_stress_mpa", 0.0)),
-            max_displacement_mm=float(fea_result.get("max_displacement_mm", 0.0)),
-            safety_factor=float(fea_result.get("safety_factor", 0.0)),
-            solver_time_s=float(fea_result.get("solver_time_s", 0.0)),
+            analysis_type=input_data.analysis_type,
+            max_stress_mpa=stress if input_data.analysis_type == "static_stress" else None,
+            max_displacement_mm=float(disp_raw) if disp_raw is not None else None,
+            safety_factor=safety,
+            frequencies_hz=[float(f) for f in fea_result.get("frequencies_hz") or []],
+            frd_path=str(fea_result.get("frd_path", "")),
+            solver_time_s=float(fea_result.get("solver_time", 0.0)),
         )
 
     async def validate_output(self, output: RunFeaOutput) -> list[str]:
-        """Verify output consistency."""
-        errors: list[str] = []
-        if output.max_stress_mpa <= 0 and output.safety_factor <= 0:
-            errors.append("FEA produced no meaningful stress or safety factor results")
-        return errors
+        """A solve that reports no result is a failure, not a zero."""
+        if output.analysis_type == "static_stress" and output.max_stress_mpa is None:
+            return ["calculix.run_fea returned no von Mises stress"]
+        if output.analysis_type == "modal" and not output.frequencies_hz:
+            return ["calculix.run_fea returned no frequencies"]
+        return []

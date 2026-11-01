@@ -27,9 +27,19 @@ from uuid import UUID
 import structlog
 
 from api_gateway.twin._ref_resolver import resolve_refs
+from api_gateway.twin.item_revisions import (
+    finish_definition_revision,
+    plan_definition_revision,
+)
 from observability.tracing import get_tracer
+from twin_core.consistency.budgets import (
+    BUDGET_REQUIRED_METADATA,
+    missing_budget_metadata,
+)
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType
+from twin_core.models.quantity import is_valid_unit
+from twin_core.provenance import describe_source, source_errors
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.engineering_entity_recorder")
@@ -52,6 +62,10 @@ _ENTITY_TYPES = frozenset(
         "invariant",
         "waiver",
         "release_approval",
+        "concept_option",
+        "design_value",
+        "release_package",
+        "bringup_checklist",
     }
 )
 
@@ -71,6 +85,10 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
         relation: str = _DEFAULT_RELATION,
         project_id: str | None = None,
         session_id: str | None = None,
+        item_key: str | None = None,
+        supersedes: str | None = None,
+        change_reason: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         if entity_type not in _ENTITY_TYPES:
             raise ValueError(
@@ -103,6 +121,83 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
             metadata = dict(extra or {})
             if session_id:
                 metadata.setdefault("session_id", session_id)
+            # FORGE-311 (lifecycle step 1): a nonsense unit string on any
+            # entity carrying one (assumption.value/unit,
+            # evidence.value/unit, budget.system_total/unit,
+            # invariant.limit/unit, objective.target/unit) is a "compile
+            # time" error -- reject it here, before it can silently reach
+            # metric-total computation (twin_core.consistency.metrics).
+            if "unit" in metadata and not is_valid_unit(str(metadata["unit"])):
+                raise ValueError(
+                    f"engineering entity recorder: metadata['unit'] "
+                    f"{metadata['unit']!r} is not a recognized unit"
+                )
+            # FORGE-414: a budget with no numbers used to record successfully
+            # and then vanish. `budget_from_entity` requires metric, unit and
+            # system_total, so the hierarchy route skipped it, logged
+            # `hierarchy_budget_entity_malformed` and carried on -- once per
+            # page load, forever. Six of the ten budgets in the live twin were
+            # in that state, named like real budgets ("Moving mass budget
+            # <= 4.5 kg") with the limit only in the title as prose.
+            #
+            # FORGE-311 put the unit check here deliberately, so a nonsense
+            # unit is a "compile time" error rather than a silent one. The
+            # required fields belong in the same place for the same reason:
+            # rejected once at creation, where the caller can still fix it,
+            # instead of failing on every read by a reader who cannot.
+            if entity_type == "budget":
+                missing_keys = missing_budget_metadata(metadata)
+                if missing_keys:
+                    raise ValueError(
+                        f"engineering entity recorder: a budget needs "
+                        f"{list(BUDGET_REQUIRED_METADATA)} in its metadata; "
+                        f"missing {missing_keys}. Pass them via `extra`, e.g. "
+                        f'extra={{"metric": "mass", "unit": "kg", '
+                        f'"system_total": 4.5}}. A budget without them is '
+                        f"dropped from every rollup, so it would look like no "
+                        f"budget had been set at all. If the limit is only in "
+                        f"the title, put the number here too."
+                    )
+
+            # FORGE-586: a design value must say where it came from, and any
+            # entity that carries a source must carry one a reviewer can find.
+            # Refused here, where the caller can still fix it, for the same
+            # reason as the unit and budget checks above.
+            if entity_type == "design_value":
+                missing = [key for key in ("name", "value") if metadata.get(key) in (None, "")]
+                if missing or "source" not in metadata:
+                    raise ValueError(
+                        "engineering entity recorder: a design_value needs "
+                        f"'name', 'value' and 'source' in `extra`; missing "
+                        f"{missing + ([] if 'source' in metadata else ['source'])}. "
+                        'e.g. extra={"name": "table_height", "value": 740, '
+                        '"unit": "mm", "source": {"kind": "standard", '
+                        '"standard": "EN 527-1", "clause": "table height"}}'
+                    )
+            if "source" in metadata:
+                errors = source_errors(metadata["source"])
+                if errors:
+                    raise ValueError(f"engineering entity recorder: {'; '.join(errors)}")
+                metadata["source_summary"] = describe_source(metadata["source"])
+                metadata["needs_review"] = metadata["source"].get("kind") == "assumption"
+
+            # FORGE-523: intent / stakeholder_need / objective are
+            # definitions (twin_core.items.registry); every other entity
+            # type is a record or unclassified and gets plan=None here.
+            display_name = title or statement
+            plan = await plan_definition_revision(
+                twin,
+                item_type=entity_type,
+                name=display_name,
+                project_id=project_id,
+                default_author="twin.record_engineering_entity",
+                item_key=item_key,
+                supersedes=supersedes,
+                change_reason=change_reason,
+                run_id=run_id,
+            )
+            if plan is not None:
+                metadata.update(plan.stamp())
 
             entity = EngineeringEntity(
                 entity_type=entity_type,  # type: ignore[arg-type]
@@ -129,6 +224,15 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
                 )
                 project_linked = True
 
+            result: dict[str, Any] = {
+                "node_id": str(created.id),
+                "entity_type": entity_type,
+                "parent_ids": [str(p) for p in resolved_parent_ids],
+                "project_linked": project_linked,
+            }
+            await finish_definition_revision(
+                twin, plan, created.id, name=display_name, result=result
+            )
             logger.info(
                 "engineering_entity_recorded",
                 entity_type=entity_type,
@@ -136,12 +240,8 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
                 parents=len(resolved_parent_ids),
                 relation=relation,
                 project_id=project_id,
+                item_ref=result.get("item_ref"),
             )
-            return {
-                "node_id": str(created.id),
-                "entity_type": entity_type,
-                "parent_ids": [str(p) for p in resolved_parent_ids],
-                "project_linked": project_linked,
-            }
+            return result
 
     return record

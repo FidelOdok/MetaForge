@@ -10,13 +10,15 @@ inside each phase is delegated to the external harness (the ReAct loop driving
 MCP tools); MetaForge owns the **gated spine** — sequencing, gates, and the
 digital thread.
 
+Flows can also be dependency graphs with parallel and conditional phases, patched while running, and judged by a completion verdict: see [Workflow Lifecycle](workflow-lifecycle.md).
+
 ## Phases and gates
 
 A flow is an ordered list of phases; each phase has an objective (handed to the
 brain) and an optional gate. Two flows ship today.
 
 Every flow is also preceded by two shared phases from the Engineering Intent &
-Requirements Harness (epic FORGE-35): **Intent** (G0, "Intent sign-off") and
+Requirements Harness epic: **Intent** (G0, "Intent sign-off") and
 **Stakeholder Needs** (G1, "Needs sign-off") — see
 [`engineering-intent-requirements-harness.md`](https://github.com/FidelOdok/MetaForge-Planner/blob/main/docs/architecture/engineering-intent-requirements-harness.md)
 for the full 9-gate model (G0–G8). The tables below start at Requirements (G2)
@@ -29,8 +31,8 @@ mechanical phases for reliable geometry):
 |-------|------------------------|------|
 | **Requirements** | Functional requirements, constraints, primary load/use case → twin | Requirements sign-off |
 | **Preliminary Feasibility** | Mass/cost/power budgets, first-order structural/thermal/geometry feasibility, major risks → twin | Preliminary Feasibility Gate (G3) |
-| **Detailed Design** | Author the critical subsystem geometry/schematic + rationale → twin | Design review |
-| **Simulation & V&V** | Run FEA / ERC-DRC, extract the key result, record a verdict → twin | V&V sign-off |
+| **Detailed Design** | Author the critical subsystem geometry/schematic + rationale → twin | Design review (G6) |
+| **Simulation & V&V** | Run FEA / ERC-DRC, extract the key result, record a verdict → twin | V&V sign-off (G7) |
 
 **`hardware_v1`** — the full hardware/robotics lifecycle. Every phase is driven
 by a **goal-driven deterministic handler** (see below) so each phase reliably
@@ -42,17 +44,17 @@ lands its real, typed deliverable in the twin:
 | **Preliminary Feasibility** | Mass/cost/power budgets, first-order structural/thermal/geometry feasibility, major risks → twin | Preliminary Feasibility Gate (G3) |
 | **System Architecture** | Subsystem decomposition, interfaces, mass/power/compute/cost budgets, actuation/sensing/compute/power selection → twin | Architecture Gate (G4) |
 | **Concept Selection** | Trade study: propose 2-3 concepts satisfying the architecture, select one with alternatives + rationale → twin | Concept Selection Gate (G5) |
-| **Mechanical Design** | Author + commit the load-bearing/motion-critical geometry, material + dimensions → twin | Mechanical design review |
+| **Mechanical Design** | Author + commit the load-bearing/motion-critical geometry, material + dimensions → twin | Mechanical design review (G6) |
 | **Electronics Design** | Power budget, schematic topology, component selection, ERC → twin | Electronics review |
 | **Firmware & Control** | Control loop, task/RTOS structure, pin map + drivers → twin | Firmware review |
-| **Simulation & V&V** | FEA / kinematics / ERC-DRC / thermal, pass-fail verdicts vs requirements → twin | V&V sign-off |
+| **Simulation & V&V** | FEA / kinematics / ERC-DRC / thermal, pass-fail verdicts vs requirements → twin | V&V sign-off (G7) |
 | **Manufacturing Prep** | BOM + cost, fabrication outputs, assembly + bring-up plan → twin | Manufacturing readiness / Release Gate (G8) |
 
 The Preliminary Feasibility gate's mass/cost/power and risk criteria are
 computed for real (not just shown as prose) by
 `twin_core.consistency.gates.evaluate_g3_feasibility`, auto-loading the
 project's persisted `budget`/`invariant` `EngineeringEntity` declarations
-(FORGE-73, `twin.record_engineering_entity`). The Architecture gate's
+(`twin.record_engineering_entity`). The Architecture gate's
 "architecture satisfies major constraints" criterion is likewise real, via
 `evaluate_g4_architecture` (reusing the same constraint-evaluation engine the
 V&V gate already enforces with). The Concept Selection gate's checks are
@@ -61,29 +63,34 @@ real too, via `evaluate_g5_concept_selection`, reading
 `GoalDrivenConceptSelectionHandler` (the "Decision Agent", spec section
 26.12) is what populates them: it proposes 2-3 candidate concepts, picks
 one, and records the decision linked back to the architecture decision (see
-[Concept selection / Decision Agent](#concept-selection-decision-agent-forge-73)
+[Concept selection / Decision Agent](#concept-selection-decision-agent)
 below). The Release gate's checks are real too, via `evaluate_g8_release`
 (the Manufacturing Prep phase's gate): real checks against
 `TwinAPI.list_baselines()` and `"evidence"` entities' staleness status
-(FORGE-51/59), plus `"waiver"`/`"release_approval"` `EngineeringEntity`
+, plus `"waiver"`/`"release_approval"` `EngineeringEntity`
 declarations that only count once approved via
 `twin.approve_engineering_entity` (see
-[Waiver / release model](#waiver-release-model-forge-73) below), plus
+[Waiver / release model](#waiver-release-model) below), plus
 "required verification complete" via the same injected
-`traceability_coverage` accessor G6 uses. Two more gate evaluators exist but
-have no phase of their own in any flow yet: `evaluate_g6_design_sketch` (G6,
+`traceability_coverage` accessor G6 uses. `evaluate_g6_design_sketch` (G6,
 Preliminary Design / Design Sketch — reads the existing `design_sketch` work
 product + its `approve-sketch` REST endpoint, and the `system_architecture`
 work product's component/interface counts, rather than inventing a parallel
 checkpoint; its "requirement coverage" criterion is likewise real when a
-caller supplies a `traceability_coverage` accessor, FORGE-73) and
-`evaluate_g7_verification_readiness` (G7 — per-critical-requirement
-verification-method/ownership checks, reusing the same `metadata
-["verification_method"]`/`Constraint.source` conventions `TraceabilityAgent`
-already established). See `twin_core/consistency/gates.py`'s module
-docstring for exactly which checks each evaluates today vs. still advisory
-pending Phase 6 (Evidence Integration, FORGE-41) or a not-yet-built phase
-for that gate.
+caller supplies a `traceability_coverage` accessor) is now mapped
+onto each flow's `design`/"Mechanical Design"/"Detailed Design" phase gate
+ — the natural preliminary-design checkpoint right after Concept
+Selection (G5). `evaluate_g7_verification_readiness` (G7 —
+per-critical-requirement verification-method/ownership checks, reusing the
+same `metadata["verification_method"]`/`Constraint.source` conventions
+`TraceabilityAgent` already established) is likewise now mapped onto each
+flow's `simulation`/"Simulation & V&V" phase gate, the checkpoint
+right before Manufacturing / Release (G8). Neither injects a
+`traceability_coverage` accessor from this checker (same as every other
+gate here — none do today), so their requirement-coverage check stays
+`NOT_EVALUATED` until that's wired. See `twin_core/consistency/gates.py`'s
+module docstring for exactly which checks each evaluates today vs. still
+advisory pending Phase 6 (Evidence Integration).
 
 Select a flow with the `flow` id in the run request (`"flow": "hardware_v1"`).
 A full `hardware_v1` run now commits **nine real, typed work products** —
@@ -91,6 +98,17 @@ A full `hardware_v1` run now commits **nine real, typed work products** —
 `firmware_source`, `test_plan`, `manufacturing_file`, and `design_decision`.
 Adding or extending a phase is a data change in
 `orchestrator/design_flow/spec.py`, not new control flow.
+
+### Phase tools follow deliverables
+
+A phase's MCP tool set is derived from what it must produce
+(`mcp_core.profiles.DELIVERABLE_TOOLS`), not only from its disciplines. The
+live failure: tailoring replaced the simulation phase's disciplines with
+`['mechanical']`, so it had no `freecad.generate_mesh` or `calculix.run_fea`
+and recorded `fail_blocked_no_fea`. Now every required and expected
+deliverable contributes its tools, always kept, and `set_disciplines` merges
+with (rather than replaces) the template discipline a deliverable depends on.
+See [context engineering](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/context-engineering.md) for budget and drop rules.
 
 ## Goal-driven deterministic handlers
 
@@ -107,7 +125,7 @@ pattern:
 
 | Phase | Handler | Produces |
 |-------|---------|----------|
-| Requirements | `GoalDrivenRequirementsHandler` | `prd` + verifiable constraints (each with an acceptance method) |
+| Requirements | `GoalDrivenRequirementsHandler` | the `constraint_set` (verifiable constraints, each with an acceptance method, the one home of the values), then the `prd` prose, then a decision linking `CS-...@n` by `depends_on` |
 | Architecture | `GoalDrivenArchitectureHandler` | `documentation` (per-subsystem numeric mass/power/cost budgets) |
 | Concept Selection | `GoalDrivenConceptSelectionHandler` | `design_decision` (trade study: alternatives + rationale + link to the architecture decision) |
 | Mechanical Design | `GoalDrivenMechanicalHandler` | loadable `cad_model` (FreeCAD → STEP → MinIO) |
@@ -120,7 +138,52 @@ Handlers share the pattern in `api_gateway/runs/*_handlers.py` and persist via
 the recorders in `api_gateway/twin/` (`geometry_recorder`, `bom_recorder`,
 `document_recorder`). A `HybridBrain` routes each phase to its handler and falls
 back to the `ReActPhaseBrain` for any phase without one (`mech_v1` and the older
-`design_v1` use different handler sets). Where a real analysis needs a
+`design_v1` use different handler sets).
+
+**`mech_v1` design phase.** The design phase is driven by the native
+`ReActPhaseBrain` (flow context first in the prompt, FreeCAD session tools,
+`twin.commit_geometry`) through `NativeMechanicalDesignHandler`. It is told to
+build a named multi-part design and to pass the real material and key
+dimensions in `extra_metadata` on the commit. If the phase ends with no loadable
+`cad_model` (or the native turn fails), `GoalDrivenMechanicalHandler` runs as a
+backstop. It is given the flow context and the project's constraint set,
+re-asks once if its spec breaks a stated limit, and the phase summary starts
+with `FALLBACK:`. `design_v1` and `hardware_v1` routing is unchanged.
+
+**Multi-part designs commit an assembly.** When a design has more
+than one part, the `cad_model` hint tells the agent to commit each part as its
+own named `cad_model`, then build one assembly (`freecad.create_assembly`, then
+`freecad.add_part_to_assembly` for each part by name), export it and commit it
+as `<product> Assembly` with `twin.commit_geometry` and
+`parts=[{node_id, name, material, position_bbox_mm}]` (or `part_node_ids`). The
+recorder checks every part is an existing `cad_model` in the same project before
+creating anything, records the list as `metadata.parts`, and links the assembly
+to each part with a `parent_of` edge. The geometry check at the gate
+(`check_assembly` in `api_gateway/runs/geometry_constraints.py`) then fails a
+phase window (the same `since_ts` window the deliverable check uses) that
+committed more than one part `cad_model` and no assembly referencing them
+(superseded nodes, and parts from earlier phases, are ignored) (`multi-part design has no assembly`), and, when an assembly exists, fails
+part position boxes that overlap by more than 0.01 mm or an assembly bounding
+box that does not enclose its parts.
+
+Coverage is met when any one assembly covers every part, so a sub-assembly
+committed after the top-level one no longer flips a covered design to "no
+assembly covering" (it used to judge whichever assembly was listed
+last). A `cad_model` committed with `model_role: "analysis"` (and `idealises`,
+the design part it stands for), such as an FEA idealisation with simplified
+supports, is left out of both geometry checks: it is not product geometry, so
+it is neither a loose design part nor held to the product's size, stock or
+material limits.
+
+A revision that a retry or rework turned down is not part of the design
+either. When a reviewer retries or reworks a phase, that
+attempt's drafts are closed as `rejected` or `abandoned` on their
+`REVISION_OF` edge. The geometry checks skip a closed revision and judge the
+newest one under the same name that is still open or approved. Before this,
+a loose model left by an abandoned attempt kept failing every later
+attempt's gate, because the Temporal gate's window is the whole project.
+
+Where a real analysis needs a
 capability MetaForge doesn't have in Phase 1 (ERC/DRC on an authored schematic,
 Gerber export), the handler records the result **honestly as deferred** rather
 than asserting a compliance the tools never established.
@@ -144,20 +207,20 @@ every phase, and do the artifacts agree?) run over three reference products:
 genuine Phase-2 boundary (real ERC needs an authored schematic, a KiCad-write
 capability), not a defect — with the digital thread intact end to end.
 
-A second suite, `evals/run_chat_scenarios.py` (MET-570), applies the same
+A second suite, `evals/run_chat_scenarios.py`, applies the same
 flywheel to the harness-backed **chat** surface: scripted multi-turn
 conversations over `/v1/chat` scored for needle recall across turns,
 project-brief adherence, context-window telemetry honesty, and tool-call
 trajectory quality (duplicate/retry discipline, error rates, big-observation
 survival). Scenarios declare `expected_today` for behavior known broken on the
-current harness (e.g. facts beyond the 20-turn history slice, until MET-568
+current harness (e.g. facts beyond the 20-turn history slice, until
 lands compaction), which reports as `xfail` and flips to `xpass` when the fix
 ships — so re-running the identical baseline command measures each
 context-engineering phase as it lands. See `evals/README.md` for the scenario
 schema and rubric catalog.
 
 Work-product **quality** (substance, not structure) is scored by an optional
-LLM-as-judge pass, `evals/judge.py` (MET-571): it grades each run's twin work
+LLM-as-judge pass, `evals/judge.py`: it grades each run's twin work
 products against the scenario's `definition_of_done` and attaches advisory
 `judge` blocks to the report. Deterministic rubric checks remain authoritative
 for pass/fail.
@@ -175,6 +238,8 @@ DesignFlowExecutor.run(run_id)          # orchestrator/design_flow/executor.py
           store.request_approval(...)   # run → awaiting_approval  (SSE emits it)
           decision = await gate         # resolved by POST /v1/runs/{id}/approval
           approve → next phase
+          retry   → re-run THIS phase (see "Retrying a phase"), same gate again
+          rework  → go back to an EARLIER phase (see "Sending a run back"), re-run from there
           reject  → run ends (rejected)
   store.complete(run_id, result)
 ```
@@ -185,6 +250,31 @@ the run's status transitions stream over the existing `/v1/runs/{id}/events`
 SSE and `/ws` surfaces, and pause/resume uses the existing approval endpoint. A
 `GateCoordinator` bridges the async gate wait to the synchronous store
 transition triggered by the approval route.
+
+### Flow context reaches every phase
+
+The context given to `flow.propose` (manufacturing route, processes, machines,
+stock, quantity, target maturity, loads and use, budget, requirements) is not
+only a generator input. `FlowContext.render_for_phases()` renders it once into a
+text block that is stored on the flow version and frozen with it:
+
+- `FrozenFlow.context` holds the block and is part of the content hash, so it
+  cannot change after approval. A flow with no context hashes exactly as before,
+  and versions saved before the field existed load with an empty context.
+- The version store persists it in a `flow_context` column, added in place to
+  existing databases.
+- Temporal: `DesignFlowInput.flow.context` is copied into
+  `PhaseRequest.flow_context`. Both fields are optional with an empty default,
+  so workflows already in flight still decode and replay.
+- In-process: the run record carries `flow_context` and `DesignFlowExecutor.run`
+  passes it into the executor's `FlowContext`.
+- Both engines call the same `ReActPhaseBrain`, which puts the block at the very
+  start of the prompt under "Flow context", ahead of the per-phase goal. The
+  block is identical for every phase of a run, so the prompt prefix stays stable
+  for prompt caching. With no context the prompt is unchanged.
+
+The requirements phase is expected to turn the stated values (stock, loads,
+spacing) into typed constraints, and no phase should report them as unknown.
 
 ## Driving it from the CLI
 
@@ -211,7 +301,7 @@ python -m cli.forge_cli runs reject <run_id>
 A run is treated as a design flow only when it opts in with a `flow` id (or
 `kind: "design_flow"`); a bare `{goal}` keeps the plain run semantics.
 
-## Driving it from chat (MET-587)
+## Driving it from chat
 
 The chat agent can start a flow itself via the `runs` MCP adapter:
 
@@ -240,11 +330,294 @@ checks which of those types the phase actually recorded during its window:
   gate** with the missing list, rather than silently passing. The Design gate
   cannot pass without a committed, viewable `cad_model`.
 
+Each required type gets a specific "which tool, which arguments" hint in the
+phase prompt (`deliverable_hints` in `api_gateway/runs/flow_brain.py`), keyed by
+the same type string the gate counts (`WorkProductType` value). For example `prd`
+is `twin.record_document(document_type='prd')`, `constraint_set` is
+`twin.record_constraint_set`, and `simulation_result` / `load_case` are
+`twin.record_document` with that `document_type`. A type no MCP tool can record
+(`schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `manufacturing_file`,
+`test_plan`, `test_result`, `verification_report`) says so and tells the model
+not to substitute another type. `twin.record_document` is in `PHASE_COMMON` (`mcp_core/profiles.py`), so every
+phase carries it. A unit test fails when a type a template requires
+or expects, or that tailoring can add, has no hint, so a tailored deliverable can
+no longer fall back to the generic "record it into the twin" line.
+
+**A server-run phase cannot ask.** Skills and phase objectives say to ask the
+person for anything missing, which is right for an interactive client. A phase
+the server runs has no one to answer, so its prompt also says it runs
+unattended (`UNATTENDED_PHASE_RULE` in `api_gateway/runs/flow_brain.py`): instead
+of asking and stopping, it records a deferred decision with its open questions
+as the reason where the objective allows one, and otherwise decides with what it
+has and states its assumptions. The reviewer answers at the gate, and a retry
+carries the answer back. Without this, a route selection phase on a brief with
+no manufacturing context asked for the quantity, recorded nothing, asked again
+on every retry, and the run failed when the findings stopped changing.
+Client-mode runs do not use this prompt, so a connected client still asks.
+
 This makes completeness machine-enforced and quality human-judged: the machine
 guarantees the deliverable exists in the twin; the human reviews whether it's
 right.
 
-## Constraint-as-gate-criteria (MET-583)
+## Retrying a phase from its gate
+
+A gate answers one of three decisions through
+`POST /v1/runs/{id}/approval`:
+
+| Decision | Body | Effect |
+|---|---|---|
+| approve | `{"decision": "approve"}` | the run moves to the next phase |
+| reject | `{"decision": "reject"}` | the run ends `rejected` |
+| retry | `{"decision": "retry", "reason": "..."}` | the same phase runs again and the same gate opens again |
+
+On a retry the phase brain gets the gate's findings (missing deliverables, an
+ungrounded reply, constraint violations) and the reviewer's `reason` as the
+**first** block of its prompt, ahead of the flow context. Every earlier approved
+phase is kept; only the retried phase's previous attempt is dropped from the
+run's `completed` list. Nothing before it re-runs and no earlier gate is asked
+again.
+
+**A gate that is not ready parks instead of failing the run.** When an enforcing
+phase is missing required deliverables, has an ungrounded reply, or the gate
+enforces constraints that are violated, the run moves to `awaiting_approval`
+with a reason that starts `NOT READY (retry the phase or reject)` and lists the
+findings. Such a gate takes **retry or reject only**: an approve is answered
+`409` by the route and is ignored by the workflow, because approving work the
+system already knows is incomplete is the click-through habit gates exist to
+prevent. Reject still ends the run.
+
+**Cap.** One phase may be retried `METAFORGE_DESIGN_FLOW_MAX_PHASE_RETRIES`
+times (default `3`). The cap is read when the run starts and carried into the
+workflow as `DesignFlowInput.max_phase_retries`, so it cannot change mid-run.
+A retry past the cap is refused with `409`; if one reaches the engine anyway the
+run ends `failed` with the reason.
+
+**Visibility.** Each attempt is recorded in the run's events
+(`phase_started` with `attempt N`, `gate_not_ready`, `phase_retry_requested`
+with the reviewer and reason). `GET /v1/runs/{id}/flow-state` adds `attempt`,
+`retriesLeft`, `gateReady` and `gateFindings`.
+
+**Temporal.** The retry travels as an optional `retry` flag on the
+`submit_gate_decision` signal (`GateAnswer.retry`, default `False`), and
+`PhaseRequest` gains optional `retry_feedback` and `attempt`, so inputs from
+before the change still deserialize. Parking a not-ready gate replaces a
+`_fail`, which changes the workflow's command sequence, so it is guarded by
+`workflow.patched("forge-495-gate-retry")`: a run whose history already holds the
+old failure replays it unchanged. The in-process executor behaves the same way
+(`GateCoordinator.note_retry`), so the two engines stay at parity.
+
+**What the retried or reworked phase is told.** After the gate
+decision closes the phase's drafts, both engines read them back and add a block
+to the retry or rework feedback: each turned-down revision's ref
+(`CAD-BRACKET@2`), the gate's reason, and a short diff against the revision
+before it (bounding box, volume, mass for a part; limit changes for a
+requirement set). In-process this is `DesignFlowExecutor(revision_notes=...)`;
+on Temporal it is the `collect_revision_notes` activity, which returns plain
+data, guarded by `workflow.patched("forge-530-revision-notes")`. See
+[context engineering](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/context-engineering.md).
+
+There is no MCP run-approval tool: a gate is answered by a human on the
+dashboard or the approval endpoint, never by the agent.
+
+## Sending a run back to an earlier phase
+
+A retry re-runs the phase a gate belongs to. That cannot fix a verdict that is
+really about earlier work: a verification gate that fails on a safety factor
+needs a design change, and the design phase is behind it. A fourth decision,
+*rework*, names an earlier phase:
+
+| Decision | Body | Effect |
+|---|---|---|
+| rework | `{"decision": "rework", "to_phase": "design", "reason": "..."}` | the run goes back to `to_phase`, re-runs it and every later phase in order, and re-opens each of their gates |
+
+The target phase's brain gets, as the **first** block of its prompt, the
+reviewer's `reason`, the findings of the gate that sent the run back, and the
+summary of the phase that failed. Later phases get no special block; they see the
+reworked phase's new summary in the thread so far. Phases **before** `to_phase`
+keep their completed entries and their approvals and are not asked again. A
+rework is accepted at a gate that is not ready as well as at one that is.
+
+**Validation.** `to_phase` must be an earlier phase of *this run's own frozen
+flow*. A missing id, an id that is not part of the flow, or the current or a
+later phase is refused with `422` and a reason that names the problem (naming the
+current phase points at `retry`). Rework on a run that is not a design flow is
+`422` too.
+
+**Cap.** One run may be sent back `METAFORGE_DESIGN_FLOW_MAX_REWORK_CYCLES`
+times (default `3`), counted across the whole run. It is read when the run starts
+and carried in `DesignFlowInput.max_rework_cycles`; the count survives a
+continue-as-new. A rework past the cap is refused with `409`; if one reaches the
+engine anyway the run ends `failed` with the reason. Each phase keeps its own
+retry budget on every pass.
+
+**Visibility.** Each cycle is a `phase_rework_requested` run event carrying
+`from`, `to` and `cycle` (and the reviewer and reason in `detail`).
+`GET /v1/runs/{id}/flow-state` adds `reworkCycles`, `maxReworkCycles` and
+`reworksLeft`; phases after the target read `pending` until they run again.
+
+**Temporal.** The target travels as an optional `rework_to` field on the
+`submit_gate_decision` signal (`GateAnswer.rework_to`, default empty), and
+`DesignFlowInput` gains `max_rework_cycles` and `rework_cycles`, so inputs from
+before the change still deserialize. Handling a rework adds commands that older
+histories do not contain, so it is guarded by
+`workflow.patched("forge-500-rework")`, which is consulted only *after* a rework
+answer has arrived. A run parked at a gate before the deploy, including one
+parked at its last gate, therefore replays exactly as before and accepts a rework
+as new history. A rework signal with an invalid target is recorded as
+`gate_decision_ignored` and the gate stays open. The in-process executor behaves
+the same way (`GateCoordinator.note_rework`), so the two engines stay at parity.
+There is still no MCP tool for this: like approve and retry, only a human answers
+a gate.
+
+## A run's change set: drafts until the gate
+
+Every definition a run writes (parts, assemblies, constraint sets, intent,
+needs, objectives, BOMs, component selections: the definition types in
+[twin_schema.md section 2.30](../twin_schema.md#230-items-and-revisions-definitions-vs-records))
+is a **draft** revision in the run's change set. Nothing new is asked of the
+agent or the reviewer: the tools are the same, and the write knows its run from
+the MCP call context (`run_id` and `phase`, set by the Temporal worker's phase
+scope and, for the in-process engine, by the executor's injected `phase_scope`).
+
+- **During the run** a draft never moves its item's head. The run's own reads
+  (`twin.item_history`, `twin.get_node` with `item_key`) see its drafts over the
+  head; the dashboard, other runs and `GET /v1/twin/items` see only approved
+  heads. The phase's own gate is evaluated over its drafts, so the reviewer sees
+  exactly what an approval would commit.
+- **Approve** commits the change set before the run moves on: every drafted
+  item's head moves to the run's latest draft, the drafts become `approved` with
+  the gate's name and the gate's reason as `change_reason`, and `SUPERSEDES`
+  links each one to the revision it replaced (with staleness propagation, spec
+  section 21). All of a gate's items move or none do.
+- **Reject, retry and rework** close the change set: its drafts become
+  `rejected` (reject) or `abandoned` (retry, rework) with the reviewer's reason.
+  No head moves. The drafts stay in each item's history; they never reach the
+  current view. A retried or reworked phase is told that what it recorded was
+  discarded, and records its work again on top of the current heads.
+- **The run ends any other way**: a completed run commits what phases after its
+  last human gate drafted (an ungated or auto-approved phase rides along with the
+  next human gate otherwise); a failed or canceled run abandons its drafts; a gate
+  that timed out rejects them.
+
+**Optimistic concurrency (spec sections 40 and 41).** When a run first drafts an
+item, the change set records that item's head as its base. At approval, if any
+base head has moved since (another run's approval, or a direct write outside any
+run), the whole approval is refused with `409` and a `PATCH_CONFLICT` message
+naming each item, its base and its current head, for example
+`CAD-LEG was @1 when this run drafted CAD-LEG@3, and is now @2`. Nothing is
+committed and the run stays parked at its gate. A **retry** of that gate is the
+rebase: it closes the stale drafts, and the conflict message is appended to the
+retry reason, so the phase redoes its work on the current revisions. Revision
+numbers are never reused, so two runs drafting one item get distinct numbers
+(`@2` and `@3` above) and a closed draft's number stays its own.
+
+**Both engines.** Gate decisions from either engine go through
+`routes.decide_run_gate` (shared by `/v1/runs/{id}/approval` and
+`/v1/approvals/gate:{id}/decision`), which settles the change set before the run
+record moves, so a resumed phase never writes into a change set that is being
+closed. Terminal states reach `api_gateway/runs/change_sets.py` through the run
+store's transition observer, which on Temporal is fed by the reconcile loop.
+
+**Not a branch.** The change set has no node of its own and no branch or merge
+vocabulary: it is the items whose `Item.drafts` names the run plus the
+`REVISION_OF` edges stamped `change_set=<run id>`. It does not go through
+`TransactionEngine`, whose `Patch` carries field edits: here the
+revisions already exist as immutable nodes and committing is a head move. It
+shares that engine's discipline instead: check every precondition, then write,
+and since `GraphEngine` has no multi-write transaction, a commit that fails
+part-way restores the heads it already moved and reports `503`.
+
+**Observability.** `item_revision_drafted`, `run_change_set_committed`,
+`run_change_set_refused`, `run_change_set_closed` and
+`run_change_set_commit_failed` log events; the
+`metaforge_twin_change_set_total{outcome}` counter (`committed`, `refused`,
+`rejected`, `abandoned`, `failed`); the `TwinChangeSetApprovalsRefused` alert.
+
+Known limits: the gate's deliverable check (`present_types`) reads the project's
+work products, so two runs on one project at the same time can each count the
+other's drafts as present; the check at approval still refuses a commit whose
+base moved.
+
+## Stale evidence at the gate
+
+A `simulation_result`, a `design_decision` and an `evidence` entity are pinned,
+when they are written, to the item revisions they are about: a simulation to the
+geometry it analysed (`CAD-BRACKET@1`), and to a constraint set
+(`CS-BRACKET-REQS@1`) only when the call names it or the requirements it
+verifies; evidence also to the project's constraint sets. See
+[records pinned to revisions](../twin_schema.md#records-pinned-to-revisions).
+When an item's head moves (a write outside any run, or this run's gate approving
+its drafts), every record pinned to an older revision of that item becomes
+`stale`. An open draft stales nothing: a gate that rejects or abandons it leaves
+the old records current, and marks records made on the draft itself `invalid`.
+
+The gate reads the same flag the agent does, so stale evidence never satisfies
+a criterion:
+
+- **Analysis constraints.** The analysis check finds a model's results by the
+  `derives_from` link or by the model's item key in the result's pins, so a
+  result recorded on an older revision of the same part is found even though it
+  names the old node. The latest *current* result is used. When only a stale one
+  exists, every analysis constraint on that model gets a finding (a violation at
+  error severity) naming the record and the revision it was for, for example
+  `max stress: 'Bracket FEA' is stale: it was for CAD-BRACKET@1, and CAD-BRACKET is now @2; re-run it on the current revision`.
+- **Deliverables.** A stale, superseded or invalid `simulation_result` or
+  `verification_report` does not count toward `required_deliverables`.
+- **G8 release.** "Stale evidence resolved" now covers `simulation_result`
+  work products as well as evidence entities, and its detail names each stale
+  record with the same text.
+
+A re-run on the new revision is `current`, and it marks the older run of the
+same analysis `superseded` (when its gate approves, for a re-run made inside a
+run), so the gate passes once the analysis is redone. Nothing extra is asked of
+the agent: the pins are inferred from what the record already names.
+
+**Phase summaries are not decisions.** When a phase that requires a
+`design_decision` ended without recording one, the native brain used to record
+its own phase summary as `"<phase> - phase summary"`. It no longer does: the
+summary is kept on the run record (`completed[].summary`, shown as
+`phases[].summary` in the run status), and a phase that decided nothing shows a
+missing `design_decision` at its gate. Existing phase-summary decisions are left
+in place and are not migrated.
+
+## Phase step budget, blob storage and tool visibility
+
+**Step budget.** Each native phase has its own tool-use budget instead of one
+hard-coded 24. A phase whose required or expected deliverables include
+`cad_model` or `simulation_result` is "heavy" and gets a larger budget, because
+building several sketch-based parts takes many CAD calls.
+
+| Variable | Default | Applies to |
+|----------|---------|-----------|
+| `METAFORGE_FLOW_PHASE_MAX_STEPS` | `24` | every other phase |
+| `METAFORGE_FLOW_PHASE_MAX_STEPS_HEAVY` | `60` | phases that need `cad_model` / `simulation_result` |
+
+An invalid or non-positive value falls back to the default with a
+`flow_phase_budget_env_invalid` warning. The budget is logged per phase in
+`design_flow_brain_phase` (`max_steps`, `heavy`), and a phase that runs out
+logs `design_flow_phase_exhausted` and ends its summary with the budget it used.
+
+**Blob storage in the worker.** `design-flow-worker` carries the same `MINIO_*`
+variables as `gateway` (a test keeps them in step). The deterministic commit
+paths, `GoalDrivenMechanicalHandler` and `MechanicalDesignHandler`, call the
+geometry recorder with `require_blob_store=True`: if the STEP blob cannot be
+stored, the commit raises and the phase reports the failure instead of creating
+a `cad_model` with no stored geometry. The optional path is unchanged:
+`twin.commit_geometry` called over MCP and the `/v1/twin/import` route still keep
+the node and log `geometry_blob_store_skipped` when storage is down.
+
+**Tool visibility.** Every `search_tools` call logs `search_tools_query` with the
+query and the tools it matched, registered, found already available, could not
+register (phase cap) or found unavailable (service-refused), so a phase hunting
+for a missing tool shows up in the logs. The search covers the whole
+MCP catalog and matches each query word against a tool's id, name and
+description, so a multi-word query such as `freecad assembly` finds
+`freecad.create_assembly`; the result lists every match with a one-line
+description and says plainly when a match exists but cannot be registered.
+`freecad.create_body` and `freecad.create_sketch` now return the body or sketch
+id, its label, and the next call to make, so a phase does not re-create the body.
+
+## Constraint-as-gate-criteria
 
 Gate *criteria* were previously prose shown to the approver but never
 evaluated. Now every gate also evaluates the project's recorded constraints
@@ -264,35 +637,147 @@ through the twin's constraint engine (`TwinConstraintChecker` in
   citing `work_product_ids` are filtered to the run's project; violations
   citing none are treated as global and always count.
 
+**Geometry constraints.** A structured requirement (`metric` +
+`limit`) carries the placeholder expression `True`, so the engine alone can
+never fail it. `TwinConstraintChecker` therefore also compares those
+constraints to the project's current `cad_model` (latest per name) through
+`api_gateway/runs/geometry_constraints.py`, and adds the result to the same
+violation list. Covered: envelope and size metrics (`envelope`, `length`,
+`width`, `height`, `depth`, `size`, `dimension`) against the sorted bounding-box
+extents read from `metadata.dimensions_mm`, `bbox_mm` or
+`geometry_features.properties.bounding_box`; thickness or stock metrics against
+the smallest extent (per part for an assembly whose parts record dimensions);
+and a `material` metric against the recorded `material`. A requirement that
+names a family (wood, metal, plastic, composite) accepts any material of that
+family, so "wood or metal" accepts birch plywood; one that names a specific
+material ("18 mm birch plywood", "aluminium") needs that word in the recorded
+material; one that names no material ("suitable for construction") is reported
+as not evaluated. A part that records no material is a violation. Not covered, and
+reported as not evaluated rather than passing: assembly parts without recorded
+dimensions, per-part printed-size limits (metrics containing `print`), mass,
+deflection and safety factor (these need analysis evidence, see below), and any
+metric outside the lists above. A metric that names a load position or a spacing
+(a word such as `moment`, `lever`, `offset`, `distance`, `position`,
+`clearance`, `spacing` or `stroke`) is not a part size even when it also says
+`length` or `height`: `moment_arm_length` is where a load acts, so it is reported
+as not evaluated instead of being compared with each part's largest extent. The `mech_v1` design gate (G6) now sets
+`enforce_constraints` (template version 1.1.0), so a violation fails it.
+
+**Analysis constraints.** Deflection / displacement, stress and
+safety-factor limits are compared to the latest `simulation_result` linked to
+each current `cad_model` (`metadata.source_cad_model_id` or a `derives_from`
+edge), by `api_gateway/runs/analysis_constraints.py`. Values are read from
+`max_displacement_mm`, `max_von_mises_mpa` and `safety_factor` (or any
+`*_sf_*` key). The constraint's unit decides what it is: length units
+(`mm`, `m`) are deflection, pressure units (`MPa`, `Pa`, `N/mm2`) are stress, dimensionless
+is safety factor, and force units (`N`, `kN`) are load requirements that are skipped
+as inputs, not result checks. The name is used only when the unit is absent, and a
+unit that contradicts the name is not evaluated with the reason. Every constraint ends as passed, violated (with the numbers) or
+not evaluated (with the reason), all shown in the gate reason; a violation on
+an enforcing gate marks it not ready. Load-case scaling: a limit that names its
+basis (`service` or `factored`) is compared after scaling the result linearly
+by target load over analysed load (inverse for safety factor), using
+`service_load_n`, `factored_load_n` and the analysed load; the finding states
+the scaling (for example 12.07 mm at 490 N becomes 6.03 mm at the 245 N
+service load, which breaks a 5 mm limit). When the result records two
+different loads and the limit names neither, or a service limit has no
+recorded loads to scale with, the constraint is not evaluated, never passed.
+A result linked only to a superseded `cad_model` is not used. The
+`simulation_result` hint also asks for an optional
+`metadata.modelling_assumptions` (for example bonded versus contact joints,
+material approximations), which is shown to the reviewer at the gate.
+
+**Design-record constraints.** An electronics or firmware
+requirement (`drc_error_count == 0`, `board_length_mm <= 40`,
+`build_error_count == 0`) has no `cad_model` to compare against, so before this
+every one went unchecked: the engine counted its `True` placeholder as a pass
+and the requirement matrix showed it as `no_data`. Now:
+
+- The constraint engine skips a placeholder that stands for a `metric` +
+  `limit` binding (`is_placeholder_bound`), so it is no longer counted as
+  evaluated.
+- `api_gateway/runs/design_fact_constraints.py` reads the numbers the current
+  (head) revision of each design record states about itself: `pcb_layout`,
+  `schematic`, `firmware_source` and `bom`. It compares the one the
+  requirement's `metric` names to the limit. A few tool spellings are accepted
+  for the same fact (`erc_errors` for `erc_error_count`, `drc_errors`,
+  `unrouted`, `layer_count`, `build_errors`). Bookkeeping numbers
+  (`file_count`, `total_bytes`, `item_revision`) are never facts.
+- `TwinConstraintChecker` adds the result to the gate: a broken limit is a
+  violation, and a metric no design record states is listed as not evaluated
+  with the reason. A size metric that a design record states (a board's
+  length) is measured from that record, not reported as "no cad_model".
+- `simulation_result` numbers are not read here. They rest on load cases and
+  assumptions, so they verify a requirement only through a claim or the
+  analysis check above.
+
+**Measuring tool results.** A sandbox run still left seven
+requirements `no_data` although the emulated boot (7 of 7
+checks), the power budget (12.47 mA against 150 mA) and the parts' datasheet
+ratings were all on record as evidence. Earlier, a run had passed every
+requirement on a claim whose evidence carried no value at all. Now:
+
+- After the design records, `design_fact_constraints` reads the current
+  results (`twin.record_evidence`) of the tools that measure the design
+  rather than estimate it: `kicad.*`, `firmware.build`,
+  `firmware.static_check`, `firmware.run_emulated` and `power.check_budget`
+  (a sum of the stated loads), plus any `datasheet` evidence (a published
+  rating). It reads the numbers at the top level of the result, newest result
+  first. A design record wins over a result for the same metric, and a result
+  whose verdict is `not_established` is skipped.
+- The basis travels with the number: the tool and its version, and the
+  result's `basis`, the inputs' `basis`, `basis_accepted_by` and `board` when
+  they are recorded. A pass from typical currents or from a stand-in board
+  says so in its detail.
+- The power budget's own names are accepted for the requirement's metric:
+  `vbus_load_ma` for `total_supply_current` or `vbus_load_current`,
+  `rail_3v3_load_ma` for `rail_3v3_load_current`, `rail_3v3_margin_pct` for
+  `rail_load_margin_pct`, and `checks_failed` for `boot_checks_failed`.
+- Any other tool's result (an FEA or CFD run) is still not read this way; it
+  counts only through a claim that cites it.
+- The gate uses the same facts, so a failed boot check or an over-budget
+  supply current is a violation at the gate, not only in the matrix.
+- A requirement nothing states is reported with the tool call that would close
+  it, for example "boot with firmware.run_emulated and record its result with
+  twin.record_evidence, with 'boot_checks_failed' in it".
+
+The requirement matrix also grades claims (see `docs/twin_schema.md`): a claim
+against a `metric` + `limit` requirement passes only when a number for that
+metric, in the evidence it cites or in the facts above, meets the limit. A
+claim with nothing comparable is `unverified`, and the completion verdict does
+not count it as passing.
+
 The gate skeleton stays hardcoded (versioned code); the criteria come from
 the project's own constraint data. The structured constraint-creation tool
-(MET-582) is what fills that data from the Requirements phase; decision-derived
-phase applicability (MET-585) is the planned complement.
+ is what fills that data from the Requirements phase; decision-derived
+phase applicability is the planned complement.
 
-## Consistency-gate status (FORGE-73)
+## Consistency-gate status
 
-Two gates carry a real spec G-number in `Gate.gate_id` — the Preliminary
-Feasibility Gate (`"G3"`, `design_v1`/`mech_v1`'s `feasibility` phase) and the
-Architecture Gate (`"G4"`, `hardware_v1`'s `architecture` phase). At those
-two gates, `TwinConsistencyGateChecker` (`api_gateway/runs/gate_eval.py`)
-calls the matching `twin_core.consistency.gates.evaluate_gN_*` evaluator and
-appends its real status to the approval reason — e.g. `G3:
-ready_for_review (2 pass, 1 fail, 6 not evaluated)`.
+Six gates carry a real spec G-number in `Gate.gate_id` — the Preliminary
+Feasibility Gate (`"G3"`, `design_v1`/`hardware_v1`/`mech_v1`'s
+`feasibility` phase), the Architecture Gate (`"G4"`, `hardware_v1`'s
+`architecture` phase), the Concept Selection Gate (`"G5"`, `hardware_v1`'s
+`concept_selection` phase), the Design review Gate (`"G6"`, every flow's
+`design` phase), the V&V sign-off Gate (`"G7"`, every flow's `simulation`
+phase), and the Manufacturing readiness / Release Gate (`"G8"`,
+`hardware_v1`'s `manufacturing` phase). At those gates,
+`TwinConsistencyGateChecker` (`api_gateway/runs/gate_eval.py`) calls the
+matching `twin_core.consistency.gates.evaluate_gN_*` evaluator and appends
+its real status to the approval reason — e.g. `G3: ready_for_review (2
+pass, 1 fail, 6 not evaluated)`.
 
 This is **purely informational**, unlike `enforce_constraints` above: there is
 no `enforce_consistency_gate` flag, so a gate never fails automatically on
 this checker's result — even a `failed` G-number status still just pauses for
-ordinary human review, same as before this existed. Every other gate has no
-`gate_id` at all, so the checker is never even consulted for them.
+ordinary human review, same as before this existed. Every other gate (the
+shared Intent/Needs phases, Requirements, Electronics, Firmware) has no
+`gate_id` at all, so the checker is never even consulted for them. G0-G2
+have no dedicated evaluator module yet — wiring those in, and deciding
+whether any of G3-G8 should ever gain real enforcement, is separate, later
+work.
 
-The remaining G-numbers (G6 Design Sketch, G7 Verification Readiness, G8
-Release) don't yet correspond to any Phase's gate — G6 deliberately
-formalizes the separate `design_sketch`/`approve-sketch` mechanism instead
-of a Phase gate, and G7/G8 have no mapping decided. Wiring them in (and
-deciding whether any of G3-G8 should ever gain real enforcement) is
-separate, later work.
-
-### Budget/invariant persistence (FORGE-73)
+### Budget/invariant persistence
 
 G3's mass/cost/power budget and runtime-invariant checks
 (`twin_core.consistency.gates.evaluate_g3_feasibility`) used to require a
@@ -301,7 +786,10 @@ was no per-project "the mass budget for this quadruped is 5kg" persistence
 anywhere. An agent now declares one via `twin.record_engineering_entity`
 (`entity_type="budget"` or `"invariant"`, with `metric`/`unit`/
 `system_total` or `limit` in `extra`, and a stable `title` like
-`"mass_budget"`/`"INV-MASS"` for readable check labels) and it is loaded
+`"mass_budget"`/`"INV-MASS"` for readable check labels; a budget is
+**rejected** without those three keys, because recording one
+without them used to succeed and then be dropped from every rollup, which
+read as no budget existing) and it is loaded
 automatically on every future G3 evaluation — including the real one
 `TwinConsistencyGateChecker` runs from the executor. A project with none
 declared gets a `NOT_EVALUATED` placeholder (`budgets:none-declared`/
@@ -312,7 +800,7 @@ never a silently dropped budget. Passing an explicit `budgets=[]`/
 `invariants=[]` still bypasses the Twin lookup, unchanged, for a caller
 evaluating a hypothetical declaration that was never persisted.
 
-### Concept selection / Decision Agent (FORGE-73)
+### Concept selection / Decision Agent {#concept-selection-decision-agent}
 
 `evaluate_g5_concept_selection`'s checks (viable concept(s), trade study
 performed, rationale captured, selected concept linked to
@@ -337,7 +825,7 @@ blocking the run.
 
 Deliberately not built in this pass: scoring candidate concepts against
 recorded `objective` `EngineeringEntity` nodes via `ObjectiveEngine`/
-`objective_from_entity` (FORGE-58) — there is no MCP *read* tool for
+`objective_from_entity` — there is no MCP *read* tool for
 engineering entities today (only `twin.record_engineering_entity`, the write
 side), and `IntentInterpreterAgent` (Phase 3), the only code that ever
 produces `entity_type="objective"` records, isn't wired into any live
@@ -345,7 +833,7 @@ execution path yet — so this handler's selection is the LLM's own reasoning,
 not an objective-weighted ranking. Wiring a real read path for engineering
 entities is separate, later work.
 
-### Waiver / release model (FORGE-73)
+### Waiver / release model {#waiver-release-model}
 
 `evaluate_g8_release`'s "waivers approved" and "build/manufacturing release
 approved" checks used to always come back `NOT_EVALUATED` — there was no
@@ -398,12 +886,116 @@ and a dedicated `forge design` CLI wrapper.
 
 | Module | Role |
 |--------|------|
-| `orchestrator/design_flow/spec.py` | `Phase` / `Gate` / `FlowDefinition`, built-in flows |
+| `orchestrator/design_flow/spec.py` | `Phase` / `Gate` / `FlowDefinition` / `DeliverableSlot`, built-in flows |
+| `orchestrator/design_flow/slots.py` | Deliverable slots: default slots, key binding, write-to-slot matching |
+| `orchestrator/design_flow/{contract,fragments,compose,checks,coupling}.py` | Composable flows: task contract, domain fragments, composition, stage-gate checks, coupled blocks ([Composable Design Flows](./composable-flows.md)) |
+| `orchestrator/design_flow/templates/spine/spine_v1.yaml` | The shared spine the templates `extends` |
 | `orchestrator/design_flow/executor.py` | `DesignFlowExecutor`, `GateCoordinator`, `PhaseBrain` |
-| `api_gateway/runs/flow_brain.py` | `ReActPhaseBrain` fallback + the decision backstop |
+| `api_gateway/runs/flow_brain.py` | `ReActPhaseBrain` fallback; keeps the phase summary on the run record |
 | `api_gateway/runs/{req,arch,mech,elec,fw,vv,mfg}_handlers.py` | Goal-driven deterministic phase handlers |
 | `api_gateway/twin/{geometry,bom,document}_recorder.py` | Persist typed artifacts loadably (blob + `content_hash` + project link) |
 | `api_gateway/runs/gate_eval.py` | `ProjectGateEvaluator` — deliverable enforcement (loadable `cad_model`) |
 | `api_gateway/runs/routes.py` | Per-flow handler routing; launches the executor on a design-flow `POST /v1/runs` |
 | `evals/run_scenarios.py`, `evals/*_rubric.py` | Eval flywheel: scenario runner + correctness rubrics |
-| `evals/run_chat_scenarios.py`, `evals/chat_*_rubric.py` | Chat context-engineering evals: multi-turn scenarios + trajectory rubrics (MET-570) |
+| `evals/run_chat_scenarios.py`, `evals/chat_*_rubric.py` | Chat context-engineering evals: multi-turn scenarios + trajectory rubrics |
+
+## Version view exposes the frozen context
+
+`GET /v1/design-flows/versions/{id}` returns `context`: the frozen flow context
+string that is part of the version's content hash, so a reviewer
+sees exactly what the phase brain will be handed. The G6 geometry-constraint
+check likewise considers only cad_models committed in the phase window, with
+superseded parts excluded, the same scoping as the assembly check.
+
+## Deliverable slots carry item keys {#deliverable-slots-carry-item-keys}
+
+Every definition write gets an item (see
+[Items and revisions](../twin_schema.md#230-items-and-revisions-definitions-vs-records)),
+but the item was still found by name, and the model chooses the name. A slot
+fixes the identity before the run starts: each deliverable a phase declares
+gets one, with the item key every write of it lands on.
+
+**Where slots come from.**
+
+- *Declared*: a template phase's `slots` list (`{type, name, key?}`), a
+  tailoring's `declare_items` operation (`value: [{"type": "cad_model",
+  "name": "left bracket"}, ...]`, or bare names when the phase produces exactly
+  one definition type), or an edited version's `slots` per phase. Two brackets
+  are two slots.
+- *Default*: one slot per singleton definition type a phase requires or
+  expects and no declared slot covers (`intent`, `constraint_set`, `bom`,
+  `assembly`), named after the phase: the requirements phase's constraint set
+  is `CS-REQUIREMENTS`, the intent phase's intent `INT-INTENT`. Parts,
+  stakeholder needs and objectives get no default slot, because a phase
+  usually writes several and one shared slot would turn four parts into four
+  revisions of one item; they are declared by name or resolved by name as in.
+
+**Keys.** A slot's key is the item key for its type and name
+(`derive_key`, e.g. `CAD-LEFT-BRACKET`). The project part of an item's identity
+is the item's project scope, not a prefix in the key: keys are already unique
+per project, a key cannot contain `/` (it sits in the
+`/v1/twin/items/{key}/revisions` path), and a project can be renamed while its
+id cannot. So the same deliverable in the same project has the same key in
+every version, and a part a run before slots already recorded as
+`CAD-LEFT-BRACKET` is the slot's item from the first slotted run.
+
+A slot of a one-per-project type (`intent`, `constraint_set`, `bom`,
+`assembly`) whose own key names no item yet revises the project's existing
+item of that type when there is exactly one. A project migrated from legacy
+nodes keeps its requirements under a key derived from their old
+title, such as `CS-WALL-SHELF-DERIVED-MECHANICAL-SIZING-CONSTRAINTS`; the
+requirements phase's `CS-REQUIREMENTS` slot writes the next revision of that
+item rather than opening a second one. With two or more candidates nothing is
+guessed and the slot key stands. The write counts as the slot's, so it is not
+flagged as undeclared (`flow_slot_bound_to_existing_item` is logged).
+
+**Frozen at save.** `FlowVersionStore.save` binds the *declared* slots
+(`slots.bind_slots` fills in their keys) before freezing, so they and their
+keys are part of the version's content hash and an approval approves them.
+Default slots are never stored: they are a pure function of the frozen phase,
+derived at run time (`slots.effective_slots`), and shown in the API with
+`derived: true`. A flow that declares no slots (every built-in template, a
+version saved before slots existed) therefore hashes exactly as before, because an
+empty `slots` list is left out of the hash like an unset `model`: an approved
+version still verifies, and a new version of the same content gets the same
+hash. `diff_flows` reports declared items (`phase 'design' declares cad_model
+'left bracket' (item CAD-LEFT-BRACKET)`), never the derived defaults.
+
+**During a run.** The phase brain puts the phase's slots on the MCP call
+context (`McpCallContext.item_slots`, carried to the sidecar in the
+`X-MetaForge-Item-Slots` header next to `X-MetaForge-Run`) and lists them in
+the phase brief, so the agent knows its item keys without having to pass them.
+A definition write with no explicit `item_key` / `supersedes`, in a phase that
+declares slots of its type, resolves to a slot (`slots.match_slot`):
+
+1. the slot with the same name or key;
+2. else the slot whose name shares the most meaningful words, when one is
+   clearly best ("Bracket, left side v2" is `CAD-LEFT-BRACKET`);
+3. else the only slot of that type, unless this same run already wrote that
+   item under a different name (a second name in one run is a second part);
+4. else no slot.
+
+An explicit `item_key` or `supersedes` always wins. A write whose final item is
+not one of the phase's slots for that type is still recorded, as its own item,
+and flagged: `metadata.undeclared_item`, `undeclared_phase`,
+`declared_item_keys`; `undeclared_item: true` plus a note in the tool result;
+a `flow_undeclared_item` log event; and the
+`metaforge_flow_item_slot_total{item_type, outcome="undeclared"}` counter
+(`outcome="slot"` for writes that landed on a slot). A write of a type the
+phase declares no slot for is not judged and resolves as.
+
+**At the gate.** `TwinConstraintChecker` lists undeclared items in the
+report's `undeclared_items`, rendered in the gate reason as `Undeclared items
+(n): ...`. They are findings for the reviewer (a real new part, or a renamed
+declared one), never violations, so they never fail a gate. The in-process
+engine scopes them to the phase window; the Temporal gate check, like its
+deliverable check, looks at the whole project. There is no alert on the
+counter: an undeclared item is a review item, and the reviewer already sees it.
+
+**API.** Every phase in `GET /v1/design-flows`, `GET /v1/design-flows/{id}`
+and `GET /v1/design-flows/versions/{id}` carries `slots`
+(`[{itemType, name, itemKey, derived}]`, `derived` for a default slot that is
+computed rather than stored), and `POST /v1/design-flows/versions` accepts
+`slots` per phase (`itemKey` optional). A slot the editor sends back with
+`derived: true` is dropped rather than turned into a declared one, so
+round-tripping a flow through the editor does not change its hash.

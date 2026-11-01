@@ -19,6 +19,7 @@ the context in; this module never reaches up.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections import OrderedDict
@@ -30,6 +31,22 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 # --- Type --------------------------------------------------------------------
+
+
+class ItemSlotClaim(BaseModel):
+    """One deliverable slot of the current design-flow phase (FORGE-524).
+
+    The recorders resolve a definition write with no explicit ``item_key`` /
+    ``supersedes`` to the matching slot's ``item_key``. A claim, like
+    ``run_id``: it only chooses which item a write lands on, which a caller
+    could do anyway by passing ``item_key``.
+    """
+
+    item_type: str
+    name: str
+    item_key: str
+
+    model_config = ConfigDict(frozen=True)
 
 
 class McpCallContext(BaseModel):
@@ -60,8 +77,105 @@ class McpCallContext(BaseModel):
         default_factory=uuid.uuid4,
         description="Per-request id for tying back to the harness's own trace.",
     )
+    profile: str | None = Field(
+        default=None,
+        description=(
+            "Tool profile this connection asked for (FORGE-410). The server-wide "
+            "``--profile`` is a deployment choice; this is a per-connection one, so "
+            "one sidecar can serve a 30-tool plugin and the dashboard's full set at "
+            "once. Set from the ``?profile=`` query parameter."
+        ),
+    )
+
+    actor_verified: bool = Field(
+        default=False,
+        description=(
+            "Whether the SERVER established actor_id, rather than the caller "
+            "asserting it. False unless a transport says otherwise."
+        ),
+    )
+
+    # ── Design-flow service caller (FORGE-487) ──────────────────────────────
+    #
+    # ``run_id`` / ``phase`` / ``model`` are what the design-flow worker says
+    # it is doing. They ride in headers like the project does, so on their own
+    # they are a *claim*. ``service_verified`` is the server's conclusion and is
+    # never read from a header: only the sidecar's own service-key check, after
+    # asking the gateway about the run, sets it (``model_copy`` on the
+    # server side). ``service_refusal`` is set instead when the key was valid
+    # but the run was not (not running, another project), so the call is
+    # refused rather than quietly demoted to a held write.
+    run_id: str | None = Field(default=None, description="Design-flow run this call serves.")
+    phase: str | None = Field(default=None, description="Design-flow phase id, as claimed.")
+    model: str | None = Field(default=None, description="Model the phase runs on, as claimed.")
+    item_slots: tuple[ItemSlotClaim, ...] = Field(
+        default=(),
+        description=(
+            "FORGE-524: the deliverable slots of the design-flow phase this call "
+            "serves, so a definition write lands on its slot's item."
+        ),
+    )
+    service_verified: bool = Field(
+        default=False,
+        description="True only when the server verified a service key AND the run.",
+    )
+    service_refusal: str | None = Field(
+        default=None,
+        description="Why a call carrying a valid service key was refused. Server-set only.",
+    )
+    # FORGE-584: a session working a phase task it claimed. Server-set only,
+    # like ``service_verified``: never read from a header, and only after the
+    # owner turned the grant on and the gateway confirmed the claim.
+    client_task_id: str | None = Field(
+        default=None,
+        description="The claimed phase task this call works on. Server-set only.",
+    )
+    client_task_verified: bool = Field(
+        default=False,
+        description="True only when the server confirmed this session's claimed task.",
+    )
 
     model_config = ConfigDict(frozen=True)
+
+    #: The all-zero session of the unattributed sentinel. Binding anything to
+    #: it would be process-global by another name, which is the leak the
+    #: binding registry below is keyed to avoid.
+    _SENTINEL_SESSION = UUID("00000000-0000-0000-0000-000000000000")
+
+    @property
+    def actor_is_attributable(self) -> bool:
+        """Whether this call can be pinned on a particular person.
+
+        FORGE-330. Distinct from "there is an actor_id": the header is a
+        convenience for local use and anyone can put anything in it, so a
+        non-default value proves nothing on its own. Only a transport that
+        checked something sets ``actor_verified``.
+
+        A shared credential -- an API key, or the shared-secret OAuth login
+        -- authorises the call and identifies nobody, so it does not count
+        either. That distinction is the whole reason the field exists: an
+        audit trail that cannot tell a proven identity from a typed-in one
+        is not an audit trail.
+        """
+        return self.actor_verified and self.actor_id != "system:unattributed"
+
+    @property
+    def session_is_stable(self) -> bool:
+        """Whether ``session_id`` came from the caller or we invented it.
+
+        FORGE-334. It matters because a session binding is only ever found
+        again by a later call presenting the *same* id. When the transport
+        supplied none, ``default_factory`` hands out a fresh one per call, so
+        a binding stored against it can never match and the scope does not
+        stick -- however confidently anything reports that it did.
+
+        ``model_fields_set`` is the honest test: the three builders
+        (headers, env, chat thread) all pass ``session_id`` only when they
+        actually have one, and ``model_copy(update=...)`` preserves the set.
+        """
+        if self.session_id == self._SENTINEL_SESSION:
+            return False
+        return "session_id" in self.model_fields_set
 
 
 # Sentinel context used when the caller didn't install one. Encodes the
@@ -121,6 +235,17 @@ HEADER_PROJECT = "X-MetaForge-Project"
 HEADER_SESSION = "X-MetaForge-Session"
 HEADER_ACTOR = "X-MetaForge-Actor"
 HEADER_CORRELATION = "X-MetaForge-Correlation"
+# FORGE-487: design-flow worker claims. The service *key* has its own header
+# (``mcp_core.service_auth.HEADER_SERVICE_KEY``) and is deliberately not part
+# of McpCallContext, which is logged and copied around.
+HEADER_RUN = "X-MetaForge-Run"
+HEADER_PHASE = "X-MetaForge-Phase"
+HEADER_MODEL = "X-MetaForge-Model"
+_MAX_CLAIM_LENGTH = 200
+# FORGE-524: the phase's slots, as a JSON list of [item_type, name, item_key].
+HEADER_ITEM_SLOTS = "X-MetaForge-Item-Slots"
+_MAX_SLOTS_HEADER_LENGTH = 8192
+_MAX_SLOTS = 64
 
 # Stdio — client passes these env vars at spawn (see .mcp.json).
 ENV_PROJECT = "METAFORGE_PROJECT_ID"
@@ -184,6 +309,33 @@ def bound_project(session_id: UUID | None) -> UUID | None:
     return _session_projects.get(session_id)
 
 
+def bind_current_session_to(project_id: str | UUID | None) -> bool:
+    """Scope the active session to ``project_id``. Returns whether it stuck.
+
+    FORGE-335: shared by ``session.start`` and ``project.open``/``create``,
+    because the honest part of this is easy to get wrong twice. It returns
+    False, and binds nothing, when the caller presented no session identity
+    -- a binding keyed on an invented session id can never be matched by a
+    later call, and reporting success for one is what makes a client stop
+    passing ``project_id`` explicitly.
+
+    Never raises: scoping is a convenience on top of whatever the caller was
+    actually doing, and failing ``session.start`` because a scope could not
+    be applied would lose the capture as well.
+    """
+    if not project_id:
+        return False
+    try:
+        parsed = project_id if isinstance(project_id, UUID) else UUID(str(project_id))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    ctx = current_context()
+    if not ctx.session_is_stable:
+        return False
+    bind_session_project(ctx.session_id, parsed)
+    return True
+
+
 def clear_session_project(session_id: UUID) -> None:
     """Drop a session's binding (called when the session completes)."""
     _session_projects.pop(session_id, None)
@@ -192,6 +344,74 @@ def clear_session_project(session_id: UUID) -> None:
 def reset_session_projects() -> None:
     """Clear every binding — tests only."""
     _session_projects.clear()
+
+
+# --- Session-scoped phase task (FORGE-584) ------------------------------------
+#
+# ``phase.claim`` records which task a session took, keyed on the session id
+# like the project binding above and for the same reason: the sidecar serves
+# several clients, and a process-wide "last claimed task" would hand one
+# client's grant to another. A session with no stable id gets no binding. The
+# binding is only a claim: the server re-checks it with the gateway before it
+# grants anything.
+
+
+class TaskBinding(BaseModel):
+    """The phase task a session claimed."""
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: str
+    run_id: str
+    phase: str
+    project_id: UUID | None = None
+
+
+_session_tasks: OrderedDict[UUID, TaskBinding] = OrderedDict()
+
+
+def bind_current_session_task(
+    task_id: str, run_id: str, phase: str, project_id: str | UUID | None
+) -> bool:
+    """Record that this session claimed ``task_id``. Returns whether it stuck."""
+    ctx = current_context()
+    if not ctx.session_is_stable or not task_id or not run_id:
+        return False
+    parsed: UUID | None
+    try:
+        parsed = (
+            project_id
+            if isinstance(project_id, UUID)
+            else (UUID(str(project_id)) if project_id else None)
+        )
+    except (ValueError, TypeError):
+        parsed = None
+    _session_tasks.pop(ctx.session_id, None)
+    _session_tasks[ctx.session_id] = TaskBinding(
+        task_id=task_id, run_id=run_id, phase=phase, project_id=parsed
+    )
+    while len(_session_tasks) > _MAX_SESSION_BINDINGS:
+        _session_tasks.popitem(last=False)
+    return True
+
+
+def bound_task(session_id: UUID | None) -> TaskBinding | None:
+    """The task bound to ``session_id``, if any."""
+    if session_id is None:
+        return None
+    return _session_tasks.get(session_id)
+
+
+def clear_session_task(session_id: UUID, task_id: str | None = None) -> None:
+    """Drop a session's task binding (on submit). With ``task_id``, only that task's."""
+    current = _session_tasks.get(session_id)
+    if current is not None and (task_id is None or current.task_id == task_id):
+        _session_tasks.pop(session_id, None)
+
+
+def reset_session_tasks() -> None:
+    """Clear every task binding — tests only."""
+    _session_tasks.clear()
 
 
 def _apply_session_binding(fields: dict[str, object], session: UUID | None) -> None:
@@ -230,7 +450,55 @@ def context_to_headers(ctx: McpCallContext) -> dict[str, str]:
     }
     if ctx.project_id is not None:
         headers[HEADER_PROJECT] = str(ctx.project_id)
+    for header, value in (
+        (HEADER_RUN, ctx.run_id),
+        (HEADER_PHASE, ctx.phase),
+        (HEADER_MODEL, ctx.model),
+    ):
+        if value:
+            headers[header] = value
+    if ctx.item_slots:
+        headers[HEADER_ITEM_SLOTS] = encode_item_slots(ctx.item_slots)
     return headers
+
+
+def encode_item_slots(slots: tuple[ItemSlotClaim, ...]) -> str:
+    """The header form of ``slots``: compact JSON, ASCII only."""
+    return json.dumps(
+        [[s.item_type, s.name, s.item_key] for s in slots[:_MAX_SLOTS]],
+        separators=(",", ":"),
+    )
+
+
+def decode_item_slots(value: str | None) -> tuple[ItemSlotClaim, ...]:
+    """Parse the slots header. Malformed or oversized input is no slots, never an error."""
+    if not value or len(value) > _MAX_SLOTS_HEADER_LENGTH:
+        return ()
+    try:
+        raw = json.loads(value)
+    except ValueError:
+        return ()
+    if not isinstance(raw, list):
+        return ()
+    out: list[ItemSlotClaim] = []
+    for entry in raw[:_MAX_SLOTS]:
+        if (
+            isinstance(entry, list)
+            and len(entry) == 3
+            and all(isinstance(v, str) and v and len(v) <= _MAX_CLAIM_LENGTH for v in entry)
+        ):
+            out.append(ItemSlotClaim(item_type=entry[0], name=entry[1], item_key=entry[2]))
+    return tuple(out)
+
+
+def _claim(value: str | None) -> str | None:
+    """A header claim, bounded and printable, or None."""
+    if not value:
+        return None
+    value = value.strip()
+    if not value or not value.isprintable():
+        return None
+    return value[:_MAX_CLAIM_LENGTH]
 
 
 def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
@@ -255,6 +523,11 @@ def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
         fields["session_id"] = session
     if correlation is not None:
         fields["correlation_id"] = correlation
+    # Claims only. ``service_verified`` is not a header and cannot become one.
+    fields["run_id"] = _claim(folded.get(HEADER_RUN.lower()))
+    fields["phase"] = _claim(folded.get(HEADER_PHASE.lower()))
+    fields["model"] = _claim(folded.get(HEADER_MODEL.lower()))
+    fields["item_slots"] = decode_item_slots(folded.get(HEADER_ITEM_SLOTS.lower()))
     _apply_session_binding(fields, session)
     return McpCallContext(**fields)
 
@@ -282,8 +555,13 @@ __all__ = [
     "ENV_SESSION",
     "HEADER_ACTOR",
     "HEADER_CORRELATION",
+    "HEADER_ITEM_SLOTS",
+    "HEADER_MODEL",
+    "HEADER_PHASE",
     "HEADER_PROJECT",
+    "HEADER_RUN",
     "HEADER_SESSION",
+    "ItemSlotClaim",
     "McpCallContext",
     "bind_session_project",
     "bound_project",
@@ -291,6 +569,8 @@ __all__ = [
     "context_from_env",
     "context_from_headers",
     "context_to_headers",
+    "decode_item_slots",
+    "encode_item_slots",
     "current_context",
     "reset_context",
     "set_context",

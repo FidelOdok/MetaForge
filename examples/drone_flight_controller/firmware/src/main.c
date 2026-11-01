@@ -21,7 +21,7 @@ static void USART1_Init(void);     /* GPS (NEO-M8N) */
 static void USART2_Init(void);     /* Telemetry / OSD */
 static void USART3_Init(void);     /* RC receiver (SBUS/CRSF) */
 static void USART6_Init(void);     /* Spare peripheral */
-static void TIM1_Init(void);       /* Motor PWM / DShot outputs */
+static void Motor_Timers_Init(void); /* Motor PWM / DShot outputs */
 static void ADC1_Init(void);       /* Battery voltage sensing */
 static void USB_Init(void);        /* USB-C (Full Speed) */
 static void SDIO_Init(void);       /* Micro-SD blackbox logging */
@@ -60,7 +60,7 @@ int main(void)
     USART2_Init();
     USART3_Init();
     USART6_Init();
-    TIM1_Init();
+    Motor_Timers_Init();
     ADC1_Init();
     USB_Init();
     SDIO_Init();
@@ -106,7 +106,7 @@ static void GPIO_Init(void)
 {
     /* TODO: Configure GPIO pins per pinmap.json
      *   - Status LED (PC13)
-     *   - Buzzer output (PB0)
+     *   - Buzzer output (PC5)
      *   - WS2812 LED data (PA8)
      */
 }
@@ -168,13 +168,13 @@ static void USART6_Init(void)
      */
 }
 
-static void TIM1_Init(void)
+static void Motor_Timers_Init(void)
 {
-    /* TODO: TIM1 for motor outputs (DShot600)
-     *   CH1 = PE9  -> Motor 1
-     *   CH2 = PE11 -> Motor 2
-     *   CH3 = PE13 -> Motor 3
-     *   CH4 = PE14 -> Motor 4
+    /* TODO: TIM3 + TIM5 for motor outputs (DShot600); the LQFP-64 has no port E
+     *   TIM3_CH3 = PB0 -> Motor 1
+     *   TIM3_CH4 = PB1 -> Motor 2
+     *   TIM5_CH1 = PA0 -> Motor 3
+     *   TIM5_CH2 = PA1 -> Motor 4
      *   DMA-driven for zero-jitter DShot frames
      */
 }
@@ -216,7 +216,8 @@ static void DMA_Init(void)
     /* TODO: Configure DMA streams
      *   DMA2_Stream0: SPI1_RX (IMU read)
      *   DMA2_Stream3: SPI1_TX (IMU write)
-     *   DMA2_Stream6: TIM1 DShot (motor output)
+     *   DMA1_Stream2: TIM3_UP DShot burst (motors 1-2)
+     *   DMA1_Stream0: TIM5_UP DShot burst (motors 3-4)
      */
 }
 

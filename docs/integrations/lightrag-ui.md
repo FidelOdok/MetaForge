@@ -1,11 +1,11 @@
 # LightRAG Web UI — Operator Guide
 
-**Status**: Phase 1 (adopted) · ADR-010 · MET-392 / MET-393
+**Status**: Phase 1 (adopted) · ADR-010 ·
 
 The LightRAG Web UI is a standalone React + Sigma.js single-page app
 served by LightRAG's own FastAPI backend. We mount it via
 `docker-compose` so engineers can dogfood the L1 knowledge layer
-during the MET-346 spike with zero new MetaForge frontend code.
+during the spike with zero new MetaForge frontend code.
 
 It is **separate from the Kinetic Console**. The integrated
 `/knowledge` page in the dashboard arrives in Phase 2; until then,
@@ -113,11 +113,11 @@ LIGHTRAG_UI_PORT=9621                 # override the host port mapping
 | You're iterating on chunking / embedding / extraction logic    | You're an end-user reviewing your own design's knowledge |
 | You need to inspect the raw knowledge graph (entities, edges)  | Phase 2 lands the embedded view (date TBD) |
 | You're debugging a poor retrieval result                        | You want fragment search alongside the rest of the dashboard's controls |
-| You're verifying MET-346 spike adoption criteria                | —                                          |
+| You're verifying spike adoption criteria | — |
 
 ---
 
-## MET-346 spike adoption checklist
+## Spike adoption checklist
 
 Each criterion below is verified by the automated test coverage that
 landed in `main` during the L1 implementation loop. Booting the
@@ -153,15 +153,15 @@ source of truth.
   `tests/uat/scenarios/tier1/full-capability.md` (L1-F1a, PR
   [#177](https://github.com/FidelOdok/MetaForge/pull/177)).
 
-If a criterion regresses in `main`, file a P1 ticket against MET-346
+If a criterion regresses in `main`, file a P1 ticket against
 referencing the broken test rather than a UI screenshot.
 
 ---
 
-## Phase-1 adoption status (MET-346)
+## Phase-1 adoption status
 
 - **Workspace separation policy is pinned.** Per L1-A5 / L1-D1 in
-  [`docs/plans/l1-implementation.md`](../plans/l1-implementation.md),
+  [`docs/plans/l1-implementation.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/plans/l1-implementation.md),
   the gateway and the LightRAG UI keep **separate** pgvector
   workspaces in Phase-1 (`lightrag` and `lightrag_ui` respectively).
   This is intentional — the LightRAG UI is engineer-dogfood scope and
@@ -183,7 +183,7 @@ referencing the broken test rather than a UI screenshot.
 ## Migration to Phase 2
 
 L1-D2 (PR [#192](https://github.com/FidelOdok/MetaForge/pull/192))
-flipped every MET-346 adoption-checklist row to ✅, which means the
+flipped every spike adoption-checklist row to ✅, which means the
 standalone `localhost:9621` UI has done its Phase-1 job. The Phase-2
 surface for sources browsing now lives in the Kinetic Console:
 
@@ -208,12 +208,12 @@ surface for sources browsing now lives in the Kinetic Console:
   sidebar matches the routing, and the LightRAG UI is no longer
   referenced from the dashboard chrome.
 
-See the L1 status board and the MET-346 adoption record for the full
+See the L1 status board and the adoption record for the full
 sequencing:
 
-- [`docs/plans/l1-implementation.md`](../plans/l1-implementation.md) —
+- [`docs/plans/l1-implementation.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/plans/l1-implementation.md) —
   L1 status board (L1-D / L1-E rows)
-- [`docs/uat/met-346-adoption-checklist-2026-05-10.md`](../uat/met-346-adoption-checklist-2026-05-10.md)
+- [`docs/uat/met-346-adoption-checklist-2026-05-10.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/uat/met-346-adoption-checklist-2026-05-10.md)
   — the L1-D2 adoption-checklist run report
 
 ---
@@ -221,7 +221,7 @@ sequencing:
 ## Cross-references
 
 - [ADR-010 — Knowledge Visualization](https://github.com/FidelOdok/MetaForge-Planner/blob/main/docs/architecture/adr-010-knowledge-visualization.md) — the architectural decision behind this Phase 1 / Phase 2 split
-- [MET-346](https://linear.app/metaforge/issue/MET-346) — the L1 KnowledgeService spike this UI dogfoods
-- [MET-392](https://linear.app/metaforge/issue/MET-392) — the docker-compose mount task
-- [MET-393](https://linear.app/metaforge/issue/MET-393) — this doc
-- [`docs/architecture/knowledge-ingestion-playbook.md`](../architecture/knowledge-ingestion-playbook.md) — what fields LightRAG's chunking pipeline expects
+- — the L1 KnowledgeService spike this UI dogfoods
+- — the docker-compose mount task
+- — this doc
+- [`docs/architecture/knowledge-ingestion-playbook.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/knowledge-ingestion-playbook.md) — what fields LightRAG's chunking pipeline expects

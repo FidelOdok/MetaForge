@@ -21,18 +21,124 @@ than inheritance.
 
 from __future__ import annotations
 
+import asyncio
+import difflib
+import inspect
 import json
+import os
+import re
 import time
+import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID, uuid4
 
 import structlog
 
+from mcp_core.annotations import annotations_for
+from mcp_core.approval_hold import (
+    HoldNotifier,
+    hold_notice_text,
+    hold_window_seconds,
+    progress_interval_seconds,
+    progress_notification,
+)
+from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
+from mcp_core.deeplinks import DeepLinkBuilder, links_for
+from mcp_core.elicitation import (
+    ELICITATION_PROTOCOL_VERSION,
+    Elicitor,
+    declares_form_elicitation,
+    elicitation_gate,
+)
+from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
+    REQUIRE_PART_COLOURS_ARG,
+    ApprovalAsk,
+    ApprovalGateFn,
+    ApprovalLedger,
+    ApprovalLedgerUnavailableError,
+    ApprovalNotConfiguredError,
+    ApprovalOutcome,
+    ApprovalRejectedError,
+    Approver,
+    ApproverArgumentRejectedError,
+    Caller,
+    HumanAuthorityRequiredError,
+    decide,
+    reject_caller_supplied_approver,
+    requires_human_authority,
+    resolve_approval,
+    strip_reserved_arguments,
+)
+from mcp_core.mrtr import (
+    MRTR_METHODS,
+    InputRequiredError,
+    InvalidRequestStateError,
+    MrtrContext,
+    StateSigner,
+    call_digest,
+    current_mrtr,
+    input_required_result,
+    mrtr_elicitor,
+    mrtr_gate,
+    with_mrtr,
+)
+from mcp_core.profiles import (
+    FULL_PROFILE,
+    PROFILES,
+    UnknownProfileError,
+    resolve_profile,
+    tools_for_profile,
+)
+from mcp_core.protocol import (
+    AUTH_DENIED,
+    INVALID_PARAMS,
+    INVALID_REQUEST,
+    METHOD_NOT_FOUND,
+    RESOURCE_NOT_FOUND,
+    TOOL_EXECUTION_ERROR,
+)
+from mcp_core.protocol_versions import (
+    CACHE_HINTS,
+    LEGACY_PROTOCOL_VERSIONS,
+    META_CLIENT_CAPABILITIES,
+    META_CLIENT_INFO,
+    META_ERROR,
+    META_SERVER_INFO,
+    META_SESSION_HANDLE,
+    META_SUBSCRIPTION_ID,
+    MINTING_TOOLS,
+    SESSION_ARGUMENT,
+    SESSION_ARGUMENT_SCHEMA,
+    UNSUPPORTED_PROTOCOL_VERSION,
+    ModernRequest,
+    current_modern_request,
+    is_legacy_error_code,
+    is_modern,
+    modern_error_code,
+    modern_meta_problem,
+    request_protocol_version,
+    subscription_problem,
+    supported_versions,
+    unsupported_version_data,
+    with_modern_request,
+)
+from mcp_core.resources import ResourceUriError, parse_resource_uri
+from mcp_core.service_auth import (
+    ServiceRunVerifier,
+    ServiceScopeError,
+    verify_service_key,
+)
+from mcp_core.workflows import WORKFLOWS, prompt_body, prompt_manifest
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
 from tool_registry.bootstrap import bootstrap_tool_registry
 from tool_registry.mcp_server.handlers import (
+    ResourceNotFoundError,
+    ResourceReadError,
     ToolHandlerError,
     ToolNotFoundError,
     make_error,
@@ -47,12 +153,16 @@ tracer = get_tracer("metaforge.mcp.server")
 
 # JSON-RPC error codes (mirrors ``tool_registry.mcp_server.server`` so
 # clients see consistent codes regardless of which entry point they hit).
-_INVALID_REQUEST = -32600
-_METHOD_NOT_FOUND = -32601
-_TOOL_EXECUTION_ERROR = -32001
-# MET-338: dedicated code for failed API-key auth so clients can branch
-# on it without parsing message strings.
-_AUTH_DENIED = -32002
+# FORGE-388: one error-code table, imported rather than restated. These
+# used to be redefined here, and `_AUTH_DENIED = -32002` collided with
+# both `mcp_core.protocol.TOOL_TIMEOUT` and the code the MCP spec assigns
+# to "Resource not found". A second copy of a table is a copy that can
+# disagree, and this one did.
+_INVALID_REQUEST = INVALID_REQUEST
+_METHOD_NOT_FOUND = METHOD_NOT_FOUND
+_TOOL_EXECUTION_ERROR = TOOL_EXECUTION_ERROR
+_RESOURCE_NOT_FOUND = RESOURCE_NOT_FOUND
+_AUTH_DENIED = AUTH_DENIED
 
 
 # MET-503: returned in the ``initialize`` handshake so any MCP client learns
@@ -83,11 +193,12 @@ Your work is captured for review:
 correctly: run `metaforge-capture use <project_id>` (CLI) or call session.start \
 with the project_id. If you don't know which project, ask the user. With no \
 active project, capture stays unbound.
-- session.start also scopes your later tool calls to that project, but only \
-when your client presents a stable session (stdio, or an X-MetaForge-Session \
-header). It tells you which happened: if it returns \
-`project_scope_bound: false`, keep passing project_id explicitly on calls \
-that take it.
+- session.start also scopes your later tool calls to that project. It tells \
+you whether that took effect: if it returns `project_scope_bound: false`, \
+the scope did NOT stick and you must keep passing project_id explicitly on \
+every call that takes one. Most clients get a sticky scope automatically \
+(stdio, or any HTTP client echoing the Mcp-Session-Id this server issues at \
+initialize); a client doing neither gets `false`.
 - Record design choices with twin.record_decision (title, rationale, alternatives) \
 so they persist as typed, reviewable decisions.
 - Capturing your reasoning (not just actions) is an optional client-side add-on \
@@ -96,6 +207,81 @@ https://github.com/FidelOdok/MetaForge/blob/main/docs/session-capture.md
 
 Full tool catalog and Phase-1 limits: \
 https://github.com/FidelOdok/MetaForge/blob/main/docs/capability-matrix.md"""
+
+
+class PromptNotFoundError(Exception):
+    """``prompts/get`` named a workflow that does not exist (FORGE-340)."""
+
+
+@dataclass(frozen=True)
+class ApprovalRecord:
+    """That a call was held, and how it ended (FORGE-417).
+
+    A held-then-approved write returned a plain success envelope, identical
+    to one that was never held. The agent read that and told the user "writes
+    from this external harness are not being held for approval" -- false, and
+    contradicted by the gateway ledger entry sitting right there. The
+    guardrail worked; the client had no way to know, so the model filled the
+    gap with a guess.
+
+    This is what the result needs to carry for that claim to be checkable.
+    """
+
+    outcome: str
+    route: str
+    held_seconds: float
+    approval_id: str | None = None
+    approver: str | None = None
+    approver_verified: bool = False
+
+    def as_meta(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "held": True,
+            "outcome": self.outcome,
+            "route": self.route,
+            "heldSeconds": round(self.held_seconds, 3),
+        }
+        if self.approval_id:
+            out["approvalId"] = self.approval_id
+        if self.approver:
+            out["approvedBy"] = self.approver
+            out["approverVerified"] = self.approver_verified
+        return out
+
+    def as_sentence(self) -> str:
+        """One line the model will actually read.
+
+        `_meta` is the right home for structured facts, but a model reads the
+        text content. Putting it only in `_meta` is how this stayed invisible:
+        the information was technically present and never looked at.
+        """
+        who = f" by {self.approver}" if self.approver else ""
+        ident = f" (approval {self.approval_id})" if self.approval_id else ""
+        unverified = "" if self.approver_verified or not self.approver else ", identity unverified"
+        return (
+            f"This write was held for human approval and was {self.outcome}"
+            f"{who}{ident} after {self.held_seconds:.1f}s"
+            f" via {self.route}{unverified}."
+        )
+
+
+def _tool_error_text(exc: ToolHandlerError) -> str:
+    """What the model should read when a tool refuses (FORGE-419).
+
+    The details are the actionable part and often the whole fix, so they lead.
+    The tool id is named because a transcript shows several calls and an
+    unattributed error is a guess about which one failed.
+    """
+    details = (exc.details or "").strip()
+    if not details:
+        # Better than an empty string, and says what to do about it rather
+        # than leaving the agent to infer a cause that was never recorded.
+        return (
+            f"{exc.tool_id} failed, and the handler gave no reason. "
+            "This is a server-side gap, not something to fix by changing the "
+            "arguments -- retrying the same call will fail the same way."
+        )
+    return f"{exc.tool_id} failed: {details}"
 
 
 class UnifiedMcpServer:
@@ -113,9 +299,91 @@ class UnifiedMcpServer:
         version: str = "0.1.0",
         session_capture: SessionCapture | None = None,
         tool_registry: ToolRegistry | None = None,
+        profile: str | None = None,
+        reloads: bool = False,
+        caller: Caller = Caller.UNTRUSTED,
+        approval_gate: ApprovalGateFn | None = None,
+        approval_ledger: ApprovalLedger | None = None,
+        exempt_local_writes: bool = True,
+        auth_posture: AuthPosture | None = None,
+        elicitor: Elicitor | None = None,
+        dashboard_url: str | None = None,
+        metrics: Any = None,
     ) -> None:
         self._adapters = list(adapters)
+        # FORGE-339: when set, ``tools/list`` serves only this profile's
+        # tools. Validated here rather than on first request — a typo in a
+        # start-up flag should stop the server, not quietly serve a profile
+        # nobody asked for or, worse, serve everything.
+        if profile is not None:
+            resolve_profile(profile)  # raises UnknownProfileError
+        self._profile = profile
+        # FORGE-359: who is on the other end, and how a write gets authorised.
+        # `caller` is set per transport: stdio is the engineer at the
+        # machine, anything remote is not.
+        #
+        # FORGE-387: the default was LOCAL and **no transport ever set it**,
+        # so every HTTP caller was treated as the engineer at the keyboard
+        # and `exempt_local_writes` waved their writes straight through. The
+        # approval table F1 documents never fired over HTTP at all. A
+        # default that is the most permissive value is how that happens
+        # quietly, so the default is now the most conservative one and the
+        # transports declare what they actually are.
+        self._caller = caller
+        # FORGE-487: the design-flow worker's credential and the authority
+        # that says whether the run it names is real. Both None = the feature
+        # is off and every caller keeps the classification the transport
+        # gave it.
+        self._service_key: str | None = None
+        self._service_verifier: ServiceRunVerifier | None = None
+        # FORGE-584: confirms a session's claimed phase task. None = the
+        # owner has not turned client-task writes on, and a client working a
+        # task stays an ordinary caller whose writes are held.
+        self._client_task_verifier: Any = None
+        self._approval_gate = approval_gate
+        # FORGE-473: where an inline (elicitation) hold is written down, so it
+        # has an approval id and an approver like a dashboard one. None keeps
+        # the old behaviour: inline answers leave no ledger entry.
+        self._approval_ledger = approval_ledger
+        # FORGE-601: signs the state a returned question carries. A fixed
+        # METAFORGE_MCP_STATE_KEY lets a question outlive a restart.
+        _state_key = os.environ.get("METAFORGE_MCP_STATE_KEY", "").strip()
+        self._mrtr_signer = StateSigner(_state_key.encode() if _state_key else None)
+        # FORGE-417: call id -> how its approval ended, read once by the
+        # MCP envelope and popped. Bounded by that pop; see _remember_hold.
+        self._approval_records: dict[str, ApprovalRecord] = {}
+        self._exempt_local_writes = exempt_local_writes
         self._version = version
+        # FORGE-332: what the transport in front of us enforces. Only the
+        # transport knows, so it tells us; None means nobody said, and the
+        # health report says exactly that rather than guessing "open".
+        self._auth_posture = auth_posture
+        # FORGE-360: the transport's channel back to the client, if it has
+        # one. Held rather than used -- whether we may actually ask depends
+        # on what the client said at initialize.
+        self._elicitor = elicitor
+        # FORGE-465: the transport's way to send a notification for the call
+        # being handled (progress on a held write). None: nothing can be
+        # sent, so a held write gets the window that fits a client's own
+        # tool timeout.
+        self._notifier: HoldNotifier | None = None
+        # FORGE-371: where the dashboard is served from, so a result can
+        # carry a link to the view that shows it. None means no links at
+        # all -- a guessed localhost URL is worse than none, because the
+        # agent states it with the same confidence either way.
+        self._deeplinks = DeepLinkBuilder(dashboard_url)
+        # FORGE-379: MetricsCollector, or None. The MCP surface is where
+        # every external harness meets MetaForge and it had no metrics at
+        # all -- "which plugin tool is failing, for whom" was a question
+        # you answered by reading Loki by hand.
+        self._metrics = metrics
+        # Whoever last completed the `initialize` handshake. Reported by
+        # health/check so a version-skew question has an answer other than
+        # "ask the user what they are running".
+        self._client_info: dict[str, Any] | None = None
+        self._client_protocol: str | None = None
+        self._client_capabilities: dict[str, Any] = {}
+        self._negotiated_protocol = self._DEFAULT_PROTOCOL_VERSION
         self._start_time = datetime.now(UTC)
         # Held only so the process shutdown path can call close_all() and
         # release remote adapters' aiohttp ClientSessions -- unused by
@@ -127,6 +395,24 @@ class UnifiedMcpServer:
         # Commit-by-reference stash: remembers freecad.export_model STEP output so
         # twin.commit_geometry can be called with just (session_id, obj_id).
         self._geom_stash = GeometryStash()
+        # FORGE-409: health was reachable only as a JSON-RPC method, so the
+        # doctor command told the agent to call something a harness cannot
+        # call. This adapter exposes the same report as a `health.check` tool
+        # and a `metaforge://health` resource. Appended here rather than
+        # supplied by a caller because the report is about *this server* --
+        # which adapters answered, what protocol was negotiated -- and no
+        # caller is in a position to assemble it.
+        from metaforge.mcp.health_adapter import HealthServer
+
+        # FORGE-411: the gateway runs under uvicorn's reloader and picks the
+        # mounted source up; this server calls uvicorn programmatically and
+        # does not. That difference is the whole staleness question, so it is
+        # recorded rather than guessed.
+        self._reloads = reloads
+
+        self._health_adapter = HealthServer(self._health_check)
+        self._adapters = [*self._adapters, self._health_adapter]
+
         # tool_id → adapter (built once at construction; tool sets are
         # static after each adapter's ``__init__``).
         self._tool_index: dict[str, McpToolServer] = {}
@@ -146,9 +432,303 @@ class UnifiedMcpServer:
             adapter_ids=[a.adapter_id for a in self._adapters],
         )
 
+    def _domain_adapters(self) -> list[McpToolServer]:
+        """Every adapter except the server's own health reporter."""
+        return [a for a in self._adapters if a is not getattr(self, "_health_adapter", None)]
+
+    def attach_elicitor(self, elicitor: Elicitor) -> None:
+        """Give this server a way to put a question to the connected client.
+
+        Set by the transport for the same reason the auth posture is: only
+        the transport has a channel back. A transport with no
+        server-to-client direction never calls this, and ``can_elicit``
+        stays False -- which is the honest state, not a degraded one.
+        """
+        self._elicitor = elicitor
+
+    def attach_notifier(self, notifier: HoldNotifier) -> None:
+        """Give this server a way to notify the client of the current call.
+
+        FORGE-465. Set by the transport, like the elicitor, because only the
+        transport has a channel back. Used to tell a client its call is held
+        and to keep its timeout from expiring while a person decides.
+        """
+        self._notifier = notifier
+
+    def declare_caller(self, caller: Caller) -> None:
+        """Say who is on the other end of this transport (FORGE-387).
+
+        Set alongside the auth posture, and for the same reason: only the
+        transport knows. Not calling it leaves the conservative default,
+        which holds writes rather than running them.
+        """
+        self._caller = caller
+        logger.info("unified_mcp_caller", caller=caller.value)
+
+    def attach_service_auth(self, key: str | None, verifier: ServiceRunVerifier | None) -> bool:
+        """Enable the design-flow service caller (FORGE-487). Returns whether it is on.
+
+        On only when there is both a usable key and something to verify runs
+        with. Either missing leaves it off, which is the safe state: the
+        worker is then an ordinary untrusted caller and its writes are held.
+        """
+        from mcp_core.service_auth import service_key_is_usable
+
+        usable = service_key_is_usable(key)
+        if key and not usable:
+            logger.warning(
+                "mcp_service_key_too_short",
+                detail="METAFORGE_MCP_SERVICE_KEY is set but too short to use; the "
+                "design-flow service caller stays off",
+            )
+        if usable and verifier is None:
+            logger.error(
+                "mcp_service_caller_no_verifier",
+                detail="a service key is set but there is no gateway to verify runs "
+                "against (METAFORGE_GATEWAY_URL); the service caller stays off",
+            )
+        enabled = usable and verifier is not None
+        self._service_key = key if enabled else None
+        self._service_verifier = verifier if enabled else None
+        logger.info("mcp_service_caller", enabled=enabled)
+        return enabled
+
+    async def authenticate_service_caller(
+        self, ctx: Any, presented_key: str | None, inbound: Any
+    ) -> Any:
+        """Decide whether this HTTP call is the design-flow service (FORGE-487).
+
+        Returns the context to run the call under:
+
+        * no key, a wrong key, or the feature off: ``ctx`` unchanged, so the
+          call is exactly as untrusted as before and its writes are held;
+        * a right key but a run that is not running, or in another project,
+          or that the gateway could not be asked about: ``service_refusal``
+          set, and every tool call under it is refused. Demoting to a held
+          write would park it for a human who is not there;
+        * a right key and a verified run: ``service_verified``, which makes
+          the call's caller ``Caller.SERVICE``.
+
+        Only ``tools/call`` is examined, so listing tools costs no gateway
+        round trip and a stale run cannot block discovery.
+        """
+        if not presented_key or self._service_key is None:
+            return ctx
+        method = inbound.get("method") if isinstance(inbound, dict) else None
+        if method not in ("tools/call", "tool/call"):
+            return ctx
+        if not verify_service_key(presented_key, self._service_key):
+            # Wrong key: untrusted, not refused. Whoever sent it gets what an
+            # anonymous caller gets; refusing would tell them the key is close.
+            logger.warning("mcp_service_key_rejected", run_id=ctx.run_id)
+            return ctx
+        run_id, project_id = ctx.run_id, ctx.project_id
+        if not run_id or project_id is None:
+            return ctx.model_copy(
+                update={
+                    "service_refusal": "a service call must name its run and its project "
+                    "(X-MetaForge-Run and X-MetaForge-Project)"
+                }
+            )
+        assert self._service_verifier is not None  # enabled implies a verifier
+        try:
+            grant = await self._service_verifier.verify(run_id, str(project_id))
+        except ServiceScopeError as exc:
+            logger.warning("mcp_service_call_out_of_scope", run_id=run_id, reason=exc.reason)
+            return ctx.model_copy(update={"service_refusal": exc.reason})
+        except Exception as exc:  # noqa: BLE001 - fail closed, with the reason
+            logger.error("mcp_service_run_unverifiable", run_id=run_id, error=str(exc))
+            return ctx.model_copy(
+                update={
+                    "service_refusal": "the gateway could not confirm the run "
+                    f"({type(exc).__name__}); service writes fail closed"
+                }
+            )
+        if grant is None:
+            logger.info("mcp_service_call_no_approved_version", run_id=run_id)
+            return ctx
+        return ctx.model_copy(
+            update={
+                "service_verified": True,
+                "actor_id": f"service:design-flow:{grant.run_id}",
+                "actor_verified": False,
+            }
+        )
+
+    def _effective_caller(self) -> Caller:
+        """Who is calling *this* request: the transport's answer, or the service."""
+        try:
+            from mcp_core.context import current_context
+
+            ctx = current_context()
+            if ctx.service_verified:
+                return Caller.SERVICE
+            if ctx.client_task_verified:
+                return Caller.CLIENT_TASK
+        except Exception:  # noqa: BLE001 - no context means the transport's answer
+            pass
+        return self._caller
+
+    def attach_client_task_grant(self, verifier: Any) -> bool:
+        """Turn on scoped writes for a client working a claimed task (FORGE-584).
+
+        Called only when the owner set ``METAFORGE_CLIENT_TASK_WRITES`` and
+        there is a gateway to confirm claims with. ``None`` turns it off.
+        """
+        self._client_task_verifier = verifier
+        enabled = verifier is not None
+        logger.info("mcp_client_task_writes", enabled=enabled)
+        return enabled
+
+    async def _client_task_scope(self) -> Any:
+        """This call's context with the client-task grant, or ``None`` for no grant.
+
+        No grant unless the owner turned it on, the session claimed a task in
+        this process, and the gateway confirms the claim now. Anything less
+        leaves the call exactly as untrusted as before: its writes are held.
+        """
+        if self._client_task_verifier is None:
+            return None
+        from mcp_core.context import bound_task, clear_session_task, current_context
+        from metaforge.mcp.client_task_grant import ClientTaskNotConfirmedError
+
+        ctx = current_context()
+        if ctx.service_verified or not ctx.session_is_stable:
+            return None
+        binding = bound_task(ctx.session_id)
+        if binding is None:
+            return None
+        try:
+            await self._client_task_verifier.confirm(binding)
+        except ClientTaskNotConfirmedError as exc:
+            # Submitted, cancelled, or the run moved on: the grant is over.
+            clear_session_task(ctx.session_id, binding.task_id)
+            logger.info("mcp_client_task_grant_ended", task_id=binding.task_id, reason=str(exc))
+            return None
+        except Exception as exc:  # noqa: BLE001 - fail closed: held, not trusted
+            logger.warning("mcp_client_task_unconfirmable", task_id=binding.task_id, error=str(exc))
+            return None
+        return ctx.model_copy(
+            update={
+                "client_task_verified": True,
+                "client_task_id": binding.task_id,
+                "run_id": binding.run_id,
+                "phase": binding.phase,
+                "project_id": binding.project_id or ctx.project_id,
+            }
+        )
+
+    @staticmethod
+    def _service_log_fields() -> dict[str, Any]:
+        """Run, phase, model and project of the current service call, for logs."""
+        from mcp_core.context import current_context
+
+        ctx = current_context()
+        return {
+            "run_id": ctx.run_id,
+            "phase": ctx.phase,
+            "model": ctx.model,
+            "project_id": str(ctx.project_id) if ctx.project_id else None,
+        }
+
+    def _enforce_service_scope(self, tool_id: str, arguments: dict[str, Any]) -> None:
+        """Refuse a service call that left its run or its project (FORGE-487).
+
+        Runs for every tool call, reads included, because the failure it
+        guards against is a verified key being used for something the run was
+        never given.
+        """
+        from mcp_core.context import current_context
+
+        ctx = current_context()
+        if ctx.service_refusal:
+            raise ServiceScopeError(tool_id, ctx.service_refusal)
+        # FORGE-584: a client working a claimed task is held to its run's
+        # project the same way.
+        if not ctx.service_verified and not ctx.client_task_verified:
+            return
+        explicit = arguments.get("project_id")
+        if explicit in (None, ""):
+            return
+        try:
+            same = uuid.UUID(str(explicit)) == ctx.project_id
+        except ValueError:
+            same = False
+        if not same:
+            logger.warning(
+                "mcp_service_call_other_project",
+                tool_id=tool_id,
+                run_id=ctx.run_id,
+                project_id=str(ctx.project_id),
+            )
+            raise ServiceScopeError(
+                tool_id,
+                f"it names project {explicit}, outside this run's project {ctx.project_id}",
+                code="service_other_project",
+            )
+
+    def declare_auth_posture(self, posture: AuthPosture) -> None:
+        """Record what the transport in front of this server enforces.
+
+        The transport is built after the server (both stdio and HTTP
+        resolve their credentials at serve time, not at bootstrap), so
+        this is a setter rather than a constructor-only argument. Calling
+        it is what keeps ``health/check`` from reporting ``unknown``;
+        ``tests/unit/test_mcp_health_auth.py`` asserts both entrypoints do.
+        """
+        self._auth_posture = posture
+        logger.info(
+            "unified_mcp_auth_posture",
+            mode=posture.mode,
+            transport=posture.transport,
+            identifies_caller=posture.oauth,
+        )
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
+
+    @property
+    def can_elicit(self) -> bool:
+        """Whether this connection can put a question to the human (FORGE-360).
+
+        Three things all have to be true, and each has bitten something:
+        the transport has a way back to the client, the client said it
+        supports elicitation, and the revision we negotiated is one where
+        ``elicitation/create`` exists. A client that declares the capability
+        while negotiating an older revision is not listening for it.
+        """
+        # FORGE-423: an elicitor may serve many connections from one server
+        # -- the HTTP one does -- so "is there an elicitor" is not the same
+        # question as "can *this* connection be asked". When it can answer
+        # per connection, its answer wins: it knows whether a stream is open
+        # and what that session's own handshake declared, where the fields
+        # below are whichever client initialised last.
+        #
+        # Without this the gate would choose elicitation for an HTTP client
+        # with no stream and then have nowhere to ask, which is worse than
+        # never choosing it: a write would hang to its timeout and come back
+        # TIMED_OUT instead of waiting in a queue somebody can see.
+        # FORGE-600/601: a handshake-free (2026-07-28) request is never sent a
+        # question; that revision forbids server-initiated requests. It is
+        # asked inside the result instead (MRTR), when the request declared
+        # form elicitation and holds can be written to the ledger (the retry
+        # closes the same entry). Otherwise its held write waits in the
+        # dashboard.
+        if current_modern_request() is not None:
+            mrtr = current_mrtr()
+            return bool(mrtr and mrtr.can_ask and self._approval_ledger is not None)
+        # A live question needs a channel back to the client; a returned one
+        # (above) does not.
+        if self._elicitor is None:
+            return False
+        available = getattr(self._elicitor, "available", None)
+        if callable(available):
+            return bool(available())
+        return (
+            declares_form_elicitation(self._client_capabilities)
+            and self._negotiated_protocol >= ELICITATION_PROTOCOL_VERSION
+        )
 
     @property
     def adapters(self) -> list[McpToolServer]:
@@ -192,8 +772,38 @@ class UnifiedMcpServer:
         if is_notification:
             return ""
 
+        # FORGE-599: a request that names its own revision in ``_meta`` (the
+        # handshake-free 2026-07-28 shape) is checked on its own. One we do
+        # not serve gets the spec's UnsupportedProtocolVersionError, which a
+        # dual-era client reads as "retry with one of these". ``initialize``
+        # is the legacy path and negotiates as it always has.
+        requested_version = request_protocol_version(params)
+        if (
+            method != "initialize"
+            and requested_version is not None
+            and current_modern_request() is None
+        ):
+            if requested_version not in supported_versions():
+                logger.info(
+                    "mcp_protocol_version_unsupported", method=method, requested=requested_version
+                )
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        UNSUPPORTED_PROTOCOL_VERSION,
+                        "Unsupported protocol version",
+                        unsupported_version_data(requested_version),
+                    )
+                )
+            if is_modern(requested_version):
+                return await self._handle_modern(
+                    raw_message, request_id, method, params, requested_version
+                )
+
         with tracer.start_as_current_span("unified_mcp.handle_request") as span:
             span.set_attribute("rpc.method", method)
+            if requested_version is not None:
+                span.set_attribute("mcp.protocol_version", requested_version)
             try:
                 # Standard MCP protocol methods (what Claude Code speaks).
                 if method == "initialize":
@@ -202,6 +812,16 @@ class UnifiedMcpServer:
                     result = await self._mcp_tools_list(params)
                 elif method == "tools/call":
                     result = await self._mcp_tools_call(params)
+                elif method == "prompts/list":
+                    result = self._prompts_list()
+                elif method == "prompts/get":
+                    result = self._prompts_get(params)
+                elif method == "resources/list":
+                    result = await self._resources_list(params)
+                elif method == "resources/templates/list":
+                    result = await self._resources_templates_list(params)
+                elif method == "resources/read":
+                    result = await self._resources_read(params)
                 # Legacy MetaForge dialect (kept for backward compat with
                 # internal callers and existing integration tests).
                 elif method == "tool/list":
@@ -215,21 +835,219 @@ class UnifiedMcpServer:
                         make_error(request_id, _METHOD_NOT_FOUND, f"Unknown method: {method}")
                     )
             except ToolNotFoundError as exc:
+                self._mark_failed(span, exc)
                 return json.dumps(
                     make_error(
                         request_id,
                         _METHOD_NOT_FOUND,
                         str(exc),
-                        {"tool_id": exc.tool_id},
+                        # The suggestions ride in ``data`` as well as the
+                        # message: a client that renders only the message
+                        # still shows them, and one that parses the envelope
+                        # can offer them as choices.
+                        {
+                            "tool_id": exc.tool_id,
+                            "did_you_mean": exc.did_you_mean,
+                            "tool_count": len(self._tool_index),
+                        },
+                    )
+                )
+            except PromptNotFoundError as exc:
+                self._mark_failed(span, exc)
+                return json.dumps(make_error(request_id, _METHOD_NOT_FOUND, str(exc)))
+            except (ResourceNotFoundError, ResourceReadError) as exc:
+                self._mark_failed(span, exc)
+                # Same reason the approval errors are caught below: an
+                # exception escaping handle_request reaches the client as a
+                # dropped connection, which says nothing about what went
+                # wrong. A missing resource is an ordinary answer.
+                missing = isinstance(exc, ResourceNotFoundError)
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _RESOURCE_NOT_FOUND if missing else _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {"uri": getattr(exc, "uri", None), "retryable": False},
+                    )
+                )
+            except UnknownProfileError as exc:
+                self._mark_failed(span, exc)
+                # FORGE-410: a per-connection profile comes off the URL, so a
+                # typo is a client mistake and has to come back as something
+                # the client can read. Letting it escape gives a dropped
+                # connection, and serving everything instead would hand a
+                # client that asked for 30 tools the 108 it was avoiding.
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        INVALID_PARAMS,
+                        str(exc),
+                        {
+                            "code": "unknown_profile",
+                            "available": [*sorted(PROFILES), FULL_PROFILE],
+                            "retryable": False,
+                        },
+                    )
+                )
+            except ServiceScopeError as exc:
+                self._mark_failed(span, exc)
+                # FORGE-487. A refusal, not a hold: nobody is waiting on a
+                # server-driven run to click anything, so the worker is told
+                # plainly and, since retrying cannot change the answer, not to
+                # retry.
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": exc.code,
+                            "reason": exc.reason,
+                            "retryable": False,
+                        },
+                    )
+                )
+            except (ApproverArgumentRejectedError, HumanAuthorityRequiredError) as exc:
+                self._mark_failed(span, exc)
+                # FORGE-393. Same reasoning as the approval errors below: the
+                # agent has to be told *why*, or it will try again with the
+                # same argument. These two say different things and get
+                # different codes -- "you must not name the approver" is a
+                # fixable mistake, "nobody approved" needs a person.
+                supplied = isinstance(exc, ApproverArgumentRejectedError)
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": (
+                                "approver_not_caller_supplied"
+                                if supplied
+                                else "human_authority_required"
+                            ),
+                            "field": getattr(exc, "field", None),
+                            # Retrying changes nothing until the argument is
+                            # dropped or a human answers.
+                            "retryable": False,
+                        },
+                    )
+                )
+            except InvalidRequestStateError as exc:
+                # FORGE-601: a replayed or forged answer. Refused, never run.
+                self._mark_failed(span, exc)
+                logger.warning("mcp_mrtr_state_refused", method=method, reason=str(exc))
+                return json.dumps(make_error(request_id, INVALID_PARAMS, str(exc)))
+            except InputRequiredError:
+                # FORGE-601: the question is on the request's MrtrContext;
+                # ``_handle_modern`` turns it into the InputRequiredResult.
+                return json.dumps({"jsonrpc": "2.0", "id": request_id, "result": {}})
+            except ApprovalLedgerUnavailableError as exc:
+                # FORGE-473: the approval could not be recorded, so the write
+                # was not run. Say why, in words the agent can relay.
+                self._mark_failed(span, exc)
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": "approval_ledger_unavailable",
+                            "outcome": "ledger_unavailable",
+                            # Worth retrying once the gateway is back.
+                            "retryable": True,
+                        },
+                    )
+                )
+            except (ApprovalNotConfiguredError, ApprovalRejectedError) as exc:
+                self._mark_failed(span, exc)
+                # A refused write is a normal outcome, not a crash. It has to
+                # reach the client as a JSON-RPC error it can read out to the
+                # user -- letting it escape gives a broken connection, which
+                # tells the agent nothing about why the tool did not run and
+                # invites it to retry.
+                # Narrowed inline: a stored isinstance result does not
+                # narrow the union at the use site.
+                approval_data: dict[str, Any] = (
+                    exc.as_data()
+                    if isinstance(exc, ApprovalRejectedError)
+                    else {"outcome": "not_configured"}
+                )
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": "approval_required",
+                            # FORGE-465: outcome, approval id, route and
+                            # window, so "held for approval <id>, nobody
+                            # approved within N s" can be said and checked.
+                            **approval_data,
+                            # Nothing here is worth retrying without a human
+                            # doing something first.
+                            "retryable": False,
+                        },
                     )
                 )
             except ToolHandlerError as exc:
+                self._mark_failed(span, exc)
                 logger.error(
                     "unified_mcp_tool_failed",
                     tool_id=exc.tool_id,
                     duration_ms=round(exc.duration_ms, 2),
                     details=exc.details,
                 )
+                if method == "tools/call":
+                    # FORGE-419: a tool that ran and refused is a *result*
+                    # with isError, per the spec's own recommendation -- not
+                    # a protocol error. The refusal usually says exactly how
+                    # to fix the call (`twin.query_cypher`: "add WHERE
+                    # n.project_id = $project_id and pass {...}"), and that
+                    # text lived in `error.data.details`, where Claude Code
+                    # shows only `error.message`: "Tool execution failed".
+                    # The agent retried blind, failed the same way, gave up,
+                    # and reported the tool as broken.
+                    #
+                    # The legacy `tool/call` dialect keeps the JSON-RPC error
+                    # below: its callers are internal and already read
+                    # `data.details`.
+                    call_id = str(getattr(exc, "call_id", "") or "")
+                    error_content: list[dict[str, Any]] = [
+                        {"type": "text", "text": _tool_error_text(exc)}
+                    ]
+                    error_meta: dict[str, Any] = {
+                        "callId": call_id,
+                        "error": {
+                            "toolId": exc.tool_id,
+                            "details": exc.details,
+                            "durationMs": round(exc.duration_ms, 2),
+                        },
+                    }
+                    # A call can be held, approved, and *then* fail. The hold
+                    # still happened, and FORGE-417's reasoning applies to an
+                    # error result exactly as to a success: the agent should
+                    # not have to guess whether a human saw this. Taking the
+                    # record also drains it, which the success path does by
+                    # popping it.
+                    held = self.take_approval_record(call_id) if call_id else None
+                    if held is not None:
+                        error_meta["approval"] = held.as_meta()
+                        error_content.append({"type": "text", "text": held.as_sentence()})
+                    return json.dumps(
+                        make_success(
+                            request_id,
+                            {
+                                "content": error_content,
+                                "isError": True,
+                                "_meta": error_meta,
+                            },
+                        )
+                    )
                 return json.dumps(
                     make_error(
                         request_id,
@@ -250,10 +1068,81 @@ class UnifiedMcpServer:
     # Method handlers — standard MCP protocol (Claude Code, Cursor, etc.)
     # ------------------------------------------------------------------
 
-    # Protocol version we negotiate with. The MCP spec rev that Claude
-    # Code 2.1.x speaks; bumping this is a coordinated change with the
-    # client side, not a routine bump.
-    _MCP_PROTOCOL_VERSION = "2024-11-05"
+    #: The oldest revision we speak -- our floor, and the pre-handshake
+    #: value of ``_negotiated_protocol``.
+    #:
+    #: FORGE-416 removed a second constant, ``_MCP_PROTOCOL_VERSION``, that
+    #: held the same string beside this one and was described as "the protocol
+    #: version we negotiate with". That stopped being true once
+    #: ``_SUPPORTED_PROTOCOL_VERSIONS`` made this an allow-list, and the
+    #: duplication was not harmless: a test asserting the server answers "our
+    #: oldest" compared against a constant named "default" and passed, which
+    #: is part of why the downgrade survived. The newest revision is
+    #: ``max(_SUPPORTED_PROTOCOL_VERSIONS)``, never a hand-maintained copy.
+    _DEFAULT_PROTOCOL_VERSION = "2024-11-05"
+
+    #: Revisions this server will negotiate up to when a client asks for
+    #: one. FORGE-360: elicitation exists only from 2025-06-18, and a
+    #: server that pinned an older revision has no business sending
+    #: ``elicitation/create`` -- a correct client is not listening for it.
+    #: So the pin became an allow-list rather than a constant.
+    #:
+    #: What we implement of 2025-06-18: elicitation, ``_meta`` on results,
+    #: tool annotations, and no JSON-RPC batching (which that revision
+    #: removes and we never had). Structured tool output stays optional in
+    #: that revision, so not emitting ``outputSchema`` is conformant.
+    #: Anything outside that list is a reason not to add a revision here.
+    #:
+    #: FORGE-599: these are the handshake (legacy) revisions only, from
+    #: ``mcp_core.protocol_versions``, which also says why 2025-11-25 is in and
+    #: 2026-07-28 is not yet. Handshake-free requests are checked per request
+    #: in ``handle_request``.
+    _SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = LEGACY_PROTOCOL_VERSIONS
+
+    @classmethod
+    def _negotiate_protocol(cls, requested: str | None) -> str:
+        """Which revision to answer an ``initialize`` with (FORGE-416).
+
+        The spec: answer the requested revision when supported, otherwise
+        "another protocol version it supports", which SHOULD be the latest.
+        This returned ``_DEFAULT_PROTOCOL_VERSION`` -- the *oldest* -- for
+        anything unsupported, so Claude Code 2.1.286 asking for 2025-11-25
+        was answered 2024-11-05. Elicitation exists only from 2025-06-18, so
+        ``can_elicit`` was false and every held write went to the dashboard
+        queue instead of being answered inline. The feature was built
+        (FORGE-360) and unreachable for the client most likely to use it.
+
+        Three cases, because "latest supported" alone is not safe for a
+        client that pinned an older revision:
+
+        ``supported``
+            echo it.
+        ``newer than anything we speak``
+            our newest. This is the spec's recommended answer and the case
+            that was broken: a client ahead of us is asking us to do our
+            best, not to fall back to our floor.
+        ``older than our newest, and not one we speak``
+            the newest revision we support that is **not newer than** what
+            was asked for. A client that pinned 2025-03-26 gets 2024-11-05
+            and keeps working; answering 2025-06-18 would invite it to
+            disconnect, which the spec permits but nobody wants. This is a
+            deliberate, narrow deviation from a SHOULD, and only in the
+            direction of not breaking an older client.
+
+        Revisions are ISO dates, so string ordering is version ordering.
+        """
+        supported = sorted(cls._SUPPORTED_PROTOCOL_VERSIONS)
+        newest = supported[-1]
+        if not requested:
+            # No version asked for at all: nothing to be compatible with,
+            # so offer the most capable thing we have.
+            return newest
+        if requested in cls._SUPPORTED_PROTOCOL_VERSIONS:
+            return requested
+        if requested > newest:
+            return newest
+        older = [v for v in supported if v <= requested]
+        return older[-1] if older else supported[0]
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         """Standard MCP handshake — return server capabilities.
@@ -264,22 +1153,328 @@ class UnifiedMcpServer:
         feature set we expose. Echoing the client's protocolVersion when
         compatible is the spec-recommended path; we pin to our known
         version to keep the contract stable across client upgrades.
+
+        FORGE-332: ``params`` used to be discarded whole. It carries the
+        only two facts about the other end this server ever learns — who
+        connected and which protocol revision they asked for — and without
+        them ``health/check`` could not answer a version-skew question, so
+        /metaforge:doctor had to either omit it or make it up. A client
+        asking for a revision we do not speak is also worth a line in the
+        log: pinning is the right behaviour, pinning silently is not.
         """
+        client = params.get("clientInfo")
+        self._client_info = client if isinstance(client, dict) else None
+        requested = params.get("protocolVersion")
+        self._client_protocol = requested if isinstance(requested, str) else None
+        caps = params.get("capabilities")
+        self._client_capabilities = caps if isinstance(caps, dict) else {}
+
+        # FORGE-360: meet the client on its own revision when we speak it.
+        # The spec's rule is to echo the requested version if supported and
+        # otherwise answer with our own; pinning unconditionally meant a
+        # client asking for 2025-06-18 was told 2024-11-05 and then, quite
+        # correctly, stopped expecting anything that revision added.
+        self._negotiated_protocol = self._negotiate_protocol(self._client_protocol)
+        if self._client_protocol and self._client_protocol not in self._SUPPORTED_PROTOCOL_VERSIONS:
+            logger.warning(
+                "mcp_protocol_skew",
+                requested=self._client_protocol,
+                negotiated=self._negotiated_protocol,
+                client=(self._client_info or {}).get("name"),
+            )
+        logger.info(
+            "mcp_initialize",
+            client=(self._client_info or {}).get("name"),
+            protocol=self._negotiated_protocol,
+            # FORGE-464: names only, so "why is this client not asked inline"
+            # is answerable from the log. ``can_elicit`` here is a snapshot
+            # with no call in flight: over HTTP it is false until a GET /mcp
+            # stream opens, and a declared client is still asked on the
+            # stream of each held call.
+            capabilities=sorted(self._client_capabilities),
+            can_elicit=self.can_elicit,
+        )
         return {
-            "protocolVersion": self._MCP_PROTOCOL_VERSION,
-            "capabilities": {
-                # ``listChanged`` would let us push notifications when
-                # the tool set mutates at runtime. Our adapters are
-                # static after bootstrap, so we don't advertise it.
-                "tools": {},
-            },
-            "serverInfo": {
-                "name": "metaforge-mcp",
-                "version": self._version,
-            },
+            "protocolVersion": self._negotiated_protocol,
+            "capabilities": self._server_capabilities(),
+            "serverInfo": self._server_info(),
             # MET-503: usage guidance every client receives on connect.
             "instructions": _SERVER_INSTRUCTIONS,
         }
+
+    def _server_info(self) -> dict[str, Any]:
+        return {"name": "metaforge-mcp", "version": self._version}
+
+    @staticmethod
+    def _server_capabilities() -> dict[str, Any]:
+        """What this server offers, the same on both eras (FORGE-600)."""
+        return {
+            # ``listChanged`` would let us push notifications when
+            # the tool set mutates at runtime. Our adapters are
+            # static after bootstrap, so we don't advertise it.
+            "tools": {},
+            # FORGE-355: adapters have been registering resources since
+            # MET-384 (the knowledge adapter publishes several), but the
+            # unified server never routed resources/* and never said it
+            # could — so a spec-compliant client had no way to reach
+            # them, and no way to find out they existed.
+            "resources": {},
+            # FORGE-340: the curated workflows, available to every
+            # spec-compliant client rather than only to harnesses with
+            # their own command surface.
+            "prompts": {},
+        }
+
+    # ------------------------------------------------------------------
+    # Handshake-free requests (2026-07-28, FORGE-600)
+    # ------------------------------------------------------------------
+
+    async def _handle_modern(
+        self,
+        raw_message: str,
+        request_id: Any,
+        method: str,
+        params: dict[str, Any],
+        version: str,
+    ) -> str:
+        """Serve one handshake-free request.
+
+        Everything about the client comes with this request: its revision and
+        capabilities are held for this request only (``with_modern_request``),
+        never written to the server's copy, which belongs to whichever
+        handshake client connected last. The method runs through the same
+        dispatch as a handshake request; the answer is then put in the shape
+        2026-07-28 requires (``_modernise``).
+        """
+        problem = modern_meta_problem(params)
+        if problem is not None:
+            logger.info("mcp_modern_request_malformed", method=method, problem=problem)
+            return json.dumps(make_error(request_id, INVALID_PARAMS, problem))
+        meta = params["_meta"]
+        client = meta.get(META_CLIENT_INFO)
+        request = ModernRequest(
+            version=version,
+            client_capabilities=dict(meta[META_CLIENT_CAPABILITIES]),
+            client_info=client if isinstance(client, dict) else None,
+        )
+        with tracer.start_as_current_span("unified_mcp.modern_request") as span:
+            span.set_attribute("rpc.method", method)
+            span.set_attribute("mcp.protocol_version", version)
+            with with_modern_request(request):
+                if method == "server/discover":
+                    response: dict[str, Any] = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": self._discover(),
+                    }
+                elif method == "subscriptions/listen":
+                    # FORGE-603: nothing here changes while the server is up,
+                    # so the transport sends an acknowledgement honouring no
+                    # types and this graceful close follows it.
+                    problem = subscription_problem(params)
+                    if problem is not None:
+                        return json.dumps(make_error(request_id, INVALID_PARAMS, problem))
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "resultType": "complete",
+                            "_meta": {META_SUBSCRIPTION_ID: request_id},
+                        },
+                    }
+                elif method in MRTR_METHODS:
+                    try:
+                        mrtr = self._mrtr_context(method, params, request)
+                    except InvalidRequestStateError as exc:
+                        logger.info("mcp_mrtr_state_refused", method=method, reason=str(exc))
+                        return json.dumps(make_error(request_id, INVALID_PARAMS, str(exc)))
+                    with with_mrtr(mrtr):
+                        response = await self._call_with_handle(raw_message, method, params)
+                    if mrtr.pending:
+                        logger.info(
+                            "mcp_mrtr_input_required",
+                            method=method,
+                            questions=sorted(mrtr.pending),
+                            holds=sorted(mrtr.holds.values()),
+                        )
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "result": input_required_result(mrtr, self._mrtr_signer),
+                        }
+                else:
+                    response = json.loads(await self.handle_request(raw_message))
+        logger.info(
+            "mcp_modern_request",
+            method=method,
+            version=version,
+            client=(client or {}).get("name") if isinstance(client, dict) else None,
+            ok="result" in response,
+        )
+        return json.dumps(self._modernise(response, method))
+
+    def _mrtr_context(
+        self, method: str, params: dict[str, Any], request: ModernRequest
+    ) -> MrtrContext:
+        """The answers and earlier holds a retry brings, after checking them."""
+        from mcp_core.context import current_context
+
+        try:
+            principal = current_context().actor_id or "anonymous"
+        except Exception:  # noqa: BLE001 - no context: an unauthenticated caller
+            principal = "anonymous"
+        ctx = MrtrContext(
+            principal=principal,
+            method=method,
+            digest=call_digest(method, params),
+            can_ask=declares_form_elicitation(request.client_capabilities),
+        )
+        responses = params.get("inputResponses")
+        if responses is not None and not isinstance(responses, dict):
+            raise InvalidRequestStateError("inputResponses must be an object")
+        state = params.get("requestState")
+        if state is not None:
+            ctx.holds = self._mrtr_signer.verify(
+                str(state), principal=principal, method=method, digest=ctx.digest
+            )
+            ctx.responses = dict(responses or {})
+        elif responses:
+            raise InvalidRequestStateError("inputResponses were sent without requestState")
+        return ctx
+
+    async def _call_with_handle(
+        self, raw_message: str, method: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Run a handshake-free call under the session its handle names (FORGE-602).
+
+        2026-07-28 has no protocol session, so a later call finds the
+        project ``project.open`` scoped it to only through the handle the
+        caller passes back in ``metaforge_session``. The argument is taken out
+        before the tool sees it. ``project.open`` and ``session.start`` mint a
+        handle when the caller has none and report it in the result.
+        """
+        from mcp_core.context import current_context, with_context
+
+        if method != "tools/call":
+            return dict(json.loads(await self.handle_request(raw_message)))
+        arguments = params.get("arguments")
+        arguments = dict(arguments) if isinstance(arguments, dict) else {}
+        supplied = arguments.pop(SESSION_ARGUMENT, None)
+        ctx = current_context()
+        minted: str | None = None
+        handle: UUID | None = None
+        if supplied is not None:
+            try:
+                handle = UUID(str(supplied))
+            except ValueError:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": json.loads(raw_message).get("id"),
+                    "error": {
+                        "code": INVALID_PARAMS,
+                        "message": f"{SESSION_ARGUMENT} is not a session handle",
+                    },
+                }
+        elif params.get("name") in MINTING_TOOLS and not ctx.session_is_stable:
+            handle = uuid4()
+            minted = str(handle)
+        if handle is None:
+            return dict(json.loads(await self.handle_request(raw_message)))
+        message = json.loads(raw_message)
+        message["params"] = {**params, "arguments": arguments}
+        with with_context(ctx.model_copy(update={"session_id": handle})):
+            response = dict(json.loads(await self.handle_request(json.dumps(message))))
+        if minted is not None and isinstance(response.get("result"), dict):
+            result = response["result"]
+            meta = result.get("_meta")
+            result["_meta"] = {
+                **(meta if isinstance(meta, dict) else {}),
+                META_SESSION_HANDLE: minted,
+            }
+            content = result.get("content")
+            if isinstance(content, list):
+                content.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"session_handle: {minted}. Pass it as the {SESSION_ARGUMENT} "
+                            "argument on every later call so they keep this scope."
+                        ),
+                    }
+                )
+            logger.info("mcp_session_handle_minted", tool=params.get("name"), handle=minted)
+        return response
+
+    def _adapter_elicitor(self) -> Any:
+        """What an adapter asks through: MRTR on a handshake-free request."""
+        if not self.can_elicit:
+            return None
+        mrtr = current_mrtr() if current_modern_request() is not None else None
+        return mrtr_elicitor(mrtr) if mrtr is not None else self._elicitor
+
+    def _discover(self) -> dict[str, Any]:
+        """``server/discover``: versions, capabilities and identity in one answer."""
+        return {
+            "supportedVersions": sorted(supported_versions(), reverse=True),
+            "capabilities": self._server_capabilities(),
+            "instructions": _SERVER_INSTRUCTIONS,
+        }
+
+    def _modernise(self, response: dict[str, Any], method: str) -> dict[str, Any]:
+        """Put an answer in the shape 2026-07-28 requires.
+
+        Every result carries ``resultType`` and the server's identity in its
+        ``_meta``; list and read results carry caching hints. The revision
+        retired the resource-not-found code ``-32002`` for ``-32602``.
+
+        It also marks the block -32000..-32019, where every code of our own
+        sits, as legacy (FORGE-607). A ``tools/call`` refused that
+        way (a held write rejected, a tool that failed, the ledger down)
+        becomes what the spec recommends for a tool failure: a result with
+        ``isError`` whose text is the reason, the code and details kept under
+        ``_meta["com.metaforge/error"]``. Any other method's code moves out of
+        the reserved range (``modern_error_code``). Handshake clients keep the
+        codes they have always had.
+        """
+        error = response.get("error")
+        if isinstance(error, dict) and error.get("code") == _RESOURCE_NOT_FOUND:
+            error["code"] = INVALID_PARAMS
+        if isinstance(error, dict) and is_legacy_error_code(error.get("code")):
+            code = int(error["code"])
+            if method == "tools/call":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": response.get("id"),
+                    "result": {
+                        "content": [{"type": "text", "text": str(error.get("message") or "")}],
+                        "isError": True,
+                        "_meta": {
+                            META_ERROR: {
+                                "code": modern_error_code(code),
+                                "legacyCode": code,
+                                "data": error.get("data"),
+                            }
+                        },
+                    },
+                }
+            else:
+                data = error.get("data")
+                error["data"] = {
+                    **(data if isinstance(data, dict) else {"detail": data} if data else {}),
+                    "legacyCode": code,
+                }
+                error["code"] = modern_error_code(code)
+        result = response.get("result")
+        if isinstance(result, dict):
+            result.setdefault("resultType", "complete")
+            meta = result.get("_meta")
+            meta = dict(meta) if isinstance(meta, dict) else {}
+            meta[META_SERVER_INFO] = self._server_info()
+            result["_meta"] = meta
+            hints = CACHE_HINTS.get(method)
+            if hints is not None and result["resultType"] == "complete":
+                result["ttlMs"], result["cacheScope"] = hints
+        return response
 
     async def _mcp_tools_list(self, params: dict[str, Any]) -> dict[str, Any]:
         """Standard MCP ``tools/list`` — wraps the legacy aggregate.
@@ -291,17 +1486,132 @@ class UnifiedMcpServer:
           ``capability``, ``output_schema``, ``phase``, ``resource_limits``)
         """
         legacy = await self._tool_list(params)
+        mutations_on = self._twin_mutations_enabled()
+        profile = self._requested_profile()
+        allowed = set(tools_for_profile(profile)) if profile else None
         mcp_tools: list[dict[str, Any]] = []
         for entry in legacy.get("tools", []):
+            tool_id = entry.get("tool_id") or entry.get("name", "")
             mcp_tool: dict[str, Any] = {
-                "name": entry.get("tool_id") or entry.get("name", ""),
+                "name": tool_id,
                 "description": entry.get("description", ""),
             }
             schema = entry.get("input_schema") or entry.get("inputSchema")
+            if current_modern_request() is not None:
+                # FORGE-602: the session handle, for callers without sessions.
+                schema = dict(schema or {"type": "object"})
+                props = dict(schema.get("properties") or {})
+                props.setdefault(SESSION_ARGUMENT, SESSION_ARGUMENT_SCHEMA)
+                schema["properties"] = props
             if schema:
                 mcp_tool["inputSchema"] = schema
+            # FORGE-343: hints the client uses to decide whether a call needs
+            # a human. Unclassified tools inherit the destructive default, so
+            # a new adapter is over-guarded rather than silently waved through.
+            mcp_tool["annotations"] = annotations_for(
+                tool_id,
+                title=entry.get("name") or None,
+                twin_mutations_enabled=mutations_on,
+            )
+            if allowed is not None and tool_id not in allowed:
+                continue
             mcp_tools.append(mcp_tool)
-        return {"tools": mcp_tools}
+
+        result: dict[str, Any] = {"tools": mcp_tools}
+        # Whatever the client cannot see, it should at least be able to ask
+        # about. `_meta` is the spec's own extension point and clients that
+        # do not read it are no worse off than before.
+        meta: dict[str, Any] = {}
+        if unavailable := legacy.get("unavailable_adapters"):
+            meta["unavailableAdapters"] = unavailable
+        if allowed is not None:
+            served = {t["name"] for t in mcp_tools}
+            meta["profile"] = {
+                "name": profile,
+                "toolCount": len(mcp_tools),
+                # A profile naming a tool no loaded adapter registers is a
+                # configuration mistake, not a smaller profile. Say so.
+                "missing": sorted(allowed - served),
+            }
+        if meta:
+            result["_meta"] = meta
+        return result
+
+    def _profile_report(self) -> dict[str, Any]:
+        """What this connection is served, and why it is not everything.
+
+        Reported even when no profile is active, because "all of them" is an
+        answer and a missing key is not: a doctor that cannot tell "no profile"
+        from "this build does not say" has to guess, and guessing is what
+        produced the 96-missing-tools report.
+        """
+        try:
+            profile = self._requested_profile()
+        except UnknownProfileError as exc:
+            # A connection asking for a profile that does not exist is a real
+            # fault and the doctor should say so, rather than this raising
+            # inside a health check.
+            return {
+                "active": None,
+                "error": str(exc),
+                "available": [*sorted(PROFILES), FULL_PROFILE],
+            }
+        if not profile:
+            return {
+                "active": None,
+                "served_tool_count": len(self._tool_index),
+                "available": [*sorted(PROFILES), FULL_PROFILE],
+                "detail": (
+                    "No profile is active, so every registered tool is served on this connection."
+                ),
+            }
+        served = len(set(tools_for_profile(profile)) & set(self._tool_index))
+        return {
+            "active": profile,
+            "served_tool_count": served,
+            "available": [*sorted(PROFILES), FULL_PROFILE],
+            "detail": (
+                f"Profile {profile!r} serves {served} of {len(self._tool_index)} "
+                "registered tools on this connection. The rest are not missing "
+                "and nothing is down -- connect with a different profile to "
+                "reach them."
+            ),
+        }
+
+    def _requested_profile(self) -> str | None:
+        """Which profile to serve this call, per connection (FORGE-410).
+
+        The connection's own choice wins over the deployment's ``--profile``:
+        one sidecar then serves a 30-tool set to a plugin and everything to
+        the dashboard, instead of a single flag shrinking the list for every
+        consumer at once. That mattered because the deployment plugins connect
+        to runs with no ``--profile`` at all, so C1's cap never reached them --
+        and a harness with a hard tool limit silently truncates.
+
+        An unrecognised name raises rather than falling back to "serve
+        everything". A client that asked for a 30-tool set and got 108 has
+        been given the exact failure profiles exist to prevent.
+        """
+        try:
+            from mcp_core.context import current_context
+
+            requested = current_context().profile
+        except Exception:  # noqa: BLE001 — no context is not an error here
+            requested = None
+        # FORGE-588: `all` is an explicit request for every tool, and it wins
+        # over a deployment flag like any other connection choice.
+        return resolve_profile(requested or self._profile)
+
+    def _twin_mutations_enabled(self) -> bool:
+        """Whether the twin adapter currently accepts mutating Cypher.
+
+        Read off the adapter rather than stored here. A second copy of this
+        flag would be a copy that can disagree with the one actually
+        enforcing, and the direction it would disagree in is telling a
+        client that a mutating tool is read-only.
+        """
+        adapter = self._tool_index.get("twin.query_cypher")
+        return bool(getattr(adapter, "_allow_mutations", False))
 
     async def _mcp_tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Standard MCP ``tools/call`` — wraps the legacy aggregate.
@@ -313,31 +1623,78 @@ class UnifiedMcpServer:
         """
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {}) or {}
+        # FORGE-362: every call gets a reference the reply can cite. The same
+        # id goes into the session record, so "I committed the geometry" can
+        # be checked against something that actually happened rather than
+        # taken on the model's word.
+        call_id = uuid4().hex[:16]
         try:
             # Forward under ``arguments`` (not ``parameters``) — that's
             # the key ``tool_registry.mcp_server.handlers.handle_tool_call``
             # reads. Sending ``parameters`` silently dropped every arg
             # and broke every spec-compliant client (Claude Code etc.).
-            result = await self._tool_call({"tool_id": tool_name, "arguments": arguments})
-        except (ToolNotFoundError, ToolHandlerError):
-            # Re-raise so the outer handler emits a JSON-RPC error
-            # envelope. The MCP spec also accepts isError=true content
-            # responses, but JSON-RPC errors are clearer for "tool not
-            # found" / hard execution failures and Claude Code surfaces
-            # both correctly.
+            # FORGE-366: `_meta` rides along. It is the spec's extension
+            # point and the only place a client can tell us which model is
+            # driving -- dropping it in translation meant session capture
+            # could never record one.
+            legacy: dict[str, Any] = {
+                "tool_id": tool_name,
+                "arguments": arguments,
+                "_call_id": call_id,
+            }
+            if isinstance(params.get("_meta"), dict):
+                legacy["_meta"] = params["_meta"]
+            result = await self._tool_call(legacy)
+        except ToolNotFoundError:
             raise
+        except ToolHandlerError as exc:
+            # Propagates. `handle_request` is where the span is marked and the
+            # dialect is known, so FORGE-419's isError conversion happens
+            # there -- returning early from here would have quietly stopped
+            # `_mark_failed` running, trading one invisible failure for
+            # another.
+            #
+            # The call id rides along because a failed call still has to be
+            # citable (FORGE-362): "I tried this and it refused" is exactly
+            # as worth checking as a claimed success.
+            exc.call_id = call_id  # type: ignore[attr-defined]
+            raise
+        meta: dict[str, Any] = {"callId": call_id}
+        links = links_for(self._deeplinks, tool_name, result)
+        if links:
+            meta["links"] = links
+        # FORGE-417: say that this call was held. Without it a held-then-
+        # approved write is byte-identical to one that was never held, and an
+        # agent reading the result told the user writes "are not being held
+        # for approval" -- false, with the ledger entry sitting right there.
+        held = self.take_approval_record(call_id)
+        if held is not None:
+            meta["approval"] = held.as_meta()
         # Body is wrapped in MCP's ``content`` array. We use ``text``
         # type with a JSON-serialised payload — the adapter outputs are
         # structured dicts, and clients can json.parse the text. If we
         # add binary outputs later we'll branch here on result shape.
+        # FORGE-630 / FORGE-373: rendered images go out as MCP image content,
+        # which a harness shows in chat, and not as base64 inside the JSON
+        # text, which a model would have to read as tokens.
+        result, images = split_image_content(result)
+        content: list[dict[str, Any]] = [{"type": "text", "text": json.dumps(result)}, *images]
+        if held is not None:
+            # A second block rather than text merged into the first: the first
+            # is the tool's own output and belongs to its schema. But `_meta`
+            # alone was not enough -- a model reads content, and information
+            # that is technically present and never looked at is how this
+            # stayed invisible in the first place.
+            content.append({"type": "text", "text": held.as_sentence()})
         return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(result),
-                }
-            ],
+            "content": content,
             "isError": False,
+            # The reference lives in `_meta` rather than inside the text
+            # payload: the text is the tool's own output and belongs to the
+            # tool, and burying a protocol-level id in it would make every
+            # adapter's schema wrong. Deep links ride here for the same
+            # reason (FORGE-371).
+            "_meta": meta,
         }
 
     # ------------------------------------------------------------------
@@ -361,23 +1718,46 @@ class UnifiedMcpServer:
             }
         )
         manifests: list[dict[str, Any]] = []
+        # FORGE-339: an adapter that cannot list its tools used to vanish
+        # from the aggregate -- a warning for the raising case, and nothing
+        # at all for a malformed response. The client saw a shorter list with
+        # no indication anything was missing, and a model reads a missing
+        # tool as a capability the system does not have.
+        #
+        # Adapters being down is normal here (the CAD/FEA containers answer
+        # -32001 routinely), so this does not fail the call. It reports the
+        # gap in-band instead: never silent is not the same as always fatal.
+        unavailable: list[dict[str, str]] = []
         for adapter in self._adapters:
+            adapter_id = str(getattr(adapter, "adapter_id", "?"))
             try:
                 sub_response_text = await adapter.handle_request(sub_request)
             except Exception as exc:
-                logger.warning(
-                    "unified_mcp_tool_list_subcall_failed",
-                    adapter_id=getattr(adapter, "adapter_id", "?"),
+                logger.error(
+                    "unified_mcp_tool_list_adapter_unavailable",
+                    adapter_id=adapter_id,
                     error=str(exc),
                 )
+                unavailable.append({"adapter_id": adapter_id, "error": str(exc)})
                 continue
             try:
                 sub_response = json.loads(sub_response_text)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                logger.error(
+                    "unified_mcp_tool_list_adapter_malformed",
+                    adapter_id=adapter_id,
+                    error=str(exc),
+                )
+                unavailable.append(
+                    {"adapter_id": adapter_id, "error": f"malformed tool/list response: {exc}"}
+                )
                 continue
             adapter_tools = sub_response.get("result", {}).get("tools", [])
             manifests.extend(adapter_tools)
-        return {"tools": manifests}
+        result: dict[str, Any] = {"tools": manifests}
+        if unavailable:
+            result["unavailable_adapters"] = unavailable
+        return result
 
     async def _tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route + capture. Single funnel for ``tools/call`` and ``tool/call``.
@@ -387,39 +1767,807 @@ class UnifiedMcpServer:
         into the bound agent session. Capture is best-effort and never alters
         the tool result or masks an error. ``ToolNotFoundError`` is not
         captured (no such tool ran).
-        """
-        if self._capture is None:
-            return await self._dispatch_tool_call(params)
 
+        FORGE-421: this used to return early when no session capture was
+        configured -- and ``_record_call`` lives *below* that return, so every
+        ``metaforge_mcp_*`` metric recorded only on a deployment that happened
+        to run with ``--capture-sessions``. Two unrelated concerns tangled by
+        one early return, and it quietly undid FORGE-413 the same day: the
+        collector was wired, the alerts still could not fire. Metrics are now
+        unconditional and capture is the optional part.
+        """
         tool_id = params.get("tool_id", "")
         arguments = params.get("arguments", {}) or {}
+        call_id = params.get("_call_id") or uuid4().hex[:16]
         t0 = time.monotonic()
         try:
             result = await self._dispatch_tool_call(params)
         except ToolHandlerError as exc:
+            elapsed = time.monotonic() - t0
+            self._record_call(tool_id, "error", elapsed, exc)
+            if self._capture is not None:
+                await self._capture.on_tool_call(
+                    tool_id,
+                    arguments,
+                    status="error",
+                    duration_ms=elapsed * 1000,
+                    error=exc.details,
+                    call_id=call_id,
+                    attribution=self.attribution(params),
+                )
+            raise
+        elapsed = time.monotonic() - t0
+        self._record_call(tool_id, "ok", elapsed)
+        if self._capture is not None:
             await self._capture.on_tool_call(
                 tool_id,
                 arguments,
-                status="error",
-                duration_ms=(time.monotonic() - t0) * 1000,
-                error=exc.details,
+                status="ok",
+                duration_ms=elapsed * 1000,
+                result=result,
+                call_id=call_id,
+                attribution=self.attribution(params),
             )
-            raise
-        await self._capture.on_tool_call(
-            tool_id,
-            arguments,
-            status="ok",
-            duration_ms=(time.monotonic() - t0) * 1000,
-            result=result,
-        )
         return result
 
-    async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Route ``tool/call`` to the adapter that owns ``tool_id``."""
-        tool_id = params.get("tool_id", "")
-        adapter = self._tool_index.get(tool_id)
+    @staticmethod
+    def _mark_failed(span: Any, exc: BaseException) -> None:
+        """Put the failure on the trace (FORGE-379).
+
+        There were no ``record_exception`` calls anywhere in this module,
+        which CLAUDE.md asks for and which is the difference between a
+        Tempo span that shows a failure and one that shows a request that
+        happened to return. Also sets ``mcp.error_class``, so a trace can
+        be filtered by the same taxonomy the metric counts.
+        """
+        try:
+            span.record_exception(exc)
+            span.set_attribute("mcp.error_class", error_class(exc))
+        except Exception:  # noqa: BLE001 — tracing must not fail the call
+            pass
+
+    def _record_call(
+        self, tool_id: str, status: str, duration: float, exc: BaseException | None = None
+    ) -> None:
+        """Publish one tool call to the metrics stack. Never raises.
+
+        Telemetry that can fail a tool call is worse than no telemetry --
+        the same contract session capture already keeps.
+        """
+        if self._metrics is None:
+            return
+        client = str((self._client_info or {}).get("name") or "unknown")
+        try:
+            self._metrics.record_mcp_tool_call(tool_id, status, duration, client)
+            if exc is not None:
+                self._metrics.record_mcp_error(tool_id, error_class(exc), client)
+        except Exception as metric_exc:  # noqa: BLE001 — never fail a call
+            logger.warning("mcp_metrics_record_failed", error=str(metric_exc))
+
+    def attribution(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Who, with what, is doing this (FORGE-366).
+
+        Every captured action used to be filed under ``agent_code: "mcp"``
+        with nothing else. A reviewer reading /sessions could see what was
+        done and not who did it, from which client, or with which model --
+        which is most of the value of having the timeline at all.
+
+        Two of the three are things the server knows for itself. The third
+        is not, and is labelled accordingly:
+
+        * ``actor`` comes from the call context. ``verified`` is true only
+          when an OAuth token established it; a shared API key authorises
+          without identifying, and a client-supplied header is a claim.
+          FORGE-330 fixed the case where the claim outranked the token, and
+          flattening the distinction here would give that back.
+        * ``client`` comes from the ``initialize`` handshake.
+        * ``model`` cannot be known server-side -- nothing on the wire
+          carries it. A client may state it in ``_meta.model``; it is
+          recorded under ``claimed`` so nobody later mistakes it for
+          something the server checked.
+        """
+        out: dict[str, Any] = {}
+        try:
+            from mcp_core.context import current_context
+
+            ctx = current_context()
+            actor = ctx.actor_id
+            attributable = ctx.actor_is_attributable
+        except Exception:  # noqa: BLE001 — attribution must not break capture
+            actor = None
+            attributable = False
+        if actor:
+            out["actor"] = actor
+            # FORGE-330: this used to be `actor != "system:unattributed"`,
+            # i.e. "the field is not the default" -- so a client that set
+            # X-MetaForge-Actor to anything at all was recorded as verified.
+            # The flag has to mean the server established it, or an audit
+            # trail cannot tell a proven identity from a typed-in one.
+            out["actor_verified"] = attributable
+        if self._client_info:
+            name = self._client_info.get("name")
+            version = self._client_info.get("version")
+            client: dict[str, Any] = {}
+            if isinstance(name, str):
+                client["name"] = name
+            if isinstance(version, str):
+                client["version"] = version
+            if client:
+                out["client"] = client
+        # FORGE-487: a verified service call says which run, phase and model it
+        # was made for. Stamped on every event, like the client, so a
+        # reviewer filtering /sessions by run does not have to infer it.
+        try:
+            if ctx.service_verified:
+                out["caller"] = Caller.SERVICE.value
+                out["service"] = {
+                    k: v
+                    for k, v in (
+                        ("run_id", ctx.run_id),
+                        ("phase", ctx.phase),
+                        ("model", ctx.model),
+                    )
+                    if v
+                }
+        except Exception:  # noqa: BLE001 - attribution must not break capture
+            pass
+        meta = (params or {}).get("_meta")
+        model = meta.get("model") if isinstance(meta, dict) else None
+        if isinstance(model, str) and model:
+            out["claimed"] = {"model": model}
+        return out
+
+    def client_agent_code(self, default: str = "mcp") -> str:
+        """What to file a session under. The client's name when it gave one.
+
+        ``agent_code`` is an existing column, so this is the one part of the
+        stamp that shows up in /sessions without a schema change -- and a
+        list where every row says "mcp" is a list that cannot be filtered by
+        who produced it.
+        """
+        name = (self._client_info or {}).get("name")
+        return name if isinstance(name, str) and name.strip() else default
+
+    # ── Prompts (FORGE-340) ───────────────────────────────────────────────
+
+    def _prompts_list(self) -> dict[str, Any]:
+        return {"prompts": prompt_manifest()}
+
+    def _prompts_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Return one workflow's instructions.
+
+        An unknown name names the ones that exist, for the same reason
+        ToolNotFoundError does (FORGE-343): a bare rejection leaves the caller
+        unable to tell a typo from a server that has no prompts at all.
+        """
+        name = params.get("name")
+        try:
+            body = prompt_body(str(name))
+        except KeyError:
+            available = ", ".join(w for w in WORKFLOWS)
+            raise PromptNotFoundError(f"Unknown prompt: {name!r}. Available: {available}") from None
+        return {
+            "description": WORKFLOWS[str(name)][0],
+            "messages": [
+                {"role": "user", "content": {"type": "text", "text": body}},
+            ],
+        }
+
+    # ── Resources (FORGE-355) ─────────────────────────────────────────────
+
+    async def _resources_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Aggregate ``resources/list`` across every adapter.
+
+        Same shape as ``_tool_list``, and the same rule: an adapter that
+        cannot answer is reported, never quietly dropped. A short resource
+        list reads to a model as "that context does not exist", which is the
+        failure this mirrors from FORGE-339.
+        """
+        sub_request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "unified-resources-list",
+                "method": "resources/list",
+                "params": params,
+            }
+        )
+        resources: list[dict[str, Any]] = []
+        unavailable: list[dict[str, str]] = []
+        for adapter in self._adapters:
+            adapter_id = str(getattr(adapter, "adapter_id", "?"))
+            try:
+                raw = await adapter.handle_request(sub_request)
+                payload = json.loads(raw)
+            except Exception as exc:
+                logger.error(
+                    "unified_mcp_resources_list_adapter_unavailable",
+                    adapter_id=adapter_id,
+                    error=str(exc),
+                )
+                unavailable.append({"adapter_id": adapter_id, "error": str(exc)})
+                continue
+            resources.extend(payload.get("result", {}).get("resources", []))
+
+        # FORGE-337: everything MetaForge publishes is parameterised by
+        # project, so all of it is a *template* and belongs in
+        # ``resources/templates/list``. Entries were being returned here
+        # instead, with a ``uri_template`` key -- neither the method nor the
+        # field name the spec defines, so a compliant client saw a list of
+        # objects with no ``uri`` and nothing usable in it. Concrete
+        # resources still belong here; today there are none, and an empty
+        # list is the honest answer rather than a malformed full one.
+        concrete = [r for r in resources if "uri" in r]
+
+        # FORGE-408: a template stops being a template once its one parameter
+        # is known. Every MetaForge resource is keyed by project, and since
+        # FORGE-335 the session carries a project -- so with one open, these
+        # *are* concrete and belong here.
+        #
+        # Leaving them out was spec-correct and useless: a client that calls
+        # `resources/list` (which is most of them, and was the agent in the
+        # FORGE-408 transcript) saw an empty list and concluded MetaForge
+        # publishes no context at all. The brief it needed was reachable only
+        # by reading `resources/templates/list` and assembling the URI by
+        # hand.
+        # ``params`` rather than ``{}``: a client may name the project
+        # explicitly, which is the only route open to one whose session the
+        # server cannot bind scope to (stdio without a session header --
+        # `project.open` tells it so via `scope_bound: false`). Without this
+        # the feature would exist only for clients that already had it easy.
+        project_id = _effective_project(params)
+        expanded = self._expand_templates_for_project(resources, project_id)
+        concrete.extend(expanded)
+
+        result: dict[str, Any] = {"resources": concrete}
+        meta: dict[str, Any] = {}
+        if unavailable:
+            meta["unavailableAdapters"] = unavailable
+        if project_id:
+            meta["project"] = project_id
+        elif expanded == []:
+            # Why the list is short, rather than leaving the model to guess.
+            # "No project is open" and "this server has no resources" look
+            # identical in an empty list and mean entirely different things.
+            meta["hint"] = (
+                "No project is in scope, so project resources are not listed. Call "
+                "project.open (or pass project_id) and list again; the parameterised "
+                "set is in resources/templates/list meanwhile."
+            )
+        if meta:
+            result["_meta"] = meta
+        return result
+
+    def _expand_templates_for_project(
+        self, resources: list[dict[str, Any]], project_id: str | None
+    ) -> list[dict[str, Any]]:
+        """Turn ``.../{project_id}`` templates into concrete resources.
+
+        Only that one placeholder. A template with any other parameter is
+        still a template, and guessing a value for it would publish a URI
+        that does not resolve -- worse than not listing it, because a model
+        will read it.
+        """
+        if not project_id:
+            return []
+        out: list[dict[str, Any]] = []
+        for entry in resources:
+            template = entry.get("uri_template") or entry.get("uriTemplate")
+            if not isinstance(template, str) or "{project_id}" not in template:
+                continue
+            filled = template.replace("{project_id}", project_id)
+            if "{" in filled:
+                continue
+            concrete = {k: v for k, v in entry.items() if k not in ("uri_template", "uriTemplate")}
+            concrete["uri"] = filled
+            out.append(concrete)
+        return out
+
+    async def _resources_templates_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """``resources/templates/list`` -- the parameterised ones.
+
+        Adapters still speak the legacy ``resources/list`` internally and
+        report ``uri_template``; the translation to the spec's
+        ``resourceTemplates`` / ``uriTemplate`` happens here, in one place,
+        rather than in every adapter.
+        """
+        sub_request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "unified-resource-templates",
+                "method": "resources/list",
+                "params": params,
+            }
+        )
+        templates: list[dict[str, Any]] = []
+        unavailable: list[dict[str, str]] = []
+        for adapter in self._adapters:
+            adapter_id = str(getattr(adapter, "adapter_id", "?"))
+            try:
+                raw = await adapter.handle_request(sub_request)
+                payload = json.loads(raw)
+            except Exception as exc:
+                logger.error(
+                    "unified_mcp_resource_templates_adapter_unavailable",
+                    adapter_id=adapter_id,
+                    error=str(exc),
+                )
+                unavailable.append({"adapter_id": adapter_id, "error": str(exc)})
+                continue
+            for entry in payload.get("result", {}).get("resources", []):
+                template = entry.get("uri_template") or entry.get("uriTemplate")
+                if not template:
+                    continue
+                out = {k: v for k, v in entry.items() if k != "uri_template"}
+                out["uriTemplate"] = template
+                templates.append(out)
+
+        result: dict[str, Any] = {"resourceTemplates": templates}
+        if unavailable:
+            result["_meta"] = {"unavailableAdapters": unavailable}
+        return result
+
+    async def _resources_read(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Route ``resources/read`` to the adapter named in the URI.
+
+        ``metaforge://<adapter>/<path>`` carries its own routing, so this
+        does not have to ask every adapter and take the first answer — which
+        would make the result depend on registration order.
+        """
+        uri = params.get("uri")
+        if not isinstance(uri, str) or not uri:
+            raise ResourceReadError(str(uri), "uri is required")
+
+        try:
+            parsed = parse_resource_uri(uri)
+        except ResourceUriError as exc:
+            raise ResourceReadError(uri, str(exc)) from exc
+
+        adapter = next(
+            (a for a in self._adapters if getattr(a, "adapter_id", None) == parsed.adapter),
+            None,
+        )
         if adapter is None:
-            raise ToolNotFoundError(tool_id)
+            known = sorted(str(getattr(a, "adapter_id", "?")) for a in self._adapters)
+            raise ResourceNotFoundError(
+                f"{uri} (no adapter {parsed.adapter!r}; loaded: {', '.join(known)})"
+            )
+
+        raw = await adapter.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "unified-resources-read",
+                    "method": "resources/read",
+                    "params": params,
+                }
+            )
+        )
+        payload = json.loads(raw)
+        if "error" in payload:
+            err = payload["error"]
+            message = err.get("message", "resource read failed")
+            # FORGE-388: honour the adapter's own code. This used to raise
+            # ResourceReadError whatever came back, so an adapter saying
+            # "this resource does not exist" reached the client as an
+            # execution error carrying the words "Resource not found" --
+            # the code contradicting its own message, and a client
+            # branching on the code drawing the wrong conclusion.
+            if err.get("code") == _RESOURCE_NOT_FOUND:
+                raise ResourceNotFoundError(f"{uri}: {message}")
+            raise ResourceReadError(uri, message)
+        return dict(payload.get("result", {}))
+
+    # ── Tool-id resolution (FORGE-343) ────────────────────────────────────
+    #
+    # MetaForge tool ids are dotted (``twin.get_node``) but models routinely
+    # send ``twin_get_node`` or ``twin/get_node``. FORGE-236 fixed exactly
+    # this on the harness side after watching a model read a bare "not
+    # found" as a dead backend; the MCP path — the one every external
+    # harness uses — never got the same treatment.
+
+    @staticmethod
+    def _slug(name: str) -> str:
+        """Collapse every separator so spellings of one tool id agree.
+
+        Splitting on the first separator does not work: ``omniverse_usd``
+        is an adapter id that contains an underscore, so there is no
+        reliable boundary between adapter and tool. Removing the
+        separators entirely sidesteps that.
+        """
+        return re.sub(r"[^a-z0-9]", "", name.lower())
+
+    def _resolve_tool_id(self, requested: str) -> str:
+        """Return the real tool id, or raise naming ones that exist.
+
+        An alias resolves only when it maps to exactly one registered tool.
+        Two candidates means guessing, and guessing which tool to run is how
+        a read turns into a write.
+        """
+        if requested in self._tool_index:
+            return requested
+
+        slug = self._slug(requested)
+        matches = [tid for tid in self._tool_index if self._slug(tid) == slug]
+        if len(matches) == 1:
+            logger.info("mcp_tool_alias_resolved", requested=requested, resolved=matches[0])
+            return matches[0]
+
+        raise ToolNotFoundError(requested, did_you_mean=self._closest_tool_ids(requested))
+
+    def _closest_tool_ids(self, requested: str, limit: int = 5) -> list[str]:
+        """Registered ids closest to what was asked for.
+
+        Matched on the slug so a separator mistake still scores as near,
+        which is the mistake actually observed.
+        """
+        known = sorted(self._tool_index)
+        if not requested:
+            return known[:limit]
+        by_slug = {self._slug(tid): tid for tid in known}
+        close = difflib.get_close_matches(self._slug(requested), list(by_slug), n=limit, cutoff=0.6)
+        if close:
+            return [by_slug[c] for c in close]
+        # Nothing similar: naming the adapter's own tools is still more use
+        # than naming none, when the prefix is recognisable.
+        prefix = requested.split(".")[0].split("_")[0].lower()
+        return [tid for tid in known if tid.lower().startswith(prefix)][:limit]
+
+    async def _authorise(
+        self,
+        tool_id: str,
+        arguments: dict[str, Any],
+        call_id: str = "",
+        progress_token: str | int | None = None,
+    ) -> Approver | None:
+        """Hold a write until a human approves it, whoever asked (FORGE-359).
+
+        Raises rather than returning a flag: every path out of here that is
+        not an approval must stop the call, and an exception cannot be
+        forgotten at a call site the way a returned bool can.
+
+        Returns the human who approved, when the gate named one. For most
+        tools that is bookkeeping; for a human-authority tool (FORGE-393) it
+        is the value the tool writes down, so a missing one is fatal here
+        rather than filled in later.
+        """
+        # Before anything else: the caller does not get to say who approved.
+        reject_caller_supplied_approver(tool_id, arguments)
+        # FORGE-487: a design-flow service call stays inside its run's project,
+        # or does not run.
+        self._enforce_service_scope(tool_id, arguments)
+        caller = self._effective_caller()
+        # FORGE-360: the local-write exemption exists only because a stdio
+        # session had nowhere to answer an approval -- F1 says so in
+        # ``guardrails._EXEMPTIBLE``. A client that can elicit *is* somewhere
+        # to answer, so the exemption stops applying to it. This is the flip
+        # that comment asked for, narrowed to connections that can actually
+        # be asked rather than applied to every stdio session blindly.
+        can_elicit = self.can_elicit
+        decision = decide(
+            tool_id,
+            caller=caller,
+            twin_mutations_enabled=self._twin_mutations_enabled(),
+            exempt_local_writes=self._exempt_local_writes and not can_elicit,
+            # FORGE-407: `twin.query_cypher` is a read or a write depending on
+            # the query. Without the arguments the gate can only judge the
+            # tool, which refused every `MATCH ... RETURN` on any deployment
+            # with twin mutations enabled.
+            arguments=arguments,
+        )
+        if decision.refused:
+            logger.warning(
+                "mcp_service_call_refused",
+                tool_id=tool_id,
+                reason=decision.reason,
+                **self._service_log_fields(),
+            )
+            raise ServiceScopeError(tool_id, decision.reason, code="service_refused")
+        if caller is Caller.SERVICE:
+            logger.info(
+                "mcp_service_call_authorised",
+                tool_id=tool_id,
+                **self._service_log_fields(),
+            )
+        if caller is Caller.CLIENT_TASK:
+            # Every call the grant covers is on the record.
+            logger.info(
+                "mcp_client_task_call_authorised",
+                tool_id=tool_id,
+                held=decision.requires_approval,
+                **self._service_log_fields(),
+            )
+        if not decision.requires_approval:
+            return None
+
+        # In-harness first: the person who asked for this is looking at that
+        # window. Not a fallback chain -- once a client has been asked, going
+        # on to the dashboard would put the same question to a second person
+        # and discard the first answer.
+        mrtr = current_mrtr() if current_modern_request() is not None else None
+        if can_elicit and mrtr is not None and self._approval_ledger is not None:
+            # FORGE-601: the question goes back inside the result.
+            gate: Any = mrtr_gate(mrtr, self._mrtr_signer, self._approval_ledger)
+        else:
+            gate = (
+                elicitation_gate(self._elicitor, self._approval_ledger)
+                if can_elicit and self._elicitor is not None
+                else self._approval_gate
+            )
+        if gate is None:
+            # Configured to hold, with nothing to hold it with. Refusing is
+            # the only honest option: running it would leave the guardrail
+            # looking present while doing nothing, and nobody audits a
+            # control they believe is switched on.
+            logger.error(
+                "mcp_approval_gate_missing",
+                tool_id=tool_id,
+                caller=caller.value,
+                reason=decision.reason,
+            )
+            raise ApprovalNotConfiguredError(tool_id, decision.reason)
+
+        route = "elicitation" if can_elicit else "dashboard"
+        # FORGE-465: a dashboard hold is invisible to the client until it
+        # ends, and the client's own tool timeout may end it first. With a
+        # progress channel the client is told at once and its timeout keeps
+        # being reset, so the long window stands; without one the window must
+        # end before the client gives up.
+        #
+        # FORGE-472: the same rule for an inline prompt. It kept a fixed 180 s
+        # that outlived Claude Code's 120 s tool timeout, and Claude Code
+        # sends no progressToken, so the client gave up first and the prompt
+        # stayed on screen after both sides had stopped waiting.
+        progress = self._has_progress_channel(progress_token)
+        window = hold_window_seconds(progress=progress)
+        approvals_url = self._deeplinks.build("approvals")
+        where = (
+            "the client's own approval prompt"
+            if route == "elicitation"
+            else f"the MetaForge dashboard Approvals page ({approvals_url})"
+            if approvals_url
+            else "the MetaForge dashboard Approvals page"
+        )
+        logger.info(
+            "mcp_tool_call_held_for_approval",
+            tool_id=tool_id,
+            caller=caller.value,
+            reason=decision.reason,
+            route=route,
+            window_seconds=window,
+            progress=progress,
+        )
+        held_from = time.monotonic()
+        approval_ids: list[str] = []
+        heartbeat: asyncio.Task[None] | None = None
+        if route == "elicitation" and progress and progress_token is not None:
+            # The longer window only stands because the client's timeout
+            # keeps being reset, so an inline prompt sends progress too.
+            text = (
+                f"{tool_id} is waiting for your answer in this client's approval "
+                f"prompt. Waiting up to {window:.0f}s."
+            )
+            self._send_progress(progress_token, 0.0, window, text, "elicitation")
+            heartbeat = asyncio.ensure_future(
+                self._hold_heartbeat(progress_token, window, text, "elicitation", held_from)
+            )
+
+        async def on_held(approval_id: str) -> None:
+            nonlocal heartbeat
+            approval_ids.append(approval_id)
+            if not progress or progress_token is None:
+                return
+            text = hold_notice_text(tool_id, approval_id, approvals_url, window)
+            self._send_progress(progress_token, 0.0, window, text, approval_id)
+            heartbeat = asyncio.ensure_future(
+                self._hold_heartbeat(progress_token, window, text, approval_id, held_from)
+            )
+
+        try:
+            resolution = resolve_approval(
+                await gate(
+                    ApprovalAsk(
+                        tool_id=tool_id,
+                        arguments=arguments,
+                        caller=caller,
+                        reason=decision.reason,
+                        project=_effective_project(arguments),
+                        timeout_seconds=window,
+                        on_held=on_held if route == "dashboard" else None,
+                        client=self._client_label(),
+                    )
+                )
+            )
+        finally:
+            if heartbeat is not None:
+                heartbeat.cancel()
+        held_seconds = time.monotonic() - held_from
+        outcome = resolution.outcome
+        approval_id = resolution.approval_id or (approval_ids[0] if approval_ids else None)
+        if outcome is not ApprovalOutcome.APPROVED:
+            logger.info(
+                "mcp_tool_call_not_approved",
+                tool_id=tool_id,
+                caller=caller.value,
+                outcome=outcome.value,
+                approval_id=approval_id,
+                route=route,
+                window_seconds=window,
+                held_seconds=round(held_seconds, 3),
+            )
+            raise ApprovalRejectedError(
+                tool_id,
+                outcome,
+                approval_id=approval_id,
+                route=route,
+                where=where,
+                held_seconds=held_seconds,
+                window_seconds=window,
+            )
+
+        if requires_human_authority(tool_id) and resolution.approver is None:
+            # Approved, but by nobody we can name. For an ordinary write that
+            # would be fine. Here the approver's name *is* the result, so
+            # writing the gate anyway would record an authority that does not
+            # exist -- which is the bug, just arriving by a different door.
+            logger.error(
+                "mcp_human_authority_missing",
+                tool_id=tool_id,
+                caller=caller.value,
+            )
+            raise HumanAuthorityRequiredError(
+                tool_id,
+                "the approval was granted but the gate did not identify who granted it",
+            )
+
+        if call_id:
+            self._remember_hold(
+                call_id,
+                ApprovalRecord(
+                    outcome=outcome.value,
+                    route=route,
+                    held_seconds=held_seconds,
+                    approval_id=approval_id,
+                    approver=(
+                        resolution.approver.label if resolution.approver is not None else None
+                    ),
+                    approver_verified=(
+                        resolution.approver.verified if resolution.approver is not None else False
+                    ),
+                ),
+            )
+        return resolution.approver
+
+    def _client_label(self) -> str | None:
+        """``name version`` of the connected MCP client, for the ledger."""
+        info = self._client_info or {}
+        name = info.get("name")
+        if not name:
+            return None
+        version = info.get("version")
+        return f"{name} {version}" if version else str(name)
+
+    def _has_progress_channel(self, progress_token: str | int | None) -> bool:
+        """A progress notification sent now would reach this call's client."""
+        if progress_token is None or self._notifier is None:
+            return False
+        try:
+            return bool(self._notifier.available())
+        except Exception as exc:  # noqa: BLE001 - asking must not fail the call
+            logger.warning("mcp_hold_notifier_unavailable", error=str(exc))
+            return False
+
+    def _send_progress(
+        self, token: str | int, progress: float, total: float, text: str, approval_id: str
+    ) -> None:
+        if self._notifier is None:
+            return
+        message = progress_notification(token, progress=progress, total=total, message=text)
+        try:
+            sent = self._notifier.send(message)
+        except Exception as exc:  # noqa: BLE001 - a notice must not fail the call
+            logger.warning("mcp_hold_progress_failed", approval_id=approval_id, error=str(exc))
+            return
+        logger.info(
+            "mcp_hold_progress_sent",
+            approval_id=approval_id,
+            progress=progress,
+            total=total,
+            delivered=sent,
+        )
+
+    async def _hold_heartbeat(
+        self, token: str | int, window: float, text: str, approval_id: str, held_from: float
+    ) -> None:
+        """Repeat the hold's progress so the client's timeout keeps resetting."""
+        interval = progress_interval_seconds()
+        last = 0.0
+        while True:
+            await asyncio.sleep(interval)
+            # Progress MUST increase with each notification.
+            elapsed = max(round(time.monotonic() - held_from, 1), last + 0.1)
+            last = elapsed
+            self._send_progress(token, min(elapsed, window), window, text, approval_id)
+
+    def _remember_hold(self, call_id: str, record: ApprovalRecord) -> None:
+        """Keep one hold until the envelope for that call reads it.
+
+        Popped by `_tools_call`. A legacy-dialect caller never reads it, and a
+        raised error can skip the pop, so the map is capped rather than
+        trusted to drain -- an observability aid must not become a leak.
+        """
+        if len(self._approval_records) > 64:
+            self._approval_records.clear()
+        self._approval_records[call_id] = record
+
+    def take_approval_record(self, call_id: str) -> ApprovalRecord | None:
+        """The hold for ``call_id``, removed. ``None`` when it was not held."""
+        return self._approval_records.pop(call_id, None)
+
+    async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Route ``tool/call``, under a client-task grant when one applies (FORGE-584)."""
+        scoped = await self._client_task_scope()
+        if scoped is None:
+            return await self._dispatch_tool_call_unscoped(params)
+        from mcp_core.context import with_context
+
+        with with_context(scoped):
+            return await self._dispatch_tool_call_unscoped(params)
+
+    async def _dispatch_tool_call_unscoped(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Route ``tool/call`` to the adapter that owns ``tool_id``."""
+        tool_id = self._resolve_tool_id(params.get("tool_id", ""))
+        adapter = self._tool_index[tool_id]
+        # `_call_id` is protocol bookkeeping, not an argument. Adapters
+        # validate what they are given, and an unexpected key is exactly the
+        # kind of thing a strict schema rejects. Kept here first, because
+        # FORGE-417's approval record is filed against it.
+        call_id = str(params.get("_call_id") or "")
+        params = {k: v for k, v in params.items() if k != "_call_id"}
+        params["tool_id"] = tool_id
+
+        # Take the reserved key away before it is looked at, so a client
+        # cannot pre-set the field the dispatcher is about to fill.
+        arguments = strip_reserved_arguments(params.get("arguments") or {})
+        params["arguments"] = arguments
+
+        meta = params.get("_meta")
+        progress_token = meta.get("progressToken") if isinstance(meta, dict) else None
+        if not isinstance(progress_token, str | int) or isinstance(progress_token, bool):
+            progress_token = None
+        approver = await self._authorise(tool_id, arguments, call_id, progress_token)
+        if approver is not None and requires_human_authority(tool_id):
+            # The tool reads its deciding human from here and nowhere else.
+            arguments[APPROVED_BY_ARG] = approver.label
+
+        # FORGE-446: every material the call names gets its library figures,
+        # here, because the adapter containers cannot read the library. An
+        # unresolved name fails the call with the closest library entries.
+        from twin_core.library.material_resolver import (
+            MaterialResolutionError,
+            fill_material_arguments,
+        )
+
+        try:
+            await fill_material_arguments(tool_id, arguments)
+        except MaterialResolutionError as exc:
+            # FORGE-638: an unresolved material is the caller's to fix (name a
+            # library material, or record it), so it is a tool error carrying
+            # the closest entries, not an exception that leaves the HTTP
+            # transport as a 500 with a traceback.
+            logger.info(
+                "mcp_tool_material_unresolved",
+                tool_id=tool_id,
+                material=exc.name,
+                candidates=exc.candidates,
+            )
+            raise ToolHandlerError(tool_id, str(exc)) from exc
+
+        # FORGE-637: geometry a harness plugin commits must carry a colour for
+        # every part, because the viewer shows only the colours in the STEP and
+        # an uncoloured model reads as unfinished. The design-flow worker
+        # (SERVICE) is not held to it here.
+        if tool_id == "twin.commit_geometry" and self._effective_caller() is not Caller.SERVICE:
+            arguments[REQUIRE_PART_COLOURS_ARG] = True
 
         # Commit-by-reference: fill a commit_geometry call's step_base64 from the
         # last export for this (session_id, obj_id) so agents needn't thread the
@@ -474,7 +2622,13 @@ class UnifiedMcpServer:
                 "params": params,
             }
         )
-        sub_response_text = await adapter.handle_request(sub_request)
+        # FORGE-582: a tool that asks the person itself (flow.await_gate)
+        # reaches them through this connection's elicitor, and only when this
+        # connection can be asked.
+        from mcp_core.elicitation import with_elicitor
+
+        with with_elicitor(self._adapter_elicitor()):
+            sub_response_text = await adapter.handle_request(sub_request)
         sub_response: dict[str, Any] = json.loads(sub_response_text)
 
         if "error" in sub_response:
@@ -504,33 +2658,463 @@ class UnifiedMcpServer:
                 )
         return result
 
+    #: How long an adapter gets to answer a health probe. Short on purpose:
+    #: orchestrators poll this endpoint for readiness, and a probe that can
+    #: hang turns one sick adapter into a sick gateway.
+    _PROBE_TIMEOUT_SECONDS = 3.0
+
+    def _telemetry_report(self) -> dict[str, Any]:
+        """Is metric recording actually live on this server (FORGE-413)?
+
+        Three-valued for the same reason the code-version check is: a
+        collector that exists but publishes nowhere is not the same as one
+        that was never wired, and calling either "on" is the failure being
+        fixed.
+        """
+        if self._metrics is None:
+            return {
+                "metrics": "not configured",
+                "detail": (
+                    "No metrics collector was passed to this server, so every "
+                    "metaforge_mcp_* metric records nothing and the alert rules "
+                    "on them cannot fire. The entrypoint should pass "
+                    "metrics=collector_for(...)."
+                ),
+            }
+        recording = getattr(self._metrics, "is_recording", None)
+        if recording is False:
+            return {
+                "metrics": "no-op",
+                "detail": (
+                    "A collector is wired but has no OTel SDK meter behind it, "
+                    "so samples go nowhere. Check OTEL_EXPORTER_OTLP_ENDPOINT "
+                    "and that METAFORGE_OTEL_EXPORT is not 'off'."
+                ),
+            }
+        # `None` means a collaborator that predates `is_recording` (a test
+        # double); reported as unknown rather than asserted either way.
+        return {"metrics": "recording" if recording else "unknown"}
+
+    def _client_report(self) -> dict[str, Any]:
+        """Who is on the other end, and whether we speak the same protocol.
+
+        ``connected: false`` is the honest answer before any handshake --
+        the legacy transports and the tests call methods directly without
+        ``initialize``, and reporting an empty name there would read as a
+        client that failed to identify itself rather than one that never
+        arrived.
+
+        FORGE-696: a handshake-free (2026-07-28) client never sends
+        ``initialize``; its identity and revision come with each request. The
+        report is then about the request asking, not the server's handshake
+        copy, which a modern client never fills.
+        """
+        modern = current_modern_request()
+        if modern is not None:
+            info = modern.client_info or {}
+            return {
+                "connected": True,
+                "name": info.get("name"),
+                "version": info.get("version"),
+                "protocol_requested": modern.version,
+                "protocol_negotiated": modern.version,
+                "handshake": "none: this revision is handshake-free, each request names it",
+                "can_elicit": self.can_elicit,
+            }
+        if self._client_info is None and self._client_protocol is None:
+            return {
+                "connected": False,
+                "protocol_negotiated": self._negotiated_protocol,
+                "detail": "no initialize handshake has been completed on this server",
+            }
+        info = self._client_info or {}
+        out: dict[str, Any] = {
+            "connected": True,
+            "name": info.get("name"),
+            "version": info.get("version"),
+            "protocol_requested": self._client_protocol,
+            "protocol_negotiated": self._negotiated_protocol,
+            # FORGE-360: the approval route this connection actually has.
+            # "Writes are held for approval" means something different when
+            # the holding place is a dashboard nobody has open.
+            "can_elicit": self.can_elicit,
+        }
+        if self._client_protocol and self._client_protocol != self._negotiated_protocol:
+            out["protocol_skew"] = True
+            out["detail"] = (
+                f"client asked for MCP {self._client_protocol}; this server does not "
+                f"speak it and negotiated {self._negotiated_protocol}. Anything added "
+                "after that revision is not available on this connection."
+            )
+        return out
+
+    async def _probe_adapter(self, adapter: McpToolServer) -> dict[str, Any]:
+        """Ask one adapter whether it is actually there."""
+        entry: dict[str, Any] = {
+            "adapter_id": str(getattr(adapter, "adapter_id", "?")),
+            "version": str(getattr(adapter, "version", "?")),
+            "tools_registered": len(getattr(adapter, "tool_ids", []) or []),
+        }
+        request = json.dumps(
+            {"jsonrpc": "2.0", "id": "unified-health", "method": "health/check", "params": {}}
+        )
+        try:
+            raw = await asyncio.wait_for(
+                adapter.handle_request(request), timeout=self._PROBE_TIMEOUT_SECONDS
+            )
+            payload = json.loads(raw)
+        except TimeoutError:
+            entry["reachable"] = False
+            entry["error"] = f"no answer within {self._PROBE_TIMEOUT_SECONDS:g}s"
+            return entry
+        except Exception as exc:
+            entry["reachable"] = False
+            entry["error"] = str(exc)
+            return entry
+
+        if "error" in payload:
+            entry["reachable"] = False
+            entry["error"] = payload["error"].get("message", "health/check returned an error")
+            return entry
+        entry["reachable"] = True
+        return entry
+
+    @staticmethod
+    def _llm_usage_report() -> dict[str, Any]:
+        from orchestrator.harness.providers.usage import usage_report
+
+        try:
+            return usage_report()
+        except Exception as exc:  # noqa: BLE001 - health must never fail on accounting
+            return {"available": False, "reason": str(exc)}
+
+    @staticmethod
+    async def _design_flow_worker_report() -> dict[str, Any]:
+        """Is a worker polling the design-flow task queue (FORGE-475)."""
+        import os
+
+        if (os.environ.get("METAFORGE_FLOW_ENGINE") or "").strip().lower() == "in_process":
+            return {"available": True, "status": "not_required", "engine": "in_process"}
+        try:
+            from orchestrator.design_flow.launcher import connect_temporal
+            from orchestrator.design_flow.temporal_flow import TASK_QUEUE
+            from orchestrator.design_flow.worker_presence import describe_pollers
+            from orchestrator.temporal_worker import temporal_host, temporal_namespace
+
+            client = await asyncio.wait_for(
+                connect_temporal(temporal_host(), temporal_namespace()), timeout=5.0
+            )
+            pollers = await asyncio.wait_for(describe_pollers(client, TASK_QUEUE), timeout=5.0)
+        except Exception as exc:  # noqa: BLE001 - health must never fail on the probe
+            return {"available": False, "status": "unknown", "reason": str(exc)}
+        if not pollers:
+            return {
+                "available": True,
+                "status": "absent",
+                "task_queue": TASK_QUEUE,
+                "reason": f"no worker is polling {TASK_QUEUE!r}; design-flow runs are refused",
+            }
+        return {
+            "available": True,
+            "status": "ok",
+            "task_queue": TASK_QUEUE,
+            "pollers": len(pollers),
+        }
+
+    @staticmethod
+    async def _vendor_connectors_report() -> dict[str, Any]:
+        """Vendor connectors and their auth state (FORGE-427). Never raises."""
+        import os
+
+        gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+        try:
+            if gateway_url:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=10.0) as http:
+                    response = await http.get(f"{gateway_url.rstrip('/')}/v1/vendors/connectors")
+                response.raise_for_status()
+                connectors = response.json().get("connectors", [])
+            else:
+                from api_gateway.vendors.service import connector_report
+
+                connectors = await connector_report()
+        except Exception as exc:  # noqa: BLE001 - health must never fail on the probe
+            return {"available": False, "status": "unknown", "reason": str(exc)}
+        problems = [c["connector"] for c in connectors if c.get("auth") != "ok"]
+        return {
+            "available": True,
+            "status": "none_configured" if not connectors else "degraded" if problems else "ok",
+            "connectors": connectors,
+            **({"problems": problems} if problems else {}),
+        }
+
+    @staticmethod
+    def _model_routing_report() -> dict[str, Any]:
+        from orchestrator.harness.providers.routing import effective_routing
+
+        try:
+            view = effective_routing()
+            # Routes whose provider has no credentials are named here, not
+            # dropped: a role the operator routed would otherwise look healthy.
+            return {"available": True, "status": "degraded" if view["problems"] else "ok", **view}
+        except Exception as exc:  # noqa: BLE001 - health must never fail on routing
+            return {"available": False, "reason": str(exc)}
+
     async def _health_check(self) -> dict[str, Any]:
-        """Aggregate health across every adapter into one report."""
+        """Aggregate health across every adapter into one report.
+
+        FORGE-332: this used to return ``status: "healthy"`` unconditionally
+        and list each adapter's tool count *from registration* -- so a gateway
+        with every CAD container down answered "healthy" with a full adapter
+        list. Nothing here had asked an adapter anything.
+
+        That is worse than the tools/list problem it resembles (FORGE-339),
+        where the tool count at least shrank. A health report that cannot say
+        unhealthy is the one thing a doctor reads, and /metaforge:doctor is
+        built on this.
+
+        The service stays ``healthy`` only when every adapter answers;
+        otherwise ``degraded``, naming the ones that did not. The HTTP status
+        stays 200 either way -- the MCP server *is* up, and an orchestrator
+        restarting the gateway because an optional CAD container is down
+        would be the wrong cure.
+        """
         now = datetime.now(UTC)
         uptime = (now - self._start_time).total_seconds()
-        adapter_health: list[dict[str, Any]] = []
-        for adapter in self._adapters:
-            adapter_health.append(
-                {
-                    "adapter_id": adapter.adapter_id,
-                    "version": adapter.version,
-                    "tools_available": len(adapter.tool_ids),
-                }
+
+        # The reporter does not probe itself: an entry that is reachable by
+        # construction is noise in a diagnostic, and it would disagree with
+        # `adapter_count` (FORGE-409).
+        adapter_health = list(
+            await asyncio.gather(*(self._probe_adapter(a) for a in self._domain_adapters()))
+        )
+        unreachable = [a["adapter_id"] for a in adapter_health if not a["reachable"]]
+        # FORGE-379: publish each probe so an alert can fire on a down
+        # adapter, rather than it waiting for somebody to run the doctor.
+        if self._metrics is not None:
+            for entry in adapter_health:
+                try:
+                    self._metrics.record_mcp_adapter_probe(
+                        str(entry["adapter_id"]), bool(entry["reachable"])
+                    )
+                except Exception as exc:  # noqa: BLE001 — never fail health
+                    logger.warning("mcp_adapter_probe_metric_failed", error=str(exc))
+
+        # FORGE-411: which code this process is actually running. The sidecar
+        # on fidel-dev served two-day-old code beside a current checkout and
+        # nothing said so -- the symptoms looked like a smaller deployment, so
+        # four bug reports were filed against that run and two of their
+        # findings were not real. The expensive part was not the stale image;
+        # it was that staleness took inference to establish.
+        from metaforge.mcp.build_info import code_version
+
+        version_info = code_version(reloads=self._reloads)
+        code = version_info.report()
+        if self._metrics is not None:
+            try:
+                self._metrics.record_mcp_code_version(version_info.result, reloads=self._reloads)
+            except Exception as exc:  # noqa: BLE001 — never fail health
+                logger.warning("mcp_code_version_metric_failed", error=str(exc))
+        if version_info.stale:
+            # Logged as well as reported, because the alert is what makes this
+            # useful to somebody who is not already looking at the health
+            # call -- which is the entire failure being fixed.
+            logger.warning(
+                "mcp_running_stale_code",
+                build_sha=code["build_sha"],
+                source_sha=code["source_sha"],
             )
-        return {
+
+        report: dict[str, Any] = {
             "service": "metaforge-mcp",
             "version": self._version,
-            "status": "healthy",
+            "code": code,
+            # A stale process is not "healthy": it answers every request
+            # correctly for code nobody is looking at.
+            "status": "stale" if code.get("stale") else "degraded" if unreachable else "healthy",
             "uptime_seconds": round(uptime, 1),
-            "adapter_count": len(self._adapters),
+            # Excludes the health adapter itself: it is the reporter, not a
+            # reportee, and counting it would tell an operator they have one
+            # more tool adapter than they wired (FORGE-409).
+            "adapter_count": len(self._domain_adapters()),
             "tool_count": len(self._tool_index),
+            # FORGE-420: with the `core` profile the client sees 21 tools and
+            # this said 117, so /metaforge:doctor reported "96 tools are not
+            # reaching the client" and named cadquery, freecad, calculix and
+            # kicad as missing. That was the profile working as designed,
+            # diagnosed as a fault. `tool_count` stays the registered
+            # catalogue -- it is a real fact and other callers read it -- and
+            # this says what *this connection* is actually served.
+            "profile": self._profile_report(),
+            # FORGE-332: A5 asks the doctor about four things -- gateway,
+            # adapters, auth and version skew. The adapters are probed
+            # above; these two are the rest, and neither was answerable
+            # from this call before. The doctor workflow already told the
+            # agent to "report the auth mode", which it could only do by
+            # inventing one.
+            "auth": (
+                self._auth_posture.report()
+                if self._auth_posture is not None
+                else dict(UNKNOWN_AUTH)
+            ),
+            "client": self._client_report(),
+            # FORGE-413: whether anything this server records reaches
+            # Prometheus. It did not, for every MCP metric, and the only way
+            # to find out was to query Prometheus and get zero series back --
+            # which reads like a quiet system. Asking the doctor is cheaper.
+            "telemetry": self._telemetry_report(),
+            # FORGE-371: a doctor that cannot say "links are off" leaves the
+            # reader to conclude the tools simply never produce them.
+            "dashboard_links": (
+                "enabled"
+                if self._deeplinks.configured
+                else "disabled (no METAFORGE_DASHBOARD_URL configured)"
+            ),
             "adapters": adapter_health,
+            # FORGE-476: what the model calls cost in the last 24 h. Read from
+            # the shared usage store; "available": false says it could not be
+            # read, which is not the same as nothing having been spent.
+            "llm_usage_24h": self._llm_usage_report(),
+            # FORGE-477: which model each role is routed to.
+            "model_routing": self._model_routing_report(),
+            # FORGE-475: whether anything polls the design-flow queue. Runs
+            # are refused without one, and this is where an operator sees why.
+            "design_flow_worker": await self._design_flow_worker_report(),
+            # FORGE-427: each vendor connector's mode and whether its
+            # credential works now, so a refused key is seen before an order.
+            "vendors": await self._vendor_connectors_report(),
         }
+        if unreachable:
+            # Named at the top level as well as per-adapter: a caller that
+            # reads only `status` still gets told what to look at.
+            report["unreachable_adapters"] = unreachable
+            report["detail"] = (
+                f"{len(unreachable)} of {len(self._adapters)} adapters did not answer: "
+                f"{', '.join(unreachable)}. Their tools are registered but calls to them "
+                "will fail."
+            )
+            logger.warning(
+                "unified_mcp_health_degraded",
+                unreachable=unreachable,
+                adapter_count=len(self._adapters),
+            )
+        return report
+
+
+#: Exception type -> the ``error_class`` label (FORGE-379).
+#:
+#: Reuses the exception taxonomy the server already raises rather than
+#: inventing a parallel one. A second list is a list that can disagree with
+#: the errors clients actually receive, and the disagreement nobody notices
+#: is the one where a dashboard says "tool failures" for a queue of writes
+#: waiting on a human.
+_ERROR_CLASSES: tuple[tuple[str, str], ...] = (
+    ("ToolNotFoundError", "tool_not_found"),
+    ("PromptNotFoundError", "prompt_not_found"),
+    ("ResourceNotFoundError", "resource_not_found"),
+    ("ResourceReadError", "resource_read_failed"),
+    ("ApprovalNotConfiguredError", "approval_not_configured"),
+    ("ApprovalRejectedError", "approval_refused"),
+    ("ApprovalLedgerUnavailableError", "approval_ledger_unavailable"),
+    # FORGE-487: a design-flow service call outside its run, its project, or
+    # the tools a service may use. Its own label: a rise means a phase is
+    # reaching for something it was never given, not that approvals are slow.
+    ("ServiceScopeError", "service_scope_refused"),
+    # FORGE-393. Separate labels on purpose: a rise in the first means a
+    # client is still passing the old argument, a rise in the second means
+    # approvals are landing without an identified human -- different faults
+    # with different fixes, and folding them together hides both.
+    ("ApproverArgumentRejectedError", "approver_caller_supplied"),
+    ("HumanAuthorityRequiredError", "human_authority_missing"),
+    ("ToolHandlerError", "tool_execution_error"),
+)
+
+
+def error_class(exc: BaseException) -> str:
+    """The metric label for one failure.
+
+    Matched on the exception's own type name so a subclass added later is
+    still classified, and anything unrecognised is ``unexpected`` rather
+    than being folded into a known bucket -- an error nobody has classified
+    should stand out, not hide inside ``tool_execution_error``.
+    """
+    names = {cls.__name__ for cls in type(exc).__mro__}
+    for name, label in _ERROR_CLASSES:
+        if name in names:
+            return label
+    return "unexpected"
+
+
+def _effective_project(arguments: dict[str, Any]) -> str | None:
+    """Which project this call lands in, for the reviewer's benefit.
+
+    An explicit ``project_id`` argument wins, exactly as it does at the data
+    layer. Otherwise it is whatever the session is scoped to -- which since
+    FORGE-335 is the normal case, and is invisible in the arguments.
+    """
+    explicit = arguments.get("project_id")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    try:
+        from mcp_core.context import current_context
+
+        scoped = current_context().project_id
+    except Exception:  # noqa: BLE001 — a missing project must not block approval
+        return None
+    return str(scoped) if scoped else None
 
 
 # ---------------------------------------------------------------------------
 # Bootstrap helper
 # ---------------------------------------------------------------------------
+
+
+#: Collaborator names ``bootstrap_tool_registry`` accepts, resolved once from
+#: the real function at import (FORGE-415).
+#:
+#: Read here rather than per call because the module global is rebindable: a
+#: test that patches ``bootstrap_tool_registry`` would otherwise have the
+#: validation check the *patch's* signature and reject every real
+#: collaborator -- which is how this was first written, and a test caught it.
+_BOOTSTRAP_COLLABORATORS: frozenset[str] = frozenset(
+    inspect.signature(bootstrap_tool_registry).parameters
+)
+
+
+def split_image_content(result: Any) -> tuple[Any, list[dict[str, Any]]]:
+    """Lift ``images[].png_base64`` out of a tool result as MCP image blocks.
+
+    Returns the result without the base64 (each image keeps its other fields
+    plus ``content_index``, its block's position in ``content``) and the
+    image blocks. Anything else comes back unchanged with no blocks. Only the
+    standard ``tools/call`` reply does this: the legacy ``tool/call`` dialect
+    the gateway's own bridge uses still gets the base64 in the result.
+    """
+    if not isinstance(result, dict):
+        return result, []
+    # The sidecar's tool result wraps the adapter's output as
+    # {tool_id, status, data}; the images are in data.
+    wrapped = result.get("data")
+    if isinstance(wrapped, dict) and isinstance(wrapped.get("images"), list):
+        lean, lifted = split_image_content(wrapped)
+        return ({**result, "data": lean}, lifted) if lifted else (result, [])
+    if not isinstance(result.get("images"), list):
+        return result, []
+    blocks: list[dict[str, Any]] = []
+    images: list[Any] = []
+    for image in result["images"]:
+        data = image.get("png_base64") if isinstance(image, dict) else None
+        if not isinstance(data, str) or not data:
+            images.append(image)
+            continue
+        blocks.append({"type": "image", "data": data, "mimeType": "image/png"})
+        rest = {k: v for k, v in image.items() if k != "png_base64"}
+        # Position 0 is the JSON text block.
+        images.append({**rest, "content_index": len(blocks)})
+    if not blocks:
+        return result, []
+    return {**result, "images": images}, blocks
 
 
 async def build_unified_server(
@@ -542,6 +3126,7 @@ async def build_unified_server(
     memory_client: Any = None,
     memory_insight_store: Any = None,
     twin_allow_mutations: bool = False,
+    profile: str | None = None,
     agent_session_store: Any = None,
     capture_sessions: bool = False,
     decision_recorder: Any = None,
@@ -550,6 +3135,13 @@ async def build_unified_server(
     component_catalog_store: Any = None,
     component_intent_llm: Any = None,
     component_recorder: Any = None,
+    brief_provider: Any = None,
+    dashboard_url: str | None = None,
+    metrics: Any = None,
+    caller: Caller = Caller.UNTRUSTED,
+    approval_gate: Any = None,
+    approval_ledger: Any = None,
+    **collaborators: Any,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -587,28 +3179,70 @@ async def build_unified_server(
     link. ``None`` skips registration (same pattern as
     ``decision_recorder``).
     """
-    registry: ToolRegistry = await bootstrap_tool_registry(
-        adapter_ids=adapter_ids,
-        knowledge_service=knowledge_service,
-        twin=twin,
-        constraint_engine=constraint_engine,
-        project_backend=project_backend,
-        memory_client=memory_client,
-        memory_insight_store=memory_insight_store,
-        twin_allow_mutations=twin_allow_mutations,
-        agent_session_store=agent_session_store,
-        decision_recorder=decision_recorder,
-        geometry_recorder=geometry_recorder,
-        blob_stager=blob_stager,
-        component_catalog_store=component_catalog_store,
-        component_intent_llm=component_intent_llm,
-        component_recorder=component_recorder,
-    )
+    # FORGE-415: this used to name each collaborator again, a second list
+    # beside `bootstrap_tool_registry`'s own -- and it was 38 short. Each
+    # missing one gates a tool registration, so those tools registered in the
+    # gateway and never in the sidecar: `twin.record_engineering_entity`, the
+    # whole Engineering Intent & Requirements Harness, `record_document`,
+    # `record_constraint_set`, `propose_change` and more were invisible to
+    # every external MCP client.
+    #
+    # Nothing could see it. Every unit test constructs the adapter directly
+    # and supplies the collaborator itself, so the factory being narrower
+    # than the thing it builds is exactly the gap tests do not cover -- the
+    # same shape as FORGE-406 (an approval gate with no production caller)
+    # and FORGE-413 (a metrics collector never passed).
+    #
+    # So the second list is gone. Named parameters this function has its own
+    # use for stay named; everything else is forwarded, and an unknown key is
+    # rejected rather than silently dropped -- a typo'd collaborator name
+    # would otherwise reproduce this bug one tool at a time.
+    forwarded: dict[str, Any] = {
+        "adapter_ids": adapter_ids,
+        "knowledge_service": knowledge_service,
+        "twin": twin,
+        "constraint_engine": constraint_engine,
+        "project_backend": project_backend,
+        "memory_client": memory_client,
+        "memory_insight_store": memory_insight_store,
+        "twin_allow_mutations": twin_allow_mutations,
+        "agent_session_store": agent_session_store,
+        "decision_recorder": decision_recorder,
+        "geometry_recorder": geometry_recorder,
+        "blob_stager": blob_stager,
+        "component_catalog_store": component_catalog_store,
+        "component_intent_llm": component_intent_llm,
+        "component_recorder": component_recorder,
+        "brief_provider": brief_provider,
+    }
+    if collaborators:
+        unknown = sorted(set(collaborators) - _BOOTSTRAP_COLLABORATORS)
+        if unknown:
+            raise TypeError(
+                "build_unified_server: bootstrap_tool_registry accepts no "
+                f"collaborator named {unknown}. A silently ignored name is how "
+                "a tool goes missing from one deployment and not another."
+            )
+        forwarded.update(collaborators)
+    registry: ToolRegistry = await bootstrap_tool_registry(**forwarded)
     capture = (
         SessionCapture(agent_session_store)
         if capture_sessions and agent_session_store is not None
         else None
     )
     return UnifiedMcpServer(
-        adapters=registry.list_adapter_servers(), session_capture=capture, tool_registry=registry
+        adapters=registry.list_adapter_servers(),
+        session_capture=capture,
+        tool_registry=registry,
+        profile=profile,
+        dashboard_url=dashboard_url,
+        metrics=metrics,
+        # FORGE-387: conservative by default, like the constructor. The
+        # sidecar's transport overrides it with declare_caller(); an
+        # in-process caller (a test, an embedding host) says so here.
+        caller=caller,
+        # Where a held write goes. The gateway builds one from its own
+        # approval store; an embedding host supplies its own.
+        approval_gate=approval_gate,
+        approval_ledger=approval_ledger,
     )

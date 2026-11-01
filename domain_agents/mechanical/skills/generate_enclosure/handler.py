@@ -7,7 +7,7 @@ from typing import Any
 
 import structlog
 
-from domain_agents.shared.commit_geometry import commit_geometry
+from domain_agents.shared.commit_geometry import commit_geometry, measured_metadata_from_cad_result
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 
@@ -115,8 +115,13 @@ class GenerateEnclosureHandler(SkillBase[GenerateEnclosureInput, GenerateEnclosu
                 committed, twin_node_id, model_url, commit_error = await commit_geometry(
                     self.context.mcp,
                     cad_file=cad_file,
-                    name=f"Enclosure ({input_data.material})",
+                    name=input_data.name,
                     project_id=input_data.project_id,
+                    # FORGE-100: the tool's own result already has
+                    # volume_mm3/bounding_box/mass_kg (cadquery.
+                    # generate_enclosure spreads _get_shape_properties() into
+                    # its response) -- thread them onto the committed node.
+                    extra_metadata=measured_metadata_from_cad_result(result),
                 )
                 span.set_attribute("committed", committed)
 

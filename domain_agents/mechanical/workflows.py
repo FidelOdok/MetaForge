@@ -82,9 +82,10 @@ class DesignWorkflowParams:
     branch: str = "main"
 
     # CAD generation
+    name: str = ""
     shape_type: str = "bracket"
     dimensions: dict[str, float] = field(default_factory=dict)
-    material: str = "aluminum_6061"
+    material: str = "aluminium_6061_t6"
     output_path: str = ""
 
     # Mesh generation
@@ -92,9 +93,18 @@ class DesignWorkflowParams:
     mesh_algorithm: str = "netgen"
     output_format: str = "inp"
 
-    # Stress validation
+    # Stress validation. FORGE-234: calculix.run_fea builds a complete,
+    # solvable deck around the mesh instead of invoking it directly, so it
+    # needs a fixed/loaded face and a load to build that deck around --
+    # fixed_node_set/load_node_set default to gmsh's own first two
+    # per-STEP-face ELSET names (Surface1/Surface2), since this pipeline
+    # generates its own mesh and has no other way to know which face is
+    # which without inspecting the geometry first.
     load_case: str = "default"
     stress_constraints: list[dict[str, Any]] = field(default_factory=list)
+    fixed_node_set: str = "Surface1"
+    load_node_set: str = "Surface2"
+    load_force_n: tuple[float, float, float] = (0.0, 0.0, -100.0)
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +216,12 @@ class MechanicalDesignWorkflow:
             ctx = self._create_skill_context(params)
 
             skill_input = GenerateCadInput(
+                # FORGE-97: name is now required on the skill's own input;
+                # this workflow's params predate that and don't always have
+                # one, so fall back to the same synthetic pattern the skill
+                # itself used to hardcode -- only for THIS non-chat caller,
+                # not a regression on the chat-driven bug the ticket reported.
+                name=params.name or f"{params.shape_type} ({params.material})",
                 work_product_id=params.work_product_id,
                 shape_type=params.shape_type,
                 dimensions=params.dimensions,
@@ -388,6 +404,10 @@ class MechanicalDesignWorkflow:
                         "mesh_file": mesh_file,
                         "load_case": params.load_case,
                         "analysis_type": "static_stress",
+                        "material": {"name": params.material},
+                        "fixed_node_set": params.fixed_node_set,
+                        "load_node_set": params.load_node_set,
+                        "load_force_n": list(params.load_force_n),
                     },
                 )
             except Exception as exc:

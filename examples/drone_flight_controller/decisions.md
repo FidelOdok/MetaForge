@@ -115,3 +115,22 @@
 - Consistent pad surface for automated optical inspection (AOI) during production.
 
 **Trade-offs**: ENIG adds approximately $0.30-0.50 per board compared to HASL at prototype quantities. OSP (Organic Solderability Preservative) would be cheaper but has a shorter shelf life (3-6 months) and worse performance with fine-pitch components. The reliability gain justifies the modest cost increase.
+
+---
+
+## DD-007: Generated Reference Board (FORGE-685)
+
+**Date**: 2026-10-24
+**Status**: Accepted
+
+**Context**: The example shipped a placeholder schematic that KiCad could not load. Phase 2 can generate the schematic and the board from a circuit description, so the reference is now generated, and every check on it is one KiCad runs.
+
+**Decision**: Generate `eda/kicad/` from `eda/circuit.json` with `kicad.generate_schematic`, `kicad.generate_pcb` and `kicad.autoroute_pcb`. The board is 40 x 40 mm, with a GND plane on In1 and a +3V3 plane on In2 (DD-002).
+
+**Rationale**:
+- The IMU is the MPU-6000 because the board reads it over SPI1, and that is the SPI variant of the MPU6050 in DD-003.
+- The motors are on TIM3 (PB0/PB1) and TIM5 (PA0/PA1). The LQFP-64 STM32F405 has no port E, so the TIM1 pins the firmware pin map used to name (PE9-PE14) do not exist on this part. The pin map and firmware comments now match the board.
+- The 3.3 V rail comes from an AP2112K LDO fed by the 5 V input from the ESC's BEC (DD-004) or USB.
+- The passives are 0402. At 0603, 34 parts with fanout room around the LQFP do not fit on 40 x 40 mm.
+
+**Trade-offs**: 40 x 40 mm is larger than the 36 x 36 mm target, and the placement is the generator's starting point, not a hand-tuned layout. The USB pair is not impedance-controlled, and nothing here has been checked for signal integrity or EMC.

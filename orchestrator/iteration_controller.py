@@ -7,6 +7,13 @@ Implements the core MetaForge design loop:
 3. **Refine** — if constraints fail, enrich parameters and loop
 4. **Gate check** — if constraints pass, auto-approve or delegate
 5. **Commit** — merge the approved branch back to source
+
+The gate fails closed (FORGE-470): with ``auto_approve`` off and no approval
+workflow configured there is nobody to ask, so the loop ends ``BLOCKED`` and
+nothing is merged. It used to approve in that case. An explicit
+``auto_approve`` still merges, but under the non-human approver
+``auto:iteration_controller`` with a warning log and a metric, so automatic
+approvals are visible.
 """
 
 from __future__ import annotations
@@ -20,10 +27,30 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, Field
 
+from observability.metrics import MetricsCollector, collector_for
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.iteration")
+
+#: Approver identity recorded when a gate is passed by ``auto_approve``
+#: rather than by a human (FORGE-470).
+AUTO_APPROVER_ID = "auto:iteration_controller"
+
+_metrics: MetricsCollector | None = None
+
+
+def _get_metrics() -> MetricsCollector:
+    global _metrics
+    if _metrics is None:
+        _metrics = collector_for("metaforge-orchestrator")
+    return _metrics
+
+
+def set_iteration_controller_metrics(metrics: MetricsCollector | None) -> None:
+    """Inject a collector (tests), or ``None`` to resolve it lazily again."""
+    global _metrics
+    _metrics = metrics
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +65,9 @@ class IterationStatus(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+    # Constraints passed but the gate cannot be answered: no approval
+    # workflow is configured and auto_approve is off (FORGE-470).
+    BLOCKED = "blocked"
 
 
 class IterationConfig(BaseModel):
@@ -73,6 +103,7 @@ class IterationResult(BaseModel):
     records: list[IterationRecord] = Field(default_factory=list)
     final_result: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
+    approver_id: str | None = None
     started_at: str = ""
     completed_at: str = ""
 
@@ -237,6 +268,8 @@ class IterationController:
                                 return result
 
                             result.status = IterationStatus.APPROVED
+                            if self._config.auto_approve:
+                                result.approver_id = AUTO_APPROVER_ID
                             result.final_result = (
                                 task_result.model_dump()
                                 if hasattr(task_result, "model_dump")
@@ -266,6 +299,22 @@ class IterationController:
                             )
                             return result
 
+                        elif gate_status == IterationStatus.BLOCKED:
+                            result.status = IterationStatus.BLOCKED
+                            result.error = (
+                                "Constraints passed but no approval workflow is "
+                                "configured and auto_approve is off; refusing to "
+                                f"merge branch {branch!r} without approval"
+                            )
+                            result.final_result = (
+                                task_result.model_dump()
+                                if hasattr(task_result, "model_dump")
+                                else {"raw": str(task_result)}
+                            )
+                            result.completed_at = datetime.now(UTC).isoformat()
+                            span.set_attribute("iteration.final_status", "blocked")
+                            return result
+
                         elif gate_status == IterationStatus.REJECTED:
                             result.status = IterationStatus.REJECTED
                             result.completed_at = datetime.now(UTC).isoformat()
@@ -289,13 +338,34 @@ class IterationController:
             return result
 
     async def _gate_check(self, loop_id: str, agent_code: str, branch: str) -> IterationStatus:
-        """Determine whether the converged result should be auto-approved."""
+        """Decide the gate for a converged result.
+
+        Fails closed (FORGE-470): only an explicit ``auto_approve`` approves
+        without a human, and never silently.
+        """
         if self._config.auto_approve:
+            logger.warning(
+                "iteration_gate_auto_approved",
+                loop_id=loop_id,
+                agent_code=agent_code,
+                branch=branch,
+                approver_id=AUTO_APPROVER_ID,
+            )
+            _get_metrics().record_iteration_gate_unattended("auto_approved", agent_code)
             return IterationStatus.APPROVED
 
         if self._approval is None:
-            # No approval workflow configured — auto-approve
-            return IterationStatus.APPROVED
+            # Nobody can be asked, so the gate cannot pass. It used to
+            # approve here, which merged unreviewed work (FORGE-470).
+            logger.warning(
+                "iteration_gate_no_approval_workflow",
+                loop_id=loop_id,
+                agent_code=agent_code,
+                branch=branch,
+                outcome="blocked",
+            )
+            _get_metrics().record_iteration_gate_unattended("blocked", agent_code)
+            return IterationStatus.BLOCKED
 
         # Delegate to approval workflow — returns CONVERGED (awaiting human)
         logger.info(

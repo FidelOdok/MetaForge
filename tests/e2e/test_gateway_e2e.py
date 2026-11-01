@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from api_gateway.server import ACTION_WORKFLOWS, create_app
+from api_gateway.version import gateway_version
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from orchestrator.dependency_engine import DependencyGraph
@@ -182,7 +183,7 @@ class TestHealthEndpointE2E:
         body = resp.json()
         assert body["status"] in {"healthy", "degraded"}
         assert "version" in body
-        assert body["version"] == "0.1.0"
+        assert body["version"] == gateway_version()
         assert "uptime_seconds" in body
 
     async def test_health_has_timestamp(self, gateway_stack):
@@ -436,7 +437,7 @@ class TestFullRoundTripE2E:
                 "parameters": {
                     "shape_type": "bracket",
                     "dimensions": {"width": 50.0, "height": 30.0, "thickness": 5.0},
-                    "material": "aluminum_6061",
+                    "material": "aluminium_6061_t6",
                 },
             },
         )

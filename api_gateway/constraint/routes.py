@@ -51,7 +51,7 @@ class ScaleDelta(BaseModel):
 
 
 class DeltaTransform(BaseModel):
-    """Delta of a dragged group: translation (mm), or — additively, MET-611 —
+    """Delta of a dragged group: translation (mm), or, additively,
     a single-axis rotation or scale. Exactly one kind is populated per request,
     matching whichever gizmo mode produced it on the client."""
 

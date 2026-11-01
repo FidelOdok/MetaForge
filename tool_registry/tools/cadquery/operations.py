@@ -369,12 +369,16 @@ def _build_single_link_urdf(
 # (fixed/revolute/slider/cylindrical/ball -- tool_registry/tools/freecad/
 # adapter.py's _VALID_JOINT_TYPES) don't map 1:1 onto URDF's joint types.
 # `fixed` and `slider` map directly (`slider` -> `prismatic`). `revolute`
-# maps to URDF's `continuous` (unlimited rotation), NOT `revolute` --
-# MetaForge's joint metadata (base/follower/axis/anchor) never captures a
-# rotation limit, and `revolute` is only valid in URDF *with* a `<limit>`;
+# maps to URDF's `continuous` (unlimited rotation) ONLY when the joint
+# carries no `limits` -- URDF's `revolute` requires a `<limit>`, and
 # inventing one would be the same class of mistake avoided for USD's
-# inertia (silently-plausible-but-wrong data). `continuous` needs no
-# `<limit>` at all, so it is the honest mapping given what's actually known.
+# inertia (silently-plausible-but-wrong data). FORGE-240: when `limits`
+# *is* given (MetaForge's joint metadata can carry one -- see `slider`'s
+# own required `limits` below), the caller-provided range is real, not
+# fabricated, and dropping it silently allows unlimited rotation on a
+# joint that physically can't -- so a revolute WITH limits maps to
+# `revolute` (with `<limit>`), and only a revolute with NO limits given
+# stays `continuous`. See `_revolute_joint_type_and_limits`.
 # `cylindrical`/`ball` have no single-joint URDF equivalent (URDF joints
 # are single-DOF except `floating`/`planar`, neither of which is a
 # faithful match) -- decomposing them into a chained multi-joint,
@@ -383,13 +387,85 @@ _URDF_JOINT_TYPE_MAP = {"fixed": "fixed", "slider": "prismatic", "revolute": "co
 _URDF_UNSUPPORTED_JOINT_TYPES = {"cylindrical", "ball"}
 
 
+def _revolute_joint_type_and_limits(
+    fc_type: str, joint: dict[str, Any], type_map: dict[str, str]
+) -> tuple[str, dict[str, Any] | None]:
+    """Resolve a joint's emitted type + limits (FORGE-240), shared across
+    URDF/SDF (whose type maps both send bare ``revolute`` to a
+    "continuous" analog -- see each map's own module comment).
+
+    A ``revolute`` joint with a caller-supplied ``limits`` dict is real
+    data, not fabricated -- it maps to the target format's real bounded
+    rotation type (``revolute``/``continuous``... the format's own
+    ``type_map["revolute"]`` value is the *unbounded* one, so a limited
+    revolute overrides it to the literal string ``"revolute"``, which
+    both URDF and SDF also use for their bounded rotational joint type).
+    Every other joint type (fixed, slider/prismatic, ball) is unaffected
+    -- this only special-cases ``revolute``.
+    """
+    limits = joint.get("limits")
+    if fc_type == "revolute" and limits:
+        return "revolute", limits
+    return type_map[fc_type], None
+
+
+def _link_world_offsets_mm(
+    links: list[dict[str, Any]], joints: list[dict[str, Any]]
+) -> dict[str, tuple[float, float, float]]:
+    """World-frame position (mm) of each link's own local origin (FORGE-243).
+
+    Parts are STEP files authored in one shared world frame, but a URDF
+    joint's ``<origin>`` is relative to the *parent* link's frame -- so the
+    offsets are meant to accumulate down the kinematic chain while the link
+    meshes (and their inertial frames) stay put in world space, unless each
+    link's own frame is pinned back to its world position first.
+
+    A link's local origin is defined as sitting at the anchor of the one
+    joint that has it as ``follower`` (that anchor point *is* where the
+    link attaches to its parent, by construction); a link that is never a
+    follower (a chain root) sits at world-frame ``(0, 0, 0)``. Only a
+    single lookup per link is needed -- computing ``T[child]`` never
+    depends on ``T[parent]`` -- so this doesn't need a topological walk:
+
+        T[link]        = the anchor of the joint whose follower == link,
+                          or (0, 0, 0) for a root link
+        joint.origin    = joint.anchor - T[joint.base]      (parent frame)
+        link mesh/COM   = link's own raw value - T[link]    (world -> local)
+
+    Translation-only (matches every other rpy in this module -- FreeCAD's
+    joint metadata carries no orientation today, so there is no rotation
+    to compose here either; a rotated parent frame would need the offset
+    transformed by that rotation, not just subtracted).
+    """
+    offsets: dict[str, tuple[float, float, float]] = {}
+    for joint in joints:
+        follower = joint.get("follower")
+        if follower:
+            anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
+            offsets[follower] = (float(anchor[0]), float(anchor[1]), float(anchor[2]))
+    for link in links:
+        offsets.setdefault(link["name"], (0.0, 0.0, 0.0))
+    return offsets
+
+
+def _sub_mm_to_m(
+    a: tuple[float, float, float], b_mm: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    """``a`` (already metres) minus ``b_mm`` (millimetres, converted first)."""
+    return (
+        a[0] - b_mm[0] * _MM_TO_M,
+        a[1] - b_mm[1] * _MM_TO_M,
+        a[2] - b_mm[2] * _MM_TO_M,
+    )
+
+
 def _build_assembly_urdf(
     *,
     robot_name: str,
     links: list[dict[str, Any]],
     joints: list[dict[str, Any]],
     xacro: bool = False,
-) -> str:
+) -> tuple[str, list[dict[str, Any]]]:
     """Build a multi-link URDF document with real joints.
 
     ``links``: each ``{name, mesh_uri, mass_kg, com_m, inertia_kgm2,
@@ -398,32 +474,56 @@ def _build_assembly_urdf(
     same way -- see ``_add_urdf_material``'s docstring).
     ``joints``: each FreeCAD joint record's shape directly
     (``{name, type, base, follower, axis, anchor}``, optionally
-    ``limits: {lower, upper, effort, velocity}`` for a ``slider`` joint --
-    see ``_URDF_JOINT_TYPE_MAP``'s reasoning above for why ``revolute``
-    doesn't need one).
+    ``limits: {lower, upper, effort, velocity}`` -- required for a
+    ``slider`` joint, and honored (not dropped) for a ``revolute`` joint
+    too -- see ``_revolute_joint_type_and_limits``).
+
+    Returns ``(xml, emitted_joints)`` -- ``emitted_joints`` is
+    ``[{name, type, limits}, ...]``, one entry per input joint, recording
+    what was *actually written* (post type-resolution) so a caller (e.g.
+    the chat agent) can report the real emitted types/limits instead of
+    guessing from the input (FORGE-240: previously the agent reported
+    fabricated limits that matched neither the request nor the file).
 
     ``xacro=True`` declares the xacro namespace on the root element -- see
     ``_robot_root_attrib``'s docstring.
+
+    FORGE-243: parts are STEP files in one shared world frame, but a URDF
+    joint's ``<origin>`` is parent-relative and a link's mesh/inertial
+    frame is the link's *own* frame -- so every world-frame value (mesh,
+    COM, joint anchor) is re-expressed relative to each link's own
+    chain-derived position (``_link_world_offsets_mm``) rather than
+    written raw, which previously left every link's mesh in its original
+    world position while the joint chain moved the link *frames* out from
+    under them -- the meshes visibly scattered apart down the chain.
     """
     robot = ET.Element("robot", attrib=_robot_root_attrib(robot_name, xacro))
+    world_offset_mm = _link_world_offsets_mm(links, joints)
 
     for link in links:
         link_el = ET.SubElement(robot, "link", name=link["name"])
         color_rgba = link.get("color_rgba")
+        offset_mm = world_offset_mm[link["name"]]
+        mesh_origin_xyz = (
+            f"{-offset_mm[0] * _MM_TO_M:.9g} "
+            f"{-offset_mm[1] * _MM_TO_M:.9g} "
+            f"{-offset_mm[2] * _MM_TO_M:.9g}"
+        )
         for tag in ("visual", "collision"):
             section = ET.SubElement(link_el, tag)
+            ET.SubElement(section, "origin", xyz=mesh_origin_xyz, rpy="0 0 0")
             geometry = ET.SubElement(section, "geometry")
             ET.SubElement(geometry, "mesh", filename=link["mesh_uri"], scale=_URDF_MESH_SCALE_XYZ)
             if tag == "visual" and color_rgba is not None:
                 _add_urdf_material(section, link["name"], color_rgba)
 
         ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
-        com_m = link["com_m"]
+        com_local_m = _sub_mm_to_m(link["com_m"], offset_mm)
         inertial = ET.SubElement(link_el, "inertial")
         ET.SubElement(
             inertial,
             "origin",
-            xyz=f"{com_m[0]:.9g} {com_m[1]:.9g} {com_m[2]:.9g}",
+            xyz=f"{com_local_m[0]:.9g} {com_local_m[1]:.9g} {com_local_m[2]:.9g}",
             rpy="0 0 0",
         )
         ET.SubElement(inertial, "mass", value=f"{link['mass_kg']:.9g}")
@@ -438,6 +538,7 @@ def _build_assembly_urdf(
             izz=f"{izz:.9g}",
         )
 
+    emitted_joints: list[dict[str, Any]] = []
     for joint in joints:
         fc_type = joint["type"].lower()
         if fc_type in _URDF_UNSUPPORTED_JOINT_TYPES:
@@ -446,47 +547,60 @@ def _build_assembly_urdf(
                 "single-joint URDF equivalent (needs multi-joint decomposition, not "
                 "yet implemented -- see _URDF_JOINT_TYPE_MAP's module comment)"
             )
-        urdf_type = _URDF_JOINT_TYPE_MAP[fc_type]
-
-        joint_el = ET.SubElement(
-            robot,
-            "joint",
-            name=joint.get("name", f"{joint['base']}_to_{joint['follower']}"),
-            type=urdf_type,
+        urdf_type, revolute_limits = _revolute_joint_type_and_limits(
+            fc_type, joint, _URDF_JOINT_TYPE_MAP
         )
+        joint_name = joint.get("name", f"{joint['base']}_to_{joint['follower']}")
+
+        joint_el = ET.SubElement(robot, "joint", name=joint_name, type=urdf_type)
         ET.SubElement(joint_el, "parent", link=joint["base"])
         ET.SubElement(joint_el, "child", link=joint["follower"])
         anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
+        base_offset_mm = world_offset_mm.get(joint["base"], (0.0, 0.0, 0.0))
+        origin_m = (
+            (anchor[0] - base_offset_mm[0]) * _MM_TO_M,
+            (anchor[1] - base_offset_mm[1]) * _MM_TO_M,
+            (anchor[2] - base_offset_mm[2]) * _MM_TO_M,
+        )
         ET.SubElement(
             joint_el,
             "origin",
-            xyz=f"{anchor[0] * _MM_TO_M:.9g} {anchor[1] * _MM_TO_M:.9g} {anchor[2] * _MM_TO_M:.9g}",
+            xyz=f"{origin_m[0]:.9g} {origin_m[1]:.9g} {origin_m[2]:.9g}",
             rpy="0 0 0",
         )
-        if urdf_type in ("continuous", "prismatic"):
+        if urdf_type in ("continuous", "prismatic", "revolute"):
             axis = joint.get("axis") or (0.0, 0.0, 1.0)
             ET.SubElement(joint_el, "axis", xyz=f"{axis[0]:.9g} {axis[1]:.9g} {axis[2]:.9g}")
-        if urdf_type == "prismatic":
-            limits = joint.get("limits")
+        emitted_limits: dict[str, float] | None = None
+        if urdf_type in ("prismatic", "revolute"):
+            limits = revolute_limits if urdf_type == "revolute" else joint.get("limits")
             if not limits:
                 raise MissingJointLimitsError(
-                    f"joint {joint.get('name', '?')!r} is a prismatic (slider) joint, which "
+                    f"joint {joint.get('name', '?')!r} is a {urdf_type} joint, which "
                     "URDF requires a <limit> element for, but no 'limits' "
                     "({'lower','upper','effort','velocity'}) was supplied for it -- "
-                    "MetaForge's joint metadata never captures one, so it must be passed "
-                    "explicitly rather than fabricated"
+                    "MetaForge's joint metadata never captures one for a prismatic joint "
+                    "by default, so it must be passed explicitly rather than fabricated"
                 )
+            emitted_limits = {
+                "lower": limits["lower"],
+                "upper": limits["upper"],
+                "effort": limits.get("effort", 100.0),
+                "velocity": limits.get("velocity", 1.0),
+            }
             ET.SubElement(
                 joint_el,
                 "limit",
-                lower=f"{limits['lower']:.9g}",
-                upper=f"{limits['upper']:.9g}",
-                effort=f"{limits.get('effort', 100.0):.9g}",
-                velocity=f"{limits.get('velocity', 1.0):.9g}",
+                lower=f"{emitted_limits['lower']:.9g}",
+                upper=f"{emitted_limits['upper']:.9g}",
+                effort=f"{emitted_limits['effort']:.9g}",
+                velocity=f"{emitted_limits['velocity']:.9g}",
             )
+        emitted_joints.append({"name": joint_name, "type": urdf_type, "limits": emitted_limits})
 
     ET.indent(robot, space="  ")
-    return '<?xml version="1.0"?>\n' + ET.tostring(robot, encoding="unicode")
+    xml = '<?xml version="1.0"?>\n' + ET.tostring(robot, encoding="unicode")
+    return xml, emitted_joints
 
 
 def _build_single_link_sdf(
@@ -563,7 +677,10 @@ def _build_single_link_sdf(
 # has no direct 2-DOF (1 translation + 1 rotation, same axis) joint element
 # -- `screw` looks similar but couples the two motions via a fixed pitch,
 # which isn't the same kinematics, so it would misrepresent the joint rather
-# than approximate it.
+# than approximate it. FORGE-240: same as URDF's map, `revolute` here maps
+# to the unbounded `continuous` ONLY when the joint carries no `limits` --
+# a caller-supplied range is real, not fabricated, and maps to the real
+# bounded `revolute` type instead (see `_revolute_joint_type_and_limits`).
 _SDF_JOINT_TYPE_MAP = {
     "fixed": "fixed",
     "slider": "prismatic",
@@ -580,13 +697,53 @@ def _build_assembly_sdf(
     joints: list[dict[str, Any]],
     static: bool,
     world_name: str,
-) -> str:
+) -> tuple[str, list[dict[str, Any]]]:
     """Build a multi-link, single-model SDFormat document with real joints.
 
     ``links``/``joints`` have the same shapes ``_build_assembly_urdf`` takes
     -- see its docstring and ``_SDF_JOINT_TYPE_MAP``'s comment above for the
     joint-type mapping (SDF's is more permissive than URDF's: it also
-    supports `ball` natively).
+    supports `ball` natively). Returns ``(xml, emitted_joints)`` -- see
+    ``_build_assembly_urdf``'s docstring for what ``emitted_joints`` is.
+
+    FORGE-304: unlike URDF (where a link's frame position is implicit in the
+    accumulated chain of parent-relative joint ``<origin>`` elements), SDF
+    positions every ``<link>`` independently via its own ``//link/pose``,
+    which defaults to being relative to the *model* frame -- confirmed from
+    the primary source (gazebosim/sdf_tutorials' pose_frame_semantics
+    tutorial.md, fetched while fixing this: "If the //pose/@relative_to
+    attribute is not defined, the //pose of an entity is relative to its
+    parent entity's frame by default, such as a link's pose relative to its
+    parent model's frame"). So each link's ``<pose>`` is simply its
+    ``_link_world_offsets_mm()`` position converted to metres -- no
+    accumulation, no negation (unlike URDF's mesh-origin compensation, which
+    offsets the *mesh* within an already-chain-positioned link frame; here
+    the link's own frame pose *is* the position).
+
+    A link's ``<inertial><pose>`` is relative to that *link's own* frame
+    (not the model frame), so the raw world-frame ``com_m`` must be
+    re-expressed relative to the link's new ``_link_world_offsets_mm()``
+    position the same way URDF's inertial ``<origin>`` already is -- this
+    was a latent, identically-shaped bug that only became visible once link
+    poses were added (previously harmless because every link's pose was
+    implicitly zero, so the model frame and every link frame coincided).
+
+    The same primary source documents joint poses as the one exception to
+    the "relative to parent entity" default: "the joint's pose is relative
+    to the frames of links that the joint connects" (specifically the
+    *child* link's frame, per that document's "Joint frame ... attached to
+    the child link at the joint's origin"). Re-deriving a joint anchor in
+    the child link's (potentially offset) local frame would need the same
+    kind of parent-relative math URDF's joint ``<origin>`` already does, but
+    SDF offers a simpler, equally spec-correct option that avoids it
+    entirely: the reserved frame name ``__model__`` (confirmed from the same
+    primary-source family -- SDFormat's model-frame documentation) can be
+    named explicitly via ``relative_to`` to override the default. Every
+    joint ``<pose>`` here is written as ``relative_to="__model__"``, so it
+    is simply the joint's real-world anchor converted to metres -- exactly
+    the same model-frame convention the link poses already use, with no
+    per-joint accumulation needed (mirroring why ``_link_world_offsets_mm``
+    itself needs no topological walk).
     """
     sdf = ET.Element("sdf", version="1.11")
     parent = sdf
@@ -595,15 +752,24 @@ def _build_assembly_sdf(
 
     model = ET.SubElement(parent, "model", name=model_name)
     ET.SubElement(model, "static").text = "true" if static else "false"
+    world_offset_mm = _link_world_offsets_mm(links, joints)
 
     for link in links:
         link_el = ET.SubElement(model, "link", name=link["name"])
+        offset_mm = world_offset_mm[link["name"]]
+        pose_m = tuple(v * _MM_TO_M for v in offset_mm)
+        ET.SubElement(
+            link_el, "pose"
+        ).text = f"{pose_m[0]:.9g} {pose_m[1]:.9g} {pose_m[2]:.9g} 0 0 0"
+
         ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
-        com_m = link["com_m"]
+        com_local_m = _sub_mm_to_m(link["com_m"], offset_mm)
 
         inertial = ET.SubElement(link_el, "inertial")
         ET.SubElement(inertial, "mass").text = f"{link['mass_kg']:.9g}"
-        ET.SubElement(inertial, "pose").text = f"{com_m[0]:.9g} {com_m[1]:.9g} {com_m[2]:.9g} 0 0 0"
+        ET.SubElement(
+            inertial, "pose"
+        ).text = f"{com_local_m[0]:.9g} {com_local_m[1]:.9g} {com_local_m[2]:.9g} 0 0 0"
         inertia = ET.SubElement(inertial, "inertia")
         for tag, val in (
             ("ixx", ixx),
@@ -622,6 +788,7 @@ def _build_assembly_sdf(
             ET.SubElement(mesh, "uri").text = link["mesh_uri"]
             ET.SubElement(mesh, "scale").text = _URDF_MESH_SCALE_XYZ
 
+    emitted_joints: list[dict[str, Any]] = []
     for joint in joints:
         fc_type = joint["type"].lower()
         if fc_type in _SDF_UNSUPPORTED_JOINT_TYPES:
@@ -629,40 +796,52 @@ def _build_assembly_sdf(
                 f"joint {joint.get('name', '?')!r} has type {fc_type!r}, which has no "
                 "direct SDF <joint> equivalent (see _SDF_JOINT_TYPE_MAP's module comment)"
             )
-        sdf_type = _SDF_JOINT_TYPE_MAP[fc_type]
-
-        joint_el = ET.SubElement(
-            model,
-            "joint",
-            name=joint.get("name", f"{joint['base']}_to_{joint['follower']}"),
-            type=sdf_type,
+        sdf_type, revolute_limits = _revolute_joint_type_and_limits(
+            fc_type, joint, _SDF_JOINT_TYPE_MAP
         )
+        joint_name = joint.get("name", f"{joint['base']}_to_{joint['follower']}")
+
+        joint_el = ET.SubElement(model, "joint", name=joint_name, type=sdf_type)
         ET.SubElement(joint_el, "parent").text = joint["base"]
         ET.SubElement(joint_el, "child").text = joint["follower"]
+        anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
+        anchor_m = tuple(v * _MM_TO_M for v in anchor)
+        pose_el = ET.SubElement(joint_el, "pose", relative_to="__model__")
+        pose_el.text = f"{anchor_m[0]:.9g} {anchor_m[1]:.9g} {anchor_m[2]:.9g} 0 0 0"
 
-        if sdf_type in ("continuous", "prismatic"):
+        emitted_limits: dict[str, float] | None = None
+        if sdf_type in ("continuous", "prismatic", "revolute"):
             axis = joint.get("axis") or (0.0, 0.0, 1.0)
             axis_el = ET.SubElement(joint_el, "axis")
             ET.SubElement(axis_el, "xyz").text = f"{axis[0]:.9g} {axis[1]:.9g} {axis[2]:.9g}"
-            if sdf_type == "prismatic":
-                limits = joint.get("limits")
+            if sdf_type in ("prismatic", "revolute"):
+                limits = revolute_limits if sdf_type == "revolute" else joint.get("limits")
                 if not limits:
                     raise MissingJointLimitsError(
-                        f"joint {joint.get('name', '?')!r} is a prismatic (slider) joint -- "
-                        "no 'limits' ({'lower','upper','effort','velocity'}) was supplied for "
-                        "it, and MetaForge's joint metadata never captures one, so it must be "
-                        "passed explicitly rather than fabricated"
+                        f"joint {joint.get('name', '?')!r} is a {sdf_type} joint -- no "
+                        "'limits' ({'lower','upper','effort','velocity'}) was supplied for "
+                        "it, and MetaForge's joint metadata never captures one for a "
+                        "prismatic joint by default, so it must be passed explicitly "
+                        "rather than fabricated"
                     )
+                emitted_limits = {
+                    "lower": limits["lower"],
+                    "upper": limits["upper"],
+                    **({"effort": limits["effort"]} if "effort" in limits else {}),
+                    **({"velocity": limits["velocity"]} if "velocity" in limits else {}),
+                }
                 limit_el = ET.SubElement(axis_el, "limit")
-                ET.SubElement(limit_el, "lower").text = f"{limits['lower']:.9g}"
-                ET.SubElement(limit_el, "upper").text = f"{limits['upper']:.9g}"
-                if "effort" in limits:
-                    ET.SubElement(limit_el, "effort").text = f"{limits['effort']:.9g}"
-                if "velocity" in limits:
-                    ET.SubElement(limit_el, "velocity").text = f"{limits['velocity']:.9g}"
+                ET.SubElement(limit_el, "lower").text = f"{emitted_limits['lower']:.9g}"
+                ET.SubElement(limit_el, "upper").text = f"{emitted_limits['upper']:.9g}"
+                if "effort" in emitted_limits:
+                    ET.SubElement(limit_el, "effort").text = f"{emitted_limits['effort']:.9g}"
+                if "velocity" in emitted_limits:
+                    ET.SubElement(limit_el, "velocity").text = f"{emitted_limits['velocity']:.9g}"
+        emitted_joints.append({"name": joint_name, "type": sdf_type, "limits": emitted_limits})
 
     ET.indent(sdf, space="  ")
-    return '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding="unicode")
+    xml = '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding="unicode")
+    return xml, emitted_joints
 
 
 class CadqueryOperations:
@@ -695,11 +874,31 @@ class CadqueryOperations:
         parent.mkdir(parents=True, exist_ok=True)
 
     def _get_shape_properties(self, shape: Any) -> dict[str, Any]:
-        """Extract geometric properties from a CadQuery shape/Workplane."""
+        """Extract geometric properties from a CadQuery shape/Workplane.
+
+        FORGE-272: a genuinely empty shape (e.g. the result of
+        ``intersect``-ing two solids with zero overlap -- confirmed by
+        ``Solids() == []``) has a well-defined zero volume/area (CadQuery's
+        own ``Volume()``/``Area()`` return ``0.0`` safely for it), but OCCT's
+        ``BoundingBox()`` raises ``Standard_ConstructionError: Bnd_Box is
+        void`` rather than returning a degenerate box -- there's nothing to
+        bound. No caller of this helper (``boolean_operation`` included) had
+        ever exercised a genuinely empty result before FORGE-272's real
+        interference check ran a real, non-overlapping intersect on fidel-dev
+        and hit this live. Guard it explicitly: an empty shape is a real,
+        describable state (zero volume, no bounding box), not an error.
+        """
         if hasattr(shape, "val"):
             solid = shape.val()
         else:
             solid = shape
+
+        if hasattr(solid, "Solids") and not solid.Solids():
+            return {
+                "volume_mm3": 0.0,
+                "surface_area_mm2": 0.0,
+                "bounding_box": None,
+            }
 
         bb = solid.BoundingBox()
         return {
@@ -745,6 +944,16 @@ class CadqueryOperations:
                 raise
 
             props = self._get_shape_properties(workplane)
+            # FORGE-100: mass is the one measured property this tool computed
+            # a value for (geometric volume) but never converted to something
+            # a constraint expression (e.g. `moving_mass_kg <= 4.5`) could
+            # actually read -- reuses the exact density table/conversion
+            # export_urdf/export_sdf already established (materials.py),
+            # not a second computation path.
+            if material:
+                props["mass_kg"] = round(
+                    props["volume_mm3"] * _MM3_TO_M3 * resolve_density_kg_m3(material), 6
+                )
             cq.exporters.export(workplane, output_path)
 
             elapsed = time.monotonic() - start
@@ -755,6 +964,7 @@ class CadqueryOperations:
                 shape_type=shape_type,
                 output_path=output_path,
                 volume_mm3=props["volume_mm3"],
+                mass_kg=props.get("mass_kg"),
                 duration_s=round(elapsed, 3),
             )
 
@@ -1246,7 +1456,7 @@ class CadqueryOperations:
                     }
                 )
 
-            urdf_xml = _build_assembly_urdf(
+            urdf_xml, emitted_joints = _build_assembly_urdf(
                 robot_name=robot_name, links=links, joints=joints, xacro=xacro
             )
             with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
@@ -1270,6 +1480,11 @@ class CadqueryOperations:
                 "robot_name": robot_name,
                 "link_names": [link["name"] for link in links],
                 "joint_names": [joint.get("name", "") for joint in joints],
+                # FORGE-240: what was ACTUALLY written (post type-resolution),
+                # not the input -- a revolute joint's real limits, when given,
+                # are now honored rather than silently dropped, and this lets
+                # the caller report that instead of guessing/fabricating.
+                "joints": emitted_joints,
             }
 
     def export_sdf(
@@ -1447,7 +1662,7 @@ class CadqueryOperations:
                     }
                 )
 
-            sdf_xml = _build_assembly_sdf(
+            sdf_xml, emitted_joints = _build_assembly_sdf(
                 model_name=model_name,
                 links=links,
                 joints=joints,
@@ -1475,6 +1690,8 @@ class CadqueryOperations:
                 "model_name": model_name,
                 "link_names": [link["name"] for link in links],
                 "joint_names": [joint.get("name", "") for joint in joints],
+                # FORGE-240: see export_urdf_assembly's return dict comment.
+                "joints": emitted_joints,
             }
 
     def export_usd(
@@ -1644,7 +1861,9 @@ class CadqueryOperations:
                     }
                 )
 
-            usda_text = build_usda_assembly(robot_name=robot_name, links=links, joints=joints)
+            usda_text, emitted_joints = build_usda_assembly(
+                robot_name=robot_name, links=links, joints=joints
+            )
             with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
                 f.write(usda_text)
 
@@ -1666,6 +1885,8 @@ class CadqueryOperations:
                 "robot_name": robot_name,
                 "link_names": [link["name"] for link in links],
                 "joint_names": [joint.get("name", "") for joint in joints],
+                # FORGE-240: see export_urdf_assembly's return dict comment.
+                "joints": emitted_joints,
             }
 
     def generate_ros2_launch(
@@ -1917,13 +2138,22 @@ class CadqueryOperations:
         parts: list[dict[str, Any]],
         constraints: list[dict[str, Any]] | None = None,
         output_path: str = "",
+        material: str = "",
     ) -> dict[str, Any]:
         """Create a multi-part assembly from STEP files.
 
         Args:
-            parts: List of dicts with 'name', 'file', and optional 'location' (x, y, z, rx, ry, rz).
+            parts: List of dicts with 'name', 'file', and optional 'location' (x, y, z in
+                mm; rx, ry, rz in degrees, applied about the part's own origin in X then
+                Y then Z order, before the translation).
             constraints: Assembly constraints (name, type, args).
             output_path: Output STEP file path.
+
+        FORGE-547: ``interference_check_passed`` used to be ``True`` whatever
+        the parts did, and rotations were dropped. Every pair of placed parts
+        is now intersected after any constraint solve; overlapping volume
+        above ``_INTERFERENCE_TOLERANCE_MM3`` is reported per pair and fails
+        the check.
         """
         self._require_cadquery()
 
@@ -1946,13 +2176,7 @@ class CadqueryOperations:
                 props = self._get_shape_properties(part_shape)
                 total_volume += props["volume_mm3"]
 
-                location = cq.Location(
-                    cq.Vector(
-                        loc.get("x", 0.0),
-                        loc.get("y", 0.0),
-                        loc.get("z", 0.0),
-                    )
-                )
+                location = _part_location(loc)
                 assy.add(part_shape, name=name, loc=location)
 
             # Apply constraints if provided
@@ -1965,25 +2189,44 @@ class CadqueryOperations:
                     )
                 assy.solve()
 
+            interferences = _pairwise_interferences(assy, [p["name"] for p in parts])
+            span.set_attribute("assembly.interferences", len(interferences))
+
             assy.save(output_path)
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
+
+            # FORGE-100: total_volume was never exposed under the canonical
+            # "volume_mm3" key measured_metadata_from_cad_result() reads,
+            # and nothing converted it to mass at all. Per-part materials
+            # aren't tracked here (AssemblyPart has no material field), so
+            # this is a first-order estimate from ONE material applied to
+            # the summed volume -- honest as a rough estimate, not a
+            # per-part-accurate mass, and only computed when the caller
+            # actually supplies one (never fabricated).
+            result: dict[str, Any] = {
+                "assembly_file": output_path,
+                "part_count": len(parts),
+                "total_volume": round(total_volume, 2),
+                "volume_mm3": round(total_volume, 2),
+                "interference_check_passed": not interferences,
+                "interferences": interferences,
+            }
+            if material:
+                density = resolve_density_kg_m3(material)
+                result["mass_kg"] = round(total_volume * _MM3_TO_M3 * density, 6)
 
             logger.info(
                 "Assembly created",
                 part_count=len(parts),
                 output_path=output_path,
                 total_volume_mm3=round(total_volume, 2),
+                mass_kg=result.get("mass_kg"),
                 duration_s=round(elapsed, 3),
             )
 
-            return {
-                "assembly_file": output_path,
-                "part_count": len(parts),
-                "total_volume": round(total_volume, 2),
-                "interference_check_passed": True,
-            }
+            return result
 
     def generate_enclosure(
         self,
@@ -2087,6 +2330,13 @@ class CadqueryOperations:
                     )
 
             props = self._get_shape_properties(enclosure)
+            # FORGE-100: same mass_kg computation as create_parametric --
+            # nothing previously converted this tool's own volume into
+            # something a `moving_mass_kg <= X` constraint could read.
+            if material:
+                props["mass_kg"] = round(
+                    props["volume_mm3"] * _MM3_TO_M3 * resolve_density_kg_m3(material), 6
+                )
             cq.exporters.export(enclosure, output_path)
 
             elapsed = time.monotonic() - start
@@ -2096,6 +2346,7 @@ class CadqueryOperations:
                 "Enclosure generated",
                 pcb_size=f"{pcb_length}x{pcb_width}",
                 output_path=output_path,
+                mass_kg=props.get("mass_kg"),
                 duration_s=round(elapsed, 3),
             )
 
@@ -2114,3 +2365,55 @@ class CadqueryOperations:
                 "material": material,
                 **props,
             }
+
+
+#: Overlap below this is treated as touching, not interference: coincident
+#: faces of mated parts intersect with a numerically tiny volume.
+_INTERFERENCE_TOLERANCE_MM3 = 1e-3
+
+
+def _part_location(loc: dict[str, Any]) -> Any:
+    """A CadQuery Location from x/y/z (mm) and rx/ry/rz (degrees), FORGE-547.
+
+    Rotations apply about the part's own origin, X then Y then Z, and the
+    translation after them; a location with no rotations is the plain
+    translation it always was.
+    """
+    location = cq.Location(
+        cq.Vector(float(loc.get("x", 0.0)), float(loc.get("y", 0.0)), float(loc.get("z", 0.0)))
+    )
+    rotation = cq.Location(cq.Vector(0, 0, 0))
+    for axis, key in (((1, 0, 0), "rx"), ((0, 1, 0), "ry"), ((0, 0, 1), "rz")):
+        angle = float(loc.get(key, 0.0) or 0.0)
+        if angle:
+            rotation = cq.Location(cq.Vector(0, 0, 0), cq.Vector(*axis), angle) * rotation
+    return location * rotation
+
+
+def _pairwise_interferences(assy: Any, names: list[str]) -> list[dict[str, Any]]:
+    """Every pair of placed parts whose solids overlap, with the overlap volume."""
+    placed: list[tuple[str, Any]] = []
+    for name in names:
+        child = assy.objects.get(name)
+        if child is None or child.obj is None:
+            continue
+        shape = child.obj.val() if hasattr(child.obj, "val") else child.obj
+        placed.append((name, shape.moved(child.loc)))
+    found: list[dict[str, Any]] = []
+    for i, (name_a, shape_a) in enumerate(placed):
+        box_a = shape_a.BoundingBox()
+        for name_b, shape_b in placed[i + 1 :]:
+            box_b = shape_b.BoundingBox()
+            if (
+                box_a.xmax < box_b.xmin
+                or box_b.xmax < box_a.xmin
+                or box_a.ymax < box_b.ymin
+                or box_b.ymax < box_a.ymin
+                or box_a.zmax < box_b.zmin
+                or box_b.zmax < box_a.zmin
+            ):
+                continue
+            volume = float(shape_a.intersect(shape_b).Volume())
+            if volume > _INTERFERENCE_TOLERANCE_MM3:
+                found.append({"part_a": name_a, "part_b": name_b, "volume_mm3": round(volume, 3)})
+    return found

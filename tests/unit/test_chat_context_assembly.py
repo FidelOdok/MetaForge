@@ -159,6 +159,27 @@ def test_layered_prompt_without_brief_has_no_project_section() -> None:
     assert "[project context]" not in prompt
 
 
+def test_layered_prompt_nudges_design_flow_when_run_tool_present() -> None:
+    """FORGE-90: run.start_design_flow (family 'run') is reachable but was
+    never surfaced proactively — only when the user's own phrasing matched
+    the tool's schema description almost verbatim."""
+    rt = _runtime(["mcp_run_start_design_flow", "mcp_run_get_status"])
+    prompt = build_system_prompt(rt)
+    assert "run.start_design_flow" in prompt
+    assert "proactively suggest" in prompt
+
+
+def test_layered_prompt_no_design_flow_nudge_without_run_tool() -> None:
+    rt = _runtime(["mcp_twin_get_node"])
+    prompt = build_system_prompt(rt)
+    assert "run.start_design_flow" not in prompt
+
+
+def test_layered_prompt_no_design_flow_nudge_with_no_tools() -> None:
+    prompt = build_system_prompt(_runtime())
+    assert "run.start_design_flow" not in prompt
+
+
 def test_layered_prompt_public_url_notice_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without METAFORGE_PUBLIC_URL, the model is told to present relative links
     as-is rather than invent a placeholder host (FORGE-79 follow-up)."""

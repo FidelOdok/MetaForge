@@ -2,7 +2,9 @@
 
 - ``GET /v1/harness/providers`` — the registered providers, each flagged with
   whether it's configured (key present / local / codex logged in) + the active
-  provider/model from env.
+  provider/model from env, and the last provider fallback (FORGE-468).
+- ``GET /v1/harness/routing``: the per-role model routes (FORGE-477) and the
+  durable selection that roles without a route fall back to.
 - ``GET /v1/harness/models`` — models for a provider. For OpenAI-compatible
   providers with a base_url + key it live-fetches ``{base_url}/models``; other
   families return an empty list (the UI falls back to a free-text model field).
@@ -30,6 +32,7 @@ from orchestrator.harness.providers.codex_auth import (
     parse_credentials,
     save_credentials,
 )
+from orchestrator.harness.providers.provenance import last_fallback
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/v1/harness", tags=["harness"])
@@ -73,10 +76,30 @@ class ProviderInfo(BaseModel):
     base_url: str | None = None
 
 
+class FallbackInfo(BaseModel):
+    """The most recent time a harness role ran on something other than its primary."""
+
+    role: str
+    primary: str
+    primary_model: str
+    fallback: str
+    fallback_model: str
+    #: The primary's error, or why it was rejected before any call.
+    error: str
+    #: ``call_failed`` or ``model_mismatch`` (capability declines are not kept).
+    reason: str
+    at: str
+
+
 class ProvidersResponse(BaseModel):
     active_provider: str | None = None
     active_model: str | None = None
     providers: list[ProviderInfo] = Field(default_factory=list)
+    #: FORGE-468: the last provider fallback in this gateway process, so a
+    #: primary that never answers is visible here and not only in the logs.
+    last_fallback: FallbackInfo | None = None
+    #: How many fallbacks this gateway process has recorded since it started.
+    fallback_count: int = 0
 
 
 def _is_configured(profile: registry.ProviderProfile) -> bool:
@@ -92,6 +115,14 @@ def _is_configured(profile: registry.ProviderProfile) -> bool:
         return True
     key, _ = _credentials_for(profile)
     return bool(key)
+
+
+def provider_is_configured(provider_id: str) -> bool:
+    """Whether ``provider_id`` has credentials here; the check behind /providers."""
+    try:
+        return _is_configured(registry.get_profile(provider_id))
+    except registry.UnknownProviderError:
+        return False
 
 
 @router.get("/providers", response_model=ProvidersResponse)
@@ -110,13 +141,99 @@ async def list_providers() -> ProvidersResponse:
     active_provider = (
         sel.provider if sel else (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip() or None
     )
-    active_model = (
-        (sel.model if sel and sel.model else None)
-        or (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
-        or None
-    )
+    stored_model = sel.model if sel and sel.model else None
+    # FORGE-93: a pairing stored BEFORE PUT /v1/harness/selection's own
+    # validation existed stays durable in the store -- provider_config_from_
+    # env (harness_backend.py) already re-validates it on every read for the
+    # actual chat-turn path, but this read-only status endpoint reported the
+    # raw stored value regardless, so `forge auth list`/the dashboard kept
+    # advertising an invalid pairing as "active" even after the turn path had
+    # already stopped using it. Same re-validation here, for the same reason.
+    if stored_model and active_provider:
+        try:
+            registry.validate_model(active_provider, stored_model)
+        except registry.InvalidModelError as exc:
+            logger.warning(
+                "harness_stored_selection_invalid_model_ignored",
+                provider=active_provider,
+                model=stored_model,
+                error=str(exc),
+            )
+            stored_model = None
+    # FORGE-93 (re-test 2026-09-26, confirmed live against fidel-dev's real
+    # env + store): METAFORGE_LLM_MODEL is configured as a matched PAIR with
+    # METAFORGE_LLM_PROVIDER (e.g. openrouter + openai/gpt-4o) -- when the
+    # store overrides the provider (e.g. to openai-codex) while carrying no
+    # model of its own, stored_model is already None here, and this fell
+    # through to the env's model default regardless of which provider it was
+    # actually configured for -- silently reporting openai-codex + an
+    # OpenRouter-style slug as "active" (same mismatch fixed in
+    # provider_config_from_env, harness_backend.py). Only trust the env model
+    # default when the active provider IS the one env vars describe.
+    env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
+    env_model = (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
+    trust_env_model = not env_provider or (active_provider or "").strip().lower() == env_provider
+    active_model = stored_model or (env_model if trust_env_model else None) or None
+    event, count = last_fallback()
     return ProvidersResponse(
-        active_provider=active_provider, active_model=active_model, providers=infos
+        active_provider=active_provider,
+        active_model=active_model,
+        providers=infos,
+        last_fallback=FallbackInfo(**event.to_dict()) if event is not None else None,
+        fallback_count=count,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routing (FORGE-477)
+# ---------------------------------------------------------------------------
+
+
+class RouteInfo(BaseModel):
+    provider: str
+    model: str
+    #: False when the route's provider has no credentials here. Such a route is
+    #: refused at call time, not used and not skipped.
+    configured: bool = True
+
+
+class RoutingResponse(BaseModel):
+    """The effective per-role routing and what roles without a route fall back to."""
+
+    roles: dict[str, RouteInfo] = Field(default_factory=dict)
+    projects: dict[str, dict[str, RouteInfo]] = Field(default_factory=dict)
+    #: Routes that would be refused (unconfigured provider). Empty when healthy.
+    problems: list[str] = Field(default_factory=list)
+    #: Only when ``project_id`` is given: the table with that project's routes applied.
+    effective_for_project: dict[str, RouteInfo] | None = None
+    #: What a role with no route runs on: the durable selection, else env.
+    default_provider: str | None = None
+    default_model: str | None = None
+
+
+@router.get("/routing", response_model=RoutingResponse)
+async def get_routing(project_id: str | None = Query(default=None)) -> RoutingResponse:
+    """Which provider and model each role is routed to.
+
+    A role absent from ``roles`` is served by the durable harness selection
+    (``default_provider`` / ``default_model``).
+    """
+    from orchestrator.harness.providers.routing import RoutingConfigError, effective_routing
+
+    try:
+        view = effective_routing(project_id)
+    except RoutingConfigError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"model routing is misconfigured: {exc}"
+        ) from exc
+    default = await list_providers()
+    return RoutingResponse(
+        roles=view["roles"],
+        projects=view["projects"],
+        problems=view["problems"],
+        effective_for_project=view.get("effective_for_project"),
+        default_provider=default.active_provider,
+        default_model=default.active_model,
     )
 
 
@@ -308,7 +425,13 @@ async def set_selection(body: SetSelectionRequest, _: None = Depends(_require_ad
         registry.get_profile(provider)
     except registry.UnknownProviderError as exc:
         raise HTTPException(status_code=400, detail=f"unknown provider '{provider}'") from exc
-    AuthStore().set_selection(provider, (body.model or "").strip() or None)
+    model = (body.model or "").strip() or None
+    if model is not None:
+        try:
+            registry.validate_model(provider, model)
+        except registry.InvalidModelError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    AuthStore().set_selection(provider, model)
     return OkResponse(provider=provider, method="selection")
 
 

@@ -135,6 +135,15 @@ def score_requirements(base: str, project_id: str, goal: str) -> dict:
         if any(m in name.lower() for m in _REQ_DECISION_NAMES):
             req_text.append(chunk)
 
+    # FORGE-528: requirement values live in the constraint set, and the prd
+    # a reader sees is rendered from it; score that view too, since the
+    # requirements decision now links the set rather than restating it.
+    try:
+        prd = _get(base, f"/v1/twin/projects/{project_id}/prd")
+        req_text.append(str(prd.get("markdown") or ""))
+    except Exception:  # noqa: BLE001 - an older gateway has no derived prd
+        pass
+
     text = " ".join(req_text or all_text)
     checks = evaluate_requirements(decision_text=text, artifact_types=artifact_types, goal=goal)
     return {

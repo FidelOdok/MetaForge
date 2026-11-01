@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 from uuid import UUID, uuid4
@@ -73,6 +73,7 @@ from api_gateway.chat.turn_capture import capture_step, capture_turn_done
 # (Postgres) backend in via ``init_project_backend``, the alias silently
 # keeps pointing at the empty in-memory store — so every project-scoped
 # chat lost its brief (get_project always missed) on any real deployment.
+from api_gateway.projects.brief import build_project_brief
 from api_gateway.projects.routes import get_project_backend
 from domain_agents.base_agent import get_llm_model, is_llm_available
 from domain_agents.mechanical.pydantic_ai_agent import (
@@ -299,94 +300,156 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
     if project is None:
         return None
 
-    lines = [
-        f"You are working inside the MetaForge project **{project.name}** "
-        f"(project_id `{project.id}`, status {project.status}).",
-    ]
-    if project.description:
-        lines.append(f"Project intent: {project.description}")
+    return await build_project_brief(project, doc_excerpt=_brief_doc_excerpt, twin=_twin)
 
-    wps = project.work_products[:_PROJECT_WP_LIMIT]
-    if wps:
-        lines.append(f"\nExisting work products in this project ({len(project.work_products)}):")
-        for wp in wps:
-            lines.append(f"- {wp.name} — {wp.type} (status {wp.status})")
-        if len(project.work_products) > _PROJECT_WP_LIMIT:
-            lines.append(f"- …and {len(project.work_products) - _PROJECT_WP_LIMIT} more")
-    else:
-        lines.append("\nThis project has no work products yet.")
 
-    # FORGE-86: inline the actual content of the most-recently-updated
-    # requirement docs, not just their names — see _brief_doc_excerpt.
-    doc_wps = sorted(
-        (wp for wp in project.work_products if wp.type in _BRIEF_DOC_TYPES),
-        key=lambda wp: wp.updated_at,
-        reverse=True,
-    )[:_BRIEF_DOC_LIMIT]
-    for wp in doc_wps:
-        excerpt = await _brief_doc_excerpt(wp.id)
-        if excerpt:
-            lines.append(f"\n### {wp.name} ({wp.type})\n{excerpt}")
+# FORGE-300: work-product types that unambiguously identify a discipline
+# already active in a project. BOM/test_plan/test_result/prd/documentation/
+# design_decision/constraint_set are deliberately omitted -- either ambiguous
+# across disciplines (a BOM serves both mechanical and electronics) or
+# genuinely cross-cutting, and their tool servers (twin, component,
+# digikey/mouser/nexar) are already always-visible core adapters regardless
+# of domain scoping (see `_CORE_ADAPTER_SERVERS` in harness_backend.py).
+_WORK_PRODUCT_TYPE_DOMAINS: dict[str, str] = {
+    "cad_model": "mechanical",
+    "cad_source_script": "mechanical",
+    "robot_description": "mechanical",
+    "manufacturing_file": "mechanical",
+    "schematic": "electronics",
+    "pcb_layout": "electronics",
+    "gerber": "electronics",
+    "pick_and_place": "electronics",
+    "firmware_source": "firmware",
+    "pinmap": "firmware",
+    "simulation_result": "simulation",
+    # FORGE-633: renders are made for industrial design review.
+    "render": "industrial_design",
+}
 
-    # MET-584: requirements-discovery directive. Chat has no gates, so the
-    # elicitation nudge lives in the brief — the enforcement twin of this is
-    # the design-flow Requirements gate (MET-582/583), and — for intent/needs
-    # specifically — the G0/G1 gates (FORGE-48, epic FORGE-35).
-    types = {str(getattr(wp.type, "value", wp.type)) for wp in project.work_products}
-    if not types & {"intent", "stakeholder_need"}:
-        lines.append(
-            "\nThis project has NO recorded intent or stakeholder needs (no "
-            "intent or stakeholder_need entity). Before substantive design "
-            "work, elicit WHY this product exists and who it's for — ask the "
-            "user rather than assuming. Record the intent first with "
-            "`twin.record_engineering_entity` (`entity_type='intent'`, give it "
-            "a short `title` so later entries can reference it), then any "
-            "stakeholder needs the same way (`entity_type='stakeholder_need'`, "
-            "`parent_refs=[the intent's title]`, `relation='motivates'`)."
-        )
-    if not types & {"prd", "constraint_set"}:
-        lines.append(
-            "\nThis project has NO recorded requirements or constraints (no prd "
-            "or constraint_set work product). Before substantive design work — "
-            "authoring or committing geometry, selecting components — elicit the "
-            "key quantified requirements from the user (loads, mass/envelope "
-            "budgets, power, cost, safety factors) and record them with "
-            "`twin.record_constraint_set` (and the rationale with "
-            "`twin.record_decision`). Ask before you assume. If an intent/need "
-            "was recorded above, link each requirement back to it with "
-            "`parent_refs=[the need's title]`."
-        )
-    if types & {"prd", "constraint_set"}:
-        lines.append(
-            "\nAs the design goes deeper — sizing a specific subsystem or "
-            "component — quantify what THAT specifically needs (e.g. this "
-            "leg's actuator torque, not just the system's overall payload) "
-            "and record it with `twin.record_constraint_set`, setting "
-            "`parent_refs` to the higher-level requirement it implements. This "
-            "keeps the chain from stated intent down to a specific part "
-            "traceable instead of stopping at the system level."
-        )
+# A brand-new project has no work products yet -- exactly when the tool cap
+# bites hardest (the catalog is the same size turn one as turn one hundred)
+# but the type-based signal above is necessarily empty. This is a coarse,
+# best-effort keyword scan of the project's own stated `description` (set at
+# creation, always present) as a second, independent signal for that case.
+_DESCRIPTION_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "mechanical": (
+        "enclosure",
+        "bracket",
+        "gearbox",
+        "housing",
+        "chassis",
+        "mechanism",
+        "linkage",
+        "gimbal",
+        "robotic arm",
+        "robot arm",
+        "cad model",
+        "3d print",
+        "actuator",
+        "gripper",
+        "structural",
+        "servo mount",
+    ),
+    "electronics": (
+        "pcb",
+        "schematic",
+        "circuit board",
+        "circuit",
+        "sensor board",
+        "power supply",
+        "voltage regulator",
+        "wiring harness",
+        "connector",
+    ),
+    "firmware": (
+        "firmware",
+        "embedded",
+        "microcontroller",
+        "rtos",
+        "esp32",
+        "stm32",
+        "arduino",
+        "bootloader",
+    ),
+    "simulation": (
+        "simulate",
+        "simulation",
+        "gazebo",
+        "physics engine",
+        "fea",
+        "stress analysis",
+        "finite element",
+    ),
+    # FORGE-633: form factor, ergonomics and finishes.
+    "industrial_design": (
+        "industrial design",
+        "form factor",
+        "ergonomic",
+        "handheld",
+        "hand-held",
+        "colour, material",
+        "color, material",
+        "cmf",
+        "anodised",
+        "anodized",
+        "powder coat",
+        "surface finish",
+        "render",
+    ),
+}
 
-    lines.append(
-        f"\nAny CAD model you generate in this project is NOT saved until you call "
-        f'`twin.commit_geometry` with `project_id="{project.id}"` — do this before your '
-        f"final answer whenever you generated or modified geometry this turn. Record "
-        f'design decisions the same way with `twin.record_decision` (`project_id="{project.id}"`). '
-        f"Ground your answers in the work products above."
-    )
-    lines.append(
-        f"\nWhen checking what's currently broken, call `twin.constraint_violations` "
-        f'with `project_id="{project.id}"` — without it, the result may include '
-        f"other projects' violations (FORGE-75)."
-    )
-    lines.append(
-        f'\nAlways pass `project_id="{project.id}"` on `twin.record_engineering_entity` '
-        f"too (intent, stakeholder_need, objective, risk, budget, invariant, waiver, "
-        f"release_approval, ...) — without it the entity is unscoped and invisible to "
-        f"this project's gate checks (e.g. a waiver recorded with no project_id never "
-        f"counts toward the G8 release gate, FORGE-78)."
-    )
-    return "\n".join(lines)
+
+def _infer_project_domains(
+    description: str, work_product_types: Iterable[str]
+) -> tuple[str, ...] | None:
+    """Best-effort discipline signal for a project-scoped chat turn (FORGE-300).
+
+    FORGE-94 found chat's full MCP catalog (143+ tools) exceeds OpenAI's
+    128-tool-array cap, so a round-robin silently drops some tools every
+    turn. ``mcp_tools_from_bridge``'s ``domains`` param already lets a
+    caller register only the always-visible core adapters plus a chosen
+    discipline's own tools -- design-flow phases have used this since
+    MET-747 (``domains=phase.disciplines``) -- but plain chat had no
+    per-conversation domain signal to pass, so it always registered
+    everything and relied on truncation (see
+    ``docs/architecture/robust-harness-design.md``, "plain ad-hoc chat has
+    no discipline signal today and stays unscoped").
+
+    This combines two signals already present on every project, no new
+    field or migration required: the disciplines its recorded work products
+    already evidence (``_WORK_PRODUCT_TYPE_DOMAINS``), and a keyword scan of
+    its own stated ``description`` (``_DESCRIPTION_DOMAIN_KEYWORDS``) for the
+    brand-new-project case where no work products exist yet. Returns
+    ``None`` (register everything, today's exact behavior) whenever neither
+    signal finds anything -- a false negative here costs nothing (the
+    catalog just isn't narrowed that turn), whereas a false positive that
+    silently hid a needed tool would be strictly worse. A scoped turn can
+    still reach anything outside its inferred domains via ``search_tools``
+    (the same rescue mechanism design-flow phases already rely on), so
+    under-scoping and over-scoping both fail safe.
+    """
+    domains: set[str] = set()
+    for wp_type in work_product_types:
+        domain = _WORK_PRODUCT_TYPE_DOMAINS.get(wp_type)
+        if domain:
+            domains.add(domain)
+    haystack = description.lower()
+    for domain, keywords in _DESCRIPTION_DOMAIN_KEYWORDS.items():
+        if any(keyword in haystack for keyword in keywords):
+            domains.add(domain)
+    return tuple(sorted(domains)) or None
+
+
+async def _project_domains(thread: ChatThreadRecord) -> tuple[str, ...] | None:
+    """``_infer_project_domains`` for a thread's project, or ``None`` when
+    the thread isn't project-scoped or the project can't be resolved."""
+    if thread.scope_kind != "project" or not thread.scope_entity_id:
+        return None
+    project = await get_project_backend().get_project(thread.scope_entity_id)
+    if project is None:
+        return None
+    wp_types = (str(getattr(wp.type, "value", wp.type)) for wp in project.work_products)
+    return _infer_project_domains(project.description, wp_types)
 
 
 def _try_uuid(value: str | None) -> UUID | None:
@@ -541,6 +604,7 @@ async def _invoke_agent(
                 # placement (system prompt vs. history pair) is path-dependent
                 # and decided in harness_backend (MET-566).
                 brief = await _project_brief(thread)
+                domains = await _project_domains(thread)
                 history = await _thread_history(thread.id)
                 availability = await _context_availability(thread)
                 # MET-566: assemble retrieved knowledge for this message via
@@ -583,6 +647,11 @@ async def _invoke_agent(
                         # MET-567: scope this turn's experience deposit to the
                         # thread's project (None on an unscoped assistant thread).
                         project_id=capture_project,
+                        # FORGE-300: scope the registered MCP tools to the
+                        # project's inferred disciplines (None -- register
+                        # everything -- for a non-project thread or a
+                        # project with no discipline signal yet).
+                        domains=domains,
                     )
                 await notify_agent_done(thread.id, "harness-agent")
                 await capture_turn_done(

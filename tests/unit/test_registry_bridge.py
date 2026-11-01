@@ -41,11 +41,32 @@ class TestRegistryMcpBridge:
         3 tools, bringing it to 72. MET-633 adds Gazebo's 3 tools
         (run_simulation, validate_world, extract_results) for 75.
         MET-635/636 adds the Isaac Sim adapter's 2 tools for 77. MET-740
-        Phase 2 adds cadquery.validate_physics_stability for 78.
+        Phase 2 adds cadquery.validate_physics_stability for 78. FORGE-231
+        adds freecad.import_step for 79. FORGE-277 adds
+        freecad.list_named_faces for 80. FORGE-280 adds calculix.cross_check_
+        cantilever_beam + calculix.check_mesh_convergence for 82.
+        FORGE-281 adds calculix.cross_check_cantilever_frequency for 83.
+        FORGE-283 adds calculix.compute_joint_loads for 84. FORGE-282 adds
+        calculix.cross_check_thermal_steady_state for 85. FORGE-544 adds
+        power.check_budget for 86. FORGE-542 adds spice.run_simulation
+        for 87. FORGE-615 adds cost.estimate_manufacturing for 88. FORGE-628 adds
+        blender.render and blender.export_blend for 90.
+        FORGE-557 adds openfoam.run_internal_flow for 91. The composable-flows
+        follow-up adds optimize.suggest for 92. FORGE-671 adds robot.size_drive and
+        robot.diff_drive_kinematics for 94. FORGE-672 adds packaging.box_compression
+        and packaging.rsc_dieline for 96. FORGE-670 adds the four aircraft.* estimates
+        for 100. FORGE-674/677 add firmware.build and firmware.run_emulated for 102.
+        FORGE-675 adds firmware.static_check for 103.
+        FORGE-680 adds kicad.export_drill and kicad.export_pos for 105.
+        FORGE-681 adds power.runtime for 106. FORGE-683 adds kicad.generate_schematic,
+        kicad.generate_pcb and kicad.autoroute_pcb for 109. FORGE-684 adds
+        kicad.export_3d, kicad.render_pcb and kicad.update_components for 112.
+        FORGE-687 adds kicad.export_svg for 113. FORGE-711 adds the four simready.*
+        tools for 117.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 78
+        assert len(tools) == 117
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""
@@ -82,3 +103,35 @@ class TestRegistryMcpBridge:
                 "cadquery.create_parametric",
                 {"shape_type": "", "parameters": {}, "output_path": "/out.step"},
             )
+
+
+class _BlankError(Exception):
+    """Raised with no args -- ``str(exc)`` is ``""``, like aiohttp's
+    ``ServerDisconnectedError()`` under real connection contention."""
+
+
+class _FakeClientRaisingBlank:
+    async def call_tool(self, request):  # noqa: ANN001, ANN201 — test double
+        raise _BlankError()
+
+
+class _FakeRegistryWithBlankFailure:
+    def get_adapter_for_tool(self, tool_id: str) -> str | None:
+        return "fake-adapter"
+
+    def get_client(self, adapter_id: str) -> _FakeClientRaisingBlank:
+        return _FakeClientRaisingBlank()
+
+
+class TestRegistryMcpBridgeErrorMessages:
+    """FORGE-249: a message-less transport failure must not render blank."""
+
+    async def test_a_blank_exception_still_produces_a_non_empty_detail(self):
+        bridge = RegistryMcpBridge(_FakeRegistryWithBlankFailure())  # type: ignore[arg-type]
+        with pytest.raises(McpToolError) as exc_info:
+            await bridge.invoke("freecad.open_session", {"name": "x"})
+        assert exc_info.value.details != ""
+        assert exc_info.value.details == "_BlankError"
+        # The rendered message must not end in a bare trailing "failed: "
+        # with nothing after it -- the exact reported symptom.
+        assert not str(exc_info.value).rstrip().endswith("failed:")

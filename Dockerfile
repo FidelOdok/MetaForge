@@ -2,6 +2,23 @@
 # Usage:  docker build -t metaforge-gateway .
 #         docker run -p 8000:8000 metaforge-gateway
 
+# ── Stage 0: dependency manifest ─────────────────────────────────────
+# FORGE-715: the release workflow stamps the release version into
+# pyproject.toml before building, so the file differs on every build. Copied
+# straight into the deps stage, it invalidated the dependency layer each time
+# and every release reinstalled everything (16 to 40 minutes, almost all of
+# it here). This stage writes a copy with the version pinned to 0.0.0 and an
+# empty README; COPY --from keys its cache on that content, so the deps layer
+# below is reused until the dependencies themselves change. The real version
+# is installed by the runtime stage's `pip install --no-deps .`, which is what
+# /health reads.
+FROM python:3.11-slim AS manifest
+
+WORKDIR /src
+COPY pyproject.toml ./
+COPY scripts/stamp_version.py ./
+RUN python stamp_version.py 0.0.0 --path pyproject.toml && touch README.md
+
 # ── Stage 1: dependencies ────────────────────────────────────────────
 FROM python:3.11-slim AS deps
 
@@ -12,7 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+COPY --from=manifest /src/pyproject.toml /src/README.md ./
+COPY LICENSE NOTICE ./
 # Install runtime + gateway database dependencies.
 #
 # ``kafka`` and ``temporal`` are included deliberately: both tiers were built
@@ -21,7 +39,11 @@ COPY pyproject.toml ./
 # ``temporalio`` were absent from the image and the code fell through its
 # graceful-degradation path forever (zero Kafka topics, zero Temporal workflow
 # executions). Installing the extras is what makes the wiring reachable.
-RUN pip install --no-cache-dir ".[gateway,kafka,temporal]" \
+#
+# ``omniverse-usd`` (usd-core, trimesh, scipy; plain wheels, no GPU) is what
+# lets simready.inspect/import open a stage in the gateway and the MCP
+# sidecar (FORGE-711). Without it they raise the install hint.
+RUN pip install --no-cache-dir ".[gateway,kafka,temporal,omniverse-usd]" \
     && pip install --no-cache-dir uvicorn[standard]
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────
@@ -51,13 +73,25 @@ COPY tool_registry/ ./tool_registry/
 COPY domain_agents/ ./domain_agents/
 COPY observability/ ./observability/
 COPY metaforge/ ./metaforge/
-COPY pyproject.toml ./
+COPY pyproject.toml README.md LICENSE NOTICE ./
 
 # Install the package itself (editable not needed in container)
 RUN pip install --no-cache-dir --no-deps .
 
 ENV PYTHONUNBUFFERED=1
 ENV METAFORGE_ENV=docker
+
+# FORGE-411: stamp the commit this image was built from, so a running process
+# can say whether it matches the checkout beside it. The sidecar mounts source
+# and does not hot-reload, so "image SHA vs mounted SHA" is the staleness
+# signal -- and it served two-day-old code for two days because nothing
+# published either number.
+#
+# Unset is handled: health/check then says staleness cannot be detected rather
+# than reporting a false pass. CI passes
+# --build-arg METAFORGE_BUILD_SHA=$(git rev-parse HEAD).
+ARG METAFORGE_BUILD_SHA=""
+ENV METAFORGE_BUILD_SHA=${METAFORGE_BUILD_SHA}
 
 EXPOSE 8000
 

@@ -10,7 +10,7 @@ in CI (which has no FreeCAD). To run it against the real runtime, execute inside
 the freecad-adapter container::
 
     docker run -i --rm --entrypoint /usr/bin/python3 \
-        metaforge/freecad-adapter:latest -m pytest \
+        ghcr.io/fidelodok/metaforge-freecad-adapter:latest -m pytest \
         tests/integration/test_freecad_authoring_vertical.py -v
 
 This is the permanent form of the in-container validation that caught the

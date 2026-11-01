@@ -1,0 +1,35 @@
+{
+  "name": "check_cmf_compatibility",
+  "version": "0.1.0",
+  "domain": "industrial_design",
+  "agent": "industrial_design",
+  "description": "Checks that each part's chosen library appearance (colour, material and finish) is recorded as suitable for the part's material, lists the finishing processes the choices need, and surfaces any assumed colour or render values still to be reviewed, with a compatible / incompatible / incomplete verdict",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "library.get_appearance",
+      "capability": "material_process_library",
+      "required": false
+    },
+    {
+      "tool_id": "library.list_appearances",
+      "capability": "material_process_library",
+      "required": false
+    },
+    {
+      "tool_id": "twin.render_work_product",
+      "capability": "twin_render",
+      "required": false
+    }
+  ],
+  "input_schema": "schema.CheckCmfCompatibilityInput",
+  "output_schema": "schema.CheckCmfCompatibilityOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": true,
+  "tags": [
+    "industrial_design",
+    "cmf",
+    "dfm"
+  ]
+}

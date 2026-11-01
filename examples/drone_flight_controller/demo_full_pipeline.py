@@ -198,7 +198,7 @@ async def run_pipeline() -> dict[str, Any]:
             name="drone-fc-schematic-v1",
             type=WorkProductType.SCHEMATIC,
             domain="electronics",
-            file_path="eda/kicad/drone_fc.kicad_sch",
+            file_path="eda/kicad/drone-fc.kicad_sch",
             content_hash="sha256:b2c3d4e5f6a7",
             format="kicad_sch",
             created_by="human",
@@ -274,7 +274,7 @@ async def run_pipeline() -> dict[str, Any]:
             task_type="run_erc",
             work_product_id=schematic_artifact.id,
             parameters={
-                "schematic_file": "eda/kicad/drone_fc.kicad_sch",
+                "schematic_file": "eda/kicad/drone-fc.kicad_sch",
             },
         )
     )
@@ -315,7 +315,7 @@ async def run_pipeline() -> dict[str, Any]:
                 "mesh_file": "models/motor_mount_bracket.inp",
                 "load_cases": [{"name": "hover_3g", "force_n": 30.0}],
                 "analysis_type": "static",
-                "material": "aluminum_6061",
+                "material": "aluminium_6061_t6",
             },
         )
     )

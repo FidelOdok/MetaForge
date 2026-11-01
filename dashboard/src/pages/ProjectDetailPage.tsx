@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useProject, useUpdateProject, useDeleteProject } from '../hooks/use-projects';
 import { useActiveProject } from '../hooks/use-active-project';
@@ -7,6 +7,15 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { formatRelativeTime } from '../utils/format-time';
+import { useCurrentView } from '../hooks/use-items';
+import { CurrentItemsPanel } from '../components/items/CurrentItemsPanel';
+import { BaselinesPanel } from '../components/items/BaselinesPanel';
+
+// FORGE-531: the preview registry and engines load only when a row's
+// Preview toggle is first opened.
+const ProjectRowPreview = lazy(() =>
+  import('../components/preview/ProjectRowPreview').then((m) => ({ default: m.ProjectRowPreview })),
+);
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'response' in error) {
@@ -71,6 +80,11 @@ export function ProjectDetailPage() {
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
   const { activeProjectId, setActiveProjectId } = useActiveProject();
+  // FORGE-526: the default view is the project's current items, one row per
+  // item at its current revision. The flat work-product list is the fallback
+  // when the twin cannot answer.
+  const { data: view } = useCurrentView(id);
+  const [showBaselines, setShowBaselines] = useState(false);
 
   useEffect(() => {
     if (id && id !== activeProjectId) setActiveProjectId(id);
@@ -80,6 +94,8 @@ export function ProjectDetailPage() {
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // FORGE-531: which work product row has its compact preview open.
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -121,11 +137,18 @@ export function ProjectDetailPage() {
   }
 
   const activity = buildActivityFeed(project.work_products);
-  const errorCount = project.work_products.filter((wp) => wp.status === 'error').length;
+  // Counts and readiness cover current items only when the current view is
+  // available (FORGE-526), never every node a run ever wrote.
+  const errorCount = view
+    ? view.counts.error
+    : project.work_products.filter((wp) => wp.status === 'error').length;
   const validCount = project.work_products.filter((wp) => wp.status === 'valid').length;
-  const readiness = project.work_products.length > 0
-    ? Math.round((validCount / project.work_products.length) * 100)
-    : 0;
+  const readiness = view
+    ? view.readiness
+    : project.work_products.length > 0
+      ? Math.round((validCount / project.work_products.length) * 100)
+      : 0;
+  const itemCount = view ? view.counts.total : project.work_products.length;
 
   const startEditing = () => {
     setEditName(project.name);
@@ -227,7 +250,21 @@ export function ProjectDetailPage() {
         <Link className="action-secondary" to="/bom">
           Bill of materials
         </Link>
+        <button
+          type="button"
+          className="action-secondary"
+          aria-expanded={showBaselines}
+          onClick={() => setShowBaselines((v) => !v)}
+        >
+          {showBaselines ? 'Hide baselines' : 'Baselines'}
+        </button>
       </div>
+
+      {showBaselines && (
+        <div className="mb-4">
+          <BaselinesPanel projectId={project.id} />
+        </div>
+      )}
 
       {/* Description, or the rename/redescribe form */}
       {isEditing ? (
@@ -288,10 +325,10 @@ export function ProjectDetailPage() {
         {/* Work Products */}
         <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
           <div style={{ fontSize: '28px', fontWeight: 300, color: 'var(--mf-c-e2e2eb)', lineHeight: 1, letterSpacing: '-0.02em' }}>
-            {project.work_products.length}
+            {itemCount}
           </div>
           <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}>
-            Work Products
+            {view ? 'Current items' : 'Work Products'}
           </div>
         </div>
 
@@ -301,7 +338,7 @@ export function ProjectDetailPage() {
             {readiness}%
           </div>
           <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}>
-            Artifacts marked valid
+            {view ? 'Current items valid' : 'Artifacts marked valid'}
           </div>
           <div className="absolute" style={{ right: '14px', bottom: '14px' }}>
             <svg width="38" height="38" viewBox="0 0 38 38">
@@ -349,7 +386,10 @@ export function ProjectDetailPage() {
       {/* Two-column: work products + activity */}
       <div className="project-detail-columns grid gap-3">
 
-        {/* Work Products panel */}
+        {view ? (
+          <CurrentItemsPanel view={view} projectId={project.id} />
+        ) : (
+        /* Work Products panel (fallback when the current view is unavailable) */
         <div className="glass rounded overflow-hidden" style={glassCard}>
           {/* Panel header */}
           <div
@@ -370,10 +410,11 @@ export function ProjectDetailPage() {
             </div>
           ) : (
             project.work_products.map((wp) => (
+              <div key={wp.id}>
+              <div className="flex items-center hover:bg-surface-high">
               <Link
-                key={wp.id}
                 to={`/twin?node=${wp.id}`}
-                className="flex items-center gap-3 px-4 hover:bg-surface-high cursor-pointer"
+                className="flex flex-1 min-w-0 items-center gap-3 pl-4 pr-2 cursor-pointer"
                 style={{ height: '40px' }}
               >
                 {/* Status dot */}
@@ -423,9 +464,49 @@ export function ProjectDetailPage() {
                   {formatRelativeTime(wp.updatedAt)}
                 </span>
               </Link>
+              <button
+                type="button"
+                onClick={() => setPreviewId((id) => (id === wp.id ? null : wp.id))}
+                aria-expanded={previewId === wp.id}
+                aria-label={`${previewId === wp.id ? 'Hide' : 'Show'} preview of ${wp.name}`}
+                title="Preview"
+                className="flex-shrink-0 mr-3 rounded"
+                style={{
+                  background: previewId === wp.id ? 'var(--mf-c-282a30)' : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 4,
+                  color: previewId === wp.id ? '#ff5a0a' : 'var(--mf-c-9a9aaa)',
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 16, verticalAlign: 'middle' }}>
+                  {previewId === wp.id ? 'visibility_off' : 'visibility'}
+                </span>
+              </button>
+              </div>
+              {previewId === wp.id && (
+                <div
+                  className="px-4 py-3"
+                  data-testid="project-row-preview"
+                  style={{ borderTop: '1px solid var(--mf-r-65-72-90-0p2)', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', background: 'var(--mf-c-111319)' }}
+                >
+                  <Suspense
+                    fallback={
+                      <div className="font-mono" style={{ fontSize: 11, color: 'var(--mf-c-9a9aaa)' }}>
+                        Loading preview…
+                      </div>
+                    }
+                  >
+                    <ProjectRowPreview nodeId={wp.id} />
+                  </Suspense>
+                </div>
+              )}
+              </div>
             ))
           )}
         </div>
+
+        )}
 
         {/* Artifact updates panel */}
         <div className="glass rounded overflow-hidden" style={glassCard}>

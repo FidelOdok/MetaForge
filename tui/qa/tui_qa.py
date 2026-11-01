@@ -189,6 +189,14 @@ INPUT_PLACEHOLDER = "message  (/model"
 FOOTER_FINGERPRINT = "Ctrl+T/R"  # nav hint in App's footer (MET-606 labels)
 
 
+def error_banner_visible(pane: str) -> bool:
+    """Whether the red `error: ...` banner (Chat.tsx, above the input box) is
+    currently on screen -- distinct from an assistant transcript line like
+    `(no reply — stream error: ...)`, which legitimately stays in scrollback
+    forever and must not false-positive this check (FORGE-101)."""
+    return any(line.strip().startswith("error: ") for line in pane.splitlines())
+
+
 def max_blank_run(text: str) -> int:
     """Longest run of consecutive blank (whitespace-only) lines."""
     best = run = 0
@@ -347,6 +355,38 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool, gateway: st
             "wedge_recovers_without_agent_done",
             bool(turn) and recovered and shows_reply,
             f"turn={_fmt(turn)}, not_thinking={recovered}, reply_shown={shows_reply}",
+        )
+
+        # 4c-bis. FORGE-101: a provider failure's raw dump (can carry the
+        #     provider's key-management URL + account user_id) must reach the
+        #     screen only as a short decoded summary, and that banner must NOT
+        #     survive into a later, successful turn.
+        prev = len(read_turns(log_path))
+        tui.type("__provider_error__ trigger a 402")
+        tui.key("Enter")
+        turn = wait_for_new_turn(tui, log_path, prev, timeout=20)
+        time.sleep(0.8)  # let the banner render
+        pane = tui.capture()
+        banner_shown = error_banner_visible(pane) and "out of credits (402)" in pane
+        raw_leaked = "user_9f2a1c7e8b3d4a5f" in pane or "openrouter.ai/settings/keys" in pane
+        tui.snap("after provider error")
+        rep.add(
+            "provider_error_shows_summary_not_raw_dump",
+            bool(turn) and banner_shown and not raw_leaked,
+            f"turn={_fmt(turn)}, banner_shown={banner_shown}, raw_leaked={raw_leaked}",
+        )
+
+        prev = len(read_turns(log_path))
+        tui.type("say hello again")
+        tui.key("Enter")
+        turn = wait_for_new_turn(tui, log_path, prev, timeout=20)
+        time.sleep(0.8)  # let the (cleared) banner state render
+        banner_cleared = not error_banner_visible(tui.capture())
+        tui.snap("after next turn post-error")
+        rep.add(
+            "stale_error_banner_clears_on_next_turn",
+            bool(turn and turn.get("chars", 0) > 0) and banner_cleared,
+            f"turn={_fmt(turn)}, banner_cleared={banner_cleared}",
         )
 
         # 4d. A LONG agentic turn (many steps + a multi-screen streamed answer)

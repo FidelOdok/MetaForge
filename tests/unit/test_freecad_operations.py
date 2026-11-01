@@ -16,7 +16,58 @@ from tool_registry.tools.freecad.operations import (
     HAS_FREECAD,
     FreecadNotAvailableError,
     FreecadOperations,
+    _resolve_parameters,
 )
+
+
+@pytest.fixture(autouse=True)
+def _passthrough_twin_frame_step():
+    """FORGE-505: these tests mesh placeholder STEP text, not real geometry, so
+    the placement-baking step (needs FreeCAD) is a passthrough here. It is
+    covered in tests/unit/test_freecad_mesh_frame.py."""
+    with patch.object(
+        FreecadOperations, "_twin_frame_step", lambda self, input_file: (input_file, False)
+    ):
+        yield
+
+
+# ---------------------------------------------------------------------------
+# 1a2. _sketch_point / _sketch_scalar -- FORGE-227: create_sketch elements must
+#     accept both this tool's flat-key convention (cx/cy/r, x1/y1/x2/y2) and
+#     the Design IR's grouped-point convention (center/radius, start/end),
+#     with a clear error (not a bare KeyError) when neither is satisfied.
+#     Pure dict/tuple parsing -- no FreeCAD needed, runs regardless of
+#     HAS_FREECAD.
+# ---------------------------------------------------------------------------
+
+
+class TestSketchPoint:
+    def test_flat_keys(self) -> None:
+        assert FreecadOperations._sketch_point(
+            {"type": "circle", "cx": 1.0, "cy": 2.0}, flat=("cx", "cy"), grouped="center"
+        ) == (1.0, 2.0)
+
+    def test_grouped_key(self) -> None:
+        assert FreecadOperations._sketch_point(
+            {"type": "circle", "center": [3.0, 4.0]}, flat=("cx", "cy"), grouped="center"
+        ) == (3.0, 4.0)
+
+    def test_neither_convention_raises_with_keys_listed(self) -> None:
+        with pytest.raises(ValueError, match=r"'cx' and 'cy'.*'center'.*x1"):
+            FreecadOperations._sketch_point(
+                {"type": "circle", "x1": 1.0}, flat=("cx", "cy"), grouped="center"
+            )
+
+
+class TestSketchScalar:
+    def test_first_matching_name(self) -> None:
+        assert FreecadOperations._sketch_scalar({"r": 5.0}, "r", "radius") == 5.0
+        assert FreecadOperations._sketch_scalar({"radius": 5.0}, "r", "radius") == 5.0
+
+    def test_missing_raises_with_names_listed(self) -> None:
+        with pytest.raises(ValueError, match=r"'r' or 'radius'"):
+            FreecadOperations._sketch_scalar({"cx": 1.0}, "r", "radius")
+
 
 # ---------------------------------------------------------------------------
 # 1. Shape defaults are well-formed
@@ -45,6 +96,112 @@ class TestShapeDefaults:
         bracket = _SHAPE_DEFAULTS["bracket"]
         assert "hole_radius" in bracket
         assert "thickness" in bracket
+
+
+# ---------------------------------------------------------------------------
+# 1b. _resolve_parameters — FORGE-96: unknown keys are rejected, not
+#     silently dropped, and 'diameter' resolves to radius/2 where unambiguous.
+# ---------------------------------------------------------------------------
+
+
+class TestResolveParameters:
+    def test_known_keys_pass_through_unchanged(self) -> None:
+        resolved = _resolve_parameters("box", {"length": 100, "width": 50, "height": 20})
+        assert resolved == {"length": 100, "width": 50, "height": 20}
+
+    def test_unknown_key_raises_with_the_accepted_list(self) -> None:
+        with pytest.raises(ValueError, match=r"unknown parameter.*girth.*accepted.*radius"):
+            _resolve_parameters("cylinder", {"girth": 150, "height": 20})
+
+    def test_diameter_aliases_to_radius_for_cylinder(self) -> None:
+        # Live repro: shape_type="cylinder", parameters={"diameter": 150, ...}
+        # silently built the DEFAULT radius=5.0 pin instead of a Ø150 disc.
+        resolved = _resolve_parameters("cylinder", {"diameter": 150, "height": 20})
+        assert resolved == {"radius": 75.0, "height": 20}
+
+    def test_diameter_aliases_to_radius_for_sphere(self) -> None:
+        resolved = _resolve_parameters("sphere", {"diameter": 40})
+        assert resolved == {"radius": 20.0}
+
+    def test_diameter_is_rejected_for_shapes_without_a_plain_radius(self) -> None:
+        """cone has radius1/radius2 -- no unambiguous single 'diameter'."""
+        with pytest.raises(ValueError, match="diameter"):
+            _resolve_parameters("cone", {"diameter": 40, "height": 20})
+
+    def test_diameter_is_rejected_when_it_has_no_geometric_meaning(self) -> None:
+        with pytest.raises(ValueError, match="diameter"):
+            _resolve_parameters("box", {"diameter": 40})
+
+    def test_both_diameter_and_radius_given_is_rejected_not_silently_resolved(self) -> None:
+        """Ambiguous -- explicit rejection beats guessing which one wins."""
+        with pytest.raises(ValueError, match="diameter"):
+            _resolve_parameters("cylinder", {"diameter": 150, "radius": 5, "height": 20})
+
+    def test_unrecognized_shape_type_is_left_untouched(self) -> None:
+        """_build_shape's own 'Unsupported shape type' error is the more
+        relevant one for an unrecognized shape -- this must not pre-empt it
+        with a confusing 'unknown parameters: everything' error."""
+        params = {"anything": 1, "goes": 2}
+        assert _resolve_parameters("not_a_real_shape", params) == params
+
+    def test_multiple_unknown_keys_are_all_named(self) -> None:
+        # sorted() orders them alphabetically: 'bogus' before 'typo'.
+        with pytest.raises(ValueError, match=r"bogus.*typo"):
+            _resolve_parameters("box", {"length": 10, "bogus": 1, "typo": 2})
+
+
+# ---------------------------------------------------------------------------
+# 1c. create_parametric computes mass_kg from volume + material density
+#     (FORGE-100) -- previously a constraint like `moving_mass_kg <= 4.5`
+#     always read the default 0 because nothing ever wrote this key.
+# ---------------------------------------------------------------------------
+
+
+class _FakeParamBoundBox:
+    XMin = YMin = ZMin = 0.0
+    XMax, YMax, ZMax = 100.0, 50.0, 20.0
+
+
+class _FakeParamShape:
+    Volume = 100_000.0  # mm^3 = 1e-4 m^3
+    Area = 10_000.0
+    BoundBox = _FakeParamBoundBox()
+
+    def exportStep(self, path: str) -> None:  # noqa: N802
+        Path(path).write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+
+class _FakePartForCreateParametric:
+    @staticmethod
+    def makeBox(length: float, width: float, height: float) -> _FakeParamShape:  # noqa: N802
+        return _FakeParamShape()
+
+
+class TestCreateParametricMassKg:
+    def test_mass_kg_uses_material_density(self, tmp_path) -> None:
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Part", _FakePartForCreateParametric()),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.create_parametric(
+                "box", {"length": 100, "width": 50, "height": 20}, material="aluminium_6061_t6"
+            )
+
+        # volume 100,000 mm^3 = 1e-4 m^3; aluminium_6061_t6 = 2700 kg/m^3
+        assert result["mass_kg"] == pytest.approx(0.27)
+
+    def test_mass_kg_omitted_when_no_material_given(self, tmp_path) -> None:
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Part", _FakePartForCreateParametric()),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.create_parametric("box", {"length": 100, "width": 50, "height": 20})
+
+        assert "mass_kg" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +459,9 @@ class _FakeDoc:
         self.Name = name
         self.Objects: list[_FakeDocObject] = []
 
+    def recompute(self) -> None:
+        pass
+
 
 class _FakeFreeCADMulti:
     """Fakes the two FreeCAD entry points describe_step_file needs."""
@@ -378,6 +538,82 @@ class TestDescribeStepFile:
         with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
             with pytest.raises(FreecadNotAvailableError):
                 ops.describe_step_file("/workspace/part.step")
+
+
+class TestImportStep:
+    """freecad.import_step — loads a STEP file into a LIVE session document
+    (FORGE-231). Committed/staged parts (e.g. via
+    twin.stage_work_product_file) had no way back into a session:
+    open_session only takes a name, and every assembly tool needs a
+    session-registered obj_id."""
+
+    def test_returns_only_solid_bearing_top_level_objects(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDoc("session-doc")
+        tabletop = _FakeDocObject("Tabletop", _FakeShape())
+        tabletop.Shape.Solids = [object()]
+        leg_a = _FakeDocObject("LegA", _FakeShape())
+        leg_a.Shape.Solids = [object()]
+        origin = _FakeDocObject("Origin")  # no Shape at all -- must be skipped
+
+        freecad = _FakeFreeCADMulti()
+        freecad.doc = doc  # pretend this document is already open (a live session)
+        fake_import = _FakeImport(freecad, [tabletop, leg_a, origin])
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            result = ops.import_step(doc, "/workspace/_staged_work_products/part.step")
+
+        assert [obj.Label for obj in result] == ["Tabletop", "LegA"]
+
+    def test_only_newly_inserted_objects_are_considered(self) -> None:
+        """A session document can already hold objects from earlier authoring
+        in the same session -- only what Import.insert just added should come
+        back, never pre-existing session objects."""
+        ops = FreecadOperations()
+        doc = _FakeDoc("session-doc")
+        pre_existing = _FakeDocObject("EarlierPrimitive", _FakeShape())
+        pre_existing.Shape.Solids = [object()]
+        doc.Objects.append(pre_existing)
+
+        imported_part = _FakeDocObject("ImportedPart", _FakeShape())
+        imported_part.Shape.Solids = [object()]
+
+        freecad = _FakeFreeCADMulti()
+        freecad.doc = doc
+        fake_import = _FakeImport(freecad, [imported_part])
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            result = ops.import_step(doc, "/workspace/part.step")
+
+        assert [obj.Label for obj in result] == ["ImportedPart"]
+
+    def test_raises_a_clear_error_when_nothing_imported_has_solids(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDoc("session-doc")
+        wireframe_only = _FakeDocObject("JustCurves")  # no Shape at all
+
+        freecad = _FakeFreeCADMulti()
+        freecad.doc = doc
+        fake_import = _FakeImport(freecad, [wireframe_only])
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            with pytest.raises(ValueError, match="nothing usable for assembly"):
+                ops.import_step(doc, "/workspace/wireframe.step")
+
+    def test_raises_when_unavailable(self) -> None:
+        ops = FreecadOperations()
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            with pytest.raises(FreecadNotAvailableError):
+                ops.import_step(_FakeDoc("d"), "/workspace/part.step")
 
 
 class TestExecuteCodeSandbox:
@@ -801,57 +1037,520 @@ class TestExportStepStepBase64:
 
 
 # ---------------------------------------------------------------------------
-# 12. generate_mesh loads STEP input the same way export_step does (FORGE-83)
+# 12. generate_mesh shells out to gmsh for a real volumetric mesh (FORGE-99)
 # ---------------------------------------------------------------------------
+#
+# The previous implementation used FreeCAD's Mesh module
+# (mesh_obj.addFacets(shape.tessellate(element_size)[1])), which failed on
+# EVERY input ("expect a sequence of floats or Vector" -- tessellate()
+# returns index triples, addFacets() expects coordinates) and, even fixed,
+# could only ever produce a surface triangulation, not the volumetric
+# tetrahedra a structural FEA solve needs. generate_mesh now shells out to
+# the gmsh CLI, verified live against a real STEP box: a real
+# `*ELEMENT, type=C3D4` block with genuine tetrahedra.
+
+# A realistic (trimmed) fixture matching gmsh's REAL output for a STEP box,
+# captured live against the actual freecad-adapter container -- boundary
+# elements (T3D2 edges, CPS3 faces) plus the volumetric C3D4 block gmsh
+# emits by default, each as its own named *ELSET per original STEP entity.
+_REAL_GMSH_INP_FIXTURE = """\
+*Heading
+ box.inp
+*NODE
+1, 0, 0, 0
+2, 0, 0, 10
+3, 0, 15, 0
+*ELEMENT, type=T3D2, ELSET=Line1
+1, 1, 9
+2, 9, 10
+*ELEMENT, type=CPS3, ELSET=Surface1
+1, 168, 281, 157
+2, 168, 311, 157
+*ELEMENT, type=C3D4, ELSET=Volume1
+1, 168, 281, 157, 311
+2, 168, 311, 157, 327
+3, 282, 289, 91, 314
+"""
 
 
-class _FakeMeshShape:
-    """Fakes the .tessellate() entry point generate_mesh needs."""
+def _fake_gmsh_run(cmd: list[str], **kwargs):
+    """subprocess.run stand-in: writes the real-shaped fixture to the -o path."""
+    import subprocess as _subprocess
 
-    def tessellate(self, element_size: float):
-        return ([object()], [object(), object()])  # (vertices, facets)
-
-
-class _FakeMeshObj:
-    def __init__(self) -> None:
-        self.CountPoints = 0
-        self.CountFacets = 0
-        self._facets: list = []
-
-    def addFacets(self, facets: list) -> None:  # noqa: N802
-        self._facets = facets
-        self.CountFacets = len(facets)
-        self.CountPoints = len(facets) + 1
-
-    def write(self, output_path: str) -> None:
-        with open(output_path, "wb") as f:  # noqa: PTH123
-            f.write(b"fake mesh data")
+    output_path = cmd[cmd.index("-o") + 1]
+    Path(output_path).write_text(_REAL_GMSH_INP_FIXTURE, encoding="utf-8")
+    return _subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
 
 
-class _FakeMeshModule:
-    def Mesh(self) -> _FakeMeshObj:  # noqa: N802
-        return _FakeMeshObj()
-
-
-class TestGenerateMeshLoadsStepInput:
-    """FORGE-83: generate_mesh shared export_step's openDocument() bug --
-    input_file is a STEP file in practice, not a native .FCStd project, so
-    it must load via Import.insert() into a fresh document."""
-
-    def test_generate_mesh_from_step_file(self, tmp_path) -> None:
+class TestGenerateMeshUsesGmsh:
+    def test_produces_real_volumetric_tetrahedra(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
         ops = FreecadOperations()
-        part = _FakeDocObject("Part", _FakeMeshShape())
-        freecad = _FakeFreeCADMulti()
-        fake_import = _FakeImport(freecad, [part])
         with (
             patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
-            patch("tool_registry.tools.freecad.operations.HAS_MESH", True),
-            patch("tool_registry.tools.freecad.operations.FreeCAD", freecad),
-            patch("tool_registry.tools.freecad.operations.Import", fake_import),
-            patch("tool_registry.tools.freecad.operations.Mesh", _FakeMeshModule()),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch(
+                "tool_registry.tools.freecad.operations.subprocess.run", side_effect=_fake_gmsh_run
+            ),
             patch.object(ops, "work_dir", str(tmp_path)),
         ):
-            result = ops.generate_mesh("/workspace/part.step")
+            result = ops.generate_mesh(str(step_file))
 
-        assert result["num_elements"] == 2
-        assert freecad.closed == ["doc1"]
+        assert result["num_nodes"] == 3
+        assert "C3D4" in result["element_types"]
+        assert result["quality_metrics"]["num_volume_elements"] == 3
+        assert result["quality_metrics"]["element_counts_by_type"]["C3D4"] == 3
+        # Boundary element sets are real too (free BC/load node groups).
+        assert result["quality_metrics"]["element_counts_by_type"]["T3D2"] == 2
+        assert result["quality_metrics"]["element_counts_by_type"]["CPS3"] == 2
+        # Total spans every element type, not just the volumetric ones.
+        assert result["num_elements"] == 3 + 2 + 2
+
+    def test_faces_is_empty_when_referenced_nodes_are_not_in_the_trimmed_fixture(
+        self, tmp_path
+    ) -> None:
+        """The module-level fixture is deliberately trimmed (only 3 of the
+        real mesh's nodes) -- Surface1's real node ids aren't among them, so
+        the face table correctly reports nothing rather than computing a
+        bogus bbox/area from partial data. See TestParseInpFaceTable below
+        for the real computation, against a small, fully self-consistent
+        mesh."""
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch(
+                "tool_registry.tools.freecad.operations.subprocess.run", side_effect=_fake_gmsh_run
+            ),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file))
+        assert result["faces"] == []
+
+    def test_gmsh_binary_missing_raises(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("x")
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.shutil.which", return_value=None),
+        ):
+            with pytest.raises(RuntimeError, match="gmsh binary"):
+                ops.generate_mesh(str(step_file))
+
+    def test_missing_input_file_raises(self, tmp_path) -> None:
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+        ):
+            with pytest.raises(FileNotFoundError):
+                ops.generate_mesh(str(tmp_path / "nope.step"))
+
+    def test_gmsh_nonzero_exit_raises_with_stderr(self, tmp_path) -> None:
+        import subprocess as _subprocess
+
+        step_file = tmp_path / "part.step"
+        step_file.write_text("x")
+        ops = FreecadOperations()
+
+        def failing_run(cmd, **kwargs):
+            return _subprocess.CompletedProcess(
+                cmd, returncode=1, stdout="", stderr="Error: could not parse STEP file"
+            )
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch("tool_registry.tools.freecad.operations.subprocess.run", side_effect=failing_run),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            with pytest.raises(RuntimeError, match="could not parse STEP file"):
+                ops.generate_mesh(str(step_file))
+
+    def test_unsupported_algorithm_raises(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("x")
+        ops = FreecadOperations()
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True):
+            with pytest.raises(ValueError, match="Unsupported meshing algorithm"):
+                ops.generate_mesh(str(step_file), algorithm="bogus")
+
+    def test_unsupported_element_order_raises(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("x")
+        ops = FreecadOperations()
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True):
+            with pytest.raises(ValueError, match="Unsupported element_order"):
+                ops.generate_mesh(str(step_file), element_order=3)
+
+    def test_element_order_defaults_to_one_and_is_passed_to_gmsh(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        captured_cmd: list[str] = []
+
+        def capturing_run(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            return _fake_gmsh_run(cmd, **kwargs)
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch(
+                "tool_registry.tools.freecad.operations.subprocess.run", side_effect=capturing_run
+            ),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file))
+
+        assert result["quality_metrics"]["element_order"] == 1
+        order_index = captured_cmd.index("-order")
+        assert captured_cmd[order_index + 1] == "1"
+
+    def test_element_order_two_requests_quadratic_elements_from_gmsh(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        captured_cmd: list[str] = []
+
+        def capturing_run(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            return _fake_gmsh_run(cmd, **kwargs)
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch(
+                "tool_registry.tools.freecad.operations.subprocess.run", side_effect=capturing_run
+            ),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file), element_order=2)
+
+        assert result["quality_metrics"]["element_order"] == 2
+        order_index = captured_cmd.index("-order")
+        assert captured_cmd[order_index + 1] == "2"
+
+    def test_netgen_and_mefisto_are_accepted_but_route_through_gmsh(self, tmp_path) -> None:
+        """FORGE-99: gmsh has no backend literally named netgen/mefisto, so
+        these are honored as recognized requests (never a 400) but actually
+        run gmsh regardless -- logged, not silently substituted."""
+        step_file = tmp_path / "part.step"
+        step_file.write_text("x")
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch(
+                "tool_registry.tools.freecad.operations.subprocess.run", side_effect=_fake_gmsh_run
+            ),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file), algorithm="netgen")
+        assert result["quality_metrics"]["algorithm"] == "gmsh"
+
+    def test_non_inp_format_skips_count_parsing_but_still_meshes(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("x")
+        ops = FreecadOperations()
+
+        def stl_run(cmd, **kwargs):
+            import subprocess as _subprocess
+
+            output_path = cmd[cmd.index("-o") + 1]
+            Path(output_path).write_text("solid Created by Gmsh\nendsolid\n")
+            return _subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch("tool_registry.tools.freecad.operations.subprocess.run", side_effect=stl_run),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file), output_format="stl")
+
+        assert result["mesh_file"].endswith(".stl")
+        assert result["num_nodes"] == 0  # not parsed for non-.inp formats
+        assert result["num_elements"] == 0
+
+
+class TestParseInpMeshCounts:
+    def test_counts_nodes_and_elements_by_type(self, tmp_path) -> None:
+        from tool_registry.tools.freecad.operations import _parse_inp_mesh_counts
+
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_REAL_GMSH_INP_FIXTURE, encoding="utf-8")
+
+        num_nodes, counts_by_type = _parse_inp_mesh_counts(str(inp))
+
+        assert num_nodes == 3
+        assert counts_by_type == {"T3D2": 2, "CPS3": 2, "C3D4": 3}
+
+    def test_empty_file_counts_zero(self, tmp_path) -> None:
+        from tool_registry.tools.freecad.operations import _parse_inp_mesh_counts
+
+        inp = tmp_path / "empty.inp"
+        inp.write_text("*Heading\n empty\n", encoding="utf-8")
+
+        num_nodes, counts_by_type = _parse_inp_mesh_counts(str(inp))
+
+        assert num_nodes == 0
+        assert counts_by_type == {}
+
+
+# A small, fully self-consistent mesh (unlike _REAL_GMSH_INP_FIXTURE, whose
+# node table is deliberately trimmed for brevity and doesn't resolve its own
+# CPS3 elements) -- two named surface groups, each a real 10x10mm square
+# split into 2 triangles, at two different Z heights, so bbox/centroid/area/
+# normal are all independently hand-verifiable.
+_FACE_TABLE_FIXTURE = """\
+*Heading
+ box.inp
+*NODE
+1, 0, 0, 0
+2, 10, 0, 0
+3, 10, 10, 0
+4, 0, 10, 0
+5, 0, 0, 5
+6, 10, 0, 5
+7, 10, 10, 5
+8, 0, 10, 5
+*ELEMENT, type=CPS3, ELSET=Surface1
+1, 1, 2, 3
+2, 1, 3, 4
+*ELEMENT, type=CPS3, ELSET=Surface2
+1, 5, 6, 7
+2, 5, 7, 8
+*ELEMENT, type=T3D2, ELSET=Line1
+1, 1, 5
+*ELEMENT, type=C3D4, ELSET=Volume1
+1, 1, 2, 3, 5
+"""
+
+
+class TestParseInpFaceTable:
+    """FORGE-239: per-STEP-face geometry (bbox/centroid/area/normal) so a
+    caller can identify a face by its real coordinates instead of guessing
+    from an opaque gmsh-assigned name."""
+
+    def test_computes_bbox_centroid_area_and_normal_for_each_surface_group(self, tmp_path) -> None:
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+
+        faces = _parse_inp_face_table(str(inp))
+
+        assert [f["name"] for f in faces] == ["Surface1", "Surface2"]
+        s1 = faces[0]
+        assert s1["element_type"] == "CPS3"
+        assert s1["num_elements"] == 2
+        assert s1["num_nodes"] == 4
+        assert s1["bbox_mm"] == {"min": [0.0, 0.0, 0.0], "max": [10.0, 10.0, 0.0]}
+        assert s1["centroid_mm"] == [5.0, 5.0, 0.0]
+        assert s1["area_mm2"] == pytest.approx(100.0)
+        assert s1["normal"] == pytest.approx([0.0, 0.0, 1.0])
+
+        s2 = faces[1]
+        assert s2["bbox_mm"] == {"min": [0.0, 0.0, 5.0], "max": [10.0, 10.0, 5.0]}
+        assert s2["centroid_mm"] == [5.0, 5.0, 5.0]
+        assert s2["area_mm2"] == pytest.approx(100.0)
+
+    def test_line_and_volume_element_sets_are_excluded(self, tmp_path) -> None:
+        """Only CPS3/CPS4 (surface) groups are meaningful as a placeable
+        face -- a line (T3D2) or the volumetric mesh itself (C3D4) isn't."""
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+
+        faces = _parse_inp_face_table(str(inp))
+
+        names = {f["name"] for f in faces}
+        assert "Line1" not in names
+        assert "Volume1" not in names
+
+    def test_a_group_whose_nodes_are_entirely_unresolved_is_skipped(self, tmp_path) -> None:
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(
+            "*NODE\n1, 0, 0, 0\n*ELEMENT, type=CPS3, ELSET=Ghost\n1, 100, 200, 300\n",
+            encoding="utf-8",
+        )
+
+        assert _parse_inp_face_table(str(inp)) == []
+
+    def test_empty_file_returns_no_faces(self, tmp_path) -> None:
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "empty.inp"
+        inp.write_text("*Heading\n empty\n", encoding="utf-8")
+
+        assert _parse_inp_face_table(str(inp)) == []
+
+
+class TestGenerateMeshFacesField:
+    """generate_mesh's own 'faces' passthrough, end-to-end via a real
+    fake-gmsh run (mirrors TestGenerateMeshUsesGmsh's style)."""
+
+    def test_faces_are_populated_for_a_resolvable_mesh(self, tmp_path) -> None:
+        import subprocess as _subprocess
+
+        def fake_run(cmd: list[str], **kwargs):
+            output_path = cmd[cmd.index("-o") + 1]
+            Path(output_path).write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+            return _subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch("tool_registry.tools.freecad.operations.subprocess.run", side_effect=fake_run),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file))
+
+        assert [f["name"] for f in result["faces"]] == ["Surface1", "Surface2"]
+        assert result["faces"][0]["bbox_mm"]["min"] == [0.0, 0.0, 0.0]
+
+    def test_faces_is_empty_for_non_inp_formats(self, tmp_path) -> None:
+        import subprocess as _subprocess
+
+        def stl_run(cmd: list[str], **kwargs):
+            output_path = cmd[cmd.index("-o") + 1]
+            Path(output_path).write_text("solid\nendsolid\n", encoding="utf-8")
+            return _subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch("tool_registry.tools.freecad.operations.subprocess.run", side_effect=stl_run),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file), output_format="stl")
+
+        assert result["faces"] == []
+
+
+class TestListNamedFaces:
+    """FORGE-277: re-fetch generate_mesh's own 'faces' table for an
+    already-generated mesh, without re-running gmsh (a dashboard face
+    picker or a later turn calls this instead of regenerating)."""
+
+    def test_returns_the_same_face_table_as_generate_mesh(self, tmp_path) -> None:
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+        ops = FreecadOperations()
+
+        result = ops.list_named_faces(str(inp))
+
+        assert result["mesh_file"] == str(inp)
+        assert [f["name"] for f in result["faces"]] == ["Surface1", "Surface2"]
+        assert result["faces"][0]["centroid_mm"] == [5.0, 5.0, 0.0]
+
+    def test_does_not_require_freecad(self, tmp_path) -> None:
+        """Pure text parsing -- unlike generate_mesh, this needs neither
+        FreeCAD nor gmsh, so it must work even when HAS_FREECAD is False."""
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+        ops = FreecadOperations()
+
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            result = ops.list_named_faces(str(inp))
+
+        assert len(result["faces"]) == 2
+
+    def test_missing_file_raises(self, tmp_path) -> None:
+        ops = FreecadOperations()
+        with pytest.raises(FileNotFoundError):
+            ops.list_named_faces(str(tmp_path / "nope.inp"))
+
+    def test_non_inp_extension_raises(self, tmp_path) -> None:
+        stl = tmp_path / "mesh.stl"
+        stl.write_text("solid\nendsolid\n", encoding="utf-8")
+        ops = FreecadOperations()
+        with pytest.raises(ValueError, match="only supports .inp"):
+            ops.list_named_faces(str(stl))
+
+
+class TestInpTetQualityForge548:
+    """``generate_mesh`` measures element quality from the ``.inp`` (FORGE-548)."""
+
+    @staticmethod
+    def _write(tmp_path: Path, nodes: str, elements: str, etype: str = "C3D4") -> str:
+        path = tmp_path / "mesh.inp"
+        path.write_text(f"*NODE\n{nodes}\n*ELEMENT, TYPE={etype}, ELSET=Volume1\n{elements}\n")
+        return str(path)
+
+    def test_regular_tetrahedron_is_ideal(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        nodes = "1, 1, 1, 1\n2, 1, -1, -1\n3, -1, 1, -1\n4, -1, -1, 1"
+        q = _inp_tet_quality(self._write(tmp_path, nodes, "1, 1, 2, 3, 4"))
+        assert q["min_angle"] == pytest.approx(70.529, abs=1e-2)
+        assert q["max_aspect_ratio"] == pytest.approx(1.0)
+        assert q["avg_quality"] == pytest.approx(1.0, abs=1e-3)
+        assert q["degenerate_elements"] == 0
+
+    def test_sliver_scores_badly(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        nodes = "1, 0, 0, 0\n2, 1, 0, 0\n3, 0, 1, 0\n4, 1, 1, 0.01"
+        q = _inp_tet_quality(self._write(tmp_path, nodes, "1, 1, 2, 3, 4"))
+        assert q["min_angle"] < 5.0
+        assert q["avg_quality"] < 0.05
+
+    def test_flat_element_counts_as_degenerate(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        nodes = "1, 0, 0, 0\n2, 1, 0, 0\n3, 0, 1, 0\n4, 1, 1, 0"
+        q = _inp_tet_quality(self._write(tmp_path, nodes, "1, 1, 2, 3, 4"))
+        assert q["degenerate_elements"] == 1
+        assert q["elements_measured"] == 0
+
+    def test_quadratic_elements_use_corner_nodes(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        nodes = "1, 1, 1, 1\n2, 1, -1, -1\n3, -1, 1, -1\n4, -1, -1, 1\n" + "\n".join(
+            f"{i}, 0, 0, 0" for i in range(5, 11)
+        )
+        elem = "1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+        q = _inp_tet_quality(self._write(tmp_path, nodes, elem, etype="C3D10"))
+        assert q["avg_quality"] == pytest.approx(1.0, abs=1e-3)
+
+    def test_no_tetrahedra_returns_nothing(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        path = tmp_path / "mesh.inp"
+        path.write_text("*NODE\n1, 0, 0, 0\n")
+        assert _inp_tet_quality(str(path)) == {}

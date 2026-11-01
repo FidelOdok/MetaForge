@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ExplodeDirection, ModelManifest } from '../types/viewer';
+import type { JointLoadChainPayload } from '../lib/robot-statics';
 
 /** Boolean-cut mode (MET-612): 'idle' (hidden) → 'picking-cutter' (choosing a
  * sibling node) → 'ready' (cutter loaded, Hole/Group enabled). */
@@ -50,6 +51,9 @@ export interface RobotJointInfo {
 
 interface ViewerState {
   glbUrl: string | null;
+  /** FORGE-531: how `glbUrl` is encoded -- 'glb' (the converter's output,
+   * the default), or a mesh file loaded directly ('stl', '3mf', 'gltf'). */
+  modelFormat: string;
   manifest: ModelManifest | null;
   selectedMeshName: string | null;
   hiddenMeshes: Set<string>;
@@ -59,6 +63,8 @@ interface ViewerState {
   viewMode: '3d' | 'graph';
   /** Callback registered by the R3F canvas to reset the camera. */
   _cameraResetFn: (() => void) | null;
+  /** See `registerFocusPart`. */
+  _focusPartFn: ((meshName: string) => void) | null;
   /** Set by SceneContents once the primary model's GLB scene has loaded. */
   modelBounds: ModelBounds | null;
   setModelBounds: (bounds: ModelBounds | null) => void;
@@ -85,7 +91,40 @@ interface ViewerState {
   setRobotPhysicsEnabled: (enabled: boolean) => void;
   setRobotError: (message: string | null) => void;
 
-  loadModel: (glbUrl: string, manifest: ModelManifest) => void;
+  /** FORGE-250: name of the joint currently hovered by drag-to-pose (an
+   * HTML sibling can't read the Canvas-child's raycast hit directly, same
+   * reason `_computeJointLoadChainFn` exists below), and whether a drag is
+   * actively in progress (used to disable preset buttons + sliders while
+   * dragging, matching "disabled in physics mode" for the same reason:
+   * two things fighting over robotJointValues at once). */
+  robotHoveredJoint: string | null;
+  robotDragging: boolean;
+  setRobotHoveredJoint: (jointName: string | null) => void;
+  setRobotDragging: (dragging: boolean) => void;
+
+  /** FORGE-250: imperative bridge so drag-to-pose can suspend/restore
+   * `<OrbitControls>` the instant a drag starts/ends -- a React-state round
+   * trip through `robotDragging` above would lose a frame (OrbitControls'
+   * own pointerdown listener fires in the same event before a re-render
+   * could flip its `enabled` prop), same rationale as `_cameraResetFn`. */
+  _orbitControlsEnabledSetterFn: ((enabled: boolean) => void) | null;
+  registerOrbitControlsEnabledSetter: (fn: ((enabled: boolean) => void) | null) => void;
+  setOrbitControlsEnabled: (enabled: boolean) => void;
+
+  /** FORGE-283: same Canvas-child-registers/HTML-sibling-calls pattern as
+   * `_cameraResetFn` above -- RobotSceneContents owns the live URDFRobot
+   * object (never put directly in this store) and registers a closure that
+   * reads its current world-posed transforms; RobotControlsOverlay's "Use
+   * as load case" button calls it on click, at the pose the user is
+   * looking at right then, rather than this store re-deriving a plain
+   * payload on every joint-slider tick nobody has asked to use yet. */
+  _computeJointLoadChainFn: ((jointNames: string[]) => JointLoadChainPayload | null) | null;
+  registerJointLoadChainCompute: (
+    fn: ((jointNames: string[]) => JointLoadChainPayload | null) | null,
+  ) => void;
+  computeJointLoadChain: (jointNames: string[]) => JointLoadChainPayload | null;
+
+  loadModel: (glbUrl: string, manifest: ModelManifest, format?: string) => void;
   /** MET-683: clear the loaded model WITHOUT leaving 3D view mode (unlike
    * `reset`, which also flips viewMode back to 'graph') -- used before
    * loading a newly-selected node so a failed load doesn't leave the
@@ -104,6 +143,16 @@ interface ViewerState {
   registerCameraReset: (fn: () => void) => void;
   /** Trigger the camera reset (called from outside the Canvas). */
   resetCamera: () => void;
+
+  /** Register the focus-a-part callback from inside the R3F Canvas
+   * (FORGE-618). Same registration shape as the camera reset above: the
+   * framing maths needs the scene graph, which only exists in there. */
+  registerFocusPart: (fn: ((meshName: string) => void) | null) => void;
+  /** Frame one part and move the orbit pivot onto it. The pivot is otherwise
+   * the whole assembly's centre, which swings a single part through a wide
+   * arc and gives no way to settle on it. */
+  focusPart: (meshName: string) => void;
+
 
   /** Additive boolean-cut slice (MET-612) — never touches the primary
    * glbUrl/manifest/selectedMeshName state above. */
@@ -124,6 +173,7 @@ interface ViewerState {
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
   glbUrl: null,
+  modelFormat: 'glb',
   manifest: null,
   selectedMeshName: null,
   hiddenMeshes: new Set<string>(),
@@ -134,6 +184,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   _cameraResetFn: null,
   modelBounds: null,
   setModelBounds: (bounds) => set({ modelBounds: bounds }),
+
 
   robotDescription: null,
   robotJoints: null,
@@ -147,6 +198,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       robotJoints: null,
       robotJointValues: {},
       robotPhysicsEnabled: false,
+      robotHoveredJoint: null,
+      robotDragging: false,
       robotError: null,
       viewMode: '3d',
       // Mutually exclusive with the GLB path — same Canvas, one at a time.
@@ -164,6 +217,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       robotJoints: null,
       robotJointValues: {},
       robotPhysicsEnabled: false,
+      robotHoveredJoint: null,
+      robotDragging: false,
       robotError: null,
     }),
 
@@ -180,9 +235,29 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   setRobotError: (message) => set({ robotError: message }),
 
-  loadModel: (glbUrl, manifest) =>
+  robotHoveredJoint: null,
+  robotDragging: false,
+  setRobotHoveredJoint: (jointName) => set({ robotHoveredJoint: jointName }),
+  setRobotDragging: (dragging) => set({ robotDragging: dragging }),
+
+  _orbitControlsEnabledSetterFn: null,
+  registerOrbitControlsEnabledSetter: (fn) => set({ _orbitControlsEnabledSetterFn: fn }),
+  setOrbitControlsEnabled: (enabled) => {
+    const fn = get()._orbitControlsEnabledSetterFn;
+    if (fn) fn(enabled);
+  },
+
+  _computeJointLoadChainFn: null,
+  registerJointLoadChainCompute: (fn) => set({ _computeJointLoadChainFn: fn }),
+  computeJointLoadChain: (jointNames) => {
+    const fn = get()._computeJointLoadChainFn;
+    return fn ? fn(jointNames) : null;
+  },
+
+  loadModel: (glbUrl, manifest, format = 'glb') =>
     set({
       glbUrl,
+      modelFormat: format,
       manifest,
       selectedMeshName: null,
       hiddenMeshes: new Set(),
@@ -194,6 +269,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       robotJoints: null,
       robotJointValues: {},
       robotPhysicsEnabled: false,
+      robotHoveredJoint: null,
+      robotDragging: false,
       robotError: null,
     }),
 
@@ -251,10 +328,16 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       robotJoints: null,
       robotJointValues: {},
       robotPhysicsEnabled: false,
+      robotHoveredJoint: null,
+      robotDragging: false,
       robotError: null,
     }),
 
   registerCameraReset: (fn) => set({ _cameraResetFn: fn }),
+
+  _focusPartFn: null,
+  registerFocusPart: (fn) => set({ _focusPartFn: fn }),
+  focusPart: (meshName) => get()._focusPartFn?.(meshName),
 
   resetCamera: () => {
     const fn = get()._cameraResetFn;

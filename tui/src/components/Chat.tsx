@@ -390,6 +390,18 @@ export function Chat({
             onChange={onInputChange}
             onSubmit={onSubmit}
             placeholder={placeholder}
+            // FORGE-95: ToolApprovalModal renders ABOVE this box, not instead
+            // of it (unlike the /resume picker, which replaces the box
+            // outright) -- both this component's own useInput and
+            // TextInput's internal one are simultaneously active handlers,
+            // so the a/x keypress that resolves an approval was ALSO
+            // reaching TextInput's buffer, even though the useInput handler
+            // above already consumes it and returns early. Ink's `useInput`
+            // has no implicit call-order stopPropagation between separate
+            // hook instances -- `focus` is ink-text-input's own documented
+            // mechanism for exactly this "route input to one component"
+            // case, so unfocusing it here is the actual fix, not a workaround.
+            focus={pendingApproval === null}
           />
         </Box>
       )}

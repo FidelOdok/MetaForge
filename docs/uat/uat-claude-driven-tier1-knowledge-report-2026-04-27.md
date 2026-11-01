@@ -1,7 +1,7 @@
 # UAT Tier-1 Knowledge — Claude-driven first run (2026-04-27)
 
 **Scenario set**: `tests/uat/scenarios/tier1/knowledge.md` (8 scenarios)
-**Validates**: MET-346, MET-293, MET-307, MET-335, MET-336
+**Validates**:
 **Tier**: 1 (cycle gate cadence)
 **Path**: validator surrogate (parent Claude Code session pre-dates `.mcp.json`; canonical path is `/uat-cycle12 --tier 1`)
 **Surrogate driver**: `scripts/run_tier1_knowledge_validator_surrogate.py`
@@ -19,7 +19,7 @@
 | 3 | empty search produces deterministic empty list | PASS (2/2) | nonsense query returns 0 hits, no crash |
 | 4 | search respects top_k cap | PASS (1/1) | broad `MetaForge` query honoured `top_k=2` |
 | 5 | knowledge.search response carries citation fields | PASS (4/4) | `chunk_index=0`, `total_chunks=1` populated, source_path non-empty |
-| 6 | knowledge.ingest rejects empty content cleanly | **FAIL** | silent success: `chunks_indexed=0`, no exception → MET-3XX (filed below) |
+| 6 | knowledge.ingest rejects empty content cleanly | **FAIL** | silent success: `chunks_indexed=0`, no exception → filed below |
 | 7 | deduplication on identical re-ingest | PASS (1/1) | re-ingest dropped prior chunks; one hit at the source_path |
 | 8 | forge ingest equivalent — directory walk | PASS (1/1) | both walker source_paths in top 5 |
 
@@ -27,7 +27,7 @@
 
 ## FAIL — Scenario 6: knowledge.ingest rejects empty content cleanly
 
-**Validates**: MET-346
+**Validates**:
 
 **Request**:
 ```json
@@ -70,9 +70,8 @@ or whitespace")` (or return an `IngestResult` shape with an explicit
 adapter (`mcp_core` knowledge bridge) should map the raise to
 JSON-RPC error -32001 with `data.details` mentioning empty content.
 
-**Filed forward**: MET-3XX (UAT FAIL: knowledge.ingest silently
-returns chunks_indexed=0 on empty content) — see Linear, parent
-MET-369, P1.15 priority.
+**Filed forward**: UAT FAIL: knowledge.ingest silently
+returns chunks_indexed=0 on empty content (P1.15 priority).
 
 ---
 

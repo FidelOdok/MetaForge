@@ -28,6 +28,21 @@ from twin_core.consistency.metrics import compute_metric_total
 from twin_core.consistency.models import Budget, BudgetAllocation, BudgetStatus
 from twin_core.graph_engine import GraphEngine
 from twin_core.models.engineering_entity import EngineeringEntity
+from twin_core.models.quantity import is_valid_unit
+
+#: What a budget's metadata must carry to be usable (FORGE-414).
+#:
+#: Exported because the write path needs the same list. It used to live only
+#: here, as a literal inside the reader, so a budget recorded without these
+#: succeeded and was then dropped from every rollup on every page load --
+#: six of ten budgets in the live twin were in that state. One list, read by
+#: both sides, is what stops the two drifting.
+BUDGET_REQUIRED_METADATA: tuple[str, ...] = ("metric", "unit", "system_total")
+
+
+def missing_budget_metadata(metadata: dict[str, object]) -> list[str]:
+    """Which required keys a would-be budget's metadata lacks."""
+    return [key for key in BUDGET_REQUIRED_METADATA if key not in metadata]
 
 
 def budget_from_entity(entity: EngineeringEntity, project_id: UUID) -> Budget:
@@ -40,9 +55,13 @@ def budget_from_entity(entity: EngineeringEntity, project_id: UUID) -> Budget:
     if entity.entity_type != "budget":
         raise ValueError(f"entity {entity.id} is not a budget (got {entity.entity_type!r})")
     md = entity.metadata
-    missing = [k for k in ("metric", "unit", "system_total") if k not in md]
+    missing = missing_budget_metadata(md)
     if missing:
         raise ValueError(f"budget entity {entity.id} metadata missing {missing}")
+    # FORGE-311: "compile"-time unit check -- a nonsense unit string is
+    # rejected here, before it ever reaches metric-total computation.
+    if not is_valid_unit(str(md["unit"])):
+        raise ValueError(f"budget entity {entity.id}: {md['unit']!r} is not a recognized unit")
     try:
         allocations = [BudgetAllocation(**a) for a in md.get("allocations", [])]
         system_total = float(md["system_total"])

@@ -45,11 +45,23 @@ def test_requirements_gate_gained_a_traceability_criterion() -> None:
         )
 
 
-def test_intent_and_needs_phases_are_the_same_shared_instance_across_flows() -> None:
-    """They're defined once and reused -- not accidentally re-authored
-    per-flow with drifting objectives/criteria."""
-    intent_phases = [next(p for p in flow.phases if p.id == "intent") for flow in FLOWS.values()]
-    assert len({id(p) for p in intent_phases}) == 1
+def test_intent_and_needs_phases_are_identical_across_flows() -> None:
+    """They must not drift apart per flow.
 
-    needs_phases = [next(p for p in flow.phases if p.id == "needs") for flow in FLOWS.values()]
-    assert len({id(p) for p in needs_phases}) == 1
+    This used to assert ``id()`` identity, because ``_INTENT_PHASE`` was one
+    Python object shared by all three flow literals -- drift was impossible
+    by construction. FORGE-397 moved the flows into per-flow template files,
+    so the shared phases are now written out once per file and drift is newly
+    *possible*. Identity cannot hold any more; equality must, and it is the
+    assertion that now does real work rather than restating the obvious.
+    """
+    for phase_id in ("intent", "needs"):
+        phases = {
+            flow_id: next(p for p in flow.phases if p.id == phase_id)
+            for flow_id, flow in FLOWS.items()
+        }
+        distinct = {p for p in phases.values()}
+        assert len(distinct) == 1, (
+            f"the '{phase_id}' phase has drifted between flows: "
+            f"{ {fid: p.objective[:60] for fid, p in phases.items()} }"
+        )

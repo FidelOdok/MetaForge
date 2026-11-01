@@ -61,6 +61,13 @@ class InvariantResult(BaseModel):
 class BudgetAllocation(BaseModel):
     target: str  # e.g. "frame", "actuators", "battery" -- a free-text label
     amount: float
+    # FORGE-313 (lifecycle step 3): who's accountable for this subsystem's
+    # share of the budget, and which discipline owns it -- both optional
+    # (a caller that omits them keeps today's exact behavior), surfaced by
+    # the Structure tab (hierarchy_routes.py) alongside the existing
+    # allocated/over-budget status.
+    owner: str = ""
+    discipline: str = ""
 
 
 class Budget(BaseModel):

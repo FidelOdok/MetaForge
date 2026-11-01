@@ -1,0 +1,28 @@
+{
+  "description": "MetaForge working rules at session start, and a reminder when a flow proposal or patch is held for a person (FORGE-539). Set METAFORGE_PLUGIN_HOOKS=off to disable.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/metaforge_hook.py\" session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*metaforge.*__flow_(propose|patch)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/metaforge_hook.py\" post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

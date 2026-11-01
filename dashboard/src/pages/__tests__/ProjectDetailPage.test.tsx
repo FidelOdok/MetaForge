@@ -27,7 +27,23 @@ vi.mock('../../hooks/use-active-project', () => ({
   }),
 }));
 
+// FORGE-531: the row preview itself is covered by PreviewHost's tests.
+vi.mock('../../components/preview/ProjectRowPreview', () => ({
+  ProjectRowPreview: ({ nodeId }: { nodeId: string }) => <div data-testid="row-preview-stub">{nodeId}</div>,
+}));
+
+// FORGE-526: the current view; undefined by default so the legacy list shows.
+vi.mock('../../hooks/use-items', () => ({
+  useCurrentView: vi.fn(() => ({ data: undefined })),
+  useItemHistory: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+  useItemDiff: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+  useBaselines: vi.fn(() => ({ data: [], isLoading: false, isError: false })),
+  useBaselineDiff: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+}));
+
 import { ProjectDetailPage } from '../ProjectDetailPage';
+import { useCurrentView } from '../../hooks/use-items';
+import { CURRENT_VIEW } from '../../components/items/__tests__/fixtures';
 import { useProject } from '../../hooks/use-projects';
 
 const mockUseProject = vi.mocked(useProject);
@@ -189,6 +205,82 @@ describe('ProjectDetailPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(screen.queryByText('Delete project')).not.toBeInTheDocument();
       expect(mockDeleteMutate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('opens a compact preview for one work product row on demand (FORGE-531)', async () => {
+    mockUseProject.mockReturnValue({
+      data: {
+        id: 'proj-001',
+        name: 'Drone FC',
+        description: '',
+        status: 'active',
+        work_products: [
+          { id: 'a1', name: 'Main board', type: 'cad_model', status: 'valid', updatedAt: new Date().toISOString() },
+          { id: 'a2', name: 'Power BOM', type: 'bom', status: 'valid', updatedAt: new Date().toISOString() },
+        ],
+        agentCount: 1,
+        lastUpdated: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useProject>);
+    render(<ProjectDetailPage />);
+    // Nothing loads until asked.
+    expect(screen.queryByTestId('project-row-preview')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Show preview of Power BOM' });
+    fireEvent.click(toggle);
+    expect(await screen.findByTestId('row-preview-stub')).toHaveTextContent('a2');
+    expect(screen.getByRole('button', { name: 'Hide preview of Power BOM' })).toHaveAttribute('aria-expanded', 'true');
+    // The row is still one link to the twin.
+    expect(screen.getByRole('link', { name: /Power BOM/ })).toHaveAttribute('href', '/twin?node=a2');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide preview of Power BOM' }));
+    expect(screen.queryByTestId('project-row-preview')).not.toBeInTheDocument();
+  });
+
+  describe('current view (FORGE-526)', () => {
+    const project = {
+      id: 'proj-001',
+      name: 'Drone FC',
+      description: '',
+      status: 'active',
+      // Six nodes written over several runs; only two are current items.
+      work_products: Array.from({ length: 6 }, (_, i) => ({
+        id: `wp-${i}`, name: `Node ${i}`, type: 'cad_model', status: i === 0 ? 'valid' : 'error', updatedAt: new Date().toISOString(),
+      })),
+      agentCount: 0,
+      lastUpdated: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    it('counts and readiness cover current items only, not every node', () => {
+      mockUseProject.mockReturnValue({ data: project, isLoading: false } as unknown as ReturnType<typeof useProject>);
+      vi.mocked(useCurrentView).mockReturnValue({ data: CURRENT_VIEW } as unknown as ReturnType<typeof useCurrentView>);
+      render(<ProjectDetailPage />);
+      expect(screen.getByText('67%')).toBeInTheDocument();
+      expect(screen.getByText('Current items valid')).toBeInTheDocument();
+      expect(screen.getAllByText('Current items').length).toBeGreaterThan(0);
+      expect(screen.getByTestId('current-items')).toBeInTheDocument();
+      // The superseded nodes are not rows.
+      expect(screen.queryByText('Node 3')).not.toBeInTheDocument();
+      expect(screen.getByText('Bracket')).toBeInTheDocument();
+    });
+
+    it('opens the baselines panel on request', () => {
+      mockUseProject.mockReturnValue({ data: project, isLoading: false } as unknown as ReturnType<typeof useProject>);
+      vi.mocked(useCurrentView).mockReturnValue({ data: CURRENT_VIEW } as unknown as ReturnType<typeof useCurrentView>);
+      render(<ProjectDetailPage />);
+      expect(screen.queryByTestId('baselines-panel')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Baselines' }));
+      expect(screen.getByTestId('baselines-panel')).toBeInTheDocument();
+    });
+
+    it('falls back to the work product list when the current view is unavailable', () => {
+      mockUseProject.mockReturnValue({ data: project, isLoading: false } as unknown as ReturnType<typeof useProject>);
+      vi.mocked(useCurrentView).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof useCurrentView>);
+      render(<ProjectDetailPage />);
+      expect(screen.getByText('Node 3')).toBeInTheDocument();
+      expect(screen.getByText('17%')).toBeInTheDocument();
     });
   });
 });

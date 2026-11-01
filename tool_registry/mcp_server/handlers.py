@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -171,8 +171,16 @@ async def handle_tool_call(
             span.set_attribute("mcp.tool.argument_count", len(arguments))
 
         start = time.monotonic()
+        # FORGE-446: library figures the dispatcher resolved for the
+        # materials this call names; taken out before the handler sees the
+        # arguments and held for the call (tool_registry.material_context).
+        from tool_registry.material_context import current, extract, using
+
+        # Added to whatever is already in effect (an outer call), never replacing it.
+        figures = {**current(), **extract(arguments)}
         try:
-            result_data = await registration.handler(arguments)
+            with using(figures):
+                result_data = await registration.handler(arguments)
         except ToolNotFoundError:
             raise
         except Exception as exc:
@@ -212,11 +220,23 @@ async def handle_health_check(
 
 
 class ToolNotFoundError(Exception):
-    """Raised when a tool/call references an unknown tool_id."""
+    """Raised when a tool/call references an unknown tool_id.
 
-    def __init__(self, tool_id: str) -> None:
+    FORGE-343: carries ``did_you_mean`` so the message names tools that do
+    exist. The precedent is FORGE-236 on the harness-side error of the same
+    name (``orchestrator/harness/tools.py``), where a bare "not found" was
+    observed making a model conclude a healthy backend was down — it has no
+    way to distinguish "you typed the name wrong" from "the server is
+    broken" unless the error says which.
+    """
+
+    def __init__(self, tool_id: str, did_you_mean: Sequence[str] = ()) -> None:
         self.tool_id = tool_id
-        super().__init__(f"Tool not found: {tool_id}")
+        self.did_you_mean = list(did_you_mean)
+        message = f"Tool not found: {tool_id}"
+        if self.did_you_mean:
+            message += ". Did you mean: " + ", ".join(self.did_you_mean)
+        super().__init__(message)
 
 
 class ToolHandlerError(Exception):
@@ -284,6 +304,19 @@ async def handle_resources_read(
                 raise
             except Exception as exc:
                 raise ResourceReadError(uri, str(exc)) from exc
+            if isinstance(contents, Mapping):
+                # `list()` on a mapping yields its keys, so a reader that
+                # returns one block instead of a list of blocks produces a
+                # successful response containing ["uri", "mimeType", "text"]
+                # and no content. Two adapters shipped that way before anyone
+                # noticed (FORGE-409), because nothing about it looks like a
+                # failure. Fail loudly instead.
+                raise ResourceReadError(
+                    uri,
+                    "reader returned a single content block; it must return a list of "
+                    "blocks (wrap it in [ ]). Returning a mapping yields its keys as "
+                    "the response content.",
+                )
             return {"contents": list(contents)}
 
     raise ResourceNotFoundError(uri)

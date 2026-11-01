@@ -107,6 +107,117 @@ groups:
           summary: "High harness tool-call failure rate for {{ $labels.tool_name }}"
           description: "Tool {{ $labels.tool_name }} has >30% error rate over 10 minutes in the chat harness loop."
 
+      # FORGE-520: a chat reply that claims a twin commit, or quotes a node id,
+      # that the turn's tool calls do not back up. The banner tells the user
+      # each time; a sustained rate means a model (or prompt) is fabricating
+      # writes routinely, which a reviewer trusting the reply would miss.
+      - alert: ChatUngroundedClaimsSustained
+        expr: sum(increase(metaforge_chat_ungrounded_claim_total[30m])) by (kind) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chat replies keep making ungrounded {{ $labels.kind }} claims"
+          description: "More than 5 chat replies in 30 minutes were flagged as ungrounded ({{ $labels.kind }}): they claimed work or quoted node ids no tool call this turn backed up. Check the model and prompt in use."
+
+      # FORGE-532: a solved run whose 3D result field could not be built, or a
+      # recorded simulation_result whose field blob never reached MinIO. Both
+      # degrade silently to the numbers-only card, so the counter is the only
+      # signal that contours have stopped appearing.
+      - alert: SimFieldPayloadFailures
+        expr: sum(increase(metaforge_sim_field_payload_total{outcome="failed"}[30m])) by (analysis_type) > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CalculiX result fields failing to build ({{ $labels.analysis_type }})"
+          description: "More than 3 solved {{ $labels.analysis_type }} runs in 30 minutes produced no 3D field payload. Results still record their summary numbers, but the dashboard cannot show contours for them. Check the calculix adapter logs for calculix_field_payload_failed."
+      - alert: SimFieldStoreFailures
+        expr: sum(increase(metaforge_sim_field_store_total{outcome="failed"}[30m])) > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Simulation result fields are not reaching MinIO"
+          description: "More than 3 simulation_result field blobs in 30 minutes failed to store. The results are recorded without a field, so the 3D viewer shows the 'field not stored' note. Check MinIO reachability from the MCP sidecar."
+
+      # FORGE-492: the guardrail refusing a design-flow phase's tool call is
+      # survivable (the model is told and picks another tool) but it should be
+      # rare. A sustained rate means a tool a phase needs is classified
+      # destructive, which is how every FreeCAD session tool ended up refused.
+      - alert: DesignFlowToolRefusalSustained
+        expr: sum(increase(metaforge_design_flow_tool_refusal_total[15m])) by (tool_name) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Design-flow phases keep being refused {{ $labels.tool_name }}"
+          description: "The guardrail refused {{ $labels.tool_name }} for the design-flow service caller more than 5 times in 15 minutes. Check its classification in mcp_core/annotations.py."
+
+      # FORGE-468: the primary provider pair (e.g. openai-codex + a claude-*
+      # model) failed on every call for weeks while the fallback answered,
+      # and nothing said so. Any sustained fallback means the configured
+      # primary is not the model doing the work. A by-design capability
+      # decline (e.g. Codex has no event-streaming adapter) is excluded.
+      - alert: HarnessProviderFallbackSustained
+        expr: |
+          sum(rate(metaforge_harness_provider_fallback_total{reason!="capability_unsupported"}[15m])) by (primary, fallback, role) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Harness role {{ $labels.role }} is running on fallback {{ $labels.fallback }}, not primary {{ $labels.primary }}"
+          description: "For 15m, {{ $labels.role }} calls have been served by {{ $labels.fallback }} because the primary {{ $labels.primary }} failed or was rejected. The configured model is not the one producing output. Check GET /v1/harness/providers (lastFallback) and the harness_provider_fallback log event."
+
+      # FORGE-476: a run whose accumulated LLM spend crossed the threshold
+      # (METAFORGE_RUN_SPEND_ALERT_USD, default 5). Per-run cost is not a
+      # metric label, so the gateway bumps this counter once per run at the
+      # crossing; the run id is in the llm_run_spend_exceeded log event.
+      - alert: LlmRunawaySpendPerRun
+        expr: |
+          sum(increase(metaforge_llm_run_spend_exceeded_total[15m])) by (role) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A run's LLM spend crossed the runaway threshold (role {{ $labels.role }})"
+          description: "At least one run spent more than the per-run LLM threshold in the last 15m. Find it with the llm_run_spend_exceeded log event, then read GET /v1/runs/{id} usage for the per-phase and per-role breakdown."
+
+      # FORGE-466: a held approval whose waiter stopped waiting must be closed,
+      # or the Approvals page offers a button for a call nobody is waiting
+      # for. result="failed" means the sidecar cannot reach the ledger to
+      # close what it opened; trigger="deadline" means waiters are dying
+      # without closing their holds, and the gateway is cleaning up after them.
+      - alert: ToolApprovalHoldCloseFailing
+        expr: |
+          sum(increase(metaforge_tool_approval_resolution_total{result="failed"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Held tool approvals are not being closed when their waiter stops waiting"
+          description: "The MCP sidecar failed to close a held approval in the gateway ledger in the last 15m. Stale entries stay on the Approvals page until the gateway deadline expires them. Check the mcp_remote_approval_resolve_failed log event and gateway reachability from the sidecar."
+      # FORGE-490: a hold created in a process nobody can answer (the design-
+      # flow worker's in-process store) can only time out and deny.
+      - alert: ApprovalHoldWithNoApprover
+        expr: |
+          sum(increase(metaforge_unreachable_approval_hold_total[15m])) by (tool) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "An approval hold was created with no reachable approver (tool {{ $labels.tool }})"
+          description: "A requires_approval tool call was parked in an in-process store that no dashboard or person can see, so it was always going to be denied. Find it with the approval_hold_unreachable log event; design-flow phase turns should use approval_mode=forward."
+      - alert: ToolApprovalHoldsExpiringByDeadline
+        expr: |
+          sum(increase(metaforge_tool_approval_resolution_total{trigger="deadline"}[30m])) > 3
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Held tool approvals are being expired by the gateway deadline"
+          description: "More than 3 held approvals in 30m were expired by the gateway because their waiter never closed them, which usually means the MCP sidecar is crashing or restarting mid-hold. Check the tool_approval_hold_expired log event and the sidecar's restarts."
+
   - name: metaforge_fleet_alerts
     rules:
       # Device has not sent telemetry for > N minutes (configurable per device type).
@@ -291,6 +402,125 @@ groups:
             cascade-delete via ``delete_work_product(id, cascade=True)``.
           runbook_url: "observability/runbooks/twin-orphans.md"
 
+      # FORGE-523 - a definition write landed but its item link did not, so
+      # the node shows as a fresh sibling instead of the next revision of its
+      # part / constraint set / intent. The write itself succeeded (it never
+      # fails over this), which is exactly why it needs an alarm.
+      - alert: TwinItemRevisionLinkFailures
+        expr: increase(metaforge_twin_item_revision_total{outcome="failed"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Twin writes are landing without their item revision link"
+          description: >-
+            {{ $value }} {{ $labels.item_type }} writes in 15m were saved without
+            a REVISION_OF/HEAD link (resolved_by={{ $labels.resolved_by }}). Search
+            the gateway logs for item_revision_failed for the node ids.
+
+      # FORGE-525 - a gate approval was refused because revisions the run
+      # drafted on moved before the gate (another run's approval or a direct
+      # write). Nothing was overwritten, which is the point, but the run is
+      # parked until a reviewer retries the phase; repeated refusals mean two
+      # flows keep editing the same parts.
+      - alert: TwinChangeSetApprovalsRefused
+        expr: increase(metaforge_twin_change_set_total{outcome="refused"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Design-flow gate approvals refused on revision conflicts"
+          description: >-
+            {{ $value }} gate approvals in 15m were refused with PATCH_CONFLICT: the
+            run's drafts were based on revisions that have since changed. Search the
+            gateway logs for run_change_set_refused for the run and items; the gate
+            needs a retry so the phase redoes its work on the current revisions.
+
+      # FORGE-529 - the item migration linked some items or revisions and
+      # failed on others. Nothing is deleted and a re-plan picks up what is
+      # left, but a project half-migrated shows duplicates next to items.
+      - alert: TwinItemMigrationFailures
+        expr: increase(metaforge_twin_item_migration_total{outcome="failed"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Item migration failed on part of a project"
+          description: >-
+            {{ $value }} {{ $labels.item_type }} items failed to migrate in 15m. Search
+            the gateway logs for item_migration_item_failed for the item keys, then run
+            the dry run again (forge twin migrate <project>) to see what is left.
+
+      # FORGE-528 - prd writes keep carrying requirement values the constraint
+      # set does not have. The write still lands (with a warning), but a
+      # steady stream means agents are writing requirements into the prd
+      # instead of twin.record_constraint_set, so the prd and the gates drift.
+      - alert: TwinPrdStrayRequirementValues
+        expr: increase(metaforge_twin_prd_requirement_value_total{outcome="stray"}[1h]) > 20
+        for: 10m
+        labels:
+          severity: info
+          sev: "4"
+        annotations:
+          summary: "prd writes carry requirement values missing from the constraint set"
+          description: >-
+            {{ $value }} requirement values in prd prose in the last hour had no
+            matching requirement in the current constraint set. Search the gateway
+            logs for prd_stray_requirement_values for the projects and values.
+
+      # FORGE-530 - the baseline brief lists one line per current item, so it
+      # should fit the char cap with room to spare. Baseline briefs being cut
+      # means the item lines grew (or a project has far more items than
+      # expected) and the agent is losing the tail of its baseline.
+      - alert: ProjectBriefBaselineCapped
+        expr: sum(increase(metaforge_project_brief_total{mode="baseline", capped="true"}[1h])) > 5
+        for: 15m
+        labels:
+          severity: info
+          sev: "4"
+        annotations:
+          summary: "Baseline project briefs are hitting the char cap"
+          description: >-
+            {{ $value }} baseline-mode project briefs were shortened in the last
+            hour. Search the gateway logs for project_brief_composed with
+            capped=true to see which project and how many items it lists.
+
+      # FORGE-527 - a record was saved but its revision pin edge was not, or a
+      # head move could not mark the records pinned to the old revision stale.
+      # Either way a stale simulation or evidence record can read as current
+      # and satisfy a gate it no longer should, and nothing else would say so.
+      - alert: TwinRecordStalenessFailures
+        expr: increase(metaforge_twin_record_staleness_total{status=~"pin_failed|propagation_failed"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Record revision pins or staleness marking are failing"
+          description: >-
+            {{ $value }} {{ $labels.record_type }} records in 15m hit {{ $labels.status }}.
+            Search the gateway logs for record_pin_edge_failed and
+            record_staleness_failed for the record and item ids.
+
+      # FORGE-526 -- a gate approval should pin the project's current items
+      # as a baseline. "empty" or "failed" means an approval went through
+      # without a baseline, so the dashboard's baseline list and diff miss it.
+      - alert: TwinGateBaselineMissing
+        expr: increase(metaforge_twin_baseline_total{source="gate", outcome=~"empty|failed"}[30m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "A gate approval did not record a baseline"
+          description: >-
+            {{ $value }} gate approvals in 30m recorded no baseline
+            (outcome={{ $labels.outcome }}). Search the gateway logs for
+            item_baseline_failed or create_item_baseline.
+
       # MET-455 — Consolidation contradiction rate. The BACKGROUND
       # synthesis pass flags newly-synthesized insights that conflict
       # with the existing corpus. A sustained nonzero rate means the
@@ -310,36 +540,21 @@ groups:
             reconcile or mark the conflicting insights stale.
           runbook_url: "observability/runbooks/consolidation-contradictions.md"
 
-  # MET-476 — KB object-store (MinIO) operational alerts. These rules
-  # activate once Prometheus scrapes the MinIO ``/minio/v2/metrics/*``
-  # endpoints; on a single-node MinIO they evaluate normally, and on a
-  # MinIO-less environment they're inert (no series to match). The three
-  # warnings cover bucket size, write latency, and access errors per the
-  # MET-476 acceptance criteria.
+  # MET-476 — KB object-store operational alerts. FORGE-577: the store is
+  # SeaweedFS now (MinIO's images were withdrawn), scraped on
+  # object-store:9327. Its S3 gateway labels every request with bucket, type
+  # (GET/PUT/LIST/...) and HTTP code. The old bucket-size alert is gone: the
+  # gateway does not report stored size, and the storage server that does
+  # listens on loopback only. The MinIO rules never fired either -- nothing
+  # scraped MinIO.
   - name: metaforge_storage_alerts
     rules:
-      - alert: MinIOKBBucketSizeHigh
-        expr: minio_bucket_usage_total_bytes{bucket="metaforge-kb"} > 1.0995116e+11  # 100 GiB
-        for: 30m
-        labels:
-          severity: warning
-          sev: "3"
-        annotations:
-          summary: "MinIO KB bucket usage above 100 GiB"
-          description: >-
-            ``metaforge-kb`` bucket has exceeded 100 GiB of stored bytes for
-            >30 minutes. Lifecycle is configured to transition objects to
-            cold storage after 365 days; check whether the configured tier
-            is healthy and whether ingest volume warrants raising this
-            threshold.
-          runbook_url: "observability/runbooks/minio-bucket-size.md"
-
-      - alert: MinIOKBWriteLatencyHigh
+      - alert: ObjectStoreWriteLatencyHigh
         expr: |
           histogram_quantile(
             0.95,
             sum by (le) (
-              rate(minio_s3_requests_seconds_bucket{api="PutObject",bucket="metaforge-kb"}[5m])
+              rate(SeaweedFS_s3_request_seconds_bucket{type="PUT",bucket="metaforge-kb"}[5m])
             )
           ) > 5
         for: 10m
@@ -347,26 +562,311 @@ groups:
           severity: warning
           sev: "3"
         annotations:
-          summary: "MinIO KB write p95 latency > 5s"
+          summary: "Object store KB write p95 latency > 5s"
           description: >-
-            PutObject p95 latency on ``metaforge-kb`` exceeded 5s for
-            10 minutes. Check MinIO node health, network egress, and
-            backing-disk saturation; ingest pipelines (MET-468) will
-            stall under sustained slow writes.
-          runbook_url: "observability/runbooks/minio-write-latency.md"
+            PUT p95 latency on ``metaforge-kb`` exceeded 5s for 10 minutes.
+            Check the object-store container's disk and CPU; ingest
+            pipelines (MET-468) stall under sustained slow writes.
 
-      - alert: MinIOKBAccessErrorsRising
+      - alert: ObjectStoreAccessErrorsRising
+        # 404s are not errors here: a bucket or object existence check
+        # answers 404 routinely. Refused credentials (401/403) and server
+        # errors (5xx) are.
         expr: |
-          sum(rate(minio_s3_requests_errors_total{bucket="metaforge-kb"}[5m])) > 0.5
+          sum(rate(SeaweedFS_s3_request_total{code=~"401|403|5.."}[5m])) > 0.5
         for: 15m
         labels:
           severity: warning
           sev: "3"
         annotations:
-          summary: "MinIO KB error rate > 0.5 req/s"
+          summary: "Object store refused or failed requests > 0.5 req/s"
           description: >-
-            Sustained access-error rate on ``metaforge-kb`` above
-            0.5 req/s for 15 minutes. Inspect MinIO logs for 4xx /
-            5xx patterns, verify credentials + IAM policies, and check
-            for client misconfigurations.
-          runbook_url: "observability/runbooks/minio-access-errors.md"
+            Sustained rate of refused (401/403) or failed (5xx) S3 requests
+            above 0.5 req/s for 15 minutes. A credential mismatch between
+            MINIO_ACCESS_KEY/MINIO_SECRET_KEY and the services that use the
+            store shows up here; check the object-store logs.
+
+      # FORGE-594: the gateway could not set up the KB bucket (create it and
+      # turn versioning on) after retrying for about five minutes.
+      - alert: KBStorageInitFailed
+        expr: |
+          increase(metaforge_kb_storage_init_total{outcome="failed"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Knowledge-base storage set-up failed at gateway start"
+          description: >-
+            The gateway could not create the metaforge-kb bucket or turn its
+            versioning on, so datasheet history can be overwritten in place.
+            Look for kb_storage_init_failed in the gateway logs, fix the
+            object store or its credentials, then restart the gateway or run
+            scripts/storage/provision_minio.py.
+
+  # ── MCP surface: the plugins' front door (FORGE-379) ──────────────────
+  - name: metaforge_mcp
+    rules:
+      - alert: McpAdapterUnreachable
+        expr: rate(metaforge_mcp_adapter_probe_total{result="unreachable"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP adapter {{ $labels.adapter_id }} is not answering"
+          description: >-
+            Its tools are still registered and still listed, so a client sees
+            no gap -- calls to them fail one at a time. Check the adapter
+            container.
+
+      - alert: McpErrorRateHigh
+        expr: >-
+          sum by (tool_id, error_class) (rate(metaforge_mcp_error_total[5m]))
+          / ignoring(error_class) group_left
+          sum by (tool_id) (rate(metaforge_mcp_tool_call_total[5m])) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.tool_id }} is failing: {{ $labels.error_class }}"
+          description: >-
+            More than a quarter of calls to this tool are failing this way.
+            The class says where to look: adapter_unavailable is a container,
+            approval_refused is a person, tool_not_found is a client calling
+            something this build does not have.
+
+      - alert: McpApprovalsTimingOut
+        expr: rate(metaforge_mcp_error_total{error_class="approval_refused"}[15m]) > 0
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "MCP writes are being refused or left unanswered"
+          description: >-
+            Held writes are not being decided. Not a fault -- nobody is
+            watching the queue, or a reviewer is saying no repeatedly.
+
+      - alert: McpUnexpectedErrors
+        expr: rate(metaforge_mcp_error_total{error_class="unexpected"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP is raising errors nothing has classified"
+          description: >-
+            An exception type outside the known taxonomy. Either a new
+            failure mode, or one that should have had a class and does not.
+
+      # FORGE-604: browser requests refused for their Origin. Either a page
+      # trying to reach the server through DNS rebinding, or a legitimate
+      # front end missing from METAFORGE_MCP_ALLOWED_ORIGINS.
+      - alert: McpOriginRejected
+        expr: increase(metaforge_mcp_origin_rejected_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP refused browser requests from an origin not on its allow-list"
+          description: >-
+            Look for mcp_origin_rejected in the mcp-http logs, which name the
+            origin. A web page you do not recognise is the DNS-rebinding case
+            the check exists for. A front end of your own needs adding to
+            METAFORGE_MCP_ALLOWED_ORIGINS.
+
+      # ── Design-flow engine (FORGE-401) ───────────────────────────────
+      - alert: DesignFlowEngineUnavailable
+        expr: rate(metaforge_design_flow_engine_unavailable_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Design-flow runs cannot start: Temporal at {{ $labels.target }} is unreachable"
+          description: >-
+            Every run start is being refused. This is deliberate -- there is
+            no in-process fallback, because a run that is not durable must
+            not look like one that is -- so the symptom is a hard 503 rather
+            than runs that quietly vanish on the next restart. Bring Temporal
+            back (`docker compose up temporal`); nothing needs replaying,
+            since no run was created.
+
+      # FORGE-469: an approval gate reached with no Temporal runtime used to
+      # auto-approve. It now refuses and the run fails, so any sample here
+      # means a worker is running without temporalio and every human gate
+      # it reaches is being refused.
+      - alert: ApprovalGateNoTemporalRuntime
+        expr: rate(metaforge_approval_gate_no_runtime_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Approval gates refused: no Temporal runtime (role {{ $labels.required_role }})"
+          description: >-
+            wait_for_approval ran in a process where temporalio is not
+            importable. The gate was refused rather than approved, so the
+            run failed instead of silently passing review. Install the
+            Temporal SDK in that worker and check the
+            approval_activity_no_runtime log event for the run and step.
+
+      - alert: DesignFlowGatesNeverAnswered
+        expr: >-
+          rate(metaforge_design_flow_gate_total{outcome="timed_out"}[1h]) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Design-flow gates are expiring unanswered"
+          description: >-
+            A gate that nobody answers ends the run rejected. Repeated
+            timeouts mean the approval queue is not being watched, not that
+            reviewers are refusing work -- those are counted separately as
+            outcome="rejected", and confusing the two hides an unattended
+            queue behind what looks like normal review.
+
+      # FORGE-581: client-mode phases were posted and none came back. The
+      # run is waiting for a connected client that is not there.
+      - alert: ClientTasksUnanswered
+        expr: >-
+          increase(metaforge_client_task_total{event="opened"}[2h]) > 0
+          and increase(metaforge_client_task_total{event="submitted"}[2h]) == 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Client-mode phase tasks are waiting with no client submitting"
+          description: >-
+            A client-mode run posted phase tasks in the last two hours and
+            no client submitted one. Either no Claude Code or Codex session
+            is connected to pick them up, or it is not calling phase.claim.
+            GET /v1/client-tasks lists what is waiting.
+
+      # FORGE-489: a gate opened and nobody was told. The run waits silently
+      # until someone polls, so this is an alarm, not an info line.
+      - alert: DesignFlowGateUnannounced
+        expr: >-
+          increase(metaforge_design_flow_gate_announce_total{outcome=~"unannounced|failed"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A design-flow gate opened without being announced"
+          description: >-
+            outcome="unannounced" means the design-flow worker has no gate
+            announcer wired; outcome="failed" means the gateway could not be
+            reached. Either way a run is waiting at a gate that no approver
+            was told about. Check the design_flow_gate_unannounced and
+            design_flow_gate_announce_failed log events.
+
+      # FORGE-470: an iteration loop converged but no approval workflow was
+      # configured, so its gate could not be answered. It used to approve
+      # and merge silently; it now stops at BLOCKED. Automatic approvals
+      # (outcome="auto_approved") are informational and do not alert.
+      - alert: IterationGateNoApprovalWorkflow
+        expr: >-
+          rate(metaforge_iteration_gate_unattended_total{outcome="blocked"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Iteration gates blocked: no approval workflow (agent {{ $labels.agent_code }})"
+          description: >-
+            An IterationController converged with auto_approve off and no
+            approval workflow to ask a human, so the loop ended BLOCKED and
+            nothing was merged. Wire an approval workflow into that
+            controller, or set auto_approve explicitly if unreviewed merges
+            are intended. The iteration_gate_no_approval_workflow log event
+            carries the loop id and branch.
+
+      # ── Code staleness (FORGE-411) ───────────────────────────────────
+      - alert: McpRunningStaleCode
+        expr: >-
+          rate(metaforge_mcp_code_version_check_total{result="stale"}[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The MCP sidecar is running code other than the checkout beside it"
+          description: >-
+            The image's baked build SHA does not match the mounted source,
+            and this process does not hot-reload. It answers every request
+            correctly -- for code nobody is reading. That is why this is
+            alerted rather than left to a health call: the last time it
+            happened the symptoms (a shorter protocol version, missing
+            tools) read as a smaller deployment, four bugs were filed
+            against the run and two of their findings were not real.
+            Restart the sidecar, or rebuild it if dependencies moved.
+
+      - alert: McpCodeVersionUndetectable
+        expr: >-
+          rate(metaforge_mcp_code_version_check_total{result="unknown"}[1h]) > 0
+        for: 2h
+        labels:
+          severity: info
+        annotations:
+          summary: "Code staleness cannot be detected on this build"
+          description: >-
+            No METAFORGE_BUILD_SHA was baked into the image, so the staleness
+            check above can never fire. Reported rather than treated as a
+            pass, because a check that silently cannot run is how the
+            original bug stayed invisible. Build with
+            --build-arg METAFORGE_BUILD_SHA=$(git rev-parse HEAD); CI does
+            this already, so this firing means the image was built by hand.
+
+  # FORGE-713 -- host watchdog (observability/watchdog.py). The watchdog
+  # restarts what it safely can; these rules cover what it reports instead.
+  - name: metaforge_host
+    rules:
+      - alert: TwinRunningInMemory
+        expr: metaforge_watchdog_twin_in_memory == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The gateway is serving an in-memory twin"
+          description: >-
+            Neo4j is configured, but the gateway's twin fell back to memory:
+            every persisted node is invisible and anything written now is lost
+            on the next restart. The watchdog restarts the gateway after two
+            checks; firing for two minutes means the restart did not help or
+            was suppressed. Check that Neo4j is up, then restart the gateway.
+          runbook_url: "docs/runbooks/host-watchdog.md"
+
+      - alert: HostMemoryLow
+        expr: metaforge_host_memory_available_bytes < 536870912
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory available is below 512 MB"
+          description: >-
+            {{ $value | humanize1024 }}B available. A host with no swap stops
+            answering entirely when this reaches zero. The watchdog does not
+            kill anything; stop a heavy job or a service you do not need.
+          runbook_url: "docs/runbooks/host-watchdog.md"
+
+      - alert: WatchdogRestartBlocked
+        expr: >-
+          increase(metaforge_watchdog_restarts_total{outcome=~"suppressed|failed"}[30m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The watchdog could not restart {{ $labels.service }}"
+          description: >-
+            {{ $labels.service }} needed a restart ({{ $labels.reason }}) and the
+            watchdog {{ $labels.outcome }} it: it is in its cooldown, has hit the
+            hourly cap, or Docker refused. A container that keeps failing after
+            restarts needs a person; read its logs.
+          runbook_url: "docs/runbooks/host-watchdog.md"
+
+      - alert: WatchdogSilent
+        expr: absent_over_time(metaforge_watchdog_checks_total[15m])
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Nothing is watching the host"
+          description: >-
+            No watchdog check has been recorded for 15 minutes, so unhealthy
+            containers and an in-memory twin are not being caught. Check the
+            watchdog service: docker compose ps watchdog.
+          runbook_url: "docs/runbooks/host-watchdog.md"

@@ -11,6 +11,7 @@ import {
   ReactFlow,
   Background,
   Controls,
+  Handle,
   MiniMap,
   type Node,
   type Edge,
@@ -20,7 +21,8 @@ import {
   MarkerType,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { TwinNode, TwinRelationship } from '../../types/twin';
+import type { TwinEndpoint, TwinNode, TwinRelationship } from '../../types/twin';
+import { groupOf, type LinkGroup } from '../../lib/graphLinks';
 import { WP_TYPE_ICONS } from '../../utils/wp-icons';
 
 // ── KC tokens ─────────────────────────────────────────────────────────────────
@@ -46,6 +48,7 @@ const DOMAIN_COLOR: Record<string, string> = {
   simulation: 'var(--mf-c-a78bfa)',
   compliance: 'var(--mf-c-f472b6)',
   supply_chain: 'var(--mf-c-34d399)',
+  industrial_design: 'var(--mf-c-86cfff)',
 };
 
 function domainColor(domain: string) {
@@ -64,10 +67,35 @@ const EDGE_COLOR: Record<string, string> = {
   uses_component: KC.teal,
   parent_of: KC.onSurfaceVariant,
   conflicts_with: KC.red,
+  // FORGE-704: the kinds the live graph holds that had no colour.
+  satisfies: KC.green,
+  supported_by: KC.teal,
+  generated_from: 'var(--mf-c-a78bfa)',
+  derives_from: KC.amber,
+  supersedes: KC.red,
+  refines: KC.teal,
+  included_in_baseline: KC.onSurfaceVariant,
 };
 
 function edgeColor(type: string) {
   return EDGE_COLOR[type] ?? KC.onSurfaceVariant;
+}
+
+// ── Connection handles ────────────────────────────────────────────────────────
+// FORGE-704. React Flow 12 anchors an edge on a node's handles, and a custom node
+// that declares none cannot be connected to: every edge fails with error 008
+// ("Couldn't create edge for source handle id: null") and nothing is drawn. This
+// graph never had them, so it never drew a single link. They are invisible and
+// inert: the graph is read-only, so there is nothing to drag from.
+const HANDLE_STYLE = { opacity: 0, pointerEvents: 'none' } as const;
+
+function NodeHandles() {
+  return (
+    <>
+      <Handle type="target" position={Position.Left} isConnectable={false} style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Right} isConnectable={false} style={HANDLE_STYLE} />
+    </>
+  );
 }
 
 // ── Custom node ───────────────────────────────────────────────────────────────
@@ -90,6 +118,7 @@ function TwinNode({ data }: { data: TwinNodeData }) {
         overflow: 'hidden',
       }}
     >
+      <NodeHandles />
       {/* Header strip */}
       <div
         style={{
@@ -144,7 +173,70 @@ interface TwinNodeData extends Record<string, unknown> {
   selected: boolean;
 }
 
-const nodeTypes = { twin: TwinNode };
+// ── Linked record: the far end of an edge that is not a work product ─────────
+// FORGE-704. A constraint, baseline, BOM item or engineering entity. Dashed and
+// smaller than a work product so it reads as "what this is linked to", not as
+// another thing to open.
+const GROUP_ICON: Record<LinkGroup, string> = {
+  constraints: 'rule',
+  intent: 'flag',
+  parts: 'memory',
+  baselines: 'inventory_2',
+  other: 'help',
+};
+const GROUP_COLOR: Record<LinkGroup, string> = {
+  constraints: KC.amber,
+  intent: KC.green,
+  parts: KC.teal,
+  baselines: KC.onSurfaceVariant,
+  other: KC.onSurfaceVariant,
+};
+
+interface RefNodeData extends Record<string, unknown> {
+  name: string;
+  kind: string;
+}
+
+function RefNode({ data }: { data: RefNodeData }) {
+  const group = groupOf(data.kind);
+  const accent = GROUP_COLOR[group];
+  return (
+    <div
+      data-testid="twin-ref-node"
+      style={{
+        minWidth: 140,
+        maxWidth: 190,
+        background: 'transparent',
+        border: `1px dashed ${accent}`,
+        borderRadius: 6,
+        fontFamily: 'monospace',
+        fontSize: 10,
+        padding: '4px 8px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+      }}
+    >
+      <NodeHandles />
+      <span className="material-symbols-outlined" style={{ fontSize: 14, color: accent, flexShrink: 0 }}>
+        {GROUP_ICON[group]}
+      </span>
+      <div style={{ overflow: 'hidden' }}>
+        <div style={{ color: KC.onSurfaceVariant, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+          {data.kind.replace(/_/g, ' ')}
+        </div>
+        <div
+          title={data.name}
+          style={{ color: KC.onSurface, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+        >
+          {data.name}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const nodeTypes = { twin: TwinNode, ref: RefNode };
 
 // ── Layout: simple grid ───────────────────────────────────────────────────────
 const COL_W = 220;
@@ -160,20 +252,76 @@ const DETAIL_PANEL_RESERVED_PX = 392;
 const DEFAULT_NODE_WIDTH = 180; // TwinNode's min/maxWidth midpoint, if unmeasured
 const DEFAULT_NODE_HEIGHT = 52;
 
-function layoutNodes(twinNodes: TwinNode[]): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>();
-  // Group by domain for visual clustering
-  const byDomain: Record<string, TwinNode[]> = {};
+/** A column holds at most this many work products before it wraps to the next. */
+const MAX_ROWS = 8;
+/** Linked records are shorter, so a column of them holds more. */
+const GHOST_ROWS = 12;
+
+/**
+ * Work products go in layers by dependency depth, so an edge mostly runs one
+ * column to the right instead of up and down a domain's tall column. A layer
+ * longer than MAX_ROWS wraps into more columns. Cycles are tolerated: depth is
+ * relaxed in a bounded number of passes, so a loop cannot run away.
+ */
+function layoutNodes(
+  twinNodes: TwinNode[],
+  relationships: TwinRelationship[],
+): { positions: Map<string, { x: number; y: number }>; columns: number } {
+  const ids = new Set(twinNodes.map((n) => n.id));
+  const depth = new Map<string, number>(twinNodes.map((n) => [n.id, 0]));
+  const edges = relationships.filter(
+    (r) => r.sourceId !== r.targetId && ids.has(r.sourceId) && ids.has(r.targetId),
+  );
+  for (let pass = 0; pass < Math.min(twinNodes.length, 12); pass++) {
+    let moved = false;
+    for (const r of edges) {
+      const want = (depth.get(r.sourceId) ?? 0) + 1;
+      if (want > (depth.get(r.targetId) ?? 0) && want <= twinNodes.length) {
+        depth.set(r.targetId, want);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  const layers = new Map<number, TwinNode[]>();
   for (const n of twinNodes) {
-    (byDomain[n.domain] ??= []).push(n);
+    const d = depth.get(n.id) ?? 0;
+    const layer = layers.get(d);
+    if (layer) layer.push(n);
+    else layers.set(d, [n]);
   }
+
+  const positions = new Map<string, { x: number; y: number }>();
   let col = 0;
-  for (const nodes of Object.values(byDomain)) {
-    nodes.forEach((n, row) => {
-      positions.set(n.id, { x: col * COL_W, y: row * ROW_H });
+  for (const d of [...layers.keys()].sort((a, b) => a - b)) {
+    const layer = (layers.get(d) ?? []).sort(
+      (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name),
+    );
+    layer.forEach((n, i) => {
+      positions.set(n.id, { x: (col + Math.floor(i / MAX_ROWS)) * COL_W, y: (i % MAX_ROWS) * ROW_H });
     });
-    col++;
+    col += Math.max(1, Math.ceil(layer.length / MAX_ROWS));
   }
+  return { positions, columns: col };
+}
+
+/** Linked records go in columns to the right of the work products, grouped by kind. */
+function layoutGhosts(
+  ghosts: Record<string, TwinEndpoint>,
+  workProductColumns: number,
+): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+  const ordered = Object.entries(ghosts).sort(
+    ([, a], [, b]) => groupOf(a.kind).localeCompare(groupOf(b.kind)) || a.name.localeCompare(b.name),
+  );
+  const x0 = (workProductColumns + 0.4) * COL_W;
+  ordered.forEach(([id], i) =>
+    positions.set(id, {
+      x: x0 + Math.floor(i / GHOST_ROWS) * COL_W,
+      y: (i % GHOST_ROWS) * (ROW_H * 0.6),
+    }),
+  );
   return positions;
 }
 
@@ -181,6 +329,8 @@ function layoutNodes(twinNodes: TwinNode[]): Map<string, { x: number; y: number 
 interface TwinGraphCanvasProps {
   nodes: TwinNode[];
   relationships: TwinRelationship[];
+  /** FORGE-704: the far ends of `relationships` that are not work products. */
+  ghosts?: Record<string, TwinEndpoint>;
   selectedId: string | null;
   onSelectNode: (id: string | null) => void;
 }
@@ -189,14 +339,21 @@ interface TwinGraphCanvasProps {
 export function TwinGraphCanvas({
   nodes: twinNodes,
   relationships,
+  ghosts,
   selectedId,
   onSelectNode,
 }: TwinGraphCanvasProps) {
-  const rfInstanceRef = useRef<ReactFlowInstance<Node<TwinNodeData>, Edge> | null>(null);
+  const rfInstanceRef = useRef<ReactFlowInstance<Node<TwinNodeData | RefNodeData>, Edge> | null>(null);
 
-  const positions = useMemo(() => layoutNodes(twinNodes), [twinNodes]);
+  const layout = useMemo(() => layoutNodes(twinNodes, relationships), [twinNodes, relationships]);
+  const positions = layout.positions;
+  const ghostMap = useMemo(() => ghosts ?? {}, [ghosts]);
+  const ghostPositions = useMemo(
+    () => layoutGhosts(ghostMap, layout.columns),
+    [ghostMap, layout.columns],
+  );
 
-  const rfNodes: Node<TwinNodeData>[] = useMemo(
+  const workProductNodes: Node<TwinNodeData>[] = useMemo(
     () =>
       twinNodes.map((n) => {
         const pos = positions.get(n.id) ?? { x: 0, y: 0 };
@@ -218,18 +375,45 @@ export function TwinGraphCanvas({
     [twinNodes, positions, selectedId],
   );
 
+  const linkedNodes: Node<RefNodeData>[] = useMemo(
+    () =>
+      Object.entries(ghostMap).map(([id, g]) => ({
+        id,
+        type: 'ref',
+        position: ghostPositions.get(id) ?? { x: 0, y: 0 },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        draggable: true,
+        selectable: false,
+        data: { name: g.name, kind: g.kind },
+      })),
+    [ghostMap, ghostPositions],
+  );
+  const rfNodes = useMemo(
+    () => [...workProductNodes, ...linkedNodes] as Node<TwinNodeData | RefNodeData>[],
+    [workProductNodes, linkedNodes],
+  );
+
   const rfEdges: Edge[] = useMemo(
     () =>
       relationships.map((r) => {
         const color = edgeColor(r.type);
+        const toLinkedRecord = r.sourceId in ghostMap || r.targetId in ghostMap;
         return {
           id: r.id,
           source: r.sourceId,
           target: r.targetId,
-          label: r.label,
+          // Labels on 140 edges are clutter; name only the links of the selected
+          // node. The rest are told apart by colour.
+          label: selectedId && (r.sourceId === selectedId || r.targetId === selectedId) ? r.label : undefined,
           labelStyle: { fill: KC.onSurfaceVariant, fontSize: 10, fontFamily: 'monospace' },
           labelBgStyle: { fill: KC.surface, fillOpacity: 0.85 },
-          style: { stroke: color, strokeWidth: 1.5 },
+          style: {
+            stroke: color,
+            strokeWidth: 1.5,
+            // A link to a record that is not a work product reads as lighter.
+            ...(toLinkedRecord ? { strokeDasharray: '4 3', opacity: 0.8 } : {}),
+          },
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 10,
@@ -239,11 +423,13 @@ export function TwinGraphCanvas({
           animated: r.type === 'produced_by' || r.type === 'validates',
         };
       }),
-    [relationships],
+    [relationships, ghostMap, selectedId],
   );
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_evt, node) => {
+      // A linked record is not a work product: there is nothing to open.
+      if (node.type === 'ref') return;
       onSelectNode(node.id === selectedId ? null : node.id);
     },
     [selectedId, onSelectNode],
@@ -271,7 +457,7 @@ export function TwinGraphCanvas({
   }, [selectedId, positions]);
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div style={{ width: '100%', flex: 1, minHeight: 0 }}>
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
@@ -306,7 +492,11 @@ export function TwinGraphCanvas({
           }}
         />
         <MiniMap
-          nodeColor={(n) => domainColor((n.data as TwinNodeData).domain)}
+          nodeColor={(n) =>
+            n.type === 'ref'
+              ? GROUP_COLOR[groupOf((n.data as RefNodeData).kind)]
+              : domainColor((n.data as TwinNodeData).domain)
+          }
           style={{
             background: KC.surfaceContainer,
             border: `1px solid ${KC.border}`,

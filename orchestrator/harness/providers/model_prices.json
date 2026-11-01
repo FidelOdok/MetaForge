@@ -1,0 +1,10 @@
+{
+  "_comment": "Illustrative list prices in USD per 1M tokens. Verify against the provider pricing page before relying on them for budgets. A (provider, model) pair that is not listed has an UNKNOWN cost (null), never 0. cached_input is the rate for tokens read from the prompt cache; cache_write is the rate for tokens written to it (Anthropic). Either may be omitted: cached tokens then bill at the input rate.",
+  "prices": [
+    {"provider": "anthropic", "model": "claude-opus-4-8", "input": 15.0, "output": 75.0, "cached_input": 1.5, "cache_write": 18.75},
+    {"provider": "anthropic", "model": "claude-sonnet-5", "input": 3.0, "output": 15.0, "cached_input": 0.3, "cache_write": 3.75},
+    {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "input": 0.8, "output": 4.0, "cached_input": 0.08, "cache_write": 1.0},
+    {"provider": "openai", "model": "gpt-4o", "input": 2.5, "output": 10.0, "cached_input": 1.25},
+    {"provider": "openai", "model": "gpt-5.5", "input": 5.0, "output": 15.0, "cached_input": 0.5}
+  ]
+}

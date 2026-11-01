@@ -1,30 +1,37 @@
 # run_fea
 
-Run a finite element analysis using the CalculiX solver.
+Run a finite element analysis with CalculiX: linear static stress or modal (natural frequencies).
 
 ## What it does
 
-1. Takes a mechanical design work_product and its FEA mesh
-2. Invokes the CalculiX solver via MCP to run static structural analysis
-3. Extracts peak stress/displacement and records them against the work_product in the twin
+1. Takes a volume mesh and the case `calculix.run_fea` needs: material, fixed face and, for static stress, the loaded face and force vector
+2. Invokes `calculix.run_fea` with exactly those arguments (FORGE-561: it used to send arguments the tool does not take, so every call failed)
+3. Returns peak von Mises stress and displacement, or modal frequencies, and the `.frd` path; it records nothing itself
 
 ## Tools Required
 
-- `calculix.run_fea` -- CalculiX static structural solve
+- `calculix.run_fea` -- CalculiX static stress or modal solve
 
 ## Input
 
 - `work_product_id` -- twin work_product id for the mechanical design
-- `mesh_file` -- path to the FEA mesh (.inp/.unv)
+- `mesh_file` -- volume mesh (.inp), e.g. from `generate_mesh`
+- `load_case` -- name of the load case
+- `analysis_type` -- `static_stress` (default; `static` is accepted) or `modal`
+- `material` -- `{"name": ...}` or explicit `youngs_modulus_mpa` / `poissons_ratio`; modal needs the name
+- `fixed_node_set` -- the face held fixed
+- `load_node_set`, `load_force_n` (`[Fx, Fy, Fz]`, N) -- required for static stress
+- `num_modes` -- modal only (default 3)
+- `yield_strength_mpa` -- optional, cited; gives a safety factor
 
 ## Output
 
-- `work_product_id` -- the design the result is attached to
-- `max_stress_mpa` -- maximum von Mises stress (MPa)
-- `max_displacement_mm` -- maximum displacement (mm)
-- `solver_time_s` -- solver wall-clock time
+- `max_stress_mpa`, `max_displacement_mm` (static), `frequencies_hz` (modal)
+- `safety_factor` -- `yield_strength_mpa / max_stress_mpa`, or null when no yield was given (the tool has no yield data)
+- `frd_path`, `solver_time_s`
 
 ## Limitations
 
-- Static structural analysis only (no modal/thermal/nonlinear)
-- Result quality depends on the supplied mesh; meshing is `generate_mesh`
+- Linear static and modal only; no thermal (see `run_cfd` / `calculix.run_thermal`), contact or nonlinear material
+- A solve that reports no stress (or no frequencies) fails validation rather than reading as zero
+- Result quality depends on the mesh; meshing is `generate_mesh`

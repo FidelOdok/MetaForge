@@ -570,6 +570,16 @@ Phase 1 includes 12 skills across 4 agents (3 skills per agent):
 | `run_circuit_sim` | SPICE circuit simulation (DC/AC/transient) | `spice.simulate` |
 | `compare_results` | Compare simulation results against reference | (pure logic) |
 
+### Industrial Design Agent (`domain_agents/industrial_design/`, Phase 2)
+
+Added after this Phase 1 catalog; all three are pure logic over sourced inputs, with a missing value or limit reported as unknown.
+
+| Skill | Description | Tools |
+|-------|-------------|-------|
+| `form_factor_envelope` | Smallest outer envelope for the contents, with clearance and wall, against a sourced maximum | (pure logic; inputs from `library.process_limits`, `freecad.measure`) |
+| `check_ergonomics` | Human-contact features against limits for the intended users, each with its population and source | (pure logic) |
+| `check_cmf_compatibility` | Each part's library appearance against its material, finishing processes, values to review | (pure logic; records from `library.get_appearance`) |
+
 ---
 
 ## 11. Example: Complete Skill Implementation
@@ -717,7 +727,7 @@ def sample_input():
             StressConstraint(
                 max_von_mises_mpa=250.0,
                 safety_factor=1.5,
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         ],
     )

@@ -14,7 +14,7 @@ Architecture documentation lives in **two places**, split by tense — what is b
 
 ### Live architecture — this repo's `docs/`
 
-The **`docs/`** directory in *this* repo documents the architecture **as implemented**. This is the source of truth for how the system actually works today. It is published as a MkDocs Material site on GitHub Pages at **https://fidelodok.github.io/MetaForge/** (auto-deployed by `.github/workflows/docs.yml` on every push to `main` that touches `docs/`). Key references:
+The **`docs/`** directory in *this* repo documents the architecture **as implemented**. This is the source of truth for how the system actually works today. It is published as a Docusaurus site on GitHub Pages at **https://fidelodok.github.io/MetaForge/** (auto-deployed by `.github/workflows/docs.yml` on every push to `main` that touches `docs/` or `docs-site/`). The markdown stays in `docs/`; `docs-site/` is only the renderer. Key references:
 
 - **Overview**: `docs/architecture.md` — system architecture as built
 - **Harness**: `docs/architecture/robust-harness-design.md` — the agent harness (ReAct loop, providers, tools, gates)
@@ -24,13 +24,13 @@ The **`docs/`** directory in *this* repo documents the architecture **as impleme
 - **Skill / Twin specs**: `docs/skill_spec.md`, `docs/twin_schema.md`
 - **Session capture**: `docs/session-capture.md`
 
-When documenting or reasoning about **current behavior**, use `docs/` — and keep it accurate, since the docs CI builds `--strict` (broken links / warnings fail the build).
+When documenting or reasoning about **current behavior**, use `docs/` — and keep it accurate, since the docs CI fails on a broken link or cross-reference.
 
 **Update documentation before merge.** Any change that alters user-facing behavior, gateway routes, schemas, CLI commands, or architecture must land its `docs/` update **in the same PR** — never as a follow-up. Specifically:
 
-- **Gateway API**: the reference at `docs/reference/gateway-api.md` renders `docs/reference/openapi.json`, which is generated from the live app. When you change a route or response schema, run `python scripts/gen_openapi.py` and commit the regenerated spec so the published reference can't drift.
+- **Gateway API**: the reference at `docs/reference/gateway-api.md` and the explorer at `/reference/openapi/` both render `docs/reference/openapi.json`, which is generated from the live app. When you change a route or response schema, run `python scripts/gen_openapi.py` and commit the regenerated spec so the published reference can't drift.
 - **CLI / behavior / architecture**: update the relevant `docs/` page (e.g. `cli-reference.md`, `architecture.md`, `capability-matrix.md`) alongside the code.
-- Verify locally with `mkdocs build --strict` before opening the PR — this is exactly what CI runs, and it fails on broken links or warnings.
+- Verify locally with `cd docs-site && npm run build && npm test` before opening the PR — this is exactly what CI runs. The build throws on a broken link or a broken markdown cross-reference (the `mkdocs build --strict` equivalent), and the test asserts that every URL the site published before the Docusaurus switch still resolves.
 
 ### Future plans — the MetaForge-Planner repo
 
@@ -57,7 +57,7 @@ All project tracking lives in **Jira** (migrated from Linear — `MET-*` referen
 ### Access
 
 - **CLI** (preferred): [`jira-cli`](https://github.com/ankitpokhrel/jira-cli), already configured at `~/.config/.jira/.config.yml` (site/project/login). It needs an API token the config doesn't store — export `JIRA_API_TOKEN` before use (the repo's `.env` carries it under `JIRA_API`: `export JIRA_API_TOKEN=$(grep '^JIRA_API=' .env | cut -d= -f2-)`). Verify with `jira me`.
-- **Cloud MCP** (Atlassian tools): only use this if it resolves to the `metaforge-team.atlassian.net` site specifically — `getAccessibleAtlassianResources` may instead surface an unrelated org's Jira (e.g. `idroneinnovations.atlassian.net`), which has no `FORGE`/MetaForge project at all. Confirm the `cloudId` before creating or citing an issue through it.
+- **Cloud MCP** (Atlassian tools): only use this if it resolves to the `metaforge-team.atlassian.net` site specifically — `getAccessibleAtlassianResources` may instead surface an unrelated org's Jira, which has no `FORGE`/MetaForge project at all. Confirm the `cloudId` before creating or citing an issue through it.
 
 ### Workflow
 
@@ -85,6 +85,35 @@ No fixed epic enumeration — epics are created as real initiatives start (unlik
 | Graph Database | Neo4j |
 | Event Bus | Apache Kafka |
 | Observability | OpenTelemetry + structlog + Prometheus + Grafana |
+
+## Open Core — What Does Not Live Here
+
+MetaForge is open core. This repository is the whole system **minus the
+hosted service**. The commercial half lives in the private
+**`FidelOdok/MetaForge-Cloud`** repo: Supabase-backed gateway authentication,
+the accounts control plane (`accounts`, `account_members`, `cloud_projects`,
+`gateway_connections` + RLS), the dashboard's sign-in surface, and the
+marketing site.
+
+Two seams connect them, both defined here and both usable by any provider:
+
+- **Gateway** — `api_gateway/auth/provider.py`. An implementation registers on
+  the `metaforge.auth` entry-point group; `METAFORGE_AUTH_MODE` names it.
+- **Dashboard** — the `metaforge:auth` Vite alias, resolving to
+  `dashboard/src/auth/none.ts` unless `METAFORGE_AUTH_MODULE` overrides it.
+
+**Rules when touching authentication:**
+
+1. Never add a provider-specific name (`supabase`, a vendor SDK, a
+   `VITE_SUPABASE_*` variable) to this repository. If something can only work
+   by making open core know about one provider, widen the seam instead.
+2. `api_gateway/auth/` carries no crypto stack. A JWT library is a provider's
+   dependency, and `tests/unit/test_gateway_auth.py` asserts that it stays one.
+3. Changing `AuthProvider`, `AuthClient`, `Principal` or the `InvalidToken` /
+   `AuthUnavailable` split is a cross-repo change — land the Cloud side too.
+4. The load-bearing property is that a gateway asked for authentication it
+   cannot deliver **refuses to start**. A provider missing from an image is a
+   real deployment mistake, not just a typo; it must never degrade to `off`.
 
 ## Dual-Mode Operation
 
@@ -118,9 +147,12 @@ npm run build                    # Production build
 ```
 
 The CLI lives at `cli/forge_cli/` (argparse-based, see `main.py`).
-There is no `forge` binary in `[project.scripts]` yet — invoke via
-`python -m cli.forge_cli`. See [`docs/cli-reference.md`](docs/cli-reference.md)
-for the full command catalog.
+`[project.scripts]` exposes it as `forge`, so an installed package has the
+binary on PATH; `python -m cli.forge_cli` does the same from a checkout.
+Keep `cli` in `[tool.hatch.build.targets.wheel] packages` — without it the
+wheel ships a `forge` script whose first import fails (FORGE-648). See
+[`docs/cli-reference.md`](docs/cli-reference.md) for the full command
+catalog.
 
 ## Git Workflow
 
@@ -129,7 +161,7 @@ for the full command catalog.
 1. **Branch** — Create a feature branch from `main` (e.g., `feat/met-15-twin-api`)
 2. **Implement** — Commit changes to the feature branch
 3. **Test branch** — Run `pytest`, `ruff check .`, `mypy .` on the branch
-4. **Update docs** — Land any required `docs/` updates **in the same PR** (see [Update documentation before merge](#documentation-two-sources-of-truth)); verify with `mkdocs build --strict`
+4. **Update docs** — Land any required `docs/` updates **in the same PR** (see [Update documentation before merge](#documentation-two-sources-of-truth)); verify with `cd docs-site && npm run build && npm test`
 5. **Pull request** — Open a PR to `main` with a summary of changes
 6. **Merge** — Merge the PR into `main` (squash or merge commit)
 7. **Test main** — Verify `main` passes all checks after merge

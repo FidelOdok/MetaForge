@@ -28,6 +28,7 @@ import os
 import sys
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -38,12 +39,44 @@ from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
+    Response,
     StreamingResponse,
 )
 
-from mcp_core.auth import AUTH_DENIED, redact, verify_api_key
+from mcp_core.auth import AUTH_DENIED, AuthPosture, redact, verify_api_key
+from mcp_core.context import HEADER_SESSION
+from mcp_core.elicitation import (
+    ElicitAction,
+    ElicitResult,
+    cancelled_notification,
+    result_from_payload,
+)
+from mcp_core.guardrails import Caller
+from mcp_core.protocol import AUTH_DENIED as AUTH_DENIED_CODE
+from mcp_core.protocol_versions import (
+    HEADER_MISMATCH,
+    PROTOCOL_VERSION_HEADER,
+    UNSUPPORTED_PROTOCOL_VERSION,
+    header_mismatch,
+    is_modern,
+    is_subscription_listen,
+    modern_header_problem,
+    modern_status,
+    request_protocol_version,
+    subscription_ack,
+)
+from mcp_core.service_auth import HEADER_SERVICE_KEY, ServiceRunVerifier
+from metaforge.mcp.http_elicitation import (
+    ElicitationHub,
+    HttpElicitor,
+    HttpNotifier,
+    is_jsonrpc_response,
+    session_uuid,
+)
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
+from metaforge.mcp.origin import OriginPolicy
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
+from observability.metrics import collector_for
 
 logger = structlog.get_logger("metaforge.mcp")
 
@@ -84,6 +117,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Comma-separated adapter id allow-list "
             "(e.g. ``cadquery,calculix``). Default: every enabled adapter."
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help=(
+            "Serve only one tool profile (core, mechanical, mechanical_product, "
+            "simulation, electronics, robotics, client_run), or 'all' for "
+            "every tool (FORGE-588). Every client caps how many tools it "
+            "carries, and most drop the overflow without saying so, which "
+            "leaves the model behaving as though the missing capability does "
+            "not exist. A profile keeps the set inside that cap on purpose. "
+            "Default: every registered tool (FORGE-339)."
         ),
     )
     parser.add_argument(
@@ -130,7 +176,10 @@ def _auth_error_response(request_id: str, reason: str) -> str:
             "jsonrpc": "2.0",
             "id": request_id,
             "error": {
-                "code": -32002,
+                # FORGE-388: the shared table, not a literal. -32002 is
+                # the spec's "Resource not found"; a rejected credential
+                # is AUTH_DENIED.
+                "code": AUTH_DENIED_CODE,
                 "message": "Authentication failed",
                 "data": {"error_type": AUTH_DENIED, "reason": reason},
             },
@@ -200,6 +249,117 @@ def _stdio_max_line_bytes() -> int:
     return value
 
 
+class StdioElicitor:
+    """Ask the connected client a question over stdio (FORGE-360).
+
+    stdio is a single duplex pipe, so a server-to-client request is just a
+    JSON-RPC request written to stdout with an id, and the answer is
+    whichever inbound line carries that id. The read loop routes it here;
+    this class only owns the correlation and the wait.
+
+    A client that never answers is not a refusal. The timeout resolves to
+    ``cancel``, which :func:`mcp_core.elicitation.elicitation_gate` maps to
+    ``TIMED_OUT`` -- so the agent is told nobody looked, rather than that a
+    reviewer said no.
+    """
+
+    def __init__(
+        self,
+        write: Callable[[str], None],
+        *,
+        timeout_seconds: float = 180.0,
+    ) -> None:
+        self._write = write
+        self._timeout = timeout_seconds
+        self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        #: Questions withdrawn (FORGE-472), so a late answer is ignored.
+        self._ended: set[str] = set()
+        self._next = 0
+
+    def resolve(self, message_id: str, payload: dict[str, Any]) -> bool:
+        """Hand an inbound response to whoever is waiting for it.
+
+        Returns False when nothing is waiting, so the caller can treat the
+        line as an ordinary request rather than dropping it silently. A late
+        answer to a withdrawn question (FORGE-472) is consumed and ignored.
+        """
+        future = self._pending.pop(message_id, None)
+        if future is None or future.done():
+            if message_id in self._ended:
+                logger.warning("mcp_elicitation_late_response_ignored", message_id=message_id)
+                return True
+            return False
+        future.set_result(payload)
+        return True
+
+    async def __call__(self, message: str, requested_schema: dict[str, Any]) -> ElicitResult:
+        self._next += 1
+        message_id = f"elicit-{self._next}"
+        future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        self._pending[message_id] = future
+        self._write(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message_id,
+                    "method": "elicitation/create",
+                    "params": {"message": message, "requestedSchema": requested_schema},
+                }
+            )
+        )
+        try:
+            payload = await asyncio.wait_for(future, timeout=self._timeout)
+        except TimeoutError:
+            self._pending.pop(message_id, None)
+            logger.warning("mcp_elicitation_timeout", message_id=message_id)
+            self._withdraw(message_id, "approval request timed out")
+            return ElicitResult(ElicitAction.CANCEL)
+        except asyncio.CancelledError:
+            self._pending.pop(message_id, None)
+            self._withdraw(message_id, "approval window ended")
+            raise
+
+        # FORGE-423: shared with the HTTP elicitor. The three defaults here
+        # are the easy part to get wrong, and getting them wrong on one
+        # transport and not the other is worse than getting them wrong on
+        # both.
+        return result_from_payload(payload)
+
+    def _withdraw(self, message_id: str, reason: str) -> None:
+        """Take the question down on the client (FORGE-472)."""
+        if len(self._ended) > 256:
+            self._ended.clear()
+        self._ended.add(message_id)
+        self._write(json.dumps(cancelled_notification(message_id, reason)))
+        logger.info("mcp_elicitation_withdrawn", message_id=message_id, reason=reason)
+
+
+def _is_response(raw: str) -> tuple[bool, str, dict[str, Any]]:
+    """Is this inbound line an answer to something *we* asked?
+
+    A JSON-RPC response carries an id and a result/error and no method. The
+    stdio loop treated every line as a request, which was correct while the
+    traffic was one-directional and becomes a silent misroute the moment it
+    is not: our own answer would have been dispatched as a method call and
+    come back as "Unknown method: None".
+
+    Anything unparseable is reported as "not a response" so it still reaches
+    ``handle_request``, which already turns it into a proper parse error.
+    """
+    try:
+        msg = json.loads(raw)
+    except (ValueError, TypeError):
+        return False, "", {}
+    if not isinstance(msg, dict) or "method" in msg:
+        return False, "", {}
+    if "result" not in msg and "error" not in msg:
+        return False, "", {}
+    message_id = msg.get("id")
+    if not isinstance(message_id, str):
+        return False, "", {}
+    return True, message_id, msg
+
+
 async def run_stdio(server: UnifiedMcpServer) -> None:
     """Read line-delimited JSON-RPC requests from stdin; reply on stdout.
 
@@ -219,6 +379,17 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
         sys.stdout.write(_auth_error_response("auth", reason) + "\n")
         sys.stdout.flush()
         return
+    # FORGE-332: the check above already knows whether a key was in force
+    # (`reason == "open_mode"` means there was none). Tell the server, so
+    # health/check can say so too -- stdio launched from a plugin manifest
+    # is the commonest way to end up in open mode without deciding to.
+    server.declare_auth_posture(
+        AuthPosture(api_key=reason != "open_mode", oauth=False, transport="stdio")
+    )
+    # FORGE-387: stdio is a subprocess this user launched on their own
+    # machine, so it really is them. Declared rather than defaulted, now
+    # that the default is the conservative one.
+    server.declare_caller(Caller.LOCAL)
 
     # MET-387: stdio installs the call context from env vars at boot —
     # one stdio process = one harness session, so a single context
@@ -250,6 +421,43 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
     transport, _ = await loop.connect_read_pipe(
         lambda: asyncio.StreamReaderProtocol(reader), sys.stdin
     )
+    # FORGE-360: stdout now has two writers -- replies to the client's
+    # requests, and our own elicitation requests -- so framing needs a lock.
+    # Interleaved partial lines would corrupt the stream for both.
+    write_lock = asyncio.Lock()
+
+    async def write_line(text: str) -> None:
+        async with write_lock:
+            sys.stdout.write(text + "\n")
+            sys.stdout.flush()
+
+    pending_writes: set[asyncio.Task[None]] = set()
+
+    def write_soon(text: str) -> None:
+        task = asyncio.ensure_future(write_line(text))
+        pending_writes.add(task)
+        task.add_done_callback(pending_writes.discard)
+
+    elicitor = StdioElicitor(write_soon)
+    server.attach_elicitor(elicitor)
+    server.attach_notifier(_StdioNotifier(write_soon))
+
+    in_flight: set[asyncio.Task[None]] = set()
+
+    async def dispatch(raw: str) -> None:
+        response = await server.handle_request(raw)
+        # FORGE-603: a subscription is acknowledged before it is closed.
+        try:
+            message = json.loads(raw)
+        except ValueError:
+            message = None
+        if is_subscription_listen(message) and '"result"' in response:
+            await write_line(json.dumps(subscription_ack(message["id"])))
+        # JSON-RPC notifications return an empty body — writing a
+        # blank line breaks the client's JSON line framing.
+        if response:
+            await write_line(response)
+
     try:
         while True:
             line = await reader.readline()
@@ -258,16 +466,28 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
             raw = line.decode("utf-8").strip()
             if not raw:
                 continue
-            response = await server.handle_request(raw)
-            # JSON-RPC notifications return an empty body — writing a
-            # blank line breaks the client's JSON line framing.
-            if not response:
+            # Our own answer, not a new request. Before elicitation the
+            # stream was one-directional and this could not happen.
+            is_response, message_id, payload = _is_response(raw)
+            if is_response and elicitor.resolve(message_id, payload):
                 continue
-            sys.stdout.write(response + "\n")
-            sys.stdout.flush()
+            # Dispatched as a task rather than awaited. A call held for
+            # approval waits on an elicitation response that arrives on
+            # *this* stream: awaiting it here means never reading the line
+            # that would release it, which is a deadlock rather than a
+            # slow approval.
+            task = asyncio.ensure_future(dispatch(raw))
+            in_flight.add(task)
+            task.add_done_callback(in_flight.discard)
     except asyncio.CancelledError:
         pass
     finally:
+        # Let anything mid-flight finish writing before the pipe closes,
+        # so a client does not see a truncated reply on shutdown.
+        if in_flight:
+            await asyncio.gather(*in_flight, return_exceptions=True)
+        if pending_writes:
+            await asyncio.gather(*pending_writes, return_exceptions=True)
         transport.close()
         logger.info("mcp_stdio_stopped")
 
@@ -277,12 +497,95 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: The session header the Streamable HTTP transport defines. Distinct from
+#: MetaForge's own ``X-MetaForge-Session``: that one is ours and a client has
+#: to be told about it, this one every spec-compliant client already sends
+#: back once the server has issued it.
+MCP_SESSION_HEADER = "Mcp-Session-Id"
+
+
+def _is_initialize(raw_body: bytes) -> bool:
+    """Whether this POST body is the ``initialize`` request.
+
+    Unparseable bodies answer False: ``handle_request`` turns them into a
+    proper JSON-RPC parse error, and minting a session for a request that
+    was never valid would leave a binding nothing will ever claim.
+    """
+    try:
+        message = json.loads(raw_body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(message, dict) and message.get("method") == "initialize"
+
+
+def _session_for_request(headers: dict[str, str], raw_body: bytes) -> str | None:
+    """The session id this request belongs to, minting one at initialize.
+
+    Returns None when there is nothing to do -- a non-initialize request
+    from a client that is not carrying a session. That client keeps the old
+    behaviour (a fresh context per call, and ``session.start`` telling it so)
+    rather than being handed a session it never asked for and will not echo.
+    """
+    folded = {k.lower(): v for k, v in headers.items()}
+    existing = folded.get(MCP_SESSION_HEADER.lower())
+    if existing:
+        # Already in a session. Only accept a well-formed one: our context
+        # keys bindings by UUID, and a value we cannot parse would silently
+        # become "no session" one layer down.
+        try:
+            UUID(existing)
+        except ValueError:
+            logger.warning("mcp_session_header_unparseable", value=existing[:64])
+            return None
+        return existing
+    if _is_initialize(raw_body):
+        return str(uuid4())
+    return None
+
+
+def _has_progress_token(payload: dict[str, Any]) -> bool:
+    """Whether a request asked for progress (``params._meta.progressToken``)."""
+    params = payload.get("params")
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    return isinstance(meta, dict) and meta.get("progressToken") is not None
+
+
+class _StdioNotifier:
+    """Notifications for the stdio client (FORGE-465). stdout always reaches it."""
+
+    def __init__(self, write: Callable[[str], None]) -> None:
+        self._write = write
+
+    def available(self) -> bool:
+        return True
+
+    def send(self, message: dict[str, Any]) -> bool:
+        self._write(json.dumps(message))
+        return True
+
+
+def _accepts_event_stream(accept: str | None) -> bool:
+    """Whether the client said it can read an SSE response (FORGE-464).
+
+    Explicit only. ``*/*`` is what a client sends when it has not thought
+    about it, and answering that with a stream would hand a plain JSON
+    client something it cannot parse.
+    """
+    if not accept:
+        return False
+    return any(
+        part.split(";", 1)[0].strip().lower() == "text/event-stream" for part in accept.split(",")
+    )
+
+
 def build_http_app(
     server: UnifiedMcpServer,
     *,
     enable_sse: bool,
     api_key: str | None = None,
     oauth: OAuthProvider | None = None,
+    service_key: str | None = None,
+    service_verifier: ServiceRunVerifier | None = None,
 ) -> Any:
     """Construct a FastAPI app exposing the unified server.
 
@@ -301,7 +604,36 @@ def build_http_app(
     ``/authorize``, ``/token``) and ``/mcp`` accepts a valid OAuth bearer
     token **or** the static key. This is what the claude.ai web connector
     requires — it cannot send a static bearer header.
+
+    FORGE-332: whichever of those two is live, the server is told, so
+    ``health/check`` reports the auth mode instead of leaving
+    /metaforge:doctor to guess. Open mode is what an unset
+    ``METAFORGE_MCP_API_KEY`` gives you, so it is the state most likely to
+    be in force without anyone having chosen it.
     """
+    identifies = bool(oauth and oauth.config.verified_identity)
+    server.declare_auth_posture(
+        AuthPosture(
+            api_key=bool(api_key),
+            oauth=oauth is not None and oauth.config.enabled,
+            transport="http",
+            identifies_caller=identifies,
+        )
+    )
+    # FORGE-387: an HTTP caller is not the engineer at the keyboard, whether
+    # they are next door or through a tunnel. REMOTE only when the login
+    # establishes who they are; a shared credential, or none, is UNTRUSTED.
+    # Both hold writes -- the difference is what a reviewer is told.
+    server.declare_caller(Caller.REMOTE if identifies else Caller.UNTRUSTED)
+    # FORGE-487: the design-flow worker is the one HTTP caller that can be
+    # something other than untrusted/remote, and only per request: it must
+    # present ``service_key`` AND name a run the gateway confirms. Off unless
+    # both are supplied, in any auth mode.
+    server.attach_service_auth(service_key, service_verifier)
+    # FORGE-584: scoped writes for a client working a claimed phase task.
+    # Off unless the owner sets METAFORGE_CLIENT_TASK_WRITES, and only with a
+    # gateway to confirm each claim against.
+    server.attach_client_task_grant(_client_task_verifier_from_env())
     app = FastAPI(
         title="MetaForge MCP",
         version="0.1.0",
@@ -311,6 +643,35 @@ def build_http_app(
             "as server-sent events when ``--transport sse`` is enabled."
         ),
     )
+
+    # FORGE-604: refuse a browser request whose Origin is not ours, so a page
+    # that re-points its own name at this host (DNS rebinding) cannot drive
+    # the tools. Only the MCP routes: /health is probed by orchestrators and
+    # the OAuth pages are this server's own.
+    origin_policy = OriginPolicy.from_env(issuer=oauth.config.issuer if oauth else None)
+
+    @app.middleware("http")
+    async def _check_origin(request: Request, call_next: Any) -> Any:
+        if request.url.path == "/mcp" or request.url.path.startswith("/mcp/"):
+            origin = request.headers.get("origin")
+            if not origin_policy.allows(origin):
+                logger.warning(
+                    "mcp_origin_rejected",
+                    origin=(origin or "")[:200],
+                    path=request.url.path,
+                    method=request.method,
+                )
+                metrics = getattr(server, "_metrics", None)
+                if metrics is not None:
+                    metrics.record_mcp_origin_rejected()
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "error": {"code": -32600, "message": "Origin not allowed"},
+                    },
+                    status_code=403,
+                )
+        return await call_next(request)
 
     def _issuer_for(request: Request) -> str:
         """Public base URL of this server.
@@ -334,7 +695,7 @@ def build_http_app(
             return authorization.split(None, 1)[1].strip()
         return None
 
-    def _check_auth(request: Request, authorization: str | None) -> None:
+    def _check_auth(request: Request, authorization: str | None) -> str | None:
         """Accept the static API key (MET-338) OR an OAuth token (MET-480).
 
         Open mode (no key, no OAuth) passes everything. When either
@@ -347,19 +708,31 @@ def build_http_app(
         oauth_on = oauth is not None and oauth.config.enabled
 
         # OAuth token path (only when configured).
-        if oauth is not None and oauth_on and provided and oauth.validate_token(provided):
-            return
+        #
+        # FORGE-330: the actor this token is bound to used to be thrown away
+        # here — `validate_token` returns it and the call site tested it for
+        # truthiness. Everything downstream then took `actor_id` from the
+        # client-supplied X-MetaForge-Actor header instead, so over HTTP a
+        # caller could claim to be anyone and that is what landed in the
+        # session record. Self-asserted attribution is not an audit trail.
+        if oauth is not None and oauth_on and provided:
+            actor = oauth.validate_token(provided)
+            if actor:
+                return actor
 
         # Static API-key path — authoritative only when a key is set.
         reason = "invalid_token"
         if api_key:
             result = verify_api_key(provided, api_key)
             if result.ok:
-                return
+                # A shared API key authorises the call but identifies nobody.
+                # Returning None keeps that distinction: authorised is not
+                # the same as attributable.
+                return None
             reason = result.reason
         elif not oauth_on:
             # Neither mechanism configured → open mode, everything passes.
-            return
+            return None
 
         # At least one mechanism is on and the request failed it.
         logger.warning(
@@ -387,26 +760,339 @@ def build_http_app(
         body = json.loads(raw)
         return JSONResponse(body.get("result", body))
 
+    # FORGE-423: the server-to-client direction. Without it `can_elicit` is
+    # false for every HTTP client -- which is every plugin -- so FORGE-360's
+    # inline approvals existed only on stdio and every held write went to the
+    # dashboard queue.
+    hub = ElicitationHub()
+    server.attach_elicitor(HttpElicitor(hub))
+    server.attach_notifier(HttpNotifier(hub))
+
+    @app.get("/mcp")
+    async def mcp_stream(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        """The long-lived SSE stream the server pushes requests down.
+
+        Distinct from ``GET /mcp/sse``, which is a request/response
+        convenience (queue work as ``?request=`` params, server closes with
+        ``event: done``). This one carries server-initiated messages and
+        stays open, which is what the Streamable HTTP spec means by the
+        server-to-client direction.
+
+        A stream with no session id is refused rather than opened on an
+        invented one: an approval pushed down a stream nobody can be
+        correlated with is a question asked into the void.
+        """
+        _check_auth(request, authorization)
+        session_id = request.headers.get(MCP_SESSION_HEADER)
+        if session_uuid(session_id) is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{MCP_SESSION_HEADER} is required to open the event stream, and "
+                    "must be the id this server issued at initialize. Without it an "
+                    "approval request cannot be routed back to the connection that "
+                    "asked for it."
+                ),
+            )
+        assert session_id is not None  # narrowed by session_uuid above
+        return StreamingResponse(
+            hub.stream(session_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/mcp")
     async def mcp_post(
         request: Request,
         authorization: str | None = Header(default=None),
-    ) -> JSONResponse:
-        _check_auth(request, authorization)
+        # FORGE-422: `Response`, not `JSONResponse` -- a 204 is returned as a
+        # bare Response (no body), and JSONResponse is a subclass, so this
+        # widens to cover both rather than the 204 being forced into a shape
+        # that must carry one.
+    ) -> Response:
+        verified_actor = _check_auth(request, authorization)
         raw_body = await request.body()
         # MET-387: install per-request McpCallContext from headers so
         # downstream handlers see the project / actor / session via
         # ``current_context()``.
         from mcp_core.context import context_from_headers, with_context
 
-        ctx = context_from_headers(dict(request.headers))
+        headers = dict(request.headers)
+        # FORGE-334: adopt the transport's own session. The Streamable HTTP
+        # spec says a server MAY assign a session id on the InitializeResult
+        # via ``Mcp-Session-Id``, and that a client which receives one MUST
+        # echo it on every subsequent request. We were issuing none, so every
+        # HTTP client without our proprietary X-MetaForge-Session header got
+        # a freshly invented session per call -- which is why a project
+        # picked with ``/metaforge:use`` did not stick for them.
+        issued_session = _session_for_request(headers, raw_body)
+        if issued_session is not None:
+            headers[HEADER_SESSION] = issued_session
+        ctx = context_from_headers(headers)
+        # FORGE-410: `?profile=core` on the MCP URL. A plugin manifest can set
+        # it where it cannot pass a command-line flag, and one sidecar then
+        # serves a capped set to the plugin and everything to the dashboard --
+        # rather than a single `--profile` shrinking the tool list for every
+        # consumer at once.
+        requested_profile = request.query_params.get("profile")
+        if requested_profile:
+            ctx = ctx.model_copy(update={"profile": requested_profile.strip()})
+        # FORGE-330: a verified token outranks whatever the client put in
+        # X-MetaForge-Actor. The header is a convenience for unauthenticated
+        # local use; it must never be able to overwrite an identity the
+        # server established cryptographically, or the audit trail records
+        # whoever the caller said they were.
+        if verified_actor:
+            # FORGE-330: the actor comes from a token this server issued,
+            # so it outranks the header -- but "issued by us" is not the
+            # same as "we know who this is". With the shared-secret login
+            # anyone holding the secret can type any name, so
+            # actor_verified stays False and the name is a label on the
+            # timeline. An upstream identity provider is what makes it an
+            # identity; `OAuthConfig.verified_identity` is where that
+            # switches on.
+            proven = bool(oauth and oauth.config.verified_identity)
+            ctx = ctx.model_copy(update={"actor_id": verified_actor, "actor_verified": proven})
+        # FORGE-423: the client answering something *we* asked. Routed by id
+        # rather than dispatched -- sending our own answer to handle_request
+        # comes back as "Unknown method: None", the same misroute the stdio
+        # loop had to learn to avoid.
+        try:
+            inbound = json.loads(raw_body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            inbound = None
+        if is_jsonrpc_response(inbound) and hub.resolve(inbound):
+            # Accepted, and there is nothing to say back.
+            return Response(status_code=202)
+
+        # FORGE-599: the version header must agree with the version the body
+        # names, or an intermediary routing on one and this server acting on
+        # the other disagree about what was asked.
+        if isinstance(inbound, dict) and "id" in inbound:
+            mismatch = header_mismatch(
+                request.headers.get(PROTOCOL_VERSION_HEADER), inbound.get("params")
+            )
+            # FORGE-600: a handshake-free request also has to carry the
+            # method (and, for a named call, its target) in headers that match.
+            modern = is_modern(request_protocol_version(inbound.get("params")))
+            if not mismatch and modern:
+                mismatch = modern_header_problem(request.headers, inbound)
+            if mismatch:
+                logger.info("mcp_protocol_header_mismatch", detail=mismatch)
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": inbound.get("id"),
+                        "error": {"code": HEADER_MISMATCH, "message": mismatch},
+                    },
+                    status_code=400,
+                )
+
+        # FORGE-487: the design-flow worker's calls. After the answer-routing
+        # above, which must not be delayed by a gateway lookup, and before the
+        # context is used anywhere (including the SSE path below).
+        ctx = await server.authenticate_service_caller(
+            ctx, request.headers.get(HEADER_SERVICE_KEY), inbound
+        )
+
+        # FORGE-464: a tools/call that may be held is answered on its own SSE
+        # stream when the client can read one, so the approval question can
+        # travel on the call it is about. Claude Code never opens GET /mcp,
+        # so without this every held write it made went to the dashboard.
+        #
+        # FORGE-465: a call carrying a progressToken gets the stream too,
+        # whatever the client can elicit, so a write held for the dashboard
+        # can say so on it. Nothing switches to SSE unless something is sent.
+        if (
+            issued_session is not None
+            and isinstance(inbound, dict)
+            and inbound.get("method") == "tools/call"
+            and _accepts_event_stream(request.headers.get("accept"))
+            and (hub.call_stream_allowed(issued_session) or _has_progress_token(inbound))
+        ):
+            return await _call_with_stream(raw_body.decode("utf-8"), ctx, issued_session)
+
+        if is_subscription_listen(inbound):
+            # FORGE-603: the acknowledgement, then the graceful close, on the
+            # request's own stream (2026-07-28 has no GET stream).
+            with with_context(ctx):
+                closing = await server.handle_request(raw_body.decode("utf-8"))
+            if '"result"' in closing:
+                assert isinstance(inbound, dict)
+                ack = json.dumps(subscription_ack(inbound["id"]))
+
+                async def subscription_events() -> AsyncIterator[bytes]:
+                    yield f"event: message\ndata: {ack}\n\n".encode()
+                    yield f"event: message\ndata: {json.dumps(json.loads(closing))}\n\n".encode()
+
+                logger.info("mcp_subscription_closed", subscription_id=inbound["id"])
+                return StreamingResponse(
+                    subscription_events(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            return _json_reply(closing, None, modern=True)
+
         with with_context(ctx):
             response = await server.handle_request(raw_body.decode("utf-8"))
+        # FORGE-423: record what this session declared, from its own
+        # handshake. The server's copy is whichever client initialised last,
+        # and routing an approval on that would ask the wrong person.
+        if issued_session is not None and _is_initialize(raw_body):
+            negotiated = ""
+            try:
+                negotiated = str(json.loads(response)["result"]["protocolVersion"])
+            except (ValueError, KeyError, TypeError):
+                pass
+            hub.note_initialize(
+                issued_session,
+                capabilities=(inbound or {}).get("params", {}).get("capabilities"),
+                negotiated_protocol=negotiated,
+            )
         # JSON-RPC notifications produce no body — return 204 so the
         # client doesn't try to json-parse an empty string.
+        #
+        # FORGE-422: a bare Response, not JSONResponse(content=None). The
+        # latter serialises None to b"null" -- four bytes on a status that
+        # MUST carry none -- so uvicorn sets Content-Length 0 and then raises
+        # "Response content longer than Content-Length". The client still got
+        # its 204, so it looked fine from outside while the server logged an
+        # ASGI traceback on every connection: `notifications/initialized` is
+        # the first thing a spec-compliant client sends.
+        return _json_reply(
+            response,
+            issued_session,
+            modern=isinstance(inbound, dict)
+            and is_modern(request_protocol_version(inbound.get("params"))),
+        )
+
+    def _json_reply(response: str, session_id: str | None, *, modern: bool = False) -> Response:
         if not response:
-            return JSONResponse(content=None, status_code=204)
-        return JSONResponse(json.loads(response))
+            return Response(status_code=204)
+        payload = json.loads(response)
+        # FORGE-599: the Streamable HTTP binding answers an unsupported
+        # revision with 400 as well as the JSON-RPC error, so a dual-era
+        # client probing us sees a recognised modern error on a 400.
+        error = payload.get("error") if isinstance(payload, dict) else None
+        code = error.get("code") if isinstance(error, dict) else None
+        if modern:
+            # FORGE-600: the 2026-07-28 binding's statuses (404, 400).
+            status = modern_status(code)
+        else:
+            status = 400 if code == UNSUPPORTED_PROTOCOL_VERSION else 200
+        out = JSONResponse(payload, status_code=status)
+        if session_id is not None:
+            out.headers[MCP_SESSION_HEADER] = session_id
+        return out
+
+    #: Handler tasks whose POST stream closed before they finished. Held so
+    #: the loop does not garbage-collect a running call; the done callback
+    #: lets each one go.
+    detached: set[asyncio.Task[str]] = set()
+
+    async def _call_with_stream(body: str, ctx: Any, session_id: str) -> Response:
+        """Run one tools/call, switching to SSE only if it asks a question.
+
+        FORGE-464. Most calls are never held, and those keep the plain JSON
+        response they always had: the handler runs as a task and the
+        transport waits for whichever comes first, the result or a message
+        pushed onto this call's stream. A result first means nothing was
+        asked, so it is returned as JSON. A message first means the call is
+        waiting on the client, and the response becomes the stream: the
+        question, then (once the client POSTs its answer, routed by id) the
+        result, then the stream closes.
+        """
+        from mcp_core.context import with_context
+
+        with with_context(ctx), hub.call_stream(session_id) as call:
+            task: asyncio.Task[str] = asyncio.create_task(server.handle_request(body))
+        first: asyncio.Task[str] = asyncio.create_task(call.queue.get())
+        await asyncio.wait({task, first}, return_when=asyncio.FIRST_COMPLETED)
+        if not first.done():
+            first.cancel()
+            hub.close_call_stream(call)
+            return _json_reply(task.result(), session_id)
+
+        logger.info("mcp_call_stream_opened", session_id=session_id)
+
+        def frame(message: str) -> bytes:
+            return f"event: message\ndata: {message}\n\n".encode()
+
+        async def events() -> AsyncIterator[bytes]:
+            try:
+                yield frame(first.result())
+                while True:
+                    getter: asyncio.Task[str] = asyncio.create_task(call.queue.get())
+                    await asyncio.wait(
+                        {task, getter}, timeout=15.0, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if getter.done():
+                        yield frame(getter.result())
+                        continue
+                    getter.cancel()
+                    if not task.done():
+                        # A reviewer is still reading. Keep intermediaries
+                        # from reaping a connection that looks idle.
+                        yield b": keep-alive\n\n"
+                        continue
+                    while not call.queue.empty():
+                        yield frame(call.queue.get_nowait())
+                    break
+                hub.close_call_stream(call)
+                result = task.result()
+                if result:
+                    # Re-serialised so the event is one line whatever the
+                    # handler's formatting.
+                    yield frame(json.dumps(json.loads(result)))
+                logger.info("mcp_call_stream_completed", session_id=session_id)
+            finally:
+                # Normal end, or the client hung up mid-question. Either way
+                # nothing more can be read here, so an unanswered question is
+                # cancelled now rather than at the elicitation timeout.
+                hub.close_call_stream(call)
+                if not task.done():
+                    logger.warning("mcp_call_stream_client_gone", session_id=session_id)
+                    detached.add(task)
+                    task.add_done_callback(detached.discard)
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={
+                MCP_SESSION_HEADER: session_id,
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.delete("/mcp")
+    async def mcp_delete(request: Request) -> Response:  # FORGE-422: 204 has no body
+        """Explicit session termination, per the Streamable HTTP spec.
+
+        A client that is done SHOULD send DELETE with its ``Mcp-Session-Id``.
+        Releasing the project binding here is what keeps a long-lived sidecar
+        from holding one for a client that has gone away -- the registry is
+        capped and evicts oldest-first, so without this a departed client's
+        binding can outlive an active client's.
+        """
+        from uuid import UUID
+
+        from mcp_core.context import clear_session_project
+
+        raw = request.headers.get(MCP_SESSION_HEADER)
+        if not raw:
+            return JSONResponse({"error": "Mcp-Session-Id required"}, status_code=400)
+        try:
+            clear_session_project(UUID(raw))
+        except ValueError:
+            return JSONResponse({"error": "Mcp-Session-Id is not a known session"}, status_code=404)
+        logger.info("mcp_session_terminated", session_id=raw)
+        # FORGE-422: same reason as the notification path above -- a 204
+        # must not carry a body.
+        return Response(status_code=204)
 
     if enable_sse:
 
@@ -500,8 +1186,16 @@ def _login_page(action: str, fields: dict[str, str], *, error: str = "") -> str:
 <form method="post" action="{action}">
   <h1>Authorize MetaForge MCP</h1>
   {banner}
+  <label>Your name<br>
+    <input type="text" name="operator" autofocus placeholder="e.g. ana"
+           autocomplete="username">
+  </label>
+  <p style="font-size:.8rem;opacity:.7;margin:.2rem 0 .8rem">
+    Recorded against your work so a reviewer can see who did what. This
+    login is a shared secret, so the name is not verified.
+  </p>
   <label>Access secret<br>
-    <input type="password" name="login_secret" autofocus required>
+    <input type="password" name="login_secret" required>
   </label>
   {hidden}
   <button type="submit">Authorize</button>
@@ -586,7 +1280,13 @@ def _mount_oauth_routes(
                 status_code=401,
             )
         redirect_uri = params["redirect_uri"]
-        code = oauth.issue_code(client, redirect_uri, params["code_challenge"], params.get("scope"))
+        code = oauth.issue_code(
+            client,
+            redirect_uri,
+            params["code_challenge"],
+            params.get("scope"),
+            operator=params.get("operator"),
+        )
         query = {"code": code}
         if params.get("state"):
             query["state"] = params["state"]
@@ -658,11 +1358,24 @@ async def serve_http_async(
     import uvicorn
 
     from metaforge.mcp.oauth import OAuthConfig
+    from metaforge.mcp.oauth_store import create_oauth_persistence
 
     api_key = os.environ.get("METAFORGE_MCP_API_KEY") or None
     oauth_config = OAuthConfig.from_env()
-    oauth = OAuthProvider(oauth_config) if oauth_config else None
-    app = build_http_app(server, enable_sse=enable_sse, api_key=api_key, oauth=oauth)
+    oauth = None
+    if oauth_config:
+        # FORGE-697: clients and tokens outlive a restart when DATABASE_URL is set.
+        oauth = OAuthProvider(oauth_config, persistence=await create_oauth_persistence())
+        await oauth.load()
+    service_key, service_verifier = _service_auth_from_env()
+    app = build_http_app(
+        server,
+        enable_sse=enable_sse,
+        api_key=api_key,
+        oauth=oauth,
+        service_key=service_key,
+        service_verifier=service_verifier,
+    )
     config = uvicorn.Config(
         app,
         host=host,
@@ -1066,8 +1779,91 @@ async def _bootstrap(
         )
     except Exception as exc:  # noqa: BLE001 — degrade; record_component_selection just absent
         logger.warning("mcp_component_recorder_init_failed", error=str(exc))
+    # FORGE-337: without this the sidecar registers no project resources at
+    # all -- resources/list came back empty while /metaforge:use, :status and
+    # :new all tell the agent to read metaforge://twin/brief/<project_id>.
+    # Registration is conditional on the provider, so the absence was silent:
+    # the resources did not fail, they were never there.
+    brief_provider = None
+    try:
+        from api_gateway.projects.brief_provider import make_brief_provider
+        from api_gateway.projects.routes import get_project_backend
+
+        brief_provider = make_brief_provider(twin, get_project_backend())
+    except Exception as exc:  # noqa: BLE001 — degrade to no resources, loudly
+        logger.warning("mcp_brief_provider_unavailable", error=str(exc))
+
+    approval_gate = _build_approval_gate()
+    approval_ledger = _build_approval_ledger()
+
+    # FORGE-413: without this the MCP server holds `metrics=None`, every
+    # recorder returns at its `if counter is not None` guard, and all four
+    # FORGE-379 metrics plus FORGE-411's two emit nothing -- so six alert
+    # rules cannot fire, and Prometheus showed zero series for every one of
+    # them. Exactly the shape of the MET-433 note a few lines above
+    # (`build_unified_server` already accepted the kwarg; only the gateway
+    # wired it) and of FORGE-406's approval gate.
+    metrics = collector_for("metaforge-mcp")
+
+    # FORGE-415: the Engineering Intent & Requirements Harness and the
+    # document/constraint recorders registered in the gateway and never here,
+    # so `twin.record_engineering_entity`, `approve_engineering_entity`,
+    # `record_document` and `record_constraint_set` were absent from every
+    # external MCP client. They need only the twin and the project backend,
+    # both of which this function already has.
+    #
+    # `proposal_recorder` is deliberately not in this list: it takes the
+    # gateway's `ApprovalWorkflow`, which the sidecar has no equivalent of --
+    # its approvals go out through the remote gate instead. Wiring it would
+    # mean inventing a second approval path, which is the opposite of what
+    # FORGE-406 was about.
+    from api_gateway.twin.constraint_recorder import make_constraint_recorder
+    from api_gateway.twin.document_recorder import make_document_recorder
+    from api_gateway.twin.engineering_entity_approval import (
+        make_engineering_entity_approver,
+    )
+    from api_gateway.twin.engineering_entity_recorder import (
+        make_engineering_entity_recorder,
+    )
+    from api_gateway.twin.item_revisions import make_item_history_reader
+
+    entity_recorder = make_engineering_entity_recorder(twin, project_backend)
+
+    # FORGE-647: placements reach the viewer through the gateway, which holds
+    # the live stream; this process posts them there.
+    from mcp_core.live_events import set_live_event_publisher
+    from metaforge.mcp.live_publisher import http_live_publisher
+
+    set_live_event_publisher(http_live_publisher())
+
+    # FORGE-462: flow.* and run.* registered in the gateway and never here, so
+    # no harness plugin could list, propose or start a design flow.
+    flow_bindings = _build_flow_bindings()
+    # FORGE-546: evidence, claims, promotion, the evaluators and the
+    # commit_* recorders registered in the gateway and never here, so every
+    # plugin client lacked them while every profile advertised
+    # twin.record_evidence.
+    evidence_bindings, lazy_bridges = _build_evidence_bindings(twin, project_backend)
+
     server = await build_unified_server(
+        **flow_bindings,
+        # FORGE-451: the machine library lives in the gateway.
+        machine_library=_build_machine_library(),
+        # FORGE-427: vendor connectors live in the gateway.
+        vendor_service=_build_vendor_service(),
+        **evidence_bindings,
+        engineering_entity_recorder=entity_recorder,
+        engineering_entity_approver=make_engineering_entity_approver(twin),
+        document_recorder=make_document_recorder(twin, project_backend),
+        constraint_recorder=make_constraint_recorder(twin, project_backend),
         adapter_ids=_adapter_ids_from_args(args.adapters),
+        approval_gate=approval_gate,
+        approval_ledger=approval_ledger,
+        metrics=metrics,
+        brief_provider=brief_provider,
+        # FORGE-371: unset means no links, reported by health/check. The
+        # server cannot know where the dashboard is served from.
+        dashboard_url=os.environ.get("METAFORGE_DASHBOARD_URL"),
         knowledge_service=knowledge_service,
         twin=twin,
         constraint_engine=twin.constraints,
@@ -1075,6 +1871,7 @@ async def _bootstrap(
         memory_client=memory_client,
         memory_insight_store=insight_store,
         twin_allow_mutations=getattr(args, "allow_twin_mutations", False),
+        profile=getattr(args, "profile", None),
         agent_session_store=agent_session_store,
         capture_sessions=getattr(args, "capture_sessions", False),
         decision_recorder=decision_recorder,
@@ -1083,8 +1880,406 @@ async def _bootstrap(
         component_catalog_store=component_catalog_store,
         component_intent_llm=component_intent_llm,
         component_recorder=component_recorder,
+        # FORGE-523: twin.item_history, so a plugin can read revisions too.
+        item_history_reader=make_item_history_reader(twin),
     )
+    # The evaluators' tier-2 calls (calculix.run_fea, run_thermal,
+    # freecad.list_named_faces) go through this server's own registry, which
+    # only exists now -- the same late binding the gateway does.
+    if lazy_bridges and server.tool_registry is not None:
+        from skill_registry.registry_bridge import RegistryMcpBridge
+        from twin_core.library.material_resolver import fill_material_arguments
+
+        registry_bridge = RegistryMcpBridge(
+            server.tool_registry, argument_filler=fill_material_arguments
+        )
+        for lazy in lazy_bridges:
+            lazy.bridge = registry_bridge
     return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
+
+
+class _LateBridge:
+    """An MCP bridge whose backing registry is bound after the server exists."""
+
+    def __init__(self) -> None:
+        self.bridge: Any = None
+
+    async def invoke(
+        self, tool_id: str, params: dict[str, Any], timeout: int | None = None
+    ) -> dict[str, Any]:
+        if self.bridge is None:
+            raise RuntimeError(f"no MCP bridge bound yet for {tool_id!r}")
+        result: dict[str, Any] = await self.bridge.invoke(tool_id, params, timeout=timeout)
+        return result
+
+
+def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str, Any], list[Any]]:
+    """The gateway's evidence and recorder collaborators, for the sidecar (FORGE-546).
+
+    Each needs only the twin and the project backend, plus (for the three
+    evaluators) a bridge to this server's own registry, bound once it exists.
+    A collaborator that cannot be built is logged and left out, so its tool is
+    simply absent rather than registered and broken.
+    """
+    bindings: dict[str, Any] = {}
+    bridges: list[Any] = []
+
+    def _try(name: str, build: Any) -> None:
+        try:
+            bindings[name] = build()
+        except Exception as exc:  # noqa: BLE001 - one missing tool, not a dead sidecar
+            logger.warning("mcp_collaborator_init_failed", collaborator=name, error=str(exc))
+
+    from api_gateway.twin import (
+        claim_recorder,
+        design_sketch_recorder,
+        evidence_recorder,
+        structured_document_recorder,
+    )
+
+    _try(
+        "evidence_recorder", lambda: evidence_recorder.make_evidence_recorder(twin, project_backend)
+    )
+    _try("claim_recorder", lambda: claim_recorder.make_claim_recorder(twin))
+    _try(
+        "design_sketch_recorder",
+        lambda: design_sketch_recorder.make_design_sketch_recorder(twin, project_backend),
+    )
+    for name in (
+        "hazard_analysis_recorder",
+        "system_architecture_recorder",
+        "technical_drawing_recorder",
+        "compliance_checklist_recorder",
+        "procurement_record_recorder",
+    ):
+        factory = getattr(structured_document_recorder, f"make_{name}")
+        _try(name, lambda f=factory: f(twin, project_backend))
+
+    # FORGE-630: twin.render_work_product, whose blender.render call goes
+    # through this server's own registry once it exists.
+    try:
+        from api_gateway.twin.render_recorder import make_work_product_renderer
+
+        render_bridge = _LateBridge()
+        bindings["work_product_renderer"] = make_work_product_renderer(
+            twin, project_backend, mcp_bridge=render_bridge
+        )
+        bridges.append(render_bridge)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="renderer", error=str(exc))
+
+    # FORGE-687: twin.record_design_files, whose kicad.export_svg previews go
+    # through this server's own registry once it exists.
+    try:
+        from api_gateway.twin.design_files_recorder import make_design_files_recorder
+
+        files_bridge = _LateBridge()
+        bindings["design_files_recorder"] = make_design_files_recorder(
+            twin, project_backend, mcp_bridge=files_bridge
+        )
+        bridges.append(files_bridge)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="design_files", error=str(exc))
+
+    try:
+        from api_gateway.requirement_intelligence.promotion import attempt_promotion
+
+        async def promotion_attempter(**kwargs: Any) -> dict[str, Any]:
+            result: dict[str, Any] = await attempt_promotion(twin, **kwargs)
+            return result
+
+        bindings["promotion_attempter"] = promotion_attempter
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="promotion", error=str(exc))
+
+    evidence = bindings.get("evidence_recorder")
+    if evidence is not None:
+        try:
+            from api_gateway.twin.calibration import make_calibrated_band_lookup
+            from api_gateway.twin.dfm_evidence import make_overhang_evidence_recorder
+            from api_gateway.twin.metric_evaluator import make_metric_evaluator
+            from api_gateway.twin.sensitivity import make_sensitivity_ranker
+            from api_gateway.twin.thermal_evidence import make_thermal_evidence_recorder
+
+            metric_bridge, thermal_bridge, overhang_bridge = (
+                _LateBridge(),
+                _LateBridge(),
+                _LateBridge(),
+            )
+            bridges.extend([metric_bridge, thermal_bridge, overhang_bridge])
+            bindings["metric_evaluator"] = make_metric_evaluator(
+                twin,
+                evidence_recorder=evidence,
+                mcp_bridge=metric_bridge,
+                calibrated_band_lookup=make_calibrated_band_lookup(twin),
+            )
+            bindings["thermal_evaluator"] = make_thermal_evidence_recorder(
+                twin, evidence_recorder=evidence, mcp_bridge=thermal_bridge
+            )
+            bindings["overhang_evaluator"] = make_overhang_evidence_recorder(
+                twin, evidence_recorder=evidence, mcp_bridge=overhang_bridge
+            )
+            bindings["sensitivity_ranker"] = make_sensitivity_ranker(
+                twin, evidence_recorder=evidence
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "mcp_collaborator_init_failed", collaborator="evaluators", error=str(exc)
+            )
+    logger.info("mcp_evidence_bindings", wired=sorted(bindings))
+    return bindings, bridges
+
+
+def _build_flow_bindings() -> dict[str, Any]:
+    """Bindings for the ``design_flow`` and ``run`` adapters (FORGE-462).
+
+    Both adapters register only when a binding is supplied, and until this
+    the sidecar supplied none: ``flow.list``, ``flow.propose``,
+    ``flow.start_run``, ``flow.status``, ``run.start_design_flow`` and
+    ``run.get_status`` were absent from every external client's tools/list.
+
+    Chosen the same way as the approval gate, for the same reason. The flow
+    versions, the approval ledger and the run store are process-level, so:
+
+    ``METAFORGE_GATEWAY_URL`` set
+        Call the gateway's own routes. A flow proposed from a plugin is the
+        one the dashboard shows, and a run started from one is in
+        ``/v1/runs``.
+
+    unset
+        Bind to this process's stores. Correct only inside the gateway; said
+        at start-up so a misconfigured sidecar is visible rather than quiet.
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_flows import build_remote_flow_bindings
+
+        remote = build_remote_flow_bindings(gateway_url)
+        logger.info("mcp_flow_bindings_remote", gateway=gateway_url)
+        return {
+            "design_flow_catalogue_reader": remote.catalogue_reader,
+            "design_flow_proposer": remote.proposer,
+            "design_flow_status_reader": remote.status_reader,
+            "design_flow_run_starter": remote.run_starter,
+            "design_flow_intent_compiler": remote.intent_compiler,
+            "design_flow_capability_reader": remote.capability_reader,
+            "design_flow_lifecycle_reader": remote.lifecycle_reader,
+            "design_flow_patcher": remote.patcher,
+            "design_flow_gate_reader": remote.gate_reader,
+            "design_flow_gate_decider": remote.gate_decider,
+            "design_flow_client_tasks": remote.client_tasks,
+            "run_launcher": remote.run_launcher,
+        }
+
+    try:
+        from api_gateway.design_flows.mcp_bindings import (
+            make_capability_reader,
+            make_catalogue_reader,
+            make_client_task_service,
+            make_gate_decider,
+            make_gate_reader,
+            make_intent_compiler,
+            make_lifecycle_reader,
+            make_patcher,
+            make_proposer,
+            make_run_starter,
+            make_run_status_reader,
+        )
+        from api_gateway.runs.launcher import make_run_launcher
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_flow_bindings_missing", error=str(exc))
+        return {}
+
+    logger.warning(
+        "mcp_flow_bindings_in_process",
+        detail=(
+            "flow.* and run.* are bound to this process's own flow, approval and run "
+            "stores. Correct only if this MCP server runs inside the gateway; a separate "
+            "sidecar should set METAFORGE_GATEWAY_URL, or proposals and runs it creates "
+            "will never appear on the dashboard."
+        ),
+    )
+    return {
+        "design_flow_catalogue_reader": make_catalogue_reader(),
+        "design_flow_proposer": make_proposer(),
+        "design_flow_status_reader": make_run_status_reader(),
+        "design_flow_run_starter": make_run_starter(),
+        "design_flow_intent_compiler": make_intent_compiler(),
+        "design_flow_capability_reader": make_capability_reader(),
+        "design_flow_lifecycle_reader": make_lifecycle_reader(),
+        "design_flow_patcher": make_patcher(),
+        "design_flow_gate_reader": make_gate_reader(),
+        "design_flow_gate_decider": make_gate_decider(),
+        "design_flow_client_tasks": make_client_task_service(),
+        "run_launcher": make_run_launcher(),
+    }
+
+
+def _build_machine_library() -> Any:
+    """The ``library.*`` binding (FORGE-451), chosen like the flow bindings.
+
+    With ``METAFORGE_GATEWAY_URL`` the sidecar reads and writes the gateway's
+    library; without it, this process's store (correct only in the gateway).
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_library import RemoteMachineLibrary, remote_material_source
+        from twin_core.library.material_resolver import install_material_source
+
+        logger.info("mcp_library_binding_remote", gateway=gateway_url)
+        # FORGE-446: material names resolve against the gateway's library too.
+        install_material_source(remote_material_source(gateway_url))
+        return RemoteMachineLibrary(gateway_url)
+    try:
+        from api_gateway.library.mcp_bindings import make_machine_library
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_library_binding_missing", error=str(exc))
+        return None
+    return make_machine_library()
+
+
+def _build_vendor_service() -> Any:
+    """The ``vendor.*`` binding (FORGE-427): the gateway's connectors over HTTP."""
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_vendors import RemoteVendorService
+
+        logger.info("mcp_vendor_binding_remote", gateway=gateway_url)
+        return RemoteVendorService(gateway_url)
+    try:
+        from api_gateway.vendors.mcp_bindings import make_vendor_service
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_vendor_binding_missing", error=str(exc))
+        return None
+    return make_vendor_service()
+
+
+def _client_task_verifier_from_env() -> Any:
+    """What confirms a client's claimed task, or ``None`` with the grant off (FORGE-584).
+
+    On only when the owner set ``METAFORGE_CLIENT_TASK_WRITES`` *and*
+    ``METAFORGE_GATEWAY_URL`` says where tasks and runs live. The switch
+    without a gateway is logged and left off: a grant nobody can confirm
+    must not be given.
+    """
+    from metaforge.mcp.client_task_grant import (
+        CLIENT_TASK_WRITES_ENV,
+        GatewayClientTaskVerifier,
+        client_task_writes_enabled,
+    )
+
+    if not client_task_writes_enabled():
+        return None
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if not gateway_url:
+        logger.error(
+            "mcp_client_task_writes_no_gateway",
+            detail=f"{CLIENT_TASK_WRITES_ENV} is set but METAFORGE_GATEWAY_URL is not; "
+            "client-task writes stay off",
+        )
+        return None
+    return GatewayClientTaskVerifier(gateway_url)
+
+
+def _service_auth_from_env() -> tuple[str | None, ServiceRunVerifier | None]:
+    """The design-flow service credential and what verifies runs (FORGE-487).
+
+    ``METAFORGE_MCP_SERVICE_KEY`` is shared between this sidecar and the
+    ``design-flow-worker`` only. There is no default: unset, the feature is
+    off and the worker is an ordinary untrusted caller whose writes are held.
+    ``METAFORGE_GATEWAY_URL`` is where runs are verified; without it the key
+    alone enables nothing (``attach_service_auth`` says so).
+    """
+    key = (os.environ.get("METAFORGE_MCP_SERVICE_KEY") or "").strip() or None
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if key is None:
+        logger.info("mcp_service_caller_off", reason="METAFORGE_MCP_SERVICE_KEY is not set")
+        return None, None
+    if not gateway_url:
+        return key, None
+    from metaforge.mcp.service_runs import GatewayRunVerifier
+
+    return key, GatewayRunVerifier(gateway_url)
+
+
+def _build_approval_gate() -> Any:
+    """Somewhere for a held write to wait (FORGE-406).
+
+    Until this existed, nothing outside the test suite ever built a gate, so
+    ``approval_gate`` was ``None`` and every write from a plugin came back
+    "no approval gate is configured". FORGE-359's guardrail was present,
+    correct and unreachable — which is the failure this codebase keeps
+    producing, and the reason the absence is now logged at start-up rather
+    than discovered on the first write.
+
+    Two shapes, chosen explicitly:
+
+    ``METAFORGE_GATEWAY_URL`` set
+        Park held calls in the gateway's ledger over HTTP. This is the right
+        answer for the sidecar: the approval store is process-level, so a
+        call held in this process would sit in a queue the dashboard cannot
+        see.
+
+    unset, but ``api_gateway`` importable
+        Use the in-process gate. Correct only when the MCP server is running
+        inside the gateway; the log line says which was chosen so a
+        misconfigured sidecar is visible rather than merely quiet.
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_approvals import build_remote_approval_gate
+
+        logger.info("mcp_approval_gate_remote", gateway=gateway_url)
+        return build_remote_approval_gate(gateway_url)
+
+    try:
+        from api_gateway.mcp_approvals import build_mcp_approval_gate
+    except Exception as exc:  # noqa: BLE001 — reported, never fatal
+        logger.error(
+            "mcp_approval_gate_missing",
+            error=str(exc),
+            detail=(
+                "No approval gate could be built, so every held write will be REFUSED "
+                "rather than queued. Set METAFORGE_GATEWAY_URL to the gateway so held "
+                "calls reach the dashboard's approvals queue."
+            ),
+        )
+        return None
+
+    logger.warning(
+        "mcp_approval_gate_in_process",
+        detail=(
+            "Holding writes in this process's own queue. Correct only if this MCP "
+            "server runs inside the gateway; a separate sidecar should set "
+            "METAFORGE_GATEWAY_URL, or held calls will never appear on the dashboard."
+        ),
+    )
+    return build_mcp_approval_gate()
+
+
+def _build_approval_ledger() -> Any:
+    """The ledger inline (elicitation) holds are written to (FORGE-473).
+
+    Mirrors :func:`_build_approval_gate`: a sidecar with ``METAFORGE_GATEWAY_URL``
+    writes to the gateway over HTTP; inside the gateway it uses the process's own
+    store. Neither available means ``None``, and the log says so, because an
+    inline answer then leaves no ledger entry.
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_approvals import RemoteApprovalLedger
+
+        return RemoteApprovalLedger(gateway_url)
+    try:
+        from api_gateway.mcp_approvals import InProcessApprovalLedger
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.warning(
+            "mcp_approval_ledger_missing",
+            error=str(exc),
+            detail="Inline approvals will have no approval id and will not reach the ledger.",
+        )
+        return None
+    return InProcessApprovalLedger()
 
 
 def _configure_logging_for_transport(transport: str) -> None:

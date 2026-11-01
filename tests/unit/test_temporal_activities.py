@@ -12,7 +12,11 @@ from uuid import uuid4
 
 import pytest
 
-from orchestrator.activities.approval_activity import wait_for_approval
+from orchestrator.activities.approval_activity import (
+    ApprovalRuntimeUnavailableError,
+    set_approval_activity_metrics,
+    wait_for_approval,
+)
 from orchestrator.activities.base_activity import (
     AgentActivityInput,
     AgentActivityOutput,
@@ -236,18 +240,43 @@ class TestSimulationActivity:
 class TestApprovalActivity:
     """Test wait_for_approval activity."""
 
-    async def test_auto_approves_without_temporal(self) -> None:
-        """Without Temporal runtime, the activity auto-approves."""
+    async def test_never_approves_without_temporal(self) -> None:
+        """Without a Temporal runtime the gate fails closed (FORGE-469).
+
+        It used to return approved=True, approver_id="auto", so a missing
+        temporalio install silently approved every human gate.
+        """
         req = ApprovalRequest(
             approval_id="test-1",
             description="Test approval",
             run_id=RUN_ID,
             step_id="approval_step",
+            required_role="reviewer",
         )
-        result = await wait_for_approval(req)
-        assert isinstance(result, ApprovalResult)
-        assert result.approved is True
-        assert result.approver_id == "auto"
+        metrics = MagicMock()
+        set_approval_activity_metrics(metrics)
+        try:
+            with pytest.raises(ApprovalRuntimeUnavailableError, match="Refusing to approve"):
+                await wait_for_approval(req)
+        finally:
+            set_approval_activity_metrics(None)
+        metrics.record_approval_gate_no_runtime.assert_called_once_with("reviewer")
+
+
+def _explicit_approval_double(approved: bool) -> AsyncMock:
+    """A stand-in for the approval activity that a test opts into explicitly.
+
+    The real activity never approves without a Temporal runtime, so a test
+    that needs a decided gate says so here rather than relying on it.
+    """
+    return AsyncMock(
+        return_value=ApprovalResult(
+            approved=approved,
+            approver_id="test-double",
+            comment="explicit test double",
+            timestamp="2026-01-01T00:00:00+00:00",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -395,18 +424,49 @@ class TestHardwareDesignWorkflow:
                     "parameters": {},
                     "branch": "main",
                 },
-                require_approval=True,  # auto-approves without Temporal
+                require_approval=True,
             )
 
-            result = await wf.run(inp)
+            with patch(
+                "orchestrator.workflows.hardware_design_workflow.wait_for_approval",
+                _explicit_approval_double(approved=True),
+            ):
+                result = await wf.run(inp)
 
             assert result.status == "completed"
             # 4 steps: mechanical, electronics, firmware, simulation
             assert len(result.steps) == 4
             assert all(s.status == "completed" for s in result.steps)
-            # Approval auto-approved
+            # Approved by the explicitly injected double, not by a fallback
             assert result.approval.get("approved") is True
+            assert result.approval.get("approver_id") == "test-double"
         finally:
+            for p in patches:
+                p.stop()
+
+    async def test_approval_gate_fails_closed_without_temporal(self) -> None:
+        """No Temporal runtime and no injected decision: the run fails (FORGE-469)."""
+        patches, _ = self._start_all_patches()
+        set_approval_activity_metrics(MagicMock())
+        try:
+            wf = HardwareDesignWorkflow()
+            inp = HardwareDesignWorkflowInput(
+                mechanical_task={
+                    "task_type": "validate_stress",
+                    "work_product_id": ARTIFACT_ID,
+                    "parameters": {},
+                    "branch": "main",
+                },
+                require_approval=True,
+            )
+
+            result = await wf.run(inp)
+
+            assert result.status == "failed"
+            assert result.approval.get("approved") is not True
+            assert "no Temporal runtime" in result.approval.get("error", "")
+        finally:
+            set_approval_activity_metrics(None)
             for p in patches:
                 p.stop()
 

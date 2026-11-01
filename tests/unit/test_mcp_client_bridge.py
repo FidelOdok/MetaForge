@@ -136,6 +136,28 @@ class TestRetry:
 
 
 # ---------------------------------------------------------------------------
+# FORGE-249: a message-less exception must not render as a blank detail
+# ---------------------------------------------------------------------------
+
+
+class _BlankError(Exception):
+    """Raised with no args -- ``str(exc)`` is ``""``, like aiohttp's
+    ``ServerDisconnectedError()`` under real connection contention."""
+
+
+class TestBlankExceptionMessage:
+    @pytest.mark.asyncio
+    async def test_falls_back_to_the_exception_class_name(self) -> None:
+        client = MagicMock()
+        client.call_tool = AsyncMock(side_effect=_BlankError())
+        bridge = McpClientBridge(client)
+        with pytest.raises(McpToolError) as exc_info:
+            await bridge.invoke("x.y", {})
+        assert exc_info.value.details == "_BlankError"
+        assert not str(exc_info.value).rstrip().endswith("failed:")
+
+
+# ---------------------------------------------------------------------------
 # Discovery helpers
 # ---------------------------------------------------------------------------
 

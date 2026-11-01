@@ -25,9 +25,13 @@ from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.datasheet import Datasheet
+from twin_core.models.design_loop_iteration import DesignLoopIteration
+from twin_core.models.device_instance import DeviceInstance
 from twin_core.models.engineering_change_transaction import EngineeringChangeTransaction
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
+from twin_core.models.hierarchy_node import HierarchyNode
+from twin_core.models.maturity_gate import MaturityGate
 from twin_core.models.relationship import SubGraph
 from twin_core.models.revision_snapshot import RevisionSnapshot
 from twin_core.models.version import Version, VersionDiff
@@ -35,8 +39,8 @@ from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
 from twin_core.versioning.git_backend import GitVersionEngine
 
-DEFAULT_NEO4J_CONNECT_ATTEMPTS = 5
-"""Connect attempts before falling back (MET-710).
+DEFAULT_NEO4J_CONNECT_ATTEMPTS = 32
+"""Connect attempts before giving up (MET-710, FORGE-712).
 
 A live incident: the gateway and Neo4j restarted together, the gateway resolved
 ``neo4j`` a moment before its DNS entry existed, and it ran on the in-memory
@@ -45,8 +49,13 @@ reporting healthy. The proof that a retry is the right fix is in the same boot
 log: the *consolidation insight store*, which connects to the same URI slightly
 later in the lifespan, succeeded. The name was resolvable seconds afterwards.
 
-Five attempts with the backoff below span ~7.5s, which covers a container-DNS
-race without meaningfully delaying a boot where Neo4j is genuinely absent."""
+Five attempts (~7.5s) covered that DNS race but not a cold start. After a host
+reboot Docker restarts every container at once without honouring compose
+``depends_on``, and Neo4j opened Bolt 1.6s after the gateway had given up
+(FORGE-712), so the gateway came up on an empty in-memory twin again. With the
+backoff below, 32 attempts span just under two minutes: enough for Neo4j to
+start on a loaded host, and short enough that a gateway with Neo4j genuinely
+absent still reaches its fail-fast or fallback decision promptly."""
 
 _NEO4J_CONNECT_BACKOFF = (0.5, 1.0, 2.0, 4.0)
 
@@ -105,6 +114,9 @@ async def _connect_with_retry(
     assert last is not None
     logger.error("neo4j_connect_exhausted", uri=uri, attempts=total, error=str(last))
     raise last
+
+
+_ITEM_EDGES = frozenset({EdgeType.REVISION_OF, EdgeType.HEAD})
 
 
 @dataclass
@@ -341,6 +353,22 @@ class TwinAPI(ABC):
         question | risk | verification_case | evidence)."""
         ...
 
+    # --- Hierarchy Nodes (FORGE-260, gap G-B1) ---
+
+    @abstractmethod
+    async def create_hierarchy_node(self, node: HierarchyNode) -> HierarchyNode: ...
+
+    @abstractmethod
+    async def get_hierarchy_node(self, node_id: UUID) -> HierarchyNode | None: ...
+
+    @abstractmethod
+    async def list_hierarchy_nodes(
+        self, project_id: UUID | None = None, kind: str | None = None
+    ) -> list[HierarchyNode]:
+        """List HierarchyNode nodes, optionally scoped to a project and/or
+        ``kind`` (product | system | subsystem | assembly)."""
+        ...
+
     # --- Baselines (FORGE-51) ---
 
     @abstractmethod
@@ -393,6 +421,80 @@ class TwinAPI(ABC):
     async def list_ects(
         self, project_id: UUID | None = None, status: str | None = None
     ) -> list[EngineeringChangeTransaction]: ...
+
+    # --- Maturity Gates (FORGE-319) ---
+
+    @abstractmethod
+    async def create_maturity_gate(self, gate: MaturityGate) -> MaturityGate:
+        """Persist one promotion attempt's record. Callers should go
+        through ``api_gateway.requirement_intelligence.promotion.
+        attempt_promotion`` rather than calling this directly -- same
+        "compositional wrapper, not a bare CRUD call" precedent as
+        ``create_ect``."""
+        ...
+
+    @abstractmethod
+    async def get_maturity_gate(self, gate_id: UUID) -> MaturityGate | None: ...
+
+    @abstractmethod
+    async def list_maturity_gates(
+        self, project_id: UUID | None = None, level: str | None = None
+    ) -> list[MaturityGate]: ...
+
+    # --- Design Loop Iterations (FORGE-287) ---
+
+    @abstractmethod
+    async def create_design_loop_iteration(
+        self, iteration: DesignLoopIteration
+    ) -> DesignLoopIteration:
+        """Persist one candidate evaluated during a closed design loop.
+        Callers should go through
+        ``api_gateway.twin.design_loop.make_design_loop_starter`` rather
+        than calling this directly -- same "compositional wrapper, not a
+        bare CRUD call" precedent as ``create_maturity_gate``."""
+        ...
+
+    @abstractmethod
+    async def get_design_loop_iteration(self, iteration_id: UUID) -> DesignLoopIteration | None: ...
+
+    @abstractmethod
+    async def list_design_loop_iterations(self, loop_id: UUID) -> list[DesignLoopIteration]:
+        """All iterations of one loop run, in ``iteration_number`` order."""
+        ...
+
+    @abstractmethod
+    async def find_design_loop_by_inputs_hash(
+        self, loop_inputs_hash: str
+    ) -> DesignLoopIteration | None:
+        """The iteration-0 node of a PRIOR loop run with this exact
+        ``loop_inputs_hash``, if one exists (FORGE-291's duplicate-commit
+        guard) -- ``None`` when no such run has happened yet."""
+        ...
+
+    @abstractmethod
+    async def update_design_loop_iteration(
+        self, iteration_id: UUID, updates: dict[str, Any]
+    ) -> DesignLoopIteration:
+        """Apply ``updates`` to an iteration's mutable approval fields
+        (approved/approved_by/approved_at) -- used to record a human's
+        approval of the winning candidate. Unlike ``update_constraint``
+        this does NOT bump a revision counter -- an iteration is a
+        historical record of one evaluated candidate, not a FORGE-50
+        controlled entity."""
+        ...
+
+    # --- Device Instances (FORGE-321) ---
+
+    @abstractmethod
+    async def create_device_instance(self, instance: DeviceInstance) -> DeviceInstance: ...
+
+    @abstractmethod
+    async def get_device_instance(self, instance_id: UUID) -> DeviceInstance | None: ...
+
+    @abstractmethod
+    async def list_device_instances(
+        self, project_id: UUID | None = None, product_id: str | None = None
+    ) -> list[DeviceInstance]: ...
 
     # --- Components ---
 
@@ -635,6 +737,11 @@ class InMemoryTwinAPI(TwinAPI):
             for node in nodes:
                 outgoing = await self._graph.get_edges(node.id, direction="outgoing")
                 incoming = await self._graph.get_edges(node.id, direction="incoming")
+                # FORGE-523: an item's REVISION_OF/HEAD edges say which item a
+                # node is a revision of, not where it sits in the thread, so
+                # they don't rescue a BOMItem with no BOM from being an orphan.
+                outgoing = [e for e in outgoing if e.edge_type not in _ITEM_EDGES]
+                incoming = [e for e in incoming if e.edge_type not in _ITEM_EDGES]
                 if not outgoing and not incoming:
                     bucket.append(node.id)
         # MET-439: surface the per-kind counts to Prometheus so a
@@ -975,6 +1082,34 @@ class InMemoryTwinAPI(TwinAPI):
         )
         return nodes  # type: ignore[return-value]
 
+    # --- Hierarchy Nodes (FORGE-260, gap G-B1) ---
+
+    async def create_hierarchy_node(self, node: HierarchyNode) -> HierarchyNode:
+        existing = await self._graph.get_node(node.id)
+        if existing is not None:
+            raise ValueError(f"HierarchyNode with ID {node.id} already exists")
+        result = await self._graph.add_node(node)
+        return result  # type: ignore[return-value]
+
+    async def get_hierarchy_node(self, node_id: UUID) -> HierarchyNode | None:
+        node = await self._graph.get_node(node_id)
+        if node is not None and isinstance(node, HierarchyNode):
+            return node
+        return None
+
+    async def list_hierarchy_nodes(
+        self, project_id: UUID | None = None, kind: str | None = None
+    ) -> list[HierarchyNode]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        if kind is not None:
+            filters["kind"] = kind
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.HIERARCHY_NODE, filters=filters if filters else None
+        )
+        return nodes  # type: ignore[return-value]
+
     # --- Baselines (FORGE-51) ---
 
     async def create_baseline(self, baseline: Baseline) -> Baseline:
@@ -1030,6 +1165,103 @@ class InMemoryTwinAPI(TwinAPI):
             filters["status"] = status
         nodes = await self._graph.list_nodes(
             node_type=NodeType.ENGINEERING_CHANGE_TRANSACTION,
+            filters=filters if filters else None,
+        )
+        return nodes  # type: ignore[return-value]
+
+    # --- Maturity Gates (FORGE-319) ---
+
+    async def create_maturity_gate(self, gate: MaturityGate) -> MaturityGate:
+        existing = await self._graph.get_node(gate.id)
+        if existing is not None:
+            raise ValueError(f"MaturityGate with ID {gate.id} already exists")
+        result = await self._graph.add_node(gate)
+        return result  # type: ignore[return-value]
+
+    async def get_maturity_gate(self, gate_id: UUID) -> MaturityGate | None:
+        node = await self._graph.get_node(gate_id)
+        if node is not None and isinstance(node, MaturityGate):
+            return node
+        return None
+
+    async def list_maturity_gates(
+        self, project_id: UUID | None = None, level: str | None = None
+    ) -> list[MaturityGate]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        if level is not None:
+            filters["level"] = level
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.MATURITY_GATE,
+            filters=filters if filters else None,
+        )
+        return nodes  # type: ignore[return-value]
+
+    # --- Design Loop Iterations (FORGE-287) ---
+
+    async def create_design_loop_iteration(
+        self, iteration: DesignLoopIteration
+    ) -> DesignLoopIteration:
+        existing = await self._graph.get_node(iteration.id)
+        if existing is not None:
+            raise ValueError(f"DesignLoopIteration with ID {iteration.id} already exists")
+        result = await self._graph.add_node(iteration)
+        return result  # type: ignore[return-value]
+
+    async def get_design_loop_iteration(self, iteration_id: UUID) -> DesignLoopIteration | None:
+        node = await self._graph.get_node(iteration_id)
+        if node is not None and isinstance(node, DesignLoopIteration):
+            return node
+        return None
+
+    async def list_design_loop_iterations(self, loop_id: UUID) -> list[DesignLoopIteration]:
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.DESIGN_LOOP_ITERATION,
+            filters={"loop_id": loop_id},
+        )
+        return sorted(nodes, key=lambda n: n.iteration_number)  # type: ignore[union-attr]
+
+    async def find_design_loop_by_inputs_hash(
+        self, loop_inputs_hash: str
+    ) -> DesignLoopIteration | None:
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.DESIGN_LOOP_ITERATION,
+            filters={"loop_inputs_hash": loop_inputs_hash, "iteration_number": 0},
+        )
+        return nodes[0] if nodes else None  # type: ignore[return-value]
+
+    async def update_design_loop_iteration(
+        self, iteration_id: UUID, updates: dict[str, Any]
+    ) -> DesignLoopIteration:
+        result = await self._graph.update_node(iteration_id, updates)
+        return result  # type: ignore[return-value]
+
+    # --- Device Instances (FORGE-321) ---
+
+    async def create_device_instance(self, instance: DeviceInstance) -> DeviceInstance:
+        existing = await self._graph.get_node(instance.id)
+        if existing is not None:
+            raise ValueError(f"DeviceInstance with ID {instance.id} already exists")
+        result = await self._graph.add_node(instance)
+        return result  # type: ignore[return-value]
+
+    async def get_device_instance(self, instance_id: UUID) -> DeviceInstance | None:
+        node = await self._graph.get_node(instance_id)
+        if node is not None and isinstance(node, DeviceInstance):
+            return node
+        return None
+
+    async def list_device_instances(
+        self, project_id: UUID | None = None, product_id: str | None = None
+    ) -> list[DeviceInstance]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        if product_id is not None:
+            filters["product_id"] = product_id
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.DEVICE_INSTANCE,
             filters=filters if filters else None,
         )
         return nodes  # type: ignore[return-value]

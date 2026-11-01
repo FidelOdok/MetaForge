@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from twin_core.models.interface import InterfaceQuantity
+
 
 class ArchComponent(BaseModel):
     """A component in the system architecture."""
@@ -22,6 +24,11 @@ class ArchInterface(BaseModel):
     to_component: str = Field(..., min_length=1, alias="to", description="Target component name")
     interface_type: str = Field(default="", description="e.g. SPI, I2C, CAN, mechanical")
     description: str = Field(default="")
+    # FORGE-313: the interface's own measurable properties (spec section 29
+    # Interface.quantities) -- e.g. "tip deflection <= 0.5mm", owned by
+    # mechanical. Optional: an interface can be declared before any of its
+    # quantities are known.
+    quantities: list[InterfaceQuantity] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
 

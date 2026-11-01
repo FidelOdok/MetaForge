@@ -59,25 +59,23 @@ import structlog
 
 from api_gateway.twin._ref_resolver import resolve_ref, resolve_refs
 from observability.tracing import get_tracer
-from twin_core.consistency.staleness import Dependency, StalenessEngine, StalenessStatus
+from twin_core.consistency.staleness import (
+    Dependency,
+    StalenessEngine,
+    StalenessStatus,
+    work_product_current_revision,
+)
 from twin_core.models.engineering_entity import EngineeringEntity
+from twin_core.models.enums import EVIDENCE_TYPES as _EVIDENCE_TYPES
 from twin_core.models.enums import EdgeType
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.evidence_recorder")
-
-_EVIDENCE_TYPES = frozenset(
-    {
-        "calculation",
-        "simulation",
-        "test",
-        "inspection",
-        "demonstration",
-        "datasheet",
-        "external_reference",
-    }
-)
-_VALID_ENTITY_KINDS = frozenset({"constraint", "engineering_entity"})
+# FORGE-314: work_product added so Evidence can pin the exact CAD/geometry
+# revision it validated (the doc's own "CAD-BODY-003@7" example) -- see
+# twin_core.consistency.staleness's module docstring for how a WorkProduct's
+# "revision" is defined (0 while it's the current tip, 1 once superseded).
+_VALID_ENTITY_KINDS = frozenset({"constraint", "engineering_entity", "work_product"})
 
 _SUPPORTS_EDGE = EdgeType.SATISFIES
 _CONTRADICTS_EDGE = EdgeType.CONFLICTS_WITH
@@ -102,20 +100,34 @@ async def _resolve_valid_against(
                 f"evidence recorder: valid_against[{index}] 'entity_kind' must be one of "
                 f"{sorted(_VALID_ENTITY_KINDS)}, got {entity_kind!r}"
             )
-        entity_id = await resolve_ref(twin, str(entry["ref"]), project_id=project_id)
+        entity_id = await resolve_ref(
+            twin,
+            str(entry["ref"]),
+            project_id=project_id,
+            include_work_products=entity_kind == "work_product",
+        )
         revision = entry.get("revision")
         if revision is None:
-            current = (
-                await twin.get_constraint(entity_id)
-                if entity_kind == "constraint"
-                else await twin.get_engineering_entity(entity_id)
-            )
-            if current is None:
-                raise ValueError(
-                    f"evidence recorder: valid_against[{index}] ref {entry['ref']!r} "
-                    f"resolved to {entity_id} but no {entity_kind} exists with that id"
+            if entity_kind == "work_product":
+                current_wp = await twin.get_work_product(entity_id)
+                if current_wp is None:
+                    raise ValueError(
+                        f"evidence recorder: valid_against[{index}] ref {entry['ref']!r} "
+                        f"resolved to {entity_id} but no work_product exists with that id"
+                    )
+                revision = await work_product_current_revision(twin, entity_id)
+            else:
+                current = (
+                    await twin.get_constraint(entity_id)
+                    if entity_kind == "constraint"
+                    else await twin.get_engineering_entity(entity_id)
                 )
-            revision = current.revision
+                if current is None:
+                    raise ValueError(
+                        f"evidence recorder: valid_against[{index}] ref {entry['ref']!r} "
+                        f"resolved to {entity_id} but no {entity_kind} exists with that id"
+                    )
+                revision = current.revision
         dependencies.append(
             Dependency(entity_kind=entity_kind, entity_id=entity_id, revision=int(revision))
         )
@@ -136,9 +148,13 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
         contradicts: list[str] | None = None,
         valid_against: list[dict[str, Any]] | None = None,
         supersedes: str | None = None,
+        replay: dict[str, Any] | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
+        depends_on: list[str] | None = None,
     ) -> dict[str, Any]:
+        from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
+
         if evidence_type not in _EVIDENCE_TYPES:
             raise ValueError(
                 f"evidence recorder: 'evidence_type' must be one of {sorted(_EVIDENCE_TYPES)}, "
@@ -182,6 +198,17 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                         "not an 'evidence' EngineeringEntity"
                     )
 
+            # FORGE-527: pin the item revisions this evidence was produced
+            # against (explicit depends_on, any valid_against work product
+            # that is an item revision, the project's constraint sets).
+            pins = await resolve_record_pins(
+                twin,
+                depends_on=depends_on,
+                node_ids=[d.entity_id for d in dependencies if d.entity_kind == "work_product"],
+                project_id=project_id,
+                include_constraint_sets=True,
+            )
+
             now = datetime.now(UTC)
             metadata: dict[str, Any] = {
                 "evidence_type": evidence_type,
@@ -192,8 +219,21 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "execution_timestamp": now.isoformat(),
                 "staleness": StalenessStatus.CURRENT.value,
             }
+            metadata.update(pin_metadata(pins))
             if session_id:
                 metadata["session_id"] = session_id
+            if replay:
+                # FORGE-316: an optional, trusted-caller-only passthrough --
+                # {"tool_id": <a real invokable MCP tool id>, "args": {...
+                # the exact kwargs to call it again with}}. NOT derived
+                # from producer/inputs (producer.tool is often a Python
+                # dotted path, e.g. FORGE-315's cantilever_tip_deflection_mm,
+                # not an invokable tool_id -- guessing replayability from it
+                # would be wrong more often than right). Only a caller that
+                # actually knows how to re-invoke itself (e.g.
+                # metric_evaluator.py) should ever pass this; this module
+                # stores it opaquely, never validates its shape.
+                metadata["replay"] = replay
 
             entity = EngineeringEntity(
                 entity_type="evidence",
@@ -234,6 +274,15 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                     "engineering_entity", superseded_id, StalenessStatus.SUPERSEDED
                 )
 
+            pinned = await link_record(
+                twin,
+                created.id,
+                pins,
+                record_type="evidence",
+                name=entity.statement or "evidence",
+                metadata=metadata,
+            )
+
             linked = False
             if project_id and project_backend is not None:
                 try:
@@ -265,6 +314,7 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "valid_against_count": len(dependencies),
                 "superseded": str(superseded_id) if superseded_id else None,
                 "project_linked": linked,
+                **pinned.as_result(),
             }
 
     return record

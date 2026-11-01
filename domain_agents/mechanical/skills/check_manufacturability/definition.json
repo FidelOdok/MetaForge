@@ -1,0 +1,15 @@
+{
+  "name": "check_manufacturability",
+  "version": "0.1.0",
+  "domain": "manufacturing",
+  "agent": "mechanical",
+  "description": "Design-for-manufacture review of a finished design against the chosen process's sourced limits (wall thickness, holes, corner and bend radii, draft, overhang, envelope), reporting pass, fail or unknown per feature and a manufacturable / not manufacturable / incomplete verdict",
+  "phase": 1,
+  "tools_required": [],
+  "input_schema": "schema.CheckManufacturabilityInput",
+  "output_schema": "schema.CheckManufacturabilityOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["dfm", "manufacturing", "quality"]
+}

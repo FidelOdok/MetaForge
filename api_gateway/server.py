@@ -6,6 +6,7 @@ and lifecycle hooks.  Run with ``uvicorn api_gateway.server:app``.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,29 +16,84 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api_gateway.approvals.routes import router as approvals_router
 from api_gateway.assistant.routes import router as assistant_router
+from api_gateway.auth import (
+    AuthConfigurationError,
+    AuthMiddleware,
+    AuthSettings,
+    load_auth_settings,
+    load_provider,
+)
+from api_gateway.bom.risk_routes import router as bom_risk_router
 from api_gateway.bom.routes import router as bom_router
+from api_gateway.bringup.routes import router as bringup_router
 from api_gateway.cad.routes import router as cad_router
 from api_gateway.cad_export.routes import router as cad_export_router
 from api_gateway.chat.routes import router as chat_router
 from api_gateway.chat.tool_approvals import router as tool_approvals_router
+from api_gateway.client_tasks.routes import router as client_tasks_router
 from api_gateway.compliance.routes import router as compliance_router
+from api_gateway.component_selection.routes import router as component_selection_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
+from api_gateway.design_flows.mcp_bindings import (
+    make_capability_reader,
+    make_catalogue_reader,
+    make_client_task_service,
+    make_gate_decider,
+    make_gate_reader,
+    make_intent_compiler,
+    make_lifecycle_reader,
+    make_patcher,
+    make_proposer,
+    make_run_starter,
+    make_run_status_reader,
+)
+from api_gateway.design_flows.routes import router as design_flows_router
+from api_gateway.design_loop.routes import router as design_loop_router
+from api_gateway.dfm.routes import router as dfm_router
+from api_gateway.evals.routes import router as evals_router
+from api_gateway.features.routes import router as features_router
+from api_gateway.firmware.routes import router as firmware_router
 from api_gateway.harness import router as harness_router
-from api_gateway.health import health_router
+from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
+from api_gateway.library.catalog_routes import router as library_catalog_router
+from api_gateway.library.routes import router as library_router
+from api_gateway.manufacture.routes import router as manufacture_router
 from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
+from api_gateway.promotion.routes import router as promotion_router
+from api_gateway.releases.routes import router as releases_router
+from api_gateway.requirement_intelligence.routes import router as requirements_router
+from api_gateway.robot_loads.routes import router as robot_loads_router
 from api_gateway.runs.routes import router as runs_router
 from api_gateway.sessions.routes import router as sessions_router
+from api_gateway.simulation.routes import router as simulation_router
+from api_gateway.technical_drawings.routes import router as technical_drawings_router
+from api_gateway.testplans.routes import router as testplans_router
+from api_gateway.trade_study.routes import router as trade_study_router
+from api_gateway.twin.baseline_routes import router as twin_baselines_router
+from api_gateway.twin.decision_routes import router as decisions_router
+from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
+from api_gateway.twin.hierarchy_routes import router as hierarchy_router
+from api_gateway.twin.item_migration_routes import router as twin_item_migration_router
+from api_gateway.twin.item_routes import router as twin_items_router
+from api_gateway.twin.live_routes import publish_local as _publish_live_local
+from api_gateway.twin.live_routes import router as twin_live_router
+from api_gateway.twin.prd_routes import router as twin_prd_router
+from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
+from api_gateway.vendors.routes import router as vendors_router
+from api_gateway.version import gateway_version
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
+from mcp_core.live_events import set_live_event_publisher
 from observability.bootstrap import init_observability, shutdown_observability
 from observability.config import ObservabilityConfig, OtlpExporterConfig
 from observability.logging import configure_logging
-from observability.metrics import MetricsCollector, MetricsRegistry
+from observability.metrics import MetricsCollector, collector_for
 from observability.middleware import ObservabilityMiddleware
 from observability.tracing import get_tracer
 from orchestrator.dependency_engine import DependencyGraph
@@ -54,7 +110,113 @@ from tool_registry.bootstrap import bootstrap_tool_registry
 from twin_core.api import InMemoryTwinAPI
 
 logger = structlog.get_logger(__name__)
+
 tracer = get_tracer("api_gateway.server")
+
+
+class _LazyBridgeMeasure:
+    """FORGE-233: an async ``measure(session_id, obj_id) -> dict`` callable
+    whose backing MCP bridge is bound AFTER construction, not at it.
+
+    ``geometry_recorder_fn``/``measure_tool`` are built and handed to
+    ``bootstrap_tool_registry`` before the ``ToolRegistry``/MCP bridge they'd
+    need to call ``freecad.measure`` even exist -- the bridge is built FROM
+    the registry ``bootstrap_tool_registry`` itself constructs, so passing a
+    real bridge in at construction time is a genuine circular dependency,
+    not just an ordering inconvenience. This holder breaks the cycle: it's
+    handed to ``bootstrap_tool_registry`` (transitively, to
+    ``twin.commit_geometry``) while still empty, and ``self.bridge`` is set
+    once, right after ``bootstrap_tool_registry`` returns and the real
+    bridge exists -- well before the gateway serves its first request.
+    ``__call__`` reads ``self.bridge`` lazily, at call time, so every real
+    request sees it populated.
+    """
+
+    def __init__(self) -> None:
+        self.bridge: Any = None
+
+    async def __call__(self, session_id: str, obj_id: str) -> dict[str, Any]:
+        if self.bridge is None:
+            return {}
+        try:
+            return await self.bridge.invoke(
+                "freecad.measure", {"session_id": session_id, "obj_id": obj_id}
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort derivation, never raise
+            logger.warning(
+                "geometry_measure_tool_invoke_failed",
+                session_id=session_id,
+                obj_id=obj_id,
+                error=str(exc),
+            )
+            return {}
+
+
+class _LazyBridgeAssemblyInfo:
+    """FORGE-245: an async ``assembly_info(session_id) -> dict`` callable,
+    same lazy-bridge-binding seam as ``_LazyBridgeMeasure`` (see its
+    docstring for why the bridge can't be supplied at construction time).
+
+    Reads a still-live FreeCAD session's assembly structure -- every
+    part currently registered (``freecad.describe_session``) and every
+    joint defined between them (``freecad.list_joints``) -- so
+    ``twin.commit_geometry`` can attach ``metadata.assembly = {parts,
+    joints}`` to a commit-by-reference call. Without this, the joints a
+    session built up (``add_assembly_joint``) are lost the moment the
+    session's TTL expires, since the committed STEP carries only merged
+    geometry with no part/joint structure of its own.
+    """
+
+    def __init__(self) -> None:
+        self.bridge: Any = None
+
+    async def __call__(self, session_id: str) -> dict[str, Any]:
+        if self.bridge is None:
+            return {}
+        try:
+            session = await self.bridge.invoke(
+                "freecad.describe_session", {"session_id": session_id}
+            )
+            joints = await self.bridge.invoke("freecad.list_joints", {"session_id": session_id})
+        except Exception as exc:  # noqa: BLE001 — best-effort derivation, never raise
+            logger.warning(
+                "geometry_assembly_info_tool_invoke_failed",
+                session_id=session_id,
+                error=str(exc),
+            )
+            return {}
+        parts = [
+            {"name": obj.get("name"), "obj_id": obj.get("obj_id"), "kind": obj.get("kind")}
+            for obj in (session.get("objects") or [])
+            if isinstance(obj, dict)
+        ]
+        return {"parts": parts, "joints": joints.get("joints") or []}
+
+
+class _LazyBridge:
+    """FORGE-315: a duck-typed McpBridge (``async invoke(tool_id, params)``)
+    whose backing bridge is bound AFTER construction -- same seam as
+    ``_LazyBridgeMeasure``/``_LazyBridgeAssemblyInfo`` (see their docstrings
+    for the circular-dependency reason: the real bridge is built FROM the
+    registry ``bootstrap_tool_registry`` itself populates, so a caller
+    handed to that same call can't receive a real bridge yet), generalized
+    to a plain passthrough for a caller that needs to invoke a DIFFERENT
+    tool by id (``twin.evaluate_metric``'s tier-2 escalation calling
+    ``calculix.run_fea``) rather than one fixed tool of its own.
+    """
+
+    def __init__(self) -> None:
+        self.bridge: Any = None
+
+    async def invoke(
+        self, tool_id: str, params: dict[str, Any], timeout: int | None = None
+    ) -> dict[str, Any]:
+        if self.bridge is None:
+            raise RuntimeError(
+                f"_LazyBridge: no backing MCP bridge bound yet (tool_id={tool_id!r})"
+            )
+        return await self.bridge.invoke(tool_id, params, timeout=timeout)
+
 
 # ---------------------------------------------------------------------------
 # OTel bootstrap (module-level so providers are active before first request)
@@ -71,15 +233,14 @@ _otel_state = init_observability(_otel_config)
 
 
 def _create_collector() -> MetricsCollector:
-    """Create a MetricsCollector backed by a real OTel meter (or no-op)."""
-    if _otel_state.is_active and _otel_state.meter_provider is not None:
-        meter = _otel_state.meter_provider.get_meter("metaforge-gateway")
-        collector = MetricsCollector(meter=meter)
-        collector.create_instruments(MetricsRegistry.all_metrics())
-        logger.info("metrics_collector_initialized", instruments=len(MetricsRegistry.all_metrics()))
-        return collector
-    logger.info("metrics_collector_noop", reason="OTel SDK not available or disabled")
-    return MetricsCollector()
+    """Create a MetricsCollector backed by a real OTel meter (or no-op).
+
+    FORGE-413 moved the body to ``observability.metrics.collector_for`` so a
+    second entrypoint gets it by calling one function instead of by
+    remembering to reproduce it -- the MCP sidecar did not, and every MCP
+    metric had zero series as a result.
+    """
+    return collector_for("metaforge-gateway")
 
 
 # ---------------------------------------------------------------------------
@@ -647,27 +808,69 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.apply import make_apply_executor
     from api_gateway.assistant.proposal_recorder import make_proposal_recorder
     from api_gateway.assistant.routes import workflow as approval_workflow
+    from api_gateway.library.mcp_bindings import make_machine_library
+    from api_gateway.requirement_intelligence.promotion import attempt_promotion
     from api_gateway.runs.launcher import make_run_launcher
+    from api_gateway.twin.baseline import make_baseline_creator
     from api_gateway.twin.blob_stager import make_blob_stager
+    from api_gateway.twin.bom_risk import make_bom_risk_scorer
+    from api_gateway.twin.bringup_checklist import (
+        make_bringup_checklist_creator,
+        make_bringup_checklist_lister,
+    )
+    from api_gateway.twin.calibration import (
+        make_calibrated_band_lookup,
+        make_calibration_recorder,
+    )
     from api_gateway.twin.claim_recorder import make_claim_recorder
     from api_gateway.twin.component_recorder import make_component_recorder
+    from api_gateway.twin.component_selection import make_component_selector
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
+    from api_gateway.twin.design_loop import (
+        make_design_loop_approver,
+        make_design_loop_reader,
+        make_design_loop_starter,
+        tube_height_candidate_mapper,
+    )
     from api_gateway.twin.design_sketch_recorder import (
         make_design_sketch_approver,
         make_design_sketch_recorder,
     )
+    from api_gateway.twin.device_instance_recorder import make_device_instance_registrar
+    from api_gateway.twin.dfm_evidence import make_overhang_evidence_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.ect_tools import make_ect_bridge
     from api_gateway.twin.engineering_entity_approval import make_engineering_entity_approver
     from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
     from api_gateway.twin.evidence_recorder import make_evidence_recorder
+    from api_gateway.twin.firmware_scaffold import make_firmware_scaffold_creator
+    from api_gateway.twin.geometry_diff import make_geometry_diff
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
+    from api_gateway.twin.harness_estimate import make_harness_estimate_getter
+    from api_gateway.twin.hierarchy_recorder import (
+        make_hierarchy_geometry_linker,
+        make_hierarchy_node_recorder,
+        make_hierarchy_rollup_fn,
+    )
+    from api_gateway.twin.interference_check import make_interference_check
+    from api_gateway.twin.item_revisions import make_item_history_reader
+    from api_gateway.twin.manufacture_release import make_manufacture_release
+    from api_gateway.twin.measurement_recorder import make_measurement_recorder
+    from api_gateway.twin.metric_evaluator import make_metric_evaluator
+    from api_gateway.twin.optimizer import make_tube_height_optimizer, make_wall_thickness_optimizer
+    from api_gateway.twin.release_package import (
+        make_release_package_creator,
+        make_release_package_lister,
+    )
+    from api_gateway.twin.repeatability import make_repeatability_estimator
+    from api_gateway.twin.revalidation import make_revalidation_executor
     from api_gateway.twin.robot_description_recorder import (
         make_robot_description_recorder,
         make_robot_description_updater,
     )
+    from api_gateway.twin.sensitivity import make_sensitivity_ranker
     from api_gateway.twin.structured_document_recorder import (
         make_compliance_checklist_recorder,
         make_hazard_analysis_recorder,
@@ -675,11 +878,294 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_system_architecture_recorder,
         make_technical_drawing_recorder,
     )
+    from api_gateway.twin.test_plan import make_test_plan_generator, make_test_plan_lister
+    from api_gateway.twin.thermal_evidence import make_thermal_evidence_recorder
+    from api_gateway.twin.trade_study import make_trade_study_selector
+    from api_gateway.vendors.mcp_bindings import make_vendor_service
 
     decision_recorder = make_decision_recorder(twin, project_backend)
     git_registry = GitRepoRegistry.from_env(twin.graph)
     init_git_registry(git_registry)
     geometry_recorder_fn = make_geometry_recorder(twin, project_backend, git_registry)
+    # FORGE-233: empty until the real MCP bridge exists (below, after
+    # bootstrap_tool_registry returns) -- see _LazyBridgeMeasure's own
+    # docstring for why this can't just be constructed with the bridge
+    # directly.
+    measure_tool = _LazyBridgeMeasure()
+    # FORGE-245: same lazy-bridge seam, for a live FreeCAD session's
+    # assembly structure (parts + joints) at commit time.
+    assembly_info_tool = _LazyBridgeAssemblyInfo()
+    # FORGE-315: same lazy-bridge seam, for twin.evaluate_metric's tier-2
+    # escalation (a real calculix.run_fea call).
+    metric_evaluator_bridge = _LazyBridge()
+    # FORGE-297: same lazy-bridge seam, for twin.evaluate_thermal_metric's
+    # real calculix.run_thermal / calculix.cross_check_thermal_steady_state
+    # calls.
+    thermal_evaluator_bridge = _LazyBridge()
+    # FORGE-273: same lazy-bridge seam, for twin.evaluate_overhang_metric's
+    # real freecad.list_named_faces call.
+    overhang_evaluator_bridge = _LazyBridge()
+    # FORGE-294: same lazy-bridge seam, for manufacture_release's real
+    # cadquery.export_geometry call.
+    manufacture_release_bridge = _LazyBridge()
+    evidence_recorder_fn = make_evidence_recorder(twin, project_backend)
+    # FORGE-321: a real measurement history overrides evaluate_metric's
+    # fixed-prior band once enough of it exists for a given metric/tier --
+    # built before metric_evaluator_fn so it can be wired straight in.
+    calibrated_band_lookup_fn = make_calibrated_band_lookup(twin)
+    metric_evaluator_fn = make_metric_evaluator(
+        twin,
+        evidence_recorder=evidence_recorder_fn,
+        mcp_bridge=metric_evaluator_bridge,
+        calibrated_band_lookup=calibrated_band_lookup_fn,
+    )
+    # FORGE-297: single-tier thermal analysis evaluator -- runs a real
+    # calculix.run_thermal call and records its output as Evidence, closing
+    # the gap where FORGE-282's thermal analysis had no path into the
+    # requirements matrix/coverage numbers.
+    thermal_evaluator_fn = make_thermal_evidence_recorder(
+        twin,
+        evidence_recorder=evidence_recorder_fn,
+        mcp_bridge=thermal_evaluator_bridge,
+    )
+    # FORGE-273: 3D-print overhang DFM check -- runs a real
+    # freecad.list_named_faces mesh lookup and records the flagged-face
+    # result as Evidence (gap G-D5).
+    overhang_evaluator_fn = make_overhang_evidence_recorder(
+        twin,
+        evidence_recorder=evidence_recorder_fn,
+        mcp_bridge=overhang_evaluator_bridge,
+    )
+    # FORGE-630: twin.render_work_product -- the model converted to GLB and
+    # rendered by blender.render over the same lazy-bridge seam.
+    from api_gateway.twin.render_recorder import make_work_product_renderer
+
+    work_product_renderer_bridge = _LazyBridge()
+    work_product_renderer_fn = make_work_product_renderer(
+        twin, project_backend, mcp_bridge=work_product_renderer_bridge
+    )
+    # FORGE-687: twin.record_design_files -- KiCad and firmware files kept as
+    # work products, with kicad.export_svg previews over the same seam.
+    from api_gateway.twin.design_files_recorder import make_design_files_recorder
+
+    design_files_bridge = _LazyBridge()
+    design_files_recorder_fn = make_design_files_recorder(
+        twin, project_backend, mcp_bridge=design_files_bridge
+    )
+    # MET-618: hoisted so the SAME blob-stager instance (and its staged-file
+    # cache) is reused by both twin.stage_work_product_file (below) and
+    # manufacture_release_fn, same pattern FORGE-265 established for
+    # component_recorder_fn.
+    blob_stager_fn = make_blob_stager(twin)
+    # FORGE-294: "Release for manufacture" -- resolves a work product's real
+    # committed STEP file (via blob_stager_fn), exports it to a real
+    # process-specific manufacturing file (via cadquery.export_geometry),
+    # and returns the result. manufacture_release_bridge is bound to the
+    # real active_bridge below, once it exists.
+    manufacture_release_fn = make_manufacture_release(
+        twin,
+        blob_stager=blob_stager_fn,
+        mcp_bridge=manufacture_release_bridge,
+    )
+    # FORGE-301: same lazy-bridge seam, for geometry_diff's real
+    # freecad.describe_step_file calls (reuses blob_stager_fn -- both nodes
+    # in a SUPERSEDES pair are resolved by node id, no new staging logic).
+    geometry_diff_bridge = _LazyBridge()
+    geometry_diff_fn = make_geometry_diff(
+        twin,
+        blob_stager=blob_stager_fn,
+        mcp_bridge=geometry_diff_bridge,
+    )
+    # FORGE-272: same lazy-bridge seam, for interference_check's real
+    # cadquery.boolean_operation(operation="intersect") call (reuses
+    # blob_stager_fn -- both named parts are resolved by node id, no new
+    # staging logic).
+    interference_check_bridge = _LazyBridge()
+    interference_check_fn = make_interference_check(
+        twin,
+        blob_stager=blob_stager_fn,
+        mcp_bridge=interference_check_bridge,
+    )
+    # FORGE-268: same lazy-bridge seam, for bom_risk's real
+    # distributors.resolve_offers / {distributor}.get_product calls.
+    bom_risk_bridge = _LazyBridge()
+    bom_risk_fn = make_bom_risk_scorer(twin, mcp_bridge=bom_risk_bridge)
+    # FORGE-316: dispatch table for twin.execute_revalidation_plan --
+    # every tool a stale Evidence's metadata["replay"]["tool_id"] can name.
+    # Only twin.evaluate_metric exists today; adding a future evaluator/
+    # recorder here is how it becomes automatically re-runnable too.
+    revalidation_executor_fn = make_revalidation_executor(
+        twin, tool_dispatch={"twin.evaluate_metric": metric_evaluator_fn}
+    )
+    sensitivity_ranker_fn = make_sensitivity_ranker(twin, evidence_recorder=evidence_recorder_fn)
+    # FORGE-320: reuses the same evidence_recorder_fn as sensitivity_ranker
+    # above, plus decision_recorder (built just below) for the "Decision
+    # with alternatives" output -- twin.record_decision already is exactly
+    # that, no new node type needed.
+    parameter_optimizer_fn = make_wall_thickness_optimizer(
+        twin, evidence_recorder=evidence_recorder_fn, decision_recorder=decision_recorder
+    )
+    # FORGE-287: composes the same optimizer above (so its Evidence/Decision
+    # recording isn't duplicated) and layers a persisted, queryable
+    # DesignLoopIteration timeline + approval gate on top.
+    design_loop_starter_fn = make_design_loop_starter(twin, optimize=parameter_optimizer_fn)
+    design_loop_reader_fn = make_design_loop_reader(twin)
+    design_loop_approver_fn = make_design_loop_approver(twin)
+    # FORGE-288: a second real parameter (height_mm) plugged into the SAME
+    # design-loop machinery above via the generalized parameter_name/metric/
+    # candidate_mapper seam -- proof the loop generalizes, not a copy.
+    tube_height_optimizer_fn = make_tube_height_optimizer(
+        twin, evidence_recorder=evidence_recorder_fn, decision_recorder=decision_recorder
+    )
+    tube_height_design_loop_starter_fn = make_design_loop_starter(
+        twin,
+        optimize=tube_height_optimizer_fn,
+        parameter_name="height_mm",
+        candidate_mapper=tube_height_candidate_mapper,
+    )
+    # FORGE-262: trade-study selection over recorded concept_option
+    # entities -- reuses decision_recorder unchanged (no new "Decision-like"
+    # node type), same precedent as parameter_optimizer_fn above. Also
+    # reuses the SAME engineering_entity_recorder_fn instance
+    # bootstrap_tool_registry wires up below, so a concept_option created
+    # via the dashboard's REST route and via an agent's own MCP call are
+    # indistinguishable afterward.
+    engineering_entity_recorder_fn = make_engineering_entity_recorder(twin, project_backend)
+    concept_selector_fn = make_trade_study_selector(twin, decision_recorder=decision_recorder)
+
+    # FORGE-299: a versioned snapshot (release_package) of a project's
+    # hierarchy/BOM/evidence/decisions, gated at creation time on a real
+    # evaluate_g8_release(...) == PASSED check -- the first real consumer
+    # of that previously purely-advisory gate. traceability_coverage is
+    # wired to the SAME TraceabilityAgent FORGE-297's coverage route uses,
+    # so G8's "required verification complete" check can actually evaluate
+    # instead of reporting NOT_EVALUATED.
+    from api_gateway.requirement_intelligence.traceability import TraceabilityAgent
+
+    async def _traceability_coverage_accessor(project_id: Any) -> Any:
+        return await TraceabilityAgent(twin).coverage(str(project_id))
+
+    release_package_creator_fn = make_release_package_creator(
+        twin,
+        engineering_entity_recorder=engineering_entity_recorder_fn,
+        traceability_coverage=_traceability_coverage_accessor,
+    )
+    release_package_lister_fn = make_release_package_lister(twin)
+
+    # FORGE-405: a real gateway/MCP-reachable way to create a Baseline --
+    # follow-up to FORGE-299, which found the G8 release gate's
+    # "configuration baseline fixed" check could never pass on a real
+    # project because nothing ever called the pre-existing
+    # twin_core.transactions.baseline.create_baseline.
+    baseline_creator_fn = make_baseline_creator(twin)
+
+    # FORGE-298: for each Constraint on a project with verification_method
+    # == "test", mechanically derives one verification_case entity from the
+    # requirement's own structured metric/operator/limit/unit/
+    # target_node_type fields. Reuses the SAME engineering_entity_recorder_fn
+    # instance every other entity type goes through.
+    test_plan_generator_fn = make_test_plan_generator(
+        twin, engineering_entity_recorder=engineering_entity_recorder_fn
+    )
+    test_plan_lister_fn = make_test_plan_lister(twin)
+
+    # FORGE-295: derives a step-by-step assembly sequence from a work
+    # product's real metadata.assembly.joints (gap G-H3). Reuses the SAME
+    # engineering_entity_recorder_fn instance every other entity type goes
+    # through.
+    bringup_checklist_creator_fn = make_bringup_checklist_creator(
+        twin, engineering_entity_recorder=engineering_entity_recorder_fn
+    )
+    bringup_checklist_lister_fn = make_bringup_checklist_lister(twin)
+
+    # FORGE-293: the dashboard-facing read/approve half of a real,
+    # pre-existing technical_drawing recorder (PR #734) that had no
+    # dashboard consumer (gap G-H1). REST-only closures, no MCP
+    # registration, so neither touches tool_registry/bootstrap.py.
+    from api_gateway.twin.technical_drawing_viewer import (
+        make_technical_drawing_approver,
+        make_technical_drawing_lister,
+    )
+
+    technical_drawing_lister_fn = make_technical_drawing_lister(twin)
+    technical_drawing_approver_fn = make_technical_drawing_approver(twin)
+
+    # MET-588: hoisted to a named variable (previously only constructed
+    # inline at the TwinServer(...) call site below) so this SAME instance
+    # can also back firmware_scaffold_creator_fn below (FORGE-276).
+    document_recorder_fn = make_document_recorder(twin, project_backend)
+
+    # FORGE-276: derives a per-joint CAN node table + a minimal firmware
+    # header scaffold from a work product's real metadata.assembly.joints
+    # (gap G-E3). Reuses the SAME document_recorder_fn instance
+    # api_gateway/runs/fw_handlers.py's design-flow phase already goes
+    # through for its own pinmap/firmware_source pair.
+    firmware_scaffold_creator_fn = make_firmware_scaffold_creator(
+        twin, document_recorder=document_recorder_fn
+    )
+
+    # FORGE-275: per-joint cumulative cable-length estimate from a work
+    # product's real metadata.assembly.joints (gap G-E2). The power-tree
+    # half of this ticket (draw/dissipation per hierarchy node) needed no
+    # new wiring -- it extends the existing hierarchy tree response with
+    # fields twin_core.consistency.hierarchy_rollup (FORGE-390) already
+    # computes; see api_gateway/twin/hierarchy_routes.py.
+    harness_estimate_getter_fn = make_harness_estimate_getter(twin)
+
+    # FORGE-285 (gap G-F9): repeatability-estimate half of "controls
+    # validation" -- REST-only (mirrors geometry_diff's own pattern), not
+    # registered as an MCP tool/TwinServer collaborator, since it needs
+    # nothing beyond `twin`. The tracking-error/stability-margin half of
+    # the ticket is deliberately not built -- see
+    # api_gateway/twin/repeatability.py's module docstring.
+    repeatability_estimator_fn = make_repeatability_estimator(twin)
+
+    # FORGE-265: requirement-driven component selection -- hoisted to a
+    # named variable (unlike every other component_recorder use, which is
+    # constructed inline at the TwinServer(...) call site below) so this
+    # SAME instance can be reused both for twin.record_component_selection
+    # and inside component_selector_fn, and again by the REST route's own
+    # init_component_selector below -- one recording path, not three.
+    component_recorder_fn = make_component_recorder(
+        twin,
+        project_backend,
+        catalog_store=getattr(app.state, "component_catalog_store", None),
+    )
+    component_selector_fn = make_component_selector(
+        twin, decision_recorder=decision_recorder, component_recorder=component_recorder_fn
+    )
+
+    # FORGE-266: attach/replace a hierarchy node's REALIZED_BY/INSTANCE_OF
+    # geometry after the node already exists ("replace placeholder with
+    # part") -- hoisted so the REST route's own init_hierarchy_geometry_linker
+    # below reuses the SAME instance twin.realize_hierarchy_node uses.
+    hierarchy_geometry_linker_fn = make_hierarchy_geometry_linker(twin)
+
+    # FORGE-319: attempt_promotion is a plain function (twin, ...) -- bind
+    # twin once here, same injected-callable shape as every make_X(twin,
+    # ...) factory above.
+    async def promotion_attempter_fn(**kwargs: Any) -> dict[str, Any]:
+        return await attempt_promotion(twin, **kwargs)
+
+    # FORGE-355: renders metaforge://twin/brief/{project_id} using the same
+    # builder the chat harness uses, so an MCP client and a chat agent are
+    # briefed identically. FORGE-337 moved the body to
+    # api_gateway.projects.brief_provider so the standalone MCP sidecar can
+    # build the same one -- it had none, and served no resources at all.
+    from api_gateway.projects.brief_provider import make_brief_provider
+    from api_gateway.projects.routes import get_project_backend
+
+    brief_provider_fn = make_brief_provider(twin, get_project_backend())
+
+    # FORGE-321: device registration; measurement recording (reuses
+    # evidence_recorder_fn via a calibration_recorder for residuals).
+    device_instance_registrar_fn = make_device_instance_registrar(twin)
+    calibration_recorder_fn = make_calibration_recorder(
+        twin, evidence_recorder=evidence_recorder_fn
+    )
+    measurement_recorder_fn = make_measurement_recorder(
+        twin, calibration_recorder=calibration_recorder_fn
+    )
 
     # MET-740: robot-description (URDF/SDF/USD) persistence for the
     # dashboard's cad-export routes. REST-route-triggered, not agent/MCP-
@@ -701,6 +1187,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         agent_session_store=getattr(app.state, "agent_session_store", None),
         decision_recorder=decision_recorder,
         geometry_recorder=geometry_recorder_fn,
+        measure_tool=measure_tool,
+        assembly_info_tool=assembly_info_tool,
         proposal_recorder=make_proposal_recorder(approval_workflow),
         # MET-582: structured requirements -> evaluable Constraint nodes +
         # a constraint_set work product (feeds MET-583's gate criteria).
@@ -709,7 +1197,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # entities (intent/need/objective/assumption/question/risk/
         # verification_case/evidence) -- the "why" a requirement exists,
         # recorded before/alongside the quantified requirements themselves.
-        engineering_entity_recorder=make_engineering_entity_recorder(twin, project_backend),
+        engineering_entity_recorder=engineering_entity_recorder_fn,
         # FORGE-73 (waiver/release model): a real approval step distinct from
         # creation, so a waiver/release_approval only counts once actually
         # approved, never just because it was recorded.
@@ -721,11 +1209,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # notes) — it fell back to twin.propose_change, whose apply-on-approve
         # executor only implements a `record_decision` action, so anything
         # else silently no-ops even after a human approves it.
-        document_recorder=make_document_recorder(twin, project_backend),
+        document_recorder=document_recorder_fn,
         # MET-618: lets an agent recover a committed work product's actual
         # file (STEP, mesh, ...) by node id once its authoring session is
-        # gone, unknown, or was never its own.
-        blob_stager=make_blob_stager(twin),
+        # gone, unknown, or was never its own. Hoisted above (FORGE-294) so
+        # the same instance backs manufacture_release_fn too.
+        blob_stager=blob_stager_fn,
         # MET-436: the parametric component catalog + the intent-translation
         # LLM (reused from the property-extraction Tier-2 wiring above).
         # component.* registers only when both are supplied, together with
@@ -750,16 +1239,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # Persists a chosen result as a BOMItem work product + project link.
         # catalog_store lets it auto-fill image/footprint/CAD/cost from an
         # already-indexed catalog row when the caller doesn't pass them.
-        component_recorder=make_component_recorder(
-            twin,
-            project_backend,
-            catalog_store=getattr(app.state, "component_catalog_store", None),
-        ),
+        # Hoisted to component_recorder_fn above (FORGE-265) so the SAME
+        # instance is also reused inside component_selector_fn.
+        component_recorder=component_recorder_fn,
         # FORGE-64 (epic FORGE-35, Phase 6: Evidence Integration): persists
         # tool-generated Evidence entities -- the constructive fix for
         # "requirement satisfaction claims" being LLM assertion instead of a
         # real, checkable graph fact.
-        evidence_recorder=make_evidence_recorder(twin, project_backend),
+        evidence_recorder=evidence_recorder_fn,
         # FORGE-65: the requirement-satisfaction claim this whole phase is
         # named for -- an artefact's real edge to the requirement it
         # satisfies, citing evidence, with status always computed live.
@@ -769,9 +1256,103 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # and tested since FORGE-66/67 but unreachable from any agent --
         # nothing wired it to an MCP tool until this.
         ect_bridge=make_ect_bridge(twin),
+        # FORGE-260 (gap G-B1): the product hierarchy tree -- a project's
+        # structural product/system/subsystem/assembly nesting, distinct
+        # from the twin's other "by type" views.
+        hierarchy_node_recorder=make_hierarchy_node_recorder(twin, project_backend),
+        hierarchy_rollup_fn=make_hierarchy_rollup_fn(twin),
+        # FORGE-266 (gap G-C2): "replace placeholder with part".
+        hierarchy_geometry_linker=hierarchy_geometry_linker_fn,
+        # FORGE-315: tier-0 closed-form hand-calc + tier-2 FEA escalation
+        # (spec §30, minimum sufficient fidelity). metric_evaluator_bridge
+        # is bound to the real active_bridge below, once it exists.
+        metric_evaluator=metric_evaluator_fn,
+        # FORGE-297: single-tier thermal analysis evaluator + evidence
+        # recorder. thermal_evaluator_bridge is bound to the real
+        # active_bridge below, once it exists.
+        thermal_evaluator=thermal_evaluator_fn,
+        # FORGE-273: 3D-print overhang DFM check + evidence recorder.
+        # overhang_evaluator_bridge is bound to the real active_bridge
+        # below, once it exists.
+        overhang_evaluator=overhang_evaluator_fn,
+        # FORGE-630: renders of a work product, bound to active_bridge below.
+        work_product_renderer=work_product_renderer_fn,
+        # FORGE-687: design files, bound to active_bridge below.
+        design_files_recorder=design_files_recorder_fn,
+        # FORGE-316: automatic selective re-run of exactly what a
+        # committed ECT's real revalidation_plan marked stale.
+        revalidation_executor=revalidation_executor_fn,
+        # FORGE-317: one-at-a-time finite-difference sensitivity ranking.
+        sensitivity_ranker=sensitivity_ranker_fn,
+        # FORGE-319: the first real gate that refuses, not just reports.
+        promotion_attempter=promotion_attempter_fn,
+        # FORGE-400: design flows reach the harness plugins. Note the absence
+        # of an approver binding -- there is no tool that approves, so there
+        # is nothing to inject for one.
+        design_flow_catalogue_reader=make_catalogue_reader(),
+        design_flow_proposer=make_proposer(),
+        design_flow_status_reader=make_run_status_reader(),
+        design_flow_run_starter=make_run_starter(),
+        # FORGE-539: read-only lifecycle tools; none proposes or approves.
+        design_flow_intent_compiler=make_intent_compiler(),
+        design_flow_capability_reader=make_capability_reader(),
+        design_flow_lifecycle_reader=make_lifecycle_reader(),
+        design_flow_patcher=make_patcher(),
+        # FORGE-582: the person decides a gate in the client's chat; the
+        # decision is theirs, recorded through the same approval service.
+        design_flow_gate_reader=make_gate_reader(),
+        design_flow_gate_decider=make_gate_decider(),
+        # FORGE-581: phase tasks for client-mode runs.
+        design_flow_client_tasks=make_client_task_service(),
+        # FORGE-355: the project brief as an MCP resource.
+        brief_provider=brief_provider_fn,
+        # FORGE-320: bisection search for the minimum-mass wall thickness
+        # satisfying deflection/safety-factor constraints.
+        parameter_optimizer=parameter_optimizer_fn,
+        # FORGE-321: DeviceInstance registration + measurement recording
+        # (residuals feed the calibrated band evaluate_metric now reads).
+        device_instance_registrar=device_instance_registrar_fn,
+        measurement_recorder=measurement_recorder_fn,
+        # FORGE-287: closed design loop -- persisted, queryable iteration
+        # timeline + approval gate over the same optimizer above.
+        design_loop_starter=design_loop_starter_fn,
+        design_loop_reader=design_loop_reader_fn,
+        design_loop_approver=design_loop_approver_fn,
+        # FORGE-288: a second real parameter (height_mm) over the same loop.
+        tube_height_design_loop_starter=tube_height_design_loop_starter_fn,
+        # FORGE-262: concept generation + trade study (gap G-B2).
+        concept_selector=concept_selector_fn,
+        # FORGE-265: requirement-driven component selection (gap G-C1).
+        component_selector=component_selector_fn,
+        # FORGE-299: versioned release-package snapshot, gated on G8 (gap G-I3).
+        release_package_creator=release_package_creator_fn,
+        # FORGE-405: baseline creation, so G8's baseline check is satisfiable.
+        baseline_creator=baseline_creator_fn,
+        # FORGE-298: mechanical test-plan derivation from test-method
+        # requirements (gap G-I2).
+        test_plan_generator=test_plan_generator_fn,
+        # FORGE-295: bring-up checklist derived from assembly joints (gap G-H3).
+        bringup_checklist_creator=bringup_checklist_creator_fn,
+        # FORGE-276: firmware scaffold derived from assembly joints (gap G-E3).
+        firmware_scaffold_creator=firmware_scaffold_creator_fn,
+        # FORGE-275: per-joint cable-length estimate from assembly joints (gap G-E2).
+        harness_estimate_getter=harness_estimate_getter_fn,
+        # FORGE-523: revision history of one item (twin.item_history).
+        item_history_reader=make_item_history_reader(twin),
+        # FORGE-451: the machine library over MCP; writes are held.
+        machine_library=make_machine_library(),
+        # FORGE-427: vendor quotes and held orders.
+        vendor_service=make_vendor_service(),
     )
     app.state.tool_registry = tool_registry
-    registry_bridge = RegistryMcpBridge(tool_registry)
+    # FORGE-539: the capability report reads the live registry and its health.
+    from api_gateway.design_flows.lifecycle_service import set_tool_registry
+
+    set_tool_registry(tool_registry)
+    # FORGE-446: material names become library figures before a tool runs.
+    from twin_core.library.material_resolver import fill_material_arguments
+
+    registry_bridge = RegistryMcpBridge(tool_registry, argument_filler=fill_material_arguments)
     logger.info(
         "tool_registry_bootstrapped",
         adapters=len(tool_registry.list_adapters()),
@@ -788,6 +1369,110 @@ async def _init_orchestrator(app: FastAPI) -> None:
 
     active_bridge = await create_mcp_bridge(fallback=registry_bridge)
     app.state.mcp_bridge = active_bridge
+    # FORGE-233: the bridge measure_tool (handed to bootstrap_tool_registry,
+    # and from there to twin.commit_geometry, above) was waiting for -- now
+    # populated, well before the gateway serves its first request.
+    measure_tool.bridge = active_bridge
+    # FORGE-245: same for assembly_info_tool.
+    assembly_info_tool.bridge = active_bridge
+    # FORGE-315: same for metric_evaluator_bridge (twin.evaluate_metric's
+    # tier-2 escalation to calculix.run_fea).
+    metric_evaluator_bridge.bridge = active_bridge
+    # FORGE-297: same for thermal_evaluator_bridge (twin.
+    # evaluate_thermal_metric's calculix.run_thermal call).
+    thermal_evaluator_bridge.bridge = active_bridge
+    # FORGE-273: same for overhang_evaluator_bridge (twin.
+    # evaluate_overhang_metric's freecad.list_named_faces call).
+    overhang_evaluator_bridge.bridge = active_bridge
+    # FORGE-630: same for work_product_renderer_bridge (blender.render).
+    work_product_renderer_bridge.bridge = active_bridge
+    # FORGE-687: same for design_files_bridge (kicad.export_svg).
+    design_files_bridge.bridge = active_bridge
+    # FORGE-294: same for manufacture_release_bridge (manufacture_release's
+    # cadquery.export_geometry call).
+    manufacture_release_bridge.bridge = active_bridge
+    # FORGE-272: same for interference_check_bridge (interference_check's
+    # real cadquery.boolean_operation call).
+    interference_check_bridge.bridge = active_bridge
+    # FORGE-301: same for geometry_diff_bridge (geometry_diff's
+    # freecad.describe_step_file calls).
+    geometry_diff_bridge.bridge = active_bridge
+    # FORGE-268: same for bom_risk_bridge (bom_risk's distributors.
+    # resolve_offers / {distributor}.get_product calls).
+    bom_risk_bridge.bridge = active_bridge
+    # FORGE-273: bind the same evaluator closure to the dashboard's REST
+    # route (api_gateway/dfm/routes.py) -- only now, after the bridge above
+    # is bound, since the closure calls mcp_bridge.invoke internally.
+    from api_gateway.dfm.routes import init_overhang_evaluator
+
+    init_overhang_evaluator(overhang_evaluator_fn)
+    # FORGE-294: same, for the manufacture-release REST route
+    # (api_gateway/manufacture/routes.py).
+    from api_gateway.manufacture.routes import init_manufacture_release
+
+    init_manufacture_release(manufacture_release_fn)
+    # FORGE-301: bind the geometry-diff evaluator to its route in
+    # api_gateway/twin/routes.py (not a separate module -- it's the direct
+    # sibling of /nodes/{id}/diff there).
+    from api_gateway.twin.routes import init_geometry_diff
+
+    init_geometry_diff(geometry_diff_fn)
+    # FORGE-272: bind the interference-check evaluator to its route in
+    # api_gateway/twin/routes.py (not a separate module -- it's the direct
+    # sibling of /nodes/{id}/geometry-diff there).
+    from api_gateway.twin.routes import init_interference_check
+
+    init_interference_check(interference_check_fn)
+    # FORGE-268: same, for the BOM risk REST route
+    # (api_gateway/bom/risk_routes.py).
+    from api_gateway.bom.risk_routes import init_bom_risk_scorer
+
+    init_bom_risk_scorer(bom_risk_fn)
+    # FORGE-299: bind the release-package creator/lister to the dashboard's
+    # REST route (api_gateway/releases/routes.py) -- unlike the evaluators
+    # above, this doesn't call mcp_bridge at all (pure graph reads/writes +
+    # a gate check), so it doesn't need to wait for active_bridge, but is
+    # wired here for locality with the other route inits.
+    from api_gateway.releases.routes import init_release_package
+
+    init_release_package(release_package_creator_fn, release_package_lister_fn)
+    # FORGE-298: bind the test-plan generator/lister to the dashboard's REST
+    # route (api_gateway/testplans/routes.py) -- same locality rationale as
+    # release_package above.
+    from api_gateway.testplans.routes import init_test_plan
+
+    init_test_plan(test_plan_generator_fn, test_plan_lister_fn)
+    # FORGE-295: bind the bring-up checklist creator/lister to the
+    # dashboard's REST route (api_gateway/bringup/routes.py) -- same
+    # locality rationale as release_package/test_plan above.
+    from api_gateway.bringup.routes import init_bringup_checklist
+
+    init_bringup_checklist(bringup_checklist_creator_fn, bringup_checklist_lister_fn)
+    # FORGE-293: bind the technical-drawing lister to the dashboard's REST
+    # route (api_gateway/technical_drawings/routes.py) -- same locality
+    # rationale as bringup_checklist above. The approver binds separately,
+    # below, into twin/routes.py alongside the design-sketch approver.
+    from api_gateway.technical_drawings.routes import init_technical_drawing_lister
+
+    init_technical_drawing_lister(technical_drawing_lister_fn)
+    # FORGE-276: bind the firmware scaffold creator to the dashboard's REST
+    # route (api_gateway/firmware/routes.py) -- same locality rationale as
+    # bringup_checklist above.
+    from api_gateway.firmware.routes import init_firmware_scaffold
+
+    init_firmware_scaffold(firmware_scaffold_creator_fn)
+    # FORGE-275: bind the harness-estimate getter to the dashboard's REST
+    # route (api_gateway/twin/harness_estimate_routes.py) -- same locality
+    # rationale as firmware_scaffold/bringup_checklist above.
+    from api_gateway.twin.harness_estimate_routes import init_harness_estimate
+
+    init_harness_estimate(harness_estimate_getter_fn)
+    # FORGE-285: bind the repeatability-estimator getter to its REST route
+    # (api_gateway/twin/repeatability_routes.py) -- same locality rationale
+    # as harness_estimate above.
+    from api_gateway.twin.repeatability_routes import init_repeatability_estimate
+
+    init_repeatability_estimate(repeatability_estimator_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -806,9 +1491,22 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.context_adapter import init_context_assembler
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_metrics, init_twin
+    from api_gateway.component_selection.routes import init_component_selector
+    from api_gateway.design_loop.routes import init_design_loop_starter
+    from api_gateway.design_loop.routes import init_twin as init_design_loop_twin
+    from api_gateway.features.routes import init_twin as init_features_twin
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
-    from api_gateway.twin.routes import init_design_sketch_approver
+    from api_gateway.promotion.routes import init_twin as init_promotion_twin
+    from api_gateway.requirement_intelligence.routes import init_twin as init_requirements_twin
+    from api_gateway.simulation.routes import init_twin as init_simulation_twin
+    from api_gateway.trade_study.routes import init_concept_selector
+    from api_gateway.trade_study.routes import init_entity_recorder as init_ts_entity_recorder
+    from api_gateway.trade_study.routes import init_twin as init_trade_study_twin
+    from api_gateway.twin.decision_routes import init_twin as init_decisions_twin
+    from api_gateway.twin.hierarchy_routes import init_hierarchy_geometry_linker
+    from api_gateway.twin.hierarchy_routes import init_twin as init_hierarchy_twin
+    from api_gateway.twin.routes import init_design_sketch_approver, init_technical_drawing_approver
     from api_gateway.twin.routes import init_twin as init_twin_viewer
 
     chat_backend = await create_backend()
@@ -837,8 +1535,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # was never built, so an abandoned run sat non-terminal forever. Observed
     # live: three `awaiting_approval` runs left behind by a client killed
     # mid-turn, still listed as pending long afterwards.
-    from api_gateway.chat.tool_approvals import get_approval_store
+    from api_gateway.chat.tool_approvals import get_approval_store, mark_approver_reachable
     from orchestrator.harness.heartbeat import RunReaper
+
+    mark_approver_reachable()
 
     app.state.run_reaper = RunReaper(get_approval_store())
     app.state.run_reaper.start()
@@ -872,6 +1572,73 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from orchestrator.harness.ledger import SqliteRunLedger, default_ledger_path
 
         init_run_ledger(SqliteRunLedger(str(default_ledger_path())))
+        # FORGE-476: token and cost accounting shares the ledger's directory.
+        from orchestrator.harness.providers.usage import ensure_usage_store
+
+        ensure_usage_store()
+    # FORGE-89: same gap as above but for the chat tool-approval queue
+    # (api_gateway/chat/tool_approvals.py), which had zero durability at
+    # all — an in-flight approval record vanished on every gateway restart
+    # with no trace it ever existed. Shares the runs-ledger disable flag
+    # since both are the same "skip touching a file" concern.
+    if (os.environ.get("METAFORGE_RUNS_LEDGER_DISABLE", "").strip().lower()) not in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        from api_gateway.chat.tool_approvals import init_approval_ledger
+        from orchestrator.harness.ledger import SqliteRunLedger, default_tool_approvals_ledger_path
+
+        init_approval_ledger(SqliteRunLedger(str(default_tool_approvals_ledger_path())))
+        # FORGE-581: client-mode phase tasks wait for hours; a restart must
+        # not drop one a client is working on.
+        from api_gateway.client_tasks.routes import init_client_task_store
+        from orchestrator.design_flow.client_tasks import (
+            SqliteClientTaskStore,
+            default_client_tasks_path,
+        )
+
+        init_client_task_store(SqliteClientTaskStore(str(default_client_tasks_path())))
+        # FORGE-451: the machine library is cross-project data and must
+        # survive a restart like the task queue.
+        from api_gateway.library.routes import init_machine_library
+        from twin_core.library.machines import (
+            SqliteMachineLibrary,
+            default_machine_library_path,
+        )
+
+        init_machine_library(SqliteMachineLibrary(str(default_machine_library_path())))
+        # Processes and materials share the machine library's file.
+        from api_gateway.library.catalog_routes import init_catalog
+        from twin_core.library.catalog import SqliteCatalog
+
+        init_catalog(SqliteCatalog(str(default_machine_library_path())))
+        # FORGE-446: this process resolves material names against its own catalog.
+        from api_gateway.library.catalog_routes import get_catalog
+        from twin_core.library.material_resolver import catalog_source, install_material_source
+
+        install_material_source(catalog_source(get_catalog))
+        # FORGE-427: quotes and orders must outlive a restart.
+        from api_gateway.vendors.service import (
+            SqliteVendorStore,
+            default_vendor_store_path,
+            init_vendor_store,
+        )
+
+        init_vendor_store(SqliteVendorStore(str(default_vendor_store_path())))
+    # FORGE-482: flow versions (proposed, approved, rejected) were process
+    # memory, so a routine reload lost every human approval while the
+    # Temporal run using it survived. Same disable flag as the ledgers.
+    if (os.environ.get("METAFORGE_RUNS_LEDGER_DISABLE", "").strip().lower()) not in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        from orchestrator.design_flow.versions import default_versions_path, init_version_store
+
+        init_version_store(str(default_versions_path()))
     # MET-566: chat-turn context assembly (knowledge fragments with
     # attribution/staleness/conflicts). No-op when LightRAG isn't configured.
     init_context_assembler(
@@ -882,10 +1649,39 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_projects_twin(twin)
     init_twin_viewer(twin)
     init_bom_twin(twin)
+    init_simulation_twin(twin)
+    init_hierarchy_twin(twin)
+    # FORGE-266: the dashboard's "Replace placeholder with part" action
+    # reuses the SAME bound callable wired into bootstrap_tool_registry
+    # above, so recording isn't duplicated between the MCP tool and the
+    # REST route.
+    init_hierarchy_geometry_linker(hierarchy_geometry_linker_fn)
+    init_requirements_twin(twin)
+    init_design_loop_twin(twin)
+    init_promotion_twin(twin)
+    init_features_twin(twin)
+    init_decisions_twin(twin)
+    init_trade_study_twin(twin)
+    # FORGE-262: the dashboard's "Select concept"/"+ add option" actions
+    # reuse the SAME bound callables wired into bootstrap_tool_registry
+    # above, so recording isn't duplicated between the MCP tools and the
+    # REST routes.
+    init_concept_selector(concept_selector_fn)
+    init_ts_entity_recorder(engineering_entity_recorder_fn)
+    # FORGE-265: the dashboard's BOM-page "Select component" action reuses
+    # the SAME bound callable wired into bootstrap_tool_registry above, so
+    # recording isn't duplicated between the MCP tool and the REST route.
+    init_component_selector(component_selector_fn)
+    # FORGE-287: the dashboard's "start closed design loop" action reuses
+    # the SAME bound optimizer callable wired into bootstrap_tool_registry
+    # above (design_loop_starter_fn), so Evidence/Decision recording isn't
+    # duplicated between the MCP tool and the REST route.
+    init_design_loop_starter(design_loop_starter_fn)
     # Follow-up to MET-740/747: the dashboard's human-approval action for a
     # design_sketch work product (twin.commit_design_sketch is the agent
     # side of this same gate, wired above via bootstrap_tool_registry).
     init_design_sketch_approver(make_design_sketch_approver(twin))
+    init_technical_drawing_approver(technical_drawing_approver_fn)
 
     # MET-197 has been in the tree since 2026-03-08 and nothing ever
     # constructed the publisher: `KAFKA_BOOTSTRAP_SERVERS` was passed to the
@@ -1167,8 +1963,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown lifecycle handler."""
     configure_logging(_otel_config)
     _reattach_otel_log_handler()
-    logger.info("gateway_starting", version="0.1.0", otel_active=_otel_state.is_active)
+    logger.info("gateway_starting", version=gateway_version(), otel_active=_otel_state.is_active)
+    # FORGE-477: a bad model route refuses to boot, rather than failing on the
+    # first call that happens to use it. Raises RoutingConfigError.
+    from orchestrator.harness.providers.routing import routing_problems, routing_table
+
+    routing_table()
+    for problem in routing_problems():
+        # Not fatal: a login can arrive after boot. Calls on that route are
+        # refused until it does, and health.check reports it meanwhile.
+        logger.warning("model_route_provider_unconfigured", problem=problem)
     await _init_orchestrator(app)
+    # FORGE-485: runs restored from the ledger read `queued` whatever their
+    # workflow is doing. Reconcile in the background so a slow or absent
+    # Temporal never delays start-up; reads reconcile on demand as well.
+    from api_gateway.runs.routes import run_reconcile_loop
+
+    reconcile_task = asyncio.create_task(run_reconcile_loop())
+    app.state.run_reconcile_task = reconcile_task
+    # FORGE-606: projects that had runs before "active" was ever set.
+    from api_gateway.runs.routes import activate_projects_with_runs
+
+    app.state.project_backfill_task = asyncio.create_task(activate_projects_with_runs())
+    # FORGE-594: create the KB bucket with versioning on. In the background,
+    # retried, and alarmed on failure; it never holds up start-up.
+    from api_gateway.knowledge.storage_init import ensure_kb_storage
+
+    kb_storage_task = asyncio.create_task(ensure_kb_storage())
+    app.state.kb_storage_task = kb_storage_task
     from api_gateway.twin.file_watcher import file_watcher
 
     if hasattr(app.state, "twin"):
@@ -1176,6 +1998,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await file_watcher.start()
     yield
     logger.info("gateway_stopping")
+    reconcile_task.cancel()
+    kb_storage_task.cancel()
     await file_watcher.stop()
     if hasattr(app.state, "tool_registry"):
         await app.state.tool_registry.close_all()
@@ -1191,6 +2015,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # MET-672: stop the abandoned-run reaper.
     if getattr(app.state, "run_reaper", None) is not None:
         await app.state.run_reaper.stop()
+    # FORGE-540: an auth provider typically holds an HTTP client for fetching
+    # signing keys. Best-effort, and never allowed to stop the rest of shutdown.
+    if getattr(app.state, "auth_provider", None) is not None:
+        try:
+            await app.state.auth_provider.aclose()
+        except Exception as exc:
+            logger.warning("gateway_auth_provider_close_failed", error=str(exc))
     # Flush and close the Kafka producer so buffered events are not dropped.
     if getattr(app.state, "kafka_publisher", None) is not None:
         try:
@@ -1238,6 +2069,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     shutdown_observability(_otel_state)
 
 
+def _resolve_cors_origins(explicit: list[str] | None, auth_settings: AuthSettings) -> list[str]:
+    """Decide the CORS allow-list, refusing the one unsafe combination.
+
+    The gateway historically defaulted to ``["*"]`` with ``allow_credentials``.
+    That was inert while nothing was authenticated — there were no credentials
+    to leak. Once a bearer token exists it is a real hole, so a wildcard is
+    rejected outright when auth is on.
+
+    Precedence: an explicit argument (tests), then ``METAFORGE_CORS_ORIGINS`` as
+    a comma-separated list, then the historical wildcard for local use.
+    """
+    if explicit is not None:
+        origins = explicit
+    else:
+        raw = os.environ.get("METAFORGE_CORS_ORIGINS", "").strip()
+        origins = [o.strip() for o in raw.split(",") if o.strip()] if raw else ["*"]
+
+    if auth_settings.enabled and "*" in origins:
+        raise AuthConfigurationError(
+            "CORS is set to '*' while METAFORGE_AUTH_MODE is enabled. A wildcard "
+            "origin combined with credentialed requests would let any site call this "
+            "gateway with a user's token. Set METAFORGE_CORS_ORIGINS to the exact "
+            "dashboard origin(s), e.g. 'https://app.metaforge.uk'."
+        )
+    return origins
+
+
 def create_app(
     *,
     cors_origins: list[str] | None = None,
@@ -1258,9 +2116,20 @@ def create_app(
     scheduler:
         Optional pre-built scheduler (for testing).
     """
+    # FORGE-391: per-app state that used to live for the whole process.
+    # Health checks are registered as this app wires up its backends and
+    # close over its connections; the approval workflow holds pending
+    # proposals. Inheriting either from a previous app meant reporting on
+    # dependencies this one never configured, and listing proposals it
+    # never received.
+    reset_health_checker()
+    from api_gateway.assistant.routes import workflow as _approval_workflow
+
+    _approval_workflow.reset()
+
     app = FastAPI(
         title="MetaForge Gateway",
-        version="0.1.0",
+        version=gateway_version(),
         description="HTTP/WebSocket front door for the MetaForge platform",
         lifespan=lifespan,
     )
@@ -1274,8 +2143,29 @@ def create_app(
     if scheduler is not None:
         app.state.scheduler = scheduler
 
+    # -- Authentication ----------------------------------------------------
+    #
+    # ``load_auth_settings`` raises rather than returning a downgraded result,
+    # so a gateway asked for authentication it cannot deliver fails to start
+    # here instead of coming up silently open.
+    auth_settings = load_auth_settings()
+    app.state.auth_settings = auth_settings
+    set_reported_auth_mode(auth_settings.mode)
+
+    origins = _resolve_cors_origins(cors_origins, auth_settings)
+
+    # Middleware nesting is decided by call order: the LAST added is outermost.
+    # Auth must sit inside CORS so that a 401 travels back out through the CORS
+    # layer and arrives at the browser with its headers, as a readable error
+    # rather than an opaque network failure.
+    if auth_settings.enabled:
+        # The provider is a separately-installed plug-in (FORGE-540), so it is
+        # resolved here rather than imported: a local gateway loads none of its
+        # crypto stack, and a gateway whose image lacks it fails loudly.
+        app.state.auth_provider = load_provider(auth_settings.mode)
+        app.add_middleware(AuthMiddleware, provider=app.state.auth_provider)
+
     # -- CORS --------------------------------------------------------------
-    origins = cors_origins if cors_origins is not None else ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -1296,12 +2186,47 @@ def create_app(
     app.include_router(projects_router)
     app.include_router(runs_router)
     app.include_router(tool_approvals_router)
+    app.include_router(approvals_router)
+    app.include_router(client_tasks_router)
+    app.include_router(library_router)
+    app.include_router(library_catalog_router)
+    app.include_router(vendors_router)
     app.include_router(cad_router)
     app.include_router(cad_export_router)
+    app.include_router(robot_loads_router)
     app.include_router(compliance_router)
     app.include_router(twin_router)
+    app.include_router(twin_live_router)
+    # FORGE-647: tools running inside the gateway publish placements straight
+    # to the live stream; the sidecar installs an HTTP publisher instead.
+    set_live_event_publisher(_publish_live_local)
+    app.include_router(twin_items_router)
+    app.include_router(twin_item_migration_router)
+    app.include_router(twin_prd_router)
+    app.include_router(twin_baselines_router)
+    app.include_router(hierarchy_router)
     app.include_router(bom_router)
+    app.include_router(bom_risk_router)
+    app.include_router(simulation_router)
     app.include_router(constraint_router)
+    app.include_router(requirements_router)
+    app.include_router(design_loop_router)
+    app.include_router(evals_router)
+    app.include_router(promotion_router)
+    app.include_router(design_flows_router)
+    app.include_router(features_router)
+    app.include_router(decisions_router)
+    app.include_router(trade_study_router)
+    app.include_router(component_selection_router)
+    app.include_router(dfm_router)
+    app.include_router(manufacture_router)
+    app.include_router(releases_router)
+    app.include_router(testplans_router)
+    app.include_router(bringup_router)
+    app.include_router(technical_drawings_router)
+    app.include_router(firmware_router)
+    app.include_router(harness_estimate_router)
+    app.include_router(repeatability_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

@@ -25,6 +25,30 @@ class McpRpcError(RuntimeError):
         self.data = data or {}
 
 
+class McpToolError(McpRpcError):
+    """A tool that ran and refused -- ``isError: true`` (FORGE-419).
+
+    Not a protocol error, which is why it is a distinct class: the call was
+    routed, the handler executed, and it said no. It subclasses
+    ``McpRpcError`` so the many tests written as "this call must fail" keep
+    expressing that, rather than being rewritten to assert a shape they do
+    not care about.
+
+    ``message`` is the text the *model* sees, which is the whole point of
+    FORGE-419: the reason used to live in JSON-RPC ``error.data.details``,
+    where Claude Code showed only "Tool execution failed", so an agent
+    retried blind and reported the tool as broken.
+    """
+
+    #: There is no JSON-RPC code, because this is not a JSON-RPC error. Kept
+    #: as 0 rather than borrowing ``-32001`` so a test asserting a code
+    #: against a tool refusal fails loudly instead of passing on a shape that
+    #: no longer exists.
+    def __init__(self, text: str, meta: dict[str, Any] | None = None) -> None:
+        super().__init__(0, text, (meta or {}).get("error"))
+        self.text = text
+
+
 async def rpc(
     client: httpx.AsyncClient,
     method: str,
@@ -74,6 +98,14 @@ async def call_tool(
         rpc_id=rpc_id,
         timeout=timeout,
     )
+    # FORGE-419: a tool that ran and refused now answers with isError on the
+    # result rather than a JSON-RPC error. Raising here keeps "this call must
+    # fail" tests meaning what they meant, and keeps the reason in the
+    # exception where a failing test will print it.
+    if result.get("isError"):
+        content = result.get("content") or [{}]
+        text = content[0].get("text", "") if isinstance(content[0], dict) else ""
+        raise McpToolError(str(text), result.get("_meta"))
     return parse_tool_result(result)
 
 

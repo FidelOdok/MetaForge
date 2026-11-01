@@ -89,10 +89,33 @@ class TestAlertingRules:
         # + 1 consolidation-contradictions (MET-455)
         # + 3 KB storage (MinIO bucket size / write latency / access errors,
         #   MET-476)
-        # + 2 harness (production-harness audit follow-up).
+        # + 2 harness (production-harness audit follow-up)
+        # + 4 MCP surface (FORGE-379)
+        # + 2 design-flow engine (FORGE-401)
+        # + 2 code staleness (FORGE-411)
+        # + 1 provider fallback sustained (FORGE-468)
+        # + 2 held approvals not closed / expiring by deadline (FORGE-466)
+        # + 1 approval gate refused with no Temporal runtime (FORGE-469)
+        # + 1 iteration gate with no approval workflow (FORGE-470).
+        # + 1 runaway LLM spend per run (FORGE-476).
+        # + 1 design-flow tool refusals sustained (FORGE-492).
+        # + 1 chat ungrounded claims sustained (FORGE-520).
+        # + 1 item revision link failures (FORGE-523).
+        # + 1 run change-set approvals refused (FORGE-525).
+        # + 2 simulation result field build / store failures (FORGE-532).
+        # + 1 prd stray requirement values (FORGE-528).
+        # + 1 baseline project briefs hitting the char cap (FORGE-530).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 23
+        # + 1 record pin / staleness failures (FORGE-527).
+        # + 1 gate approval without a baseline (FORGE-526).
+        # + 1 item migration failures (FORGE-529).
+        # + 1 client-mode phase tasks nobody submits (FORGE-581).
+        # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
+        # + 1 KB storage set-up failed at gateway start (FORGE-594).
+        # + 1 browser requests refused for their Origin (FORGE-604).
+        # + 4 host watchdog (FORGE-713).
+        assert len(rules) == 56
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -110,11 +133,13 @@ class TestAlertingRules:
             )
 
     def test_six_critical_rules(self) -> None:
-        """There must be exactly 6 critical rules (3 original + 3 fleet)."""
+        """8 critical: 3 original + 3 fleet + 1 design-flow engine (FORGE-401)
+        + 1 approval gate without a Temporal runtime (FORGE-469)
+        + 1 twin running in memory (FORGE-713)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         critical = [r for r in rules if r["labels"]["severity"] == "critical"]
-        assert len(critical) == 6
+        assert len(critical) == 9
 
     def test_seven_warning_rules(self) -> None:
         # 17 warning: 5 original + 2 fleet + 2 retrieval-quality
@@ -122,11 +147,35 @@ class TestAlertingRules:
         # + 1 consolidation-contradictions (MET-455)
         # + 3 KB-storage (MinIO bucket size / write latency / access errors,
         #   MET-476)
-        # + 2 harness (production-harness audit follow-up).
+        # + 2 harness (production-harness audit follow-up)
+        # + 3 MCP surface (FORGE-379; the fourth is severity: info)
+        # + 1 design-flow gates-never-answered (FORGE-401; the engine-down
+        #   rule alongside it is critical)
+        # + 1 code staleness (FORGE-411; the undetectable-skew rule beside it
+        #   is severity: info, because it says the check cannot run, not that
+        #   something is broken)
+        # + 1 harness provider fallback sustained (FORGE-468).
+        # + 1 held approvals not being closed (FORGE-466; the
+        #   expiring-by-deadline rule beside it is severity: info)
+        # + 1 iteration gate with no approval workflow (FORGE-470)
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 17
+        # + 1 runaway LLM spend per run (FORGE-476)
+        # + 1 design-flow tool refusals sustained (FORGE-492)
+        # + 1 chat ungrounded claims sustained (FORGE-520)
+        # + 1 item revision link failures (FORGE-523)
+        # + 1 run change-set approvals refused (FORGE-525)
+        # + 2 simulation result field build / store failures (FORGE-532)
+        # + 1 record pin / staleness failures (FORGE-527)
+        # + 1 gate approval without a baseline (FORGE-526)
+        # + 1 item migration failures (FORGE-529)
+        # + 1 client-mode phase tasks nobody submits (FORGE-581).
+        # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
+        # + 1 KB storage set-up failed at gateway start (FORGE-594).
+        # + 1 browser requests refused for their Origin (FORGE-604).
+        # + 3 host watchdog (FORGE-713).
+        assert len(warnings) == 42
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -141,6 +190,15 @@ class TestAlertingRules:
                 "KafkaConsumerStopped",
                 "Neo4jUnreachable",
                 "TSDBIngestionFailing",
+                # FORGE-401: runs cannot start at all, and deliberately do not
+                # fall back to a non-durable engine -- so this is an outage
+                # with a hard 503, not a degradation.
+                "DesignFlowEngineUnavailable",
+                # FORGE-469: a worker without temporalio is refusing every
+                # human gate it reaches (it used to approve them silently).
+                "ApprovalGateNoTemporalRuntime",
+                # FORGE-713: the gateway serves an empty in-memory twin.
+                "TwinRunningInMemory",
             ]
         )
 
@@ -151,23 +209,75 @@ class TestAlertingRules:
         warning_names = sorted(r["alert"] for r in rules if r["labels"]["severity"] == "warning")
         assert warning_names == sorted(
             [
+                # FORGE-490: a hold was parked where no approver can answer it.
+                "ApprovalHoldWithNoApprover",
+                # FORGE-520: chat replies keep claiming twin writes or node ids
+                # their own tool calls do not back up.
+                "ChatUngroundedClaimsSustained",
+                # FORGE-581: client-mode phases posted and none came back.
+                "ClientTasksUnanswered",
                 "ConsolidationContradictionsRising",
                 "ContextTruncationSpike",
+                # FORGE-594: the KB bucket was not set up (no versioning).
+                "KBStorageInitFailed",
+                # FORGE-532: 3D result fields failing to build or to store.
+                "SimFieldPayloadFailures",
+                "SimFieldStoreFailures",
+                # FORGE-401: an unanswered gate ends the run rejected, so a
+                # sustained rate means the approval queue is unattended --
+                # counted apart from outcome="rejected", which is a reviewer
+                # actually deciding.
+                "DesignFlowGatesNeverAnswered",
+                # FORGE-489: a gate opened and no approver was told.
+                "DesignFlowGateUnannounced",
+                # FORGE-492: the guardrail keeps refusing a tool a phase calls.
+                "DesignFlowToolRefusalSustained",
+                "McpAdapterUnreachable",
+                "McpErrorRateHigh",
+                # FORGE-411: the process is serving code other than the
+                # checkout beside it. Warning rather than critical because it
+                # answers every request correctly -- for code nobody reads.
+                "McpRunningStaleCode",
+                "McpUnexpectedErrors",
+                # FORGE-604: browser requests refused for their Origin.
+                "McpOriginRejected",
                 "DeviceOffline",
                 "ErrorBudgetBurnRate",
+                "HarnessProviderFallbackSustained",
                 "HarnessToolCallErrorRateHigh",
                 "HarnessTurnAbnormalStopRateHigh",
                 "HighAgentFailureRate",
                 "KafkaConsumerLagHigh",
                 "KnowledgeSearchLatencySLO",
                 "LLMCostSpike",
-                "MinIOKBAccessErrorsRising",
-                "MinIOKBBucketSizeHigh",
-                "MinIOKBWriteLatencyHigh",
+                "LlmRunawaySpendPerRun",
+                # FORGE-577: the object store is SeaweedFS; no bucket-size rule.
+                "ObjectStoreAccessErrorsRising",
+                "ObjectStoreWriteLatencyHigh",
                 "OscillationDetected",
                 "RetrievalPrecisionRegression",
                 "SensorOutOfRange",
                 "TwinOrphansDetected",
+                # FORGE-523: a definition write saved without its item link.
+                "TwinItemRevisionLinkFailures",
+                # FORGE-525: a gate approval refused on a revision conflict.
+                "TwinChangeSetApprovalsRefused",
+                # FORGE-529: the item migration failed on part of a project.
+                "TwinItemMigrationFailures",
+                # FORGE-527: record pins or staleness marking failing.
+                "TwinRecordStalenessFailures",
+                # FORGE-526: a gate approval recorded no baseline.
+                "TwinGateBaselineMissing",
+                # FORGE-466: the sidecar cannot close holds it opened, so
+                # stale entries sit on the Approvals page until expired.
+                "ToolApprovalHoldCloseFailing",
+                # FORGE-470: an iteration loop converged with no approval
+                # workflow, so it stopped BLOCKED instead of merging.
+                "IterationGateNoApprovalWorkflow",
+                # FORGE-713: host watchdog.
+                "HostMemoryLow",
+                "WatchdogRestartBlocked",
+                "WatchdogSilent",
             ]
         )
 
@@ -188,34 +298,30 @@ class TestAlertingRules:
                 f"Missing 'description' annotation in {rule['alert']}"
             )
 
-    def test_minio_kb_alerts_cover_met_476_criteria(self) -> None:
-        """MET-476: bucket size, write latency, and access errors each have a rule.
+    def test_object_store_alerts_cover_met_476_criteria(self) -> None:
+        """MET-476 on the SeaweedFS object store (FORGE-577).
 
-        Verifies the three MinIO KB alerts exist, target the ``metaforge-kb``
-        bucket, and use the appropriate Prometheus metric per criterion.
+        Write latency and access errors each have a rule on the S3 gateway's
+        own metrics. Bucket size has none: the gateway does not report it.
         """
         data = _load_yaml(_RULES_PATH)
         rules = {r["alert"]: r for r in _all_alert_rules(data)}
 
-        bucket_size = rules["MinIOKBBucketSizeHigh"]
-        write_latency = rules["MinIOKBWriteLatencyHigh"]
-        errors = rules["MinIOKBAccessErrorsRising"]
+        write_latency = rules["ObjectStoreWriteLatencyHigh"]
+        errors = rules["ObjectStoreAccessErrorsRising"]
+        assert "MinIOKBBucketSizeHigh" not in rules
 
-        assert bucket_size["labels"]["severity"] == "warning"
-        assert write_latency["labels"]["severity"] == "warning"
-        assert errors["labels"]["severity"] == "warning"
+        for rule in (write_latency, errors):
+            assert rule["labels"]["severity"] == "warning"
+            assert "minio_" not in rule["expr"], f"{rule['alert']} still reads MinIO metrics"
 
-        # Each rule references the canonical KB bucket.
-        for rule in (bucket_size, write_latency, errors):
-            assert 'bucket="metaforge-kb"' in rule["expr"], (
-                f"{rule['alert']} must filter on bucket=metaforge-kb"
-            )
-
-        # Each criterion is wired to the appropriate metric family.
-        assert "minio_bucket_usage_total_bytes" in bucket_size["expr"]
-        assert "minio_s3_requests_seconds_bucket" in write_latency["expr"]
+        assert 'bucket="metaforge-kb"' in write_latency["expr"]
+        assert "SeaweedFS_s3_request_seconds_bucket" in write_latency["expr"]
         assert "histogram_quantile" in write_latency["expr"]
-        assert "minio_s3_requests_errors_total" in errors["expr"]
+        # Errors are counted across buckets: a credential mismatch shows on
+        # requests that name no bucket. 404 is not an error (existence checks).
+        assert "SeaweedFS_s3_request_total" in errors["expr"]
+        assert "404" not in errors["expr"]
 
 
 # ===================================================================

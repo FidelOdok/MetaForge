@@ -1,8 +1,13 @@
 """Temporal activity for human-in-the-loop approval gates.
 
 Blocks until a Temporal signal delivers the approval decision via the
-activity heartbeat mechanism. In production the workflow sends a signal;
-in tests the activity can be resolved directly.
+activity heartbeat mechanism. In production the workflow sends a signal.
+
+Without a Temporal runtime there is nothing to wait on, so the activity
+fails closed (FORGE-469): it raises :class:`ApprovalRuntimeUnavailableError`
+and never approves. It used to auto-approve here, which meant a missing
+``temporalio`` install silently waved every human gate through. Tests that
+need an approved gate inject an explicit test double instead.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from typing import Any
 
 import structlog
 
+from observability.metrics import MetricsCollector, collector_for
 from observability.tracing import get_tracer
 from orchestrator.activities.base_activity import ApprovalRequest, ApprovalResult
 
@@ -25,6 +31,29 @@ try:
     HAS_TEMPORAL = True
 except ImportError:
     HAS_TEMPORAL = False
+
+_metrics: MetricsCollector | None = None
+
+
+def _get_metrics() -> MetricsCollector:
+    global _metrics
+    if _metrics is None:
+        _metrics = collector_for("metaforge-orchestrator")
+    return _metrics
+
+
+def set_approval_activity_metrics(metrics: MetricsCollector | None) -> None:
+    """Inject a collector (tests), or ``None`` to resolve it lazily again."""
+    global _metrics
+    _metrics = metrics
+
+
+class ApprovalRuntimeUnavailableError(RuntimeError):
+    """An approval gate was reached with no Temporal runtime to wait on.
+
+    Raised instead of approving: a gate that cannot reach a human must
+    stop the run, not pass it.
+    """
 
 
 def _activity_defn(func: Any) -> Any:
@@ -44,8 +73,8 @@ async def wait_for_approval(request: ApprovalRequest) -> ApprovalResult:
     the approval signal). The workflow then passes the approval result
     directly.
 
-    When running outside Temporal (e.g. unit tests), the activity returns
-    immediately with an auto-approved result.
+    Without a Temporal runtime the activity fails closed: it raises
+    :class:`ApprovalRuntimeUnavailableError` and never approves (FORGE-469).
     """
     with tracer.start_as_current_span("activity.wait_for_approval") as span:
         span.set_attribute("approval.id", request.approval_id)
@@ -82,16 +111,23 @@ async def wait_for_approval(request: ApprovalRequest) -> ApprovalResult:
                     comment="Activity cancelled by workflow signal",
                     timestamp=datetime.now(UTC).isoformat(),
                 )
-        else:
-            # Outside Temporal: auto-approve for testing
-            logger.info(
-                "approval_activity_auto_approved",
-                approval_id=request.approval_id,
-                reason="no_temporal_runtime",
-            )
-            return ApprovalResult(
-                approved=True,
-                approver_id="auto",
-                comment="Auto-approved (no Temporal runtime)",
-                timestamp=datetime.now(UTC).isoformat(),
-            )
+
+        # No Temporal runtime: nothing can deliver a human decision, so
+        # refuse rather than approve (FORGE-469).
+        span.set_attribute("approval.outcome", "no_runtime")
+        logger.error(
+            "approval_activity_no_runtime",
+            approval_id=request.approval_id,
+            run_id=request.run_id,
+            step_id=request.step_id,
+            required_role=request.required_role,
+            reason="temporalio not importable",
+        )
+        _get_metrics().record_approval_gate_no_runtime(request.required_role)
+        exc = ApprovalRuntimeUnavailableError(
+            f"Approval gate {request.approval_id!r} (step {request.step_id!r}) "
+            "cannot be decided: no Temporal runtime is available "
+            "(temporalio is not importable). Refusing to approve."
+        )
+        span.record_exception(exc)
+        raise exc

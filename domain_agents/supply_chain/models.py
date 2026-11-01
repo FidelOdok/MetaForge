@@ -40,6 +40,10 @@ class RiskFactor(BaseModel):
     weight: float = Field(..., ge=0.0, le=1.0, description="Factor weight (0-1)")
     score: int = Field(..., ge=0, le=100, description="Factor score (0-100)")
     description: str = Field(default="", description="Explanation of the score")
+    known: bool = Field(
+        default=True,
+        description="False when the input was not supplied and the score is the neutral unknown",
+    )
 
 
 class PartRiskScore(BaseModel):
@@ -51,6 +55,10 @@ class PartRiskScore(BaseModel):
     risk_level: RiskLevel = Field(..., description="Risk level classification")
     factors: list[RiskFactor] = Field(default_factory=list, description="Individual risk factors")
     flagged: bool = Field(default=False, description="Whether this part is flagged for attention")
+    unknown_factors: list[str] = Field(
+        default_factory=list,
+        description="Factors scored as unknown because their data was not supplied",
+    )
 
 
 class BOMRiskReport(BaseModel):

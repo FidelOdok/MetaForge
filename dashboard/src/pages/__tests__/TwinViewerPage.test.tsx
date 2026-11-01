@@ -6,6 +6,19 @@ vi.mock('../../hooks/use-twin', () => ({
   useTwinNode: vi.fn(),
   useTwinRelationships: vi.fn(() => ({ data: [] })),
   useNodeVersionHistory: vi.fn(() => ({ data: [], isLoading: false })),
+  useRevisionDiff: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+  useGeometryDiff: vi.fn(() => ({ data: undefined, isLoading: false })),
+}));
+
+vi.mock('../../hooks/use-features', () => ({
+  useFeatureDiff: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useGenerateFeature: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+}));
+
+// FORGE-531: the inspector's inline preview reads the node's file.
+vi.mock('../../api/endpoints/twin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/endpoints/twin')>()),
+  fetchNodeFileText: vi.fn(async () => '# Flight time target\n\nTwenty minutes.'),
 }));
 
 vi.mock('../../hooks/use-conversion', () => ({
@@ -67,15 +80,34 @@ vi.mock('../../components/viewer/TwinAgentChat', () => ({
 }));
 
 vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
-  TwinGraphCanvas: ({ nodes }: { nodes: { name: string }[] }) => (
-    <div data-testid="twin-graph-canvas">
+  TwinGraphCanvas: ({
+    nodes,
+    relationships = [],
+    ghosts = {},
+  }: {
+    nodes: { name: string }[];
+    relationships?: unknown[];
+    ghosts?: Record<string, { name: string; kind: string }>;
+  }) => (
+    <div data-testid="twin-graph-canvas" data-edges={relationships.length}>
       {nodes.map((n) => <span key={n.name}>{n.name}</span>)}
+      {Object.entries(ghosts).map(([id, g]) => (
+        <span key={id} data-testid="linked-record">{g.name}</span>
+      ))}
     </div>
   ),
 }));
 
 import { TwinViewerPage } from '../TwinViewerPage';
-import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../../hooks/use-twin';
+import {
+  useTwinNodes,
+  useTwinNode,
+  useTwinRelationships,
+  useNodeVersionHistory,
+  useRevisionDiff,
+  useGeometryDiff,
+} from '../../hooks/use-twin';
+import { useFeatureDiff } from '../../hooks/use-features';
 import { fireEvent, act, within } from '@testing-library/react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../../store/project-store';
@@ -86,6 +118,9 @@ const mockUseTwinNodes = vi.mocked(useTwinNodes);
 const mockUseTwinNode = vi.mocked(useTwinNode);
 const mockUseTwinRelationships = vi.mocked(useTwinRelationships);
 const mockUseNodeVersionHistory = vi.mocked(useNodeVersionHistory);
+const mockUseRevisionDiff = vi.mocked(useRevisionDiff);
+const mockUseGeometryDiff = vi.mocked(useGeometryDiff);
+const mockUseFeatureDiff = vi.mocked(useFeatureDiff);
 
 // MET-686: a harness for simulating an in-SPA navigation that changes the
 // ?node= query string on the SAME /twin path -- react-router does not
@@ -213,6 +248,198 @@ describe('TwinViewerPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
 
     expect(screen.queryByText(/History ·/)).not.toBeInTheDocument();
+  });
+
+  it('shows a revision compare picker when 2+ revisions exist, and diffs on selection (FORGE-301)', () => {
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({
+      data: [
+        { revision: 2, created_at: new Date().toISOString(), content_hash: 'abcdef1234', change_description: 'Widened mounting hole', metadata_snapshot: { wall_mm: 2 } },
+        { revision: 1, created_at: new Date().toISOString(), content_hash: '0123456789', change_description: 'Initial import', metadata_snapshot: { wall_mm: 3 } },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseRevisionDiff.mockReturnValue({
+      data: {
+        work_product_id: 'n1',
+        revision_a: 1,
+        revision_b: 2,
+        changed: { wall_mm: { from_value: 3, to_value: 2 } },
+        added: {},
+        removed: {},
+      },
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useRevisionDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+
+    fireEvent.change(screen.getByTestId('revision-diff-select-a'), { target: { value: '1' } });
+    fireEvent.change(screen.getByTestId('revision-diff-select-b'), { target: { value: '2' } });
+
+    expect(screen.getByTestId('revision-diff-view')).toBeInTheDocument();
+    expect(screen.getByText('wall_mm:')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+  });
+
+  it('shows a real volume/area delta vs. a SUPERSEDES predecessor (FORGE-301)', () => {
+    const node = {
+      id: 'n1',
+      name: 'enclosure-v2.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseGeometryDiff.mockReturnValue({
+      data: {
+        current_work_product_id: 'n1',
+        has_previous_version: true,
+        previous_work_product_id: 'n0',
+        current_volume_mm3: 1500,
+        previous_volume_mm3: 1000,
+        volume_delta_mm3: 500,
+        current_area_mm2: 900,
+        previous_area_mm2: 700,
+        area_delta_mm2: 200,
+        current_bounding_box: {},
+        previous_bounding_box: {},
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useGeometryDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /enclosure-v2\.step/ }));
+
+    expect(screen.getByTestId('geometry-version-diff')).toBeInTheDocument();
+    expect(screen.getByText('1,000 mm³')).toBeInTheDocument();
+    expect(screen.getByText('1,500 mm³')).toBeInTheDocument();
+    expect(screen.getByText('(+500)')).toBeInTheDocument();
+  });
+
+  it('renders nothing for geometry diff when there is no SUPERSEDES predecessor', () => {
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    // FORGE-709: the gateway now says "no predecessor" with a 200 carrying
+    // the discriminant, not a 404 the client turned into undefined -- so the
+    // panel has to hide on THAT shape, which is what this asserts.
+    mockUseGeometryDiff.mockReturnValue({
+      data: { current_work_product_id: 'n1', has_previous_version: false },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useGeometryDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+
+    expect(screen.queryByTestId('geometry-version-diff')).not.toBeInTheDocument();
+  });
+
+  it('renders the parameter diff when a feature has a SUPERSEDES predecessor', () => {
+    const node = {
+      id: 'n1',
+      name: 'rib-v2.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseFeatureDiff.mockReturnValue({
+      data: {
+        currentWorkProductId: 'n1',
+        hasPreviousVersion: true,
+        previousWorkProductId: 'n0',
+        changed: { thickness_mm: { from_value: 2, to_value: 3 } },
+        added: {},
+        removed: {},
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useFeatureDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /rib-v2\.step/ }));
+
+    expect(screen.getByTestId('feature-version-diff')).toBeInTheDocument();
+  });
+
+  it('renders nothing for the parameter diff when there is no predecessor', () => {
+    // FORGE-709: "no predecessor" arrives as a 200 with the discriminant
+    // false rather than a 404, so the panel must hide on that shape.
+    const node = {
+      id: 'n1',
+      name: 'rib-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseFeatureDiff.mockReturnValue({
+      data: { currentWorkProductId: 'n1', hasPreviousVersion: false },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useFeatureDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /rib-v1\.step/ }));
+
+    expect(screen.queryByTestId('feature-version-diff')).not.toBeInTheDocument();
   });
 
   it('clears the selected node (detail panel + breadcrumb) when the active project changes', () => {
@@ -514,5 +741,299 @@ describe('TwinViewerPage', () => {
         setSampleModeForTests(false);
       }
     });
+  });
+});
+
+describe('deep links (FORGE-371)', () => {
+  // A reply that says "I committed the bracket" should be able to link to
+  // the view that shows it. ?node= has worked since MET-514; ?tab= was
+  // local state, so a link naming a tab landed on the page and silently
+  // showed the default -- which reads as the link being wrong rather than
+  // unsupported.
+  it('opens on the tab named in the URL', () => {
+    window.history.pushState({}, '', '/twin?tab=asm');
+    render(<TwinViewerPage />);
+    expect(screen.getByRole('button', { name: 'Assembly' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('falls back to the default tab for a name it does not know', () => {
+    // The link may come from a build older or newer than this one. Still a
+    // working page, not an error.
+    window.history.pushState({}, '', '/twin?tab=nonsense');
+    render(<TwinViewerPage />);
+    expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('leaves the default tab alone when no tab is named', () => {
+    window.history.pushState({}, '', '/twin');
+    render(<TwinViewerPage />);
+    expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+// ── FEA result inspector (FORGE-305) ────────────────────────────────────────
+/** FORGE-246 landed the simulation_result work product; FORGE-279 the read
+ *  route the Sim page lists from. The inspector never got its half, so a
+ *  selected result rendered as untyped scalar rows -- `max_von_mises_mpa:
+ *  182.4`, no units, no ordering, indistinguishable from the forty other
+ *  properties beside it. */
+describe('TwinViewerPage FEA result view (FORGE-305)', () => {
+  const meshStats = { num_nodes: 12500, num_elements: 48000 };
+
+  function resultNode(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'sr1',
+      name: 'bracket-fea-run-3',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {
+        wp_type: 'simulation_result',
+        max_von_mises_mpa: 182.43,
+        max_displacement_mm: 0.4126,
+        load_case: 'tip-load-500N',
+      },
+      meshStats,
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  function selectNode(node: Record<string, unknown>) {
+    window.history.pushState({}, '', '/twin');
+    useLayoutStore.setState({ sidebarCollapsed: false });
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /bracket-fea-run-3/ }));
+  }
+
+  it('shows the summary with units for a simulation_result node', () => {
+    selectNode(resultNode());
+    const panel = screen.getByTestId('fea-result-section');
+    // The units are the point: 182.43 on its own is not an answer.
+    expect(within(panel).getByText('182.4')).toBeInTheDocument();
+    expect(within(panel).getByText('MPa')).toBeInTheDocument();
+    expect(within(panel).getByText('0.413')).toBeInTheDocument();
+    expect(within(panel).getByText('mm')).toBeInTheDocument();
+  });
+
+  it('names the load case that produced it', () => {
+    selectNode(resultNode());
+    expect(
+      within(screen.getByTestId('fea-result-section')).getByText(/tip-load-500N/),
+    ).toBeInTheDocument();
+  });
+
+  it('says so when the load case was not recorded, rather than showing a blank', () => {
+    selectNode(resultNode({ properties: { wp_type: 'simulation_result', max_von_mises_mpa: 1 } }));
+    expect(
+      within(screen.getByTestId('fea-result-section')).getByText(/not recorded/),
+    ).toBeInTheDocument();
+  });
+
+  it('shows mesh stats, which the scalar-only properties projection drops', () => {
+    // The whole reason meshStats needed surfacing separately: `properties` is
+    // scalar-only, so an object value never reaches the client at all.
+    selectNode(resultNode());
+    const panel = screen.getByTestId('fea-result-section');
+    expect(within(panel).getByText('num_elements')).toBeInTheDocument();
+    expect(within(panel).getByText('48,000')).toBeInTheDocument();
+  });
+
+  it('does not render for a node that is not a simulation result', () => {
+    selectNode(resultNode({ properties: { wp_type: 'cad_model' } }));
+    expect(screen.queryByTestId('fea-result-section')).not.toBeInTheDocument();
+  });
+
+  it('says the numbers are missing rather than rendering an empty panel', () => {
+    // A blank panel reads as "the view is broken", which is the wrong
+    // conclusion to lead a reader to.
+    selectNode(resultNode({ properties: { wp_type: 'simulation_result' }, meshStats: undefined }));
+    expect(
+      within(screen.getByTestId('fea-result-section')).getByText(/never reached it/),
+    ).toBeInTheDocument();
+  });
+
+  it('treats an empty-string measurement as absent, not as zero stress', () => {
+    // `Number('')` is 0, which would render as a real measurement of zero --
+    // the kind of fabricated reading that is worse than a dash.
+    selectNode(
+      resultNode({
+        properties: { wp_type: 'simulation_result', max_von_mises_mpa: '', max_displacement_mm: 0.5 },
+      }),
+    );
+    const panel = screen.getByTestId('fea-result-section');
+    expect(within(panel).queryByText('0.0')).not.toBeInTheDocument();
+    expect(within(panel).getByText('0.500')).toBeInTheDocument();
+  });
+
+  it('notes that a result recorded before FORGE-532 has no stored 3D field', () => {
+    selectNode(resultNode());
+    expect(
+      within(screen.getByTestId('fea-result-section')).getByTestId('field-not-stored'),
+    ).toHaveTextContent(/Field not stored/);
+  });
+
+  it('points at the Sim page for comparison instead of duplicating it', () => {
+    selectNode(resultNode());
+    const link = within(screen.getByTestId('fea-result-section')).getByRole('link', {
+      name: /Compare in Sim/,
+    });
+    expect(link).toHaveAttribute('href', '/sim');
+  });
+});
+
+describe('TwinViewerPage — inspector preview from the registry (FORGE-531)', () => {
+  function selectWp(properties: Record<string, unknown>) {
+    const node = {
+      id: 'wp-prev',
+      name: 'preview-target',
+      type: 'work_product',
+      domain: 'systems',
+      status: 'valid',
+      properties,
+      updatedAt: new Date().toISOString(),
+    };
+    window.history.pushState({}, '', '/twin');
+    useLayoutStore.setState({ sidebarCollapsed: false });
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /preview-target/ }));
+  }
+
+  it('renders a PRD as Markdown in the inspector, not a raw dump', async () => {
+    selectWp({ wp_type: 'prd', format: 'md' });
+    const section = screen.getByTestId('node-preview-section');
+    expect(within(section).getByText(/Preview · Markdown/)).toBeInTheDocument();
+    expect(await within(section).findByRole('heading', { name: 'Flight time target' })).toBeInTheDocument();
+  });
+
+  it('leaves a STEP model to the 3D viewer and keeps the CAD actions', () => {
+    selectWp({ wp_type: 'cad_model', format: 'step' });
+    expect(screen.queryByTestId('node-preview-section')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /View 3D Model/ })).toBeInTheDocument();
+    expect(screen.getByTitle('Boolean cut against another CAD node')).toBeInTheDocument();
+  });
+
+  it('offers 3D for an STL mesh, without the STEP-only boolean cut', () => {
+    selectWp({ wp_type: 'manufacturing_file', format: 'stl' });
+    expect(screen.getByRole('button', { name: /View 3D Model/ })).toBeInTheDocument();
+    expect(screen.queryByTitle('Boolean cut against another CAD node')).not.toBeInTheDocument();
+  });
+
+  it('names the missing engine for an unknown format', () => {
+    selectWp({ wp_type: 'manufacturing_file', format: 'weird' });
+    const section = screen.getByTestId('node-preview-section');
+    expect(within(section).getByText('No preview engine for .weird files')).toBeInTheDocument();
+  });
+});
+
+describe('TwinViewerPage graph links (FORGE-704)', () => {
+  // Two work products, and edges to a constraint, an intent and a baseline. The
+  // gateway names the far ends in `endpoints`; before this the page kept only the
+  // work-product to work-product edge and dropped the rest without a word.
+  const wps = [
+    { id: 'w1', name: 'Arm', type: 'work_product', domain: 'mechanical', status: 'valid', properties: {}, updatedAt: '2026-09-22T12:00:00Z' },
+    { id: 'w2', name: 'Bracket', type: 'work_product', domain: 'mechanical', status: 'valid', properties: {}, updatedAt: '2026-09-22T11:00:00Z' },
+  ];
+  const relationships = [
+    { id: 'r1', sourceId: 'w1', targetId: 'w2', type: 'depends_on', label: 'depends on' },
+    { id: 'r2', sourceId: 'w1', targetId: 'c1', type: 'constrained_by', label: 'constrained by' },
+    { id: 'r3', sourceId: 'i1', targetId: 'w1', type: 'depends_on', label: 'depends on' },
+    { id: 'r4', sourceId: 'w1', targetId: 'b1', type: 'included_in_baseline', label: 'included in baseline' },
+    { id: 'r5', sourceId: 'w2', targetId: 'b1', type: 'included_in_baseline', label: 'included in baseline' },
+  ];
+  const endpoints = {
+    c1: { kind: 'constraint', name: 'Max mass 250 g' },
+    i1: { kind: 'intent', name: 'Hover indoors' },
+    b1: { kind: 'baseline', name: 'Release candidate' },
+  };
+
+  function mountWith(extra: Record<string, unknown> = {}) {
+    mockUseTwinNodes.mockReturnValue({ data: wps, isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseTwinRelationships.mockReturnValue({
+      data: relationships,
+      endpoints,
+      skippedNodes: 0,
+      isError: false,
+      ...extra,
+    } as unknown as ReturnType<typeof useTwinRelationships>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    useProjectStore.setState({ activeProjectId: 'proj-a', hasSelected: true });
+    render(<TwinViewerPage />);
+    return screen.queryByRole('group', { name: 'Linked records' }) as HTMLElement;
+  }
+
+  it('offers a switch per kind of linked record, with how many edges go to it', () => {
+    const bar = mountWith();
+    expect(within(bar).getByRole('button', { name: /Constraints 1/ })).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: /Intent & evidence 1/ })).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: /Baselines 2/ })).toBeInTheDocument();
+  });
+
+  it('draws links to constraints and intent by default, and names those records', () => {
+    mountWith();
+    const canvas = screen.getByTestId('twin-graph-canvas');
+    // the work-product edge, the constraint link and the intent link
+    expect(canvas).toHaveAttribute('data-edges', '3');
+    expect(within(canvas).getByText('Max mass 250 g')).toBeInTheDocument();
+    expect(within(canvas).getByText('Hover indoors')).toBeInTheDocument();
+  });
+
+  it('keeps baseline membership off to start and says how many links are hidden', () => {
+    const bar = mountWith();
+    expect(within(bar).getByRole('button', { name: /Baselines 2/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(bar).getByText('2 links hidden')).toBeInTheDocument();
+    expect(within(screen.getByTestId('twin-graph-canvas')).queryByText('Release candidate')).not.toBeInTheDocument();
+  });
+
+  it('draws the baseline links when that switch is turned on, and the hidden count clears', () => {
+    const bar = mountWith();
+    fireEvent.click(within(bar).getByRole('button', { name: /Baselines 2/ }));
+    const canvas = screen.getByTestId('twin-graph-canvas');
+    expect(canvas).toHaveAttribute('data-edges', '5');
+    expect(within(canvas).getByText('Release candidate')).toBeInTheDocument();
+    expect(within(bar).queryByText(/links? hidden/)).not.toBeInTheDocument();
+  });
+
+  it('turns a kind of link off again', () => {
+    const bar = mountWith();
+    fireEvent.click(within(bar).getByRole('button', { name: /Constraints 1/ }));
+    expect(screen.getByTestId('twin-graph-canvas')).toHaveAttribute('data-edges', '2');
+    // the constraint link, plus the two baseline links that start off
+    expect(within(bar).getByText('3 links hidden')).toBeInTheDocument();
+  });
+
+  it('says so when the relationships request failed, instead of showing stand-in edges', () => {
+    mountWith({ isError: true, data: undefined, endpoints: undefined });
+    expect(screen.getByText(/Links unavailable/)).toBeInTheDocument();
+  });
+
+  it('reports work products whose links could not be read', () => {
+    const bar = mountWith({ skippedNodes: 2 });
+    expect(within(bar).getByText("2 work products' links could not be read.")).toBeInTheDocument();
+  });
+
+  it('shows no link controls when there is nothing to say', () => {
+    mountWith({ data: [], endpoints: {} });
+    expect(screen.queryByRole('group', { name: 'Linked records' })).not.toBeInTheDocument();
   });
 });

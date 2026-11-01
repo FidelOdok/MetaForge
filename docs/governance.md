@@ -32,9 +32,9 @@ Each top-level directory has a designated owner responsible for code review and 
 | Pattern | Purpose | Example |
 |---------|---------|---------|
 | `main` | Stable, reviewed code only | — |
-| `feat/<issue-id>/<short-desc>` | New features | `feat/met-8/mechanical-agent` |
-| `fix/<issue-id>/<short-desc>` | Bug fixes | `fix/met-42/twin-merge-conflict` |
-| `met-<id>/<short-desc>` | Linear issue work | `met-40/phase-0-specs` |
+| `feat/<issue-id>/<short-desc>` | New features | `feat/123/mechanical-agent` |
+| `fix/<issue-id>/<short-desc>` | Bug fixes | `fix/456/twin-merge-conflict` |
+| `<issue-id>/<short-desc>` | Tracker issue work | `789/phase-0-specs` |
 | `docs/<short-desc>` | Documentation changes | `docs/skill-spec-update` |
 | `release/v<version>` | Release preparation | `release/v0.1.0` |
 
@@ -54,7 +54,7 @@ Each top-level directory has a designated owner responsible for code review and 
 | Lint | `ruff check .` passes (Python) or `eslint` passes (TypeScript) |
 | Types | `mypy .` passes (Python, strict mode) or `tsc --noEmit` (TypeScript) |
 | Docs | Public API changes include docstring updates |
-| Linear | PR description references Linear issue (e.g., "Closes MET-42") |
+| Linear | PR description references the tracker issue |
 
 ---
 
@@ -85,7 +85,7 @@ Follow the Tool Adapter SDK guide in [`mcp_spec.md` Section 9](mcp_spec.md#9-too
 
 ### Checklist
 
-- [ ] Linear issue created under MET-7 (MCP Infrastructure)
+- [ ] Linear issue created under the MCP Infrastructure epic
 - [ ] Directory created: `tool_registry/tools/<adapter_name>/`
 - [ ] `server.py` subclasses `McpToolServer`, registers tool manifests
 - [ ] `Dockerfile` with tool binary installed, workspace volume, no network
@@ -208,13 +208,13 @@ Backlog → Todo → In Progress → In Review → Done
 
 | Epic | Scope | Phase |
 |------|-------|-------|
-| MET-40 | Phase 0: Specification documents | Phase 0 |
-| MET-5 | Digital Twin Core | Phase 1 |
-| MET-6 | Skill System | Phase 1 |
-| MET-7 | MCP Infrastructure | Phase 1-2 |
-| MET-8 | Mechanical Agent (first vertical) | Phase 1 |
-| MET-9 | Electronics Agent | Phase 2 |
-| MET-10 | Assistant Layer (IDE extensions) | Phase 2-3 |
+| - | Phase 0: Specification documents | Phase 0 |
+| - | Digital Twin Core | Phase 1 |
+| - | Skill System | Phase 1 |
+| - | MCP Infrastructure | Phase 1-2 |
+| - | Mechanical Agent (first vertical) | Phase 1 |
+| - | Electronics Agent | Phase 2 |
+| - | Assistant Layer (IDE extensions) | Phase 2-3 |
 
 ---
 

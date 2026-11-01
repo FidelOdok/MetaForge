@@ -13,6 +13,12 @@ from typing import Any
 import pytest
 
 from api_gateway.sessions.backend import InMemoryAgentSessionStore
+
+# FORGE-387: these exercise tool dispatch, not the write gate. The
+# server used to default to Caller.LOCAL, which exempted their writes
+# by accident; the default is now conservative, so a local session is
+# declared explicitly -- the same thing the stdio transport does.
+from mcp_core.guardrails import Caller
 from metaforge.mcp.capture import SessionCapture
 from metaforge.mcp.server import UnifiedMcpServer
 from tool_registry.mcp_server.handlers import ToolHandlerError, ToolManifest
@@ -70,7 +76,9 @@ async def _call(server: UnifiedMcpServer, tool_id: str, **args: Any) -> Any:
 class TestAutoCapture:
     async def test_three_calls_one_session_ordered_actions(self) -> None:
         store = InMemoryAgentSessionStore.create()
-        server = UnifiedMcpServer(adapters=[_ToolServer()], session_capture=SessionCapture(store))
+        server = UnifiedMcpServer(
+            adapters=[_ToolServer()], caller=Caller.LOCAL, session_capture=SessionCapture(store)
+        )
 
         for _ in range(3):
             await _call(server, "alpha.add", a=1, b=2)
@@ -85,7 +93,9 @@ class TestAutoCapture:
 
     async def test_error_path_records_error_event(self) -> None:
         store = InMemoryAgentSessionStore.create()
-        server = UnifiedMcpServer(adapters=[_ToolServer()], session_capture=SessionCapture(store))
+        server = UnifiedMcpServer(
+            adapters=[_ToolServer()], caller=Caller.LOCAL, session_capture=SessionCapture(store)
+        )
 
         with pytest.raises(ToolHandlerError):
             await _call(server, "alpha.boom")
@@ -99,6 +109,7 @@ class TestAutoCapture:
         store = InMemoryAgentSessionStore.create()
         server = UnifiedMcpServer(
             adapters=[_ToolServer(), _SessionServer(store)],
+            caller=Caller.LOCAL,
             session_capture=SessionCapture(store),
         )
 
@@ -122,7 +133,9 @@ class TestAutoCapture:
         assert server._capture._explicit_id == explicit_id
 
     async def test_capture_disabled_is_noop(self) -> None:
-        server = UnifiedMcpServer(adapters=[_ToolServer()])  # no session_capture
+        server = UnifiedMcpServer(
+            adapters=[_ToolServer()], caller=Caller.LOCAL
+        )  # no session_capture
         result = await _call(server, "alpha.add", a=4, b=5)
         assert result["data"]["sum"] == 9
 
@@ -132,7 +145,9 @@ class TestAutoCapture:
                 raise RuntimeError("db down")
 
         server = UnifiedMcpServer(
-            adapters=[_ToolServer()], session_capture=SessionCapture(_RaisingStore())
+            adapters=[_ToolServer()],
+            caller=Caller.LOCAL,
+            session_capture=SessionCapture(_RaisingStore()),
         )
         # Tool call still succeeds despite the store blowing up on capture.
         result = await _call(server, "alpha.add", a=7, b=8)

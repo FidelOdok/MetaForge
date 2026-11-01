@@ -8,7 +8,7 @@ vi.mock('../../client', () => ({
 }));
 
 import apiClient from '../../client';
-import { createRun, getRun, listRuns, submitRunApproval } from '../runs';
+import { createRun, getRun, listRuns } from '../runs';
 
 const mockGet = vi.mocked(apiClient.get);
 const mockPost = vi.mocked(apiClient.post);
@@ -28,7 +28,7 @@ const RAW = {
 describe('listRuns', () => {
   it('maps snake_case to camelCase', async () => {
     mockGet.mockResolvedValueOnce({ data: { runs: [RAW] } });
-    const runs = await listRuns();
+    const { runs } = await listRuns();
     expect(runs[0]?.id).toBe('run_1');
     expect(runs[0]?.createdAt).toBe(1);
     expect(runs[0]?.approvalReason).toBeUndefined();
@@ -56,14 +56,5 @@ describe('createRun', () => {
     const run = await createRun({ goal: 'x' }, true);
     expect(mockPost).toHaveBeenCalledWith('/runs', { request: { goal: 'x' }, start: true });
     expect(run.status).toBe('running');
-  });
-});
-
-describe('submitRunApproval', () => {
-  it('posts the decision to the approval endpoint', async () => {
-    mockPost.mockResolvedValueOnce({ data: { ...RAW, status: 'rejected' } });
-    const run = await submitRunApproval('run_1', 'reject');
-    expect(mockPost).toHaveBeenCalledWith('/runs/run_1/approval', { decision: 'reject' });
-    expect(run.status).toBe('rejected');
   });
 });

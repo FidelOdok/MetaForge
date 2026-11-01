@@ -1,23 +1,71 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway", "observability", "digital_twin", "metaforge"]
+# "cli" is load-bearing: [project.scripts] exposes `forge` as
+# cli.forge_cli.main:main, so a wheel without it installs a console script
+# that dies on import (FORGE-648).
+packages = ["cli", "twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway", "observability", "digital_twin", "metaforge"]
 
 [project]
-name = "metaforge"
-version = "0.1.0"
+# Not "metaforge": that name on PyPI belongs to an unrelated job-shop
+# scheduling library (FORGE-648). The import packages are unchanged --
+# ``import metaforge`` still works -- this is only the distribution name
+# people type after ``pip install``.
+name = "metaforge-hw"
+# The release workflow tags every push to main and derives that tag from the
+# repository history, never from here, so the patch number lives on the tag.
+# This tracks the minor line those tags are cut from, and is a floor rather
+# than the truth: `scripts/stamp_version.py` writes the resolved version in
+# before the gateway image is built, so the installed distribution -- and
+# therefore `/health` -- reports the release it came from. A source checkout
+# that nothing stamped reports this number.
+version = "0.3.0"
 description = "Local-first control plane for hardware design"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Fidel Odok" }]
+keywords = ["hardware", "cad", "simulation", "digital-twin", "engineering", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "pydantic>=2.0",
     # ``pydantic-ai`` (the umbrella) pulls every provider's extras
-    # (gradio, xai-sdk, vertex, bedrock, …) and the resolver backtracks
+    # (gradio, xai-sdk, vertex, bedrock, ...) and the resolver backtracks
     # forever (MET-377). MetaForge only uses the openai + anthropic
-    # providers — pin the slim variant with just those, so Docker
+    # providers -- pin the slim variant with just those, so Docker
     # builds finish in minutes not hours.
-    "pydantic-ai-slim[openai,anthropic]>=0.1",
+    #
+    # FORGE-323: the ``>=0.1`` floor left the resolver free to consider
+    # every ``pydantic-ai-slim`` release from 0.1.0 through 2.x -- a
+    # ~300-version search space. Adding an unrelated pure-Python package
+    # (``pint``, FORGE-311) was enough to reopen the exact MET-377
+    # pathology: pip tries the newest candidate first, hits a conflict,
+    # and backtracks one version at a time (~350-400s per candidate on
+    # fidel-dev, observed walking 2.35.3 -> 2.35.1 -> ... -> 2.32.1
+    # without resolving). The 2.x line also switches its HTTP client dep
+    # from ``httpx`` to a different package, ``httpx2`` -- a likely
+    # contributor to the conflict. Pin to the exact version already
+    # verified working in this repo's own dev environment (1.68.0, the
+    # last release before the 2.0 jump, still on plain ``httpx``) to
+    # remove the ambiguity. ``pydantic-graph`` is pinned to match: it's
+    # already locked in lockstep by pydantic-ai-slim's own metadata
+    # (``pydantic-graph==<same version>``), but declaring it explicitly
+    # lets pip resolve it immediately instead of fetching pydantic-ai-
+    # slim's metadata first to discover the exact pin.
+    "pydantic-ai-slim[openai,anthropic]==1.68.0",
+    "pydantic-graph==1.68.0",
     "structlog>=24.0",
     # Cap below FastAPI 0.137 / Starlette 1.0: Starlette 1.x wraps
     # ``include_router`` results in ``_IncludedRouter`` objects without a
@@ -50,11 +98,26 @@ dependencies = [
     "opentelemetry-sdk>=1.20",
     "opentelemetry-exporter-otlp-proto-grpc>=1.20",
     "opentelemetry-instrumentation-fastapi>=0.43b0",
+    # Quantity (twin_core/models/quantity.py, FORGE-311): real dimensional
+    # consistency for physical values (mass/length/etc.), not just an
+    # informal unit-suffix-in-key-name convention. Pure Python, no C
+    # extension -- safe to add unconditionally.
+    "pint>=0.24",
 ]
+
+[project.urls]
+Homepage = "https://www.metaforge.uk"
+Documentation = "https://fidelodok.github.io/MetaForge/"
+Repository = "https://github.com/FidelOdok/MetaForge"
+Issues = "https://github.com/FidelOdok/MetaForge/issues"
 
 [project.scripts]
 forge = "cli.forge_cli.main:main"
 forge-server = "api_gateway.server:main"
+# FORGE-374: the local-first entry point. A packaged plugin launches this by
+# name; `python -m metaforge.mcp` works too but depends on the interpreter
+# and working directory the harness happens to spawn with.
+metaforge-mcp = "metaforge.mcp.__main__:main"
 
 [project.optional-dependencies]
 neo4j = [
@@ -108,11 +171,6 @@ dev = [
     # under tests/fixtures/datasheets/. Decoupled from the production
     # PDF ingest path (MET-399) — fixture prep only.
     "pdfplumber>=0.10",
-    # Documentation site (docs/ -> https://metaforge-ha.github.io/MetaForge/).
-    # Built locally with `mkdocs serve` and on push-to-main by
-    # .github/workflows/docs.yml.
-    "mkdocs-material>=9.5",
-    "mkdocs-include-markdown-plugin>=6.0",
 ]
 temporal = [
     "temporalio>=1.5",
@@ -176,13 +234,27 @@ gateway = [
     # only in [knowledge], leaving the built gateway image unable to
     # import ``minio`` — MinIOKBStorage silently fell back / errored.
     "minio>=7.2",
+    # FORGE-540: no JWT library here on purpose. ``api_gateway.auth`` knows
+    # that callers may have to prove who they are, not how a credential is
+    # checked -- that belongs to whichever provider is registered on the
+    # ``metaforge.auth`` entry-point group, and travels as that provider's own
+    # dependency. A local gateway therefore installs no crypto stack at all.
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+# FORGE-560: each skill keeps its own tests.py beside its handler. pytest's
+# default python_files never matches that name and testpaths held only
+# tests/, so none of them ran anywhere (several had gone stale or empty).
+# Every skill directory is a package, so the 27 same-named modules import
+# under distinct names. tool_registry/tools/*/tests.py stay out: they are
+# re-exports of tests/unit and would run twice.
+testpaths = ["tests", "domain_agents"]
+python_files = ["test_*.py", "*_test.py", "tests.py"]
 markers = [
+    "no_material_library: run without the test material library (FORGE-446)",
     "perf: opt-in latency/throughput baselines; not run in default CI (MET-477 Phase 6)",
+    "real_paths: kicad handler tests that check real files exist (FORGE-680)",
 ]
 # Phase 6: exclude perf tests from the default `pytest` invocation. Opt in
 # with `pytest -m perf` (or set METAFORGE_PERF_TESTS=1 to belt-and-braces).
@@ -212,3 +284,14 @@ exclude = [
     "dist/",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pint's own source uses PEP 695 generic syntax (Python 3.12+) internally
+# (e.g. pint/facets/context/objects.py); this repo's mypy `python_version`
+# target is 3.11, so even a --follow-imports=silent visit crashes on that
+# syntax with a hard parse error ("errors prevented further checking") that
+# aborts the ENTIRE run, not just pint's own (irrelevant) type info.
+# `follow_imports = "skip"` (stronger than "silent") tells mypy not to open
+# pint's source at all -- imported names resolve to Any instead.
+module = "pint.*"
+follow_imports = "skip"

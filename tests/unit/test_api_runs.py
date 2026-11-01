@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from api_gateway.runs.routes import get_run_store, init_run_ledger, reset_run_store, router
 from orchestrator.harness.ledger import SqliteRunLedger
-from orchestrator.harness.runs import RunNotFoundError, RunStatus
+from orchestrator.harness.runs import RunStatus
 
 
 @pytest.fixture
@@ -110,7 +110,7 @@ class TestRunLedgerDurability:
         run_id = client.post("/v1/runs", json={}).json()["id"]
         assert get_run_store().get(run_id) is not None  # no ledger involved at all
 
-    def test_rehydrates_non_terminal_runs_on_init(self, client: TestClient) -> None:
+    def test_rehydrates_every_run_on_init(self, client: TestClient) -> None:
         ledger = SqliteRunLedger(":memory:")
         store = get_run_store()
         running = store.create({"goal": "in flight"}, run_id="was-running")
@@ -126,7 +126,10 @@ class TestRunLedgerDurability:
         try:
             fresh_store = get_run_store()
             assert fresh_store.get("was-running").status is RunStatus.RUNNING
-            with pytest.raises(RunNotFoundError):  # terminal runs don't rehydrate
-                fresh_store.get("already-done")
+            # FORGE-605: finished runs come back too, as history; they used to
+            # stay in the ledger and vanish from every list after a restart.
+            assert fresh_store.get("already-done").status is RunStatus.COMPLETED
+            listed = {r["id"] for r in client.get("/v1/runs").json()["runs"]}
+            assert {"was-running", "already-done"} <= listed
         finally:
             reset_run_store()

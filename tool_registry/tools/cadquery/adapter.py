@@ -269,9 +269,10 @@ class CadqueryServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "Material name for density lookup (e.g. 'aluminum_6061', "
-                                "'steel', 'abs'); unrecognized names fall back to a "
-                                "neutral default density rather than failing"
+                                "A material library name (library.list_materials, e.g. "
+                                "'aluminium_6061_t6', 'abs'); its density comes from the "
+                                "library with its source. A name the library does not hold "
+                                "is refused, with the closest entries."
                             ),
                         },
                         "density_kg_m3": {
@@ -520,9 +521,10 @@ class CadqueryServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "Material name for density lookup (e.g. 'aluminum_6061', "
-                                "'steel', 'abs'); unrecognized names fall back to a "
-                                "neutral default density rather than failing"
+                                "A material library name (library.list_materials, e.g. "
+                                "'aluminium_6061_t6', 'abs'); its density comes from the "
+                                "library with its source. A name the library does not hold "
+                                "is refused, with the closest entries."
                             ),
                         },
                         "density_kg_m3": {
@@ -711,9 +713,10 @@ class CadqueryServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "Material name for density lookup (e.g. 'aluminum_6061', "
-                                "'steel', 'abs'); unrecognized names fall back to a "
-                                "neutral default density rather than failing"
+                                "A material library name (library.list_materials, e.g. "
+                                "'aluminium_6061_t6', 'abs'); its density comes from the "
+                                "library with its source. A name the library does not hold "
+                                "is refused, with the closest entries."
                             ),
                         },
                         "density_kg_m3": {
@@ -962,7 +965,18 @@ class CadqueryServer(McpToolServer):
                                 "properties": {
                                     "name": {"type": "string"},
                                     "file": {"type": "string"},
-                                    "location": {"type": "object"},
+                                    "location": {
+                                        "type": "object",
+                                        "description": (
+                                            "x, y, z in mm; rx, ry, rz in degrees, "
+                                            "applied about the part's origin X then Y "
+                                            "then Z, before the translation"
+                                        ),
+                                        "properties": {
+                                            k: {"type": "number"}
+                                            for k in ("x", "y", "z", "rx", "ry", "rz")
+                                        },
+                                    },
                                 },
                                 "required": ["name", "file"],
                             },
@@ -977,6 +991,16 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": "Output STEP file path",
                         },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material name for a first-order mass estimate "
+                                "(summed volume x this ONE material's density -- "
+                                "per-part materials aren't tracked, so this is a "
+                                "rough estimate, not per-part-accurate). Omit to "
+                                "skip mass_kg entirely rather than guess."
+                            ),
+                        },
                     },
                     "required": ["parts"],
                 },
@@ -986,7 +1010,26 @@ class CadqueryServer(McpToolServer):
                         "assembly_file": {"type": "string"},
                         "part_count": {"type": "integer"},
                         "total_volume": {"type": "number"},
-                        "interference_check_passed": {"type": "boolean"},
+                        "volume_mm3": {"type": "number"},
+                        "mass_kg": {"type": "number"},
+                        "interference_check_passed": {
+                            "type": "boolean",
+                            "description": (
+                                "FORGE-547: false when any two placed parts overlap; "
+                                "see interferences"
+                            ),
+                        },
+                        "interferences": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "part_a": {"type": "string"},
+                                    "part_b": {"type": "string"},
+                                    "volume_mm3": {"type": "number"},
+                                },
+                            },
+                        },
                     },
                 },
                 phase=2,
@@ -1477,6 +1520,7 @@ class CadqueryServer(McpToolServer):
         parts = arguments.get("parts", [])
         constraints = arguments.get("constraints")
         output_path = arguments.get("output_path", "")
+        material = arguments.get("material", "")
 
         if not parts:
             raise ValueError("parts list is required and must not be empty")
@@ -1495,7 +1539,7 @@ class CadqueryServer(McpToolServer):
             work_dir=self.config.work_dir,
             timeout=self.config.max_operation_time,
         )
-        return ops.create_assembly(parts, constraints, output_path)
+        return ops.create_assembly(parts, constraints, output_path, material)
 
     async def generate_enclosure(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Generate PCB enclosure from board dimensions and connector cutouts."""
