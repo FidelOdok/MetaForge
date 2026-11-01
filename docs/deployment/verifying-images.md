@@ -17,6 +17,7 @@ repository's CI built.
 | `ghcr.io/fidelodok/metaforge-cadquery-adapter` | CadQuery tool adapter |
 | `ghcr.io/fidelodok/metaforge-kicad-adapter` | KiCad tool adapter |
 | `ghcr.io/fidelodok/metaforge-spice-adapter` | SPICE tool adapter |
+| `ghcr.io/fidelodok/metaforge-slicer-adapter` | PrusaSlicer tool adapter (G-code and print estimates) |
 | `ghcr.io/fidelodok/metaforge-openfoam-adapter` | OpenFOAM flow solver adapter (opt-in, `cfd` compose profile; the base is the OpenFOAM Foundation release image, pinned by digest) |
 | `ghcr.io/fidelodok/metaforge-firmware-adapter` | Firmware build and emulation adapter (opt-in, `firmware` compose profile; PlatformIO with the STM32 and ESP32 platforms, Renode, Espressif QEMU) |
 | `ghcr.io/fidelodok/metaforge-occt` | STEP to GLB converter for the viewer |

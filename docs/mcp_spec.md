@@ -1310,6 +1310,31 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 ---
 
+### Slicer Adapter (`tool_registry/tools/slicer/`)
+
+| Property | Details |
+|----------|---------|
+| Docker Image | `ghcr.io/fidelodok/metaforge-slicer-adapter`, published by CI (`tool_registry/tools/slicer/Dockerfile`) |
+| Base Image | `python:3.11-slim-trixie` + Debian `prusa-slicer` (2.9.2); PrusaSlicer is AGPL-3.0 and runs as a separate program |
+| Transport | HTTP JSON-RPC on port 8106 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_SLICER_URL` |
+| Workspace | Shares `adapter-workspace` with the CAD adapters; a model is read by path and each run writes `output/slicer/<run id>/` (the G-code and `config.ini`) |
+| Compose | Runs by default; limited to 2 CPUs and 2 GB, two slices at a time, `SLICER_MAX_OPERATION_TIME` (600 s) each |
+| Tools | `slicer.slice`, `slicer.list_profiles` |
+
+**Tools provided**:
+
+| Tool ID | Capability | Description |
+|---------|-----------|-------------|
+| `slicer.slice` | `slicing` | Run `prusa-slicer --export-gcode` on a workspace `.stl`, `.3mf`, `.obj`, `.step` or `.stp`. Loads `config_path` (a PrusaSlicer config export) when given, then a generated config with the chosen `printer` and `material` presets and the per-call overrides. Returns `gcode_path`, `print_time_s`, `filament_mm`, `filament_cm3`, `filament_g`, `layers`, `height_mm` and the effective `settings`, all read from the G-code; `filament_cost` when `filament_cost_per_kg` is given. A slicer failure is a JSON-RPC error carrying PrusaSlicer's own reason, such as "All objects are outside of the print volume." |
+| `slicer.list_profiles` | `slicing` | The built-in printer and material presets and the defaults |
+
+No configuration may run a program. A `config_path` or a 3MF project that
+sets `post_process` is refused before PrusaSlicer starts, the config loaded
+last always sets `post_process` empty and `binary_gcode` off, and PrusaSlicer
+runs with no stdin, so its own prompt before running a script reads no.
+
+---
+
 ### OpenFOAM Adapter (`tool_registry/tools/openfoam/`)
 
 | Property | Details |

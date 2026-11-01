@@ -10,7 +10,7 @@ published to GitHub Container Registry and signed:
 | Image | Published by |
 |---|---|
 | `metaforge-gateway` (also runs the MCP server and both workers) | `release.yml`, every push to `main` |
-| `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter`, `-openfoam-adapter`, `-firmware-adapter` | `adapter-images.yml`, when their code changes |
+| `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter`, `-slicer-adapter`, `-openfoam-adapter`, `-firmware-adapter` | `adapter-images.yml`, when their code changes |
 
 The OpenFOAM adapter is opt-in. Its image is about 4 GB, so it runs only
 under the `cfd` compose profile: add `cfd` to `COMPOSE_PROFILES` in the host's `.env`

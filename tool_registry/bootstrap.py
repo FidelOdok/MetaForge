@@ -106,6 +106,16 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.firmware.config",
         "config_class": "FirmwareConfig",
     },
+    # PrusaSlicer G-code and print estimates. Registers so tools/list is
+    # stable; a call needs the slicer-adapter container
+    # (METAFORGE_ADAPTER_SLICER_URL), since the gateway and sidecar images
+    # have no PrusaSlicer and raise SlicerNotAvailableError in-process.
+    "slicer": {
+        "module": "tool_registry.tools.slicer.adapter",
+        "class": "SlicerServer",
+        "config_module": "tool_registry.tools.slicer.config",
+        "config_class": "SlicerConfig",
+    },
     # MET-633: opt-in like freecad/kicad above -- needs a real `gz` binary
     # (Gazebo Sim) in the container/host PATH to execute; the adapter
     # registers regardless so tools/list is stable, but handlers raise
