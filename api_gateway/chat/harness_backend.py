@@ -187,6 +187,9 @@ _REQUIRES_APPROVAL_TOOL_IDS = frozenset(
         "meshy.text_to_3d",
         "meshy.image_to_3d",
         "meshy.refine_texture",
+        "tripo.text_to_3d",
+        "tripo.image_to_3d",
+        "tripo.convert",
     }
 )
 

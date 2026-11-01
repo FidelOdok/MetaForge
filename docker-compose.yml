@@ -150,6 +150,10 @@ services:
       # Unset, that adapter's tools are not registered.
       - MESHY_API_KEY=${MESHY_API_KEY:-}
       - ZOO_API_TOKEN=${ZOO_API_TOKEN:-}
+      - TRIPO_API_KEY=${TRIPO_API_KEY:-}
+      - TRIPO_BASE_URL=${TRIPO_BASE_URL:-}
+      - SLANT3D_API_KEY=${SLANT3D_API_KEY:-}
+      - SLANT3D_PLATFORM_ID=${SLANT3D_PLATFORM_ID:-}
     volumes:
       # Read-write (MET-612): boolean-cut staging writes input STEP files here
       # for the adapter containers to read by the same absolute path.
@@ -559,6 +563,10 @@ services:
       # Cloud adapters, same passthrough as the gateway above.
       - MESHY_API_KEY=${MESHY_API_KEY:-}
       - ZOO_API_TOKEN=${ZOO_API_TOKEN:-}
+      - TRIPO_API_KEY=${TRIPO_API_KEY:-}
+      - TRIPO_BASE_URL=${TRIPO_BASE_URL:-}
+      - SLANT3D_API_KEY=${SLANT3D_API_KEY:-}
+      - SLANT3D_PLATFORM_ID=${SLANT3D_PLATFORM_ID:-}
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
       # MET-478 follow-up: without this, kicad.* tools ran in-process inside
