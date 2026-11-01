@@ -19,8 +19,10 @@ Covered:
 - **Thickness / stock** (``thickness``, ``stock``): the smallest bounding-box
   extent of a single-part model. A multi-part assembly is checked part by part
   when its parts record dimensions, and skipped otherwise.
-- **Material** (``material``): the cad_model's recorded material must share a
-  material family word with the one the requirement names.
+- **Material** (``material``): a requirement naming a family (wood, metal,
+  plastic, composite) accepts any material of that family; one naming a specific
+  material (birch plywood, aluminium) needs that word in the recorded material;
+  one naming no material is not evaluated. A part with no material fails.
 
 Not covered (reported as not evaluated, never as passing): load positions and
 spacings (metrics naming a moment, lever, offset, distance, position, clearance,
@@ -78,9 +80,83 @@ _LOAD_POSITION_WORDS = frozenset(
     }
 )
 
-# Words that do not identify a material family.
-_GENERIC_MATERIAL_WORDS = frozenset(
-    {"mm", "the", "and", "with", "wood", "board", "sheet", "offcut", "stock", "material", "grade"}
+#: FORGE-718: the materials a requirement can name, by family. A family word
+#: in a requirement ("wood or metal") accepts any member; a member ("birch
+#: plywood") must itself appear in the recorded material. The check used to
+#: compare every word of the requirement's text, with "wood" listed as generic,
+#: so "durable materials like wood or metal" failed birch plywood and a prose
+#: requirement naming no material failed everything.
+_MATERIAL_FAMILIES: dict[str, frozenset[str]] = {
+    "wood": frozenset(
+        {
+            "timber",
+            "hardwood",
+            "softwood",
+            "plywood",
+            "birch",
+            "oak",
+            "pine",
+            "beech",
+            "maple",
+            "walnut",
+            "ash",
+            "spruce",
+            "mdf",
+            "bamboo",
+            "teak",
+            "cherry",
+        }
+    ),
+    "metal": frozenset(
+        {
+            "steel",
+            "stainless",
+            "aluminium",
+            "titanium",
+            "brass",
+            "copper",
+            "iron",
+            "zinc",
+            "magnesium",
+            "bronze",
+        }
+    ),
+    "plastic": frozenset(
+        {
+            "polymer",
+            "abs",
+            "pla",
+            "petg",
+            "nylon",
+            "pa12",
+            "polycarbonate",
+            "acrylic",
+            "pmma",
+            "hdpe",
+            "polypropylene",
+            "asa",
+            "tpu",
+            "pom",
+            "acetal",
+            "peek",
+        }
+    ),
+    "composite": frozenset({"cfrp", "gfrp", "fibreglass", "carbon", "fibre", "kevlar"}),
+}
+_ALIASES = {
+    "ply": "plywood",
+    "aluminum": "aluminium",
+    "fiber": "fibre",
+    "fiberglass": "fibreglass",
+    "metallic": "metal",
+    "plastics": "plastic",
+    "wooden": "wood",
+    "metals": "metal",
+    "woods": "wood",
+    "polymers": "polymer",
+}
+_KNOWN_MATERIAL_WORDS = frozenset(_MATERIAL_FAMILIES) | frozenset().union(
+    *_MATERIAL_FAMILIES.values()
 )
 
 
@@ -170,22 +246,25 @@ def is_assembly(metadata: dict[str, Any]) -> bool:
 
 
 def _material_words(text: str) -> set[str]:
-    return {
-        w
-        for w in re.findall(r"[a-z][a-z0-9]+", text.lower())
-        if w not in _GENERIC_MATERIAL_WORDS and len(w) > 2
-    }
+    """The material vocabulary words in *text*, aliases folded."""
+    words = {_ALIASES.get(w, w) for w in re.findall(r"[a-z][a-z0-9]*", text.lower())}
+    return words & _KNOWN_MATERIAL_WORDS
 
 
-def _material_matches(required: str, recorded: str) -> bool:
+def _families(words: set[str]) -> set[str]:
+    return {f for f, members in _MATERIAL_FAMILIES.items() if f in words or words & members}
+
+
+def _material_matches(required: str, recorded: str) -> bool | None:
+    """Whether *recorded* satisfies *required*; ``None`` when *required* names no material."""
     req = _material_words(required)
     if not req:
-        return True  # nothing identifying to compare
+        return None
     have = _material_words(recorded)
-    # "plywood" / "ply" are the same family.
-    have |= {"plywood"} if "ply" in have else set()
-    req |= {"plywood"} if "ply" in req else set()
-    return bool(req & have)
+    specific = req - _MATERIAL_FAMILIES.keys()
+    if specific:
+        return bool(specific & have)
+    return bool(req & _families(have))
 
 
 def is_load_position(metric: str) -> bool:
@@ -302,10 +381,19 @@ def check_geometry_constraints(
             if kind == "material":
                 required = _required_material(constraint)
                 recorded = str(meta.get("material") or "")
-                result.evaluated += 1
                 if not recorded:
+                    result.evaluated += 1
                     sink.append(f"{label}: cad_model '{model_name}' records no material")
-                elif not _material_matches(required, recorded):
+                    continue
+                matches = _material_matches(required, recorded)
+                if matches is None:
+                    result.not_evaluated.append(
+                        f"{label}: the requirement names no material to compare "
+                        f"'{model_name}' ({recorded}) with"
+                    )
+                    continue
+                result.evaluated += 1
+                if not matches:
                     sink.append(
                         f"{label}: cad_model '{model_name}' material '{recorded}' "
                         f"does not match required '{required}'"

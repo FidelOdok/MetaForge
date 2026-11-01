@@ -647,8 +647,12 @@ violation list. Covered: envelope and size metrics (`envelope`, `length`,
 extents read from `metadata.dimensions_mm`, `bbox_mm` or
 `geometry_features.properties.bounding_box`; thickness or stock metrics against
 the smallest extent (per part for an assembly whose parts record dimensions);
-and a `material` metric against the recorded `material` (a shared material
-family word is a match, a missing material is a violation). Not covered, and
+and a `material` metric against the recorded `material`. A requirement that
+names a family (wood, metal, plastic, composite) accepts any material of that
+family, so "wood or metal" accepts birch plywood; one that names a specific
+material ("18 mm birch plywood", "aluminium") needs that word in the recorded
+material; one that names no material ("suitable for construction") is reported
+as not evaluated. A part that records no material is a violation. Not covered, and
 reported as not evaluated rather than passing: assembly parts without recorded
 dimensions, per-part printed-size limits (metrics containing `print`), mass,
 deflection and safety factor (these need analysis evidence, see below), and any
