@@ -159,6 +159,10 @@ tracer = get_tracer("metaforge.mcp.server")
 # to "Resource not found". A second copy of a table is a copy that can
 # disagree, and this one did.
 _INVALID_REQUEST = INVALID_REQUEST
+#: FORGE-724: how long a pending-approvals answer is reused across calls, and
+#: how many sessions' "already told" sets are kept.
+_APPROVAL_NOTICE_TTL_SECONDS = 15.0
+_APPROVAL_NOTICE_SESSIONS = 512
 _METHOD_NOT_FOUND = METHOD_NOT_FOUND
 _TOOL_EXECUTION_ERROR = TOOL_EXECUTION_ERROR
 _RESOURCE_NOT_FOUND = RESOURCE_NOT_FOUND
@@ -311,6 +315,10 @@ class UnifiedMcpServer:
         metrics: Any = None,
     ) -> None:
         self._adapters = list(adapters)
+        # FORGE-724: pending-approval notices on tool results (off until attached).
+        self._approvals_lister: Any = None
+        self._approvals_told: dict[str, set[str]] = {}
+        self._pending_cache: dict[str | None, tuple[float, list[dict[str, Any]]]] = {}
         # FORGE-339: when set, ``tools/list`` serves only this profile's
         # tools. Validated here rather than on first request — a typo in a
         # start-up flag should stop the server, not quietly serve a profile
@@ -568,6 +576,63 @@ class UnifiedMcpServer:
         except Exception:  # noqa: BLE001 - no context means the transport's answer
             pass
         return self._caller
+
+    def attach_approval_notices(self, lister: Any) -> None:
+        """Mention new pending approvals on tool results (FORGE-724).
+
+        ``lister`` is the ``approvals.list`` binding: ``(project_id | None) ->
+        [item dict, ...]``. Gates and held writes from a server-run flow only
+        reached the dashboard, so a person working in a client never heard of
+        them. With this on, the first tool result after an approval appears
+        carries one sentence saying so, once per item per session.
+        """
+        self._approvals_lister = lister
+
+    async def _approval_notice(self, tool_name: str) -> tuple[str, int] | None:
+        """One sentence about approvals this session has not been told of, or None."""
+        lister = getattr(self, "_approvals_lister", None)
+        if lister is None or tool_name.startswith("approvals.") or tool_name == "flow.await_gate":
+            return None
+        from mcp_core.context import current_context
+
+        ctx = current_context()
+        if ctx is not None and ctx.service_verified:
+            return None  # the design-flow worker: nobody to tell
+        session = str(ctx.session_id) if ctx is not None else "default"
+        project = str(ctx.project_id) if ctx is not None and ctx.project_id else None
+        try:
+            now = time.monotonic()
+            cache = self._pending_cache.get(project)
+            if cache is not None and now - cache[0] < _APPROVAL_NOTICE_TTL_SECONDS:
+                items = cache[1]
+            else:
+                items = [
+                    i for i in await lister(project) if i.get("status", "pending") == "pending"
+                ]
+                self._pending_cache[project] = (now, items)
+        except Exception as exc:  # noqa: BLE001 - a notice must never fail a tool call
+            logger.debug("approval_notice_unavailable", error=str(exc))
+            return None
+        told = self._approvals_told.setdefault(session, set())
+        if len(self._approvals_told) > _APPROVAL_NOTICE_SESSIONS:
+            self._approvals_told.pop(next(iter(self._approvals_told)))
+        live = {str(i.get("id")) for i in items}
+        told &= live
+        new = [i for i in items if str(i.get("id")) not in told]
+        if not new:
+            return None
+        told |= live
+        titles = "; ".join(str(i.get("title") or i.get("id")) for i in new[:3])
+        more = f" and {len(new) - 3} more" if len(new) > 3 else ""
+        total = len(items)
+        sentence = (
+            f"MetaForge: {total} approval{'s' if total != 1 else ''} waiting for a person "
+            f"({len(new)} new: {titles}{more}). Tell the person. They can decide them here with "
+            "/metaforge:approvals (approvals.list, then approvals.decide puts one to them), or "
+            "in the dashboard. You cannot decide them yourself."
+        )
+        logger.info("approval_notice_added", session=session, pending=total, new=len(new))
+        return sentence, total
 
     def attach_client_task_grant(self, verifier: Any) -> bool:
         """Turn on scoped writes for a client working a claimed task (FORGE-584).
@@ -1686,6 +1751,11 @@ class UnifiedMcpServer:
             # that is technically present and never looked at is how this
             # stayed invisible in the first place.
             content.append({"type": "text", "text": held.as_sentence()})
+        # FORGE-724: approvals the person has not heard of, said once.
+        notice = await self._approval_notice(str(tool_name))
+        if notice is not None:
+            content.append({"type": "text", "text": notice[0]})
+            meta["pendingApprovals"] = notice[1]
         return {
             "content": content,
             "isError": False,

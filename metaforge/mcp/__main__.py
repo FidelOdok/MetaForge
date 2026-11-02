@@ -1883,6 +1883,9 @@ async def _bootstrap(
         # FORGE-523: twin.item_history, so a plugin can read revisions too.
         item_history_reader=make_item_history_reader(twin),
     )
+    # FORGE-724: tell a client's person about approvals waiting for them.
+    if flow_bindings.get("design_flow_approvals_lister") is not None:
+        server.attach_approval_notices(flow_bindings["design_flow_approvals_lister"])
     # The evaluators' tier-2 calls (calculix.run_fea, run_thermal,
     # freecad.list_named_faces) go through this server's own registry, which
     # only exists now -- the same late binding the gateway does.

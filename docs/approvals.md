@@ -196,6 +196,17 @@ waiting for a person, from the MCP client (the Claude Code plugin's
 Like `flow.await_gate`, `approvals.decide` is not held at the call (it only
 asks), and the design-flow worker may not call either tool.
 
+**Told without asking.** A person working in a client should not have to ask
+whether something is waiting. When a client's tool call returns and an approval
+has appeared that this MCP session has not been told about, the sidecar adds
+one sentence to that result: how many are waiting, the new ones' titles, and
+that the person can decide them with `/metaforge:approvals` or in the
+dashboard. Each item is mentioned once per session; the approval tools
+themselves and `flow.await_gate` carry no notice, and the design-flow worker
+never gets one. The list is fetched at most every 15 seconds and a failure
+to fetch it never affects the call. The plugin's session rules tell the agent
+to pass the notice on straight away.
+
 Both are on the `core` profile, the plugin's default connection. To make room
 under its 40-tool cap, `memory.list_insights` and
 `memory.retrieve_similar_experience` moved to the full profile.
