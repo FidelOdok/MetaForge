@@ -686,6 +686,63 @@ class ApprovalRejectedError(RuntimeError):
         return out
 
 
+class ApprovalHandedOffError(RuntimeError):
+    """A held call was handed to a person instead of waited on (FORGE-741).
+
+    For a client that can neither show an approval prompt nor be sent
+    progress. Holding the call open there was a silent wait: the person saw a
+    tool call that would not finish, never an approval, and the hold expired
+    unanswered. Now the hold stays open in the ledger and the call returns at
+    once with the approval id and where to decide it. The same call, made
+    again after the person approves, runs once.
+    """
+
+    def __init__(
+        self,
+        tool_id: str,
+        approval_id: str,
+        *,
+        where: str,
+        url: str | None = None,
+        expires_in_seconds: float | None = None,
+        repeated: bool = False,
+    ) -> None:
+        self.tool_id = tool_id
+        self.approval_id = approval_id
+        self.where = where
+        self.url = url
+        self.expires_in_seconds = expires_in_seconds
+        self.repeated = repeated
+        minutes = (
+            f" It stays open for about {max(1, round(expires_in_seconds / 60))} minutes."
+            if expires_in_seconds
+            else ""
+        )
+        status = "is still waiting" if repeated else "is waiting"
+        super().__init__(
+            f"{tool_id} has not run: it {status} for a person to approve it "
+            f"(approval {approval_id}). Tell the person now that it needs their approval "
+            f"on {where}.{minutes} After they say they approved it, call {tool_id} again "
+            "with exactly the same arguments; it then runs once. Do not approve it "
+            "yourself, and do not call it again in a loop."
+        )
+
+    def as_data(self) -> dict[str, Any]:
+        """The same facts, structured, for the JSON-RPC error's ``data``."""
+        out: dict[str, Any] = {
+            "outcome": "awaiting_person",
+            "approval_id": self.approval_id,
+            "route": "dashboard",
+            "where": self.where,
+            "next": "call_again_with_same_arguments_after_approval",
+        }
+        if self.url:
+            out["approval_url"] = self.url
+        if self.expires_in_seconds is not None:
+            out["expires_in_seconds"] = round(self.expires_in_seconds)
+        return out
+
+
 class ApprovalLedgerUnavailableError(RuntimeError):
     """A held call could not be written to the approval ledger (FORGE-473).
 

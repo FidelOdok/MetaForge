@@ -353,12 +353,18 @@ inline) is not silent until it ends:
   `METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` (default 180). Without one it
   waits `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100), below common client
   tool timeouts (Claude Code: 120), so the server answers before the client
-  gives up. The window travels on the approval ask and sets the hold's
+  gives up. When the server also has an approval ledger, a dashboard hold for a
+  client with no progress channel is handed off instead of waited on: it stays
+  open for 30 minutes, the call returns after 20 seconds with
+  `data.outcome = "awaiting_person"` and `retryable: true`, and the same call
+  made again after the person approves runs once. See
+  [Approvals](approvals.md#any-approval-in-the-client-chat). The window travels on the approval ask and sets the hold's
   ledger deadline. A gate constructed with an explicit
   `timeout_seconds` caps it.
 * **Outcome.** An unapproved call is a JSON-RPC error with
   `data.code = "approval_required"` and `data.outcome` one of `rejected`,
-  `timed_out`, `cancelled` or `not_configured`, plus `approval_id`, `route`
+  `timed_out`, `cancelled`, `not_configured` or `awaiting_person` (handed
+  off, with `approval_url`, `expires_in_seconds` and `next`), plus `approval_id`, `route`
   (`dashboard` or `elicitation`), `where`, `held_seconds` and
   `window_seconds` when known. `message` states the same facts, because it
   is what a client shows the model.

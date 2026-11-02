@@ -23,6 +23,7 @@ import structlog
 from api_gateway.chat.tool_approvals import (
     HOLD_DEADLINE_GRACE_SECONDS,
     get_approval_store,
+    project_for_hold,
     record_inline_answer,
 )
 from mcp_core.guardrails import (
@@ -85,6 +86,7 @@ def build_mcp_approval_gate(
                 "caller": ask.caller.value,
                 "source": "mcp",
                 "session_id": ask.session_id,
+                "project": project_for_hold(ask.project, ask.arguments),
                 "route": "dashboard",
                 "client": ask.client,
             }
@@ -162,7 +164,7 @@ class InProcessApprovalLedger:
                     "caller": ask.caller.value,
                     "source": "mcp",
                     "session_id": ask.session_id,
-                    "project": ask.project,
+                    "project": project_for_hold(ask.project, ask.arguments),
                     "route": route,
                     "client": ask.client,
                 }
@@ -179,6 +181,31 @@ class InProcessApprovalLedger:
                 ask.tool_id, str(exc) or type(exc).__name__
             ) from exc
         return run.id
+
+    async def read_hold(self, approval_id: str) -> ApprovalResolution | None:
+        """The decision on a hold, or ``None`` while it awaits one (FORGE-741)."""
+        try:
+            run = get_approval_store().get(approval_id)
+        except Exception as exc:  # noqa: BLE001 - reported as a refusal, never a pass
+            raise ApprovalLedgerUnavailableError(
+                approval_id, str(exc) or type(exc).__name__
+            ) from exc
+        if run.status is RunStatus.AWAITING_APPROVAL:
+            return None
+        if run.status in (RunStatus.RUNNING, RunStatus.COMPLETED):
+            outcome = ApprovalOutcome.APPROVED
+        elif run.status is RunStatus.TIMED_OUT:
+            outcome = ApprovalOutcome.TIMED_OUT
+        elif run.status is RunStatus.CANCELED:
+            outcome = ApprovalOutcome.CANCELLED
+        else:
+            outcome = ApprovalOutcome.REJECTED
+        approver = (
+            Approver(actor_id=str(run.approved_by), verified=bool(run.approver_verified))
+            if getattr(run, "approved_by", None)
+            else None
+        )
+        return ApprovalResolution(outcome=outcome, approver=approver, approval_id=run.id)
 
     async def close_hold(
         self,

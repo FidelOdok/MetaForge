@@ -11,7 +11,9 @@ export const approvalKeys = {
 };
 
 // A held item can expire on its own with nothing prompting a human to look,
-// so the pending queue polls rather than waiting for a manual reload.
+// so the pending queue polls rather than waiting for a manual reload. It keeps
+// polling in a background tab too: React Query stops by default, and a held
+// call expires while the person is in another window waiting to be told.
 const POLL_INTERVAL_MS = 5_000;
 
 export function useApprovals(filters: ApprovalListFilters = {}) {
@@ -19,6 +21,7 @@ export function useApprovals(filters: ApprovalListFilters = {}) {
     queryKey: approvalKeys.list(filters),
     queryFn: () => listApprovals(filters),
     refetchInterval: filters.status === 'decided' ? false : POLL_INTERVAL_MS,
+    refetchIntervalInBackground: filters.status !== 'decided',
   });
 }
 
@@ -28,6 +31,7 @@ export function useApproval(id: string | undefined, enabled = true) {
     queryFn: () => getApproval(id!),
     enabled: !!id && enabled,
     refetchInterval: POLL_INTERVAL_MS,
+    refetchIntervalInBackground: true,
   });
 }
 

@@ -371,6 +371,44 @@ class RemoteApprovalLedger:
         )
         return approval_id
 
+    async def read_hold(self, approval_id: str) -> ApprovalResolution | None:
+        """The decision on a hold, or ``None`` while it awaits one (FORGE-741).
+
+        The approver comes off the ledger entry, as for every other route.
+        Raises :class:`ApprovalLedgerUnavailableError` when the ledger cannot
+        be read, so an outage is never read as an approval.
+        """
+        try:
+            if self._client is not None:
+                current = await self._client.get(
+                    f"{self._endpoint}/{approval_id}", timeout=self._timeout
+                )
+            else:
+                async with httpx.AsyncClient(timeout=self._timeout) as http:
+                    current = await http.get(f"{self._endpoint}/{approval_id}")
+            current.raise_for_status()
+            body: dict[str, Any] = current.json()
+        except Exception as exc:  # noqa: BLE001 - reported as a refusal, never a pass
+            raise ApprovalLedgerUnavailableError(
+                str(approval_id), str(exc) or type(exc).__name__
+            ) from exc
+        status = str(body.get("status") or "")
+        if status == _PENDING:
+            return None
+        approver = (
+            Approver(
+                actor_id=str(body["approved_by"]),
+                verified=bool(body.get("approver_verified")),
+            )
+            if body.get("approved_by")
+            else None
+        )
+        return ApprovalResolution(
+            outcome=_STATUS_OUTCOMES.get(status, ApprovalOutcome.REJECTED),
+            approver=approver,
+            approval_id=approval_id,
+        )
+
     async def close_hold(
         self,
         approval_id: str,
