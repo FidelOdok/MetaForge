@@ -147,6 +147,42 @@ async def test_without_the_flag_an_uncoloured_commit_is_unchanged() -> None:
     assert base64.b64decode(stored[0]["step_base64"]) == STEP
 
 
+async def test_a_generated_mesh_is_not_held_to_the_step_colour_rule(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Tripo or Meshy GLB keeps its own materials; the rule is about STEP.
+
+    Live on the sandbox (2026-11-02) a tripo.download GLB was refused as
+    "(whole model)" uncoloured, so the documented download-then-commit path
+    could never succeed from a plugin.
+    """
+    monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output" / "mug.glb").write_bytes(b"glTF" + bytes(20))
+    srv, stored = _server()
+    await srv.commit_geometry(
+        {
+            "file_path": "output/mug.glb",
+            "format": "glb",
+            "name": "Mug from photo",
+            "source_tool": "tripo.download",
+            REQUIRE_PART_COLOURS_ARG: True,
+        }
+    )
+    assert len(stored) == 1
+
+
+async def test_colouring_a_mesh_is_refused_with_the_reason(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+    (tmp_path / "part.stl").write_bytes(b"solid x endsolid x")
+    srv, stored = _server()
+    with pytest.raises(ValueError, match="a stl mesh keeps its own materials"):
+        await srv.commit_geometry({"file_path": "part.stl", "name": "p", "color": "#808080"})
+    assert stored == []
+
+
 # ── the server sets the flag, and only the server ─────────────────────────
 
 

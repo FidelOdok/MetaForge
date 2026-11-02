@@ -59,6 +59,9 @@ _MAX_WAIT_SECONDS = 120
 _DEFAULT_WAIT_SECONDS = 60
 _OUTPUT_SUBDIR = Path("output") / "tripo"
 _GENERATION_TYPES = frozenset({"text_to_model", "image_to_model", "multiview_to_model"})
+#: Sent when the caller names no model. Tripo stopped choosing one itself and
+#: answers 400 (code 1004, "model is required") without it, live on 2026-11-02.
+DEFAULT_MODEL = "v3.1-20260211"
 
 _MESH_OPTIONS: dict[str, Any] = {
     "model": {
@@ -372,6 +375,7 @@ class TripoMcpServer(McpToolServer):
     async def handle_text_to_3d(self, arguments: dict[str, Any]) -> dict[str, Any]:
         prompt = _require_str(arguments, "prompt")
         options = _options(arguments, _MESH_OPTION_TYPES)
+        options.setdefault("model", DEFAULT_MODEL)
         negative = arguments.get("negative_prompt")
         if isinstance(negative, str) and negative.strip():
             options["negative_prompt"] = negative.strip()
@@ -382,6 +386,7 @@ class TripoMcpServer(McpToolServer):
 
     async def handle_image_to_3d(self, arguments: dict[str, Any]) -> dict[str, Any]:
         options = _options(arguments, _MESH_OPTION_TYPES)
+        options.setdefault("model", DEFAULT_MODEL)
         file_path = _optional_str(arguments, "file_path")
         image_url = _optional_str(arguments, "image_url")
         if bool(file_path) == bool(image_url):
