@@ -22,6 +22,7 @@ from fastapi import HTTPException
 
 from api_gateway.approvals.findings import findings_from_lines, findings_from_reason
 from api_gateway.approvals.schemas import (
+    ID_PREFIXES,
     REASON_REQUIRED_FOR,
     ApprovalItem,
     DecisionRecord,
@@ -36,6 +37,9 @@ from api_gateway.design_loop import routes as design_loop_routes
 from api_gateway.runs import routes as run_routes
 from api_gateway.runs.schemas import project_of
 from api_gateway.twin import routes as twin_routes
+from api_gateway.uploads import routes as upload_routes
+from api_gateway.uploads import service as upload_service
+from api_gateway.uploads.store import StagedUpload, UploadNotFoundError
 from mcp_core.guardrails import Approver, requires_human_authority
 from orchestrator.harness.runs import (
     UNANSWERED,
@@ -458,11 +462,118 @@ async def _twin_items(app: Any) -> list[ApprovalItem]:
     return items
 
 
+def upload_item(upload: StagedUpload) -> ApprovalItem:
+    """A staged upload as an approval: approve imports its files, reject drops them."""
+    item_id = f"upload:{upload.id}"
+    status = {
+        "open": "pending",
+        "pending": "pending",
+        "approved": "approved",
+        "rejected": "rejected",
+        "expired": "expired",
+    }[upload.status]
+    accepted = upload.accepted
+    left_out = [f for f in upload.files if f.error is not None and not f.work_product_id]
+    names = ", ".join(f.name for f in accepted[:3]) + (
+        f" and {len(accepted) - 3} more" if len(accepted) > 3 else ""
+    )
+    allowed = ["approve", "reject"] if upload.status == "pending" else []
+    decidable, why = _decidable(upload.status == "pending", allowed)
+    if upload.status == "open":
+        why = "still receiving files; it can be decided once the upload is finished"
+    record = (
+        DecisionRecord(
+            decision=upload.decision.decision,
+            reason=upload.decision.reason,
+            approver=upload.decision.approver,
+            approver_verified=upload.decision.approver_verified,
+            surface=_surface(upload.decision.surface),
+            decided_at=upload.decision.decided_at,
+        )
+        if upload.decision
+        else None
+    )
+    return ApprovalItem(
+        id=item_id,
+        kind="upload",
+        status=status,  # type: ignore[arg-type]
+        title=f"Upload: {names or 'no importable files'}",
+        summary=(
+            f"{len(accepted)} file(s), {upload.total_size} bytes, from {upload.source}"
+            + (f"; {len(left_out)} cannot be imported" if left_out else "")
+            + (f". {upload.description}" if upload.description else "")
+        ),
+        project_id=upload.project_id,
+        created_at=upload.created_at,
+        route="dashboard",
+        requested_by=upload.agent or upload.requested_by,
+        allowed_decisions=allowed,  # type: ignore[arg-type]
+        decidable=decidable,
+        not_decidable_reason=why,
+        detail={
+            "upload_id": upload.id,
+            "source": upload.source,
+            "files": [
+                {
+                    **f.model_dump(),
+                    "preview_url": (
+                        f"/v1/uploads/{upload.id}/files/{f.name}"
+                        if f.error is None and upload.status == "pending"
+                        else None
+                    ),
+                }
+                for f in upload.files
+            ],
+        },
+        decision=_record(item_id, record),
+    )
+
+
+def _upload_items() -> list[ApprovalItem]:
+    try:
+        store = upload_routes.get_upload_store()
+        upload_service.expire_overdue(store)
+        return [upload_item(u) for u in store.list()]
+    except Exception as exc:  # noqa: BLE001 - one unreadable kind must not hide the others
+        logger.warning("approvals_list_failed", kind="upload", error=str(exc))
+        return []
+
+
+async def _decide_upload(
+    app: Any, upload_id: str, decision: str, reason: str, approver: Approver, surface: str
+) -> None:
+    store = upload_routes.get_upload_store()
+    upload = store.get(upload_id)
+    try:
+        if decision == "approve":
+            twin = _twin_of(app) or twin_routes.get_twin()
+            await upload_service.approve(
+                store,
+                twin,
+                upload,
+                approver=approver.label,
+                approver_verified=approver.verified,
+                surface=surface,
+            )
+        else:
+            upload_service.reject(
+                store,
+                upload,
+                reason=reason,
+                approver=approver.label,
+                approver_verified=approver.verified,
+                surface=surface,
+            )
+    except upload_service.UploadError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 # ── list / get ───────────────────────────────────────────────────────────
 
 
 #: Kinds only a person may decide, unless the owner delegates them (FORGE-510).
-HUMAN_AUTHORITY_KINDS: tuple[str, ...] = ("human_authority", "design_loop")
+#: An upload is one: the agent that sent the files may not let them in itself.
+HUMAN_AUTHORITY_KINDS: tuple[str, ...] = ("human_authority", "design_loop", "upload")
 ALLOW_AGENT_HUMAN_AUTHORITY_ENV = "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY"
 AGENT_HUMAN_AUTHORITY_REASON = (
     "this approval needs a human decision; agents may not decide it unless the gateway "
@@ -516,6 +627,7 @@ async def list_items(app: Any) -> list[ApprovalItem]:
             items.append(tool_item(r))
     items.extend(change_item(p) for p in assistant_routes.workflow.list_proposals())
     items.extend(await _twin_items(app))
+    items.extend(_upload_items())
     items.sort(key=lambda i: i.created_at or "", reverse=True)
     return items
 
@@ -530,11 +642,7 @@ def _not_found(item_id: str) -> HTTPException:
 
 def split_id(item_id: str) -> tuple[str, str]:
     kind, sep, raw = item_id.partition(":")
-    if (
-        not sep
-        or not raw
-        or kind not in ("gate", "tool", "change", "design_loop", "sketch", "drawing")
-    ):
+    if not sep or not raw or kind not in ID_PREFIXES:
         raise _not_found(item_id)
     return kind, raw
 
@@ -567,6 +675,11 @@ async def get_item(app: Any, item_id: str) -> ApprovalItem:
         if not proposal:
             raise _not_found(item_id)
         return change_item(proposal)
+    if kind == "upload":
+        try:
+            return upload_item(upload_routes.get_upload_store().get(raw))
+        except UploadNotFoundError as exc:
+            raise _not_found(item_id) from exc
     twin = _twin_of(app)
     if twin is None:
         raise _not_found(item_id)
@@ -668,6 +781,8 @@ async def decide(
             )
         elif kind == "design_loop":
             await design_loop_routes.approve_loop(raw, label, audit)
+        elif kind == "upload":
+            await _decide_upload(app, raw, decision, reason, approver, surface)
         elif kind == "sketch":
             await twin_routes.approve_sketch_node(UUID(raw), label, audit)
         else:

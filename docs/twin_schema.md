@@ -205,6 +205,12 @@ at the rendered model, and `metadata.source_content_hash` records which
 revision of it was rendered, so a render of an older revision can be told
 apart from a current one.
 
+Two more are inputs from outside ([Files in and out](file-transfer.md)):
+`GCODE = "gcode"`, G-code for one printer (`.gcode`, `.gco`, `.bgcode`),
+which `library.dispatch_job` sends; and `IMAGE = "image"`, a picture (a
+reference photo, a sketch, a screenshot), with its pixel size in
+`metadata.width_px` and `metadata.height_px`.
+
 **Pydantic Model**:
 
 ```python

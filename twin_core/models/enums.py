@@ -155,6 +155,13 @@ class WorkProductType(StrEnum):
     # a GENERATED_FROM edge, and records that model's content hash so a
     # stale render can be told apart from a current one.
     RENDER = "render"
+    # G-code for one printer, from slicer.slice or an upload. A work product
+    # of its own so library.dispatch_job can send it; linked GENERATED_FROM
+    # the part it was sliced from when that is known.
+    GCODE = "gcode"
+    # A picture: a reference photo, a sketch, a screenshot, a marked-up
+    # drawing. Uploaded as input (and the source of tripo/meshy image_to_3d).
+    IMAGE = "image"
 
 
 class ConstraintSeverity(StrEnum):

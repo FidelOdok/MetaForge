@@ -10,7 +10,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
@@ -36,14 +36,6 @@ from api_gateway.twin.file_link import (
 )
 from api_gateway.twin.geometry_diff import NoPreviousVersion
 from api_gateway.twin.import_schemas import ImportWorkProductResponse
-from api_gateway.twin.import_service import (
-    ALLOWED_EXTENSIONS,
-    MAX_FILE_SIZE,
-    ImportService,
-    get_extension,
-    infer_domain,
-    infer_wp_type,
-)
 from api_gateway.twin.record_pins import record_view
 from api_gateway.twin.schemas import (
     ApproveSketchRequest,
@@ -70,7 +62,6 @@ from api_gateway.twin.version_schemas import (
 )
 from api_gateway.twin.version_service import VersionService
 from observability.tracing import get_tracer
-from shared.storage import default_storage
 from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
 from twin_core.models.enums import EdgeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
@@ -572,6 +563,11 @@ _PREVIEW_CONTENT_TYPES: dict[str, str] = {
     "jpeg": "image/jpeg",
     "svg": "image/svg+xml",
     "gif": "image/gif",
+    "webp": "image/webp",
+    "gcode": "text/plain; charset=utf-8",
+    "gco": "text/plain; charset=utf-8",
+    "obj": "model/obj",
+    "3mf": "model/3mf",
     "txt": "text/plain; charset=utf-8",
     "md": "text/markdown; charset=utf-8",
     "json": "application/json",
@@ -857,164 +853,26 @@ async def import_work_product(
 ) -> ImportWorkProductResponse:
     """Upload a design file and register it as a work product in the Twin.
 
-    Accepts STEP, IGES, KiCad (.kicad_sch, .kicad_pcb), and FreeCAD
-    (.FCStd) files. Metadata is extracted automatically based on file type.
+    Accepts CAD (STEP, IGES, FreeCAD), KiCad, meshes (STL, OBJ, GLB, glTF,
+    PLY, 3MF), G-code, images, firmware and documents; ``ALLOWED_EXTENSIONS``
+    is the list. A person importing here is the approval: uploads from an
+    agent or a link go through ``/v1/uploads`` and wait for one.
     """
-    with tracer.start_as_current_span("twin.import_work_product") as span:
-        filename = file.filename or "unknown"
-        ext = get_extension(filename)
-        span.set_attribute("import.filename", filename)
-        span.set_attribute("import.extension", ext)
+    from api_gateway.twin.import_commit import ImportRejected, commit_import
 
-        # Validate extension
-        if ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Unsupported file type '{ext}'. "
-                    f"Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
-                ),
-            )
-
-        # Read and validate content
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="Uploaded file is empty")
-        if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large ({len(content)} bytes). Max: {MAX_FILE_SIZE}",
-            )
-
-        # Resolve domain and type
-        resolved_domain = domain or infer_domain(ext)
-        if wp_type is not None:
-            try:
-                resolved_type = WorkProductType(wp_type)
-            except ValueError:
-                valid = [t.value for t in WorkProductType]
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid wp_type '{wp_type}'. Valid: {valid}",
-                )
-        else:
-            resolved_type = infer_wp_type(ext)
-
-        # Extract metadata
-        import_service = ImportService()
-        metadata = await import_service.extract_metadata(content, filename)
-
-        # Store file locally (kept as a cache / fallback even when MinIO
-        # is the source of truth — download prefers the object key).
-        content_hash = default_storage.content_hash(content)
-        session_id = f"import-{uuid4()}"
-        stored_path = default_storage.save(session_id, filename, content)
-
-        # Build name from description or filename
-        name = description.strip()[:60] if description.strip() else Path(filename).stem
-
-        now = datetime.now(UTC)
-        wp_id = uuid4()
-
-        # MET-483: upload the blob to MinIO — the architecture's source of
-        # truth for work-product blobs (data-modalities.md). Graceful: if
-        # the minio client is missing or the server is unreachable, keep
-        # the local file_path and skip the object key so download falls
-        # back to disk rather than failing the import.
-        minio_object_key: str | None = None
-        try:
-            from api_gateway.twin.blob_store import store_work_product_blob
-
-            minio_object_key = store_work_product_blob(
-                str(wp_id),
-                filename,
-                content,
-                content_type=_content_type_for(ext.lstrip("."), filename),
-            )
-        except Exception as exc:  # minio absent / bucket unreachable / etc.
-            logger.warning("wp_blob_minio_upload_skipped", filename=filename, error=str(exc))
-
-        wp_metadata: dict[str, object] = {
-            "imported": True,
-            "original_filename": filename,
-            "session_id": session_id,
-            "timestamp": now.isoformat(),
-            **metadata,
-        }
-        if minio_object_key:
-            wp_metadata["minio_object_key"] = minio_object_key
-            span.set_attribute("import.minio_object_key", minio_object_key)
-
-        # Create WorkProduct
-        wp = WorkProduct(
-            id=wp_id,
-            name=name,
-            type=resolved_type,
-            domain=resolved_domain,
-            file_path=stored_path,
-            content_hash=content_hash,
-            format=ext.lstrip("."),
-            metadata=wp_metadata,
-            created_at=now,
-            updated_at=now,
-            created_by="import-api",
-            # MET-491: stamp project_id on the node itself so the twin's
-            # project-scoped read path (list_work_products(project_id=...)) finds
-            # it. The Postgres project junction below is separate and only feeds
-            # the Projects page; without this the /twin project filter returns 0
-            # for imported nodes (decision/geometry-recorder nodes already set it).
-            project_id=project_id or None,
-        )
-
-        created_wp = await _twin.create_work_product(wp)
-
-        # Record initial revision
-        revision = VersionService.build_revision(created_wp, "Initial import")
-        updated_metadata = VersionService.append_to_metadata(created_wp.metadata, revision)
-        await _twin.update_work_product(created_wp.id, {"metadata": updated_metadata})
-
-        # Link to project if requested
-        if project_id:
-            try:
-                from api_gateway.projects.routes import link_work_product_to_project
-
-                await link_work_product_to_project(
-                    project_id,
-                    str(created_wp.id),
-                    created_wp.name,
-                    created_wp.type.value,
-                )
-            except Exception as exc:
-                span.record_exception(exc)
-                logger.warning(
-                    "import_project_link_failed",
-                    project_id=project_id,
-                    error=str(exc),
-                )
-
-        logger.info(
-            "work_product_imported",
-            wp_id=str(created_wp.id),
-            filename=filename,
-            domain=resolved_domain,
-            wp_type=resolved_type.value,
+    content = await file.read()
+    try:
+        return await commit_import(
+            _twin,
+            content,
+            file.filename or "unknown",
             project_id=project_id,
+            domain=domain,
+            wp_type=wp_type,
+            description=description,
         )
-
-        return ImportWorkProductResponse(
-            id=str(created_wp.id),
-            name=created_wp.name,
-            domain=resolved_domain,
-            wp_type=resolved_type.value,
-            file_path=stored_path,
-            content_hash=content_hash,
-            format=ext.lstrip("."),
-            # Return the stored metadata (incl. minio_object_key) so callers
-            # see where the blob landed, not just the extracted fields.
-            metadata=wp_metadata,
-            project_id=project_id,
-            created_at=now.isoformat(),
-        )
+    except ImportRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

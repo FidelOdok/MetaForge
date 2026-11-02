@@ -185,7 +185,7 @@ class TestVersionServiceDiff:
 class TestVersionEndpoints:
     @pytest.fixture(autouse=True)
     def _mock_storage(self):
-        with patch("api_gateway.twin.routes.default_storage") as mock_st:
+        with patch("api_gateway.twin.import_commit.default_storage") as mock_st:
             mock_st.save.return_value = "/tmp/test/file.step"
             mock_st.content_hash.return_value = "abc123"
             yield mock_st

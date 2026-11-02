@@ -10,7 +10,8 @@ export type ApprovalKind =
   | 'design_change'
   | 'design_loop'
   | 'sketch'
-  | 'drawing';
+  | 'drawing'
+  | 'upload';
 
 export type ApprovalStatus =
   | 'pending'

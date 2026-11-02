@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { Button } from '../ui/Button';
+import { openStagedFile } from '../../api/endpoints/uploads';
 import { useDecideApproval } from '../../hooks/use-approvals';
 import { formatRelativeTime } from '../../utils/format-time';
 import type {
@@ -37,6 +38,7 @@ const KIND_LABELS: Record<ApprovalItem['kind'], string> = {
   design_loop: 'Design loop',
   sketch: 'Sketch',
   drawing: 'Drawing',
+  upload: 'Upload',
 };
 
 const DECISION_LABELS: Record<ApprovalDecision, string> = {
@@ -98,6 +100,51 @@ function entries(obj: unknown): [string, unknown][] {
   return obj && typeof obj === 'object' && !Array.isArray(obj)
     ? Object.entries(obj as Record<string, unknown>)
     : [];
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface UploadFileRow {
+  name: string;
+  size: number;
+  wp_type: string;
+  error: string | null;
+  work_product_id: string | null;
+  preview_url: string | null;
+}
+
+/** A staged upload's files: what each becomes, what was left out, and a look at each. */
+function UploadDetail({ uploadId, files }: { uploadId: string; files: unknown }) {
+  const rows = (Array.isArray(files) ? files : []) as UploadFileRow[];
+  const [failed, setFailed] = useState<string | null>(null);
+  return (
+    <div className="space-y-1" data-testid="approval-detail">
+      {rows.map((f) => (
+        <div key={f.name} className="flex flex-wrap items-center gap-2 font-mono text-xs">
+          <span style={{ color: f.error ? KC.error : KC.onSurface }}>{f.name}</span>
+          <Chip>{f.error ? 'not importable' : f.wp_type}</Chip>
+          <span style={{ color: KC.onSurfaceVariant }}>{formatBytes(f.size)}</span>
+          {f.error && <span style={{ color: KC.error }}>{f.error}</span>}
+          {f.preview_url && (
+            <button
+              type="button"
+              className="underline"
+              style={{ color: KC.primaryContainer }}
+              onClick={() => openStagedFile(uploadId, f.name).catch(() => setFailed(f.name))}
+            >
+              view
+            </button>
+          )}
+          {f.work_product_id && <Chip color={KC.success}>in twin</Chip>}
+        </div>
+      ))}
+      {failed && <p style={{ color: KC.error, margin: 0 }}>Could not open {failed}.</p>}
+    </div>
+  );
 }
 
 /** The part of the card that depends on `kind`. */
@@ -188,6 +235,8 @@ function KindDetail({ item }: { item: ApprovalItem }) {
         </div>
       );
     }
+    case 'upload':
+      return <UploadDetail uploadId={String(d.upload_id ?? '')} files={d.files} />;
     default: {
       const ref = d.node_id ?? d.loop_id;
       return ref != null ? (
