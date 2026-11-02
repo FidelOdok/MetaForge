@@ -154,6 +154,32 @@ class InProcessApprovalLedger:
     :class:`metaforge.mcp.remote_approvals.RemoteApprovalLedger` instead.
     """
 
+    async def policy_approval(self, ask: ApprovalAsk) -> ApprovalResolution | None:
+        """The project's policy's approval of ``ask``, or ``None`` to hold it (FORGE-745)."""
+        from api_gateway.chat.tool_approvals import PolicyApprovalRequest, approve_by_policy
+
+        try:
+            answer = await approve_by_policy(
+                PolicyApprovalRequest(
+                    tool=ask.tool_id,
+                    arguments=ask.arguments,
+                    caller=ask.caller.value,
+                    session_id=ask.session_id,
+                    project=ask.project,
+                    client=ask.client,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - no answer means a person decides
+            logger.info("mcp_policy_approval_unavailable", tool_id=ask.tool_id, error=str(exc))
+            return None
+        if not answer.approved:
+            return None
+        return ApprovalResolution(
+            outcome=ApprovalOutcome.APPROVED,
+            approver=Approver(actor_id=str(answer.approved_by or "policy"), verified=False),
+            approval_id=answer.id,
+        )
+
     async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
         store = get_approval_store()
         try:

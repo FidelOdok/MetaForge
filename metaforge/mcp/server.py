@@ -165,6 +165,9 @@ _INVALID_REQUEST = INVALID_REQUEST
 #: FORGE-724: how long a pending-approvals answer is reused across calls, and
 #: how many sessions' "already told" sets are kept.
 _APPROVAL_NOTICE_TTL_SECONDS = 15.0
+#: FORGE-745: tools a project's approval policy may approve without a person.
+#: The gateway decides whether it does; this only saves asking for the rest.
+POLICY_APPROVABLE_TOOLS = frozenset({"phase.claim"})
 #: FORGE-741: a hold handed to a person (a client that can neither be asked
 #: nor sent progress) stays open this long for the same call to come back to.
 HANDOFF_WINDOW_SECONDS = 1800.0
@@ -2378,6 +2381,32 @@ class UnifiedMcpServer:
             )
         if not decision.requires_approval:
             return None
+
+        # FORGE-745: a call the project's approval policy already covers (a
+        # phase claim under ``auto``) runs, approved by the policy and on the
+        # ledger, without asking anyone. Anything else is held as before.
+        policy_approval = getattr(self._approval_ledger, "policy_approval", None)
+        if policy_approval is not None and tool_id in POLICY_APPROVABLE_TOOLS:
+            by_policy = await policy_approval(
+                ApprovalAsk(
+                    tool_id=tool_id,
+                    arguments=arguments,
+                    caller=caller,
+                    reason=decision.reason,
+                    project=_effective_project(arguments),
+                    client=self._client_label(),
+                )
+            )
+            if by_policy is not None and by_policy.outcome is ApprovalOutcome.APPROVED:
+                logger.info(
+                    "mcp_tool_call_approved_by_policy",
+                    tool_id=tool_id,
+                    caller=caller.value,
+                    approval_id=by_policy.approval_id,
+                )
+                return await self._approved(
+                    tool_id, caller, "policy", by_policy, 0.0, None, call_id
+                )
 
         # In-harness first: the person who asked for this is looking at that
         # window. Not a fallback chain -- once a client has been asked, going
