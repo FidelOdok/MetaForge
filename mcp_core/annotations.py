@@ -44,6 +44,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "flow.status",
         # FORGE-722: what is waiting for a person; reading it decides nothing.
         "approvals.list",
+        # FORGE-730: open gate reviews.
+        "review.list_tasks",
         # FORGE-539: the lifecycle readers. Compiling an intent stores nothing,
         # and coverage, lifecycle and the completion verdict only read.
         "flow.compile_intent",
@@ -307,6 +309,9 @@ ADDITIVE: frozenset[str] = frozenset(
         "flow.await_gate",
         # FORGE-722: records the decision a person gives on any pending item.
         "approvals.decide",
+        # FORGE-730: a client reviewer takes and answers a gate review.
+        "review.claim",
+        "review.submit",
         # FORGE-581: taking a phase task and handing it back record the
         # client's own work on the task; neither touches design state.
         "phase.claim",

@@ -813,6 +813,8 @@ async def _apply_policy(app: Any, run: Run, review: GateReview) -> tuple[str, st
     mode = effective_mode(await get_policy_store().get(str(project_id)))
     if mode in ("off", "advise"):
         return "advised", f"policy '{mode}': a person decides"
+    if review.same_client:
+        return "held", "reviewed by the client that did the phase, so it is advice only"
     if review.recommendation in ("none", "reject"):
         # A reviewer never ends a run on its own, and "none" is no view at all.
         return "held", f"the reviewer recommended '{review.recommendation}'; a person decides"

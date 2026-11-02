@@ -148,6 +148,10 @@ BOOKKEEPING: frozenset[str] = frozenset(
         "session.start",
         "session.log_event",
         "session.complete",
+        # FORGE-730: a client reviewer's own output: advice on a gate, not
+        # design state. Holding it would ask a person to approve the advice.
+        "review.claim",
+        "review.submit",
         # FORGE-647: shows a committed part in the live assembly view and
         # records nothing in the twin. Holding each placement for approval
         # would make the view a series of prompts instead of a build.
@@ -216,7 +220,15 @@ ARGUMENT_CLASSIFIED: frozenset[str] = frozenset({"twin.query_cypher"})
 #: was given; reshaping either is an administrator's call (FORGE-487).
 #: FORGE-584: ``phase.*`` too. The worker's phase brain has no business
 #: taking client tasks.
-SERVICE_REFUSED_PREFIXES: tuple[str, ...] = ("project.", "flow.", "run.", "phase.", "approvals.")
+# FORGE-722/730: approvals and gate reviews are a person's, or a client reviewer's.
+SERVICE_REFUSED_PREFIXES: tuple[str, ...] = (
+    "project.",
+    "flow.",
+    "run.",
+    "phase.",
+    "approvals.",
+    "review.",
+)
 
 #: What a client working a claimed phase task may call that the service
 #: worker may not (FORGE-584): handing tasks back, and asking the person to

@@ -48,6 +48,7 @@ from api_gateway.design_flows.mcp_bindings import (
     make_lifecycle_reader,
     make_patcher,
     make_proposer,
+    make_review_task_service,
     make_run_starter,
     make_run_status_reader,
 )
@@ -1306,6 +1307,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-581: phase tasks for client-mode runs.
         design_flow_client_tasks=make_client_task_service(),
         design_flow_approvals_lister=make_approvals_lister(),
+        design_flow_review_tasks=make_review_task_service(),
         # FORGE-355: the project brief as an MCP resource.
         brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness
@@ -2195,6 +2197,10 @@ def create_app(
 
     app.include_router(approval_policy_router)
     app.include_router(gate_review_router)
+    # FORGE-730: reviews done by a connected client's reviewer subagent.
+    from api_gateway.approvals.review_tasks import router as review_tasks_router
+
+    app.include_router(review_tasks_router)
     app.include_router(client_tasks_router)
     app.include_router(library_router)
     app.include_router(library_catalog_router)

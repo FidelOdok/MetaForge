@@ -621,7 +621,11 @@ class TestLifecycleSurface:
                         assert "${CLAUDE_PLUGIN_ROOT}/hooks/metaforge_hook.py" in hook["command"]
             assert (root / "hooks" / "metaforge_hook.py").is_file()
             agents = {p.stem for p in (root / "agents").glob("*.md")}
-            assert agents == {"metaforge-flow-planner", "metaforge-run-verifier"}
+            assert agents == {
+                "metaforge-flow-planner",
+                "metaforge-run-verifier",
+                "metaforge-gate-reviewer",  # FORGE-730
+            }
             manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
             assert "hooks" not in manifest, "the standard location loads by itself"
 

@@ -10,6 +10,7 @@ import { formatRelativeTime } from '../utils/format-time';
 import { useCurrentView } from '../hooks/use-items';
 import { CurrentItemsPanel } from '../components/items/CurrentItemsPanel';
 import { BaselinesPanel } from '../components/items/BaselinesPanel';
+import { ApprovalPolicyPanel } from '../components/approvals/ApprovalPolicyPanel';
 
 // FORGE-531: the preview registry and engines load only when a row's
 // Preview toggle is first opened.
@@ -85,6 +86,7 @@ export function ProjectDetailPage() {
   // when the twin cannot answer.
   const { data: view } = useCurrentView(id);
   const [showBaselines, setShowBaselines] = useState(false);
+  const [showPolicy, setShowPolicy] = useState(false);
 
   useEffect(() => {
     if (id && id !== activeProjectId) setActiveProjectId(id);
@@ -258,7 +260,21 @@ export function ProjectDetailPage() {
         >
           {showBaselines ? 'Hide baselines' : 'Baselines'}
         </button>
+        <button
+          type="button"
+          className="action-secondary"
+          aria-expanded={showPolicy}
+          onClick={() => setShowPolicy((v) => !v)}
+        >
+          {showPolicy ? 'Hide approval policy' : 'Approval policy'}
+        </button>
       </div>
+
+      {showPolicy && (
+        <div className="mb-4">
+          <ApprovalPolicyPanel projectId={project.id} />
+        </div>
+      )}
 
       {showBaselines && (
         <div className="mb-4">

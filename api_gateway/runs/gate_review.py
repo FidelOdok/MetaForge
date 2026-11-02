@@ -241,11 +241,90 @@ async def server_review(brief: dict[str, Any], *, model_ref: str) -> dict[str, A
     return parse_review(reply)
 
 
+def client_review_wait_seconds() -> float:
+    """How long to wait for a client reviewer, ``METAFORGE_CLIENT_REVIEW_WAIT_SECONDS``."""
+    try:
+        return max(float(os.environ.get("METAFORGE_CLIENT_REVIEW_WAIT_SECONDS", "") or 600), 0.0)
+    except ValueError:
+        return 600.0
+
+
+_CLIENT_POLL_SECONDS = 10.0
+
+
+async def _post_none(
+    gateway: _Gateway, payload: dict[str, Any], source: str, model: str, why: str
+) -> None:
+    phase = payload.get("phase") or {}
+    try:
+        await gateway.request(
+            "POST",
+            f"/v1/runs/{payload.get('run_id')}/gate-review",
+            json_body={
+                "phase": str(phase.get("id") or ""),
+                "attempt": payload.get("attempt"),
+                "gate": str(payload.get("gate") or ""),
+                "source": source,
+                "model": model or "unknown",
+                "recommendation": "none",
+                "error": why,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("gate_review_post_failed", run_id=payload.get("run_id"), error=str(exc))
+
+
+async def _client_review(
+    payload: dict[str, Any], gateway: _Gateway, model_ref: str, *, sleep: Any = None
+) -> dict[str, Any] | None:
+    """Open a review task and wait for a client to submit it. None when nobody did."""
+    import asyncio
+    import time
+
+    pause = sleep or asyncio.sleep
+    phase = payload.get("phase") or {}
+    brief = await build_review_brief(payload, gateway)
+    task = await gateway.request(
+        "POST",
+        "/v1/review-tasks",
+        json_body={
+            "run_id": payload.get("run_id"),
+            "project_id": payload.get("project_id"),
+            "phase": str(phase.get("id") or ""),
+            "attempt": payload.get("attempt"),
+            "gate": str(payload.get("gate") or ""),
+            "brief": brief,
+            "requested_model": model_ref,
+        },
+    )
+    task_id = task["id"]
+    logger.info(
+        "gate_review_task_waiting", task_id=task_id, wait_seconds=client_review_wait_seconds()
+    )
+    deadline = time.monotonic() + client_review_wait_seconds()
+    while True:
+        current = await gateway.request("GET", f"/v1/review-tasks/{task_id}")
+        status = (current or {}).get("status")
+        if status == "submitted":
+            return {"status": "reviewed", "source": "client", "task_id": task_id}
+        if status == "cancelled" or time.monotonic() >= deadline:
+            break
+        await pause(_CLIENT_POLL_SECONDS)
+    await gateway.request(
+        "POST",
+        f"/v1/review-tasks/{task_id}/cancel",
+        json_body={"reason": "no client reviewer in time"},
+    )
+    logger.info("gate_review_task_unclaimed", task_id=task_id)
+    return None
+
+
 async def review_gate(
     payload: dict[str, Any],
     *,
     client: httpx.AsyncClient | None = None,
     reviewer: Any = None,
+    sleep: Any = None,
 ) -> dict[str, Any]:
     """Review one open gate if the project's policy asks for it, and post the review."""
     gateway = _Gateway(client)
@@ -267,10 +346,22 @@ async def review_gate(
         span.set_attribute("policy.mode", mode)
         if mode == "off":
             return {"status": "skipped", "why": "policy off"}
-        if policy.get("reviewer") == "client":
-            # FORGE-730: a client reviewer claims a review task; not this step's job.
-            return {"status": "skipped", "why": "client reviewer"}
+        source = str(policy.get("reviewer") or "server")
         model_ref = str(policy.get("reviewer_model") or "")
+        if source in ("client", "client_then_server"):
+            # FORGE-730: a connected client's reviewer subagent does the review.
+            try:
+                outcome = await _client_review(payload, gateway, model_ref, sleep=sleep)
+            except Exception as exc:  # noqa: BLE001 - fall back as the policy says
+                logger.warning("gate_review_task_failed", run_id=run_id, error=str(exc))
+                outcome = None
+            if outcome is not None:
+                return outcome
+            if source == "client":
+                await _post_none(
+                    gateway, payload, "client", model_ref, "no client reviewer took the review"
+                )
+                return {"status": "unreviewed", "why": "no client reviewer"}
         review: dict[str, Any] = {
             "phase": str(phase.get("id") or ""),
             "attempt": payload.get("attempt"),

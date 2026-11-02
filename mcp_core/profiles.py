@@ -115,6 +115,10 @@ REVIEW_TOOLS: frozenset[str] = frozenset(
         "flow.verify_completion",
         "run.get_status",
         "approvals.list",
+        # FORGE-730: the client reviewer's own task loop.
+        "review.list_tasks",
+        "review.claim",
+        "review.submit",
         "library.list_machines",
         "library.get_machine",
         "library.machine_limits",

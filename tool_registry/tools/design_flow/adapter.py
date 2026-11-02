@@ -60,6 +60,7 @@ class DesignFlowServer(McpToolServer):
         gate_decider: Any = None,
         client_tasks: Any = None,
         approvals_lister: Any = None,
+        review_tasks: Any = None,
     ) -> None:
         super().__init__(adapter_id="design_flow", version="0.1.0")
         self._catalogue_reader = catalogue_reader
@@ -74,6 +75,7 @@ class DesignFlowServer(McpToolServer):
         self._gate_decider = gate_decider
         self._client_tasks = client_tasks
         self._approvals_lister = approvals_lister
+        self._review_tasks = review_tasks
 
         if catalogue_reader is not None:
             self._register_list_flows()
@@ -107,6 +109,9 @@ class DesignFlowServer(McpToolServer):
             self._register_approvals_list()
             if gate_decider is not None:
                 self._register_approvals_decide()
+        # FORGE-730: gate reviews done by this client's reviewer subagent.
+        if review_tasks is not None:
+            self._register_review_tasks()
 
     # ── tools ────────────────────────────────────────────────────────────
 
@@ -607,6 +612,73 @@ class DesignFlowServer(McpToolServer):
             handler=self.approvals_decide,
         )
 
+    def _register_review_tasks(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="review.list_tasks",
+                adapter_id="design_flow",
+                name="List gate reviews waiting for a reviewer",
+                description=(
+                    "Gate reviews the project's approval policy asked a client reviewer to do. "
+                    "Hand each to the metaforge-gate-reviewer subagent; do not review a phase "
+                    "you worked on in this conversation."
+                ),
+                capability="design_flow_read",
+                input_schema={"type": "object", "properties": {"project_id": {"type": "string"}}},
+            ),
+            handler=self.review_list_tasks,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="review.claim",
+                adapter_id="design_flow",
+                name="Take a gate review",
+                description=(
+                    "Claim one review task by id. Returns its review brief: the phase's "
+                    "objective and deliverables, the twin's work products, the gate's check "
+                    "results and earlier decisions, and the model the policy asks for."
+                ),
+                capability="design_flow_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {"task_id": {"type": "string"}},
+                    "required": ["task_id"],
+                },
+            ),
+            handler=self.review_claim,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="review.submit",
+                adapter_id="design_flow",
+                name="Submit a gate review",
+                description=(
+                    "Submit your review of a claimed gate: recommendation (approve, retry, "
+                    "rework or reject), to_phase for rework, reasons, concerns, confidence 0-1 "
+                    "and the model you ran on. It is recorded on the gate as the reviewer's "
+                    "advice; the project's approval policy decides what it does."
+                ),
+                capability="design_flow_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "recommendation": {
+                            "type": "string",
+                            "enum": ["approve", "retry", "rework", "reject"],
+                        },
+                        "to_phase": {"type": "string"},
+                        "reasons": {"type": "string"},
+                        "concerns": {"type": "array", "items": {"type": "string"}},
+                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                        "model": {"type": "string"},
+                    },
+                    "required": ["task_id", "recommendation", "reasons", "confidence"],
+                },
+            ),
+            handler=self.review_submit,
+        )
+
     def _register_phase_tasks(self) -> None:
         self.register_tool(
             manifest=ToolManifest(
@@ -684,6 +756,44 @@ class DesignFlowServer(McpToolServer):
         )
 
     # ── handlers ─────────────────────────────────────────────────────────
+
+    async def review_list_tasks(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = str(arguments.get("project_id") or "").strip() or None
+        with tracer.start_as_current_span("review.list_tasks"):
+            tasks = await self._review_tasks.list_tasks(project_id)
+        return {
+            "count": len(tasks),
+            "tasks": [
+                {
+                    k: t.get(k)
+                    for k in ("id", "run_id", "project_id", "phase", "gate", "requested_model")
+                }
+                for t in tasks
+            ],
+        }
+
+    async def review_claim(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(arguments.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("review.claim: 'task_id' is required")
+        with tracer.start_as_current_span("review.claim"):
+            result: dict[str, Any] = await self._review_tasks.claim(task_id, self._client_name())
+        return result
+
+    async def review_submit(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(arguments.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("review.submit: 'task_id' is required")
+        body = {
+            k: arguments[k]
+            for k in ("recommendation", "to_phase", "reasons", "concerns", "confidence", "model")
+            if k in arguments
+        }
+        with tracer.start_as_current_span("review.submit"):
+            result: dict[str, Any] = await self._review_tasks.submit(
+                task_id, self._client_name(), body
+            )
+        return result
 
     async def approvals_list(self, arguments: dict[str, Any]) -> dict[str, Any]:
         from tool_registry.tools.design_flow.approvals import list_pending

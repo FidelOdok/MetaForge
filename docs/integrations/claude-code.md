@@ -189,13 +189,16 @@ gateway that needs one; a local gateway started without auth does not.
 
 ### Hooks and agents
 
-The package ships two hooks and two subagents. SessionStart adds MetaForge's
+The package ships two hooks and three subagents. SessionStart adds MetaForge's
 working rules to the session; PostToolUse on `flow.propose` and `flow.patch`
 restates that the result is held for a person. Both are a standard-library
 Python script that never fails a session; `METAFORGE_PLUGIN_HOOKS=off`
 disables them. `metaforge-flow-planner` plans a flow and stops at the
 approval; `metaforge-run-verifier` reports a run's completion verdict without
-rounding "the phases finished" into "done". See
+rounding "the phases finished" into "done"; `metaforge-gate-reviewer` takes
+a gate review the project's approval policy asked a client to do and submits
+a recommendation, on its own model (see
+[Approval policy and the gate reviewer](../approvals.md#approval-policy-and-the-gate-reviewer)). See
 [Workflow Lifecycle](../architecture/workflow-lifecycle.md).
 
 ### Regenerating the package

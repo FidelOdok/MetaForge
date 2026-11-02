@@ -1912,6 +1912,17 @@
         "title": "CancelRequest",
         "type": "object"
       },
+      "CancelReviewTask": {
+        "properties": {
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "CancelReviewTask",
+        "type": "object"
+      },
       "Candidate": {
         "properties": {
           "manufacturer": {
@@ -2094,6 +2105,18 @@
           }
         },
         "title": "ClaimRequest",
+        "type": "object"
+      },
+      "ClaimReviewTask": {
+        "properties": {
+          "client": {
+            "default": "client",
+            "maxLength": 200,
+            "title": "Client",
+            "type": "string"
+          }
+        },
+        "title": "ClaimReviewTask",
         "type": "object"
       },
       "CompileRequest": {
@@ -5478,6 +5501,11 @@
             "default": "",
             "title": "Reviewer",
             "type": "string"
+          },
+          "same_client": {
+            "default": false,
+            "title": "Same Client",
+            "type": "boolean"
           },
           "source": {
             "default": "server",
@@ -9132,6 +9160,63 @@
         "title": "OkResponse",
         "type": "object"
       },
+      "OpenReviewTask": {
+        "properties": {
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt"
+          },
+          "brief": {
+            "additionalProperties": true,
+            "title": "Brief",
+            "type": "object"
+          },
+          "gate": {
+            "default": "",
+            "title": "Gate",
+            "type": "string"
+          },
+          "phase": {
+            "minLength": 1,
+            "title": "Phase",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "requested_model": {
+            "default": "",
+            "title": "Requested Model",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "phase"
+        ],
+        "title": "OpenReviewTask",
+        "type": "object"
+      },
       "OpenTaskRequest": {
         "properties": {
           "attempt": {
@@ -11213,6 +11298,126 @@
           "outcome"
         ],
         "title": "ResolveHoldRequest",
+        "type": "object"
+      },
+      "ReviewTask": {
+        "properties": {
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt"
+          },
+          "brief": {
+            "additionalProperties": true,
+            "title": "Brief",
+            "type": "object"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "claimed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed By"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "gate": {
+            "default": "",
+            "title": "Gate",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "requested_model": {
+            "default": "",
+            "title": "Requested Model",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "default": "open",
+            "enum": [
+              "open",
+              "claimed",
+              "submitted",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "phase",
+          "created_at"
+        ],
+        "title": "ReviewTask",
         "type": "object"
       },
       "RevisionDiff": {
@@ -13507,6 +13712,62 @@
           "summary"
         ],
         "title": "SubmitRequest",
+        "type": "object"
+      },
+      "SubmitReview": {
+        "properties": {
+          "client": {
+            "default": "client",
+            "maxLength": 200,
+            "title": "Client",
+            "type": "string"
+          },
+          "concerns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Concerns",
+            "type": "array"
+          },
+          "confidence": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "model": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Model",
+            "type": "string"
+          },
+          "reasons": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Reasons",
+            "type": "string"
+          },
+          "recommendation": {
+            "enum": [
+              "approve",
+              "retry",
+              "rework",
+              "reject"
+            ],
+            "title": "Recommendation",
+            "type": "string"
+          },
+          "to_phase": {
+            "default": "",
+            "title": "To Phase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recommendation"
+        ],
+        "title": "SubmitReview",
         "type": "object"
       },
       "SynthesizeRequest": {
@@ -22451,6 +22712,325 @@
         "summary": "Propose Requirement Fix",
         "tags": [
           "requirements"
+        ]
+      }
+    },
+    "/v1/review-tasks": {
+      "get": {
+        "description": "Review tasks, open ones by default, optionally for one project.",
+        "operationId": "list_review_tasks_v1_review_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "claimed",
+                    "submitted",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "open",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewTask"
+                  },
+                  "title": "Response List Review Tasks V1 Review Tasks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Review Tasks",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "post": {
+        "description": "Open a review task for a gate (the design-flow worker's review step).",
+        "operationId": "open_review_task_v1_review_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenReviewTask"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTask"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Review Task",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/v1/review-tasks/{task_id}": {
+      "get": {
+        "operationId": "get_review_task_v1_review_tasks__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTask"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Review Task",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/v1/review-tasks/{task_id}/cancel": {
+      "post": {
+        "operationId": "cancel_review_task_v1_review_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelReviewTask"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTask"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Review Task",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/v1/review-tasks/{task_id}/claim": {
+      "post": {
+        "description": "Take a review task. Returns it with its brief.",
+        "operationId": "claim_review_task_v1_review_tasks__task_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimReviewTask"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTask"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Review Task",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/v1/review-tasks/{task_id}/submit": {
+      "post": {
+        "description": "Record the client reviewer's review on the gate, then close the task.",
+        "operationId": "submit_review_v1_review_tasks__task_id__submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitReview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Review V1 Review Tasks  Task Id  Submit Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Review",
+        "tags": [
+          "approvals"
         ]
       }
     },

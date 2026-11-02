@@ -250,6 +250,25 @@ that fails posts `recommendation: none` with the error, and the gate waits for
 a person as it would have anyway. `reviewer: client` leaves the review to a
 connected client's reviewer subagent.
 
+**A client as the reviewer.** With `reviewer: client` (or
+`client_then_server`) the review step opens a **review task** with the brief
+and the model the policy asks for, and waits up to
+`METAFORGE_CLIENT_REVIEW_WAIT_SECONDS` (default 600). A connected client's
+reviewer takes it with `review.list_tasks`, `review.claim` and `review.submit`
+(routes `/v1/review-tasks`); the Claude Code plugin ships the
+`metaforge-gate-reviewer` subagent for this, running on its own model (Opus by
+default, set in the subagent's `model` line). The review is recorded on the
+gate as `reviewer:client:<model>`. When nobody takes the task in time,
+`client_then_server` runs the server reviewer and `client` records that no
+review came. The server cannot tell a subagent from the session that ran it,
+so a review submitted by the same client that did a client-mode phase is
+marked `same_client` and is advice only: the policy never acts on it. The
+design-flow worker can call none of the `review.*` tools.
+
+**In the dashboard.** A project's page has an **Approval policy** panel: the
+mode in force, who set it, the reviewer and its model, and for `auto` how long
+it lasts. Modes above the gateway's cap are shown but cannot be chosen.
+
 **Evidence before trust.** When a person decides a gate that has a review,
 `metaforge_gate_review_agreement_total` records whether they agreed. The
 `GateReviewerDisagreesOften` alert fires when people overrule it on more than
