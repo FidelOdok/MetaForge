@@ -84,6 +84,10 @@ class GateReview(BaseModel):
     model: str = ""
     #: ``reviewer:<source>:<model>``; what a decision it makes is recorded as.
     reviewer: str = ""
+    #: FORGE-730: a client reviewer from the same client that did the phase.
+    #: The server cannot tell a subagent from its parent session, so such a
+    #: review is shown as advice and never acted on by the policy.
+    same_client: bool = False
     created_at: str | None = None
     error: str | None = None
     #: What the policy did with it: ``advised``, ``decided`` or ``held`` (why in ``applied_note``).

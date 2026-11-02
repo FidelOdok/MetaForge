@@ -254,6 +254,8 @@ class RemoteFlowBindings:
     client_tasks: Any = None
     #: FORGE-722: every pending approval, for approvals.list / approvals.decide.
     approvals_lister: Any = None
+    #: FORGE-730: gate reviews for this client's reviewer subagent.
+    review_tasks: Any = None
 
 
 class RemoteClientTasks:
@@ -299,6 +301,29 @@ class RemoteClientTasks:
             },
         )
         return task
+
+
+class RemoteReviewTasks:
+    """``review.*`` over the gateway's ``/v1/review-tasks`` (FORGE-730)."""
+
+    def __init__(self, gateway: _Gateway) -> None:
+        self._gateway = gateway
+
+    async def list_tasks(self, project_id: str | None) -> list[dict[str, Any]]:
+        path = "/v1/review-tasks?status=open" + (f"&project_id={project_id}" if project_id else "")
+        return list(await self._gateway.request("GET", path) or [])
+
+    async def claim(self, task_id: str, client: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST", f"/v1/review-tasks/{task_id}/claim", json={"client": client}
+        )
+        return result
+
+    async def submit(self, task_id: str, client: str, body: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST", f"/v1/review-tasks/{task_id}/submit", json={"client": client, **body}
+        )
+        return result
 
 
 class RemoteRunLauncher:
@@ -642,6 +667,7 @@ def build_remote_flow_bindings(
         return list((listing or {}).get("items") or [])
 
     return RemoteFlowBindings(
+        review_tasks=RemoteReviewTasks(gateway),
         approvals_lister=list_approvals,
         gate_reader=read_gate,
         gate_decider=decide_gate,

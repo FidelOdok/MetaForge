@@ -28,6 +28,7 @@ __all__ = [
     "make_gate_decider",
     "make_gate_reader",
     "make_approvals_lister",
+    "make_review_task_service",
     "make_intent_compiler",
     "make_lifecycle_reader",
     "make_patcher",
@@ -490,6 +491,47 @@ def make_approvals_lister() -> Any:
         return [i.model_dump() for i in items]
 
     return list_approvals
+
+
+class _ReviewTaskService:
+    """``review.*`` over this process's review task store (FORGE-730)."""
+
+    async def list_tasks(self, project_id: str | None) -> list[dict[str, Any]]:
+        from api_gateway.approvals.review_tasks import get_review_task_store
+
+        return [t.model_dump() for t in get_review_task_store().list(project_id, "open")]
+
+    async def claim(self, task_id: str, client: str) -> dict[str, Any]:
+        from fastapi import HTTPException
+
+        from api_gateway.approvals.review_tasks import ClaimReviewTask, claim_review_task
+
+        try:
+            task = await claim_review_task(task_id, ClaimReviewTask(client=client))
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+        return task.model_dump()
+
+    async def submit(self, task_id: str, client: str, body: dict[str, Any]) -> dict[str, Any]:
+        from types import SimpleNamespace
+
+        from fastapi import HTTPException
+
+        from api_gateway.approvals.review_tasks import SubmitReview, submit_review
+
+        try:
+            return await submit_review(
+                task_id,
+                SubmitReview(client=client, **body),
+                SimpleNamespace(app=None),  # type: ignore[arg-type]
+            )
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+
+
+def make_review_task_service() -> Any:
+    """The in-process ``review.*`` binding (FORGE-730)."""
+    return _ReviewTaskService()
 
 
 def make_gate_decider() -> Any:

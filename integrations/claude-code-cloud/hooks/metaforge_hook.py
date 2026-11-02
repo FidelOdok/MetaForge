@@ -43,6 +43,8 @@ SESSION_RULES = (
     "- When a MetaForge result says approvals are waiting for a person, tell the "
     "person right away and offer /metaforge:approvals; approvals.decide puts one "
     "to them in a prompt. Never answer one or report it as decided.\n"
+    "- When review.list_tasks shows open gate reviews, hand them to the "
+    "metaforge-gate-reviewer subagent; never review a phase you worked on.\n"
     "- A design is done only when flow.lifecycle / flow.verify_completion says "
     "COMPLETED_VERIFIED. PARTIALLY_COMPLETED is not done.\n"
     "- 'unknown' phase state is not 'pending'; no_data is a gap, not a pass.\n"

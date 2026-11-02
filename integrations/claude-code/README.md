@@ -47,6 +47,7 @@ claude.ai ignores a connector whose URL contains a `${user_config.*}` reference,
 ## Agents
 
 - `metaforge-flow-planner`
+- `metaforge-gate-reviewer`
 - `metaforge-run-verifier`
 
 ## Hooks

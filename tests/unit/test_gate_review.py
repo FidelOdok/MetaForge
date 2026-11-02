@@ -29,13 +29,16 @@ from api_gateway.approvals.policy import (
 )
 from api_gateway.approvals.policy_routes import review_router
 from api_gateway.approvals.policy_routes import router as policy_router
+from api_gateway.approvals.review_tasks import reset_review_task_store
+from api_gateway.approvals.review_tasks import router as review_tasks_router
 from api_gateway.approvals.routes import router as approvals_router
 from api_gateway.runs import routes as run_routes
 from api_gateway.runs.gate_review import parse_review, review_gate, review_skill
 from mcp_core.annotations import ADDITIVE, DESTRUCTIVE
-from mcp_core.guardrails import BOOKKEEPING
+from mcp_core.guardrails import BOOKKEEPING, SERVICE_REFUSED_PREFIXES
 from mcp_core.profiles import PROFILES, REVIEW_TOOLS
 from orchestrator.design_flow.temporal_activities import DesignFlowActivities
+from tool_registry.tools.design_flow.adapter import DesignFlowServer
 
 PROJECT = "p1"
 
@@ -259,19 +262,14 @@ def test_the_review_step_posts_the_reviewers_view() -> None:
     assert briefs[0]["checks"]["findings"] == ["Chair Seat records no material"]
 
 
-def test_no_review_when_the_policy_is_off_or_the_client_reviews() -> None:
+def test_no_review_when_the_policy_is_off() -> None:
     posted: list[dict] = []
 
     async def reviewer(brief: dict) -> dict:  # pragma: no cover - must not run
         raise AssertionError("reviewed while off")
 
     off = asyncio.run(review_gate(PAYLOAD, client=_fake_gateway("off", posted), reviewer=reviewer))
-    client = asyncio.run(
-        review_gate(
-            PAYLOAD, client=_fake_gateway("advise", posted, reviewer="client"), reviewer=reviewer
-        )
-    )
-    assert off["status"] == client["status"] == "skipped" and posted == []
+    assert off["status"] == "skipped" and posted == []
 
 
 def test_a_failing_reviewer_still_says_so_on_the_gate() -> None:
@@ -331,3 +329,159 @@ def test_the_review_skill_carries_the_answer_contract() -> None:
     skill = review_skill()
     assert "Substance, not presence" in skill
     assert '"recommendation"' in skill and '"confidence"' in skill
+
+
+# ── FORGE-730: the client reviewer ─────────────────────────────────────────
+
+
+@pytest.fixture
+def tasks_client(client: TestClient) -> Iterator[TestClient]:
+    reset_review_task_store()
+    client.app.include_router(review_tasks_router)  # type: ignore[attr-defined]
+    yield client
+    reset_review_task_store()
+
+
+def _open_task(c: TestClient, run_id: str) -> str:
+    resp = c.post(
+        "/v1/review-tasks",
+        json={
+            "run_id": run_id,
+            "project_id": PROJECT,
+            "phase": "design",
+            "attempt": 1,
+            "brief": {"goal": "a chair"},
+            "requested_model": "opus",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def test_a_client_reviewer_claims_and_submits_a_review(tasks_client: TestClient) -> None:
+    _set(tasks_client, "advise", reviewer="client")
+    run_id = _gate()
+    task_id = _open_task(tasks_client, run_id)
+    assert [t["id"] for t in tasks_client.get("/v1/review-tasks").json()] == [task_id]
+    claimed = tasks_client.post(f"/v1/review-tasks/{task_id}/claim", json={"client": "cc"}).json()
+    assert claimed["brief"]["goal"] == "a chair" and claimed["requested_model"] == "opus"
+    # A second client cannot take or answer it.
+    assert (
+        tasks_client.post(f"/v1/review-tasks/{task_id}/claim", json={"client": "other"}).status_code
+        == 409
+    )
+    out = tasks_client.post(
+        f"/v1/review-tasks/{task_id}/submit",
+        json={
+            "client": "cc",
+            "model": "claude-opus",
+            "recommendation": "retry",
+            "reasons": "No material.",
+            "confidence": 0.8,
+        },
+    ).json()
+    assert out["review"]["reviewer"] == "reviewer:client:claude-opus"
+    review = tasks_client.get(f"/v1/approvals/gate:{run_id}").json()["review"]
+    assert review["source"] == "client" and review["recommendation"] == "retry"
+    assert tasks_client.get(f"/v1/review-tasks/{task_id}").json()["status"] == "submitted"
+
+
+def test_a_review_by_the_client_that_did_the_phase_is_advice_only(
+    tasks_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api_gateway.approvals import review_tasks
+
+    monkeypatch.setattr(review_tasks, "_did_the_phase", lambda task, client: True)
+    _set(tasks_client, "auto", reviewer="client")
+    run_id = _gate(ready=True)
+    task_id = _open_task(tasks_client, run_id)
+    out = tasks_client.post(
+        f"/v1/review-tasks/{task_id}/submit",
+        json={
+            "client": "cc",
+            "model": "m",
+            "recommendation": "approve",
+            "reasons": "ok",
+            "confidence": 0.99,
+        },
+    ).json()
+    assert out["review"]["same_client"] is True and out["review"]["applied"] == "held"
+    assert tasks_client.get(f"/v1/approvals/gate:{run_id}").json()["status"] == "pending"
+
+
+def _client_gateway(policy_reviewer: str, posted: list[dict], *, submit: bool) -> httpx.AsyncClient:
+    state = {"status": "open"}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/approval-policy"):
+            policy = {"mode": "advise", "reviewer": policy_reviewer, "reviewer_model": "opus"}
+            return httpx.Response(200, json={"policy": policy, "effective_mode": "advise"})
+        if path == "/v1/review-tasks" and request.method == "POST":
+            return httpx.Response(201, json={"id": "review:run_1:design:2", "status": "open"})
+        if path.startswith("/v1/review-tasks/") and path.endswith("/cancel"):
+            state["status"] = "cancelled"
+            return httpx.Response(200, json={"status": "cancelled"})
+        if path.startswith("/v1/review-tasks/"):
+            if submit:
+                state["status"] = "submitted"
+            return httpx.Response(200, json={"status": state["status"]})
+        if path.endswith("/gate-review"):
+            posted.append(json.loads(request.content))
+            return httpx.Response(200, json={"applied": "advised"})
+        if path.startswith("/v1/runs/"):
+            return httpx.Response(200, json={"request": {"decisions": []}})
+        return httpx.Response(200, json={"nodes": []})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handle))
+
+
+async def _no_sleep(_: float) -> None:
+    return None
+
+
+def test_the_review_step_waits_for_a_client_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    posted: list[dict] = []
+    out = asyncio.run(
+        review_gate(PAYLOAD, client=_client_gateway("client", posted, submit=True), sleep=_no_sleep)
+    )
+    assert out == {"status": "reviewed", "source": "client", "task_id": "review:run_1:design:2"}
+    assert posted == []  # the client's submission recorded it
+
+
+def test_no_client_in_time_falls_back_to_the_server_or_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("METAFORGE_CLIENT_REVIEW_WAIT_SECONDS", "0")
+
+    async def reviewer(brief: dict) -> dict:
+        return {"recommendation": "approve", "reasons": "ok", "concerns": [], "confidence": 0.9}
+
+    posted: list[dict] = []
+    asyncio.run(
+        review_gate(
+            PAYLOAD,
+            client=_client_gateway("client_then_server", posted, submit=False),
+            reviewer=reviewer,
+            sleep=_no_sleep,
+        )
+    )
+    assert posted[-1]["source"] == "server" and posted[-1]["recommendation"] == "approve"
+    posted.clear()
+    asyncio.run(
+        review_gate(
+            PAYLOAD, client=_client_gateway("client", posted, submit=False), sleep=_no_sleep
+        )
+    )
+    assert posted[-1]["recommendation"] == "none" and "no client reviewer" in posted[-1]["error"]
+
+
+def test_the_review_tools_are_registered_and_kept_from_the_worker() -> None:
+    class _Tasks:
+        async def list_tasks(self, project_id: str | None) -> list[dict]:
+            return []
+
+    srv = DesignFlowServer(review_tasks=_Tasks())
+    assert {"review.list_tasks", "review.claim", "review.submit"} <= set(srv.tool_ids)
+    assert any("review.submit".startswith(p) for p in SERVICE_REFUSED_PREFIXES)
+    assert {"review.list_tasks", "review.claim", "review.submit"} <= REVIEW_TOOLS

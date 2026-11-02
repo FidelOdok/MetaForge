@@ -50,6 +50,7 @@ Install **one**. The manifest has no way to switch a server entry off, so two pa
 ## Agents
 
 - `metaforge-flow-planner`
+- `metaforge-gate-reviewer`
 - `metaforge-run-verifier`
 
 ## Hooks

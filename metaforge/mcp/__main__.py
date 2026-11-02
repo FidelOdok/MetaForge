@@ -2072,6 +2072,7 @@ def _build_flow_bindings() -> dict[str, Any]:
             "design_flow_gate_decider": remote.gate_decider,
             "design_flow_client_tasks": remote.client_tasks,
             "design_flow_approvals_lister": remote.approvals_lister,
+            "design_flow_review_tasks": remote.review_tasks,
             "run_launcher": remote.run_launcher,
         }
 
@@ -2087,6 +2088,7 @@ def _build_flow_bindings() -> dict[str, Any]:
             make_lifecycle_reader,
             make_patcher,
             make_proposer,
+            make_review_task_service,
             make_run_starter,
             make_run_status_reader,
         )
@@ -2117,6 +2119,7 @@ def _build_flow_bindings() -> dict[str, Any]:
         "design_flow_gate_decider": make_gate_decider(),
         "design_flow_client_tasks": make_client_task_service(),
         "design_flow_approvals_lister": make_approvals_lister(),
+        "design_flow_review_tasks": make_review_task_service(),
         "run_launcher": make_run_launcher(),
     }
 
