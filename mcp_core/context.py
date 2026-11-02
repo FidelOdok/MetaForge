@@ -108,6 +108,9 @@ class McpCallContext(BaseModel):
     run_id: str | None = Field(default=None, description="Design-flow run this call serves.")
     phase: str | None = Field(default=None, description="Design-flow phase id, as claimed.")
     model: str | None = Field(default=None, description="Model the phase runs on, as claimed.")
+    #: FORGE-746: the MCP client this call came from (``name version`` from its
+    #: ``initialize``). Who a task was claimed by when no identity is signed in.
+    client: str | None = Field(default=None, description="The MCP client, as `name version`.")
     item_slots: tuple[ItemSlotClaim, ...] = Field(
         default=(),
         description=(

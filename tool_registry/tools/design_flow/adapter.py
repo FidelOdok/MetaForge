@@ -890,10 +890,24 @@ class DesignFlowServer(McpToolServer):
 
     @staticmethod
     def _client_name() -> str:
+        """Who is claiming or submitting: the signed-in actor, else the client.
+
+        FORGE-746: with no identity signed in every client was "unknown", so a
+        session could not be told from another, and the rule that a client
+        never reviews a phase it did compared "unknown" with "unknown". The
+        MCP client and its session tell them apart.
+        """
         from mcp_core.context import current_context
 
-        actor = current_context().actor_id
-        return actor if actor and actor != "system:unattributed" else "unknown"
+        ctx = current_context()
+        actor = ctx.actor_id
+        if actor and actor != "system:unattributed":
+            return actor
+        if ctx.client:
+            if ctx.session_is_stable:
+                return f"{ctx.client} (session {str(ctx.session_id)[:8]})"
+            return ctx.client
+        return "unknown"
 
     async def list_tasks(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("phase.list_tasks"):

@@ -61,7 +61,9 @@ async def claim_covered_by_policy(tool: str, arguments: dict[str, Any]) -> str |
         except Exception:  # noqa: BLE001 - an unknown task is a person's call
             no("unknown task")
             return None
-        if task.status != "open":
+        # A claimed task can be claimed again by a client that restarted or
+        # lost its session handle (FORGE-746); a submitted one cannot.
+        if task.status not in ("open", "claimed"):
             no(f"the task is {task.status}")
             return None
         try:

@@ -224,3 +224,18 @@ class TestTheClaimIsApprovedByThePolicy:
             response = await _call(server, "twin.commit_geometry", {"project_id": PROJECT})
         assert ran == []
         assert response["error"]["data"]["outcome"] == "awaiting_person"
+
+
+@pytest.mark.asyncio
+async def test_a_claimed_task_can_be_claimed_again_under_auto(gateway: httpx.AsyncClient) -> None:
+    # FORGE-746: a client that lost its session handle claims again; the
+    # store allows it and so does the policy, but not a submitted task.
+    await _policy("auto")
+    task_id = _open_task()
+    task_routes.get_client_task_store().claim(task_id, "claude-code")
+    ran: list[str] = []
+    async with gateway as http:
+        server = await _server(http, ran)
+        response = await _call(server, "phase.claim", {"task_id": task_id})
+    assert "error" not in response, response
+    assert ran == ["phase.claim"]
