@@ -90,9 +90,12 @@ def test_reject_needs_a_reason_inline_too(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
-def test_only_gates_are_decided_here(client: TestClient) -> None:
+def test_any_kind_goes_through_service_decide(client: TestClient) -> None:
+    # FORGE-722: approvals.decide records a held tool call (or any pending item)
+    # here too. It used to be refused with 422 as "gates only"; now an unknown
+    # item gets service.decide's own 404, the same as a dashboard click.
     resp = client.post("/v1/approvals/tool:abc/inline-decision", json={"decision": "approve"})
-    assert resp.status_code == 422
+    assert resp.status_code == 404
 
 
 def test_in_process_bindings_read_and_decide_a_gate(client: TestClient) -> None:

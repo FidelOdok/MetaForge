@@ -252,6 +252,8 @@ class RemoteFlowBindings:
     gate_decider: Any = None
     #: FORGE-581: phase tasks for client-mode runs.
     client_tasks: Any = None
+    #: FORGE-722: every pending approval, for approvals.list / approvals.decide.
+    approvals_lister: Any = None
 
 
 class RemoteClientTasks:
@@ -631,7 +633,16 @@ def build_remote_flow_bindings(
         logger.info("design_flow_gate_decided_in_chat", approval_id=approval_id, via="gateway")
         return item
 
+    async def list_approvals(project_id: str | None) -> list[dict[str, Any]]:
+        with tracer.start_as_current_span("remote_flows.list_approvals"):
+            path = "/v1/approvals?status=pending"
+            if project_id:
+                path += f"&project_id={project_id}"
+            listing = await gateway.request("GET", path)
+        return list((listing or {}).get("items") or [])
+
     return RemoteFlowBindings(
+        approvals_lister=list_approvals,
         gate_reader=read_gate,
         gate_decider=decide_gate,
         client_tasks=RemoteClientTasks(gateway),

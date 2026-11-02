@@ -376,6 +376,8 @@ async def bootstrap_tool_registry(
     design_flow_gate_decider: Any = None,
     # FORGE-581: phase tasks for client-mode runs.
     design_flow_client_tasks: Any = None,
+    # FORGE-722: pending approvals for approvals.list / approvals.decide.
+    design_flow_approvals_lister: Any = None,
     brief_provider: Any = None,
     parameter_optimizer: Any = None,
     device_instance_registrar: Any = None,
@@ -769,6 +771,7 @@ async def bootstrap_tool_registry(
                     gate_reader=design_flow_gate_reader,
                     gate_decider=design_flow_gate_decider,
                     client_tasks=design_flow_client_tasks,
+                    approvals_lister=design_flow_approvals_lister,
                 )
                 await registry.register_adapter(flow_server)
                 registered.append("design_flow")

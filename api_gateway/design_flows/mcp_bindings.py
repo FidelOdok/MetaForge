@@ -27,6 +27,7 @@ __all__ = [
     "make_client_task_service",
     "make_gate_decider",
     "make_gate_reader",
+    "make_approvals_lister",
     "make_intent_compiler",
     "make_lifecycle_reader",
     "make_patcher",
@@ -475,6 +476,20 @@ def make_gate_reader() -> Any:
         }
 
     return read_gate
+
+
+def make_approvals_lister() -> Any:
+    """The pending approvals for ``approvals.list`` and ``approvals.decide`` (FORGE-722)."""
+
+    async def list_approvals(project_id: str | None) -> list[dict[str, Any]]:
+        from api_gateway.approvals import service
+
+        items = [i for i in await service.list_items(None) if i.status == "pending"]
+        if project_id:
+            items = [i for i in items if i.project_id == project_id]
+        return [i.model_dump() for i in items]
+
+    return list_approvals
 
 
 def make_gate_decider() -> Any:

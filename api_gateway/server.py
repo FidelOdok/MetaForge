@@ -38,6 +38,7 @@ from api_gateway.component_selection.routes import router as component_selection
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.design_flows.mcp_bindings import (
+    make_approvals_lister,
     make_capability_reader,
     make_catalogue_reader,
     make_client_task_service,
@@ -1304,6 +1305,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         design_flow_gate_decider=make_gate_decider(),
         # FORGE-581: phase tasks for client-mode runs.
         design_flow_client_tasks=make_client_task_service(),
+        design_flow_approvals_lister=make_approvals_lister(),
         # FORGE-355: the project brief as an MCP resource.
         brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness

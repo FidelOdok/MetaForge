@@ -37,6 +37,7 @@ claude.ai ignores a connector whose URL contains a `${user_config.*}` reference,
 - `/metaforge:verify`
 - `/metaforge:replan`
 - `/metaforge:gate`
+- `/metaforge:approvals`
 - `/metaforge:doctor`
 
 ## Skills
