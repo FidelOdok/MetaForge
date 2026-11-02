@@ -36,6 +36,8 @@ from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.codex_login import handle_codex_login
 from cli.forge_cli.codex_login import register_subparser as register_codex_login_subparser
 from cli.forge_cli.config import ForgeConfig, handle_config
+from cli.forge_cli.files import handle_files
+from cli.forge_cli.files import register_subparsers as register_files_subparsers
 from cli.forge_cli.formatters import format_output
 from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
@@ -198,6 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- approvals (unified /v1/approvals) --------------------------------
     register_approvals_subparser(subparsers)
+
+    # -- files in and out (/v1/uploads, /v1/files) -----------------------
+    register_files_subparsers(subparsers)
 
     # -- runs (harness) ----------------------------------------------------
     runs_parser = subparsers.add_parser("runs", help="Drive harness runs (/v1/runs)")
@@ -796,6 +801,10 @@ _HANDLERS = {
     "memory": handle_memory,
     "runs": handle_runs,
     "approvals": handle_approvals,
+    "upload": handle_files,
+    "uploads": handle_files,
+    "download": handle_files,
+    "link": handle_files,
     "projects": handle_projects,
     "cad": handle_cad,
     "design": handle_design,
