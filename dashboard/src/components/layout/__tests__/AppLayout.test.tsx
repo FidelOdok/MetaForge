@@ -8,6 +8,10 @@ vi.mock('../../../hooks/use-health', () => ({ useHealth: () => mockUseHealth() }
 vi.mock('../../shared/ProjectSwitcher', () => ({
   ProjectSwitcher: () => <div data-testid="project-switcher" />,
 }));
+let mockPending: unknown[] = [];
+vi.mock('../../../hooks/use-approvals', () => ({
+  useApprovals: () => ({ data: { items: mockPending, unscoped_count: 0 } }),
+}));
 
 import { AppLayout } from '../AppLayout';
 import { useLayoutStore } from '../../../store/layout-store';
@@ -97,5 +101,25 @@ describe('AppLayout shell', () => {
     expect(within(crumbs).getByRole('link', { name: 'Projects' })).toHaveAttribute('href', '/projects');
     expect(within(crumbs).getByText('Details')).toHaveAttribute('aria-current', 'page');
     expect(document.title).toBe('Projects — MetaForge');
+  });
+});
+
+describe('pending approvals in the shell (FORGE-723)', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    mockUseHealth.mockReturnValue({ isError: false, data: undefined });
+  });
+
+  it('counts them on the Approvals link and announces them on the page', () => {
+    mockPending = [
+      { id: 'gate:run_1', kind: 'gate', status: 'pending', title: 'Design gate' },
+      { id: 'tool:run_2', kind: 'tool_call', status: 'pending', title: 'Held write' },
+    ];
+    renderShell('/projects');
+    expect(screen.getByRole('link', { name: 'Approvals (2 pending)' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Approvals waiting' })).toHaveTextContent(
+      '2 approvals waiting for you',
+    );
+    mockPending = [];
   });
 });
