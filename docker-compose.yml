@@ -505,7 +505,7 @@ services:
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
-      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam,firmware,simready,slicer
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam,firmware,simready,slicer,meshy,zoo,tripo,slant3d
       --allow-twin-mutations
       --capture-sessions
     ports:
