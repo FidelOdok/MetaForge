@@ -182,6 +182,7 @@ gateway that needs one; a local gateway started without auth does not.
 | `/metaforge:fea` | Run a load case and record the evidence against the revision it came from |
 | `/metaforge:gate` | Review whether the project can be promoted |
 | `/metaforge:approvals` | See what is waiting for your decision (gates, held writes, proposals) and decide it in a prompt here |
+| `/metaforge:drive` | Put a run under the run supervisor and report how it is going; pair it with `/loop 10m /metaforge:drive <run>` to keep reporting |
 | `/metaforge:flow` | Propose a design flow: ask for route, maturity and loads, tailor in caller mode, stop at the approval |
 | `/metaforge:verify` | Did a run achieve its intent (the completion verdict) |
 | `/metaforge:replan` | Patch a running flow, re-running only what changed |

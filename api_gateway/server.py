@@ -51,6 +51,7 @@ from api_gateway.design_flows.mcp_bindings import (
     make_review_task_service,
     make_run_starter,
     make_run_status_reader,
+    make_supervisor_service,
 )
 from api_gateway.design_flows.routes import router as design_flows_router
 from api_gateway.design_loop.routes import router as design_loop_router
@@ -1308,6 +1309,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         design_flow_client_tasks=make_client_task_service(),
         design_flow_approvals_lister=make_approvals_lister(),
         design_flow_review_tasks=make_review_task_service(),
+        design_flow_supervisor=make_supervisor_service(),
         # FORGE-355: the project brief as an MCP resource.
         brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness
@@ -1985,6 +1987,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     reconcile_task = asyncio.create_task(run_reconcile_loop())
     app.state.run_reconcile_task = reconcile_task
+    # FORGE-735: tick every supervised run; resumes after a restart because
+    # the supervision record lives on the run.
+    from api_gateway.runs.supervisor import run_supervisor_loop
+
+    supervisor_task = asyncio.create_task(run_supervisor_loop())
+    app.state.run_supervisor_task = supervisor_task
     # FORGE-606: projects that had runs before "active" was ever set.
     from api_gateway.runs.routes import activate_projects_with_runs
 
@@ -2003,6 +2011,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     logger.info("gateway_stopping")
     reconcile_task.cancel()
+    supervisor_task.cancel()
     kb_storage_task.cancel()
     await file_watcher.stop()
     if hasattr(app.state, "tool_registry"):
@@ -2201,6 +2210,10 @@ def create_app(
     from api_gateway.approvals.review_tasks import router as review_tasks_router
 
     app.include_router(review_tasks_router)
+    # FORGE-734: drive a design run to a verified result.
+    from api_gateway.runs.supervisor_routes import router as supervisor_router
+
+    app.include_router(supervisor_router)
     app.include_router(client_tasks_router)
     app.include_router(library_router)
     app.include_router(library_catalog_router)

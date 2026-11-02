@@ -380,6 +380,8 @@ async def bootstrap_tool_registry(
     design_flow_approvals_lister: Any = None,
     # FORGE-730: gate reviews for a client reviewer subagent.
     design_flow_review_tasks: Any = None,
+    # FORGE-739: the run supervisor.
+    design_flow_supervisor: Any = None,
     brief_provider: Any = None,
     parameter_optimizer: Any = None,
     device_instance_registrar: Any = None,
@@ -775,6 +777,7 @@ async def bootstrap_tool_registry(
                     client_tasks=design_flow_client_tasks,
                     approvals_lister=design_flow_approvals_lister,
                     review_tasks=design_flow_review_tasks,
+                    supervisor=design_flow_supervisor,
                 )
                 await registry.register_adapter(flow_server)
                 registered.append("design_flow")

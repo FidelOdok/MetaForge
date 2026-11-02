@@ -905,3 +905,20 @@ groups:
             Over the last week, people decided differently from the reviewer's
             recommendation on more than 30% of at least 20 gates. Do not move a
             project to auto_clean or auto on this evidence; look at where it disagrees.
+
+  # FORGE-734 -- run supervisor (api_gateway/runs/supervisor.py).
+  - name: metaforge_run_supervisor
+    rules:
+      - alert: RunSupervisorFoundPlatformIssue
+        expr: >-
+          increase(metaforge_run_supervisor_action_total{action="stopped",reason="platform"}[1h]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The run supervisor stopped on something only code can fix"
+          description: >-
+            A supervised run kept failing a gate or a capability the agent cannot
+            satisfy (a check that may be wrong, a missing tool), so the supervisor
+            stopped instead of spending retries. The supervision log on the run
+            says which; it usually means a bug to file, not a design to redo.

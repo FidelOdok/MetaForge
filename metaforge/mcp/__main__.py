@@ -2073,6 +2073,7 @@ def _build_flow_bindings() -> dict[str, Any]:
             "design_flow_client_tasks": remote.client_tasks,
             "design_flow_approvals_lister": remote.approvals_lister,
             "design_flow_review_tasks": remote.review_tasks,
+            "design_flow_supervisor": remote.supervisor,
             "run_launcher": remote.run_launcher,
         }
 
@@ -2091,6 +2092,7 @@ def _build_flow_bindings() -> dict[str, Any]:
             make_review_task_service,
             make_run_starter,
             make_run_status_reader,
+            make_supervisor_service,
         )
         from api_gateway.runs.launcher import make_run_launcher
     except Exception as exc:  # noqa: BLE001 - reported, never fatal
@@ -2120,6 +2122,7 @@ def _build_flow_bindings() -> dict[str, Any]:
         "design_flow_client_tasks": make_client_task_service(),
         "design_flow_approvals_lister": make_approvals_lister(),
         "design_flow_review_tasks": make_review_task_service(),
+        "design_flow_supervisor": make_supervisor_service(),
         "run_launcher": make_run_launcher(),
     }
 

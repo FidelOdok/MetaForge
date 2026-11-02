@@ -29,6 +29,7 @@ __all__ = [
     "make_gate_reader",
     "make_approvals_lister",
     "make_review_task_service",
+    "make_supervisor_service",
     "make_intent_compiler",
     "make_lifecycle_reader",
     "make_patcher",
@@ -527,6 +528,34 @@ class _ReviewTaskService:
             )
         except HTTPException as exc:
             raise RuntimeError(str(exc.detail)) from exc
+
+
+class _SupervisorService:
+    """``flow.supervise`` over this process's run supervisor (FORGE-739)."""
+
+    async def start(self, run_id: str, budgets: dict[str, Any]) -> dict[str, Any]:
+        from api_gateway.runs import supervisor
+
+        supervisor.start_supervision(run_id, budgets=budgets, started_by="mcp")
+        await supervisor.supervise_tick(run_id)
+        run = supervisor._store().get(run_id)  # noqa: SLF001
+        return supervisor.supervision_of(run) or {}
+
+    async def status(self, run_id: str) -> dict[str, Any]:
+        from api_gateway.runs import supervisor
+
+        run = supervisor._store().get(run_id)  # noqa: SLF001
+        return supervisor.supervision_of(run) or {"active": False}
+
+    async def stop(self, run_id: str, reason: str) -> dict[str, Any]:
+        from api_gateway.runs import supervisor
+
+        return supervisor.stop_supervision(run_id, reason) or {"active": False}
+
+
+def make_supervisor_service() -> Any:
+    """The in-process ``flow.supervise`` binding (FORGE-739)."""
+    return _SupervisorService()
 
 
 def make_review_task_service() -> Any:

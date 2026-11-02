@@ -61,6 +61,7 @@ class DesignFlowServer(McpToolServer):
         client_tasks: Any = None,
         approvals_lister: Any = None,
         review_tasks: Any = None,
+        supervisor: Any = None,
     ) -> None:
         super().__init__(adapter_id="design_flow", version="0.1.0")
         self._catalogue_reader = catalogue_reader
@@ -76,6 +77,7 @@ class DesignFlowServer(McpToolServer):
         self._client_tasks = client_tasks
         self._approvals_lister = approvals_lister
         self._review_tasks = review_tasks
+        self._supervisor = supervisor
 
         if catalogue_reader is not None:
             self._register_list_flows()
@@ -112,6 +114,9 @@ class DesignFlowServer(McpToolServer):
         # FORGE-730: gate reviews done by this client's reviewer subagent.
         if review_tasks is not None:
             self._register_review_tasks()
+        # FORGE-739: drive a run to a verified result.
+        if supervisor is not None:
+            self._register_supervise()
 
     # ── tools ────────────────────────────────────────────────────────────
 
@@ -612,6 +617,38 @@ class DesignFlowServer(McpToolServer):
             handler=self.approvals_decide,
         )
 
+    def _register_supervise(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="flow.supervise",
+                adapter_id="design_flow",
+                name="Supervise a design run until it is verified",
+                description=(
+                    "Start, read or stop the run supervisor for a design run. It watches the "
+                    "run; gets each gate reviewed and decided within the project's approval "
+                    "policy (it never decides a gate itself); restarts a failed or unverified "
+                    "run as a new linked run with an amended brief; and stops for a person on a "
+                    "platform issue, a decision only a person can make, or a used budget. "
+                    "action=start (with optional budgets), status, or stop."
+                ),
+                capability="design_flow_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "run_id": {"type": "string"},
+                        "action": {"type": "string", "enum": ["start", "status", "stop"]},
+                        "max_actions": {"type": "integer"},
+                        "max_restarts": {"type": "integer"},
+                        "max_model_calls": {"type": "integer"},
+                        "max_hours": {"type": "number"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["run_id"],
+                },
+            ),
+            handler=self.supervise,
+        )
+
     def _register_review_tasks(self) -> None:
         self.register_tool(
             manifest=ToolManifest(
@@ -756,6 +793,29 @@ class DesignFlowServer(McpToolServer):
         )
 
     # ── handlers ─────────────────────────────────────────────────────────
+
+    async def supervise(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(arguments.get("run_id") or "").strip()
+        if not run_id:
+            raise ValueError("flow.supervise: 'run_id' is required")
+        action = str(arguments.get("action") or "status")
+        with tracer.start_as_current_span("flow.supervise") as span:
+            span.set_attribute("run.id", run_id)
+            span.set_attribute("supervise.action", action)
+            if action == "start":
+                budgets = {
+                    k: arguments[k]
+                    for k in ("max_actions", "max_restarts", "max_model_calls", "max_hours")
+                    if arguments.get(k) is not None
+                }
+                result: dict[str, Any] = await self._supervisor.start(run_id, budgets)
+            elif action == "stop":
+                result = await self._supervisor.stop(
+                    run_id, str(arguments.get("reason") or "stopped from a client")
+                )
+            else:
+                result = await self._supervisor.status(run_id)
+        return result
 
     async def review_list_tasks(self, arguments: dict[str, Any]) -> dict[str, Any]:
         project_id = str(arguments.get("project_id") or "").strip() or None

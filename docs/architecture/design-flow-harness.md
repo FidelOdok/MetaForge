@@ -999,3 +999,32 @@ computed rather than stored), and `POST /v1/design-flows/versions` accepts
 `slots` per phase (`itemKey` optional). A slot the editor sends back with
 `derived: true` is dropped rather than turned into a declared one, so
 round-tripping a flow through the editor does not change its hash.
+
+## Run supervisor
+
+The run supervisor drives a design run to a verified result, like a loop over
+the run (`api_gateway/runs/supervisor.py`). It is started per run with
+`POST /v1/runs/{id}/supervise` (optional budgets `max_actions`,
+`max_restarts`, `max_model_calls`, `max_hours`), the `flow.supervise` MCP tool,
+the plugin's `/metaforge:drive`, or the **Supervise this run** button on the
+run page. Every 30 seconds the gateway ticks each supervised run:
+
+| Run state | What the supervisor does |
+|---|---|
+| Queued or running | Watches. |
+| At a gate | Lets the gate be reviewed and decided under the project's [approval policy](../approvals.md#approval-policy-and-the-gate-reviewer); it never decides a gate itself. When a person has to, it records that it is waiting. When the gate is failing in a way the agent cannot fix (the reviewer judges the work sound while the checks fail, or the same findings return after a retry), it stops and reports a platform issue instead of spending retries. |
+| Failed | Diagnoses the failure from the run's failure class. A design failure restarts the run as a new run, linked by `supervised_from`, whose `flow_context` says why the last attempt stopped and what the reviewer said. A tooling failure restarts after a two-minute pause. A missing capability or an authorisation failure stops it for a person. |
+| Completed | Reads the completion verdict. `COMPLETED_VERIFIED` ends the supervision as `verified`; anything else restarts with the unmet requirements in the brief. |
+| Rejected, cancelled or timed out | Stops: a person, or the clock, ended the run. |
+
+A restart carries the run's goal, flow, project, intelligence and flow context
+and nothing of its decisions, reviews or engine state. The supervision record
+(`request["supervision"]`: status, budgets, counters, the chain of runs and a
+log of its actions) moves to the new run, so `GET /v1/runs/{id}/supervision`
+on any run in the chain shows where it went, and a gateway restart resumes it.
+Budgets default to 20 actions, 3 restarts, 600 model calls across the chain
+and 12 hours; when one is used the supervisor stops and says which.
+`metaforge_run_supervisor_action_total` counts its actions, and
+`RunSupervisorFoundPlatformIssue` fires when it stopped on something only a
+code change can fix.
+

@@ -8,6 +8,7 @@ import { StatusBadge } from '../components/shared/StatusBadge';
 import { FlowGraph } from '../components/runs/FlowGraph';
 import { PhaseActivity } from '../components/runs/PhaseActivity';
 import { RunChangesPanel } from '../components/items/RunChangesPanel';
+import { RunSupervisionPanel } from '../components/runs/RunSupervisionPanel';
 import { useDesignFlows } from '../hooks/use-design-flows';
 import { useFlowState } from '../hooks/use-flow-state';
 import { useRunToolEvents } from '../hooks/use-run-tool-events';
@@ -201,6 +202,12 @@ export function RunDetailPage() {
           <p>{run.error}</p>
         </section>
       )}
+
+      {/* FORGE-739: drive this run to a verified result. */}
+      <RunSupervisionPanel
+        runId={run.id}
+        ended={['completed', 'rejected', 'canceled', 'cancelled', 'timed_out'].includes(run.status)}
+      />
 
       {/* FORGE-526: the item revisions this run produced, and what each gate did. */}
       <RunChangesPanel runId={run.id} projectId={projectId} />

@@ -116,7 +116,8 @@ class TestAlertingRules:
         # + 1 browser requests refused for their Origin (FORGE-604).
         # + 4 host watchdog (FORGE-713).
         # + 2 gate reviewer: failing, disagrees often (FORGE-726).
-        assert len(rules) == 58
+        # + 1 run supervisor platform issue (FORGE-734).
+        assert len(rules) == 59
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -177,7 +178,8 @@ class TestAlertingRules:
         # + 1 browser requests refused for their Origin (FORGE-604).
         # + 3 host watchdog (FORGE-713).
         # + 2 gate reviewer (FORGE-726).
-        assert len(warnings) == 44
+        # + 1 run supervisor (FORGE-734).
+        assert len(warnings) == 45
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -283,6 +285,8 @@ class TestAlertingRules:
                 # FORGE-726: gate reviewer.
                 "GateReviewerFailing",
                 "GateReviewerDisagreesOften",
+                # FORGE-734: run supervisor.
+                "RunSupervisorFoundPlatformIssue",
             ]
         )
 
