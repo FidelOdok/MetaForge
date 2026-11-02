@@ -118,6 +118,8 @@ class FlowContext:
     #: The phase brain puts this first in its prompt. Empty on a first attempt.
     retry_feedback: str = ""
     attempt: int = 1
+    #: FORGE-742: rework cycles used so far; a client task id carries it.
+    rework_cycle: int = 0
     completed: list[tuple[Phase, PhaseOutcome]] = field(default_factory=list)
     #: FORGE-539: the facts phase conditions are evaluated against, and the
     #: phases skipped because their condition did not hold.
@@ -519,6 +521,7 @@ class DesignFlowExecutor:
             ctx.retry_feedback = pending_feedback
             pending_feedback = ""
             ctx.attempt = 1
+            ctx.rework_cycle = cycles
             jump: ReworkJump | None = None
             while True:
                 result = await self._attempt_phase(
@@ -579,6 +582,7 @@ class DesignFlowExecutor:
             attempt = 1
             ctx.retry_feedback = feedback.pop(phase.id, "")
             ctx.attempt = 1
+            ctx.rework_cycle = cycles
             jump: ReworkJump | None = None
             while True:
                 result = await self._attempt_phase(
