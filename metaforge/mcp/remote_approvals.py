@@ -337,6 +337,37 @@ class RemoteApprovalLedger:
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             return await http.post(url, json=body)
 
+    async def policy_approval(self, ask: ApprovalAsk) -> ApprovalResolution | None:
+        """The project's policy's approval of ``ask``, or ``None`` to hold it (FORGE-745).
+
+        Any failure is ``None``: the call is then held for a person, never run
+        on an answer nobody gave.
+        """
+        try:
+            response = await self._post(
+                f"{self._endpoint}/policy",
+                {
+                    "tool": ask.tool_id,
+                    "arguments": ask.arguments,
+                    "caller": ask.caller.value,
+                    "session_id": ask.session_id,
+                    "project": ask.project,
+                    "client": ask.client,
+                },
+            )
+            response.raise_for_status()
+            body: dict[str, Any] = response.json()
+        except Exception as exc:  # noqa: BLE001 - no answer means a person decides
+            logger.info("mcp_policy_approval_unavailable", tool_id=ask.tool_id, error=str(exc))
+            return None
+        if not body.get("approved"):
+            return None
+        return ApprovalResolution(
+            outcome=ApprovalOutcome.APPROVED,
+            approver=Approver(actor_id=str(body.get("approved_by") or "policy"), verified=False),
+            approval_id=str(body.get("id") or "") or None,
+        )
+
     async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
         try:
             created = await self._post(

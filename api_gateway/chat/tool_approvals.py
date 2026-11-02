@@ -366,6 +366,72 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
     return RunResponse.from_run(run)
 
 
+class PolicyApprovalRequest(BaseModel):
+    """A held call the project's approval policy may already cover."""
+
+    tool: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    caller: str = "untrusted"
+    session_id: str | None = None
+    project: str | None = None
+    client: str | None = None
+
+
+class PolicyApprovalResponse(BaseModel):
+    approved: bool
+    #: The ledger entry the approval is recorded on, when approved.
+    id: str | None = None
+    approved_by: str | None = None
+
+
+@router.post("/policy", response_model=PolicyApprovalResponse)
+async def approve_by_policy(body: PolicyApprovalRequest) -> PolicyApprovalResponse:
+    """Approve a held call the project's policy covers, or say it does not.
+
+    Only a ``phase.claim`` on an open task of the project's own client-mode run
+    under an ``auto`` policy is covered (see
+    :mod:`api_gateway.approvals.claim_policy`). A covered call is written to the
+    ledger like any other, approved by ``policy:auto:<who set it>`` on route
+    ``policy``; anything else records nothing and the caller holds it for a
+    person as before.
+    """
+    from api_gateway.approvals.claim_policy import claim_covered_by_policy
+
+    approver = await claim_covered_by_policy(body.tool, body.arguments)
+    if approver is None:
+        return PolicyApprovalResponse(approved=False)
+    run = _approval_store.create(
+        {
+            "tool": body.tool,
+            "arguments": body.arguments,
+            "caller": body.caller,
+            "source": "mcp",
+            "session_id": body.session_id,
+            "project": project_for_hold(body.project, body.arguments),
+            "route": "policy",
+            "client": body.client,
+        }
+    )
+    _approval_store.start(run.id)
+    _approval_store.request_approval(
+        run.id,
+        reason="covered by the project's approval policy",
+        deadline=_approval_store.now() + DEFAULT_HOLD_TIMEOUT_SECONDS,
+    )
+    run = _approval_store.submit_approval(
+        run.id, ApprovalDecision.APPROVE, approved_by=approver, approver_verified=False
+    )
+    run = _close_decided_hold(
+        run.id,
+        approved=True,
+        approver=approver,
+        verified=False,
+        reason="covered by the project's approval policy",
+    )
+    logger.info("tool_approval_by_policy", run_id=run.id, tool=body.tool, approved_by=approver)
+    return PolicyApprovalResponse(approved=True, id=run.id, approved_by=approver)
+
+
 class ResolveHoldRequest(BaseModel):
     """Close a hold nobody is waiting for any more (FORGE-466)."""
 

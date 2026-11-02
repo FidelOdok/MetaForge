@@ -9833,6 +9833,98 @@
         "title": "PhaseView",
         "type": "object"
       },
+      "PolicyApprovalRequest": {
+        "description": "A held call the project's approval policy may already cover.",
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "caller": {
+            "default": "untrusted",
+            "title": "Caller",
+            "type": "string"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "title": "PolicyApprovalRequest",
+        "type": "object"
+      },
+      "PolicyApprovalResponse": {
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          }
+        },
+        "required": [
+          "approved"
+        ],
+        "title": "PolicyApprovalResponse",
+        "type": "object"
+      },
       "PrdSource": {
         "properties": {
           "item_type": {
@@ -17861,6 +17953,48 @@
           }
         },
         "summary": "Hold Tool Call",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
+    "/v1/chat/tool_approvals/policy": {
+      "post": {
+        "description": "Approve a held call the project's policy covers, or say it does not.\n\nOnly a ``phase.claim`` on an open task of the project's own client-mode run\nunder an ``auto`` policy is covered (see\n:mod:`api_gateway.approvals.claim_policy`). A covered call is written to the\nledger like any other, approved by ``policy:auto:<who set it>`` on route\n``policy``; anything else records nothing and the caller holds it for a\nperson as before.",
+        "operationId": "approve_by_policy_v1_chat_tool_approvals_policy_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyApprovalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve By Policy",
         "tags": [
           "chat-tool-approvals"
         ]
