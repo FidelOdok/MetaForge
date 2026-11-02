@@ -16,7 +16,7 @@ one body of code.
 | `GET /v1/approvals?status=pending\|decided\|all&project_id=<id>&kind=<kind>` | List items. `decided` is every item that is not pending (the audit view). |
 | `GET /v1/approvals/{id}` | One item. |
 | `POST /v1/approvals/{id}/decision` | Body `{"decision", "reason", "to_phase"}`. Returns the updated item. |
-| `POST /v1/approvals/gate:{run_id}/inline-decision` | A gate decision a person gave in the MCP client's own prompt, recorded by the sidecar that asked. Body adds `approver` and `approver_verified`. Gates only. See [Gates in the client chat](#gates-in-the-client-chat). |
+| `POST /v1/approvals/{id}/inline-decision` | A decision a person gave in the MCP client's own prompt, recorded by the sidecar that asked: a gate from `flow.await_gate`, or any pending item from `approvals.decide`. Body adds `approver` and `approver_verified`. See [Gates in the client chat](#gates-in-the-client-chat) and [Any approval in the client chat](#any-approval-in-the-client-chat). |
 
 The list response is `{"items": [...], "unscoped_count": n}`. When scoped to a
 project, `unscoped_count` is how many items were left out because they carry no
@@ -168,6 +168,31 @@ cannot.
   caller).
 
 The decision record shows `surface: "chat"`.
+
+## Any approval in the client chat
+
+`flow.await_gate` covers one run's next gate. Two tools cover everything else
+waiting for a person, from the MCP client (the Claude Code plugin's
+`/metaforge:approvals` command uses them):
+
+- `approvals.list` returns the pending items, the same list as the Approvals
+  page: gates, held tool calls, change proposals and twin approvals. Pass
+  `project_id` to narrow it. It is read-only.
+- `approvals.decide` puts one of them, by id, to the person in the client's own
+  prompt, offering only the decisions the item allows right now. The person
+  answers; the agent cannot. The answer is recorded through
+  `POST /v1/approvals/{id}/inline-decision`, so the dashboard's rules apply:
+  approve is not offered on a gate whose checks failed, retry and rework keep
+  their caps, reject, retry and rework need a reason, and a hold already being
+  asked in another client's prompt is not decidable here. Dismissing the prompt
+  leaves the item pending. The decision record shows `surface: "chat"`.
+
+Like `flow.await_gate`, `approvals.decide` is not held at the call (it only
+asks), and the design-flow worker may not call either tool.
+
+Both are on the `core` profile, the plugin's default connection. To make room
+under its 40-tool cap, `memory.list_insights` and
+`memory.retrieve_similar_experience` moved to the full profile.
 
 ## Delegating approvals to an agent
 

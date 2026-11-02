@@ -94,8 +94,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "project.update",
         "constraint.validate",
         "knowledge.ingest",
-        "memory.list_insights",
-        "memory.retrieve_similar_experience",
+        # FORGE-722: memory.list_insights and memory.retrieve_similar_experience
+        # gave their places to approvals.list / approvals.decide at the 40-tool
+        # cap; both stay in `all`, and retrieve_similar_experience in client_run.
         # FORGE-462: starting a gated design flow is a core action. The run.*
         # pair were listed here while no sidecar registered them; flow.* is
         # the approved-version path a person signs off on first.
@@ -110,6 +111,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "flow.capabilities",
         "flow.lifecycle",
         "flow.patch",
+        # FORGE-722: what is waiting for the person, decided in this chat.
+        "approvals.list",
+        "approvals.decide",
         # FORGE-630: run.get_status gave its place to twin.render_work_product;
         # flow.status reports a run's state, and run.get_status stays in `all`.
         "run.start_design_flow",
@@ -456,6 +460,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "flow.status",
         "flow.lifecycle",
         "flow.await_gate",
+        # FORGE-722: what is waiting for the person, decided in this chat.
+        "approvals.list",
+        "approvals.decide",
         "phase.list_tasks",
         "phase.claim",
         "phase.submit",

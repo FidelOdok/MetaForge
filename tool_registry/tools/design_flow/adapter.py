@@ -59,6 +59,7 @@ class DesignFlowServer(McpToolServer):
         gate_reader: Any = None,
         gate_decider: Any = None,
         client_tasks: Any = None,
+        approvals_lister: Any = None,
     ) -> None:
         super().__init__(adapter_id="design_flow", version="0.1.0")
         self._catalogue_reader = catalogue_reader
@@ -72,6 +73,7 @@ class DesignFlowServer(McpToolServer):
         self._gate_reader = gate_reader
         self._gate_decider = gate_decider
         self._client_tasks = client_tasks
+        self._approvals_lister = approvals_lister
 
         if catalogue_reader is not None:
             self._register_list_flows()
@@ -99,6 +101,12 @@ class DesignFlowServer(McpToolServer):
         # FORGE-581: phase tasks for client-mode runs.
         if client_tasks is not None:
             self._register_phase_tasks()
+        # FORGE-722: every pending approval, and one put to the person in this
+        # chat. Deciding reuses the gate decider (service.decide, any kind).
+        if approvals_lister is not None:
+            self._register_approvals_list()
+            if gate_decider is not None:
+                self._register_approvals_decide()
 
     # ── tools ────────────────────────────────────────────────────────────
 
@@ -548,6 +556,57 @@ class DesignFlowServer(McpToolServer):
             handler=self.await_gate,
         )
 
+    def _register_approvals_list(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="approvals.list",
+                adapter_id="design_flow",
+                name="List approvals waiting for a person",
+                description=(
+                    "Everything waiting for a person's decision: design-flow gates, held "
+                    "tool calls, change proposals and twin approvals, the same list as the "
+                    "dashboard's Approvals page. Pass project_id to narrow it. Show the "
+                    "person what is waiting; to have them decide one here, call "
+                    "approvals.decide with its id."
+                ),
+                capability="design_flow_read",
+                input_schema={
+                    "type": "object",
+                    "properties": {"project_id": {"type": "string"}},
+                },
+            ),
+            handler=self.approvals_list,
+        )
+
+    def _register_approvals_decide(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="approvals.decide",
+                adapter_id="design_flow",
+                name="Ask the person to decide one pending approval",
+                description=(
+                    "Put ONE pending approval (an id from approvals.list) to the PERSON in "
+                    "this chat. They choose from the decisions it allows right now and "
+                    "give a reason where one is required; you do not answer the prompt "
+                    "and cannot decide for them. If they dismiss it, or this client cannot "
+                    "show a prompt, it stays pending in the dashboard and `forge approvals`."
+                ),
+                capability="design_flow_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "approval_id": {"type": "string"},
+                        "answer_seconds": {
+                            "type": "number",
+                            "description": "How long the person has to answer (default 80).",
+                        },
+                    },
+                    "required": ["approval_id"],
+                },
+            ),
+            handler=self.approvals_decide,
+        )
+
     def _register_phase_tasks(self) -> None:
         self.register_tool(
             manifest=ToolManifest(
@@ -625,6 +684,25 @@ class DesignFlowServer(McpToolServer):
         )
 
     # ── handlers ─────────────────────────────────────────────────────────
+
+    async def approvals_list(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from tool_registry.tools.design_flow.approvals import list_pending
+
+        project_id = str(arguments.get("project_id") or "").strip() or None
+        return await list_pending(lister=self._approvals_lister, project_id=project_id)
+
+    async def approvals_decide(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from tool_registry.tools.design_flow.approvals import decide_approval
+
+        approval_id = str(arguments.get("approval_id") or "").strip()
+        if not approval_id:
+            raise ValueError("approvals.decide: 'approval_id' is required")
+        return await decide_approval(
+            lister=self._approvals_lister,
+            decider=self._gate_decider,
+            approval_id=approval_id,
+            answer_seconds=arguments.get("answer_seconds"),
+        )
 
     async def await_gate(self, arguments: dict[str, Any]) -> dict[str, Any]:
         from tool_registry.tools.design_flow.gates import await_gate

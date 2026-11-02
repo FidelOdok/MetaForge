@@ -192,6 +192,8 @@ DOWNSTREAM_APPROVED: frozenset[str] = frozenset(
         # agent cannot answer the prompt, and a client that cannot show one
         # gets no decision at all.
         "flow.await_gate",
+        # FORGE-722: same shape as flow.await_gate, for any pending item.
+        "approvals.decide",
     }
 )
 
@@ -214,7 +216,7 @@ ARGUMENT_CLASSIFIED: frozenset[str] = frozenset({"twin.query_cypher"})
 #: was given; reshaping either is an administrator's call (FORGE-487).
 #: FORGE-584: ``phase.*`` too. The worker's phase brain has no business
 #: taking client tasks.
-SERVICE_REFUSED_PREFIXES: tuple[str, ...] = ("project.", "flow.", "run.", "phase.")
+SERVICE_REFUSED_PREFIXES: tuple[str, ...] = ("project.", "flow.", "run.", "phase.", "approvals.")
 
 #: What a client working a claimed phase task may call that the service
 #: worker may not (FORGE-584): handing tasks back, and asking the person to

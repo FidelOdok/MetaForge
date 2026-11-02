@@ -2068,11 +2068,13 @@ def _build_flow_bindings() -> dict[str, Any]:
             "design_flow_gate_reader": remote.gate_reader,
             "design_flow_gate_decider": remote.gate_decider,
             "design_flow_client_tasks": remote.client_tasks,
+            "design_flow_approvals_lister": remote.approvals_lister,
             "run_launcher": remote.run_launcher,
         }
 
     try:
         from api_gateway.design_flows.mcp_bindings import (
+            make_approvals_lister,
             make_capability_reader,
             make_catalogue_reader,
             make_client_task_service,
@@ -2111,6 +2113,7 @@ def _build_flow_bindings() -> dict[str, Any]:
         "design_flow_gate_reader": make_gate_reader(),
         "design_flow_gate_decider": make_gate_decider(),
         "design_flow_client_tasks": make_client_task_service(),
+        "design_flow_approvals_lister": make_approvals_lister(),
         "run_launcher": make_run_launcher(),
     }
 

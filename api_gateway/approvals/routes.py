@@ -211,21 +211,18 @@ async def decide_approval(
 async def decide_inline(
     approval_id: str, body: InlineDecisionRequest, request: Request
 ) -> ApprovalItem:
-    """Record a gate decision a person gave in the MCP client's chat (FORGE-582).
+    """Record a decision a person gave in the MCP client's chat (FORGE-582, FORGE-722).
 
-    Gates only: a held tool call's inline answer has its own route
-    (``/v1/tool-approvals/{id}/resolve``). The decision goes through the same
+    Gates from ``flow.await_gate``, and any pending item from
+    ``approvals.decide``. The decision goes through the same
     ``service.decide`` as a dashboard click, so a gate that is not ready
-    still cannot be approved, and retry and rework caps still apply.
+    still cannot be approved, retry and rework caps still apply, and a hold
+    already being asked in another client's prompt is not decidable here.
     """
     from api_gateway.auth.dependencies import current_principal
     from mcp_core.elicitation import LOCAL_ELICITATION_ACTOR
 
-    if approval_id.partition(":")[0] != "gate":
-        raise HTTPException(
-            status_code=422,
-            detail="inline decisions are recorded here for design-flow gates only",
-        )
+    kind = approval_id.partition(":")[0] or "unknown"
     verified = bool(body.approver and body.approver_verified) and (
         current_principal(request) is not None
     )
@@ -243,9 +240,9 @@ async def decide_inline(
         )
     except HTTPException as exc:
         outcome = "refused" if exc.status_code < 500 else "error"
-        _collector().record_approval_decision("gate", body.decision, "chat", outcome)
+        _collector().record_approval_decision(kind, body.decision, "chat", outcome)
         raise
-    _collector().record_approval_decision("gate", body.decision, "chat", "ok")
+    _collector().record_approval_decision(kind, body.decision, "chat", "ok")
     logger.info(
         "approval_decided_inline",
         approval_id=approval_id,
