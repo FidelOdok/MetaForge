@@ -2769,10 +2769,18 @@ class UnifiedMcpServer:
 
     async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route ``tool/call``, under a client-task grant when one applies (FORGE-584)."""
+        from mcp_core.context import current_context, with_context
+
         scoped = await self._client_task_scope()
+        label = self._client_label()
+        if label:
+            # FORGE-746: the client rides along, so a task claimed on a session
+            # with no signed-in identity names this client, not "unknown".
+            base = scoped if scoped is not None else current_context()
+            if not base.client:
+                scoped = base.model_copy(update={"client": label})
         if scoped is None:
             return await self._dispatch_tool_call_unscoped(params)
-        from mcp_core.context import with_context
 
         with with_context(scoped):
             return await self._dispatch_tool_call_unscoped(params)
