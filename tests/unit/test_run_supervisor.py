@@ -251,3 +251,20 @@ def test_flow_supervise_is_a_client_tool_the_worker_cannot_call() -> None:
     srv = DesignFlowServer(supervisor=_Sup())
     assert "flow.supervise" in srv.tool_ids
     assert any("flow.supervise".startswith(p) for p in SERVICE_REFUSED_PREFIXES)
+
+
+def test_resuming_a_stopped_supervision_starts_a_fresh_budget() -> None:
+    # FORGE-744: the Chair run's 1 h budget ran out; starting it again kept the
+    # old clock and stopped it at once with "wall-time budget used (1.1 h)".
+    run_id = _run()
+    supervisor.start_supervision(run_id, budgets={"max_hours": 1})
+    sup = _sup(run_id)
+    sup["started_epoch"] -= 3700
+    run_routes.get_run_store().annotate(run_id, "supervision", sup)
+    assert _tick(run_id)["status"] == "stopped"
+
+    supervisor.start_supervision(run_id, budgets={"max_hours": 1})
+    resumed = _tick(run_id)
+    assert resumed["active"] and resumed["status"] == "watching"
+    assert resumed["counters"] == {"actions": 0, "restarts": 0}
+    assert [e["action"] for e in resumed["log"]].count("start") == 2

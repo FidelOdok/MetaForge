@@ -132,6 +132,17 @@ def start_supervision(
         "started_epoch": time.time(),
         "started_by": started_by,
     }
+    if not sup.get("active"):
+        # FORGE-744: resuming a supervision that stopped starts a fresh budget
+        # window. Kept, the old clock and counters stopped it again at once
+        # ("wall-time budget used"), so a run whose budget ran out could never
+        # be supervised again. The chain and the log carry over.
+        sup.update(
+            started_at=_now(),
+            started_epoch=time.time(),
+            counters={"actions": 0, "restarts": 0},
+            started_by=started_by or sup.get("started_by", ""),
+        )
     # ``is not None``, not truthiness: a budget of 0 (no restarts) is a real choice.
     chosen = {k: v for k, v in (budgets or {}).items() if v is not None}
     sup["budgets"] = {**DEFAULT_BUDGETS, **chosen}
