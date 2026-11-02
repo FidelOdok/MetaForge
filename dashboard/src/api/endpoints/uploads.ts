@@ -1,4 +1,5 @@
 import apiClient from '../client';
+import { resolveGatewayHref } from '../../lib/gatewayConfig';
 
 /** One file in a staged upload. Mirrors `api_gateway.uploads.store.StagedFile`. */
 export interface StagedFile {
@@ -36,14 +37,24 @@ export interface CreateUploadOptions {
   wpTypes?: Record<string, string>;
 }
 
+/** A file and the path it had inside a dropped folder. */
+export interface PathedFile {
+  file: File;
+  path: string;
+}
+
 /** Every file the person picked. A file from a folder keeps its relative path. */
 export async function createUpload(
-  files: File[],
+  files: Array<File | PathedFile>,
   options: CreateUploadOptions = {},
 ): Promise<StagedUpload> {
   const form = new FormData();
-  for (const file of files) {
-    const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  for (const item of files) {
+    const file = item instanceof File ? item : item.file;
+    const rel =
+      item instanceof File
+        ? (item as File & { webkitRelativePath?: string }).webkitRelativePath
+        : item.path;
     form.append('files', file, rel || file.name);
   }
   if (options.projectId) form.append('project_id', options.projectId);
@@ -84,4 +95,31 @@ export async function openStagedFile(uploadId: string, name: string): Promise<vo
     window.open(url, '_blank', 'noopener');
   }
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export interface DownloadLink {
+  work_product_id: string;
+  name: string;
+  size: number;
+  via: 'gateway' | 'object_store';
+  url: string | null;
+  path: string | null;
+  expires_at: string;
+}
+
+/**
+ * A signed link to a work product's file that works without signing in, for
+ * a person to share. Absolute, so it can be pasted anywhere.
+ */
+export async function createDownloadLink(
+  workProductId: string,
+  path = '',
+): Promise<{ url: string; link: DownloadLink }> {
+  const { data } = await apiClient.post<DownloadLink>(
+    `/files/${encodeURIComponent(workProductId)}/link`,
+    { path },
+  );
+  const href = data.url ?? resolveGatewayHref(data.path ?? '');
+  const url = /^[a-z][a-z0-9+.-]*:/i.test(href) ? href : `${window.location.origin}${href}`;
+  return { url, link: data };
 }

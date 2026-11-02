@@ -71,6 +71,8 @@ const GERBER_FORMATS = new Set([
 ]);
 const TEXT_FORMATS = new Set([
   'txt', 'log', 'urdf', 'xacro', 'sdf', 'usda', 'net', 'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg',
+  // G-code: the slicer's header comments say the print time and filament.
+  'gcode', 'gco',
 ]);
 
 /** Code formats and the highlighter language they map to. */

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAllLinks, useDeleteLink, useSyncNode } from '../hooks/use-links';
 import { useActiveProject } from '../hooks/use-active-project';
+import { FileUploadPanel } from '../components/files/FileUploadPanel';
 import type { FileLink, FileLinkStatus, FileLinkTool } from '../types/twin';
 
 // ── Status dot colours ────────────────────────────────────────────────────────
@@ -287,6 +288,9 @@ export function FilesPage() {
           </button>
         </div>
       </div>
+
+      {/* ── Upload files and folders into the twin ─────────────────────────── */}
+      <FileUploadPanel projectId={activeProjectId} />
 
       {/* ── Search section ──────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 12 }}>

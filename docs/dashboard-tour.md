@@ -368,6 +368,10 @@ result but the word.
 
 ### Work product previews
 
+The full-screen **Preview** modal has **Copy link**: it makes a signed
+download link (`POST /v1/files/{id}/link`) and copies it, so the file can
+go to someone without a MetaForge login until the link expires.
+
 One registry, `previewEngineFor` in
 `dashboard/src/components/preview/registry.ts`, picks how a
 work product is previewed. The twin inspector, the full-screen
@@ -440,7 +444,17 @@ verdict. A result recorded without a field keeps its numbers and says
 
 Every stored artifact, with download and file-link sync.
 
-- **Backed by:** `GET /v1/twin/links` and the twin file routes.
+At the top, **upload files and folders** into the twin: CAD, meshes,
+G-code, images, KiCad projects, firmware, PDFs and spreadsheets, by
+choosing files, choosing a folder, or dropping either. With **Import now**
+ticked (the default) the person's choice is the approval and the files are
+imported at once; unticked, the upload waits on `/approvals` for review.
+Files that cannot be imported are listed with the reason. **Recent uploads**
+shows each upload's state, with a link to review the pending ones,
+including those a plugin or an upload link sent.
+
+- **Backed by:** `GET /v1/twin/links`, the twin file routes, and
+  `POST /v1/uploads` / `GET /v1/uploads` ([Files in and out](file-transfer.md)).
 
 ## `/knowledge`: ingested sources
 

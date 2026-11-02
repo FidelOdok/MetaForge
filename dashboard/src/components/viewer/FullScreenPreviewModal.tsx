@@ -5,6 +5,7 @@ import { useToast } from '../ui/Toast';
 import { useViewerStore } from '../../store/viewer-store';
 import { useApproveSketch } from '../../hooks/use-twin';
 import { nodeFileUrl } from '../../api/endpoints/twin';
+import { createDownloadLink } from '../../api/endpoints/uploads';
 import { ENGINE_LABELS, previewEngineFor, TEXT_ENGINES } from '../preview/registry';
 import { PreviewHost } from '../preview/PreviewHost';
 import { useNodeFileText } from '../preview/useNodeFileText';
@@ -71,6 +72,18 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
+
+  // A signed link: it downloads the file without the gateway's login, until
+  // it expires, so it can go to someone without a MetaForge account.
+  const handleShareLink = async () => {
+    try {
+      const { url, link } = await createDownloadLink(node.id);
+      await navigator.clipboard.writeText(url);
+      toast.success(`Link copied. It works until ${new Date(link.expires_at).toLocaleString()}.`);
+    } catch {
+      toast.error('Could not make a link for this file.');
+    }
+  };
 
   const handleCopy = async () => {
     if (!text) return;
@@ -198,6 +211,16 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
               {copied ? 'Copied' : 'Copy'}
             </Button>
           )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleShareLink}
+            className="text-xs"
+            title="Copy a link that downloads this file without signing in, for a while"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>link</span>
+            Copy link
+          </Button>
           <a href={downloadUrl} download style={{ textDecoration: 'none' }}>
             <Button variant="secondary" size="sm" className="text-xs">
               <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>download</span>
