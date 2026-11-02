@@ -17,7 +17,8 @@ Three operations, each a separate MCP tool so its annotation is honest:
     here, never taken from the caller, so it cannot be asserted. Held, like
     every twin write.
 
-MetaForge has no slicer: the work product must already be G-code.
+The work product must already be G-code. ``slicer.slice`` writes G-code to
+the adapter workspace, but nothing records that file as a work product yet.
 """
 
 from __future__ import annotations
@@ -90,8 +91,8 @@ async def dispatch_job(
         raise JobError(f"work product {work_product_id} has no file to send ({exc})") from exc
     if not filename.lower().endswith(GCODE_SUFFIXES):
         raise JobError(
-            f"{filename} is not G-code. MetaForge has no slicer: slice the part for "
-            f"{machine.name} and record the G-code as a work product, then send that."
+            f"{filename} is not G-code. Slice the part for {machine.name} and "
+            f"record the G-code as a work product, then send that."
         )
     revision = await work_product_current_revision(twin, wp_uuid)
     project_id = getattr(wp, "project_id", None) or (wp.metadata or {}).get("project_id")

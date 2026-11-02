@@ -150,6 +150,12 @@ PROFILES: dict[str, frozenset[str]] = {
         "simready.import",
         "simready.inspect",
         "simready.search",
+        # A supplier's native CAD (SolidWorks, CATIA, NX, ...) as STEP, and
+        # its mass properties. Cloud tools: served only when ZOO_API_TOKEN is
+        # set, and otherwise reported as unserved rather than dropped.
+        "zoo.convert",
+        "zoo.get_conversion",
+        "zoo.mass_properties",
         "twin.commit_geometry",
         "twin.record_design_files",
         # FORGE-630: see what was modelled.
@@ -405,6 +411,43 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.record_constraint_set",
         "twin.record_document",
         "twin.record_engineering_entity",
+    },
+    # Prototyping (the Planner's Phase 2 discipline): a printable part from a
+    # prompt, an image or a supplier's file, sliced for a printer and priced
+    # at a print farm. Generative meshes (Tripo, Meshy), CAD conversion and
+    # mass (Zoo), PrusaSlicer, and Slant 3D analysis and quotes. Its own set
+    # rather than an addition to `manufacturing`, whose design-flow phase is
+    # already at PHASE_MCP_BUDGET; it is in no DISCIPLINE_PROFILES entry, so
+    # no phase pays for it. The cloud tools are served only where their key
+    # is set.
+    "prototyping": _BASE
+    | {
+        "tripo.text_to_3d",
+        "tripo.image_to_3d",
+        "tripo.convert",
+        "tripo.get_task",
+        "tripo.download",
+        "tripo.get_balance",
+        "meshy.text_to_3d",
+        "meshy.image_to_3d",
+        "meshy.get_task",
+        "meshy.download",
+        "zoo.convert",
+        "zoo.get_conversion",
+        "zoo.mass_properties",
+        "slicer.slice",
+        "slicer.list_profiles",
+        "slant3d.analyze_part",
+        "slant3d.quote",
+        "slant3d.get_part",
+        "slant3d.list_filaments",
+        "cadquery.export_geometry",
+        "twin.commit_geometry",
+        "twin.stage_work_product_file",
+        "twin.render_work_product",
+        "twin.record_document",
+        "library.list_machines",
+        "library.machine_limits",
     },
     "client_run": _BASE
     | {

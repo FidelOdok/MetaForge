@@ -98,8 +98,10 @@ the DFM phase check the design against the chosen machine's limits.
 Only when the person asks for the part to be made, on an in-house printer
 with an OctoPrint or Moonraker connection:
 
-1. The part must already be G-code, recorded as a work product. MetaForge has
-   no slicer; if there is no G-code, say so and stop.
+1. The part must already be G-code, recorded as a work product. If there is
+   none, say so and stop. `slicer.slice` writes G-code to the workspace, but
+   that file cannot be recorded as a work product yet, so it cannot be sent
+   from here.
 2. `library.dispatch_job` with the machine and the G-code work product. This
    starts a real print. It is held for the person every time; never retry a
    refused or timed-out one without asking. It refuses a machine that is not

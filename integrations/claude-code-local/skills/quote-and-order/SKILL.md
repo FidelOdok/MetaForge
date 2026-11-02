@@ -46,6 +46,14 @@ date. An order is a purchase and always waits for the person.
    changed since; quote again then.
 5. `vendor.order_status` to follow it.
 
+## The Slant 3D print farm
+
+When `SLANT3D_API_KEY` is set, the `slant3d.*` tools price an FDM print
+directly, without a vendor connector: `slant3d.analyze_part` on an STL, then
+`slant3d.quote`. The `slice-for-printing` skill has the steps. Its prices are
+print cost only, in USD, and it has no order tool; the person orders on Slant
+3D's site.
+
 ## Vendors with no API
 
 Many services cannot be quoted or ordered by API (AISLER for PCBs,
