@@ -850,6 +850,18 @@ class MetricsRegistry:
         labels=["recommendation", "decision", "agreed"],
     )
 
+    # ── Run supervisor (FORGE-734) ─────────────────────────────────────
+
+    SUPERVISOR_ACTION_TOTAL = MetricDefinition(
+        name="metaforge_run_supervisor_action_total",
+        type="counter",
+        description=(
+            "Run supervisor actions (start, restart, stopped, verified) by reason "
+            "(design, tooling, platform, person, budget, verification, ok, other) (FORGE-734)"
+        ),
+        labels=["action", "reason"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -873,7 +885,13 @@ class MetricsRegistry:
             + cls.sim_field_metrics()
             + cls.watchdog_metrics()
             + cls.gate_review_metrics()
+            + cls.supervisor_metrics()
         )
+
+    @classmethod
+    def supervisor_metrics(cls) -> list[MetricDefinition]:
+        """Run supervisor metrics (FORGE-734)."""
+        return [cls.SUPERVISOR_ACTION_TOTAL]
 
     @classmethod
     def gate_review_metrics(cls) -> list[MetricDefinition]:
@@ -1844,6 +1862,12 @@ class MetricsCollector:
                     "agreed": "true" if agreed else "false",
                 },
             )
+
+    def record_supervisor_action(self, action: str, reason: str) -> None:
+        """Record one run supervisor action (FORGE-734)."""
+        counter = self._instruments.get(MetricsRegistry.SUPERVISOR_ACTION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"action": action, "reason": reason})
 
     def record_watchdog_restart(self, service: str, reason: str, outcome: str) -> None:
         """Record a restart the watchdog made, suppressed, or failed to make."""

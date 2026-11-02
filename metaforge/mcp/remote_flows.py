@@ -256,6 +256,8 @@ class RemoteFlowBindings:
     approvals_lister: Any = None
     #: FORGE-730: gate reviews for this client's reviewer subagent.
     review_tasks: Any = None
+    #: FORGE-739: the run supervisor.
+    supervisor: Any = None
 
 
 class RemoteClientTasks:
@@ -322,6 +324,31 @@ class RemoteReviewTasks:
     async def submit(self, task_id: str, client: str, body: dict[str, Any]) -> dict[str, Any]:
         result: dict[str, Any] = await self._gateway.request(
             "POST", f"/v1/review-tasks/{task_id}/submit", json={"client": client, **body}
+        )
+        return result
+
+
+class RemoteSupervisor:
+    """``flow.supervise`` over ``/v1/runs/{id}/supervise`` (FORGE-739)."""
+
+    def __init__(self, gateway: _Gateway) -> None:
+        self._gateway = gateway
+
+    async def start(self, run_id: str, budgets: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST", f"/v1/runs/{run_id}/supervise", json=budgets
+        )
+        return result
+
+    async def status(self, run_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "GET", f"/v1/runs/{run_id}/supervision"
+        )
+        return result
+
+    async def stop(self, run_id: str, reason: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST", f"/v1/runs/{run_id}/supervise/stop", json={"reason": reason}
         )
         return result
 
@@ -668,6 +695,7 @@ def build_remote_flow_bindings(
 
     return RemoteFlowBindings(
         review_tasks=RemoteReviewTasks(gateway),
+        supervisor=RemoteSupervisor(gateway),
         approvals_lister=list_approvals,
         gate_reader=read_gate,
         gate_decider=decide_gate,

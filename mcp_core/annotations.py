@@ -312,6 +312,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-730: a client reviewer takes and answers a gate review.
         "review.claim",
         "review.submit",
+        # FORGE-739: starts, reads or stops the run supervisor; its restarts are
+        # new runs, and it never decides a gate itself.
+        "flow.supervise",
         # FORGE-581: taking a phase task and handing it back record the
         # client's own work on the task; neither touches design state.
         "phase.claim",

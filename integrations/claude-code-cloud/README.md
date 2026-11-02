@@ -41,6 +41,7 @@ Install **one**. The manifest has no way to switch a server entry off, so two pa
 - `/metaforge:replan`
 - `/metaforge:gate`
 - `/metaforge:approvals`
+- `/metaforge:drive`
 - `/metaforge:doctor`
 
 ## Skills

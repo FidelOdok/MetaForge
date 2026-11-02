@@ -76,7 +76,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 client-mode phase tasks (FORGE-581)
         # + 5 host watchdog (FORGE-713).
         # + 2 gate reviewer (FORGE-726).
-        assert len(all_metrics) == 92
+        # + 1 run supervisor (FORGE-734).
+        assert len(all_metrics) == 93
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -117,6 +118,7 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.sim_field_metrics())
             + len(MetricsRegistry.watchdog_metrics())
             + len(MetricsRegistry.gate_review_metrics())
+            + len(MetricsRegistry.supervisor_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 
@@ -145,6 +147,7 @@ class TestMetricsRegistryGroupedAccess:
             MetricsRegistry.sim_field_metrics(),
             MetricsRegistry.watchdog_metrics(),
             MetricsRegistry.gate_review_metrics(),
+            MetricsRegistry.supervisor_metrics(),
         ]
         grouped = {m.name for group in groups for m in group}
         registered = {m.name for m in MetricsRegistry.all_metrics()}
