@@ -612,6 +612,22 @@ _PREVIEW_CONTENT_TYPES: dict[str, str] = {
 }
 
 
+def _active_content_headers(media_type: str) -> dict[str, str]:
+    """Headers that keep an SVG or HTML file from acting on this origin.
+
+    Both run script when opened directly, and files now arrive from outside
+    (an approved upload). ``sandbox allow-scripts`` gives the document an
+    opaque origin: a design sketch still runs, but nothing it does reaches
+    the gateway's cookies, storage or API as this origin.
+    """
+    if media_type.startswith(("image/svg+xml", "text/html")):
+        return {
+            "Content-Security-Policy": "sandbox allow-scripts",
+            "X-Content-Type-Options": "nosniff",
+        }
+    return {}
+
+
 def _content_type_for(fmt: str, filename: str) -> str:
     """Best-effort MIME type for inline preview from format or filename."""
     key = (fmt or "").lower().lstrip(".")
@@ -696,7 +712,10 @@ async def download_node_file(
         return Response(
             content=content,
             media_type=media_type,
-            headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'{disposition}; filename="{filename}"',
+                **_active_content_headers(media_type),
+            },
         )
 
 
@@ -764,7 +783,9 @@ async def download_node_named_file(node_id: str, filename: str) -> Response:
             media_type=media_type,
             size=len(content),
         )
-        return Response(content=content, media_type=media_type)
+        return Response(
+            content=content, media_type=media_type, headers=_active_content_headers(media_type)
+        )
 
 
 @router.delete("/nodes/{node_id}", status_code=204)

@@ -99,6 +99,15 @@ Which way in suits which client:
 
 The plugin skill `move-files` tells the model which to use.
 
+In the dashboard, the Files page uploads files and folders (dropped
+folders keep their structure), the Approvals page shows each staged file
+with a **view** button, and a work product's Preview has **Copy link**.
+
+Twin file routes (`GET /v1/twin/nodes/{id}/file` and `/files/{name}`)
+serve SVG and HTML with `Content-Security-Policy: sandbox allow-scripts`,
+since files now arrive from outside: opened directly, such a file runs in
+an opaque origin and cannot use the gateway's cookies, storage or API.
+
 ## Signed links
 
 A link is its own credential, so a person's browser or `curl` can use it

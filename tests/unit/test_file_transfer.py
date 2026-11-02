@@ -350,3 +350,23 @@ def test_links_expire_in_real_time() -> None:
     time.sleep(1.1)
     with pytest.raises(links.LinkError):
         links.verify(token)
+
+
+class TestActiveContent:
+    async def test_an_svg_from_the_twin_cannot_act_on_the_gateway_origin(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        app = FastAPI()
+        app.include_router(twin_routes.router)
+        wp_id = await _wp(twin, "logo.svg", b"<svg onload='alert(1)'/>")
+        got = TestClient(app).get(f"/v1/twin/nodes/{wp_id}/file")
+        assert got.status_code == 200
+        assert got.headers["content-security-policy"] == "sandbox allow-scripts"
+        assert got.headers["x-content-type-options"] == "nosniff"
+
+    async def test_an_ordinary_file_is_served_as_before(self, twin: InMemoryTwinAPI) -> None:
+        app = FastAPI()
+        app.include_router(twin_routes.router)
+        wp_id = await _wp(twin, "part.step", STEP)
+        got = TestClient(app).get(f"/v1/twin/nodes/{wp_id}/file")
+        assert "content-security-policy" not in got.headers
