@@ -41,6 +41,7 @@ The id is `<prefix>:<native id>`. The prefix says which store holds the item;
 | `design_loop:` | `design_loop` | The winning candidate of a closed design loop | `POST /v1/design-loop/{id}/approve` |
 | `sketch:` | `sketch` | A design sketch work product | `POST /v1/twin/nodes/{id}/approve-sketch` |
 | `drawing:` | `drawing` | A technical drawing work product | `POST /v1/twin/nodes/{id}/approve-technical-drawing` |
+| `upload:` | `upload` | Files staged from outside: a plugin tool call, a signed upload link, the local plugin, or the API. A human-authority kind. See [Files in and out](file-transfer.md) | approve imports the files, reject deletes them |
 
 ## The item
 
@@ -310,7 +311,7 @@ An agent decision without `X-MetaForge-On-Behalf-Of` is a 422.
 
 **Human-authority approvals stay human.** Items of kind `human_authority`
 (`twin.attempt_promotion`, `twin.approve_design_loop`,
-`twin.approve_engineering_change`) and `design_loop` cannot be decided by an
+`twin.approve_engineering_change`), `design_loop` and `upload` cannot be decided by an
 agent. For an agent caller they show `decidable: false` with an explanation,
 and a decision attempt is a 403. The gateway owner can delegate them by setting
 `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true` on the gateway (default off).

@@ -22,6 +22,11 @@ from twin_core.models.enums import WorkProductType
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.import_service")
 
+#: G-code a printer runs; ``api_gateway.library.jobs`` sends these.
+GCODE_EXTENSIONS = (".gcode", ".gco", ".bgcode")
+#: Pictures: reference photos, sketches, screenshots, marked-up drawings.
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg")
+
 ALLOWED_EXTENSIONS = {
     # CAD / EDA source (parsed for metadata)
     ".step",
@@ -52,7 +57,20 @@ ALLOWED_EXTENSIONS = {
     ".xln",
     ".stl",
     ".glb",
+    # Plugin file transfer: the rest of what a person brings to a design.
+    # Meshes and print projects from a slicer or a generator, G-code for a
+    # printer, and pictures (a reference photo, a sketch, a screenshot).
+    ".gltf",
+    ".obj",
+    ".3mf",
+    ".ply",
+    *GCODE_EXTENSIONS,
+    *IMAGE_EXTENSIONS,
 }
+
+#: A folder arrives as a zip, or as several files in one upload; a zip is
+#: opened into its files, each checked against ALLOWED_EXTENSIONS.
+ARCHIVE_EXTENSIONS = (".zip",)
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
@@ -82,6 +100,12 @@ _EXT_TO_DOMAIN: dict[str, str] = {
     ".map": "firmware",
     ".stl": "mechanical",
     ".glb": "mechanical",
+    ".gltf": "mechanical",
+    ".obj": "mechanical",
+    ".3mf": "manufacturing",
+    ".ply": "mechanical",
+    **dict.fromkeys(GCODE_EXTENSIONS, "manufacturing"),
+    **dict.fromkeys(IMAGE_EXTENSIONS, "systems"),
     ".md": "systems",
     ".txt": "systems",
     ".pdf": "systems",
@@ -113,6 +137,12 @@ _EXT_TO_WP_TYPE: dict[str, WorkProductType] = {
     ".xln": WorkProductType.MANUFACTURING_FILE,
     ".stl": WorkProductType.MANUFACTURING_FILE,
     ".glb": WorkProductType.CAD_MODEL,
+    ".gltf": WorkProductType.CAD_MODEL,
+    ".obj": WorkProductType.CAD_MODEL,
+    ".ply": WorkProductType.CAD_MODEL,
+    ".3mf": WorkProductType.MANUFACTURING_FILE,
+    **dict.fromkeys(GCODE_EXTENSIONS, WorkProductType.GCODE),
+    **dict.fromkeys(IMAGE_EXTENSIONS, WorkProductType.IMAGE),
     ".md": WorkProductType.DOCUMENTATION,
     ".txt": WorkProductType.DOCUMENTATION,
     ".pdf": WorkProductType.DOCUMENTATION,
@@ -141,6 +171,58 @@ def infer_domain(ext: str) -> str:
 def infer_wp_type(ext: str) -> WorkProductType:
     """Infer WorkProductType from file extension."""
     return _EXT_TO_WP_TYPE.get(ext, WorkProductType.CAD_MODEL)
+
+
+#: JPEG start-of-frame markers, which carry the image's height and width.
+_JPEG_FRAME_MARKERS = frozenset(
+    {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+)
+
+
+def image_size(content: bytes) -> tuple[int, int] | None:
+    """Pixel width and height of a PNG, GIF, JPEG or WebP, read from its header.
+
+    Stdlib only: the gateway has no imaging library, and the size is all the
+    twin records. ``None`` for SVG, a truncated file or anything unrecognised.
+    """
+    import struct
+
+    try:
+        if content[:8] == b"\x89PNG\r\n\x1a\n" and content[12:16] == b"IHDR":
+            w, h = struct.unpack(">II", content[16:24])
+            return int(w), int(h)
+        if content[:6] in (b"GIF87a", b"GIF89a"):
+            w, h = struct.unpack("<HH", content[6:10])
+            return int(w), int(h)
+        if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+            chunk = content[12:16]
+            if chunk == b"VP8X":
+                w = int.from_bytes(content[24:27], "little") + 1
+                h = int.from_bytes(content[27:30], "little") + 1
+                return w, h
+            if chunk == b"VP8 ":
+                w, h = struct.unpack("<HH", content[26:30])
+                return int(w) & 0x3FFF, int(h) & 0x3FFF
+            if chunk == b"VP8L":
+                bits = int.from_bytes(content[21:25], "little")
+                return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        if content[:2] == b"\xff\xd8":
+            i = 2
+            while i + 9 < len(content):
+                if content[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = content[i + 1]
+                if marker in _JPEG_FRAME_MARKERS:
+                    h, w = struct.unpack(">HH", content[i + 5 : i + 9])
+                    return int(w), int(h)
+                if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                    i += 2
+                    continue
+                i += 2 + int.from_bytes(content[i + 2 : i + 4], "big")
+    except (struct.error, IndexError):
+        return None
+    return None
 
 
 class ImportService:
@@ -174,6 +256,12 @@ class ImportService:
                 return await self._extract_kicad_pcb_metadata(content, filename)
             elif ext == ".fcstd":
                 return await self._extract_fcstd_metadata(content, filename)
+            elif ext in IMAGE_EXTENSIONS:
+                meta = self._basic_metadata(content, filename)
+                size = image_size(content)
+                if size is not None:
+                    meta["width_px"], meta["height_px"] = size
+                return meta
             else:
                 return self._basic_metadata(content, filename)
 

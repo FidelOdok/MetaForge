@@ -88,6 +88,7 @@ from api_gateway.twin.live_routes import router as twin_live_router
 from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
+from api_gateway.uploads.routes import router as uploads_router
 from api_gateway.vendors.routes import router as vendors_router
 from api_gateway.version import gateway_version
 from domain_agents.electronics.agent import ElectronicsAgent
@@ -1633,6 +1634,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         )
 
         init_vendor_store(SqliteVendorStore(str(default_vendor_store_path())))
+        # Staged uploads wait for a person, possibly across a restart.
+        from api_gateway.uploads.routes import init_upload_store
+        from api_gateway.uploads.store import SqliteUploadStore, default_upload_store_path
+
+        init_upload_store(SqliteUploadStore(str(default_upload_store_path())))
     # FORGE-482: flow versions (proposed, approved, rejected) were process
     # memory, so a routine reload lost every human approval while the
     # Temporal run using it survived. Same disable flag as the ledgers.
@@ -2200,6 +2206,7 @@ def create_app(
     app.include_router(runs_router)
     app.include_router(tool_approvals_router)
     app.include_router(approvals_router)
+    app.include_router(uploads_router)
     # FORGE-726: who decides a project's gates (policy) and the reviewer's notes.
     from api_gateway.approvals.policy_routes import review_router as gate_review_router
     from api_gateway.approvals.policy_routes import router as approval_policy_router

@@ -29,6 +29,7 @@ const KINDS: { value: ApprovalKind; label: string }[] = [
   { value: 'design_loop', label: 'Design loop' },
   { value: 'sketch', label: 'Sketch' },
   { value: 'drawing', label: 'Drawing' },
+  { value: 'upload', label: 'Upload' },
 ];
 
 type Tab = 'pending' | 'audit';

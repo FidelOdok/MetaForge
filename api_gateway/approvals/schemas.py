@@ -17,6 +17,7 @@ ApprovalKind = Literal[
     "design_loop",
     "sketch",
     "drawing",
+    "upload",  # files from outside, staged until a person approves them
 ]
 DecisionName = Literal["approve", "reject", "retry", "rework"]
 #: ``chat``: a person answered in the MCP client's own prompt (elicitation),
@@ -26,7 +27,15 @@ Surface = Literal["dashboard", "cli", "agent", "chat", "reviewer", "unknown"]
 #: Id prefixes (``<prefix>:<native id>``) are coarser than ``kind``: a held
 #: tool call, a flow proposal and a human-authority call all live in the tool
 #: ledger and are all ``tool:<id>``.
-ID_PREFIXES: tuple[str, ...] = ("gate", "tool", "change", "design_loop", "sketch", "drawing")
+ID_PREFIXES: tuple[str, ...] = (
+    "gate",
+    "tool",
+    "change",
+    "design_loop",
+    "sketch",
+    "drawing",
+    "upload",
+)
 
 #: Decisions that must carry a reason (422 otherwise).
 REASON_REQUIRED_FOR: tuple[str, ...] = ("reject", "retry", "rework")
