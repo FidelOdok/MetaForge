@@ -758,7 +758,7 @@ you answered by reading Loki by hand.
 `error_class` is the point of the group. A rate of "errors" says
 something is wrong; the class says what to do about it —
 `adapter_unavailable` needs a container, `approval_refused` needs a
-person, `tool_not_found` means a client is calling something this build
+person, `approval_handed_off` is a write waiting on a person who has been told, `tool_not_found` means a client is calling something this build
 does not have, and `unexpected` means an exception nobody has
 classified, which should stand out rather than hide inside
 `tool_execution_error`.

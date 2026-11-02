@@ -104,14 +104,17 @@ class RunResponse(BaseModel):
 def project_of(request: dict[str, Any]) -> str | None:
     """The project a run belongs to, wherever the caller put it.
 
-    Two shapes in practice: a design-flow run carries ``project_id`` at the
-    top of its request, and a held tool call carries the tool's own
-    ``arguments.project_id``. Both are the same fact, so both resolve here
-    rather than at each call site.
+    Three shapes in practice: a design-flow run carries ``project_id`` at the
+    top of its request, a held tool call carries the project it lands in as
+    ``project`` (FORGE-732: unread until then, so a held call scoped from the
+    session was hidden on a project's Approvals page), and the tool's own
+    ``arguments.project_id``. All the same fact, so all resolve here rather
+    than at each call site.
     """
-    direct = request.get("project_id")
-    if isinstance(direct, str) and direct:
-        return direct
+    for key in ("project_id", "project"):
+        direct = request.get(key)
+        if isinstance(direct, str) and direct:
+            return direct
     arguments = request.get("arguments")
     if isinstance(arguments, dict):
         nested = arguments.get("project_id")

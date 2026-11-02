@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import hashlib
 import inspect
 import json
 import os
@@ -57,11 +58,13 @@ from mcp_core.guardrails import (
     REQUIRE_PART_COLOURS_ARG,
     ApprovalAsk,
     ApprovalGateFn,
+    ApprovalHandedOffError,
     ApprovalLedger,
     ApprovalLedgerUnavailableError,
     ApprovalNotConfiguredError,
     ApprovalOutcome,
     ApprovalRejectedError,
+    ApprovalResolution,
     Approver,
     ApproverArgumentRejectedError,
     Caller,
@@ -162,6 +165,13 @@ _INVALID_REQUEST = INVALID_REQUEST
 #: FORGE-724: how long a pending-approvals answer is reused across calls, and
 #: how many sessions' "already told" sets are kept.
 _APPROVAL_NOTICE_TTL_SECONDS = 15.0
+#: FORGE-741: a hold handed to a person (a client that can neither be asked
+#: nor sent progress) stays open this long for the same call to come back to.
+HANDOFF_WINDOW_SECONDS = 1800.0
+#: How long the first call still waits, in case the person is already looking;
+#: well inside the shortest client tool timeout seen (Claude Code's 120 s).
+HANDOFF_WAIT_SECONDS = 20.0
+HANDOFF_POLL_SECONDS = 1.0
 _APPROVAL_NOTICE_SESSIONS = 512
 _METHOD_NOT_FOUND = METHOD_NOT_FOUND
 _TOOL_EXECUTION_ERROR = TOOL_EXECUTION_ERROR
@@ -318,6 +328,8 @@ class UnifiedMcpServer:
         # FORGE-724: pending-approval notices on tool results (off until attached).
         self._approvals_lister: Any = None
         self._approvals_told: dict[str, set[str]] = {}
+        # FORGE-741: handed-off holds, by call, as (approval id, open until).
+        self._handoffs: dict[str, tuple[str, float]] = {}
         self._pending_cache: dict[str | None, tuple[float, list[dict[str, Any]]]] = {}
         # FORGE-339: when set, ``tools/list`` serves only this profile's
         # tools. Validated here rather than on first request — a typo in a
@@ -1023,6 +1035,24 @@ class UnifiedMcpServer:
                             "code": "approval_ledger_unavailable",
                             "outcome": "ledger_unavailable",
                             # Worth retrying once the gateway is back.
+                            "retryable": True,
+                        },
+                    )
+                )
+            except ApprovalHandedOffError as exc:
+                # FORGE-741: not a failure. The call waits on a person, and
+                # says who to tell and what to do once they have answered.
+                self._mark_failed(span, exc)
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": "approval_required",
+                            **exc.as_data(),
+                            # Worth one more call, after the person approves.
                             "retryable": True,
                         },
                     )
@@ -2409,6 +2439,24 @@ class UnifiedMcpServer:
         held_from = time.monotonic()
         approval_ids: list[str] = []
         heartbeat: asyncio.Task[None] | None = None
+        reader = getattr(self._approval_ledger, "read_hold", None)
+        if route == "dashboard" and not progress and reader is not None:
+            # FORGE-741: nothing can reach this client while it waits, so the
+            # wait was silent and ran out unanswered. Hand it to the person.
+            resolution = await self._hand_off(
+                tool_id, arguments, caller, decision.reason, where, approvals_url, reader
+            )
+            return await self._approved(
+                tool_id,
+                caller,
+                route,
+                resolution,
+                time.monotonic() - held_from,
+                None,
+                call_id,
+                None,
+                where,
+            )
         if route == "elicitation" and progress and progress_token is not None:
             # The longer window only stands because the client's timeout
             # keeps being reset, so an inline prompt sends progress too.
@@ -2450,9 +2498,126 @@ class UnifiedMcpServer:
         finally:
             if heartbeat is not None:
                 heartbeat.cancel()
-        held_seconds = time.monotonic() - held_from
+        return await self._approved(
+            tool_id,
+            caller,
+            route,
+            resolution,
+            time.monotonic() - held_from,
+            approval_ids[0] if approval_ids else None,
+            call_id,
+            window,
+            where,
+        )
+
+    async def _hand_off(
+        self,
+        tool_id: str,
+        arguments: dict[str, Any],
+        caller: Caller,
+        reason: str,
+        where: str,
+        approvals_url: str | None,
+        reader: Any,
+    ) -> ApprovalResolution:
+        """Hand a held call to a person rather than wait on it (FORGE-741).
+
+        The hold is opened once, for :data:`HANDOFF_WINDOW_SECONDS`, and waited
+        on only briefly in case the person is already looking. After that the
+        call returns :class:`ApprovalHandedOffError` naming the approval. The
+        same call again (same session, tool and arguments) reads the decision:
+        approved runs it once, still pending hands it off again without a
+        second hold, anything else is the refusal it ended in. The person
+        decides on the dashboard and the approver comes off the ledger; the
+        caller never decides.
+        """
+        from mcp_core.context import current_context
+
+        ctx = current_context()
+        session = str(ctx.session_id) if ctx is not None and ctx.session_is_stable else ""
+        key = hashlib.sha256(
+            json.dumps(
+                {"tool": tool_id, "arguments": arguments, "session": session},
+                sort_keys=True,
+                default=str,
+            ).encode()
+        ).hexdigest()
+        now = time.monotonic()
+        for stale in [k for k, (_, until) in self._handoffs.items() if until <= now]:
+            del self._handoffs[stale]
+        entry = self._handoffs.get(key)
+        repeated = entry is not None
+        if entry is None:
+            ledger = self._approval_ledger
+            assert ledger is not None  # reader came from it
+            approval_id = await ledger.open_hold(
+                ApprovalAsk(
+                    tool_id=tool_id,
+                    arguments=arguments,
+                    caller=caller,
+                    reason=reason,
+                    project=_effective_project(arguments),
+                    timeout_seconds=HANDOFF_WINDOW_SECONDS,
+                    client=self._client_label(),
+                ),
+                route="dashboard",
+            )
+            entry = (approval_id, now + HANDOFF_WINDOW_SECONDS)
+            self._handoffs[key] = entry
+            # The hand-off already told this session; the next result's
+            # "approvals waiting" notice need not repeat it.
+            told = str(ctx.session_id) if ctx is not None else "default"
+            self._approvals_told.setdefault(told, set()).add(approval_id)
+            logger.info(
+                "mcp_tool_call_handed_off",
+                tool_id=tool_id,
+                caller=caller.value,
+                approval_id=approval_id,
+                window_seconds=HANDOFF_WINDOW_SECONDS,
+            )
+        approval_id = entry[0]
+        wait_until = time.monotonic() + (0.0 if repeated else HANDOFF_WAIT_SECONDS)
+        while True:
+            resolution = await reader(approval_id)
+            if resolution is not None:
+                if self._handoffs.get(key) is not entry:
+                    # Another call with the same arguments used this answer first.
+                    break
+                del self._handoffs[key]
+                logger.info(
+                    "mcp_handed_off_call_decided",
+                    tool_id=tool_id,
+                    approval_id=approval_id,
+                    outcome=resolution.outcome.value,
+                )
+                return resolution
+            if time.monotonic() >= wait_until:
+                break
+            await asyncio.sleep(HANDOFF_POLL_SECONDS)
+        raise ApprovalHandedOffError(
+            tool_id,
+            approval_id,
+            where=where,
+            url=approvals_url,
+            expires_in_seconds=max(0.0, entry[1] - time.monotonic()),
+            repeated=repeated,
+        )
+
+    async def _approved(
+        self,
+        tool_id: str,
+        caller: Caller,
+        route: str,
+        resolution: ApprovalResolution,
+        held_seconds: float,
+        held_id: str | None,
+        call_id: str | None,
+        window: float | None = None,
+        where: str | None = None,
+    ) -> Approver | None:
+        """The approver of a resolved hold, or the refusal it ended in."""
         outcome = resolution.outcome
-        approval_id = resolution.approval_id or (approval_ids[0] if approval_ids else None)
+        approval_id = resolution.approval_id or held_id
         if outcome is not ApprovalOutcome.APPROVED:
             logger.info(
                 "mcp_tool_call_not_approved",
@@ -3086,6 +3251,8 @@ _ERROR_CLASSES: tuple[tuple[str, str], ...] = (
     ("ResourceReadError", "resource_read_failed"),
     ("ApprovalNotConfiguredError", "approval_not_configured"),
     ("ApprovalRejectedError", "approval_refused"),
+    # FORGE-741: waiting on a person the client was told about, not refused.
+    ("ApprovalHandedOffError", "approval_handed_off"),
     ("ApprovalLedgerUnavailableError", "approval_ledger_unavailable"),
     # FORGE-487: a design-flow service call outside its run, its project, or
     # the tools a service may use. Its own label: a rise means a phase is

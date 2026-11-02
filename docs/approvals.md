@@ -212,6 +212,37 @@ Both are on the `core` profile, the plugin's default connection. To make room
 under its 40-tool cap, `memory.list_insights` and
 `memory.retrieve_similar_experience` moved to the full profile.
 
+**A held call is handed to the person.** Some clients can neither show an
+approval prompt nor be sent progress notifications, the claude.ai connector
+among them. Holding a write open for one of them was a silent wait: the person
+saw a tool call that would not finish, never an approval, and the hold ran out.
+For such a client the sidecar instead:
+
+1. records the hold on the ledger with a 30-minute window and waits 20 seconds
+   in case the person answers at once;
+2. returns a JSON-RPC error with `code: "approval_required"`,
+   `outcome: "awaiting_person"`, the `approval_id`, `where` (the dashboard
+   Approvals page and its link), `expires_in_seconds`,
+   `next: "call_again_with_same_arguments_after_approval"` and
+   `retryable: true`. Its message tells the agent to tell the person, and to
+   call the tool again with the same arguments once the person has approved;
+3. on that repeated call (same MCP session, tool and arguments) reads the
+   decision. Approved: the call runs, once, with the approver taken from the
+   ledger. Still pending: the same approval comes back with no second hold.
+   Rejected or expired: the usual refusal.
+
+The person decides on the dashboard. The agent's own word is never taken as
+the decision, so a model cannot approve its own write by saying the person
+agreed. A client that can show a prompt is still asked inline, and one that
+receives progress still waits with its window.
+
+A held call that names a run (`run_id`, or a task id `<run_id>:<phase>:<n>`,
+as `phase.claim` does) and no project is recorded under the run's project, so
+it shows on that project's Approvals page rather than only under All
+projects. The pending queue keeps polling in a background browser tab, so an
+item that appears while the person is in another window is there when they
+look.
+
 ## Approval policy and the gate reviewer
 
 Each project has an **approval policy** that says who decides its design-flow

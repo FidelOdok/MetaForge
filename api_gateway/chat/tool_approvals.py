@@ -29,6 +29,7 @@ from api_gateway.runs.schemas import (
     RunListResponse,
     RunResponse,
     filter_by_project,
+    project_of,
 )
 from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector, collector_for
@@ -269,6 +270,34 @@ def get_approval(run_id: str) -> RunResponse:
         raise HTTPException(status_code=404, detail=f"approval '{run_id}' not found") from exc
 
 
+def project_for_hold(project: str | None, arguments: dict[str, Any]) -> str | None:
+    """The project a held call lands in: the caller's, else its run's (FORGE-732).
+
+    ``phase.claim`` and the other task tools name a run (``run_id``, or a
+    ``task_id`` of ``<run_id>:<phase>:<n>``) and no project, so their holds
+    were written unscoped and hidden on the project-scoped Approvals page the
+    refusal sent the person to. The run knows its project. Best-effort: an
+    unknown run leaves the hold unscoped, which the page still counts.
+    """
+    if project:
+        return project
+    for key in ("run_id", "task_id"):
+        raw = arguments.get(key)
+        if not isinstance(raw, str) or not raw.startswith("run_"):
+            continue
+        try:
+            from api_gateway.runs.routes import get_run_store
+
+            run = get_run_store().get(raw.split(":", 1)[0])
+        except Exception as exc:  # noqa: BLE001 - scoping is best-effort
+            logger.info("tool_approval_project_unresolved", key=key, error=str(exc))
+            continue
+        found = project_of(run.request or {})
+        if found:
+            return found
+    return None
+
+
 class HoldToolCallRequest(BaseModel):
     """Park a tool call from another process in this ledger (FORGE-406)."""
 
@@ -313,7 +342,7 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
             "caller": body.caller,
             "source": body.source,
             "session_id": body.session_id,
-            "project": body.project,
+            "project": project_for_hold(body.project, body.arguments),
             "route": body.route,
             "client": body.client,
         }
