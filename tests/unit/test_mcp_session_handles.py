@@ -139,3 +139,35 @@ def test_every_tool_lists_the_handle_for_a_modern_caller_only() -> None:
     assert all(
         SESSION_ARGUMENT not in (t.get("inputSchema") or {}).get("properties", {}) for t in legacy
     )
+
+
+def test_a_phase_claim_mints_a_handle_the_phase_grant_binds_to() -> None:
+    # FORGE-746: the client-task grant is keyed by session. A handshake-free
+    # claim with no handle bound nothing (session_bound=False on the Chair
+    # run), so every write of the claimed phase was held again.
+    from mcp_core.context import bind_current_session_task, bound_task
+
+    class _Phase(McpToolServer):
+        def __init__(self) -> None:
+            super().__init__(adapter_id="phase", version="0.1.0")
+            self.register_tool(
+                ToolManifest(
+                    tool_id="phase.claim",
+                    adapter_id="phase",
+                    name="claim",
+                    description="stub",
+                    capability="test",
+                    input_schema={"type": "object", "properties": {"task_id": {"type": "string"}}},
+                ),
+                self._claim,
+            )
+
+        async def _claim(self, args: dict[str, Any]) -> dict[str, Any]:
+            bound = bind_current_session_task(args["task_id"], "run_1", "design", PROJECT)
+            return {"session_bound": bound}
+
+    server = UnifiedMcpServer([_Phase()], caller=Caller.LOCAL)
+    result = _call(server, "phase.claim", {"task_id": "run_1:design:1.r2"})["result"]
+    handle = result["_meta"][META_SESSION_HANDLE]
+    binding = bound_task(UUID(handle))
+    assert binding is not None and binding.task_id == "run_1:design:1.r2"

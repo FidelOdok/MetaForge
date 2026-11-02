@@ -216,8 +216,11 @@ def with_modern_request(request: ModernRequest) -> Iterator[ModernRequest]:
 #: Cross-call state a client wants kept (the project ``project.open`` scopes
 #: later calls to, the record ``session.start`` opens) is referenced instead by
 #: a server-minted handle the client passes back as an ordinary tool argument.
-#: These tools mint one when the caller has none.
-MINTING_TOOLS = frozenset({"project.open", "session.start"})
+#: These tools mint one when the caller has none. ``phase.claim`` too
+#: (FORGE-746): the grant that lets a claimed phase's writes run is keyed by
+#: session, so a handshake-free claim with no handle bound nothing and every
+#: write of the phase was held again.
+MINTING_TOOLS = frozenset({"project.open", "session.start", "phase.claim"})
 
 #: The tool argument a handshake-free caller passes its handle in. Every tool
 #: lists it, optional, for those callers only.

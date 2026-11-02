@@ -319,15 +319,15 @@ agreement is high before moving it to `auto_clean`.
 
 **A phase claim under `auto`.** In a client-mode run each phase starts with
 `phase.claim`, and an unverified client's claim is held for a person. When the
-project's policy is in effect `auto`, a `phase.claim` on an open task of the
-project's own client-mode run, while that run is still going, is approved by
+project's policy is in effect `auto`, a `phase.claim` on an open (or already
+claimed) task of the project's own client-mode run, while that run is still going, is approved by
 the policy instead: the MCP server asks
 `POST /v1/chat/tool_approvals/policy` before holding the call, and the gateway
 records the approval on the ledger like any other, on route `policy`,
 approved by `policy:auto:<who set the policy>` (unverified). A claim lets one
 session do one phase of one run, and its work still goes through the gate the
 reviewer decides, so it adds nothing the person who chose `auto` had not
-already handed over. Every other write, a claim on a task that is not open or
+already handed over. Every other write, a claim on a task that was submitted or
 belongs to another project, and every other mode are held for a person as
 before. No agent approves anything here and no model judges it.
 
