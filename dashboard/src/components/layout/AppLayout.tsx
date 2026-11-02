@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { useLayoutStore } from '../../store/layout-store';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
+import { ApprovalNotifier } from '../approvals/ApprovalNotifier';
 import { MOBILE_NAV_QUERY } from './nav';
 
 type InertElement = HTMLElement & { inert: boolean };
@@ -93,6 +94,7 @@ export function AppLayout() {
           </Suspense>
         </main>
       </div>
+      <ApprovalNotifier />
     </div>
   );
 }

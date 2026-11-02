@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
 import { ArrowUpRight, Settings, X } from 'lucide-react';
 import { useLayoutStore } from '../../store/layout-store';
+import { usePendingApprovals } from '../approvals/ApprovalNotifier';
 import { MOBILE_NAV_MAX_WIDTH, NAV_GROUPS } from './nav';
 
 interface SidebarProps {
@@ -26,6 +27,8 @@ const SETTINGS_LABEL = 'Settings & connection';
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const collapsed = useLayoutStore((s) => s.sidebarCollapsed);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  // FORGE-723: how many approvals wait, on the Approvals link itself.
+  const pendingCount = usePendingApprovals().length;
 
   const showTooltip = (el: HTMLElement, label: string) => {
     if (!collapsed || window.innerWidth <= MOBILE_NAV_MAX_WIDTH) return;
@@ -79,13 +82,18 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 <NavLink
                   key={to}
                   to={to}
-                  aria-label={label}
+                  aria-label={to === '/approvals' && pendingCount ? `${label} (${pendingCount} pending)` : label}
                   {...tooltipHandlers(label)}
                   onClick={close}
                   className={({ isActive }) => `workspace-nav-link ${isActive ? 'selected' : ''}`}
                 >
                   <Icon size={18} aria-hidden="true" />
                   <span>{label}</span>
+                  {to === '/approvals' && pendingCount > 0 && (
+                    <span className="nav-count" aria-hidden="true">
+                      {pendingCount > 99 ? '99+' : pendingCount}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </div>

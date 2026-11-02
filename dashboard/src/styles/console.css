@@ -3584,3 +3584,80 @@ button:disabled {
   color: var(--mf-c-9a9aaa);
   cursor: help;
 }
+
+/* FORGE-723: pending approvals, on the nav link and on every page. */
+.workspace-nav-link>span.nav-count {
+  margin-left:auto;
+  min-width:20px;
+  padding:0 6px;
+  border-radius:10px;
+  background:var(--mf-c-f59e0b);
+  color:#111;
+  font-size:11px;
+  font-weight:600;
+  line-height:18px;
+  text-align:center
+}
+.nav-collapsed .workspace-nav-link>span.nav-count {
+  display:block;
+  position:absolute;
+  top:4px;
+  right:4px;
+  min-width:16px;
+  padding:0 4px;
+  font-size:10px;
+  line-height:16px
+}
+.approval-notice {
+  position:fixed;
+  right:16px;
+  top:72px;
+  z-index:45;
+  width:min(340px, calc(100vw - 32px));
+  background:var(--mf-c-15171e);
+  color:var(--mf-c-bdbdcc);
+  border:1px solid var(--mf-c-f59e0b);
+  border-radius:8px;
+  padding:12px 14px;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
+  font-size:13px
+}
+.approval-notice header {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--mf-c-f59e0b)
+}
+.approval-notice header strong {
+  flex:1
+}
+.approval-notice ul {
+  margin:10px 0;
+  padding:0;
+  list-style:none;
+  display:flex;
+  flex-direction:column;
+  gap:6px
+}
+.approval-notice li {
+  display:flex;
+  gap:8px;
+  align-items:baseline;
+  min-width:0
+}
+.approval-notice-kind {
+  flex-shrink:0;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:var(--mf-c-9898aa)
+}
+.approval-notice-title {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.approval-notice-more {
+  margin:0 0 8px;
+  color:var(--mf-c-9898aa)
+}

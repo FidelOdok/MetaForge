@@ -9,6 +9,12 @@ The older per-kind routes still work and are unchanged for callers. Both
 surfaces call the same decision functions, so the 404, 409 and 422 rules are
 one body of code.
 
+In the dashboard, pending approvals are announced on every page, not only on
+the Approvals page: the Approvals link in the sidebar shows how many are
+waiting, and a notice opens when one arrives that has not been seen yet, with
+the newest titles and a link to review them. Dismissing it hides those items
+for the browser session; a new approval brings it back.
+
 ## Routes
 
 | Route | Purpose |
