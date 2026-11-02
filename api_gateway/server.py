@@ -58,6 +58,7 @@ from api_gateway.design_loop.routes import router as design_loop_router
 from api_gateway.dfm.routes import router as dfm_router
 from api_gateway.evals.routes import router as evals_router
 from api_gateway.features.routes import router as features_router
+from api_gateway.files.routes import files_router, links_router, upload_links_router
 from api_gateway.firmware.routes import router as firmware_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
@@ -812,6 +813,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.apply import make_apply_executor
     from api_gateway.assistant.proposal_recorder import make_proposal_recorder
     from api_gateway.assistant.routes import workflow as approval_workflow
+    from api_gateway.files.mcp_bindings import make_files_service
     from api_gateway.library.mcp_bindings import make_machine_library
     from api_gateway.requirement_intelligence.promotion import attempt_promotion
     from api_gateway.runs.launcher import make_run_launcher
@@ -1350,6 +1352,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         machine_library=make_machine_library(),
         # FORGE-427: vendor quotes and held orders.
         vendor_service=make_vendor_service(),
+        files_service=make_files_service(),
     )
     app.state.tool_registry = tool_registry
     # FORGE-539: the capability report reads the live registry and its health.
@@ -2206,7 +2209,11 @@ def create_app(
     app.include_router(runs_router)
     app.include_router(tool_approvals_router)
     app.include_router(approvals_router)
+    # Upload links before /v1/uploads/{id}, so POST /v1/uploads/link is not an id.
+    app.include_router(upload_links_router)
     app.include_router(uploads_router)
+    app.include_router(files_router)
+    app.include_router(links_router)
     # FORGE-726: who decides a project's gates (policy) and the reviewer's notes.
     from api_gateway.approvals.policy_routes import review_router as gate_review_router
     from api_gateway.approvals.policy_routes import router as approval_policy_router

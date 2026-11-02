@@ -752,6 +752,43 @@ def build_http_app(
             headers=headers or None,
         )
 
+    # Signed links (files.link, files.request_upload) are issued by the
+    # gateway but reached here, on the address the client knows. The link is
+    # its own credential, checked by the gateway, so these take no API key.
+    gateway_for_links = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip().rstrip("/")
+
+    @app.api_route("/v1/links/{rest:path}", methods=["GET", "POST", "PUT"])
+    async def proxy_link(rest: str, request: Request) -> Response:
+        if not gateway_for_links:
+            raise HTTPException(status_code=404, detail="no gateway behind this server")
+        import httpx
+
+        url = f"{gateway_for_links}/v1/links/{rest}"
+        keep = {"content-type", "content-length"}
+        headers = {k: v for k, v in request.headers.items() if k.lower() in keep}
+        async with httpx.AsyncClient(timeout=600.0) as http:
+            upstream = await http.request(
+                request.method,
+                url,
+                params=dict(request.query_params),
+                content=await request.body(),
+                headers=headers,
+            )
+        passed = {
+            k: v
+            for k, v in upstream.headers.items()
+            if k.lower()
+            in {
+                "content-type",
+                "content-disposition",
+                "content-security-policy",
+                "x-content-type-options",
+                "referrer-policy",
+                "cache-control",
+            }
+        }
+        return Response(upstream.content, status_code=upstream.status_code, headers=passed)
+
     @app.get("/health")
     async def health() -> JSONResponse:
         raw = await server.handle_request(
@@ -814,6 +851,11 @@ def build_http_app(
         # that must carry one.
     ) -> Response:
         verified_actor = _check_auth(request, authorization)
+        # files.link and files.request_upload return links on the address
+        # this request came in on, which is the one the person can reach.
+        from metaforge.mcp.remote_files import PUBLIC_BASE
+
+        PUBLIC_BASE.set(_issuer_for(request))
         raw_body = await request.body()
         # MET-387: install per-request McpCallContext from headers so
         # downstream handlers see the project / actor / session via
@@ -1851,6 +1893,8 @@ async def _bootstrap(
         machine_library=_build_machine_library(),
         # FORGE-427: vendor connectors live in the gateway.
         vendor_service=_build_vendor_service(),
+        # Uploads, files and the link secret live in the gateway too.
+        files_service=_build_files_service(args.transport),
         **evidence_bindings,
         engineering_entity_recorder=entity_recorder,
         engineering_entity_approver=make_engineering_entity_approver(twin),
@@ -2164,6 +2208,33 @@ def _build_vendor_service() -> Any:
         logger.error("mcp_vendor_binding_missing", error=str(exc))
         return None
     return make_vendor_service()
+
+
+def _build_files_service(transport: str) -> Any:
+    """The ``files.*`` binding, chosen like the vendor binding.
+
+    With ``METAFORGE_GATEWAY_URL`` it is the gateway's over HTTP. Without one
+    it is this process's, and on stdio (the local plugin, on the person's own
+    machine) it may also read and save files in the project folder:
+    ``METAFORGE_LOCAL_FILES_ROOT``, else the folder the client started it in.
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_files import RemoteFilesService
+
+        logger.info("mcp_files_binding_remote", gateway=gateway_url)
+        return RemoteFilesService(gateway_url)
+    try:
+        from api_gateway.files.mcp_bindings import make_files_service
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_files_binding_missing", error=str(exc))
+        return None
+    local_root = None
+    if transport == "stdio":
+        from pathlib import Path
+
+        local_root = Path(os.environ.get("METAFORGE_LOCAL_FILES_ROOT") or os.getcwd())
+    return make_files_service(local_root=local_root)
 
 
 def _client_task_verifier_from_env() -> Any:

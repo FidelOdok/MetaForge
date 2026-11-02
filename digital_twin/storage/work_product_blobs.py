@@ -18,7 +18,10 @@ is built on first use from the ``MINIO_*`` environment. Tests pass a fake
 from __future__ import annotations
 
 import io
+from dataclasses import replace
+from datetime import timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 import structlog
 
@@ -106,6 +109,34 @@ def fetch_work_product_blob(
             response.release_conn()
         span.set_attribute("storage.size", len(data))
         return data
+
+
+def presign_work_product_blob(
+    object_key: str,
+    expires: timedelta,
+    *,
+    public_endpoint: str,
+    client: Any = None,
+    settings: MinIOSettings | None = None,
+) -> str:
+    """A presigned GET URL for a work-product blob, on the store's public address.
+
+    A presigned URL is signed for one host, so it is built on the address a
+    person's browser reaches (``public_endpoint``, ``host[:port]`` or a URL),
+    not the in-cluster one. Signing is local: nothing is sent to the store.
+    """
+    resolved = settings or MinIOSettings.from_env()
+    parsed = urlsplit(public_endpoint if "://" in public_endpoint else f"//{public_endpoint}")
+    public = replace(
+        resolved,
+        endpoint=parsed.netloc or public_endpoint,
+        secure=parsed.scheme != "http" if parsed.scheme else resolved.secure,
+    )
+    cl = client or _build_client(public)
+    with tracer.start_as_current_span("blob_store.presign") as span:
+        span.set_attribute("storage.key", object_key)
+        url: str = cl.presigned_get_object(public.bucket, object_key, expires=expires)
+        return url
 
 
 def delete_work_product_blob(

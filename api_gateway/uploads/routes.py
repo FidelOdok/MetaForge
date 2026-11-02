@@ -11,12 +11,15 @@ wait for a person.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from typing import Any
 
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from api_gateway.auth.approver import approver_from_request
 from api_gateway.uploads import service
@@ -67,6 +70,13 @@ def init_upload_store(store: SqliteUploadStore | None) -> None:
     """Install ``store`` (the lifespan), or ``None`` to start over (tests)."""
     global _store  # noqa: PLW0603
     _store = store
+
+
+def requester(approver: Any, claimed: str | None) -> str:
+    """Who asked for an upload: the verified principal, else whom the caller names."""
+    if approver.verified or not claimed:
+        return str(approver.actor_id)
+    return claimed.strip()[:200]
 
 
 def _get(upload_id: str) -> StagedUpload:
@@ -129,6 +139,70 @@ async def create_upload(
     except service.UploadError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     return upload
+
+
+class InlineFile(BaseModel):
+    name: str
+    text: str | None = Field(None, description="Content, for a text file")
+    content_base64: str | None = Field(None, description="Content, for any file")
+    wp_type: str | None = None
+
+
+class InlineUploadRequest(BaseModel):
+    files: list[InlineFile] = Field(..., min_length=1)
+    project_id: str | None = None
+    description: str = ""
+    # Who asked, for the record only (an agent's sidecar names its user). A
+    # verified principal always wins; this never decides anything.
+    requested_by: str | None = None
+
+
+#: An inline upload goes through a model's context, so it stays small; a
+#: signed upload link (``POST /v1/uploads/link``) takes the rest.
+MAX_INLINE_UPLOAD_BYTES = 8 * 1024 * 1024
+
+
+@router.post("/inline", response_model=StagedUpload, status_code=201)
+async def create_inline_upload(request: Request, body: InlineUploadRequest) -> StagedUpload:
+    """Stage files sent as content in a JSON body (the plugin's ``files.import``)."""
+    payload: list[tuple[str, bytes]] = []
+    for f in body.files:
+        if (f.text is None) == (f.content_base64 is None):
+            raise HTTPException(
+                status_code=422, detail=f"{f.name}: send exactly one of text or content_base64"
+            )
+        try:
+            data = (
+                f.text.encode("utf-8")
+                if f.text is not None
+                else base64.b64decode(f.content_base64 or "", validate=True)
+            )
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"{f.name}: not valid base64") from exc
+        payload.append((f.name, data))
+    total = sum(len(d) for _, d in payload)
+    if total > MAX_INLINE_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"{total} bytes is over the {MAX_INLINE_UPLOAD_BYTES}-byte inline limit; "
+                "ask for an upload link instead"
+            ),
+        )
+    approver = approver_from_request(request)
+    try:
+        return service.stage(
+            get_upload_store(),
+            payload,
+            project_id=body.project_id,
+            source="inline",
+            requested_by=requester(approver, body.requested_by),
+            agent=(request.headers.get(AGENT_HEADER) or "").strip()[:100] or None,
+            description=body.description,
+            wp_types={f.name: f.wp_type for f in body.files if f.wp_type},
+        )
+    except service.UploadError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[StagedUpload])

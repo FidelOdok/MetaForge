@@ -206,6 +206,19 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "measured mass (twin.record_design_files after simready.import)."
         ),
     ),
+    # G-code for one printer, from slicer.slice or an upload; what
+    # library.dispatch_job sends. Slicing again for the same part and printer
+    # is its next revision.
+    TwinTypeSpec(
+        "gcode",
+        TwinTypeKind.DEFINITION,
+        "work_product:gcode",
+        key_prefix="GC",
+        description=(
+            "G-code for one printer, with the config it was sliced with "
+            "(twin.record_design_files after slicer.slice)."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",

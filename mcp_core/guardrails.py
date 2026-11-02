@@ -198,6 +198,12 @@ DOWNSTREAM_APPROVED: frozenset[str] = frozenset(
         "flow.await_gate",
         # FORGE-722: same shape as flow.await_gate, for any pending item.
         "approvals.decide",
+        # Files in from outside are staged, and the staged upload is an
+        # approval of its own (kind upload): nothing reaches the twin until a
+        # person approves it. Holding the call too would ask them twice.
+        "files.import",
+        "files.request_upload",
+        "files.import_local",
     }
 )
 

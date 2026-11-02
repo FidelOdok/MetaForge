@@ -149,6 +149,12 @@ READ_ONLY: frozenset[str] = frozenset(
         "optimize.suggest",
         # The built-in slicer presets, from constants; nothing read or written.
         "slicer.list_profiles",
+        # Files out: a file's content, its names, an upload's state, and a
+        # signed link (a token computed from the secret; nothing is stored).
+        "files.list",
+        "files.read",
+        "files.upload_status",
+        "files.link",
         # FORGE-671: drive arithmetic over the caller's figures.
         "robot.size_drive",
         "robot.diff_drive_kinematics",
@@ -491,6 +497,14 @@ PRODUCING: frozenset[str] = frozenset(
         # Creates a file on the Slant 3D account (and its slicing analysis);
         # replaces nothing and costs nothing.
         "slant3d.analyze_part",
+        # Files in: staged under the gateway's staging folder, never the twin;
+        # the upload is approved by a person (guardrails.DOWNSTREAM_APPROVED).
+        "files.import",
+        "files.request_upload",
+        "files.import_local",
+        # A new file in the local project folder; an existing one is refused
+        # unless the caller says overwrite (local plugin only).
+        "files.save_local",
         # A new run folder of its own under output/slicer/ (G-code and the
         # config used); the model and any config_path are only read.
         "slicer.slice",

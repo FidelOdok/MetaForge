@@ -1575,6 +1575,24 @@
         "title": "Body_upload_and_convert_v1_convert_post",
         "type": "object"
       },
+      "Body_upload_through_link_v1_links__token__post": {
+        "properties": {
+          "files": {
+            "description": "Files, or zips of folders",
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_through_link_v1_links__token__post",
+        "type": "object"
+      },
       "BomComponentResponse": {
         "description": "One BOM line item, in the dashboard's camelCase shape.",
         "properties": {
@@ -6719,6 +6737,98 @@
         "title": "InlineDecisionRequest",
         "type": "object"
       },
+      "InlineFile": {
+        "properties": {
+          "content_base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Content, for any file",
+            "title": "Content Base64"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Content, for a text file",
+            "title": "Text"
+          },
+          "wp_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wp Type"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "InlineFile",
+        "type": "object"
+      },
+      "InlineUploadRequest": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/InlineFile"
+            },
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "InlineUploadRequest",
+        "type": "object"
+      },
       "InsightKind": {
         "description": "What kind of statement the insight is.",
         "enum": [
@@ -7963,6 +8073,30 @@
           "mass_kg"
         ],
         "title": "LinkLoadInput",
+        "type": "object"
+      },
+      "LinkRequest": {
+        "properties": {
+          "lifetime_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds; default grows with the size",
+            "title": "Lifetime S"
+          },
+          "path": {
+            "default": "",
+            "description": "A named file; empty for the primary file",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "title": "LinkRequest",
         "type": "object"
       },
       "LiveEventRequest": {
@@ -15169,6 +15303,57 @@
         "title": "UploadDecision",
         "type": "object"
       },
+      "UploadLinkRequest": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "expected_bytes": {
+            "default": 0,
+            "description": "Total size expected; sets the lifetime",
+            "minimum": 0.0,
+            "title": "Expected Bytes",
+            "type": "integer"
+          },
+          "lifetime_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifetime S"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          }
+        },
+        "title": "UploadLinkRequest",
+        "type": "object"
+      },
       "UrdfAssemblyExportRequest": {
         "properties": {
           "joints": {
@@ -19501,6 +19686,174 @@
         ]
       }
     },
+    "/v1/files/{work_product_id}": {
+      "get": {
+        "description": "The files a work product holds, primary first.",
+        "operationId": "list_files_v1_files__work_product_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Files V1 Files  Work Product Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Files",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/v1/files/{work_product_id}/link": {
+      "post": {
+        "description": "A signed link to the file: ``url`` for an object-store link, else ``path``.",
+        "operationId": "create_download_link_v1_files__work_product_id__link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Download Link V1 Files  Work Product Id  Link Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Download Link",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/v1/files/{work_product_id}/read": {
+      "get": {
+        "description": "A file's content inline: text, or base64. Too large is refused with its size.",
+        "operationId": "read_file_v1_files__work_product_id__read_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A named file; empty for the primary file",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "A named file; empty for the primary file",
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_bytes",
+            "required": false,
+            "schema": {
+              "default": 2097152,
+              "minimum": 1,
+              "title": "Max Bytes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read File V1 Files  Work Product Id  Read Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read File",
+        "tags": [
+          "files"
+        ]
+      }
+    },
     "/v1/firmware/scaffold": {
       "post": {
         "operationId": "create_firmware_scaffold_v1_firmware_scaffold_post",
@@ -21907,6 +22260,195 @@
         "summary": "Process Limits",
         "tags": [
           "library"
+        ]
+      }
+    },
+    "/v1/links/{token}": {
+      "get": {
+        "description": "A download link's file, or an upload link's page.",
+        "operationId": "follow_link_v1_links__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Follow Link",
+        "tags": [
+          "files"
+        ]
+      },
+      "post": {
+        "description": "Add files to an open upload (the page, or ``curl -F files=@part.step``).",
+        "operationId": "upload_through_link_v1_links__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_through_link_v1_links__token__post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedUpload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Through Link",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/v1/links/{token}/finish": {
+      "post": {
+        "description": "Close the upload; it then waits in ``/v1/approvals`` for a person.",
+        "operationId": "finish_upload_v1_links__token__finish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Finish Upload V1 Links  Token  Finish Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finish Upload",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/v1/links/{token}/{name}": {
+      "put": {
+        "description": "Add one file from a raw body: ``curl -T part.step <link>/part.step``.",
+        "operationId": "put_through_link_v1_links__token___name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedUpload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Through Link",
+        "tags": [
+          "files"
         ]
       }
     },
@@ -27107,6 +27649,92 @@
           }
         },
         "summary": "Create Upload",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/v1/uploads/inline": {
+      "post": {
+        "description": "Stage files sent as content in a JSON body (the plugin's ``files.import``).",
+        "operationId": "create_inline_upload_v1_uploads_inline_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InlineUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedUpload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Inline Upload",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/v1/uploads/link": {
+      "post": {
+        "description": "Open an upload and return a signed link that takes files into it.",
+        "operationId": "create_upload_link_v1_uploads_link_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Upload Link V1 Uploads Link Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Upload Link",
         "tags": [
           "uploads"
         ]

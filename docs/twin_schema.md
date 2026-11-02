@@ -1183,6 +1183,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `pinmap` | definition | `PIN` | `WorkProduct` `pinmap` (`twin.record_design_files`, or `twin.create_firmware_scaffold`) |
 | `firmware_source` | definition | `FW` | `WorkProduct` `firmware_source`: a firmware project's sources and build output (`twin.record_design_files`, or `twin.create_firmware_scaffold`) |
 | `purchased_model` | definition | `PMD` | `WorkProduct` `cad_model`: a bought part's OpenUSD package with its GLB preview, licence, attribution and mass (`twin.record_design_files` after `simready.import`) |
+| `gcode` | definition | `GC` | `WorkProduct` `gcode`: G-code for one printer with the `config.ini` it was sliced with (`twin.record_design_files` after `slicer.slice`), which `library.dispatch_job` sends |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
