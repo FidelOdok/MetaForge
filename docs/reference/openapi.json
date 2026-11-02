@@ -3521,6 +3521,11 @@
       },
       "DesignFlowView": {
         "properties": {
+          "contentHash": {
+            "default": "",
+            "title": "Contenthash",
+            "type": "string"
+          },
           "description": {
             "title": "Description",
             "type": "string"

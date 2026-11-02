@@ -599,3 +599,78 @@ class TestTheCredential:
 def test_run_status_the_verifier_requires_is_running() -> None:
     """The word the verifier compares against is the harness's own."""
     assert RunStatus.RUNNING.value == "running"
+
+
+# ── FORGE-721: a run of the shipped template is trusted ─────────────────────
+
+
+def _template_run(template: str, content_hash: str) -> str:
+    request: dict[str, Any] = {
+        "kind": "design_flow",
+        "project_id": PROJECT,
+        "flow_template_id": template,
+        "flow_content_hash": content_hash,
+    }
+    store = run_routes.get_run_store()
+    run = store.create(request)
+    store.start(run.id)
+    return run.id
+
+
+class TestBuiltInTemplateRuns:
+    """Live on the sandbox: a chair run of the built-in mech_v1 template held
+    every FreeCAD and twin write as an untrusted caller, so a person approved
+    dozens of tool calls on top of the gates. A run of the unmodified shipped
+    template runs reviewed code, so its worker is trusted like an approved
+    version's."""
+
+    def test_an_unmodified_template_run_writes_without_a_hold(self, gateway_http) -> None:
+        from api_gateway.design_flows.routes import _template_content_hash
+
+        run = _template_run("hardware_v1", _template_content_hash("hardware_v1"))
+        sidecar = _Sidecar(GatewayRunVerifier("http://gw.test", client=gateway_http))
+
+        body = sidecar.call(INTENT_ENTITY, {"title": "intent"}, key=KEY, run=run)
+
+        assert "error" not in body, body
+        assert _ran(sidecar) == [INTENT_ENTITY]
+        assert sidecar.gate.asks == []
+
+    def test_a_tailored_or_changed_flow_stays_held(self, gateway_http) -> None:
+        run = _template_run("hardware_v1", "0" * 64)
+        sidecar = _Sidecar(GatewayRunVerifier("http://gw.test", client=gateway_http))
+
+        body = sidecar.call(INTENT_ENTITY, key=KEY, run=run)
+
+        assert body["error"]["data"]["code"] == "approval_required"
+        assert [a.tool_id for a in sidecar.gate.asks] == [INTENT_ENTITY]
+
+    def test_an_unknown_template_stays_held(self, gateway_http) -> None:
+        run = _template_run("no_such_flow", "0" * 64)
+        sidecar = _Sidecar(GatewayRunVerifier("http://gw.test", client=gateway_http))
+
+        body = sidecar.call(INTENT_ENTITY, key=KEY, run=run)
+
+        assert body["error"]["data"]["code"] == "approval_required"
+
+    def test_the_key_is_still_required(self, gateway_http) -> None:
+        from api_gateway.design_flows.routes import _template_content_hash
+
+        run = _template_run("hardware_v1", _template_content_hash("hardware_v1"))
+        sidecar = _Sidecar(GatewayRunVerifier("http://gw.test", client=gateway_http))
+
+        body = sidecar.call(INTENT_ENTITY, key=None, run=run)
+
+        assert body["error"]["data"]["code"] == "approval_required"
+
+    async def test_the_view_hash_is_what_a_started_run_records(self, gateway_http) -> None:
+        # The run route freezes the template on start; if the two hashes drift,
+        # every template run silently goes back to holding every write.
+        from api_gateway.runs.routes import _resolve_in_process_flow
+
+        response = await gateway_http.get("/v1/design-flows/hardware_v1")
+        run = run_routes.get_run_store().create(
+            {"kind": "design_flow", "flow": "hardware_v1", "project_id": PROJECT}
+        )
+        _resolve_in_process_flow(run)
+        assert run.request["flow_content_hash"] == response.json()["contentHash"]

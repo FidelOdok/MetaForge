@@ -11,10 +11,14 @@ the gateway's own endpoints:
 * ``GET /v1/design-flows/versions/{id}``: the flow version the run is pinned
   to is ``approved`` and valid.
 
-A run with no flow version (a built-in template started with
-``run.start_design_flow``) has no approval to bind a grant to, so this returns
-``None`` and the caller stays untrusted: those writes are still held for a
-person, as before.
+A run with no flow version is a built-in template run. FORGE-721: it is
+trusted when the content hash the gateway recorded for it at start equals the
+shipped template's (``GET /v1/design-flows/{id}`` ``contentHash``), so the run
+executes reviewed code nobody tailored. A tailored or patched flow, an unknown
+template, or a run with no recorded hash returns ``None``: the caller stays
+untrusted and its writes are held for a person, as before. Before this every
+built-in template run held every write, and a person had to approve each
+FreeCAD and twin call of an approved run.
 
 Answers are cached for a few seconds so a phase making a burst of writes is
 not a burst of gateway requests. Only a *grant* is cached, and briefly: a run
@@ -101,7 +105,10 @@ class GatewayRunVerifier:
 
         version_id = run.get("flow_version_id") or request.get("flow_version_id")
         if not version_id:
-            return None
+            grant = await self._template_grant(http, run_id, project_id, request)
+            if grant is not None:
+                self._grants[key] = (self._clock() + self._ttl, grant)
+            return grant
 
         version_response = await http.get(f"{self._base}/v1/design-flows/versions/{version_id}")
         if version_response.status_code == 404:
@@ -118,3 +125,31 @@ class GatewayRunVerifier:
         grant = ServiceGrant(run_id=run_id, project_id=project_id, flow_version_id=str(version_id))
         self._grants[key] = (self._clock() + self._ttl, grant)
         return grant
+
+    async def _template_grant(
+        self, http: httpx.AsyncClient, run_id: str, project_id: str, request: dict[str, Any]
+    ) -> ServiceGrant | None:
+        """A grant for a run of an unmodified built-in template, else ``None``."""
+        template_id = request.get("flow_template_id")
+        recorded = request.get("flow_content_hash")
+        if not template_id or not recorded:
+            return None
+        response = await http.get(f"{self._base}/v1/design-flows/{template_id}")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        view = response.json()
+        shipped = view.get("contentHash")
+        if not view.get("valid", False) or not shipped or shipped != recorded:
+            logger.info(
+                "mcp_service_template_run_not_trusted",
+                run_id=run_id,
+                template=template_id,
+                reason="tailored, changed or invalid template",
+            )
+            return None
+        return ServiceGrant(
+            run_id=run_id,
+            project_id=project_id,
+            flow_version_id=f"template:{template_id}@{str(shipped)[:12]}",
+        )
