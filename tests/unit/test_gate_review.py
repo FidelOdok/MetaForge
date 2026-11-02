@@ -29,13 +29,16 @@ from api_gateway.approvals.policy import (
 )
 from api_gateway.approvals.policy_routes import review_router
 from api_gateway.approvals.policy_routes import router as policy_router
+from api_gateway.approvals.review_tasks import reset_review_task_store
+from api_gateway.approvals.review_tasks import router as review_tasks_router
 from api_gateway.approvals.routes import router as approvals_router
 from api_gateway.runs import routes as run_routes
 from api_gateway.runs.gate_review import parse_review, review_gate, review_skill
 from mcp_core.annotations import ADDITIVE, DESTRUCTIVE
-from mcp_core.guardrails import BOOKKEEPING
+from mcp_core.guardrails import BOOKKEEPING, SERVICE_REFUSED_PREFIXES
 from mcp_core.profiles import PROFILES, REVIEW_TOOLS
 from orchestrator.design_flow.temporal_activities import DesignFlowActivities
+from tool_registry.tools.design_flow.adapter import DesignFlowServer
 
 PROJECT = "p1"
 
@@ -329,15 +332,6 @@ def test_the_review_skill_carries_the_answer_contract() -> None:
 
 
 # ── FORGE-730: the client reviewer ─────────────────────────────────────────
-
-from api_gateway.approvals.review_tasks import (  # noqa: E402
-    reset_review_task_store,
-)
-from api_gateway.approvals.review_tasks import (
-    router as review_tasks_router,
-)
-from mcp_core.guardrails import SERVICE_REFUSED_PREFIXES  # noqa: E402
-from tool_registry.tools.design_flow.adapter import DesignFlowServer  # noqa: E402
 
 
 @pytest.fixture
