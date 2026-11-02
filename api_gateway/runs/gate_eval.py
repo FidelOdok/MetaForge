@@ -358,30 +358,100 @@ class TwinConstraintChecker:
                     models.append((node_id, name, dict(getattr(node, "metadata", None) or {})))
                 break
         if drop_superseded:
-            replaced: set[str] = set()
-            for _, _, meta in models:
-                for key in ("supersedes", "revision_of"):
-                    value = meta.get(key)
-                    values = value if isinstance(value, list) else [value]
-                    replaced.update(str(v) for v in values if v)
-            graph = getattr(self._twin, "graph", None)
-            if graph is not None:
-                from twin_core.models.enums import EdgeType
-
-                for node_id, _, _ in models:
-                    try:
-                        incoming = await graph.get_edges(
-                            UUID(node_id), direction="incoming", edge_type=EdgeType.SUPERSEDES
-                        )
-                    except Exception as exc:  # noqa: BLE001 - edge lookup is best-effort
-                        logger.warning(
-                            "gate_eval_supersedes_failed", node_id=node_id, error=str(exc)
-                        )
-                        continue
-                    if incoming:
-                        replaced.add(node_id)
+            replaced = await self._superseded([(n, m) for n, _, m in models])
             models = [m for m in models if m[0] not in replaced]
         return models
+
+    async def _superseded(self, nodes: list[tuple[str, dict[str, Any]]]) -> set[str]:
+        """The ids among ``nodes`` (``(node_id, metadata)``) a newer revision replaces.
+
+        A node is replaced when another node's ``supersedes`` / ``revision_of``
+        metadata names it or it has an incoming SUPERSEDES edge from a revision
+        that is not a closed draft. Shared by the
+        model window (FORGE-515) and the constraint scope (FORGE-740) so both
+        halves of a geometry check agree on what is current.
+        """
+        replaced: set[str] = set()
+        for _, meta in nodes:
+            for key in ("supersedes", "revision_of"):
+                value = meta.get(key)
+                values = value if isinstance(value, list) else [value]
+                replaced.update(str(v) for v in values if v)
+        graph = getattr(self._twin, "graph", None)
+        if graph is not None:
+            from twin_core.models.enums import EdgeType
+
+            for node_id, _ in nodes:
+                try:
+                    incoming = await graph.get_edges(
+                        UUID(node_id), direction="incoming", edge_type=EdgeType.SUPERSEDES
+                    )
+                except Exception as exc:  # noqa: BLE001 - edge lookup is best-effort
+                    logger.warning("gate_eval_supersedes_failed", node_id=node_id, error=str(exc))
+                    continue
+                # A draft a retry or rework closed replaces nothing: its edge
+                # must not silence the head it once meant to supersede.
+                for edge in incoming:
+                    if not await self._closed_draft(str(edge.source_id)):
+                        replaced.add(node_id)
+                        break
+        return replaced
+
+    async def _current_constraints(self, constraints: list[Any]) -> list[Any]:
+        """Only the constraints of current constraint-set revisions (FORGE-740).
+
+        A constraint belongs to the constraint set it arrived in
+        (``metadata.constraint_set_wp``). One whose set a retry or rework
+        closed (FORGE-597), or a newer revision superseded, is not a limit of
+        the design any more: without this a corrected limit could never relax,
+        because the old revision kept voting. A constraint with no set, or a
+        set whose status cannot be read, is kept: fail toward evaluating.
+        """
+        getter = getattr(self._twin, "get_work_product", None)
+        set_ids = sorted(
+            {
+                str(raw)
+                for c in constraints
+                if (raw := (getattr(c, "metadata", None) or {}).get("constraint_set_wp"))
+            }
+        )
+        if not set_ids:
+            return constraints
+        sets: list[tuple[str, dict[str, Any]]] = []
+        stale: set[str] = set()
+        for set_id in set_ids:
+            try:
+                UUID(set_id)
+            except ValueError:
+                continue
+            if await self._closed_draft(set_id):
+                stale.add(set_id)
+                continue
+            meta: dict[str, Any] = {}
+            if getter is not None:
+                try:
+                    node = await getter(UUID(set_id))
+                    meta = dict(getattr(node, "metadata", None) or {})
+                except Exception as exc:  # noqa: BLE001 - an unreadable set keeps its constraints
+                    logger.warning(
+                        "gate_eval_constraint_set_read_failed", set_id=set_id, error=str(exc)
+                    )
+            sets.append((set_id, meta))
+        stale |= await self._superseded(sets) & set(set_ids)
+        if not stale:
+            return constraints
+        kept = [
+            c
+            for c in constraints
+            if str((getattr(c, "metadata", None) or {}).get("constraint_set_wp") or "") not in stale
+        ]
+        logger.info(
+            "gate_eval_stale_constraints_skipped",
+            constraint_sets=sorted(stale),
+            skipped=len(constraints) - len(kept),
+            consequence="constraints of superseded or closed revisions not evaluated",
+        )
+        return kept
 
     async def _geometry_check(
         self,
@@ -395,9 +465,10 @@ class TwinConstraintChecker:
         try:
             # FORGE-698: a size a design record states (a board's length) is
             # measured by the design-record check, not against a cad_model.
+            # FORGE-740: and only the current revision of each constraint set.
             constraints = [
                 c
-                for c in await lister(project_id=UUID(project_id))
+                for c in await self._current_constraints(await lister(project_id=UUID(project_id)))
                 if not states_metric(c, facts or {})
             ]
             # FORGE-515: only this phase window's current parts (not every
@@ -438,7 +509,7 @@ class TwinConstraintChecker:
         if lister is None or getter is None or self._backend is None or not project_id:
             return AnalysisCheck()
         try:
-            constraints = await lister(project_id=UUID(project_id))
+            constraints = await self._current_constraints(await lister(project_id=UUID(project_id)))
             project = await self._backend.get_project(project_id)
             if project is None:
                 return AnalysisCheck()
@@ -597,7 +668,7 @@ class TwinConstraintChecker:
             )
 
         try:
-            constraints = await lister(project_id=UUID(project_id))
+            constraints = await self._current_constraints(await lister(project_id=UUID(project_id)))
         except Exception as exc:  # noqa: BLE001 - design comparison is best-effort
             logger.warning(
                 "gate_eval_design_fact_constraints_failed",

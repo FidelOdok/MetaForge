@@ -183,6 +183,17 @@ newest one under the same name that is still open or approved. Before this,
 a loose model left by an abandoned attempt kept failing every later
 attempt's gate, because the Temporal gate's window is the whole project.
 
+The constraints a gate compares against are scoped the same way. Each
+constraint belongs to the `constraint_set` revision it arrived in
+(`metadata.constraint_set_wp`), and the geometry, analysis and design-record
+checks evaluate only constraints of current revisions and of this run's open
+drafts. A constraint whose set was closed as `rejected` or `abandoned`, or
+superseded by a newer revision (a `supersedes` / `revision_of` reference or an
+incoming `SUPERSEDES` edge from a revision that is not itself closed), gets no
+vote, so a phase that corrects a limit can relax it as well as tighten it.
+A constraint with no set, or whose set's status cannot be read, is still
+evaluated: the gate fails toward checking a limit, never toward skipping one.
+
 Where a real analysis needs a
 capability MetaForge doesn't have in Phase 1 (ERC/DRC on an authored schematic,
 Gerber export), the handler records the result **honestly as deferred** rather
