@@ -370,3 +370,26 @@ class TestActiveContent:
         wp_id = await _wp(twin, "part.step", STEP)
         got = TestClient(app).get(f"/v1/twin/nodes/{wp_id}/file")
         assert "content-security-policy" not in got.headers
+
+
+class TestFileResource:
+    async def test_a_text_file_is_a_text_resource(self, twin: InMemoryTwinAPI) -> None:
+        wp_id = await _wp(twin, "cube.gcode", GCODE)
+        (block,) = await FilesServer(LocalFilesService()).read_resource(
+            f"metaforge://files/{wp_id}"
+        )
+        assert block["text"].startswith("; generated") and block["mimeType"] == "text/plain"
+
+    async def test_an_image_is_a_blob_with_its_type(self, twin: InMemoryTwinAPI) -> None:
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+        wp_id = await _wp(twin, "ref.png", png)
+        server = FilesServer(LocalFilesService())
+        raw = await server.handle_request(
+            '{"jsonrpc":"2.0","id":1,"method":"resources/read",'
+            f'"params":{{"uri":"metaforge://files/{wp_id}"}}}}'
+        )
+        import json as _json
+
+        (block,) = _json.loads(raw)["result"]["contents"]
+        assert block["mimeType"] == "image/png"
+        assert base64.b64decode(block["blob"]) == png

@@ -61,6 +61,10 @@ After the person approves, `files.upload_status` gives each file's
 | You need to look at a small file (G-code header, a BOM, a netlist) | `files.read`; text comes back as text, other files as base64; a large binary is refused with its size |
 | The local plugin, and the person wants it in their project folder | `files.save_local` with a `destination`; it will not overwrite unless they say so |
 | Which files a work product holds (a KiCad project, a render's views) | `files.list`, then pass `path` to the others |
+| The client attaches MCP resources | `metaforge://files/<work_product_id>` (or `/<path>`), up to 2 MB |
+
+A person at a terminal can do the same with `forge upload`, `forge download`
+and `forge link`.
 
 ## Checklist
 

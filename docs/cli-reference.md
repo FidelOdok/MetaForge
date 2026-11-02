@@ -683,6 +683,30 @@ includes `change_id` (use it with `approve` / `reject`, or as
 `change:<change_id>` with [`approvals`](#approvals)), the
 proposing agent, the target work product, and the diff summary.
 
+### `upload`, `uploads`, `download`, `link`: files in and out {#files}
+
+```bash
+forge upload part.step photos/ board.zip --project <id> [--description "..."] [--now] [--json]
+forge uploads [--project <id>] [--status pending] [--json]
+forge download <work_product_id> [--path <named file>] [-o <file or folder>] [--force]
+forge link <work_product_id> [--path <named file>] [--lifetime <seconds>] [--json]
+```
+
+`forge upload` sends files and folders (a folder keeps its structure;
+`.git`, `node_modules`, `__pycache__`, `.venv`, `.forge` and `.pio` are
+skipped) to `POST /v1/uploads`. They wait for a person to approve them
+(`forge approvals approve upload:<id>`, or the dashboard), unless `--now`,
+which imports them at once with you as the approval. Each file is listed as
+imported, staged, or left out with the reason.
+
+`forge download` saves a work product's file (or a named one with `--path`)
+under the gateway's file name, and will not replace an existing file without
+`--force`. `forge link` prints a signed link that downloads the file without
+signing in until it expires; anyone who has it can use it.
+
+Exit codes: 2 usage, 3 not found, 5 refused (too large, nothing importable),
+6 not authorized. See [Files in and out](file-transfer.md).
+
 ### `approve` / `reject` — act on a proposal
 
 ```

@@ -97,7 +97,22 @@ Which way in suits which client:
 | The local plugin | `files.import_local` | `files.import_local` |
 | The dashboard | the import area (`POST /v1/twin/import`) or `POST /v1/uploads` | the same, with folders |
 
-The plugin skill `move-files` tells the model which to use.
+The plugin skill `move-files` tells the model which to use. From a
+terminal, `forge upload`, `forge download` and `forge link` do the same
+([CLI reference](cli-reference.md#files)).
+
+### Files as resources
+
+A work product's file is also an MCP resource,
+`metaforge://files/{work_product_id}` (its primary file) or
+`metaforge://files/{work_product_id}/{path}` (a named one), for clients that
+attach resources, such as Claude Code's `@` mentions. Text formats come back
+as `text`; images, PDFs, meshes and other binaries as a base64 `blob` with
+their MIME type (`image/png`, `model/step`, ...). The limit is 2 MB, as for
+`files.read`; past it the read fails and names `files.link`. How each client
+presents a binary resource is the client's own: this follows the MCP
+specification, and has been checked against the protocol, not yet against
+every client.
 
 In the dashboard, the Files page uploads files and folders (dropped
 folders keep their structure), the Approvals page shows each staged file
