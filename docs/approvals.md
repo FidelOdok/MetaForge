@@ -254,7 +254,7 @@ policy says what that recommendation does.
 | `off` (default) | Nothing extra. | A person |
 | `advise` | The reviewer's recommendation, reasons, concerns and confidence are shown with the gate. | A person |
 | `auto_clean` | When the gate's checks all passed with no findings and the reviewer recommends approve with confidence 0.8 or more, the reviewer's approval is recorded. Anything else waits. | The reviewer for clean gates, a person otherwise |
-| `auto` | The reviewer decides approve, retry or rework (never reject) with confidence 0.6 or more, until the policy's expiry (24 hours by default, a week at most), then `advise` again. | The reviewer until it expires |
+| `auto` | The reviewer decides approve, retry or rework (never reject) with confidence 0.6 or more (a rework of the phase under review is recorded as the retry it is), until the policy's expiry (24 hours by default, a week at most), then `advise` again. | The reviewer until it expires |
 
 In every mode a gate whose checks failed never offers approve, a `reject`
 recommendation is never acted on, and the reviewer's decisions are recorded
