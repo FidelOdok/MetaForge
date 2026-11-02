@@ -48,17 +48,25 @@ def _wp(wp_id: object, wp_type: str, name: str) -> object:
 
 
 class _Graph:
-    def __init__(self, statuses: dict[str, str], supersedes: dict[str, str], broken: set[str]):
+    def __init__(
+        self,
+        statuses: dict[str, str],
+        supersedes: dict[str, str],
+        broken: set[str],
+        priors: dict[str, str],
+    ) -> None:
         self._statuses = statuses
         self._incoming = {target: source for source, target in supersedes.items()}
         self._broken = broken
+        self._priors = priors
 
     async def get_edges(self, node_id: object, **kw: object) -> list:
         if str(node_id) in self._broken:
             raise RuntimeError("graph unavailable")
         if kw.get("edge_type") == EdgeType.REVISION_OF:
             status = self._statuses.get(str(node_id))
-            return [] if status is None else [SimpleNamespace(metadata={"status": status})]
+            meta = {"status": status, "prior_node_id": self._priors.get(str(node_id))}
+            return [] if status is None else [SimpleNamespace(metadata=meta)]
         if kw.get("edge_type") == EdgeType.SUPERSEDES and kw.get("direction") == "incoming":
             source = self._incoming.get(str(node_id))
             return [] if source is None else [SimpleNamespace(source_id=source)]
@@ -72,9 +80,10 @@ class _Twin:
         statuses: dict[str, str] | None = None,
         supersedes: dict[str, str] | None = None,
         broken: set[str] | None = None,
+        priors: dict[str, str] | None = None,
     ) -> None:
         self._constraints = constraints
-        self.graph = _Graph(statuses or {}, supersedes or {}, broken or set())
+        self.graph = _Graph(statuses or {}, supersedes or {}, broken or set(), priors or {})
         self._nodes = {
             str(CAD): SimpleNamespace(metadata=CHAIR),
             str(SIM): SimpleNamespace(metadata={**LIVE_FEA, "source_cad_model_id": str(CAD)}),
@@ -102,10 +111,12 @@ def _checker(twin: _Twin) -> TwinConstraintChecker:
     return TwinConstraintChecker(twin, SimpleNamespace(get_project=get_project))
 
 
-# rev 3 is the open draft of this run and supersedes rev 1; rev 2 was abandoned.
+# The live shape: rev 3 is this run's open draft, linked to rev 1 only by the
+# prior_node_id on its own REVISION_OF edge (the SUPERSEDES edge is written
+# when its gate approves it); rev 2 was abandoned.
 CHAIR_HISTORY = {
-    "statuses": {REV1: "approved", REV2: "abandoned", REV3: "open"},
-    "supersedes": {REV3: REV1},
+    "statuses": {REV1: "approved", REV2: "abandoned", REV3: "draft"},
+    "priors": {REV2: REV1, REV3: REV1},
 }
 WIDTHS = [
     _c("product_envelope_width", 420, REV1),
@@ -119,6 +130,16 @@ async def test_a_corrected_revision_clears_its_predecessors_violation() -> None:
     out = await _checker(_Twin(WIDTHS, **CHAIR_HISTORY))._geometry_check(str(uuid4()))
     assert out.violations == []
     assert out.evaluated >= 1
+
+
+@pytest.mark.asyncio
+async def test_an_approved_revision_supersedes_through_its_edge() -> None:
+    constraints = [_c("product_envelope_width", 420, REV1), _c("product_envelope_width", 500, REV3)]
+    twin = _Twin(
+        constraints, statuses={REV1: "approved", REV3: "approved"}, supersedes={REV3: REV1}
+    )
+    out = await _checker(twin)._geometry_check(str(uuid4()))
+    assert out.violations == []
 
 
 @pytest.mark.asyncio

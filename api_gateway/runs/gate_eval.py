@@ -366,10 +366,11 @@ class TwinConstraintChecker:
         """The ids among ``nodes`` (``(node_id, metadata)``) a newer revision replaces.
 
         A node is replaced when another node's ``supersedes`` / ``revision_of``
-        metadata names it or it has an incoming SUPERSEDES edge from a revision
-        that is not a closed draft. Shared by the
-        model window (FORGE-515) and the constraint scope (FORGE-740) so both
-        halves of a geometry check agree on what is current.
+        metadata names it, it has an incoming SUPERSEDES edge from a revision
+        that is not a closed draft, or an open draft among ``nodes`` names it as
+        its ``prior_node_id``. Shared by the model window (FORGE-515) and the
+        constraint scope (FORGE-740) so both halves of a geometry check agree
+        on what is current.
         """
         replaced: set[str] = set()
         for _, meta in nodes:
@@ -395,6 +396,23 @@ class TwinConstraintChecker:
                     if not await self._closed_draft(str(edge.source_id)):
                         replaced.add(node_id)
                         break
+                # An open draft has no SUPERSEDES edge until its gate approves
+                # it; the revision it replaces is the ``prior_node_id`` on its
+                # own REVISION_OF edge.
+                try:
+                    revisions = await graph.get_edges(
+                        UUID(node_id), direction="outgoing", edge_type=EdgeType.REVISION_OF
+                    )
+                except Exception as exc:  # noqa: BLE001 - edge lookup is best-effort
+                    logger.warning("gate_eval_supersedes_failed", node_id=node_id, error=str(exc))
+                    continue
+                from twin_core.items.change_sets import CLOSED_STATUSES
+
+                for edge in revisions:
+                    meta = getattr(edge, "metadata", None) or {}
+                    prior = meta.get("prior_node_id")
+                    if prior and meta.get("status") not in CLOSED_STATUSES:
+                        replaced.add(str(prior))
         return replaced
 
     async def _current_constraints(self, constraints: list[Any]) -> list[Any]:
