@@ -24,6 +24,8 @@ Not for:
   `calculix.run_thermal`.
 - Surface meshes for printing or rendering: export STL from the CAD tools
   (`cadquery.export_geometry`), not a FE mesh.
+- A mesh generated from a prompt or an image (Tripo, Meshy): that is the
+  `mesh-from-prompt` skill.
 - A part with no committed geometry: design and commit it first
   (`generate_cad_script`, `generate_cad`).
 

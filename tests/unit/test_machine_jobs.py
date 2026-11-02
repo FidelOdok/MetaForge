@@ -186,7 +186,7 @@ async def test_nothing_is_sent_to_a_busy_vendor_or_unavailable_machine(
 @pytest.mark.asyncio
 async def test_only_gcode_is_sent(library: SqliteMachineLibrary, twin: Any, tmp_path: Path) -> None:
     step = await _gcode(twin, tmp_path, name="bracket.step")
-    with pytest.raises(JobError, match="no slicer"):
+    with pytest.raises(JobError, match="is not G-code"):
         await dispatch_job(_printer(library), step)
     with pytest.raises(JobError, match="not found"):
         await dispatch_job(_printer(library), str(uuid4()))

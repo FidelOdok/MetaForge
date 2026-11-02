@@ -921,8 +921,8 @@ the machine. `library.record_job_result` records the ended job as
 `demonstration` evidence against the pinned revision, reading the outcome
 from the machine so a caller cannot assert it; a stopped or failed print is
 recorded as not made. Jobs live in the library store (`machine_jobs`).
-MetaForge has no slicer, so the G-code is made elsewhere and recorded as a
-work product first. PrusaLink machines can be discovered but not yet sent
+The G-code must already be a work product. `slicer.slice` writes G-code to
+the adapter workspace, but nothing records that file as a work product yet. PrusaLink machines can be discovered but not yet sent
 jobs.
 
 A successful proposal (`201`, `status: "proposed"`) keeps every existing
