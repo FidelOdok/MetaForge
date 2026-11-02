@@ -8,9 +8,7 @@ MetaForge is a **local-first control plane** that turns human intent into review
 
 **Prime Rule**: If it can't be versioned, reviewed, and built — MetaForge doesn't output it.
 
-## Documentation: Two Sources of Truth
-
-Architecture documentation lives in **two places**, split by tense — what is built vs. what is planned. Consult the right one for the task:
+## Documentation
 
 ### Live architecture — this repo's `docs/`
 
@@ -32,19 +30,9 @@ When documenting or reasoning about **current behavior**, use `docs/` — and ke
 - **CLI / behavior / architecture**: update the relevant `docs/` page (e.g. `cli-reference.md`, `architecture.md`, `capability-matrix.md`) alongside the code.
 - Verify locally with `cd docs-site && npm run build && npm test` before opening the PR — this is exactly what CI runs. The build throws on a broken link or a broken markdown cross-reference (the `mkdocs build --strict` equivalent), and the test asserts that every URL the site published before the Docusaurus switch still resolves.
 
-### Future plans — the MetaForge-Planner repo
+### Planning new work
 
-The **MetaForge-Planner** repo (`FidelOdok/MetaForge-Planner`) is the source of truth for **forward-looking** plans, specifications, and vision — what we intend to build, not what exists yet:
-
-- **Architecture (planned)**: `docs/architecture/` — system vision, orchestrator design, technical specs
-- **Repository Structure**: `docs/architecture/repository-structure.md` — canonical monorepo layout
-- **Framework**: `docs/FRAMEWORK_MAPPING.md` — 25-discipline taxonomy with phase-by-phase implementation
-- **Roadmap**: `docs/roadmap.md` and `docs/architecture/mvp-roadmap.md` — phased delivery plan
-- **Agent specs**: `docs/agents/` — per-agent design documents
-- **Tool catalog**: `TOOLS_INTEGRATION_CATALOG.md` — all external tool integrations
-- **Vision**: `VISION.md` — project principles and non-goals
-
-When **planning new features or making architectural decisions**, fetch the relevant docs from `FidelOdok/MetaForge-Planner` using GitHub tools before implementing. Do not invent architecture — follow what's specified there. Once a plan is built, reflect the implemented reality in this repo's `docs/`.
+The `FidelOdok/MetaForge-Planner` repo is **outdated** and is not a source of truth: do not consult it or follow its specifications. Plan new features and architectural changes from this repo's `docs/` (including `docs/roadmap.md`) and the codebase itself, track the work in Jira, and land the implemented design in `docs/` in the same PR.
 
 ## Project & Task Management (Jira)
 
@@ -189,7 +177,7 @@ chore: add .gitignore
 
 ## Platform Source Repository Structure (Modular Monorepo)
 
-This repo follows the canonical layout defined in `FidelOdok/MetaForge-Planner` at `docs/architecture/repository-structure.md`. Each top-level directory maps to an architectural layer:
+Each top-level directory maps to an architectural layer:
 
 ```
 MetaForge/
