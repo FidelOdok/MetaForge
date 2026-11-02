@@ -38,6 +38,10 @@ services:
       # restart: unless-stopped retry until Neo4j is up, where the in-memory
       # fallback looked healthy and silently hid every persisted node.
       - METAFORGE_REQUIRE_NEO4J=${METAFORGE_REQUIRE_NEO4J:-true}
+      # FORGE-726: the strongest approval policy any project may choose
+      # (off, advise, auto_clean or auto). Default advise: the reviewer only
+      # recommends until an operator raises it.
+      - METAFORGE_AUTO_APPROVE_MAX=${METAFORGE_AUTO_APPROVE_MAX:-advise}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - TEMPORAL_HOST=temporal:7233
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -706,6 +710,8 @@ services:
       # and the failure shows as outcome="failed" on the announce metric.
       - METAFORGE_GATEWAY_URL=${METAFORGE_GATEWAY_URL:-http://gateway:8000}
       - METAFORGE_GATEWAY_API_KEY=${METAFORGE_GATEWAY_API_KEY:-}
+      # FORGE-730: how long a gate review waits for a client reviewer.
+      - METAFORGE_CLIENT_REVIEW_WAIT_SECONDS=${METAFORGE_CLIENT_REVIEW_WAIT_SECONDS:-600}
       # FORGE-501: the worker's deterministic fallback commit (geometry
       # recorder) stores the STEP blob in MinIO. Without these a cad_model was
       # created with no stored geometry. Same names and defaults as `gateway`.
