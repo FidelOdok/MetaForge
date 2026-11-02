@@ -42,7 +42,7 @@ claude.ai ignores a connector whose URL contains a `${user_config.*}` reference,
 
 ## Skills
 
-48 skills are bundled: the engineering skills MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), `intent-to-verified-design` (the lifecycle procedure) and `workflow-lifecycle` (the reasoning contract).
+49 skills are bundled: the engineering skills MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), `intent-to-verified-design` (the lifecycle procedure) and `workflow-lifecycle` (the reasoning contract).
 
 ## Agents
 

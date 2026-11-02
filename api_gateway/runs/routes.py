@@ -773,6 +773,23 @@ def _resolve_in_process_flow(run: Run) -> FlowDefinition:
     return definition
 
 
+async def _in_process_gate_review(payload: dict[str, Any]) -> dict[str, Any]:
+    """The gate reviewer for the in-process engine, which runs inside the gateway.
+
+    The policy is read from this process first, so a project left at ``off``
+    (the default) makes no call at all.
+    """
+    from api_gateway.approvals.policy import effective_mode, get_policy_store
+    from api_gateway.runs.gate_review import review_gate
+
+    project_id = payload.get("project_id")
+    if not project_id:
+        return {"status": "skipped", "why": "no project"}
+    if effective_mode(await get_policy_store().get(str(project_id))) == "off":
+        return {"status": "skipped", "why": "policy off"}
+    return await review_gate(payload)
+
+
 def _build_in_process_executor(brain: Any, project_backend: Any) -> DesignFlowExecutor:
     """The executor and its live gate checks, bound to the gateway's twin."""
     from api_gateway.runs.gate_eval import (
@@ -786,6 +803,8 @@ def _build_in_process_executor(brain: Any, project_backend: Any) -> DesignFlowEx
     return DesignFlowExecutor(
         store=_store,
         brain=brain,
+        # FORGE-726: the same gate reviewer the Temporal worker runs.
+        gate_reviewer=_in_process_gate_review,
         coordinator=_gate_coordinator,
         # The twin lets the gate require a *loadable* cad_model, not a bare node.
         gate_evaluator=ProjectGateEvaluator(project_backend, twin=get_twin()),

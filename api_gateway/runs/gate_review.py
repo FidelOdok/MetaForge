@@ -1,0 +1,303 @@
+"""The gate reviewer: a second opinion on every design-flow gate (FORGE-726..729).
+
+Runs right after a gate opens, when the project's approval policy asks for it
+(``api_gateway.approvals.policy``). Three parts:
+
+* **The review brief** (FORGE-727): what the phase was asked to do, what it
+  recorded (the twin's nodes for the project, with their content), what the
+  gate's checks found, and the run's earlier decisions with their reasons.
+  Built over the gateway's REST API, so the Temporal worker and the in-process
+  engine build the same brief.
+* **The reviewer** (FORGE-729): a review turn of the harness with its own model
+  (``reviewer_model``), the ``gate-review`` skill as its rubric and the
+  read-only ``review`` tool set (FORGE-728). It has no write tools, so it
+  cannot fix what it is judging, and it answers with a structured review.
+* **Posting** the review to ``POST /v1/runs/{id}/gate-review``, where the
+  gateway stores it on the gate and applies the policy: ``advise`` only shows
+  it; ``auto_clean`` and ``auto`` may decide as ``reviewer:server:<model>``.
+
+Every step is best-effort. A reviewer that fails posts a review with
+``recommendation: none`` and the error, and the gate simply waits for a
+person, as it would have without a reviewer.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+import httpx
+import structlog
+
+from api_gateway.runs.gate_announce import gateway_url
+from observability.tracing import get_tracer
+
+logger = structlog.get_logger(__name__)
+tracer = get_tracer("api_gateway.runs.gate_review")
+
+__all__ = ["build_review_brief", "parse_review", "review_gate", "review_skill"]
+
+_TIMEOUT_SECONDS = 20.0
+#: Tool steps the reviewer may take: enough to read the thread, not to wander.
+REVIEW_MAX_STEPS = 12
+_MAX_NODES = 30
+_MAX_PROPERTY_CHARS = 700
+_SKILL = (
+    Path(__file__).resolve().parents[2] / "mcp_core" / "plugin_skills" / "gate-review" / "SKILL.md"
+)
+
+
+def _headers() -> dict[str, str]:
+    key = (os.environ.get("METAFORGE_GATEWAY_API_KEY") or "").strip()
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
+class _Gateway:
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        self._client = client
+
+    async def request(self, method: str, path: str, *, json_body: Any = None) -> Any:
+        url = f"{gateway_url()}{path}"
+        if self._client is not None:
+            resp = await self._client.request(
+                method, url, json=json_body, headers=_headers(), timeout=_TIMEOUT_SECONDS
+            )
+        else:
+            async with httpx.AsyncClient() as client:
+                resp = await client.request(
+                    method, url, json=json_body, headers=_headers(), timeout=_TIMEOUT_SECONDS
+                )
+        resp.raise_for_status()
+        return resp.json() if resp.content else None
+
+
+def review_skill() -> str:
+    """The ``gate-review`` skill's body: the rubric both reviewers use."""
+    try:
+        text = _SKILL.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    return text.split("---", 2)[2].strip() if text.startswith("---") else text
+
+
+def _compact(value: Any) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return text if len(text) <= _MAX_PROPERTY_CHARS else text[:_MAX_PROPERTY_CHARS] + " …"
+
+
+async def build_review_brief(payload: dict[str, Any], gateway: _Gateway) -> dict[str, Any]:
+    """The reviewer's context for one gate (FORGE-727)."""
+    run_id = str(payload.get("run_id") or "")
+    project_id = payload.get("project_id")
+    phase = payload.get("phase") or {}
+    brief: dict[str, Any] = {
+        "run_id": run_id,
+        "project_id": project_id,
+        "goal": payload.get("goal") or "",
+        "phase": {
+            "id": phase.get("id"),
+            "title": phase.get("title"),
+            "objective": phase.get("objective"),
+            "required_deliverables": phase.get("required_deliverables") or [],
+            "disciplines": phase.get("disciplines") or [],
+        },
+        "gate": payload.get("gate") or "",
+        "attempt": payload.get("attempt"),
+        "checks": {
+            "ready": bool(payload.get("ready")),
+            "findings": list(payload.get("findings") or []),
+            "reason": payload.get("reason") or "",
+        },
+    }
+    try:
+        run = await gateway.request("GET", f"/v1/runs/{run_id}")
+        request = (run or {}).get("request") or {}
+        brief["earlier_decisions"] = [
+            {k: d.get(k) for k in ("decision", "reason", "approver", "surface", "decided_at")}
+            for d in (request.get("decisions") or [])[-10:]
+        ]
+        brief["flow"] = request.get("flow_template_id") or request.get("flow")
+    except Exception as exc:  # noqa: BLE001 - the brief is still useful without the run
+        brief["earlier_decisions"] = []
+        logger.info("gate_review_brief_run_unavailable", run_id=run_id, error=str(exc))
+    if project_id:
+        try:
+            listing = await gateway.request(
+                "GET", f"/v1/twin/nodes?project_id={project_id}&limit=500"
+            )
+            nodes = listing.get("nodes", listing) if isinstance(listing, dict) else listing
+            wanted = set(brief["phase"]["required_deliverables"]) | {
+                "constraint_set",
+                "design_decision",
+                "cad_model",
+                "load_case",
+                "simulation_result",
+            }
+            picked = []
+            for node in nodes or []:
+                props = node.get("properties") or {}
+                wp_type = props.get("wp_type") or node.get("type")
+                if wp_type not in wanted:
+                    continue
+                picked.append(
+                    {
+                        "id": node.get("id"),
+                        "type": wp_type,
+                        "name": node.get("name"),
+                        "created_by": props.get("created_by") or props.get("authored_by"),
+                        "material": props.get("material"),
+                        "summary": _compact(
+                            props.get("rationale")
+                            or props.get("content")
+                            or props.get("description")
+                            or {k: v for k, v in props.items() if k not in ("minio_object_key",)}
+                        ),
+                    }
+                )
+            brief["work_products"] = picked[-_MAX_NODES:]
+        except Exception as exc:  # noqa: BLE001
+            brief["work_products"] = []
+            logger.info("gate_review_brief_nodes_unavailable", run_id=run_id, error=str(exc))
+    return brief
+
+
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def parse_review(text: str) -> dict[str, Any]:
+    """The reviewer's JSON answer (the last JSON object in its reply)."""
+    candidates = _JSON_BLOCK.findall(text or "")
+    if not candidates:
+        start, end = (text or "").rfind("{"), (text or "").rfind("}")
+        if start != -1 and end > start:
+            candidates = [text[start : end + 1]]
+    for raw in reversed(candidates):
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and "recommendation" in data:
+            rec = str(data.get("recommendation") or "").strip().lower()
+            if rec not in ("approve", "retry", "rework", "reject"):
+                rec = "none"
+            try:
+                confidence = min(max(float(data.get("confidence") or 0.0), 0.0), 1.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            return {
+                "recommendation": rec,
+                "to_phase": str(data.get("to_phase") or ""),
+                "reasons": str(data.get("reasons") or "")[:4000],
+                "concerns": [str(c)[:500] for c in (data.get("concerns") or [])][:20],
+                "confidence": confidence,
+            }
+    raise ValueError("the reviewer's reply carried no review JSON")
+
+
+def _review_prompt(brief: dict[str, Any]) -> str:
+    return (
+        "You are MetaForge's independent gate reviewer. You did not do this work and you "
+        "cannot change it: read, judge, and recommend. Follow this procedure:\n\n"
+        f"{review_skill()}\n\n"
+        "The review brief for this gate:\n"
+        f"```json\n{json.dumps(brief, indent=1, default=str)[:40000]}\n```\n\n"
+        "Use the read-only tools if you need more, then end with the JSON object."
+    )
+
+
+def _split_model(ref: str) -> tuple[str | None, str | None]:
+    ref = (ref or "").strip()
+    if not ref:
+        return None, None
+    provider, sep, model = ref.partition(":")
+    return (provider, model) if sep and model else (None, ref)
+
+
+async def server_review(brief: dict[str, Any], *, model_ref: str) -> dict[str, Any]:
+    """One review turn of the harness, read-only, with the reviewer's own model."""
+    from api_gateway.chat.harness_backend import run_chat_turn
+    from api_gateway.chat.routes import get_mcp_bridge, get_metrics
+    from mcp_core.profiles import REVIEW_TOOLS
+    from orchestrator.harness.providers.usage import usage_scope
+
+    provider, model = _split_model(model_ref)
+    bridge = get_mcp_bridge()
+    phase_id = (brief.get("phase") or {}).get("id") or "gate"
+    with usage_scope(run_id=brief.get("run_id"), phase=phase_id, role="gate_check"):
+        reply = await run_chat_turn(
+            _review_prompt(brief),
+            mcp_bridge=bridge,
+            metrics=get_metrics(),
+            session_id=f"review:{brief.get('run_id')}:{phase_id}",
+            max_steps=REVIEW_MAX_STEPS,
+            provider=provider,
+            model=model,
+            tool_allowlist=REVIEW_TOOLS,
+            approval_mode="forward",
+        )
+    return parse_review(reply)
+
+
+async def review_gate(
+    payload: dict[str, Any],
+    *,
+    client: httpx.AsyncClient | None = None,
+    reviewer: Any = None,
+) -> dict[str, Any]:
+    """Review one open gate if the project's policy asks for it, and post the review."""
+    gateway = _Gateway(client)
+    run_id = str(payload.get("run_id") or "")
+    project_id = payload.get("project_id")
+    phase = payload.get("phase") or {}
+    with tracer.start_as_current_span("gate_review.review") as span:
+        span.set_attribute("run.id", run_id)
+        span.set_attribute("phase.id", str(phase.get("id") or ""))
+        if not project_id:
+            return {"status": "skipped", "why": "no project"}
+        try:
+            view = await gateway.request("GET", f"/v1/projects/{project_id}/approval-policy")
+        except Exception as exc:  # noqa: BLE001 - no policy, no review
+            logger.info("gate_review_policy_unavailable", run_id=run_id, error=str(exc))
+            return {"status": "skipped", "why": "policy unavailable"}
+        mode = view.get("effective_mode", "off")
+        policy = view.get("policy") or {}
+        span.set_attribute("policy.mode", mode)
+        if mode == "off":
+            return {"status": "skipped", "why": "policy off"}
+        if policy.get("reviewer") == "client":
+            # FORGE-730: a client reviewer claims a review task; not this step's job.
+            return {"status": "skipped", "why": "client reviewer"}
+        model_ref = str(policy.get("reviewer_model") or "")
+        review: dict[str, Any] = {
+            "phase": str(phase.get("id") or ""),
+            "attempt": payload.get("attempt"),
+            "gate": str(payload.get("gate") or ""),
+            "source": "server",
+            "model": model_ref or "default",
+        }
+        try:
+            brief = await build_review_brief(payload, gateway)
+            run = reviewer or (lambda b: server_review(b, model_ref=model_ref))
+            review.update(await run(brief))
+        except Exception as exc:  # noqa: BLE001 - a failed review still says so on the gate
+            span.record_exception(exc)
+            logger.warning("gate_review_failed", run_id=run_id, error=str(exc))
+            review.update({"recommendation": "none", "error": str(exc)[:500]})
+        try:
+            stored = await gateway.request(
+                "POST", f"/v1/runs/{run_id}/gate-review", json_body=review
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("gate_review_post_failed", run_id=run_id, error=str(exc))
+            return {"status": "failed", "why": str(exc)}
+    logger.info(
+        "gate_review_posted",
+        run_id=run_id,
+        phase=review["phase"],
+        recommendation=review.get("recommendation"),
+        applied=(stored or {}).get("applied"),
+    )
+    return {"status": "reviewed", "applied": (stored or {}).get("applied")}

@@ -327,6 +327,19 @@ class InMemoryRunStore:
         self._notify(run)
         return run
 
+    def annotate(self, run_id: str, key: str, value: Any) -> Run:
+        """Set ``request[key]`` on a run and persist it, without a transition.
+
+        FORGE-726: a gate's review arrives after the gate opened, when the
+        status no longer changes, so nothing else would save it. Notifies like
+        a transition so the ledger and the run's stream see it.
+        """
+        run = self.get(run_id)
+        run.request[key] = value
+        run.updated_at = self._clock()
+        self._notify(run)
+        return run
+
     def delete(self, run_id: str) -> None:
         """Remove a run outright.
 

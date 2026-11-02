@@ -32,6 +32,7 @@ from tool_registry.tools.design_flow.gates import (
     DEFAULT_ANSWER_SECONDS,
     MAX_ANSWER_SECONDS,
     GateDecider,
+    review_lines,
 )
 
 logger = structlog.get_logger(__name__)
@@ -68,6 +69,7 @@ def _summary(item: dict[str, Any]) -> dict[str, Any]:
         "decidable": bool(item.get("decidable")),
         "allowed_decisions": list(item.get("allowed_decisions") or []),
         "not_decidable_reason": item.get("not_decidable_reason"),
+        "review": item.get("review"),
     }
 
 
@@ -101,6 +103,7 @@ def approval_question(item: dict[str, Any], answer_seconds: float) -> tuple[str,
     if findings:
         lines += ["", "What the checks found:"]
         lines += [f"  - [{f.get('severity', 'error')}] {f.get('message', '')}" for f in findings]
+    lines += review_lines(item)
     lines += ["", "Choices:"] + [f"  - {_DECISION_WORDS[d]}" for d in allowed]
     if item.get("kind") == "gate" and "approve" not in allowed:
         lines += ["", "Approve is not offered: the gate's checks did not pass."]

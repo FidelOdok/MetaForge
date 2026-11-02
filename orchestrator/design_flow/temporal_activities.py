@@ -53,6 +53,9 @@ class DesignFlowActivities:
     gate_announcer: GateAnnouncer | None = None
     revision_notes: RevisionNotes | None = None
     value_history: ValueHistory | None = None
+    #: FORGE-726: ``(payload) -> result``; a second opinion on the open gate,
+    #: posted to the gateway when the project's approval policy asks for one.
+    gate_reviewer: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
 
     #: Seconds between heartbeats while a phase is running. A phase is a long
     #: agent loop; without heartbeats Temporal cannot tell a slow one from a
@@ -119,6 +122,32 @@ class DesignFlowActivities:
             )
             return
         metrics.record_design_flow_gate_announce("announced")
+
+    @activity.defn(name="review_gate")
+    async def review_gate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Ask the gate reviewer for its view of the open gate (FORGE-726).
+
+        Never raises: a review is advice, and the gate waits for its decision
+        whether or not one arrives. Heartbeats while the reviewer works.
+        """
+        if self.gate_reviewer is None:
+            return {"status": "skipped", "why": "no reviewer wired"}
+        task = asyncio.ensure_future(self.gate_reviewer(payload))
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=self.heartbeat_interval)
+                if done:
+                    break
+                activity.heartbeat(payload.get("run_id"))
+            return task.result()
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        except Exception as exc:  # noqa: BLE001 - advice must never fail the gate
+            logger.warning(
+                "design_flow_gate_review_error", run_id=payload.get("run_id"), error=str(exc)
+            )
+            return {"status": "failed", "why": str(exc)}
 
     @activity.defn(name="collect_revision_notes")
     async def collect_revision_notes(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -198,6 +227,7 @@ class DesignFlowActivities:
         """The activity callables to register with a worker."""
         return [
             self.run_phase,
+            self.review_gate,
             self.evaluate_gate,
             self.announce_gate,
             self.collect_revision_notes,

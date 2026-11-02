@@ -870,3 +870,38 @@ groups:
             containers and an in-memory twin are not being caught. Check the
             watchdog service: docker compose ps watchdog.
           runbook_url: "docs/runbooks/host-watchdog.md"
+
+  # FORGE-726 -- gate reviewer (api_gateway/runs/gate_review.py).
+  - name: metaforge_gate_review
+    rules:
+      - alert: GateReviewerFailing
+        expr: >-
+          sum(increase(metaforge_gate_review_total{recommendation="none"}[1h]))
+          / clamp_min(sum(increase(metaforge_gate_review_total[1h])), 1) > 0.5
+          and sum(increase(metaforge_gate_review_total[1h])) >= 4
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The gate reviewer cannot reach a view on most gates"
+          description: >-
+            More than half of the last hour's gate reviews came back with no
+            recommendation. Gates still wait for a person, so nothing is approved
+            wrongly, but advise and auto modes are not doing their job. Check the
+            reviewer model setting and the design-flow worker's logs
+            (gate_review_failed).
+
+      - alert: GateReviewerDisagreesOften
+        expr: >-
+          sum(increase(metaforge_gate_review_agreement_total{agreed="false"}[7d]))
+          / clamp_min(sum(increase(metaforge_gate_review_agreement_total[7d])), 1) > 0.3
+          and sum(increase(metaforge_gate_review_agreement_total[7d])) >= 20
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "People disagree with the gate reviewer on over 30% of gates"
+          description: >-
+            Over the last week, people decided differently from the reviewer's
+            recommendation on more than 30% of at least 20 gates. Do not move a
+            project to auto_clean or auto on this evidence; look at where it disagrees.

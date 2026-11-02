@@ -46,6 +46,7 @@ __all__ = [
     "describe_decision",
     "gate_question",
     "last_gate_decision",
+    "review_lines",
 ]
 
 #: ``(run_id) -> {"run_status": str, "gate": <approval item dict> | None,
@@ -98,6 +99,25 @@ def _bounded(value: Any, default: float, upper: float) -> float:
     return min(max(number, 1.0), upper)
 
 
+def review_lines(item: dict[str, Any]) -> list[str]:
+    """The reviewer agent's note on a gate, as prompt lines (FORGE-726). Empty if none."""
+    review = item.get("review") or {}
+    rec = review.get("recommendation")
+    if not rec or rec == "none":
+        return []
+    lines = [
+        "",
+        f"Reviewer ({review.get('reviewer') or 'reviewer'}) recommends: {rec}"
+        + (f" to '{review.get('to_phase')}'" if rec == "rework" and review.get("to_phase") else "")
+        + f" (confidence {float(review.get('confidence') or 0):.2f})",
+    ]
+    if review.get("reasons"):
+        lines.append(f"  {review['reasons']}")
+    lines += [f"  - {c}" for c in (review.get("concerns") or [])[:5]]
+    lines.append("  This is advice; the decision is yours.")
+    return lines
+
+
 def gate_question(gate: dict[str, Any], answer_seconds: float) -> tuple[str, dict[str, Any]]:
     """The prompt and form for one open gate.
 
@@ -117,6 +137,7 @@ def gate_question(gate: dict[str, Any], answer_seconds: float) -> tuple[str, dic
     detail = gate.get("detail") or {}
     if detail.get("retries_left") is not None:
         lines += ["", f"Retries left for this phase: {detail['retries_left']}"]
+    lines += review_lines(gate)
     lines += ["", "Choices:"] + [f"  - {_DECISION_WORDS[d]}" for d in allowed]
     if "approve" not in allowed:
         lines += ["", "Approve is not offered: the gate's checks did not pass."]

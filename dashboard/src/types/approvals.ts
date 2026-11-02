@@ -52,6 +52,25 @@ export interface ApprovalDecisionRecord {
   decided_at: string;
 }
 
+/** FORGE-726: a reviewer agent's note on a gate. Advice unless the policy acts on it. */
+export interface GateReview {
+  phase: string;
+  attempt: number | null;
+  gate: string;
+  recommendation: 'approve' | 'retry' | 'rework' | 'reject' | 'none';
+  to_phase: string;
+  reasons: string;
+  concerns: string[];
+  confidence: number;
+  source: 'server' | 'client';
+  model: string;
+  reviewer: string;
+  created_at: string | null;
+  error: string | null;
+  applied: string | null;
+  applied_note: string | null;
+}
+
 export interface ApprovalItem {
   id: string;
   kind: ApprovalKind;
@@ -72,6 +91,7 @@ export interface ApprovalItem {
   not_decidable_reason: string | null;
   detail: Record<string, unknown>;
   decision: ApprovalDecisionRecord | null;
+  review?: GateReview | null;
 }
 
 export interface ApprovalList {

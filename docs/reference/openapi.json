@@ -279,6 +279,16 @@
             ],
             "title": "Requested By"
           },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rework_targets": {
             "items": {
               "type": "string"
@@ -352,6 +362,157 @@
           "items"
         ],
         "title": "ApprovalListResponse",
+        "type": "object"
+      },
+      "ApprovalPolicy": {
+        "description": "One project's policy, as stored.",
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "extra": {
+            "additionalProperties": true,
+            "title": "Extra",
+            "type": "object"
+          },
+          "mode": {
+            "default": "off",
+            "enum": [
+              "off",
+              "advise",
+              "auto_clean",
+              "auto"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "reviewer": {
+            "default": "server",
+            "enum": [
+              "server",
+              "client",
+              "client_then_server"
+            ],
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "reviewer_model": {
+            "default": "",
+            "title": "Reviewer Model",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "default": "",
+            "title": "Updated By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "ApprovalPolicy",
+        "type": "object"
+      },
+      "ApprovalPolicyUpdate": {
+        "properties": {
+          "expires_in_hours": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 168.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Hours"
+          },
+          "mode": {
+            "enum": [
+              "off",
+              "advise",
+              "auto_clean",
+              "auto"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "reviewer": {
+            "default": "server",
+            "enum": [
+              "server",
+              "client",
+              "client_then_server"
+            ],
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "reviewer_model": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Reviewer Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ApprovalPolicyUpdate",
+        "type": "object"
+      },
+      "ApprovalPolicyView": {
+        "description": "The stored policy, what is in force now, and the operator cap.",
+        "properties": {
+          "effective_mode": {
+            "title": "Effective Mode",
+            "type": "string"
+          },
+          "max_mode": {
+            "title": "Max Mode",
+            "type": "string"
+          },
+          "modes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Modes",
+            "type": "array"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ApprovalPolicy"
+          }
+        },
+        "required": [
+          "policy",
+          "effective_mode",
+          "max_mode",
+          "modes"
+        ],
+        "title": "ApprovalPolicyView",
         "type": "object"
       },
       "ApprovalRequest": {
@@ -3177,6 +3338,7 @@
               "cli",
               "agent",
               "chat",
+              "reviewer",
               "unknown"
             ],
             "title": "Surface",
@@ -5208,6 +5370,135 @@
           "gate"
         ],
         "title": "GateOpenedRequest",
+        "type": "object"
+      },
+      "GateReview": {
+        "description": "A reviewer agent's note on one gate.\n\nWritten for the gate's phase and attempt, so a review of an earlier\nattempt is never shown against a later one.",
+        "properties": {
+          "applied": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied"
+          },
+          "applied_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Note"
+          },
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt"
+          },
+          "concerns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Concerns",
+            "type": "array"
+          },
+          "confidence": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "gate": {
+            "default": "",
+            "title": "Gate",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "reasons": {
+            "default": "",
+            "title": "Reasons",
+            "type": "string"
+          },
+          "recommendation": {
+            "enum": [
+              "approve",
+              "retry",
+              "rework",
+              "reject",
+              "none"
+            ],
+            "title": "Recommendation",
+            "type": "string"
+          },
+          "reviewer": {
+            "default": "",
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "source": {
+            "default": "server",
+            "enum": [
+              "server",
+              "client"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "to_phase": {
+            "default": "",
+            "title": "To Phase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "recommendation"
+        ],
+        "title": "GateReview",
         "type": "object"
       },
       "GateView": {
@@ -21636,6 +21927,100 @@
         ]
       }
     },
+    "/v1/projects/{project_id}/approval-policy": {
+      "get": {
+        "description": "Who decides this project's gates right now.",
+        "operationId": "get_approval_policy_v1_projects__project_id__approval_policy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPolicyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Approval Policy",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "put": {
+        "description": "Set who decides this project's gates. A person's decision only.",
+        "operationId": "put_approval_policy_v1_projects__project_id__approval_policy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalPolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPolicyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Approval Policy",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
     "/v1/projects/{project_id}/work-products/{work_product_id}": {
       "delete": {
         "description": "Remove a work-product link from a project.\n\nLets callers clean up duplicate/stale work-product references without\ndeleting the project. 404 if no matching link exists.",
@@ -22490,6 +22875,59 @@
         "summary": "Gate Opened",
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/gate-review": {
+      "post": {
+        "description": "Record a reviewer agent's note on the run's open gate.\n\nCalled by the design-flow worker's review step (or on behalf of a client\nreviewer). The note is stored on the run and shown with the gate; the\nproject's approval policy then decides what, if anything, it does: in\n``off`` and ``advise`` nothing, in ``auto_clean`` and ``auto`` it may decide\nthe gate as ``reviewer:<source>:<model>``, never as a person.",
+        "operationId": "post_gate_review_v1_runs__run_id__gate_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GateReview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GateReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Gate Review",
+        "tags": [
+          "approvals"
         ]
       }
     },

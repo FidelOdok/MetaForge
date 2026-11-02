@@ -8,6 +8,7 @@ import type {
   ApprovalDecisionRecord,
   ApprovalFinding,
   ApprovalItem,
+  GateReview,
 } from '../../types/approvals';
 
 // Kinetic Console tokens (same set the old Approvals cards used).
@@ -211,11 +212,51 @@ export interface ApprovalCardProps {
  * own explanation, when the item is not decidable.
  */
 /** Where a decision was taken, in words (FORGE-583). `unknown` says nothing. */
+/** FORGE-726: the reviewer agent's recommendation on a gate. Advice, shown before the choice. */
+function ReviewNote({ review }: { review: GateReview }) {
+  if (review.recommendation === 'none') {
+    return (
+      <p data-testid="gate-review" style={{ margin: 0, fontSize: 13, color: KC.onSurfaceVariant }}>
+        The reviewer could not reach a view{review.error ? `: ${review.error}` : '.'}
+      </p>
+    );
+  }
+  const target = review.recommendation === 'rework' && review.to_phase ? ` to ${review.to_phase}` : '';
+  return (
+    <div
+      data-testid="gate-review"
+      className="space-y-1"
+      style={{ borderLeft: `3px solid ${KC.warning}`, paddingLeft: 10, fontSize: 13 }}
+    >
+      <p style={{ margin: 0, color: KC.onSurface }}>
+        <strong>Reviewer recommends: {review.recommendation}{target}</strong>{' '}
+        <span className="font-mono" style={{ color: KC.onSurfaceVariant }}>
+          confidence {review.confidence.toFixed(2)} · {review.reviewer || review.source}
+        </span>
+      </p>
+      {review.reasons && <p style={{ margin: 0, color: KC.onSurface }}>{review.reasons}</p>}
+      {review.concerns.length > 0 && (
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {review.concerns.map((c, i) => (
+            <li key={i}>{c}</li>
+          ))}
+        </ul>
+      )}
+      <p style={{ margin: 0, color: KC.onSurfaceVariant }}>
+        {review.applied === 'decided'
+          ? `Decided by the reviewer under the approval policy (${review.applied_note ?? ''}).`
+          : 'Advice only: the decision is yours.'}
+      </p>
+    </div>
+  );
+}
+
 const SURFACE_WORDS: Record<string, string> = {
   dashboard: 'in the dashboard',
   cli: 'from the CLI',
   agent: 'through an agent',
   chat: "in the client's chat",
+  reviewer: 'by the reviewer agent, under the approval policy',
 };
 
 /** "by user:fidel (unverified) in the client's chat", or null when nothing is known. */
@@ -340,6 +381,8 @@ export function ApprovalCard({ item, onDecided }: ApprovalCardProps) {
       )}
 
       <KindDetail item={item} />
+
+      {item.review && <ReviewNote review={item.review} />}
 
       {isPending && (
         <div className="space-y-2 pt-1">
