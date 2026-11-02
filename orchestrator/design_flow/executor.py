@@ -18,10 +18,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import structlog
 
@@ -415,8 +415,14 @@ class DesignFlowExecutor:
         phase_scope: PhaseScope | None = None,
         revision_notes: RevisionNotesProvider | None = None,
         value_reader: DesignValueReader | None = None,
+        gate_reviewer: Callable[[dict[str, Any]], Awaitable[Any]] | None = None,
     ) -> None:
         self._store = store
+        # FORGE-726: a second opinion on each open gate, same as the Temporal
+        # worker's review_gate activity. Fire-and-forget: advice never holds
+        # the gate up, and the tasks are kept so they are not collected early.
+        self._gate_reviewer = gate_reviewer
+        self._review_tasks: set[asyncio.Task[Any]] = set()
         # Composable flows: reads design values for the task checks a stage
         # gate evaluates. Without one, declared checks are no_data (blocking).
         self._value_reader = value_reader
@@ -779,6 +785,30 @@ class DesignFlowExecutor:
         # approval can't race ahead of the future.
         self._coordinator.register(run_id)
         self._store.request_approval(run_id, reason=reason[:2000])
+        if self._gate_reviewer is not None:
+            review = asyncio.ensure_future(
+                self._gate_reviewer(
+                    {
+                        "run_id": run_id,
+                        "project_id": ctx.project_id,
+                        "goal": ctx.goal,
+                        "phase": {
+                            "id": phase.id,
+                            "title": phase.title,
+                            "objective": phase.objective,
+                            "required_deliverables": list(phase.required_deliverables),
+                            "disciplines": list(phase.disciplines),
+                        },
+                        "gate": gate.name,
+                        "attempt": attempt,
+                        "ready": not blocking,
+                        "findings": list(findings),
+                        "reason": reason,
+                    }
+                )
+            )
+            self._review_tasks.add(review)
+            review.add_done_callback(self._review_tasks.discard)
         logger.info("design_flow_gate_wait", run_id=run_id, gate=gate.name, ready=not blocking)
         decision = await self._coordinator.wait(run_id)
         self._coordinator.set_gate_state(

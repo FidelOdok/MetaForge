@@ -214,3 +214,15 @@ class McpOAuthTokenRow(Base):
     scope: Mapped[str] = mapped_column(String(255), nullable=False)
     client_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     expires_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+# FORGE-726: who decides a project's design-flow gates (api_gateway/approvals/policy.py).
+
+
+class ApprovalPolicyRow(Base):
+    """``approval_policies`` table: one project's approval policy, as JSON."""
+
+    __tablename__ = "approval_policies"
+
+    project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    policy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

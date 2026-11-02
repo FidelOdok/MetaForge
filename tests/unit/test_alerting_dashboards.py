@@ -115,7 +115,8 @@ class TestAlertingRules:
         # + 1 KB storage set-up failed at gateway start (FORGE-594).
         # + 1 browser requests refused for their Origin (FORGE-604).
         # + 4 host watchdog (FORGE-713).
-        assert len(rules) == 56
+        # + 2 gate reviewer: failing, disagrees often (FORGE-726).
+        assert len(rules) == 58
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -175,7 +176,8 @@ class TestAlertingRules:
         # + 1 KB storage set-up failed at gateway start (FORGE-594).
         # + 1 browser requests refused for their Origin (FORGE-604).
         # + 3 host watchdog (FORGE-713).
-        assert len(warnings) == 42
+        # + 2 gate reviewer (FORGE-726).
+        assert len(warnings) == 44
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -278,6 +280,9 @@ class TestAlertingRules:
                 "HostMemoryLow",
                 "WatchdogRestartBlocked",
                 "WatchdogSilent",
+                # FORGE-726: gate reviewer.
+                "GateReviewerFailing",
+                "GateReviewerDisagreesOften",
             ]
         )
 

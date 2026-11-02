@@ -443,6 +443,22 @@ async def _block_history(project_id: str | None, names: list[str]) -> dict[str, 
     return await TwinDesignValueReader(twin).history(project_id, names)
 
 
+async def _review_gate(payload: dict[str, Any]) -> dict[str, Any]:
+    """The gate reviewer, on this worker (FORGE-726).
+
+    Connects the MCP bridge first so the reviewer can read the twin and the
+    library through the read-only ``review`` tools; without the sidecar it
+    still reviews from the brief alone rather than not at all.
+    """
+    from api_gateway.runs.gate_review import review_gate
+
+    try:
+        await ensure_mcp_bridge()
+    except Exception as exc:  # noqa: BLE001 - review from the brief alone
+        logger.warning("gate_review_without_tools", error=str(exc))
+    return await review_gate(payload)
+
+
 def build_activities() -> DesignFlowActivities:
     from api_gateway.runs.change_sets import revision_notes
     from api_gateway.runs.gate_announce import http_gate_announcer
@@ -457,6 +473,8 @@ def build_activities() -> DesignFlowActivities:
         # Composable flows: a coupled block's value history, read in an
         # activity so the workflow can decide whether to run another pass.
         value_history=_block_history,
+        # FORGE-726: a second opinion on each gate, when the policy asks.
+        gate_reviewer=_review_gate,
     )
 
 

@@ -84,6 +84,53 @@ _BASE: frozenset[str] = frozenset(
     }
 )
 
+#: FORGE-728: what a gate reviewer reads, and nothing that writes. It judges a
+#: phase's output against its checks, requirements and sources, so it gets the
+#: twin's thread and history, the library's limits, analysis results and
+#: measurements -- and no recorder, so it cannot fix what it is judging.
+REVIEW_TOOLS: frozenset[str] = frozenset(
+    {
+        "project.open",
+        "project.get",
+        "project.list",
+        "health.check",
+        # Its own activity record (bookkeeping, not design state), like every profile.
+        "session.start",
+        "session.log_event",
+        "session.complete",
+        "twin.get_node",
+        "twin.find_by_property",
+        "twin.thread_for",
+        "twin.constraint_violations",
+        "twin.what_verifies",
+        "twin.where_used",
+        "twin.item_history",
+        "twin.query_cypher",
+        "twin.get_design_loop",
+        "knowledge.search",
+        "memory.list_insights",
+        "memory.retrieve_similar_experience",
+        "flow.status",
+        "flow.lifecycle",
+        "flow.verify_completion",
+        "run.get_status",
+        "approvals.list",
+        "library.list_machines",
+        "library.get_machine",
+        "library.machine_limits",
+        "library.process_limits",
+        "library.standard_part",
+        "calculix.extract_results",
+        "power.check_budget",
+        "firmware.static_check",
+        "kicad.get_pin_mapping",
+        "cadquery.get_properties",
+        "freecad.get_properties",
+        "freecad.measure",
+        "freecad.describe_model",
+    }
+)
+
 PROFILES: dict[str, frozenset[str]] = {
     # Everything an engineer needs before picking a discipline: project and
     # session handling, twin reads and the records that are not domain
@@ -453,6 +500,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "library.list_machines",
         "library.machine_limits",
     },
+    # FORGE-728: a gate reviewer's connection (the plugin's reviewer subagent).
+    "review": REVIEW_TOOLS,
     "client_run": _BASE
     | {
         "flow.list",

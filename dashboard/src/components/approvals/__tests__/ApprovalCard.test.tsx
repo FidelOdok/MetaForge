@@ -227,3 +227,55 @@ describe('decidedBy', () => {
     expect(decidedBy({ ...base, surface: 'unknown' })).toBeNull();
   });
 });
+
+describe('the gate reviewer (FORGE-726)', () => {
+  const review = {
+    phase: 'requirements',
+    attempt: 1,
+    gate: 'G1',
+    recommendation: 'retry' as const,
+    to_phase: '',
+    reasons: 'The load case has no magnitude.',
+    concerns: ['No safety factor target'],
+    confidence: 0.72,
+    source: 'server' as const,
+    model: 'opus',
+    reviewer: 'reviewer:server:opus',
+    created_at: null,
+    error: null,
+    applied: 'advised',
+    applied_note: "policy 'advise': a person decides",
+  };
+
+  it('shows the recommendation as advice', () => {
+    render(<ApprovalCard item={makeApproval({ review })} />);
+    const note = screen.getByTestId('gate-review');
+    expect(note).toHaveTextContent('Reviewer recommends: retry');
+    expect(note).toHaveTextContent('confidence 0.72');
+    expect(note).toHaveTextContent('The load case has no magnitude.');
+    expect(note).toHaveTextContent('No safety factor target');
+    expect(note).toHaveTextContent('Advice only: the decision is yours.');
+  });
+
+  it('says when the reviewer could not reach a view', () => {
+    render(
+      <ApprovalCard
+        item={makeApproval({ review: { ...review, recommendation: 'none', error: 'model down' } })}
+      />,
+    );
+    expect(screen.getByTestId('gate-review')).toHaveTextContent('could not reach a view: model down');
+  });
+
+  it('names the reviewer surface on a decision it made', () => {
+    const record = {
+      decision: 'approve' as const,
+      reason: null,
+      approver: 'reviewer:server:opus',
+      approver_verified: false,
+      surface: 'reviewer',
+      on_behalf_of: null,
+      decided_at: '',
+    };
+    expect(decidedBy(record)).toContain('by the reviewer agent');
+  });
+});

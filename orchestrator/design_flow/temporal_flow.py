@@ -117,6 +117,17 @@ FAILURE_CLASS_PATCH_ID = "forge-539-failure-class"
 #: histories recorded before it replay with the decisions they had.
 STALL_PATCH_ID = "forge-573-stall"
 
+#: ``workflow.patched`` id for FORGE-726. After a gate is announced, one
+#: ``review_gate`` activity asks the gate reviewer for its view (when the
+#: project's approval policy wants one). Histories recorded before it replay
+#: without the activity.
+REVIEW_PATCH_ID = "forge-726-gate-review"
+
+#: The reviewer reads the phase's output and may call read-only tools; it is
+#: bounded so a stuck review cannot hold the gate's activity slot for long.
+_REVIEW_TIMEOUT = timedelta(minutes=20)
+_REVIEW_HEARTBEAT = timedelta(minutes=2)
+
 #: Composable flows: a coupled block phase runs one pass per activity and the
 #: workflow repeats it (judged by the ``judge_block`` activity) until it
 #: settles. Patched so a run started before this replays its single pass.
@@ -692,6 +703,46 @@ class DesignFlowWorkflow:
         self._record("phase_finished", phase=phase.id, detail=result.status)
         return entry
 
+    async def _review_gate(
+        self,
+        inp: DesignFlowInput,
+        phase: FrozenPhase,
+        gate_name: str,
+        findings: list[str],
+        blocking: bool,
+        reason: str,
+    ) -> None:
+        """A second opinion on the open gate (FORGE-726). Advice: never fails the run."""
+        payload = {
+            "run_id": inp.run_id,
+            "project_id": inp.project_id,
+            "goal": inp.goal,
+            "phase": {
+                "id": phase.id,
+                "title": phase.title,
+                "objective": phase.objective,
+                "required_deliverables": list(phase.required_deliverables),
+                "disciplines": list(phase.disciplines),
+            },
+            "gate": gate_name,
+            "attempt": self._attempt,
+            "ready": not blocking,
+            "findings": list(findings),
+            "reason": reason,
+        }
+        try:
+            await workflow.execute_activity(
+                "review_gate",
+                payload,
+                start_to_close_timeout=_REVIEW_TIMEOUT,
+                heartbeat_timeout=_REVIEW_HEARTBEAT,
+                retry_policy=RetryPolicy(maximum_attempts=1),
+                result_type=dict,
+            )
+        except ActivityError:
+            # The gate is open and waits for a person either way.
+            pass
+
     async def _run_gate(
         self,
         inp: DesignFlowInput,
@@ -777,6 +828,8 @@ class DesignFlowWorkflow:
             start_to_close_timeout=_CHECK_TIMEOUT,
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
+        if workflow.patched(REVIEW_PATCH_ID):
+            await self._review_gate(inp, phase, gate.name, findings, blocking, reason)
 
         # `wait_condition` raises rather than returning when the timeout
         # expires. Letting that escape would fail the workflow, which reads as

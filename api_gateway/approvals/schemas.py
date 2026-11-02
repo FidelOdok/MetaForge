@@ -21,7 +21,7 @@ ApprovalKind = Literal[
 DecisionName = Literal["approve", "reject", "retry", "rework"]
 #: ``chat``: a person answered in the MCP client's own prompt (elicitation),
 #: recorded by the sidecar that asked (FORGE-582).
-Surface = Literal["dashboard", "cli", "agent", "chat", "unknown"]
+Surface = Literal["dashboard", "cli", "agent", "chat", "reviewer", "unknown"]
 
 #: Id prefixes (``<prefix>:<native id>``) are coarser than ``kind``: a held
 #: tool call, a flow proposal and a human-authority call all live in the tool
@@ -64,6 +64,33 @@ class DecisionRecord(BaseModel):
     decided_at: str | None = None
 
 
+class GateReview(BaseModel):
+    """A reviewer agent's note on one gate (FORGE-726).
+
+    Written for the gate's phase and attempt, so a review of an earlier
+    attempt is never shown against a later one.
+    """
+
+    phase: str
+    attempt: int | None = None
+    gate: str = ""
+    #: ``none`` when the reviewer could not reach a view (``error`` says why).
+    recommendation: Literal["approve", "retry", "rework", "reject", "none"]
+    to_phase: str = ""
+    reasons: str = ""
+    concerns: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    source: Literal["server", "client"] = "server"
+    model: str = ""
+    #: ``reviewer:<source>:<model>``; what a decision it makes is recorded as.
+    reviewer: str = ""
+    created_at: str | None = None
+    error: str | None = None
+    #: What the policy did with it: ``advised``, ``decided`` or ``held`` (why in ``applied_note``).
+    applied: str | None = None
+    applied_note: str | None = None
+
+
 class ApprovalItem(BaseModel):
     """One normalized approval, whatever it is about."""
 
@@ -87,6 +114,9 @@ class ApprovalItem(BaseModel):
     not_decidable_reason: str | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
     decision: DecisionRecord | None = None
+    #: FORGE-726: the reviewer agent's note on this gate, when the project's
+    #: approval policy asks for one.
+    review: GateReview | None = None
 
 
 class ApprovalListResponse(BaseModel):

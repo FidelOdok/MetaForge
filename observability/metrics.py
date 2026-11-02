@@ -827,6 +827,29 @@ class MetricsRegistry:
         labels=[],
     )
 
+    # ── Gate reviewer (FORGE-726) ──────────────────────────────────────
+
+    GATE_REVIEW_TOTAL = MetricDefinition(
+        name="metaforge_gate_review_total",
+        type="counter",
+        description=(
+            "Reviewer agent notes on design-flow gates, by source (server, client), "
+            "recommendation (approve, retry, rework, reject, none = could not review) "
+            "and what the approval policy did (advised, decided, held) (FORGE-726)"
+        ),
+        labels=["source", "recommendation", "applied"],
+    )
+    GATE_REVIEW_AGREEMENT_TOTAL = MetricDefinition(
+        name="metaforge_gate_review_agreement_total",
+        type="counter",
+        description=(
+            "A person's gate decision after a reviewer recommendation, by recommendation, "
+            "decision and whether they agreed: the evidence for trusting the reviewer "
+            "with more (FORGE-726)"
+        ),
+        labels=["recommendation", "decision", "agreed"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -849,7 +872,13 @@ class MetricsRegistry:
             + cls.design_flow_metrics()
             + cls.sim_field_metrics()
             + cls.watchdog_metrics()
+            + cls.gate_review_metrics()
         )
+
+    @classmethod
+    def gate_review_metrics(cls) -> list[MetricDefinition]:
+        """Gate reviewer metrics (FORGE-726)."""
+        return [cls.GATE_REVIEW_TOTAL, cls.GATE_REVIEW_AGREEMENT_TOTAL]
 
     @classmethod
     def watchdog_metrics(cls) -> list[MetricDefinition]:
@@ -1791,6 +1820,30 @@ class MetricsCollector:
         self._set_gauge(MetricsRegistry.WATCHDOG_TWIN_IN_MEMORY.name, 1 if twin_in_memory else 0)
         if memory_available is not None:
             self._set_gauge(MetricsRegistry.HOST_MEMORY_AVAILABLE_BYTES.name, memory_available)
+
+    def record_gate_review(self, source: str, recommendation: str, applied: str) -> None:
+        """Record one reviewer note on a gate and what the policy did with it."""
+        counter = self._instruments.get(MetricsRegistry.GATE_REVIEW_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={"source": source, "recommendation": recommendation, "applied": applied},
+            )
+
+    def record_gate_review_agreement(
+        self, recommendation: str, decision: str, agreed: bool
+    ) -> None:
+        """Record whether a person's gate decision matched the reviewer's."""
+        counter = self._instruments.get(MetricsRegistry.GATE_REVIEW_AGREEMENT_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "recommendation": recommendation,
+                    "decision": decision,
+                    "agreed": "true" if agreed else "false",
+                },
+            )
 
     def record_watchdog_restart(self, service: str, reason: str, outcome: str) -> None:
         """Record a restart the watchdog made, suppressed, or failed to make."""

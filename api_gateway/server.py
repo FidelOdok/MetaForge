@@ -2189,6 +2189,12 @@ def create_app(
     app.include_router(runs_router)
     app.include_router(tool_approvals_router)
     app.include_router(approvals_router)
+    # FORGE-726: who decides a project's gates (policy) and the reviewer's notes.
+    from api_gateway.approvals.policy_routes import review_router as gate_review_router
+    from api_gateway.approvals.policy_routes import router as approval_policy_router
+
+    app.include_router(approval_policy_router)
+    app.include_router(gate_review_router)
     app.include_router(client_tasks_router)
     app.include_router(library_router)
     app.include_router(library_catalog_router)

@@ -26,6 +26,7 @@ from api_gateway.approvals.schemas import (
     ApprovalItem,
     DecisionRecord,
     GateFinding,
+    GateReview,
     Surface,
 )
 from api_gateway.assistant import routes as assistant_routes
@@ -59,7 +60,7 @@ def _iso(value: Any) -> str | None:
     return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
 
 
-_SURFACES = ("dashboard", "cli", "agent", "chat")
+_SURFACES = ("dashboard", "cli", "agent", "chat", "reviewer")
 
 
 def _surface(value: Any) -> Surface:
@@ -207,6 +208,7 @@ async def gate_item(run: Run, *, snap: dict[str, Any] | None = None) -> Approval
             "rework_cycles_left": (snap or {}).get("reworks_left"),
         },
         decision=None if pending else record,
+        review=current_review(run, snap) if pending else None,
     )
 
 
@@ -673,6 +675,8 @@ async def decide(
     except Exception:
         _unstage_run_decision(staged)
         raise
+    if kind == "gate" and surface != "reviewer" and current.review is not None:
+        _record_agreement(current.review, decision)
     return await get_item(app, item_id)
 
 
@@ -720,3 +724,134 @@ def _unstage_run_decision(staged: dict[str, Any] | None) -> None:
         log.remove(staged["entry"])
     if not log:
         staged["run"].request.pop(DECISIONS_KEY, None)
+
+
+# ── FORGE-726: the reviewer agent's notes, and the policy that acts on them ──
+
+#: Where a run keeps its gate reviews (newest last), in ``run.request``.
+REVIEWS_KEY = "gate_reviews"
+_MAX_REVIEWS = 40
+#: ``auto_clean`` approves only above this confidence; ``auto`` decides above the other.
+AUTO_CLEAN_CONFIDENCE = 0.8
+AUTO_CONFIDENCE = 0.6
+
+_review_metrics: Any = None
+
+
+def _metrics() -> Any:
+    global _review_metrics  # noqa: PLW0603
+    if _review_metrics is None:
+        from observability.metrics import collector_for
+
+        _review_metrics = collector_for("metaforge-gateway")
+    return _review_metrics
+
+
+def current_review(run: Run, snap: dict[str, Any] | None) -> GateReview | None:
+    """The newest review of the gate that is open now (same phase and attempt)."""
+    reviews = run.request.get(REVIEWS_KEY) or []
+    phase = (snap or {}).get("phase")
+    attempt = (snap or {}).get("attempt")
+    for raw in reversed(reviews):
+        try:
+            review = GateReview.model_validate(raw)
+        except Exception:  # noqa: BLE001 - a malformed entry is skipped, not fatal
+            continue
+        if phase is not None and review.phase != str(phase):
+            continue
+        if attempt is not None and review.attempt is not None and review.attempt != attempt:
+            continue
+        return review
+    return None
+
+
+def _record_agreement(review: GateReview, decision: str) -> None:
+    agreed = review.recommendation == decision
+    logger.info(
+        "gate_review_agreement",
+        recommendation=review.recommendation,
+        decision=decision,
+        agreed=agreed,
+        reviewer=review.reviewer,
+    )
+    _metrics().record_gate_review_agreement(review.recommendation, decision, agreed)
+
+
+async def record_review(app: Any, run_id: str, review: GateReview) -> GateReview:
+    """Store a reviewer's note on the run, then let the project's policy act on it."""
+    store = run_routes.get_run_store()
+    run = store.get(run_id)
+    if not review.created_at:
+        review.created_at = datetime.now(UTC).isoformat()
+    if not review.reviewer:
+        review.reviewer = f"reviewer:{review.source}:{review.model or 'unknown'}"
+    applied, note = await _apply_policy(app, run, review)
+    review.applied, review.applied_note = applied, note
+    reviews = [*(run.request.get(REVIEWS_KEY) or []), review.model_dump()][-_MAX_REVIEWS:]
+    store.annotate(run_id, REVIEWS_KEY, reviews)
+    _metrics().record_gate_review(review.source, review.recommendation, applied)
+    logger.info(
+        "gate_review_recorded",
+        run_id=run_id,
+        phase=review.phase,
+        recommendation=review.recommendation,
+        confidence=review.confidence,
+        reviewer=review.reviewer,
+        applied=applied,
+        note=note,
+    )
+    return review
+
+
+async def _apply_policy(app: Any, run: Run, review: GateReview) -> tuple[str, str]:
+    """``(applied, note)``: what the project's approval policy does with this review."""
+    from api_gateway.approvals.policy import effective_mode, get_policy_store
+
+    project_id = project_of(run.request)
+    if not project_id:
+        return "advised", "the run has no project, so a person decides"
+    mode = effective_mode(await get_policy_store().get(str(project_id)))
+    if mode in ("off", "advise"):
+        return "advised", f"policy '{mode}': a person decides"
+    if review.recommendation in ("none", "reject"):
+        # A reviewer never ends a run on its own, and "none" is no view at all.
+        return "held", f"the reviewer recommended '{review.recommendation}'; a person decides"
+    try:
+        item = await get_item(app, f"gate:{run.id}")
+    except HTTPException as exc:
+        return "held", f"the gate could not be read: {exc.detail}"
+    if item.status != "pending" or not item.decidable:
+        return "held", "the gate is not open for a decision"
+    if item.detail.get("phase") not in (None, review.phase) or (
+        review.attempt is not None and item.detail.get("attempt") not in (None, review.attempt)
+    ):
+        return "held", "the review is of an earlier gate"
+    decision = review.recommendation
+    if decision not in item.allowed_decisions:
+        return "held", f"'{decision}' is not available at this gate"
+    if mode == "auto_clean":
+        if decision != "approve":
+            return "held", "auto_clean only approves; a person decides retry and rework"
+        if item.findings:
+            return "held", "the gate has findings, so it is not clean"
+        if review.confidence < AUTO_CLEAN_CONFIDENCE:
+            return "held", f"confidence {review.confidence:.2f} is below {AUTO_CLEAN_CONFIDENCE}"
+    elif review.confidence < AUTO_CONFIDENCE:
+        return "held", f"confidence {review.confidence:.2f} is below {AUTO_CONFIDENCE}"
+    if decision == "rework" and review.to_phase not in item.rework_targets:
+        return "held", f"rework target '{review.to_phase}' is not one of {item.rework_targets}"
+    reason = (review.reasons or f"The reviewer recommended {decision}.").strip()
+    try:
+        await decide(
+            app,
+            item.id,
+            decision=decision,
+            reason=f"[reviewer] {reason}"[:2000],
+            to_phase=review.to_phase if decision == "rework" else "",
+            approver=Approver(actor_id=review.reviewer, verified=False),
+            surface="reviewer",
+            on_behalf_of=None,
+        )
+    except HTTPException as exc:
+        return "held", f"the decision was refused: {exc.detail}"
+    return "decided", f"policy '{mode}': the reviewer chose '{decision}'"

@@ -211,6 +211,52 @@ Both are on the `core` profile, the plugin's default connection. To make room
 under its 40-tool cap, `memory.list_insights` and
 `memory.retrieve_similar_experience` moved to the full profile.
 
+## Approval policy and the gate reviewer
+
+Each project has an **approval policy** that says who decides its design-flow
+gates. A **reviewer agent** reads each gate and recommends a decision; the
+policy says what that recommendation does.
+
+| Mode | At each gate | Who decides |
+|---|---|---|
+| `off` (default) | Nothing extra. | A person |
+| `advise` | The reviewer's recommendation, reasons, concerns and confidence are shown with the gate. | A person |
+| `auto_clean` | When the gate's checks all passed with no findings and the reviewer recommends approve with confidence 0.8 or more, the reviewer's approval is recorded. Anything else waits. | The reviewer for clean gates, a person otherwise |
+| `auto` | The reviewer decides approve, retry or rework (never reject) with confidence 0.6 or more, until the policy's expiry (24 hours by default, a week at most), then `advise` again. | The reviewer until it expires |
+
+In every mode a gate whose checks failed never offers approve, a `reject`
+recommendation is never acted on, and the reviewer's decisions are recorded
+with the approver `reviewer:<source>:<model>` and surface `reviewer`, never as
+a person.
+
+**Setting it.** `GET /v1/projects/{id}/approval-policy` returns the stored
+policy, the mode in force now and the operator cap.
+`PUT /v1/projects/{id}/approval-policy` with `{mode, reviewer, reviewer_model,
+expires_in_hours}` sets it. Changing the policy is a person's decision: a
+request with `X-MetaForge-Surface: agent` gets 403, and no MCP tool sets it.
+The gateway's `METAFORGE_AUTO_APPROVE_MAX` (default `advise`) caps the highest
+mode any project may use; a mode above it is refused with 422.
+
+**Where the reviewer runs.** After a gate is announced, the design-flow
+worker runs one `review_gate` step (the in-process engine does the same). It
+reads the policy and, unless it is `off`, builds a **review brief** (the
+phase's objective and deliverables, the twin's work products for the project,
+the gate's check results and the run's earlier decisions), runs a review turn
+with its own model (`reviewer_model`, as `provider:model` or a model id), the
+`gate-review` skill as its rubric and the read-only `review` tool profile, and
+posts the result to `POST /v1/runs/{id}/gate-review`. The gateway stores it on
+the gate (`review` on the approval item) and applies the policy. A reviewer
+that fails posts `recommendation: none` with the error, and the gate waits for
+a person as it would have anyway. `reviewer: client` leaves the review to a
+connected client's reviewer subagent.
+
+**Evidence before trust.** When a person decides a gate that has a review,
+`metaforge_gate_review_agreement_total` records whether they agreed. The
+`GateReviewerDisagreesOften` alert fires when people overrule it on more than
+30% of at least 20 gates in a week, and `GateReviewerFailing` when most
+reviews come back with no recommendation. Run a project in `advise` until the
+agreement is high before moving it to `auto_clean`.
+
 ## Delegating approvals to an agent
 
 An agent such as Claude Code can run `forge approvals` for you. The decision is
