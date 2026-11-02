@@ -70,3 +70,97 @@ implies, for example a `.json` that is a BOM or a `.md` that is the PRD.
 
 A person importing through `POST /v1/twin/import` in the dashboard is the
 approval, so that route imports directly, as it always has.
+
+## From an MCP client: `files.*`
+
+Every plugin (Claude Code, its cloud and local variants, Codex) and any other
+MCP client reaches files through one adapter. In the gateway and the local
+plugin it runs in-process; in the sidecar it calls the gateway's routes.
+
+| Tool | Does | Classified |
+|------|------|-----------|
+| `files.import` | Stages small files sent as content in the call: `text`, or `content_base64`, up to 8 MB in all. A zip is a folder. | Producing; not held, because the upload is itself an approval |
+| `files.request_upload` | Opens an upload and returns a signed `url` that takes files of any size, and the `curl` lines to use it. | Producing; not held, for the same reason |
+| `files.upload_status` | An upload's state and each file's outcome. | Read-only |
+| `files.list` | A work product's files: the primary one and any named ones. | Read-only |
+| `files.read` | A file's content: text for text formats, base64 otherwise. Up to 2 MB; a larger binary is refused with its size, a longer text is cut and says so. | Read-only |
+| `files.link` | A signed download `url` for a file. | Read-only |
+| `files.import_local` | The local plugin only: stages files or folders from the project folder. | Producing; not held |
+| `files.save_local` | The local plugin only: writes a work product's file into the project folder, never over an existing file unless asked. | Additive |
+
+Which way in suits which client:
+
+| Client | Small files | Large files and folders |
+|--------|-------------|-------------------------|
+| Claude Code, Codex | `files.import` | `files.request_upload`, then `curl -T` and `curl -X POST <url>/finish` |
+| claude.ai and other chat-only clients | `files.import` | `files.request_upload`; the person opens the `url`, picks files or a folder, and presses Finish |
+| The local plugin | `files.import_local` | `files.import_local` |
+| The dashboard | the import area (`POST /v1/twin/import`) or `POST /v1/uploads` | the same, with folders |
+
+The plugin skill `move-files` tells the model which to use.
+
+## Signed links
+
+A link is its own credential, so a person's browser or `curl` can use it
+without the gateway's token, and the plugin's OAuth token stays where it is.
+A token names what it is for (a download or an upload, and which work
+product, file or upload) and when it ends, signed with HMAC-SHA256. Nothing is
+stored per link: it cannot be listed or revoked one by one, it ends at its
+expiry, and changing the secret ends them all.
+
+| Route | Purpose |
+|-------|---------|
+| `POST /v1/files/{id}/link` | Body `{path, lifetime_s}`. A download link: `url` for an object-store link, else `path` (`/v1/links/<token>`). |
+| `GET /v1/files/{id}` | The work product's files. |
+| `GET /v1/files/{id}/read?path=&max_bytes=` | Inline content, as `files.read`. |
+| `POST /v1/uploads/link` | Body `{project_id, description, expected_bytes, lifetime_s}`. Opens an upload and returns its link `path`, `upload_id`, `approval_id` and `expires_at`. |
+| `POST /v1/uploads/inline` | Body `{files: [{name, text \| content_base64, wp_type}], project_id, description}`. Stages files, as `files.import`. |
+| `GET /v1/links/{token}` | A download link's file (images and PDFs inline, everything else as an attachment, always with `Content-Security-Policy: sandbox`), or an upload link's page. |
+| `POST /v1/links/{token}` | Multipart `files`: adds files to the upload. |
+| `PUT /v1/links/{token}/{name}` | A raw body as one file: `curl -T part.step <url>/part.step`. |
+| `POST /v1/links/{token}/finish` | Closes the upload; it then waits in `/v1/approvals`. |
+
+`/v1/links/` is the one path prefix the auth middleware lets through without a
+bearer token (`PUBLIC_PREFIXES`); every route under it checks the link
+instead, and refuses a forged, expired or wrong-kind link with 403.
+
+**Lifetime.** A link lives 15 minutes plus 20 seconds per megabyte of the
+file (or of `expected_bytes` for an upload), at most 24 hours, unless
+`lifetime_s` asks for another value within those bounds. An upload that is
+still open when its link expires is discarded.
+
+**The secret.** `METAFORGE_LINK_SECRET`, else a random secret kept in
+`~/.metaforge/link_secret` (`METAFORGE_LINK_SECRET_PATH`), so a restart does
+not break links already handed out.
+
+**Where a link points.** The person reaches the sidecar, not the gateway, so
+the sidecar serves `/v1/links/*` itself, passing each request to the gateway
+(`METAFORGE_GATEWAY_URL`), and makes links absolute on the address the MCP
+request came in on (the same address its OAuth metadata uses), or on
+`METAFORGE_MCP_PUBLIC_URL` when set. A link from the gateway's own tools uses
+`METAFORGE_GATEWAY_PUBLIC_URL`, else stays a path the dashboard resolves.
+
+**Object-store links.** With `METAFORGE_LINK_OBJECT_STORE_ENDPOINT` set to
+the object store's address as a browser reaches it, a download link for a
+file kept in the store is a presigned URL on that address, and the bytes do
+not pass through the gateway. Set `MINIO_REGION` too, or presigning first
+asks the store for its region. Without the setting, or if presigning fails,
+the link goes through the gateway.
+
+## The local plugin
+
+`metaforge-local` runs on the person's own machine over stdio, with no
+gateway and no HTTP server, so a link would point nowhere. Instead it reads
+and writes the project folder directly: `METAFORGE_LOCAL_FILES_ROOT`, else the
+folder the client started it in. Nothing outside that folder is read or
+written, and `.git`, `node_modules`, `__pycache__`, `.venv` and `.forge` are
+skipped when a folder is imported.
+
+## G-code to a printer
+
+`slicer.slice` writes G-code to the adapter workspace.
+`twin.record_design_files` with `work_product_type: gcode` records the run
+folder (the G-code and the `config.ini` it was sliced with) as a `gcode`
+work product, linked `GENERATED_FROM` the part; `library.dispatch_job` then
+sends it to an in-house printer. An uploaded `.gcode`, `.gco` or `.bgcode`
+file becomes the same type.

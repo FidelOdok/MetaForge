@@ -5362,7 +5362,9 @@ class TwinServer(McpToolServer):
                     "'firmware_source' (a PlatformIO project folder; its build output is "
                     "kept too), or 'purchased_model' (the folder simready.import wrote: a "
                     "bought part's OpenUSD package with a GLB preview; its licence, "
-                    "attribution and mass are read from the folder, not from metadata). "
+                    "attribution and mass are read from the folder, not from metadata), or "
+                    "'gcode' (slicer.slice's output folder, or one .gcode file; sources: the "
+                    "part it was sliced from; library.dispatch_job can then send it). "
                     "Recording the same name again is that item's next revision. "
                     "source_node_ids are what it was made from (the BOM for a schematic, the "
                     "schematic for a board, the board for gerbers and placement, the pinmap "
@@ -5383,6 +5385,7 @@ class TwinServer(McpToolServer):
                                 "pinmap",
                                 "firmware_source",
                                 "purchased_model",
+                                "gcode",
                             ],
                         },
                         "file_path": {

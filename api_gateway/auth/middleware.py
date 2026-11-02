@@ -31,7 +31,7 @@ from api_gateway.auth.provider import AuthProvider, AuthUnavailable, InvalidToke
 
 logger = structlog.get_logger(__name__)
 
-__all__ = ["AuthMiddleware", "PUBLIC_PATHS"]
+__all__ = ["AuthMiddleware", "PUBLIC_PATHS", "PUBLIC_PREFIXES"]
 
 #: Paths reachable without a credential.
 #:
@@ -47,6 +47,14 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         "/openapi.json",
     }
 )
+
+
+#: Path prefixes whose requests carry their own credential instead of a
+#: bearer token: a signed link (``api_gateway.files.links``) is checked by
+#: its route, which refuses anything forged or expired. Without this a link
+#: handed to a person's browser, or to ``curl``, would need the token the
+#: link exists to avoid.
+PUBLIC_PREFIXES: tuple[str, ...] = ("/v1/links/",)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -92,7 +100,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # with an opaque error rather than a usable one.
         if request.method == "OPTIONS":
             return True
-        return request.url.path.rstrip("/") in PUBLIC_PATHS or request.url.path in PUBLIC_PATHS
+        path = request.url.path
+        if path.startswith(PUBLIC_PREFIXES):
+            return True
+        return path.rstrip("/") in PUBLIC_PATHS or path in PUBLIC_PATHS
 
     @staticmethod
     def _bearer(request: Request) -> str | None:

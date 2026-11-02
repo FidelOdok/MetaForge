@@ -41,11 +41,14 @@ part when `SLANT3D_API_KEY` is set.
 3. Report `print_time`, `filament_g`, `filament_mm`,
    `layers` and the settings used, and the `gcode_path` it wrote. To compare
    options, slice once per option and give a small table.
-4. If the person wants the result kept, record the estimate with
-   `twin.record_document` against the part (the figures, settings and
-   slicer version). The G-code file itself cannot be recorded as a twin work
-   product yet, so `library.dispatch_job` cannot send it; the person copies
-   it from the workspace to their printer.
+4. To keep the G-code, or to print it, record the slicer's run folder (the
+   folder holding `gcode_path`) with `twin.record_design_files`,
+   `work_product_type: gcode`, a name that says the part and printer, the
+   part's node as `source_node_ids`, and the estimate as `metadata`. Slicing
+   the same part for the same printer again is its next revision.
+5. To print on the person's own printer, `library.dispatch_job` with that
+   work product (`manage-machines`). To give them the file, `files.link`
+   (`move-files`).
 
 ## Steps: price at Slant 3D
 

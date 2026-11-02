@@ -51,7 +51,7 @@ from api_gateway.auth.config import (
     load_auth_settings,
 )
 from api_gateway.auth.dependencies import current_principal, require_principal
-from api_gateway.auth.middleware import PUBLIC_PATHS, AuthMiddleware
+from api_gateway.auth.middleware import PUBLIC_PATHS, PUBLIC_PREFIXES, AuthMiddleware
 from api_gateway.auth.principal import Principal
 from api_gateway.auth.provider import (
     ENTRY_POINT_GROUP,
@@ -66,6 +66,7 @@ __all__ = [
     "ENTRY_POINT_GROUP",
     "MODE_OFF",
     "PUBLIC_PATHS",
+    "PUBLIC_PREFIXES",
     "AuthConfigurationError",
     "AuthMiddleware",
     "AuthProvider",

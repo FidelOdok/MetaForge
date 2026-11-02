@@ -168,19 +168,23 @@ PROFILES: dict[str, frozenset[str]] = {
         # FORGE-630: run.get_status gave its place to twin.render_work_product;
         # flow.status reports a run's state, and run.get_status stays in `all`.
         "run.start_design_flow",
-        "twin.compute_hierarchy_rollup",
-        "twin.evaluate_metric",
         "twin.propose_change",
         "twin.query_cypher",
         "twin.record_claim",
         "twin.record_constraint_set",
         "twin.record_document",
-        "twin.record_hierarchy_node",
         # FORGE-630: see a part. The Codex plugin connects with `core`, so
         # without it there a Codex user could not render anything.
         "twin.render_work_product",
         "web.fetch",
         "web.search",
+        # Files in and out from any client. twin.compute_hierarchy_rollup,
+        # twin.evaluate_metric and twin.record_hierarchy_node gave their
+        # places and stay in `all`: a Codex user who cannot send a file in
+        # or get one out cannot use the twin at all.
+        "files.import",
+        "files.request_upload",
+        "files.link",
     },
     # CAD authoring. Both kernels, because a part often starts in one and is
     # inspected in the other.
@@ -357,6 +361,10 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.record_design_files",
         "twin.record_document",
         "twin.stage_work_product_file",
+        # A KiCad project or a datasheet in, fabrication files out.
+        "files.import",
+        "files.request_upload",
+        "files.link",
     },
     # Assemblies and robot descriptions, through to a simulator.
     "robotics": _BASE
@@ -494,15 +502,18 @@ PROFILES: dict[str, frozenset[str]] = {
         "slicer.list_profiles",
         "slant3d.analyze_part",
         "slant3d.quote",
-        "slant3d.get_part",
         "slant3d.list_filaments",
         "cadquery.export_geometry",
         "twin.commit_geometry",
         "twin.stage_work_product_file",
         "twin.render_work_product",
         "twin.record_document",
-        "library.list_machines",
-        "library.machine_limits",
+        # A reference image or a supplier file in, a print file out. The
+        # machine library reads and slant3d.get_part made room; all stay in
+        # `all`.
+        "files.import",
+        "files.request_upload",
+        "files.link",
     },
     # FORGE-728: a gate reviewer's connection (the plugin's reviewer subagent).
     "review": REVIEW_TOOLS,

@@ -17,8 +17,9 @@ Three operations, each a separate MCP tool so its annotation is honest:
     here, never taken from the caller, so it cannot be asserted. Held, like
     every twin write.
 
-The work product must already be G-code. ``slicer.slice`` writes G-code to
-the adapter workspace, but nothing records that file as a work product yet.
+The work product must already be G-code: ``slicer.slice`` writes it to the
+adapter workspace, and ``twin.record_design_files`` (kind ``gcode``) or an
+approved upload makes it a work product.
 """
 
 from __future__ import annotations
@@ -91,8 +92,9 @@ async def dispatch_job(
         raise JobError(f"work product {work_product_id} has no file to send ({exc})") from exc
     if not filename.lower().endswith(GCODE_SUFFIXES):
         raise JobError(
-            f"{filename} is not G-code. Slice the part for {machine.name} and "
-            f"record the G-code as a work product, then send that."
+            f"{filename} is not G-code. Slice the part for {machine.name} "
+            f"(slicer.slice), record the output with twin.record_design_files "
+            f"(kind gcode), then send that."
         )
     revision = await work_product_current_revision(twin, wp_uuid)
     project_id = getattr(wp, "project_id", None) or (wp.metadata or {}).get("project_id")

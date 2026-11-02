@@ -98,6 +98,7 @@ _SOURCE_SUFFIXES = {
 }
 _SOURCE_DIRS = ("src", "include", "lib", "test", "boards")
 _BUILD_OUTPUTS = ("firmware.elf", "firmware.bin", "firmware.hex", "firmware.map")
+_GCODE_SUFFIXES = (".gcode", ".gco", ".bgcode")
 _SKIP_DIRS = {".pio", ".git", "build", "__pycache__", ".vscode", "node_modules"}
 
 #: KiCad's gerber name suffixes (``<board>-F_Cu.gtl``) -> what the layer is.
@@ -128,6 +129,10 @@ KINDS: dict[str, _Kind] = {
     "pinmap": _Kind("pinmap", "firmware", "csv", "firmware.design"),
     "firmware_source": _Kind("firmware_source", "firmware", "c", "firmware.design"),
     "purchased_model": _Kind("cad_model", "mechanical", "glb", "mechanical.library"),
+    # G-code for one printer: slicer.slice's output folder (the G-code and the
+    # config.ini it was sliced with) or one G-code file. library.dispatch_job
+    # sends it; link it GENERATED_FROM the part it was sliced from.
+    "gcode": _Kind("gcode", "manufacturing", "gcode", "manufacturing.prototype"),
 }
 
 
@@ -187,6 +192,8 @@ def select_files(kind: str, path: Path) -> tuple[Path, list[Path]]:
                 and (p.suffix in (ext, ".kicad_pro") or p.name in ("sym-lib-table", "fp-lib-table"))
             ]
             return folder, [path, *extra]
+        if kind == "gcode" and path.suffix.lower() not in _GCODE_SUFFIXES:
+            raise ValueError(f"G-code is a .gcode, .gco or .bgcode file, not '{path.name}'")
         return folder, [path]
 
     folder = path
@@ -250,6 +257,16 @@ def select_files(kind: str, path: Path) -> tuple[Path, list[Path]]:
             )
         rest = [p for p in _walk(folder, lambda p: True) if p != preview]
         return folder, [preview, *rest]
+    if kind == "gcode":
+        files = [
+            p
+            for p in sorted(folder.iterdir())
+            if p.is_file() and p.suffix.lower() in _GCODE_SUFFIXES
+        ]
+        if not files:
+            raise ValueError(f"no .gcode, .gco or .bgcode file in '{folder}'")
+        config = folder / "config.ini"
+        return folder, files + ([config] if config.is_file() else [])
     raise ValueError(f"unknown kind '{kind}'")
 
 

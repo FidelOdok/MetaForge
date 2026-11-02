@@ -38,6 +38,8 @@ def test_definitions_are_the_versioned_types() -> None:
         "firmware_source",
         # FORGE-711: a bought part's model.
         "purchased_model",
+        # G-code a printer runs, from slicer.slice or an upload.
+        "gcode",
     }
 
 

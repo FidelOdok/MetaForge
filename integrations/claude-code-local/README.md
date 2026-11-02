@@ -50,7 +50,7 @@ Persistent stores (Neo4j, Postgres) are optional — without them the twin is in
 
 ## Skills
 
-49 engineering skills are bundled.
+50 engineering skills are bundled.
 
 ## Writes wait for a human
 

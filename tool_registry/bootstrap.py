@@ -199,6 +199,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"library"}
     # FORGE-427: vendor connectors, injected by the gateway or the sidecar.
     | {"vendor"}
+    # Files in and out, injected by the gateway, the sidecar or the local plugin.
+    | {"files"}
     # FORGE-615: in-process arithmetic, no container, no credentials.
     | {"cost"}
     # Composable flows: in-process search arithmetic, like power and cost.
@@ -403,6 +405,8 @@ async def bootstrap_tool_registry(
     machine_library: Any = None,
     # FORGE-427: vendor connectors (quotes, held orders, order status).
     vendor_service: Any = None,
+    # Files in and out: staged uploads, inline reads, signed links.
+    files_service: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -1488,6 +1492,22 @@ async def bootstrap_tool_registry(
                 failed.append("vendor")
         else:
             skipped.append("vendor")
+
+        # ----- Files in and out -----
+        if files_service is not None and _is_adapter_enabled("files"):
+            try:
+                from tool_registry.tools.files.adapter import FilesServer
+
+                files_server = FilesServer(files_service)
+                await registry.register_adapter(files_server)
+                registered.append("files")
+                logger.info("files_mcp_adapter_registered", tools=sorted(files_server.tool_ids))
+            except Exception as exc:
+                logger.error("files_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("files")
+        else:
+            skipped.append("files")
 
         span.set_attribute("adapters.registered", len(registered))
         span.set_attribute("adapters.skipped", len(skipped))
