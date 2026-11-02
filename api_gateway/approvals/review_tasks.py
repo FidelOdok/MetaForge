@@ -178,15 +178,18 @@ def _did_the_phase(task: ReviewTask, client: str) -> bool:
     """Whether ``client`` claimed this gate's phase as a client-mode phase task."""
     try:
         from api_gateway.client_tasks.routes import get_client_task_store
-        from orchestrator.design_flow.client_tasks import task_id_for as phase_task_id
 
-        phase_task = get_client_task_store().get(
-            phase_task_id(task.run_id, task.phase, task.attempt or 1)
-        )
+        # FORGE-742: a reworked phase's task id carries the rework cycle, so
+        # every task of this phase counts, whatever its attempt or cycle: a
+        # client that worked on the phase at all does not review it.
+        phase_tasks = [
+            t
+            for t in get_client_task_store().list_tasks(run_id=task.run_id)
+            if t.phase_id == task.phase
+        ]
     except Exception:  # noqa: BLE001 - no phase task: the server ran the phase
         return False
-    who = {getattr(phase_task, "claimed_by", None), getattr(phase_task, "submitted_by", None)}
-    return client in who
+    return any(client in {t.claimed_by, t.submitted_by} for t in phase_tasks)
 
 
 @router.post("/{task_id}/submit")

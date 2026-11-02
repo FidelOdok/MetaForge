@@ -112,8 +112,17 @@ class TaskStateError(ValueError):
     """The task is not in a state that allows this (e.g. submitting twice)."""
 
 
-def task_id_for(run_id: str, phase_id: str, attempt: int) -> str:
-    return f"{run_id}:{phase_id}:{attempt}"
+def task_id_for(run_id: str, phase_id: str, attempt: int, rework_cycle: int = 0) -> str:
+    """``run:phase:attempt``, with ``.r<cycle>`` once the run has been reworked (FORGE-742).
+
+    A rework re-runs a phase from attempt 1, so without the cycle the re-run
+    asked for the id of a task submitted before the rework. ``open_task``
+    returns a submitted task as it is (that is how an activity retry keeps a
+    submission), so the reworked phase finished at once on the old work, no
+    client task was opened, and the gate reopened unchanged forever.
+    """
+    base = f"{run_id}:{phase_id}:{attempt}"
+    return f"{base}.r{rework_cycle}" if rework_cycle > 0 else base
 
 
 def default_client_tasks_path() -> Path:

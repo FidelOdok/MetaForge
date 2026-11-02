@@ -184,6 +184,9 @@ class PhaseRequest:
     retry_feedback: str = ""
     #: 1 for the first attempt, 2 for the first retry, and so on.
     attempt: int = 1
+    #: FORGE-742: rework cycles the run has used. A rework restarts a phase's
+    #: attempts, so this is what keeps a re-run's client task its own.
+    rework_cycle: int = 0
     #: FORGE-581: ``"server"`` runs a phase brain; ``"client"`` posts the
     #: phase as a task for the connected client and waits for its submission.
     #: Payload only: the activity is the same, so no replay patch is needed.
@@ -429,6 +432,7 @@ class DesignFlowWorkflow:
                             flow_context=inp.flow.context,
                             retry_feedback=retry_feedback,
                             attempt=self._attempt,
+                            rework_cycle=self._rework_cycles,
                             intelligence=inp.intelligence,
                         ),
                         start_to_close_timeout=_PHASE_TIMEOUT,
@@ -682,6 +686,7 @@ class DesignFlowWorkflow:
                 flow_context=inp.flow.context,
                 retry_feedback=retry_feedback,
                 attempt=attempt,
+                rework_cycle=self._rework_cycles,
                 intelligence=inp.intelligence,
             ),
             start_to_close_timeout=_PHASE_TIMEOUT,

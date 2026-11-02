@@ -237,6 +237,11 @@ the person as an approvable gate.
 - The task id is `run:phase:attempt`, so a retried activity finds the task
   (and any submission) the first attempt posted. A worker that stops
   withdraws its open task; the retry reopens it.
+- Once a gate has sent the run back for rework, the id also carries the rework
+  cycle: `run:phase:attempt.r<cycle>`. A rework restarts a phase's attempts
+  at 1, so without the cycle the re-run would find the task submitted before
+  the rework and finish at once on that old work, opening nothing for the
+  client and reopening the same gate on every answer.
 - Tasks live in SQLite next to the run ledger
   (`METAFORGE_CLIENT_TASKS_PATH`, default `~/.metaforge/client_tasks.db`), so
   a gateway restart does not lose one a client is working on.

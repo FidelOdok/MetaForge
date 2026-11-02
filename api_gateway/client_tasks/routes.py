@@ -72,6 +72,8 @@ class OpenTaskRequest(BaseModel):
     run_id: str = Field(alias="runId")
     phase_id: str = Field(alias="phaseId")
     attempt: int = 1
+    #: FORGE-742: rework cycles the run has used; part of the task id.
+    rework_cycle: int = Field(default=0, ge=0, alias="reworkCycle")
     project_id: str | None = Field(default=None, alias="projectId")
     brief: dict[str, Any] = Field(default_factory=dict)
 
@@ -137,14 +139,14 @@ def _require_client_mode_run(run_id: str) -> None:
 
 @router.post("", status_code=201)
 async def open_task(body: OpenTaskRequest) -> dict[str, Any]:
-    """Post a phase for the client. Idempotent on ``run:phase:attempt``."""
+    """Post a phase for the client. Idempotent on ``run:phase:attempt[.r<cycle>]``."""
     _require_client_mode_run(body.run_id)
     with tracer.start_as_current_span("client_tasks.open") as span:
         span.set_attribute("run.id", body.run_id)
         span.set_attribute("phase.id", body.phase_id)
         task = get_client_task_store().open_task(
             PhaseTask(
-                id=task_id_for(body.run_id, body.phase_id, body.attempt),
+                id=task_id_for(body.run_id, body.phase_id, body.attempt, body.rework_cycle),
                 run_id=body.run_id,
                 phase_id=body.phase_id,
                 attempt=body.attempt,

@@ -9326,6 +9326,12 @@
             ],
             "title": "Projectid"
           },
+          "reworkCycle": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reworkcycle",
+            "type": "integer"
+          },
           "runId": {
             "title": "Runid",
             "type": "string"
@@ -18091,7 +18097,7 @@
         ]
       },
       "post": {
-        "description": "Post a phase for the client. Idempotent on ``run:phase:attempt``.",
+        "description": "Post a phase for the client. Idempotent on ``run:phase:attempt[.r<cycle>]``.",
         "operationId": "open_task_v1_client_tasks_post",
         "requestBody": {
           "content": {

@@ -136,6 +136,8 @@ class HttpTaskChannel:
                 "runId": task.run_id,
                 "phaseId": task.phase_id,
                 "attempt": task.attempt,
+                # FORGE-742: the gateway builds the task id from this too.
+                "reworkCycle": int(task.brief.get("rework_cycle") or 0),
                 "projectId": task.project_id,
                 "brief": task.brief,
             },
@@ -202,6 +204,7 @@ def brief_for(
     prior: list[str] | None = None,
     attempt: int = 1,
     project_id: str | None = None,
+    rework_cycle: int = 0,
 ) -> dict[str, Any]:
     """What the client is told: what a phase brain would have been told."""
     return {
@@ -219,6 +222,7 @@ def brief_for(
         "retry_feedback": retry_feedback,
         "prior_phases": list(prior or []),
         "attempt": attempt,
+        "rework_cycle": rework_cycle,
         "how_to_submit": SUBMIT_GUIDANCE,
     }
 
@@ -283,7 +287,7 @@ def submitted_status(task: PhaseTask) -> str:
 
 def task_from_request(request: PhaseRequest) -> PhaseTask:
     return PhaseTask(
-        id=task_id_for(request.run_id, request.phase.id, request.attempt),
+        id=task_id_for(request.run_id, request.phase.id, request.attempt, request.rework_cycle),
         run_id=request.run_id,
         phase_id=request.phase.id,
         attempt=request.attempt,
@@ -296,6 +300,7 @@ def task_from_request(request: PhaseRequest) -> PhaseTask:
             prior=request.prior,
             attempt=request.attempt,
             project_id=request.project_id,
+            rework_cycle=request.rework_cycle,
         ),
     )
 
@@ -320,7 +325,7 @@ class ClientPhaseBrain:
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
         task = PhaseTask(
-            id=task_id_for(self._run_id, phase.id, context.attempt),
+            id=task_id_for(self._run_id, phase.id, context.attempt, context.rework_cycle),
             run_id=self._run_id,
             phase_id=phase.id,
             attempt=context.attempt,
@@ -333,6 +338,7 @@ class ClientPhaseBrain:
                 prior=[outcome.summary for _, outcome in context.completed],
                 attempt=context.attempt,
                 project_id=context.project_id,
+                rework_cycle=context.rework_cycle,
             ),
         )
         done = await run_client_phase(self._channel, task)

@@ -320,3 +320,39 @@ class TestPatchedRuns:
         phases, result = await self._patched(env, flow, new_flow, "c", ["b", "c"])
         assert result["status"] == "completed"
         assert phases.ran == ["a", "b", "c", "b", "c"]
+
+
+class TestReworkCarriesTheCycle:
+    async def test_a_reworked_phase_is_asked_for_with_the_rework_cycle(self, env) -> None:
+        # FORGE-742: the cycle is what keeps a re-run's client task its own.
+        seen: list[tuple[str, int, int]] = []
+
+        async def runner(request: PhaseRequest) -> PhaseResult:
+            seen.append((request.phase.id, request.attempt, request.rework_cycle))
+            return PhaseResult(summary=f"did {request.phase.id}")
+
+        acts = DesignFlowActivities(
+            phase_runner=runner, gate_checker=_ok_gate, gate_announcer=_announced
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        flow = _flow([_phase("req"), _phase("mech", ["req"], gated=True)])
+        run_id = str(uuid.uuid4())
+        handle = env.client.get_workflow_handle(f"design-flow-{run_id}")
+        async with build_design_flow_worker(env.client, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=flow)
+            await _gate_on(launcher, run_id, "mech")
+            await launcher.answer_gate(
+                run_id, approved=False, decided_by="user:r", rework_to="req", comment="redo"
+            )
+            for _ in range(300):
+                if len(seen) == 4:
+                    break
+                await asyncio.sleep(0.05)
+            await _gate_on(launcher, run_id, "mech")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            result = await handle.result()
+            history = await handle.fetch_history()
+
+        assert result["status"] == "completed"
+        assert seen == [("req", 1, 0), ("mech", 1, 0), ("req", 1, 1), ("mech", 1, 1)]
+        await Replayer_replay(history)
