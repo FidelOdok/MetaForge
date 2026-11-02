@@ -123,14 +123,25 @@ async def test_text_to_3d_posts_the_prompt_and_returns_the_task(tmp_path: Path) 
         "face_limit": 20000,
         "auto_size": True,
         "texture": False,
+        "model": "v3.1-20260211",
     }
 
 
-async def test_unset_options_are_not_sent(tmp_path: Path) -> None:
+async def test_unset_options_are_not_sent_but_a_model_always_is(tmp_path: Path) -> None:
+    # Tripo answers 400 (code 1004, "model is required") when none is named.
     fake = FakeTripo()
     server = make_server(fake, tmp_path)
     await server.handle_text_to_3d({"prompt": "a vase", "negative_prompt": "  "})
-    assert body(fake.requests[0]) == {"prompt": "a vase"}
+    assert body(fake.requests[0]) == {"prompt": "a vase", "model": "v3.1-20260211"}
+
+
+async def test_a_named_model_wins_over_the_default(tmp_path: Path) -> None:
+    fake = FakeTripo()
+    server = make_server(fake, tmp_path)
+    await server.handle_image_to_3d(
+        {"image_url": "https://example.com/p.png", "model": "P1-20260311"}
+    )
+    assert body(fake.requests[0])["model"] == "P1-20260311"
 
 
 async def test_overlong_prompt_is_refused_before_the_call(tmp_path: Path) -> None:
@@ -163,7 +174,7 @@ async def test_image_to_3d_uploads_a_workspace_image_first(tmp_path: Path) -> No
     assert b'filename="sketch.png"' in upload.content
     assert PNG_BYTES in upload.content
     assert create.url.path == "/v3/generation/image-to-model"
-    assert body(create) == {"input": "file_xyz"}
+    assert body(create) == {"input": "file_xyz", "model": "v3.1-20260211"}
     assert result["task_id"] == TASK_ID
 
 
@@ -172,7 +183,10 @@ async def test_image_to_3d_passes_a_public_url_through(tmp_path: Path) -> None:
     server = make_server(fake, tmp_path)
     await server.handle_image_to_3d({"image_url": "https://example.com/p.png"})
     assert len(fake.requests) == 1
-    assert body(fake.requests[0]) == {"input": "https://example.com/p.png"}
+    assert body(fake.requests[0]) == {
+        "input": "https://example.com/p.png",
+        "model": "v3.1-20260211",
+    }
 
 
 @pytest.mark.parametrize(

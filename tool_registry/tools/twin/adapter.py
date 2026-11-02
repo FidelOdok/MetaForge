@@ -2848,6 +2848,26 @@ class TwinServer(McpToolServer):
         # here, because a colour has to be chosen, not invented.
         part_colours = arguments.get("part_colours")
         whole_colour = arguments.get("color")
+        # Colours live in a STEP's product records. A mesh (a GLB from
+        # tripo.download or meshy.download, an STL, an OBJ) carries its own
+        # materials or none, so the STEP colour rule and colouring do not
+        # apply to it; both used to run on any format, which refused every
+        # generated mesh as '(whole model)' uncoloured.
+        geometry_format = (
+            (
+                str(arguments.get("format") or "")
+                or (Path(file_path).suffix if isinstance(file_path, str) else "")
+                or "step"
+            )
+            .lower()
+            .lstrip(".")
+        )
+        is_step = geometry_format in ("step", "stp")
+        if not is_step and (part_colours or whole_colour is not None):
+            raise ValueError(
+                f"twin.commit_geometry: colours are written into a STEP; a {geometry_format} "
+                "mesh keeps its own materials. Commit it without part_colours or color."
+            )
         if part_colours or whole_colour is not None:
             # FORGE-637: colour at commit, so every CAD route (a stateless
             # CadQuery or FreeCAD tool writes no colour) can be coloured where
@@ -2882,7 +2902,7 @@ class TwinServer(McpToolServer):
             ).decode("ascii")
             extra_colours = {"part_colours": part_colours or {}, "color": whole_colour}
             logger.info("commit_geometry_coloured", name=name, **extra_colours)
-        if arguments.get(REQUIRE_PART_COLOURS_ARG):
+        if arguments.get(REQUIRE_PART_COLOURS_ARG) and is_step:
             from tool_registry.tools.freecad.materials_appearance import uncoloured_products
 
             try:
