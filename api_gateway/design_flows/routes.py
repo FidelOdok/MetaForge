@@ -200,6 +200,10 @@ class DesignFlowView(BaseModel):
     #: wrong, and the person picking it has no way to tell which.
     valid: bool = True
     violations: list[str] = Field(default_factory=list)
+    #: FORGE-721: the content hash a run started from this template records, so
+    #: the MCP sidecar can tell a run of the shipped, reviewed template apart
+    #: from a tailored or patched one when deciding whether to trust its worker.
+    contentHash: str = ""  # noqa: N815
     #: FORGE-539: the dependency graph: edges, parallel waves, conditions, and
     #: whether it is the plain straight line. Null when the graph is invalid
     #: (the violations say why).
@@ -220,6 +224,17 @@ class DesignFlowListResponse(BaseModel):
     defaultFlowId: str  # noqa: N815
 
 
+def _template_content_hash(flow_id: str, definition: FlowDefinition | None = None) -> str:
+    """The hash ``POST /v1/runs`` records for a run of this built-in template."""
+    from orchestrator.design_flow.frozen import freeze_flow
+
+    try:
+        version = flow_version(flow_id)
+    except KeyError:
+        version = "unversioned"
+    return freeze_flow(definition or get_flow(flow_id), version=version).content_hash
+
+
 def _to_view(flow_id: str) -> DesignFlowView:
     template = load_templates()[flow_id]
     definition = template.definition
@@ -233,6 +248,7 @@ def _to_view(flow_id: str) -> DesignFlowView:
         isDefault=flow_id == DEFAULT_FLOW_ID,
         valid=result.ok,
         violations=[str(v) for v in result.violations],
+        contentHash=_template_content_hash(flow_id, definition),
         phases=[_phase_view(phase) for phase in definition.phases],
         graph=_graph_dict(definition),
     )
