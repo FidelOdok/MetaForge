@@ -38,7 +38,15 @@ from observability.tracing import get_tracer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.runs.gate_review")
 
-__all__ = ["build_review_brief", "parse_review", "review_gate", "review_skill"]
+__all__ = [
+    "build_review_brief",
+    "parse_review",
+    "request_open_gate_review",
+    "request_reviews_for_project",
+    "review_gate",
+    "review_open_gate",
+    "review_skill",
+]
 
 _TIMEOUT_SECONDS = 20.0
 #: Tool steps the reviewer may take: enough to read the thread, not to wander.
@@ -392,3 +400,112 @@ async def review_gate(
         applied=(stored or {}).get("applied"),
     )
     return {"status": "reviewed", "applied": (stored or {}).get("applied")}
+
+
+# ── a gate that opened without a review (FORGE-743) ─────────────────────────
+
+#: ``run_id:phase:attempt`` of reviews asked for and not finished, so the
+#: supervisor's next tick and a policy change do not ask twice for one gate.
+_in_flight: set[str] = set()
+_tasks: set[Any] = set()
+
+
+async def review_open_gate(run_id: str) -> dict[str, Any]:
+    """Review the gate ``run_id`` is parked at, if it has no review yet (FORGE-743).
+
+    A review used to happen only when a gate opened. A gate that opened while
+    the project's policy was ``off``, or whose review failed, stayed unreviewed
+    for good: turning the policy to ``auto`` afterwards changed nothing, and the
+    run waited for a person the policy said was not needed. The policy still
+    decides: ``review_gate`` skips when it is ``off``.
+    """
+    from api_gateway.approvals import service
+    from api_gateway.runs import routes as run_routes
+    from api_gateway.runs.schemas import project_of
+
+    run = run_routes.get_run_store().get(run_id)
+    item = await service.get_item(None, f"gate:{run_id}")
+    if item.status != "pending":
+        return {"status": "skipped", "why": "the gate is not open"}
+    if item.review is not None:
+        return {"status": "skipped", "why": "the gate already has a review"}
+    phase_id = str(item.detail.get("phase") or "")
+    definition = run_routes._run_definition(run)  # noqa: SLF001
+    phase = next(
+        (p for p in (definition.phases if definition is not None else []) if p.id == phase_id),
+        None,
+    )
+    payload = {
+        "run_id": run_id,
+        "project_id": project_of(run.request),
+        "goal": str(run.request.get("goal") or ""),
+        "phase": {
+            "id": phase_id,
+            "title": getattr(phase, "title", phase_id),
+            "objective": getattr(phase, "objective", ""),
+            "required_deliverables": list(getattr(phase, "required_deliverables", []) or []),
+            "disciplines": list(getattr(phase, "disciplines", []) or []),
+        },
+        "gate": str(item.detail.get("gate") or ""),
+        "attempt": item.detail.get("attempt"),
+        "ready": "approve" in item.allowed_decisions,
+        "findings": [f.message for f in item.findings],
+        "reason": run.approval_reason or "",
+    }
+    logger.info("gate_review_requested_for_open_gate", run_id=run_id, phase=phase_id)
+    return await review_gate(payload)
+
+
+def request_open_gate_review(run_id: str, phase: str, attempt: Any) -> bool:
+    """Start :func:`review_open_gate` in the background, once per gate. True if started."""
+    import asyncio
+
+    key = f"{run_id}:{phase}:{attempt}"
+    if key in _in_flight:
+        return False
+    _in_flight.add(key)
+
+    async def _run() -> None:
+        try:
+            outcome = await review_open_gate(run_id)
+            logger.info("gate_review_open_gate_done", run_id=run_id, phase=phase, **outcome)
+        except Exception as exc:  # noqa: BLE001 - a review is advice; it never breaks a run
+            logger.warning("gate_review_open_gate_failed", run_id=run_id, error=str(exc))
+        finally:
+            _in_flight.discard(key)
+
+    task = asyncio.ensure_future(_run())
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return True
+
+
+async def request_reviews_for_project(project_id: str) -> int:
+    """Ask for a review of every open, unreviewed gate in a project (FORGE-743).
+
+    Called when a person changes the project's approval policy, so a gate
+    already waiting is reviewed under the new policy rather than only gates
+    that open later. Returns how many reviews were started.
+    """
+    from api_gateway.approvals import service
+    from api_gateway.runs import routes as run_routes
+    from api_gateway.runs.schemas import project_of
+    from orchestrator.harness.runs import RunStatus
+
+    started = 0
+    for run in list(run_routes.get_run_store().list()):
+        if run.status is not RunStatus.AWAITING_APPROVAL:
+            continue
+        if project_of(run.request) != project_id or not run_routes.is_design_flow_run(run):
+            continue
+        try:
+            item = await service.get_item(None, f"gate:{run.id}")
+        except Exception as exc:  # noqa: BLE001 - one unreadable gate must not stop the rest
+            logger.info("gate_review_open_gate_unreadable", run_id=run.id, error=str(exc))
+            continue
+        if item.review is None and request_open_gate_review(
+            run.id, str(item.detail.get("phase") or ""), item.detail.get("attempt")
+        ):
+            started += 1
+    logger.info("gate_review_project_requested", project_id=project_id, started=started)
+    return started

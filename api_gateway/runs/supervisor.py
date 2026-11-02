@@ -359,7 +359,31 @@ async def _at_gate(run: Any, sup: dict[str, Any], service: Any) -> dict[str, Any
         detail += ". The approval policy decides it, or a person does."
         _log(sup, run.id, "gate", detail)
         _save(run.id, sup)
+    if review is None and sup.get("review_asked") != key and await _policy_reviews(run):
+        # FORGE-743: a gate that opened while the policy was off, or whose
+        # review failed, gets one now; the policy then decides it as usual.
+        from api_gateway.runs.gate_review import request_open_gate_review
+
+        if request_open_gate_review(run.id, phase, attempt):
+            sup["review_asked"] = key
+            _log(sup, run.id, "review", f"asked the reviewer for the open {phase} gate")
+            _save(run.id, sup)
     return sup
+
+
+async def _policy_reviews(run: Any) -> bool:
+    """Whether the run's project policy has gates reviewed (any mode but ``off``)."""
+    from api_gateway.approvals.policy import effective_mode, get_policy_store
+    from api_gateway.runs.schemas import project_of
+
+    project_id = project_of(run.request)
+    if not project_id:
+        return False
+    try:
+        return effective_mode(await get_policy_store().get(str(project_id))) != "off"
+    except Exception as exc:  # noqa: BLE001 - no policy readable: a person decides
+        logger.info("run_supervisor_policy_unreadable", run_id=run.id, error=str(exc))
+        return False
 
 
 async def _at_completion(run: Any, sup: dict[str, Any]) -> dict[str, Any] | None:

@@ -98,6 +98,15 @@ async def put_approval_policy(
             updated_at=datetime.now(UTC).isoformat(),
         )
         await get_policy_store().put(policy)
+    if body.mode != "off":
+        # FORGE-743: gates already waiting are reviewed under the new policy,
+        # not only gates that open from now on.
+        from api_gateway.runs.gate_review import request_reviews_for_project
+
+        try:
+            await request_reviews_for_project(project_id)
+        except Exception as exc:  # noqa: BLE001 - setting the policy must not fail on this
+            logger.warning("approval_policy_open_gate_review_failed", error=str(exc))
     logger.info(
         "approval_policy_set",
         project_id=project_id,

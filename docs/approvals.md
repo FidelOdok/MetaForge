@@ -282,6 +282,15 @@ that fails posts `recommendation: none` with the error, and the gate waits for
 a person as it would have anyway. `reviewer: client` leaves the review to a
 connected client's reviewer subagent.
 
+**A gate already waiting is reviewed too.** The review step runs when a gate
+opens, so a gate that opened while the policy was `off` (or whose review
+failed without being posted) would otherwise never get one. Two things now
+ask for it later, once per gate (phase and attempt): setting a project's policy
+to anything but `off` reviews every open, unreviewed gate in that project, and
+the run supervisor asks for the review of an unreviewed gate on its next check
+while the policy is not `off`. The review is then applied by the policy as
+usual; the supervisor's log records it as a `review` entry.
+
 **A client as the reviewer.** With `reviewer: client` (or
 `client_then_server`) the review step opens a **review task** with the brief
 and the model the policy asks for, and waits up to
