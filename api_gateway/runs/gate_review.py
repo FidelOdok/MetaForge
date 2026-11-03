@@ -9,7 +9,9 @@ Runs right after a gate opens, when the project's approval policy asks for it
   Built over the gateway's REST API, so the Temporal worker and the in-process
   engine build the same brief.
 * **The reviewer** (FORGE-729): a review turn of the harness with its own model
-  (``reviewer_model``), the ``gate-review`` skill as its rubric and the
+  (the policy's ``reviewer_model``, else ``METAFORGE_REVIEWER_MODEL``, else
+  the gateway's model; see :func:`reviewer_model`), the ``gate-review`` skill
+  as its rubric and the
   read-only ``review`` tool set (FORGE-728). It has no write tools, so it
   cannot fix what it is judging, and it answers with a structured review.
 * **Posting** the review to ``POST /v1/runs/{id}/gate-review``, where the
@@ -46,6 +48,7 @@ __all__ = [
     "review_gate",
     "review_open_gate",
     "review_skill",
+    "reviewer_model",
 ]
 
 _TIMEOUT_SECONDS = 20.0
@@ -231,17 +234,66 @@ def _split_model(ref: str) -> tuple[str | None, str | None]:
     return (provider, model) if sep and model else (None, ref)
 
 
+#: The server reviewer's model when the project's policy names none.
+REVIEWER_MODEL_ENV = "METAFORGE_REVIEWER_MODEL"
+
+
+def reviewer_model(policy: dict[str, Any] | None) -> tuple[str, str]:
+    """``(model_ref, source)`` for the server reviewer.
+
+    Precedence: the project policy's ``reviewer_model`` (``source="policy"``),
+    then ``METAFORGE_REVIEWER_MODEL`` (``"env"``), then the gateway's own
+    model, which is ``("", "default")`` here and resolved by the harness.
+    A ref is ``provider:model`` or a bare model id for the active provider.
+    """
+    configured = str((policy or {}).get("reviewer_model") or "").strip()
+    if configured:
+        return configured, "policy"
+    from_env = (os.environ.get(REVIEWER_MODEL_ENV) or "").strip()
+    if from_env:
+        return from_env, "env"
+    return "", "default"
+
+
+def _resolved_model(model_ref: str) -> str:
+    """``provider:model`` the harness would run ``model_ref`` on, or ``""``.
+
+    Names the model on a review when no response said who served it (the
+    review failed before or during the call). Best-effort.
+    """
+    try:
+        from api_gateway.chat.harness_backend import provider_config_from_env
+        from orchestrator.harness.providers.usage import usage_scope
+
+        provider, model = _split_model(model_ref)
+        with usage_scope(role="gate_check"):
+            config = provider_config_from_env(provider=provider, model=model)
+        primary = config.slots.candidates("generator")[0]
+        return f"{primary.name}:{primary.model}"
+    except Exception:  # noqa: BLE001 - naming the model never fails a review
+        return ""
+
+
 async def server_review(brief: dict[str, Any], *, model_ref: str) -> dict[str, Any]:
-    """One review turn of the harness, read-only, with the reviewer's own model."""
+    """One review turn of the harness, read-only, with the reviewer's own model.
+
+    The result's ``model`` is the ``provider:model`` that wrote the final
+    reply, as the provider pipeline recorded it, so a review on the gateway's
+    default model still says which model that was.
+    """
     from api_gateway.chat.harness_backend import run_chat_turn
     from api_gateway.chat.routes import get_mcp_bridge, get_metrics
     from mcp_core.profiles import REVIEW_TOOLS
+    from orchestrator.harness.providers.provenance import capture_served
     from orchestrator.harness.providers.usage import usage_scope
 
     provider, model = _split_model(model_ref)
     bridge = get_mcp_bridge()
     phase_id = (brief.get("phase") or {}).get("id") or "gate"
-    with usage_scope(run_id=brief.get("run_id"), phase=phase_id, role="gate_check"):
+    with (
+        capture_served() as served,
+        usage_scope(run_id=brief.get("run_id"), phase=phase_id, role="gate_check"),
+    ):
         reply = await run_chat_turn(
             _review_prompt(brief),
             mcp_bridge=bridge,
@@ -253,7 +305,11 @@ async def server_review(brief: dict[str, Any], *, model_ref: str) -> dict[str, A
             tool_allowlist=REVIEW_TOOLS,
             approval_mode="forward",
         )
-    return parse_review(reply)
+    review = parse_review(reply)
+    last = served.last()
+    if last is not None:
+        review["model"] = f"{last.provider}:{last.model}"
+    return review
 
 
 def client_review_wait_seconds() -> float:
@@ -362,11 +418,13 @@ async def review_gate(
         if mode == "off":
             return {"status": "skipped", "why": "policy off"}
         source = str(policy.get("reviewer") or "server")
-        model_ref = str(policy.get("reviewer_model") or "")
+        # A client reviewer is asked for the policy's model only: the env
+        # setting names a model for this gateway's provider chain.
+        policy_model = str(policy.get("reviewer_model") or "").strip()
         if source in ("client", "client_then_server"):
             # FORGE-730: a connected client's reviewer subagent does the review.
             try:
-                outcome = await _client_review(payload, gateway, model_ref, sleep=sleep)
+                outcome = await _client_review(payload, gateway, policy_model, sleep=sleep)
             except Exception as exc:  # noqa: BLE001 - fall back as the policy says
                 logger.warning("gate_review_task_failed", run_id=run_id, error=str(exc))
                 outcome = None
@@ -374,15 +432,26 @@ async def review_gate(
                 return outcome
             if source == "client":
                 await _post_none(
-                    gateway, payload, "client", model_ref, "no client reviewer took the review"
+                    gateway, payload, "client", policy_model, "no client reviewer took the review"
                 )
                 return {"status": "unreviewed", "why": "no client reviewer"}
+        model_ref, model_source = reviewer_model(policy)
+        span.set_attribute("gate_review.requested_model", model_ref)
+        span.set_attribute("gate_review.model_source", model_source)
+        logger.info(
+            "gate_review_model_selected",
+            run_id=run_id,
+            phase=str(phase.get("id") or ""),
+            requested_model=model_ref,
+            model_source=model_source,
+        )
         review: dict[str, Any] = {
             "phase": str(phase.get("id") or ""),
             "attempt": payload.get("attempt"),
             "gate": str(payload.get("gate") or ""),
             "source": "server",
-            "model": model_ref or "default",
+            "model": model_ref,
+            "model_source": model_source,
         }
         try:
             brief = await build_review_brief(payload, gateway)
@@ -392,6 +461,11 @@ async def review_gate(
             span.record_exception(exc)
             logger.warning("gate_review_failed", run_id=run_id, error=str(exc))
             review.update({"recommendation": "none", "error": str(exc)[:500]})
+        if not review.get("model"):
+            # The gateway's default model ran and no response named it (the
+            # review failed first): name what the harness resolves it to.
+            review["model"] = _resolved_model(model_ref) or "default"
+        span.set_attribute("gate_review.model", str(review["model"]))
         try:
             stored = await gateway.request(
                 "POST", f"/v1/runs/{run_id}/gate-review", json_body=review
@@ -404,6 +478,8 @@ async def review_gate(
         run_id=run_id,
         phase=review["phase"],
         recommendation=review.get("recommendation"),
+        model=review.get("model"),
+        model_source=model_source,
         applied=(stored or {}).get("applied"),
     )
     return {"status": "reviewed", "applied": (stored or {}).get("applied")}

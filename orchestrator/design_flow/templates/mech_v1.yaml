@@ -11,7 +11,7 @@
 # when the phases or gates change, so a completed run can still say what
 # it actually ran.
 id: mech_v1
-version: 1.6.0
+version: 1.7.0
 extends: spine_v1
 name: Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven
 label: Mechanical design
@@ -74,11 +74,16 @@ phases:
     limits (library.process_limits, library.machine_limits, library.get_material), the standard
     parts and components that can join it (library.standard_part, component.search_intent), and
     the findings and lessons of earlier runs on this project. Propose 2 or 3 concepts that differ
-    in structure or joinery, each one fit for the route. For each concept draw a labelled sketch
-    with twin.commit_design_sketch as self-contained SVG: front, side and isometric views of a
-    simple block layout of its parts, with part names, joint types, and the key sizes taken from
-    the requirements. Mark every label as intended, assumption or open (an unresolved question);
-    a sketch shows intent and never claims a measured, verified or manufacturable result. Choose
+    in structure or joinery, each one fit for the route. For each concept, first draw its block
+    layout with twin.render_concept_sketch: every part as a box or cylinder with its size and
+    position, every joint between parts, the key sizes taken from the requirements, and every
+    part and joint tagged intended, assumption or open (an unresolved question). Then make the
+    concept's AI image from that sketch with twin.render_concept_image (layout_node_id = the
+    sketch's node id, and a short visual_brief naming the product, its materials, finish and
+    style), so each concept is shown as a picture a person can judge at a glance as well as a
+    dimensioned layout. If the image tool reports that no image provider is configured or the
+    provider fails, say so in the decision and carry on with the sketches. Sketches and images
+    show intent and never claim a measured, verified or manufacturable result. Choose
     one concept (the person picks at this gate; if they said 'you choose', choose and say why)
     and record a decision with twin.record_decision: the selected assembly in its
     assembly field (every part with its source, made, bought or standard, and every connection
@@ -89,6 +94,7 @@ phases:
     design phase to confirm. Do not author CAD in this phase.
   expected_artifacts:
   - design_sketch
+  - render
   - design_decision
   required_deliverables:
   - design_sketch
@@ -99,6 +105,7 @@ phases:
     name: Concept Design Gate (G5)
     criteria:
     - Two or three concepts proposed, each with a labelled sketch
+    - Each concept shown as an AI concept image made from its sketch, or the reason it could not be
     - Selected assembly recorded with every part, connection and joint type
     - Joints rely on named standard or bought parts with their sources
     - Concept fits the chosen manufacturing route and its limits

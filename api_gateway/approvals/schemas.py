@@ -90,7 +90,13 @@ class GateReview(BaseModel):
     concerns: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     source: Literal["server", "client"] = "server"
+    #: The model that reviewed, ``provider:model`` when the server reviewer
+    #: ran (as the provider pipeline recorded it).
     model: str = ""
+    #: Where the server reviewer's model came from: ``policy`` (the project's
+    #: ``reviewer_model``), ``env`` (``METAFORGE_REVIEWER_MODEL``) or
+    #: ``default`` (the gateway's chat model). Empty for a client review.
+    model_source: str = ""
     #: ``reviewer:<source>:<model>``; what a decision it makes is recorded as.
     reviewer: str = ""
     #: FORGE-730: a client reviewer from the same client that did the phase.

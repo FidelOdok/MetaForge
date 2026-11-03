@@ -18,23 +18,20 @@ That reading is a proposal, never a record of truth:
   reading is handed to the concept phase (``confirmed_sketch_readings``).
 
 The model call is injected (``VisionCall``) so tests use a fake. The default
-one goes through the harness provider pipeline with the gateway's configured
-providers, keeps only those whose adapter passes image content through, and
+one (``api_gateway.twin.vision``) goes through the harness provider pipeline
+with the gateway's configured providers and ``METAFORGE_VISION_MODEL`` when
+set, keeps only those whose adapter passes image content through, and
 is bounded by a timeout, so a missing or silent provider is a clear error
 rather than a hang.
 """
 
 from __future__ import annotations
 
-import asyncio
-import base64
 import hashlib
 import json
 import os
 import re
 import time
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -42,6 +39,8 @@ from uuid import UUID, uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from api_gateway.twin import vision as _vision
+from api_gateway.twin.vision import VisionCall, VisionReply
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -73,7 +72,7 @@ class SketchReadingError(ValueError):
     """The model's reading could not be used; the message says why."""
 
 
-class SketchVisionUnavailableError(RuntimeError):
+class SketchVisionUnavailableError(_vision.VisionUnavailableError):
     """No vision model could be asked, or none answered in time."""
 
 
@@ -213,42 +212,9 @@ def parse_reading(text: str) -> SketchReading:
 
 # ── The model call ────────────────────────────────────────────────────────
 
-
-@dataclass(frozen=True)
-class VisionReply:
-    """What a vision call returns: the text, and who answered."""
-
-    text: str
-    provider: str | None = None
-    model: str | None = None
-
-
-#: ``(image_bytes, mime_type, prompt) -> reply``. A plain string is accepted
-#: as the reply text with no provenance.
-VisionCall = Callable[[bytes, str, str], Awaitable["VisionReply | str"]]
-
-#: Provider families whose adapter passes a message's content list through
-#: unchanged. Gemini, Bedrock and Codex flatten messages to text, so an image
-#: would never reach the model.
-_ANTHROPIC_FAMILY = frozenset({"anthropic", "claude"})
-_TEXT_ONLY_FAMILIES = frozenset(
-    {"gemini", "google", "vertex", "bedrock", "aws-bedrock", "openai-codex", "codex"}
-)
-
-
-def _vision_content(family: str, image: bytes, mime_type: str, prompt: str) -> list[dict[str, Any]]:
-    data = base64.b64encode(image).decode("ascii")
-    if family in _ANTHROPIC_FAMILY:
-        image_block: dict[str, Any] = {
-            "type": "image",
-            "source": {"type": "base64", "media_type": mime_type, "data": data},
-        }
-    else:
-        image_block = {
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime_type};base64,{data}"},
-        }
-    return [image_block, {"type": "text", "text": prompt}]
+# The call itself lives in ``api_gateway.twin.vision`` so other image readers
+# share it. ``VisionReply`` and ``VisionCall`` are imported from there and stay
+# importable from here.
 
 
 def _timeout_s() -> float:
@@ -266,80 +232,18 @@ def make_default_vision_call(
     """A :data:`VisionCall` over the gateway's configured model providers.
 
     ``invoke`` and ``provider_config`` are injectable for tests; by default the
-    provider chain is the one chat uses (``provider_config_from_env``), less
-    any family that cannot carry an image.
+    provider chain is the one chat uses, with ``METAFORGE_VISION_MODEL`` as its
+    model when set (``vision.vision_provider_config``), less any family that
+    cannot carry an image.
     """
-
-    async def call(image: bytes, mime_type: str, prompt: str) -> VisionReply:
-        from orchestrator.harness.providers import (
-            AllProvidersFailedError,
-            ProviderPipeline,
-            RoleModelSlots,
-            default_invoke,
-        )
-        from orchestrator.harness.providers.usage import usage_scope
-
-        try:
-            if provider_config is not None:
-                config = provider_config
-            else:
-                from api_gateway.chat.harness_backend import provider_config_from_env
-
-                config = provider_config_from_env()
-            candidates = list(config.slots.candidates("generator"))
-        except Exception as exc:  # noqa: BLE001 - reported as unavailable, never a crash
-            raise SketchVisionUnavailableError(
-                f"no model provider is configured for reading sketches: {exc}"
-            ) from exc
-        usable = [s for s in candidates if s.name.lower() not in _TEXT_ONLY_FAMILIES]
-        if not usable:
-            names = ", ".join(sorted({s.name for s in candidates})) or "none"
-            raise SketchVisionUnavailableError(
-                "no vision-capable model provider is configured (configured: "
-                f"{names}); reading a sketch needs Anthropic or an OpenAI-compatible "
-                "provider with a vision model"
-            )
-
-        answered: dict[str, str] = {}
-        send = invoke or default_invoke
-
-        async def _invoke(spec: Any, _request: Any) -> Any:
-            family = spec.name.lower()
-            request = {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": _vision_content(family, image, mime_type, prompt),
-                    }
-                ],
-                "max_tokens": 4096,
-                "temperature": 0.0,
-            }
-            result = await send(spec, request)
-            answered.update(provider=spec.name, model=spec.model)
-            return result
-
-        pipeline = ProviderPipeline(
-            RoleModelSlots(slots={"vision": usable}), retry_policy=config.retry
-        )
-        limit = timeout_s if timeout_s is not None else _timeout_s()
-        try:
-            with usage_scope(role="sketch_reading"):
-                result = await asyncio.wait_for(pipeline.complete("vision", None, _invoke), limit)
-        except TimeoutError as exc:
-            raise SketchVisionUnavailableError(
-                f"no vision model answered within {limit:g} s"
-            ) from exc
-        except AllProvidersFailedError as exc:
-            raise SketchVisionUnavailableError(
-                f"no vision model could read the sketch: {exc}"
-            ) from exc
-        text = result.get("text", "") if isinstance(result, dict) else str(result or "")
-        return VisionReply(
-            text=text, provider=answered.get("provider"), model=answered.get("model")
-        )
-
-    return call
+    return _vision.make_vision_call(
+        role="sketch_reading",
+        purpose="reading sketches",
+        invoke=invoke,
+        provider_config=provider_config,
+        timeout_s=timeout_s if timeout_s is not None else _timeout_s(),
+        unavailable=SketchVisionUnavailableError,
+    )
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────

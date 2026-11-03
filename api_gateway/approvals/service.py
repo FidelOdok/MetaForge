@@ -918,6 +918,8 @@ async def record_review(app: Any, run_id: str, review: GateReview) -> GateReview
         recommendation=review.recommendation,
         confidence=review.confidence,
         reviewer=review.reviewer,
+        model=review.model,
+        model_source=review.model_source,
         applied=applied,
         note=note,
     )
