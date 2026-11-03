@@ -1,0 +1,72 @@
+{
+  "category": "CNC routers",
+  "checked": "2026-11-03",
+  "about": "Published manufacturer specifications. Each value cites the official page it was read from; notes say where a page was read through a search index's copy. Not prices; confirm on the manufacturer's site before relying on a figure.",
+  "models": [
+    {
+      "kind": "cnc_router",
+      "make": "Carbide 3D",
+      "model": "Shapeoko 5 Pro 4x4",
+      "processes": [
+        "cnc_milling"
+      ],
+      "capabilities": {
+        "travel_mm": {
+          "value": [
+            1219.2,
+            1219.2,
+            101.6
+          ],
+          "url": "https://carbide3d.com/blog/introducing-shapeoko-5-pro/"
+        }
+      },
+      "note": "48 x 48 in, converted. Z is the 4 in clearance under the gantry (Z travel 155 mm). Spindle is the buyer's choice, so no RPM. Now sold as the Shapeoko 5.1 Pro."
+    },
+    {
+      "kind": "cnc_router",
+      "make": "Onefinity",
+      "model": "Woodworker (Gen 1, X-35)",
+      "processes": [
+        "cnc_milling"
+      ],
+      "capabilities": {
+        "travel_mm": {
+          "value": [
+            815.975,
+            815.975,
+            133.35
+          ],
+          "url": "https://www.onefinitycnc.com/product-page/militaryoffer"
+        }
+      },
+      "note": "32 1/8 x 32 1/8 x 5 1/4 in, converted. Router not included, so no RPM. Read from the search index's copy of the official page."
+    },
+    {
+      "kind": "cnc_router",
+      "make": "ShopBot",
+      "model": "Desktop",
+      "processes": [
+        "cnc_milling"
+      ],
+      "capabilities": {
+        "travel_mm": {
+          "value": [
+            610,
+            460,
+            89
+          ],
+          "url": "https://www.shopbottools.com/products/desktop"
+        },
+        "materials": {
+          "value": [
+            "wood",
+            "plastic",
+            "aluminum"
+          ],
+          "url": "https://www.shopbottools.com/products/desktop"
+        }
+      },
+      "note": "24 x 18 x 3.5 in with the vacuum or T-slot deck (585 x 430 x 200 mm with the lower deck). 1 HP spindle, RPM not stated."
+    }
+  ]
+}

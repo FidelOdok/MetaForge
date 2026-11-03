@@ -1619,6 +1619,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         )
 
         init_machine_library(SqliteMachineLibrary(str(default_machine_library_path())))
+        # FORGE-753: common machine models, each value sourced, so a new
+        # install's library is not empty. Idempotent; never overwrites.
+        try:
+            from api_gateway.library.routes import get_machine_library
+            from twin_core.library.machine_seed import seed_machine_library
+
+            seed_machine_library(get_machine_library())
+        except Exception as exc:  # noqa: BLE001 - a seed failure must not stop the gateway
+            logger.warning("machine_seed_failed", error=str(exc))
         # Processes and materials share the machine library's file.
         from api_gateway.library.catalog_routes import init_catalog
         from twin_core.library.catalog import SqliteCatalog

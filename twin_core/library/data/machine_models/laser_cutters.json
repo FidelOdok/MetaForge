@@ -1,0 +1,154 @@
+{
+  "category": "Laser cutters",
+  "checked": "2026-11-03",
+  "about": "Published manufacturer specifications. Each value cites the official page it was read from; notes say where a page was read through a search index's copy. Not prices; confirm on the manufacturer's site before relying on a figure.",
+  "models": [
+    {
+      "kind": "laser_cutter",
+      "make": "xTool",
+      "model": "P2S",
+      "processes": [
+        "laser_cutting"
+      ],
+      "capabilities": {
+        "laser_power_w": {
+          "value": 55,
+          "url": "https://www.xtool.com/products/xtool-p2-55w-co2-laser-cutter"
+        }
+      },
+      "note": "55 W CO2. Working area 600 x 305 mm (no official Z height found, so travel is not recorded). xTool states 18 mm basswood in one pass (20 mm acrylic); no plywood figure. Read from the search index's copy of the official page."
+    },
+    {
+      "kind": "laser_cutter",
+      "make": "Glowforge",
+      "model": "Pro",
+      "processes": [
+        "laser_cutting"
+      ],
+      "capabilities": {
+        "travel_mm": {
+          "value": [
+            495,
+            279,
+            50
+          ],
+          "url": "https://glowforge.com/b/tech-specs/performance"
+        },
+        "laser_power_w": {
+          "value": 45,
+          "url": "https://glowforge.com/b/tech-specs/performance"
+        },
+        "materials": {
+          "value": [
+            "wood",
+            "fabric",
+            "leather",
+            "paper",
+            "cardboard",
+            "acrylic",
+            "delrin",
+            "mylar",
+            "rubber",
+            "cork",
+            "sandpaper"
+          ],
+          "url": "https://glowforge.com/b/tech-specs/performance"
+        }
+      },
+      "note": "45 W CO2. Z 50 mm is with the tray removed (13 mm with the tray; 6.3 mm through the passthrough). No maximum cut thickness is published."
+    },
+    {
+      "kind": "laser_cutter",
+      "make": "Epilog",
+      "model": "Fusion Edge 24",
+      "processes": [
+        "laser_cutting"
+      ],
+      "capabilities": {
+        "travel_mm": {
+          "value": [
+            610,
+            610,
+            254
+          ],
+          "url": "https://www.epiloglaser.com/laser-machines/product-line/"
+        },
+        "laser_power_w": {
+          "value": 60,
+          "url": "https://www.epiloglaser.com/laser-machines/product-line/"
+        }
+      },
+      "note": "CO2 at 50 or 60 W (60 W recorded). Z is the 254 mm material thickness figure. Epilog's pages disagree on wattage and one lists the line as legacy."
+    },
+    {
+      "kind": "laser_cutter",
+      "make": "Trotec",
+      "model": "Speedy 300",
+      "processes": [
+        "laser_cutting"
+      ],
+      "capabilities": {
+        "travel_mm": {
+          "value": [
+            726,
+            432,
+            200
+          ],
+          "url": "https://www.troteclaser.com/static/pdf/speedy-300/Datasheet-Speedy-300C-8066-en.pdf"
+        },
+        "laser_power_w": {
+          "value": 120,
+          "url": "https://www.troteclaser.com/static/pdf/speedy-300/Datasheet-Speedy-300C-8066-en.pdf"
+        }
+      },
+      "note": "CO2 at 30 to 120 W (120 W, the largest option, recorded). 200 mm part height with the 1.5 or 2.0 in lens. Datasheet dated 2020."
+    },
+    {
+      "kind": "laser_cutter",
+      "make": "Thunder Laser",
+      "model": "Nova 35",
+      "processes": [
+        "laser_cutting"
+      ],
+      "capabilities": {
+        "travel_mm": {
+          "value": [
+            900,
+            600,
+            230
+          ],
+          "url": "https://eu.thunderlaser.com/nova-35-laser-cutter/"
+        },
+        "laser_power_w": {
+          "value": 80,
+          "url": "https://eu.thunderlaser.com/nova-35-laser-cutter/"
+        },
+        "materials": {
+          "value": [
+            "wood",
+            "acrylic",
+            "rubber",
+            "paperboard"
+          ],
+          "url": "https://eu.thunderlaser.com/nova-35-laser-cutter/"
+        }
+      },
+      "note": "80 W CO2 standard (100 and 130 W optional). Z 230 mm with the front door closed; 20 mm pass-through. No cut thickness published; plywood not named."
+    },
+    {
+      "kind": "laser_cutter",
+      "make": "OMTech",
+      "model": "Maker MF1624-60",
+      "processes": [
+        "laser_cutting"
+      ],
+      "capabilities": {
+        "laser_power_w": {
+          "value": 60,
+          "url": "https://omtechlaser.com/products/60w-co2-laser-engraver-cutter-usb-6r57-us"
+        }
+      },
+      "note": "60 W CO2 with a 400 x 600 mm area (no Z height published, so travel is not recorded); 720 x 50 mm pass-through. Read from the search index's copy of the official page."
+    }
+  ]
+}
