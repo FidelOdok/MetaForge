@@ -22,6 +22,7 @@ WIRED = {
     "twin.evaluate_overhang_metric",
     "twin.rank_sensitivity",
     "twin.commit_design_sketch",
+    "twin.render_concept_sketch",
     "twin.commit_hazard_analysis",
     "twin.commit_system_architecture",
     "twin.commit_technical_drawing",
