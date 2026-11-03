@@ -54,6 +54,8 @@ SUPERVISION_KEY = "supervision"
 SUPERVISOR_INTERVAL_SECONDS = 30.0
 #: A tooling failure is retried after this pause rather than at once.
 TOOLING_PAUSE_SECONDS = 120.0
+#: FORGE-751: how long an open gate stays unreviewed before the supervisor asks.
+REVIEW_GRACE_SECONDS = 180.0
 _MAX_LOG = 100
 
 DEFAULT_BUDGETS: dict[str, float] = {
@@ -370,7 +372,19 @@ async def _at_gate(run: Any, sup: dict[str, Any], service: Any) -> dict[str, Any
         detail += ". The approval policy decides it, or a person does."
         _log(sup, run.id, "gate", detail)
         _save(run.id, sup)
-    if review is None and sup.get("review_asked") != key and await _policy_reviews(run):
+    if key != sup.get("gate_first_seen_key"):
+        sup["gate_first_seen_key"], sup["gate_first_seen"] = key, time.time()
+        _save(run.id, sup)
+    # FORGE-751: the worker reviews a gate as it opens, so asking at once
+    # duplicated that review (the Chair design gate was reviewed twice in
+    # 7 s). Ask only for a gate that has been open, unreviewed, past a grace.
+    waited = time.time() - float(sup.get("gate_first_seen") or time.time())
+    if (
+        review is None
+        and waited >= REVIEW_GRACE_SECONDS
+        and sup.get("review_asked") != key
+        and await _policy_reviews(run)
+    ):
         # FORGE-743: a gate that opened while the policy was off, or whose
         # review failed, gets one now; the policy then decides it as usual.
         from api_gateway.runs.gate_review import request_open_gate_review

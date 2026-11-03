@@ -287,8 +287,9 @@ opens, so a gate that opened while the policy was `off` (or whose review
 failed without being posted) would otherwise never get one. Two things now
 ask for it later, once per gate (phase and attempt): setting a project's policy
 to anything but `off` reviews every open, unreviewed gate in that project, and
-the run supervisor asks for the review of an unreviewed gate on its next check
-while the policy is not `off`. The review is then applied by the policy as
+the run supervisor asks for the review of a gate still unreviewed three
+minutes after it opened (leaving the worker's own review time to land) while
+the policy is not `off`. The review is then applied by the policy as
 usual; the supervisor's log records it as a `review` entry.
 
 **A client as the reviewer.** With `reviewer: client` (or

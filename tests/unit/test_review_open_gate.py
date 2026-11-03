@@ -37,6 +37,7 @@ def _fresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[str, str, Any
         return True
 
     monkeypatch.setattr(gate_review, "request_open_gate_review", fake_request)
+    monkeypatch.setattr(supervisor, "REVIEW_GRACE_SECONDS", 0.0)
     yield asked
     run_routes.reset_run_store()
     reset_policy_store(None)
@@ -152,3 +153,21 @@ def test_a_gate_that_already_has_a_review_is_left_alone(monkeypatch: pytest.Monk
     )
     outcome = asyncio.run(gate_review.review_open_gate(run_id))
     assert outcome["status"] == "skipped"
+
+
+def test_a_gate_just_opened_is_left_to_the_workers_review(
+    _fresh: list[tuple[str, str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # FORGE-751: the worker reviews a gate as it opens; asking at once made
+    # two reviews of the Chair design gate 7 s apart.
+    monkeypatch.setattr(supervisor, "REVIEW_GRACE_SECONDS", 180.0)
+    _policy("auto")
+    run_id = _run_at_gate()
+    supervisor.start_supervision(run_id)
+    _tick(run_id)
+    assert _fresh == []
+    sup = supervisor.supervision_of(run_routes.get_run_store().get(run_id))
+    sup["gate_first_seen"] -= 200
+    run_routes.get_run_store().annotate(run_id, "supervision", sup)
+    _tick(run_id)
+    assert [a[:2] for a in _fresh] == [(run_id, "dfm_review")]
