@@ -35,7 +35,9 @@ from orchestrator.design_flow.checks import (
     value_names,
 )
 from orchestrator.design_flow.context import (
+    DESIGN_PHASE_ID,
     DFM_REVIEW_PHASE_ID,
+    assembly_conformance_gap,
     dfm_review_gap,
     route_decision_gap,
 )
@@ -916,6 +918,22 @@ class DesignFlowExecutor:
                 gap = dfm_review_gap(await self._evaluator.dfm_review(ctx.project_id))
             except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
                 logger.warning("design_flow_dfm_review_error", error=str(exc))
+                gap = None
+            if gap is not None:
+                missing.append(gap)
+        if (
+            phase.id == DESIGN_PHASE_ID
+            and hasattr(self._evaluator, "concept_assembly")
+            and hasattr(self._evaluator, "cad_part_names")
+        ):
+            # FORGE-763: the CAD builds the concept that was approved.
+            try:
+                gap = assembly_conformance_gap(
+                    await self._evaluator.concept_assembly(ctx.project_id),
+                    await self._evaluator.cad_part_names(ctx.project_id),
+                )
+            except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+                logger.warning("design_flow_concept_conformance_error", error=str(exc))
                 gap = None
             if gap is not None:
                 missing.append(gap)

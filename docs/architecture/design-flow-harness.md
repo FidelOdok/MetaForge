@@ -899,6 +899,16 @@ standard and bought parts the joints rely on are recorded with
 `twin.record_component_selection` and `selection: "candidate"`; the BOM view
 reports that state, so a candidate never reads as a chosen part.
 
+Design then builds to the concept. The `mech_v1` design phase is told to
+read the selected assembly and author one CAD part per made part, named as in
+the concept, joined as decided. Its gate (G6) reads the latest assembly on
+record and is not ready while a made part has no committed CAD part carrying
+its name (a "Leg" is covered by "Leg 1" or "Chair Leg"). Bought and standard
+parts are not required to be modelled. If the design has to depart from the
+concept, the phase records a revised concept decision with its assembly, and
+the gate compares against that one. With no assembly on record the gate
+behaves as before.
+
 A sketch shows intent and is never evidence. Sketches and renders are
 committed with `metadata.authority = "illustrative"`, the gate review brief
 reports each work product's authority (`illustrative` for a sketch, render

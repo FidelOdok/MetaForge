@@ -22,6 +22,7 @@ invariants all read the same answers.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -37,6 +38,8 @@ __all__ = [
     "ManufacturingRoute",
     "DFM_REVIEW_MISSING",
     "DFM_REVIEW_PHASE_ID",
+    "DESIGN_PHASE_ID",
+    "assembly_conformance_gap",
     "PROCESS_RANKING_MISSING",
     "ROUTE_DECISION_MISSING",
     "DfmReview",
@@ -870,3 +873,44 @@ def parse_concept_options(value: object) -> tuple[ConceptOption, ...]:
     if len(chosen) != 1:
         raise ValueError(f"concept_options must mark exactly one selected, got {len(chosen)}")
     return tuple(options)
+
+
+# ── design follows the concept (FORGE-763) ────────────────────────────────
+
+#: The phase that authors the CAD. Its gate compares the committed parts with
+#: the assembly the concept selected.
+DESIGN_PHASE_ID = "design"
+
+
+def _name_key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+
+
+def _covered(part: str, cad_names: list[str]) -> bool:
+    key = _name_key(part)
+    if not key:
+        return True
+    return any(key in _name_key(cad) or _name_key(cad) in key for cad in cad_names if cad)
+
+
+def assembly_conformance_gap(assembly: ConceptAssembly | None, cad_names: list[str]) -> str | None:
+    """What the design gate is missing against the selected concept, or None.
+
+    Every part the concept makes needs a committed CAD part that carries its
+    name ("Leg" is covered by "Leg 1" or "Chair Leg"). Bought and standard
+    parts are not modelled necessarily, so they are not required. No recorded
+    assembly means there is nothing to conform to, as in a flow whose concept
+    phase records none.
+    """
+    if assembly is None:
+        return None
+    made = [p.name for p in assembly.parts if p.source == "made"]
+    uncovered = [name for name in made if not _covered(name, cad_names)]
+    if not uncovered:
+        return None
+    return (
+        "CAD for every part the selected concept makes; none committed for: "
+        + ", ".join(uncovered)
+        + " (build them, named as in the concept, or record a revised concept decision "
+        "with its assembly if the design has moved on)"
+    )

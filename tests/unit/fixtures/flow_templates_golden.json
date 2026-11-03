@@ -607,7 +607,7 @@
   "version": "1.2.0"
  },
  "mech_v1": {
-  "content_hash": "cf76fddd819dbdaa4d0c2eb981771ef8481a19105a75337fbdb6c74d6de092a1",
+  "content_hash": "e58eca431395a2587b26ebdc5cb54b232eb8bdb2e1690de6aa8f17f8eedbe9be",
   "definition": {
    "id": "mech_v1",
    "name": "Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven",
@@ -841,7 +841,7 @@
     {
      "id": "design",
      "title": "Mechanical Design",
-     "objective": "Design the part THE GOAL DESCRIBES \u2014 not a generic or example part. Author its geometry with the FreeCAD tools, sized to the requirements; name the part after what it actually is; use the process and material chosen at the route gate and design to that process's limits (the constraint set recorded there); then PERSIST it with the commit-geometry tool so it becomes a viewable cad_model (a described-but-uncommitted model does NOT count). Record the design rationale: the dimensions, the material, and how the section carries the load. If sizing this part derives a specific numeric spec (e.g. a section dimension driven by the load case), record it with `twin.record_constraint_set` and set `parent_refs` to the system requirement it implements.",
+     "objective": "Design the part THE GOAL DESCRIBES \u2014 not a generic or example part. Build the assembly selected at the concept gate: read the concept decision (its assembly lists every part, whether it is made, bought or standard, and every connection with its joint), author one CAD part for each made part, named as in the concept, and join them as decided with the standard parts named there. If the design must depart from the concept, say why and record a revised concept decision with its assembly; the gate checks the committed parts against the latest one. Author the geometry with the FreeCAD tools, sized to the requirements; name each part after what it actually is; use the process and material chosen at the route gate and design to that process's limits (the constraint set recorded there); then PERSIST it with the commit-geometry tool so it becomes a viewable cad_model (a described-but-uncommitted model does NOT count). Record the design rationale: the dimensions, the material, and how the section carries the load. If sizing this part derives a specific numeric spec (e.g. a section dimension driven by the load case), record it with `twin.record_constraint_set` and set `parent_refs` to the system requirement it implements.",
      "expected_artifacts": [
       "cad_model",
       "design_decision"
@@ -855,6 +855,7 @@
       "auto_approve": false,
       "criteria": [
        "The committed geometry is the part the goal asked for",
+       "Every part the selected concept makes is committed, joined as the concept decided",
        "Sized to the requirements; material chosen with rationale",
        "Committed as a viewable cad_model"
       ],
