@@ -112,3 +112,18 @@ async def test_a_cad_model_still_can() -> None:
         requirement_ref=requirement, artefact_ref=cad, project_id=PROJECT
     )
     assert out
+
+
+def test_each_concept_is_drawn_and_then_shown_as_an_ai_image() -> None:
+    """FORGE-771: the concept sketch is model-driven, on top of the block layout."""
+    for flow_id in ("mech_v1", "concept_v1"):
+        concept = next(
+            p for p in load_templates()[flow_id].definition.phases if p.id == "concept_selection"
+        )
+        assert "twin.render_concept_sketch" in concept.objective
+        assert "twin.render_concept_image" in concept.objective
+        assert "twin.commit_design_sketch" not in concept.objective
+        assert "render" in concept.expected_artifacts
+        # The image is expected, not required: no provider must not block the gate.
+        assert "render" not in concept.required_deliverables
+        assert any("AI concept image" in c for c in concept.gate.criteria)
