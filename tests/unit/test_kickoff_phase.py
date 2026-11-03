@@ -349,7 +349,8 @@ def _brain(kickoff: Kickoff | None, lessons: list[PriorLesson]) -> ReActPhaseBra
 def _prompt(brain: ReActPhaseBrain, phase_id: str) -> str:
     phase = Phase(id=phase_id, title=phase_id, objective="do the phase")
     ctx = FlowContext(goal="a chair", project_id=PROJECT)
-    return brain._prompt("a chair", phase, ctx, asyncio.run(brain._kickoff_blocks(phase, ctx)))
+    block = asyncio.run(brain._kickoff_blocks(phase, ctx))
+    return brain._prompt("a chair", phase, ctx, kickoff_block=block)
 
 
 LESSONS = [PriorLesson("design: legs overlap the seat", "new")]

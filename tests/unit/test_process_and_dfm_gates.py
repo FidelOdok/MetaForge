@@ -252,7 +252,7 @@ async def test_a_mech_v1_run_chooses_the_process_first_and_stops_on_a_failed_dfm
         store=store, brain=brain, coordinator=coord, gate_evaluator=_FlowEvaluator(_FAILED)
     )
     task = asyncio.create_task(executor.run(run.id))
-    for _ in range(8):  # intent .. route_selection, concept, industrial_design, design
+    for _ in range(9):  # kickoff, intent .. route_selection, concept, industrial_design, design
         await wait_for_gate(store, run.id)
         store.submit_approval(run.id, ApprovalDecision.APPROVE)
     await wait_for_gate(store, run.id)

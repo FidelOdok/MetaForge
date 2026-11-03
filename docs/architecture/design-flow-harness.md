@@ -984,12 +984,58 @@ concept, the phase records a revised concept decision with its assembly, and
 the gate compares against that one. With no assembly on record the gate
 behaves as before.
 
+Industrial design hands mechanical design constraints, not prose. The
+shared industrial design phase now also decides the joint and edge language
+(how joints show and with which fixings; which edges get which radius or
+chamfer) and records it with `twin.record_constraint_set`. Its decision
+carries an `industrial_design` field: `joint_language`, `edge_treatment`,
+`ergonomics` (a verdict with the source of its limits, or the reason nobody
+handles the product), `finishes` (each part's appearance and whether
+`check_cmf_compatibility` passed) and `open_decisions`. Both gate engines
+read the latest one, and the gate is not ready while a decision is still
+open, the ergonomics check failed, a finish clashes with its material, or no
+finish is chosen.
+
 A sketch shows intent and is never evidence. Sketches and renders are
 committed with `metadata.authority = "illustrative"`, the gate review brief
 reports each work product's authority (`illustrative` for a sketch, render
 or image, otherwise the recorded authority), and `twin.record_claim` refuses
 a claim whose artefact is illustrative: a requirement is satisfied by the
 CAD model, analysis or test that shows it, not by a drawing of the idea.
+
+#### Reading a person's sketch {#sketch-understanding}
+
+A person can start the concept from their own hand sketch or reference
+image. `twin.interpret_sketch` sends it to a vision model, which proposes
+the parts it sees, the connections and joint types between them, rough
+proportions and the questions it cannot answer from the picture. The reply
+must be strict JSON in that schema; anything else is refused and nothing is
+stored. The module is `api_gateway/twin/sketch_reading.py`, and the model
+call is injected, so tests run against a fake.
+
+The reading is a proposal, not a record:
+
+- The image is stored as an `image` work product with
+  `metadata.authority = "illustrative"`, so it can never back a claim.
+- Every proportion carries `tag: "assumption"`, whatever the model said. A
+  size read off a drawing is never `verified`.
+- The reading sits in `metadata.sketch_reading` with `status: "proposed"`.
+  A person moves it to `confirmed` or `rejected` with
+  `twin.confirm_sketch_reading`, a human-authority tool: the call is always
+  held, and the decider recorded is whoever approved it, never a name in the
+  arguments. An agent cannot confirm its own reading.
+
+Only confirmed readings reach the concept phase. When `concept_selection`
+starts, the phase brain lists the project's confirmed readings and adds them
+to the phase prompt, labelled as intent: proportions as assumptions and open
+questions as still open. A proposed or rejected reading is never offered.
+
+The vision model is the gateway's configured provider chain, less the
+families whose adapter cannot carry an image (Gemini, Bedrock and Codex). If
+none is left, or none answers within `METAFORGE_SKETCH_READING_TIMEOUT_S`
+(120 s by default), the tool fails with a message saying so. Outcomes are
+counted in `metaforge_sketch_reading_total`, and the
+`SketchReadingUnavailable` alert fires when most readings in an hour fail.
 
 ### Waiver / release model {#waiver-release-model}
 

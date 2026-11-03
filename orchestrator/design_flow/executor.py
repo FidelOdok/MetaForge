@@ -37,9 +37,11 @@ from orchestrator.design_flow.checks import (
 from orchestrator.design_flow.context import (
     DESIGN_PHASE_ID,
     DFM_REVIEW_PHASE_ID,
+    INDUSTRIAL_DESIGN_PHASE_ID,
     KICKOFF_PHASE_ID,
     assembly_conformance_gap,
     dfm_review_gap,
+    industrial_design_gap,
     kickoff_gap,
     route_decision_gap,
 )
@@ -925,6 +927,15 @@ class DesignFlowExecutor:
                 gap = dfm_review_gap(await self._evaluator.dfm_review(ctx.project_id))
             except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
                 logger.warning("design_flow_dfm_review_error", error=str(exc))
+                gap = None
+            if gap is not None:
+                missing.append(gap)
+        if phase.id == INDUSTRIAL_DESIGN_PHASE_ID and hasattr(self._evaluator, "industrial_design"):
+            # FORGE-764: no open industrial design decision passes the gate.
+            try:
+                gap = industrial_design_gap(await self._evaluator.industrial_design(ctx.project_id))
+            except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+                logger.warning("design_flow_industrial_design_error", error=str(exc))
                 gap = None
             if gap is not None:
                 missing.append(gap)

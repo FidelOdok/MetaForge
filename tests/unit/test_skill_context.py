@@ -64,6 +64,8 @@ def test_phases_declare_disciplines() -> None:
     # native brain, mechanical + simulation procedures injected.
     mech = get_flow("mech_v1")
     assert [p.id for p in mech.phases] == [
+        # The kickoff: deciding questions, directions and the pick.
+        "kickoff",
         "intent",
         "needs",
         "requirements",

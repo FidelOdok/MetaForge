@@ -877,6 +877,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_robot_description_updater,
     )
     from api_gateway.twin.sensitivity import make_sensitivity_ranker
+    from api_gateway.twin.sketch_reading import (
+        make_sketch_interpreter,
+        make_sketch_reading_decider,
+    )
     from api_gateway.twin.structured_document_recorder import (
         make_compliance_checklist_recorder,
         make_hazard_analysis_recorder,
@@ -1231,6 +1235,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # human-approval gate before real CAD/build work on anything
         # non-trivial or any revision of an already-built design.
         design_sketch_recorder=make_design_sketch_recorder(twin, project_backend),
+        # FORGE-762: a vision model's proposed reading of an uploaded sketch,
+        # and a person's confirm or reject of it.
+        sketch_interpreter=make_sketch_interpreter(twin, project_backend),
+        sketch_reading_decider=make_sketch_reading_decider(twin),
         # MET-747 lifecycle-mapping follow-up: five structured-document work
         # products (hazard analysis, system architecture, technical drawing,
         # compliance checklist, procurement record), each backed by the

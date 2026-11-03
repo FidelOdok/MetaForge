@@ -335,6 +335,10 @@ ADDITIVE: frozenset[str] = frozenset(
         "session.start",
         "twin.commit_compliance_checklist",
         "twin.commit_design_sketch",
+        # FORGE-762: stores an image and a *proposed* reading of it. Re-reading
+        # an uploaded image replaces only an unconfirmed reading, in a new
+        # revision, so nothing a person decided is lost.
+        "twin.interpret_sketch",
         # FORGE-760: draws a sketch and adds it as a new design_sketch node.
         "twin.render_concept_sketch",
         "twin.commit_engineering_change",
@@ -580,6 +584,9 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # is exactly the kind of state-forward, prior-state-losing decision
         # this category exists for.
         "twin.realize_hierarchy_node",
+        # FORGE-762: a person's confirm or reject of a sketch reading moves it
+        # forward into concept input, the same family as the approvals above.
+        "twin.confirm_sketch_reading",
     }
 )
 
@@ -598,6 +605,8 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "vendor.quote",
         "vendor.place_order",
         "vendor.order_status",
+        # FORGE-762: the image goes to the configured vision model's API.
+        "twin.interpret_sketch",
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",
