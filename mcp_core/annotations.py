@@ -335,6 +335,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "session.start",
         "twin.commit_compliance_checklist",
         "twin.commit_design_sketch",
+        # FORGE-760: draws a sketch and adds it as a new design_sketch node.
+        "twin.render_concept_sketch",
         "twin.commit_engineering_change",
         "twin.commit_geometry",
         # FORGE-647: a live-view placement, see guardrails.BOOKKEEPING.
