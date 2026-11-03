@@ -537,7 +537,9 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
 
 
 from orchestrator.design_flow.context import (  # noqa: E402
+    DESIGN_PHASE_ID,
     DFM_REVIEW_PHASE_ID,
+    assembly_conformance_gap,
     dfm_review_gap,
     route_decision_gap,
 )
@@ -634,6 +636,17 @@ class _GateCheckers:
             elif review is not None:
                 accepts = " (approving accepts it)" if review.verdict == "incomplete" else ""
                 route_note = f"; {review.summary()}{accepts}"
+
+        if phase_id == DESIGN_PHASE_ID and hasattr(self._evaluator, "concept_assembly"):
+            # FORGE-763: the CAD builds the concept that was approved.
+            assembly = await self._evaluator.concept_assembly(project_id)
+            gap = assembly_conformance_gap(
+                assembly, await self._evaluator.cad_part_names(project_id)
+            )
+            if gap is not None:
+                missing.append(gap)
+            elif assembly is not None:
+                route_note += f"; built to the concept: {assembly.summary()}"
 
         constraints = await self._constraints.check(project_id)
         check_findings: list[str] = []

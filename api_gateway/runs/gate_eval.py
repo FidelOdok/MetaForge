@@ -243,6 +243,34 @@ class ProjectGateEvaluator:
         logger.info("gate_eval_route_decision", project_id=project_id, decision=decision.summary())
         return decision
 
+    async def concept_assembly(self, project_id: str | None) -> Any:
+        """The latest selected concept assembly (FORGE-763), or ``None``."""
+        from orchestrator.design_flow.context import parse_concept_assembly
+
+        found = await self._latest_decision(project_id, "assembly", parse_concept_assembly)
+        return found[0] if found is not None else None
+
+    async def cad_part_names(self, project_id: str | None) -> list[str]:
+        """The names of the project's committed CAD parts and assembly members."""
+        if not project_id:
+            return []
+        project = await self._backend.get_project(project_id)
+        if project is None:
+            return []
+        names: list[str] = []
+        for wp in project.work_products:
+            wp_type = getattr(wp, "type", None)
+            if str(getattr(wp_type, "value", wp_type)) != "cad_model":
+                continue
+            names.append(str(getattr(wp, "name", "") or ""))
+            metadata = getattr(wp, "metadata", None) or {}
+            for member in metadata.get("parts") or metadata.get("components") or []:
+                if isinstance(member, dict):
+                    names.append(str(member.get("name") or ""))
+                elif isinstance(member, str):
+                    names.append(member)
+        return [n for n in names if n]
+
     async def dfm_review(self, project_id: str | None) -> Any:
         """The project's latest DFM review (FORGE-611), or ``None``."""
         from orchestrator.design_flow.context import parse_dfm_review
