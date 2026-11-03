@@ -35,6 +35,16 @@ mechanical phases for reliable geometry):
 | **Detailed Design** | Author the critical subsystem geometry/schematic + rationale → twin | Design review (G6) |
 | **Simulation & V&V** | Run FEA / ERC-DRC, extract the key result, record a verdict → twin | V&V sign-off (G7) |
 
+**`concept_v1`** decides what to build and stops before any CAD. It runs
+`mech_v1`'s intent (with the [deciding questions](#deciding-questions)),
+needs, requirements, feasibility, route selection and concept design phases,
+copied verbatim (`tests/unit/test_concept_flow.py` fails if they drift), then
+a **Verification Plan** phase that hands the concept on with its checks named:
+for every requirement the method, the load case or measurement, the
+acceptance criterion and the phase that will do it, plus how each of the
+concept's open items will be closed. A concept approved here is the starting
+point for a `mech_v1` run.
+
 **`hardware_v1`** — the full hardware/robotics lifecycle. Every phase is driven
 by a **goal-driven deterministic handler** (see below) so each phase reliably
 lands its real, typed deliverable in the twin:
@@ -886,7 +896,10 @@ than eight questions, repeated ids, or an unanswered question whose source is
 not `open`. Both gate engines (the in-process executor's readiness check and
 the Temporal `_GateCheckers.evaluate`) read the latest record at the intent
 gate: without one the gate is not ready. The intent entity stays the phase's
-only required deliverable, so an earlier run's intent can still be reused.
+only required deliverable, so an earlier run's intent can still be reused, but
+only with its answers: a new flow skips intent only when the project has both
+a current intent and a valid deciding-answers record, so an intent recorded
+before the questions existed is settled again rather than skipped.
 
 **Every later phase is briefed with the answers.** `ReActPhaseBrain` reads
 the project's latest deciding answers before each phase after intent and puts

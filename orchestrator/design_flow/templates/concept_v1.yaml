@@ -1,0 +1,131 @@
+# concept_v1 flow template.
+#
+# Decides what to build, and stops before any CAD: intent (with the deciding
+# questions and earlier runs' lessons), stakeholder needs, requirements,
+# preliminary feasibility, the manufacturing route, and concept design
+# (labelled sketches, the selected assembly, the concept options and the
+# candidate bought and standard parts), whose gate is where the person picks
+# a direction. A concept approved here is the starting point for mech_v1.
+#
+# The requirements, route selection and concept phases are mech_v1's, copied
+# verbatim; tests/unit/test_concept_flow.py fails if the two drift apart.
+# `version` is recorded on every run started from this template. Bump it
+# when the phases or gates change.
+id: concept_v1
+version: 1.0.0
+extends: spine_v1
+name: Concept design (Intent -> Requirements -> Route -> Concept -> Verification plan), stops before CAD
+label: Concept design
+description: Decide what to build before any CAD - labelled sketches, the selected assembly and candidate parts.
+phases:
+- use: intent
+- use: needs
+- id: requirements
+  title: Requirements
+  objective: >-
+    Establish the mechanical requirements from the goal. Quantify the load case (magnitude
+    and where it acts / moment arm), the material class, the safety-factor target, and the
+    mass/envelope budget. Record the requirements and load case as a design decision, scoped
+    to the project.
+  expected_artifacts:
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Requirements sign-off
+    criteria:
+    - Load case quantified (magnitude + location)
+    - Material class and safety-factor target stated
+    - Mass / envelope budget stated
+    - Parent traceability exists (requirements trace to a need)
+- use: feasibility
+- id: route_selection
+  title: Manufacturing Route & Process Selection
+  objective: >-
+    Before any detailed design, choose how the part will be made, from what is available. Read
+    the manufacturing context in this brief (route, machines, stock, quantity, budget); ask the
+    person for anything missing rather than assume it. Pick 2 to 4 candidate processes the route
+    allows, source each one's capability limits and costs as design values with their sources,
+    and rank them with the rank_manufacturing_processes skill. Record a decision
+    (record-decision tool) scoped to the project with manufacturing_route (the recommended route
+    'in_house' or 'vendor', process and material_class) and process_ranking (the candidates with
+    their reasons); a process the person already stated is a one-candidate ranking. Record the
+    chosen process's limits as a constraint set so the design is held to them. If the person
+    cannot decide yet, pass manufacturing_route with deferred: true and their reason. The gate
+    shows the ranking: approving accepts the recommendation; a retry naming another process
+    records that one instead. A decision without manufacturing_route, or a chosen route without
+    process_ranking, leaves the gate not ready.
+  expected_artifacts:
+  - design_decision
+  - constraint_set
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - manufacturing
+  gate:
+    name: Manufacturing route and process decision
+    criteria:
+    - Candidate processes compared on fit, availability and cost at quantity
+    - Capability values sourced, not assumed
+    - Chosen process and material recorded, with its limits as constraints
+- use: concept_selection
+  title: Concept Design
+  objective: >-
+    Before any CAD, decide what to build and show it. Work from this brief: the deciding answers from intent, the requirements and load cases, the chosen manufacturing route, the library's process, machine and material
+    limits (library.process_limits, library.machine_limits, library.get_material), the standard
+    parts and components that can join it (library.standard_part, component.search_intent), and
+    the findings and lessons of earlier runs on this project. Propose 2 or 3 concepts that differ
+    in structure or joinery, each one fit for the route. For each concept draw a labelled sketch
+    with twin.commit_design_sketch as self-contained SVG: front, side and isometric views of a
+    simple block layout of its parts, with part names, joint types, and the key sizes taken from
+    the requirements. Mark every label as intended, assumption or open (an unresolved question);
+    a sketch shows intent and never claims a measured, verified or manufacturable result. Choose
+    one concept (the person picks at this gate; if they said 'you choose', choose and say why)
+    and record a decision with twin.record_decision: the selected assembly in its
+    assembly field (every part with its source, made, bought or standard, and every connection
+    between parts with its joint type), concept_options naming each concept with exactly one
+    selected, the alternatives and why each was rejected, parent_refs to the requirements it
+    serves. Record the standard or bought parts the joints rely on (dowels, screws, inserts) with
+    twin.record_component_selection and selection candidate, with their sizes and sources, for the
+    design phase to confirm. Do not author CAD in this phase.
+  expected_artifacts:
+  - design_sketch
+  - design_decision
+  required_deliverables:
+  - design_sketch
+  - design_decision
+  disciplines:
+  - manufacturing
+  gate:
+    name: Concept Design Gate (G5)
+    criteria:
+    - Two or three concepts proposed, each with a labelled sketch
+    - Selected assembly recorded with every part, connection and joint type
+    - Joints rely on named standard or bought parts with their sources
+    - Concept fits the chosen manufacturing route and its limits
+    - Alternatives recorded with why each was rejected
+    - Sketches labelled as intent; no verified or manufacturable claims
+    gate_id: G5
+- id: verification_plan
+  title: Verification Plan
+  objective: >-
+    Hand the selected concept on with its checks named; author no CAD and run no analysis here.
+    For every requirement on the project, state how the design flow will verify it: the method
+    (analysis, test, inspection or demonstration), the load case or measurement, the acceptance
+    criterion with its source, and the phase that will do it (simulation, DFM review or a
+    physical test). For the requirements whose verification method is test, run
+    twin.generate_test_plan for the project. Name the concept's open items and assumptions that
+    verification must close (for example a joint capacity with no sourced value), each with how
+    it will be closed. Record one decision with twin.record_decision covering the plan, with
+    parent_refs to the requirements and to the concept decision.
+  expected_artifacts:
+  - test_plan
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Concept hand-off (verification plan)
+    criteria:
+    - Every requirement has a verification method, load case or measurement, and acceptance criterion
+    - Each verification is assigned to the phase that will do it
+    - The concept's open items and assumptions each have a way to be closed

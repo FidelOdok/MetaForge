@@ -946,5 +946,238 @@
     }
    ]
   }
+ },
+ "concept_v1": {
+  "content_hash": "809971a9e54a336a3c9f2d230655c9fb1f5133d2275e4e8fa1e766556f938018",
+  "definition": {
+   "id": "concept_v1",
+   "name": "Concept design (Intent -> Requirements -> Route -> Concept -> Verification plan), stops before CAD",
+   "phases": [
+    {
+     "id": "intent",
+     "title": "Intent",
+     "objective": "Establish WHY this product is being built, before any requirements. From the stated goal, identify: the system's purpose, its primary stakeholder(s), the initial operating context, the system boundary (what's in scope vs out of scope), and the desired outcome. Record ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'), scoped to the project. Then settle the deciding questions, once: the few whose answers change this design most (who uses it, the load it carries, the budget, the quantity, the process available, the style), at most eight. Answer each from the goal and the flow context first (source stated); ask the person only what those leave open (source person); where nobody can answer, state your assumption (source assumed) or leave it open (source open). Read the lessons from earlier runs on this project in this brief and keep the ones that bear on this design. Record one decision with twin.record_decision whose deciding_questions field holds questions [{id, question, answer, source}] and lessons [{text, source_run}]. Later phases are briefed with these answers and must not ask them again. Do not choose a design direction here; the concept phase does, once the requirements and the process are known.",
+     "expected_artifacts": [
+      "intent",
+      "design_decision"
+     ],
+     "required_deliverables": [
+      "intent"
+     ],
+     "enforce_deliverables": true,
+     "gate": {
+      "name": "Intent sign-off",
+      "auto_approve": false,
+      "criteria": [
+       "System purpose stated",
+       "Primary stakeholder(s) identified",
+       "System boundary (in/out of scope) defined",
+       "Desired outcome stated",
+       "Deciding questions answered once, each with its source, with earlier runs' lessons"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null
+     },
+     "disciplines": [],
+     "model": null,
+     "slots": [],
+     "depends_on": null,
+     "condition": null,
+     "outcome": ""
+    },
+    {
+     "id": "needs",
+     "title": "Stakeholder Needs",
+     "objective": "Identify the stakeholder needs this product must satisfy, tracing back to the recorded intent. For each stakeholder, capture their need in plain language -- avoid premature implementation detail (that's what requirements are for, next phase). Record each with the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's title], relation='motivates'), scoped to the project.",
+     "expected_artifacts": [
+      "stakeholder_need"
+     ],
+     "required_deliverables": [
+      "stakeholder_need"
+     ],
+     "enforce_deliverables": true,
+     "gate": {
+      "name": "Needs sign-off",
+      "auto_approve": false,
+      "criteria": [
+       "Stakeholder set identified",
+       "Each stakeholder's need captured in plain language",
+       "Needs trace to the recorded intent"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null
+     },
+     "disciplines": [],
+     "model": null,
+     "slots": [],
+     "depends_on": null,
+     "condition": null,
+     "outcome": ""
+    },
+    {
+     "id": "requirements",
+     "title": "Requirements",
+     "objective": "Establish the mechanical requirements from the goal. Quantify the load case (magnitude and where it acts / moment arm), the material class, the safety-factor target, and the mass/envelope budget. Record the requirements and load case as a design decision, scoped to the project.",
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "enforce_deliverables": true,
+     "gate": {
+      "name": "Requirements sign-off",
+      "auto_approve": false,
+      "criteria": [
+       "Load case quantified (magnitude + location)",
+       "Material class and safety-factor target stated",
+       "Mass / envelope budget stated",
+       "Parent traceability exists (requirements trace to a need)"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null
+     },
+     "disciplines": [],
+     "model": null,
+     "slots": [],
+     "depends_on": null,
+     "condition": null,
+     "outcome": ""
+    },
+    {
+     "id": "feasibility",
+     "title": "Preliminary Feasibility",
+     "objective": "Sanity-check feasibility before committing to detailed design. Check the requirement's mass, cost, and power/energy budgets against a first-order estimate; assess first-order structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility; confirm the key technologies involved are actually available; and identify the major risks to the project, each with an owner and a mitigation. Record a feasibility summary as a decision (record-decision tool), scoped to the project -- flag anything infeasible or high-risk explicitly rather than silently proceeding.",
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "enforce_deliverables": true,
+     "gate": {
+      "name": "Preliminary Feasibility Gate (G3)",
+      "auto_approve": false,
+      "criteria": [
+       "Mass budget checked",
+       "Cost budget checked",
+       "Power/energy budget checked",
+       "First-order structural feasibility assessed",
+       "Actuator sizing assessed (where applicable)",
+       "Thermal plausibility assessed",
+       "Geometry feasibility assessed",
+       "Key technologies confirmed available",
+       "Major risks identified, each with an owner and mitigation"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G3"
+     },
+     "disciplines": [],
+     "model": null,
+     "slots": [],
+     "depends_on": null,
+     "condition": null,
+     "outcome": ""
+    },
+    {
+     "id": "route_selection",
+     "title": "Manufacturing Route & Process Selection",
+     "objective": "Before any detailed design, choose how the part will be made, from what is available. Read the manufacturing context in this brief (route, machines, stock, quantity, budget); ask the person for anything missing rather than assume it. Pick 2 to 4 candidate processes the route allows, source each one's capability limits and costs as design values with their sources, and rank them with the rank_manufacturing_processes skill. Record a decision (record-decision tool) scoped to the project with manufacturing_route (the recommended route 'in_house' or 'vendor', process and material_class) and process_ranking (the candidates with their reasons); a process the person already stated is a one-candidate ranking. Record the chosen process's limits as a constraint set so the design is held to them. If the person cannot decide yet, pass manufacturing_route with deferred: true and their reason. The gate shows the ranking: approving accepts the recommendation; a retry naming another process records that one instead. A decision without manufacturing_route, or a chosen route without process_ranking, leaves the gate not ready.",
+     "expected_artifacts": [
+      "design_decision",
+      "constraint_set"
+     ],
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "enforce_deliverables": true,
+     "gate": {
+      "name": "Manufacturing route and process decision",
+      "auto_approve": false,
+      "criteria": [
+       "Candidate processes compared on fit, availability and cost at quantity",
+       "Capability values sourced, not assumed",
+       "Chosen process and material recorded, with its limits as constraints"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null
+     },
+     "disciplines": [
+      "manufacturing"
+     ],
+     "model": null,
+     "slots": [],
+     "depends_on": null,
+     "condition": null,
+     "outcome": ""
+    },
+    {
+     "id": "concept_selection",
+     "title": "Concept Design",
+     "objective": "Before any CAD, decide what to build and show it. Work from this brief: the deciding answers from intent, the requirements and load cases, the chosen manufacturing route, the library's process, machine and material limits (library.process_limits, library.machine_limits, library.get_material), the standard parts and components that can join it (library.standard_part, component.search_intent), and the findings and lessons of earlier runs on this project. Propose 2 or 3 concepts that differ in structure or joinery, each one fit for the route. For each concept draw a labelled sketch with twin.commit_design_sketch as self-contained SVG: front, side and isometric views of a simple block layout of its parts, with part names, joint types, and the key sizes taken from the requirements. Mark every label as intended, assumption or open (an unresolved question); a sketch shows intent and never claims a measured, verified or manufacturable result. Choose one concept (the person picks at this gate; if they said 'you choose', choose and say why) and record a decision with twin.record_decision: the selected assembly in its assembly field (every part with its source, made, bought or standard, and every connection between parts with its joint type), concept_options naming each concept with exactly one selected, the alternatives and why each was rejected, parent_refs to the requirements it serves. Record the standard or bought parts the joints rely on (dowels, screws, inserts) with twin.record_component_selection and selection candidate, with their sizes and sources, for the design phase to confirm. Do not author CAD in this phase.",
+     "expected_artifacts": [
+      "design_sketch",
+      "design_decision"
+     ],
+     "required_deliverables": [
+      "design_sketch",
+      "design_decision"
+     ],
+     "enforce_deliverables": true,
+     "gate": {
+      "name": "Concept Design Gate (G5)",
+      "auto_approve": false,
+      "criteria": [
+       "Two or three concepts proposed, each with a labelled sketch",
+       "Selected assembly recorded with every part, connection and joint type",
+       "Joints rely on named standard or bought parts with their sources",
+       "Concept fits the chosen manufacturing route and its limits",
+       "Alternatives recorded with why each was rejected",
+       "Sketches labelled as intent; no verified or manufacturable claims"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G5"
+     },
+     "disciplines": [
+      "manufacturing"
+     ],
+     "model": null,
+     "slots": [],
+     "depends_on": null,
+     "condition": null,
+     "outcome": ""
+    },
+    {
+     "id": "verification_plan",
+     "title": "Verification Plan",
+     "objective": "Hand the selected concept on with its checks named; author no CAD and run no analysis here. For every requirement on the project, state how the design flow will verify it: the method (analysis, test, inspection or demonstration), the load case or measurement, the acceptance criterion with its source, and the phase that will do it (simulation, DFM review or a physical test). For the requirements whose verification method is test, run twin.generate_test_plan for the project. Name the concept's open items and assumptions that verification must close (for example a joint capacity with no sourced value), each with how it will be closed. Record one decision with twin.record_decision covering the plan, with parent_refs to the requirements and to the concept decision.",
+     "expected_artifacts": [
+      "test_plan",
+      "design_decision"
+     ],
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "enforce_deliverables": true,
+     "gate": {
+      "name": "Concept hand-off (verification plan)",
+      "auto_approve": false,
+      "criteria": [
+       "Every requirement has a verification method, load case or measurement, and acceptance criterion",
+       "Each verification is assigned to the phase that will do it",
+       "The concept's open items and assumptions each have a way to be closed"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null
+     },
+     "disciplines": [],
+     "model": null,
+     "slots": [],
+     "depends_on": null,
+     "condition": null,
+     "outcome": ""
+    }
+   ]
+  }
  }
 }

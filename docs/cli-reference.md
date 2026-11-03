@@ -800,7 +800,7 @@ interactive confirmation. Returns the count of deleted chunks.
 ### `design` — run a gated design flow
 
 ```
-design <goal> [--flow hardware_v1|mech_v1|design_v1] [--project-id <uuid>]
+design <goal> [--flow hardware_v1|mech_v1|design_v1|concept_v1] [--project-id <uuid>]
               [--no-start] [--no-watch]
 ```
 
@@ -817,7 +817,8 @@ A friendly wrapper over `runs create` for the [design-flow
 harness](architecture/design-flow-harness.md): it starts the gated flow for a
 product goal, prints the run id, and (by default) streams the live phase/gate
 transitions. `--flow` picks the lifecycle (`hardware_v1` full 7-phase, `mech_v1`
-mechanical vertical, `design_v1` demo); `--no-watch` returns immediately;
+mechanical vertical, `design_v1` demo, `concept_v1` concept design that stops
+before CAD); `--no-watch` returns immediately;
 `--no-start` creates the run without starting it. Each run pauses at every gate
 for human sign-off — approve with `runs approve <run_id>`.
 
