@@ -111,6 +111,7 @@ def test_a_load_change_reruns_affected_work_and_keeps_the_rest(
         "requirements",
         "feasibility",
         "route_selection",
+        "concept_selection",
         "design",
         "dfm_review",
         "simulation",
@@ -303,7 +304,14 @@ async def test_reused_phases_are_skipped_by_the_real_engine() -> None:
         await asyncio.sleep(0.005)
     await asyncio.wait_for(task, timeout=5.0)
 
-    assert ran == ["feasibility", "route_selection", "design", "dfm_review", "simulation"]
+    assert ran == [
+        "feasibility",
+        "route_selection",
+        "concept_selection",
+        "design",
+        "dfm_review",
+        "simulation",
+    ]
     view = lifecycle_view(accepted.definition.phases, _in_process_state(store.get(run.id)))
     for reused in ("intent", "needs", "requirements"):
         assert view.node(reused).execution_status is ExecutionStatus.SKIPPED
