@@ -59,6 +59,8 @@ class BomComponentResponse(BaseModel):
     datasheetUrl: str | None = None  # noqa: N815
     footprint: str | None = None
     cadModelUrl: str | None = None  # noqa: N815
+    # FORGE-758: a part the concept relies on before design confirms it.
+    selection: Literal["candidate", "selected"] = "selected"
 
 
 class BomListResponse(BaseModel):
@@ -88,6 +90,7 @@ def _item_to_component(item: BOMItem) -> BomComponentResponse:
         datasheetUrl=item.datasheet_url or None,
         footprint=item.footprint or None,
         cadModelUrl=item.cad_model_url or None,
+        selection="candidate" if specs.get("selection") == "candidate" else "selected",
     )
 
 

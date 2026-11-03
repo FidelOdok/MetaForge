@@ -607,7 +607,7 @@
   "version": "1.2.0"
  },
  "mech_v1": {
-  "content_hash": "86c2ab4101eebeba63f234cad6acae51ecaabfb604d5c885ce6a129846eb8bf3",
+  "content_hash": "cf76fddd819dbdaa4d0c2eb981771ef8481a19105a75337fbdb6c74d6de092a1",
   "definition": {
    "id": "mech_v1",
    "name": "Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven",
@@ -771,7 +771,7 @@
     {
      "id": "concept_selection",
      "title": "Concept Design",
-     "objective": "Before any CAD, decide what to build and show it. Work from this brief: the requirements and load cases, the chosen manufacturing route, the library's process, machine and material limits (library.process_limits, library.machine_limits, library.get_material), the standard parts and components that can join it (library.standard_part, component.search_intent), and the findings and lessons of earlier runs on this project. Propose 2 or 3 concepts that differ in structure or joinery, each one fit for the route. For each concept draw a labelled sketch with twin.commit_design_sketch as self-contained SVG: front, side and isometric views of a simple block layout of its parts, with part names, joint types, and the key sizes taken from the requirements. Mark every label as intended, assumption or open (an unresolved question); a sketch shows intent and never claims a measured, verified or manufacturable result. Choose one concept and record a decision with twin.record_decision: the selected assembly (every part, every connection between parts and its joint type), the alternatives and why each was rejected, parent_refs to the requirements it serves. Name the standard or bought parts the joints rely on (dowels, screws, inserts) with their sizes and sources as candidates for the design phase. Do not author CAD in this phase.",
+     "objective": "Before any CAD, decide what to build and show it. Work from this brief: the requirements and load cases, the chosen manufacturing route, the library's process, machine and material limits (library.process_limits, library.machine_limits, library.get_material), the standard parts and components that can join it (library.standard_part, component.search_intent), and the findings and lessons of earlier runs on this project. Propose 2 or 3 concepts that differ in structure or joinery, each one fit for the route. For each concept draw a labelled sketch with twin.commit_design_sketch as self-contained SVG: front, side and isometric views of a simple block layout of its parts, with part names, joint types, and the key sizes taken from the requirements. Mark every label as intended, assumption or open (an unresolved question); a sketch shows intent and never claims a measured, verified or manufacturable result. Choose one concept and record a decision with twin.record_decision: the selected assembly in its assembly field (every part with its source, made, bought or standard, and every connection between parts with its joint type), concept_options naming each concept with exactly one selected, the alternatives and why each was rejected, parent_refs to the requirements it serves. Record the standard or bought parts the joints rely on (dowels, screws, inserts) with twin.record_component_selection and selection candidate, with their sizes and sources, for the design phase to confirm. Do not author CAD in this phase.",
      "expected_artifacts": [
       "design_sketch",
       "design_decision"

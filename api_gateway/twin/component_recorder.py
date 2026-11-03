@@ -50,6 +50,7 @@ tracer = get_tracer("api_gateway.twin.component_recorder")
 
 _BOM_WORK_PRODUCT_NAME = "Bill of Materials"
 _CONTAINER_KIND = "component_selection_container"
+SELECTION_STATES: tuple[str, ...] = ("candidate", "selected")
 
 
 def _urn_segment(value: str) -> str:
@@ -180,6 +181,7 @@ def make_component_recorder(
         supersedes: str | None = None,
         change_reason: str | None = None,
         run_id: str | None = None,
+        selection: str = "selected",
     ) -> dict[str, Any]:
         from twin_core.models.bom_item import BOMItem
 
@@ -189,6 +191,13 @@ def make_component_recorder(
             raise ValueError("component recorder: 'manufacturer' is required (non-empty string)")
         if not category or not isinstance(category, str):
             raise ValueError("component recorder: 'category' is required (non-empty string)")
+        # FORGE-758: the concept phase names parts its joints rely on before
+        # anything is designed; those are candidates until design confirms
+        # them, and must not read as the chosen BOM.
+        if selection not in SELECTION_STATES:
+            raise ValueError(
+                f"component recorder: 'selection' must be one of {', '.join(SELECTION_STATES)}"
+            )
 
         # FORGE-523: a component selection is a definition keyed by the role
         # it fills (or by the part when no role is given), so choosing a
@@ -253,6 +262,7 @@ def make_component_recorder(
                 specifications.update(specs)
             if session_id:
                 specifications["session_id"] = session_id
+            specifications["selection"] = selection
 
             global_asset_id = f"urn:metaforge:bom:{_urn_segment(manufacturer)}:{_urn_segment(mpn)}"
 
