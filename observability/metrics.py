@@ -888,6 +888,19 @@ class MetricsRegistry:
         labels=["outcome"],
     )
 
+    # ── Concept image critique (FORGE-772) ─────────────────────────────
+
+    CONCEPT_IMAGE_CRITIQUE_TOTAL = MetricDefinition(
+        name="metaforge_concept_image_critique_total",
+        type="counter",
+        description=(
+            "Vision-model checks of a concept image against the selected assembly, by "
+            "verdict: consistent, inconsistent, unclear, or unchecked (no assembly, no "
+            "vision model, or a reply that did not fit the schema) (FORGE-772)"
+        ),
+        labels=["verdict"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1015,6 +1028,7 @@ class MetricsRegistry:
             cls.TWIN_RECORD_STALENESS_TOTAL,
             cls.CONCEPT_IMAGE_TOTAL,
             cls.SKETCH_READING_TOTAL,
+            cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
         ]
 
     @classmethod
@@ -1896,6 +1910,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CONCEPT_IMAGE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
+
+    def record_concept_image_critique(self, verdict: str) -> None:
+        """Record one concept image check by its verdict (FORGE-772)."""
+        counter = self._instruments.get(MetricsRegistry.CONCEPT_IMAGE_CRITIQUE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"verdict": verdict})
 
     def record_sketch_reading(self, outcome: str) -> None:
         """Record one sketch reading outcome (FORGE-762)."""

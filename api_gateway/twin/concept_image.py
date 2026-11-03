@@ -29,6 +29,12 @@ the record says which happened rather than implying more:
 
 No SVG rasteriser (cairosvg, resvg) is installed, and the provider does not
 take SVG input, so the sketch's SVG is never sent as is.
+
+Once the image exists, a vision model checks it against the concept's
+selected assembly (``image_critique``) and the result is stored on the render
+as ``metadata.critique``. That check is advisory and best-effort: when it
+cannot run, the critique says ``unchecked`` and why, and the image is still
+returned.
 """
 
 from __future__ import annotations
@@ -194,6 +200,7 @@ def make_concept_image_recorder(
     generator: ImageGenerator | None = None,
     blob_writer: Callable[..., str] | None = None,
     timeout_s: float | None = None,
+    vision_call: Any = None,
 ) -> Any:
     """Return an async ``render(...)`` that generates, labels and commits one image.
 
@@ -201,7 +208,9 @@ def make_concept_image_recorder(
     in the environment at call time, so a provider configured after start
     is picked up and an unconfigured one fails that call, not the gateway.
     ``blob_writer(node_id, filename, content, content_type=...) -> key`` is
-    injectable for tests and defaults to MinIO.
+    injectable for tests and defaults to MinIO. ``vision_call`` is the model
+    call the image check uses (``sketch_reading.VisionCall``); it defaults to
+    the gateway's vision path, made only when an assembly is known.
     """
 
     def _default_writer(node_id: str, filename: str, content: bytes, *, content_type: str) -> str:
@@ -224,7 +233,10 @@ def make_concept_image_recorder(
         size: str = "1024x1024",
         project_id: str | None = None,
         domain: str = "mechanical",
+        decision_ref: str | None = None,
+        assembly: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        from api_gateway.twin.image_critique import check_image, resolve_assembly, unchecked
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
 
@@ -234,6 +246,20 @@ def make_concept_image_recorder(
         if len(brief) > MAX_BRIEF_CHARS:
             raise ValueError(f"concept image: 'visual_brief' is longer than {MAX_BRIEF_CHARS}")
         parse_size(size)
+        # The assembly the image is checked against, found before any paid
+        # call: one asked for by name or given inline that cannot be used is
+        # the caller's error; a project lookup that fails only skips the check.
+        known: Any = None
+        lookup_failed: str | None = None
+        if decision_ref is not None or assembly is not None:
+            known = await resolve_assembly(
+                twin, project_id=project_id, decision_ref=decision_ref, assembly=assembly
+            )
+        else:
+            try:
+                known = await resolve_assembly(twin, project_id=project_id)
+            except Exception as exc:  # noqa: BLE001 - the check is best-effort
+                lookup_failed = f"the concept decision could not be read: {exc}"
 
         with tracer.start_as_current_span("twin.render_concept_image") as span:
             span.set_attribute("concept_image.concept", concept_name)
@@ -294,6 +320,20 @@ def make_concept_image_recorder(
                     f"the concept image was generated but could not be stored ({exc})"
                 ) from exc
 
+            # FORGE-772: a vision model checks the picture against the selected
+            # assembly. Advisory, and never fails the image.
+            if lookup_failed is not None:
+                critique = unchecked(lookup_failed)
+            else:
+                critique = await check_image(
+                    image.image_bytes,
+                    image.mime,
+                    known,
+                    vision_call=vision_call,
+                    concept_name=concept_name,
+                )
+            span.set_attribute("concept_image.critique", str(critique.get("verdict")))
+
             conditioning_record = {
                 **conditioned_on,
                 "image_conditioning": used,
@@ -318,6 +358,9 @@ def make_concept_image_recorder(
                 "model": image.model,
                 "size": size,
                 "generated_by": "twin.render_concept_image",
+                "concept_name": concept_name,
+                # FORGE-772: advisory; the image stays illustrative either way.
+                "critique": critique,
             }
             if layout_node_id:
                 metadata["source_work_product_id"] = layout_node_id
@@ -377,6 +420,7 @@ def make_concept_image_recorder(
                 "model": image.model,
                 "linked_to_layout": linked_to_layout,
                 "project_linked": project_linked,
+                "critique": critique,
             }
             if fmt == "png":
                 # Lifted into an MCP image block by the server, shown in chat.

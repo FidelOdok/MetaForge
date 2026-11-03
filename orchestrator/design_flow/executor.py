@@ -41,6 +41,7 @@ from orchestrator.design_flow.context import (
     INDUSTRIAL_DESIGN_PHASE_ID,
     INTENT_PHASE_ID,
     assembly_conformance_gap,
+    concept_image_check_note,
     concept_pick_note,
     deciding_answers_gap,
     dfm_review_gap,
@@ -973,6 +974,18 @@ class DesignFlowExecutor:
                 note = concept_pick_note(await self._evaluator.concept_options(ctx.project_id))
             except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
                 logger.warning("design_flow_concept_options_error", error=str(exc))
+                note = None
+            if note is not None:
+                notes.append(note)
+        if phase.id == CONCEPT_PHASE_ID and hasattr(self._evaluator, "concept_image_checks"):
+            # FORGE-772: how each concept image matches its assembly. A note
+            # for the reviewer, never a gap: the images are illustrative.
+            try:
+                note = concept_image_check_note(
+                    await self._evaluator.concept_image_checks(ctx.project_id)
+                )
+            except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+                logger.warning("design_flow_concept_image_check_error", error=str(exc))
                 note = None
             if note is not None:
                 notes.append(note)

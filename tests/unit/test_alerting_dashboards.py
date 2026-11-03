@@ -119,7 +119,8 @@ class TestAlertingRules:
         # + 1 run supervisor platform issue (FORGE-734).
         # + 1 concept images unavailable (FORGE-761).
         # + 1 sketch readings unavailable (FORGE-762).
-        assert len(rules) == 61
+        # + 1 concept images unchecked (FORGE-772, severity: info).
+        assert len(rules) == 62
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""

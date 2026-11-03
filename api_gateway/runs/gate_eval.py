@@ -278,6 +278,52 @@ class ProjectGateEvaluator:
         found = await self._latest_decision(project_id, "assembly", parse_concept_assembly)
         return found[0] if found is not None else None
 
+    async def concept_image_checks(self, project_id: str | None) -> list[dict[str, Any]]:
+        """The vision check on each concept's newest image (FORGE-772).
+
+        One entry per concept name, ``{"concept", "verdict", "issues", "reason"}``,
+        from ``metadata.critique`` on renders made by ``twin.render_concept_image``.
+        An image with no check stored reads as unchecked.
+        """
+        getter = getattr(self._twin, "get_work_product", None)
+        if not project_id or getter is None:
+            return []
+        project = await self._backend.get_project(project_id)
+        if project is None:
+            return []
+        renders = [
+            wp
+            for wp in project.work_products
+            if str(getattr(getattr(wp, "type", None), "value", getattr(wp, "type", None)))
+            == "render"
+        ]
+        renders.sort(key=lambda wp: _to_epoch(getattr(wp, "updated_at", None)) or 0.0)
+        latest: dict[str, dict[str, Any]] = {}
+        for wp in renders:
+            try:
+                node = await getter(UUID(str(getattr(wp, "id", ""))))
+            except Exception as exc:  # noqa: BLE001 - one unreadable node must not crash a gate
+                logger.warning("gate_eval_concept_image_read_failed", error=str(exc))
+                continue
+            metadata = dict(getattr(node, "metadata", None) or {})
+            if metadata.get("generated_by") != "twin.render_concept_image":
+                continue
+            concept = str(metadata.get("concept_name") or "") or str(
+                getattr(node, "name", "") or ""
+            ).removeprefix("Concept image: ")
+            raw = metadata.get("critique")
+            critique: dict[str, Any] = raw if isinstance(raw, dict) else {}
+            latest.pop(concept, None)  # the newest image of a concept wins
+            latest[concept] = {
+                "concept": concept,
+                "verdict": str(critique.get("verdict") or "unchecked"),
+                "issues": list(critique.get("issues") or []),
+                "reason": str(critique.get("reason") or "")
+                or ("" if critique else "no check stored on the image"),
+            }
+        logger.info("gate_eval_concept_image_checks", project_id=project_id, count=len(latest))
+        return list(latest.values())
+
     async def cad_part_names(self, project_id: str | None) -> list[str]:
         """The names of the project's committed CAD parts and assembly members."""
         if not project_id:

@@ -2018,6 +2018,15 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("concept_image_renderer", _concept_image)
 
+    # FORGE-772: twin.critique_concept_image. Registered whether or not a
+    # vision model is configured; without one the verdict is "unchecked".
+    def _concept_image_critic() -> Any:
+        from api_gateway.twin.image_critique import make_concept_image_critic
+
+        return make_concept_image_critic(twin, project_backend)
+
+    _try("concept_image_critic", _concept_image_critic)
+
     # FORGE-630: twin.render_work_product, whose blender.render call goes
     # through this server's own registry once it exists.
     try:
