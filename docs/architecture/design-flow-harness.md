@@ -1035,6 +1035,15 @@ read the latest one, and the gate is not ready while a decision is still
 open, the ergonomics check failed, a finish clashes with its material, or no
 finish is chosen.
 
+Each concept is shown two ways. The concept phase first draws its block
+layout with `twin.render_concept_sketch` (the dimensioned, tagged views), then
+makes the concept's AI image from that sketch with `twin.render_concept_image`,
+so a person can judge the direction at a glance. The image is an expected,
+not required, artifact: with no image provider configured, or a provider
+that fails, the phase says so in its decision and the gate still reads the
+sketches. Inside a claimed concept task the image call is a client-task
+write, so it is not held for approval like a call outside any task.
+
 A sketch shows intent and is never evidence. Sketches and renders are
 committed with `metadata.authority = "illustrative"`, the gate review brief
 reports each work product's authority (`illustrative` for a sketch, render

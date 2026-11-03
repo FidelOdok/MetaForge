@@ -95,10 +95,20 @@ def deliverable_hints(pid: str) -> dict[str, str]:
     )
     return {
         "design_sketch": (
-            "draw it with the commit-design-sketch tool as self-contained SVG (front, side "
-            "and isometric views of the block layout), labelling every part, joint and key "
-            "size as intended, assumption or open; a sketch shows intent and never claims a "
-            f"measured, verified or manufacturable result, project_id={pid}"
+            # FORGE-771: the block layout is drawn by the renderer, then shown
+            # as an AI concept image made from it.
+            "draw the block layout with the render-concept-sketch tool (every part with its "
+            "size and position, every joint, each tagged intended, assumption or open), then "
+            "make an AI concept image from that sketch with the render-concept-image tool "
+            "(layout_node_id = the sketch, a short visual_brief); a sketch or image shows "
+            "intent and never claims a measured, verified or manufacturable result, "
+            f"project_id={pid}"
+        ),
+        "render": (
+            "in the concept phase, make it from the concept's sketch with the "
+            "render-concept-image tool (layout_node_id = the sketch's node id, a short "
+            "visual_brief: product, materials, finish, style); after CAD, render the "
+            f"committed model with the render-work-product tool, project_id={pid}"
         ),
         "design_decision": (
             "record it with the record-decision tool (title, rationale, alternatives), "
