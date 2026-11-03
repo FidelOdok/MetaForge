@@ -900,6 +900,12 @@ async def record_review(app: Any, run_id: str, review: GateReview) -> GateReview
         review.created_at = datetime.now(UTC).isoformat()
     if not review.reviewer:
         review.reviewer = f"reviewer:{review.source}:{review.model or 'unknown'}"
+    if review.recommendation == "rework" and review.to_phase in ("", review.phase):
+        # FORGE-747: redoing the phase under review is a retry. A reviewer
+        # that called it a rework of that phase (the Chair feasibility gate)
+        # named a target no gate offers, so the policy could never apply it.
+        logger.info("gate_review_rework_to_own_phase", run_id=run_id, phase=review.phase)
+        review.recommendation, review.to_phase = "retry", ""
     applied, note = await _apply_policy(app, run, review)
     review.applied, review.applied_note = applied, note
     reviews = [*(run.request.get(REVIEWS_KEY) or []), review.model_dump()][-_MAX_REVIEWS:]

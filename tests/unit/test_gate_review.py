@@ -206,6 +206,27 @@ def test_auto_retries_with_the_reviewers_reasons(client: TestClient) -> None:
     assert record["decision"] == "retry" and "Record a material." in record["reason"]
 
 
+@pytest.mark.parametrize("to_phase", ["design", ""])
+def test_a_rework_of_the_phase_under_review_is_a_retry(client: TestClient, to_phase: str) -> None:
+    # FORGE-747: the reviewer of the Chair feasibility gate recommended
+    # "rework to feasibility". Redoing the phase under review is a retry, and
+    # as a rework it named a target no gate offers.
+    _set(client, "auto")
+    run_id = _gate(ready=False)
+    stored = _review(
+        client,
+        run_id,
+        recommendation="rework",
+        to_phase=to_phase,
+        confidence=0.7,
+        reasons="Add budgets.",
+    ).json()
+    assert stored["recommendation"] == "retry" and stored["to_phase"] == ""
+    assert stored["applied"] == "decided"
+    record = client.get(f"/v1/approvals/gate:{run_id}").json()["decision"]
+    assert record["decision"] == "retry"
+
+
 def test_the_reviewer_never_rejects_on_its_own(client: TestClient) -> None:
     _set(client, "auto")
     run_id = _gate()
