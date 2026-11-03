@@ -1286,6 +1286,18 @@ class TwinServer(McpToolServer):
                             ),
                             "items": {"type": "object"},
                         },
+                        "kickoff": {
+                            "type": "object",
+                            "description": (
+                                "On the kickoff decision: questions [{id, question, answer, "
+                                "source (stated | person | assumed | open)}], at most 8; "
+                                "directions [{name, rationale, risk}], two or three; picked "
+                                "(a direction name, or 'auto' with chosen = the direction you "
+                                "chose and why); lessons [{text, source_run}] from earlier "
+                                "runs. The kickoff gate reads it and every later phase is "
+                                "briefed with it."
+                            ),
+                        },
                         "manufacturing_route": {
                             "type": "object",
                             "description": (
@@ -1390,6 +1402,11 @@ class TwinServer(McpToolServer):
             if not isinstance(options, list):
                 raise ValueError("twin.record_decision: 'concept_options' must be an array")
             kwargs["concept_options"] = options
+        kickoff = arguments.get("kickoff")
+        if kickoff is not None:
+            if not isinstance(kickoff, dict):
+                raise ValueError("twin.record_decision: 'kickoff' must be an object")
+            kwargs["kickoff"] = kickoff
         return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------

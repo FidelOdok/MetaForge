@@ -483,7 +483,18 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
     recorder = make_geometry_recorder(get_twin(), project_backend)
     bom_recorder = make_bom_recorder(get_twin(), project_backend)
     doc_recorder = make_document_recorder(get_twin(), project_backend)
-    react = ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}")
+    # The kickoff record and earlier runs' lessons reach the phase briefs
+    # through the twin and the run records, read the same way on both engines.
+    from api_gateway.runs.gate_eval import ProjectGateEvaluator
+    from api_gateway.runs.prior_lessons import make_lessons_reader
+
+    kickoff_source = ProjectGateEvaluator(project_backend, twin=get_twin())
+    react = ReActPhaseBrain(
+        mcp_bridge=bridge,
+        session_id=f"flow:{run_id}",
+        kickoff_reader=kickoff_source.kickoff,
+        lessons_reader=make_lessons_reader(run_id, kickoff_source, get_twin()),
+    )
 
     # Per-flow brain routing:
     #  - design_v1: deterministic quadruped-demo handlers (reliable, hardcoded).
@@ -539,8 +550,10 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
 from orchestrator.design_flow.context import (  # noqa: E402
     DESIGN_PHASE_ID,
     DFM_REVIEW_PHASE_ID,
+    KICKOFF_PHASE_ID,
     assembly_conformance_gap,
     dfm_review_gap,
+    kickoff_gap,
     route_decision_gap,
 )
 from orchestrator.design_flow.generator import ROUTE_SELECTION_PHASE_ID  # noqa: E402
@@ -647,6 +660,16 @@ class _GateCheckers:
                 missing.append(gap)
             elif assembly is not None:
                 route_note += f"; built to the concept: {assembly.summary()}"
+
+        if phase_id == KICKOFF_PHASE_ID and hasattr(self._evaluator, "kickoff"):
+            # The kickoff gate is where the person picks a direction: it needs
+            # the record, and its reason lists the directions to pick from.
+            kickoff = await self._evaluator.kickoff(project_id)
+            gap = kickoff_gap(kickoff)
+            if gap is not None:
+                missing.append(gap)
+            elif kickoff is not None:
+                route_note += f"; {kickoff.gate_note()}"
 
         constraints = await self._constraints.check(project_id)
         check_findings: list[str] = []

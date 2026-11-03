@@ -132,6 +132,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         dfm_review: dict[str, Any] | None = None,
         assembly: dict[str, Any] | None = None,
         concept_options: list[dict[str, Any]] | None = None,
+        kickoff: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
         from twin_core.models.enums import WorkProductType
@@ -166,6 +167,16 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 options = parse_concept_options(concept_options)
         except ValueError as exc:
             raise ValueError(f"twin.record_decision: {exc}") from exc
+        # The kickoff: deciding questions, directions and the pick, as data
+        # the kickoff gate and every later phase brief read.
+        kickoff_record = None
+        if kickoff is not None:
+            from orchestrator.design_flow.context import parse_kickoff
+
+            try:
+                kickoff_record = parse_kickoff(kickoff)
+            except ValueError as exc:
+                raise ValueError(f"twin.record_decision: {exc}") from exc
         route_decision = None
         if manufacturing_route is not None:
             # FORGE-608: what the route-selection gate reads. Checked here so a
@@ -194,6 +205,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
             )
             if selected_assembly is not None:
                 markdown += "\n" + selected_assembly.markdown()
+            if kickoff_record is not None:
+                markdown += "\n" + kickoff_record.markdown()
             content = markdown.encode("utf-8")
             content_hash = hashlib.sha256(content).hexdigest()
             filename = f"{_slug(title)}.md"
@@ -303,6 +316,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["assembly"] = selected_assembly.as_metadata()
             if options is not None:
                 metadata["concept_options"] = [o.as_metadata() for o in options]
+            if kickoff_record is not None:
+                metadata["kickoff"] = kickoff_record.as_metadata()
             metadata.update(pin_metadata(pins))
             if pins:
                 # FORGE-528's list of refs, now every pin (one depends_on).

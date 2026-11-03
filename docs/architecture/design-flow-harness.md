@@ -22,7 +22,8 @@ Requirements Harness epic: **Intent** (G0, "Intent sign-off") and
 **Stakeholder Needs** (G1, "Needs sign-off") — see
 [`engineering-intent-requirements-harness.md`](https://github.com/FidelOdok/MetaForge-Planner/blob/main/docs/architecture/engineering-intent-requirements-harness.md)
 for the full 9-gate model (G0–G8). The tables below start at Requirements (G2)
-onward for brevity; `intent` and `needs` always run first.
+onward for brevity; `intent` and `needs` always run first, except that
+`mech_v1` opens with a short [Kickoff](#kickoff-mech-v1) before them.
 
 **`design_v1`** — the thin mechanical vertical (deterministic handlers drive the
 mechanical phases for reliable geometry):
@@ -856,6 +857,80 @@ execution path yet — so this handler's selection is the LLM's own reasoning,
 not an objective-weighted ranking. Wiring a real read path for engineering
 entities is separate, later work.
 
+### Kickoff in mech_v1 {#kickoff-mech-v1}
+
+`mech_v1` opens with a **Kickoff** phase, before `intent`, so the person
+knows the design direction within the first minutes of a run. It records one
+`design_decision` whose `kickoff` field holds:
+
+```
+{
+  "questions":  [{"id", "question", "answer", "source"}],   // 1 to 8
+  "directions": [{"name", "rationale", "risk"}],            // 2 or 3
+  "picked":     "<a direction's name>" | "auto",
+  "chosen":     "<the agent's direction, for auto>",
+  "why":        "<the reason, required for auto>",
+  "lessons":    [{"text", "source_run"}]
+}
+```
+
+- **Deciding questions** are the few whose answers change the design most
+  (who uses it, the load, the budget, the quantity, the process available,
+  the style). Each answer says where it came from: `stated` (the goal or the
+  flow context), `person`, `assumed` (the agent's stated assumption) or
+  `open`. Every later phase brief carries the answers under "do not ask them
+  again", so they are asked once.
+- **Directions** are two or three named directions for the product type, for
+  a chair: four-leg dowelled, slot-together flat-pack, cantilever, each with
+  a one-line rationale and its main risk.
+- **The pick** names one direction, or is `auto` when the person said "you
+  choose" or nobody could answer yet: then the agent names the direction it
+  chose (`chosen`) and why (`why`).
+
+`twin.record_decision` checks the record with `parse_kickoff`
+(`orchestrator/design_flow/context.py`) and refuses a malformed one: a pick
+that is not one of the directions, `auto` without a choice and a reason, a
+direction with no risk, more than eight questions, or an unanswered question
+whose source is not `open`.
+
+**The gate is the "pick a direction" card.** Both engines (the in-process
+executor's readiness check and the Temporal `_GateCheckers.evaluate`) read the
+latest kickoff record: without one the gate is not ready, and with one its
+reason lists every direction with its rationale and risk, the pick, and how to
+change it: approving accepts the picked direction; a retry naming another
+direction, or saying "you choose", sends the phase back with that answer, and
+it records a new kickoff. The reason is the same text the dashboard and the
+plugin already show at a gate; there is no separate dashboard card yet. Under
+an approval policy that lets a reviewer decide, the reviewer may approve the
+pick like any other gate.
+
+**Every later phase is briefed with it.** `ReActPhaseBrain` reads the
+project's latest kickoff record before each phase after the kickoff and puts
+it in the brief, after the prior phases: the answers, the picked direction
+with its rationale and risk, and the directions not taken. The concept phase
+is also told to build on the picked direction: one concept develops it, and a
+concept that departs from it says why.
+
+**Earlier runs are reused.** The kickoff and concept briefs also list what
+earlier runs on the same project learned, collected by
+`api_gateway/runs/prior_lessons.py` with the pure helpers in
+`orchestrator/design_flow/prior_lessons.py`:
+
+- gate rejections: the reason on every reject, retry or rework logged on an
+  earlier run's decisions;
+- reviewer findings: the reasons of a reviewer's retry, rework or reject, and
+  every concern it raised;
+- recorded lessons: the latest kickoff record's own lessons and the twin's
+  rejected item revisions with their gate reasons.
+
+They are newest first, deduplicated on their text and capped at eight. The
+current run is left out. The gateway reads runs from its run store; the
+Temporal worker, whose store is empty, reads the run ledger file the gateway
+writes, read-only, from the `~/.metaforge` volume the two share. A source that
+cannot be read costs its lessons, never the phase. The kickoff phase carries
+the lessons that bear on the design into its record, so a later run finds
+them there too.
+
 ### Concept design in mech_v1 and illustrative sketches {#concept-design-mech-v1}
 
 `mech_v1` now carries the same **Concept Selection** phase (`use:
@@ -978,6 +1053,7 @@ and a dedicated `forge design` CLI wrapper.
 | `api_gateway/runs/{req,arch,mech,elec,fw,vv,mfg}_handlers.py` | Goal-driven deterministic phase handlers |
 | `api_gateway/twin/{geometry,bom,document}_recorder.py` | Persist typed artifacts loadably (blob + `content_hash` + project link) |
 | `api_gateway/runs/gate_eval.py` | `ProjectGateEvaluator` — deliverable enforcement (loadable `cad_model`) |
+| `api_gateway/runs/prior_lessons.py`, `orchestrator/design_flow/prior_lessons.py` | Earlier runs' gate rejections, reviewer findings and recorded lessons for the kickoff and concept briefs |
 | `api_gateway/runs/routes.py` | Per-flow handler routing; launches the executor on a design-flow `POST /v1/runs` |
 | `evals/run_scenarios.py`, `evals/*_rubric.py` | Eval flywheel: scenario runner + correctness rubrics |
 | `evals/run_chat_scenarios.py`, `evals/chat_*_rubric.py` | Chat context-engineering evals: multi-turn scenarios + trajectory rubrics |
