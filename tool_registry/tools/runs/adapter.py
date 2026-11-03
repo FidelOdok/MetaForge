@@ -63,7 +63,7 @@ class RunsServer(McpToolServer):
                         },
                         "flow": {
                             "type": "string",
-                            "enum": ["hardware_v1", "mech_v1", "design_v1"],
+                            "enum": ["hardware_v1", "mech_v1", "design_v1", "concept_v1"],
                             "description": "Lifecycle to run (default hardware_v1).",
                         },
                         "project_id": {

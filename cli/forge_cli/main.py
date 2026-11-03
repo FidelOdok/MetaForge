@@ -274,7 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
     design_parser.add_argument(
         "--flow",
         default="hardware_v1",
-        choices=["hardware_v1", "mech_v1", "design_v1"],
+        choices=["hardware_v1", "mech_v1", "design_v1", "concept_v1"],
         help="Design flow to run (default: hardware_v1)",
     )
     design_parser.add_argument("--project-id", default=None, help="Scope the run to a project")

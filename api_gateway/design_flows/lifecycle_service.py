@@ -167,8 +167,41 @@ async def current_item_types(twin: Any, project_id: str | None) -> tuple[str, ..
     except Exception as exc:  # noqa: BLE001 - "not checked", never "nothing exists"
         logger.warning("flow_current_items_unavailable", project_id=project_id, error=str(exc))
         return None
+    if "intent" in current and not await _has_deciding_answers(twin, project_id):
+        # FORGE-768: intent also settles the deciding questions. An intent
+        # recorded before they existed is not a settled intent, so the phase
+        # runs again rather than being skipped with nothing asked.
+        current.discard("intent")
+        logger.info("flow_intent_not_reused_without_answers", project_id=project_id)
     logger.info("flow_current_items_read", project_id=project_id, current=sorted(current))
     return tuple(sorted(current))
+
+
+async def _has_deciding_answers(twin: Any, project_id: str) -> bool:
+    """Does the project have a decision carrying valid deciding answers?
+
+    False when it cannot be read: running intent again costs a phase, while
+    skipping it on a guess loses the answers every later brief relies on.
+    """
+    try:
+        from orchestrator.design_flow.context import parse_deciding_answers
+        from twin_core.models.enums import WorkProductType
+
+        decisions = await twin.list_work_products(
+            work_product_type=WorkProductType.DESIGN_DECISION, project_id=UUID(str(project_id))
+        )
+        for wp in decisions:
+            value = (getattr(wp, "metadata", None) or {}).get("deciding_questions")
+            if value is None:
+                continue
+            try:
+                parse_deciding_answers(value)
+            except ValueError:
+                continue
+            return True
+    except Exception as exc:  # noqa: BLE001 - unreadable reads as "not settled"
+        logger.warning("flow_deciding_answers_unreadable", project_id=project_id, error=str(exc))
+    return False
 
 
 async def requirement_rows(
