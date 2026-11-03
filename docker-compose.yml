@@ -126,6 +126,10 @@ services:
       # OpenRouter — read by digital_twin/knowledge/openrouter_lightrag.py
       # and openrouter_property_llm.py. Tunables fall back to in-code defaults.
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      # FORGE-769: AI concept images (twin.render_concept_image); opt-in, paid.
+      - METAFORGE_IMAGE_PROVIDER=${METAFORGE_IMAGE_PROVIDER:-}
+      - METAFORGE_IMAGE_MODEL=${METAFORGE_IMAGE_MODEL:-}
+      - METAFORGE_IMAGE_TIMEOUT_S=${METAFORGE_IMAGE_TIMEOUT_S:-}
       - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
       - LIGHTRAG_FALLBACK_MODEL=${LIGHTRAG_FALLBACK_MODEL:-}
       - PROPERTY_EXTRACTION_MODEL=${PROPERTY_EXTRACTION_MODEL:-}
@@ -544,6 +548,10 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      # FORGE-769: AI concept images (twin.render_concept_image); opt-in, paid.
+      - METAFORGE_IMAGE_PROVIDER=${METAFORGE_IMAGE_PROVIDER:-}
+      - METAFORGE_IMAGE_MODEL=${METAFORGE_IMAGE_MODEL:-}
+      - METAFORGE_IMAGE_TIMEOUT_S=${METAFORGE_IMAGE_TIMEOUT_S:-}
       - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
       # MET-436: digikey/mouser/nexar adapters + offer_resolver need these to
       # register with live credentials — the gateway service (docker-compose.yml)

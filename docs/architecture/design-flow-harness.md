@@ -984,7 +984,10 @@ text chunk; where Pillow is missing the image is wrapped in an SVG whose text
 element carries the label instead, and no layout image is sent. Like every
 sketch and render it can never back a requirement claim. Generation is opt-in
 because each image is a paid call. `METAFORGE_IMAGE_PROVIDER=openrouter`
-uses the gateway's existing `OPENROUTER_API_KEY`: the layout image and the
+uses the OpenRouter key the deployment already has (`OPENROUTER_API_KEY`,
+`OPEN_ROUTER_API_KEY`, or `METAFORGE_LLM_API_KEY` when OpenRouter is the LLM
+provider), and the compose file passes the `METAFORGE_IMAGE_*` settings to the
+gateway and the MCP sidecar: the layout image and the
 prompt go to OpenRouter's chat completions with the image output modality,
 and the picture comes back in the reply, so any image model on OpenRouter is
 a `METAFORGE_IMAGE_MODEL` slug (default `google/gemini-2.5-flash-image`;
