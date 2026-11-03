@@ -157,6 +157,13 @@ async def build_review_brief(payload: dict[str, Any], gateway: _Gateway) -> dict
                         "name": node.get("name"),
                         "created_by": props.get("created_by") or props.get("authored_by"),
                         "material": props.get("material"),
+                        # FORGE-759: a sketch or render shows intent, never evidence.
+                        "authority": (
+                            "illustrative"
+                            if wp_type in ("design_sketch", "render", "image")
+                            or props.get("authority") == "illustrative"
+                            else props.get("authority") or "record"
+                        ),
                         "summary": _compact(
                             props.get("rationale")
                             or props.get("content")

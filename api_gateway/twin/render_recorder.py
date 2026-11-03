@@ -339,6 +339,8 @@ def make_work_product_renderer(
             "source_work_product_id": str(source.id),
             "source_content_hash": source_hash,
             "rendered_by": "blender.render",
+            # FORGE-759: a picture of the design, never a measurement of it.
+            "authority": "illustrative",
             **settings,
         }
         now = datetime.now(UTC)

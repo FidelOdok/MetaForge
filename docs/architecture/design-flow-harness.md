@@ -856,6 +856,27 @@ execution path yet — so this handler's selection is the LLM's own reasoning,
 not an objective-weighted ranking. Wiring a real read path for engineering
 entities is separate, later work.
 
+### Concept design in mech_v1 and illustrative sketches {#concept-design-mech-v1}
+
+`mech_v1` now carries the same **Concept Selection** phase (`use:
+concept_selection`, titled "Concept Design"), placed after the process
+choice (`route_selection`) and before `industrial_design`, so a product's
+structure and joints are decided before anyone authors CAD. The phase asks
+for two or three concepts, one labelled sketch per concept committed with
+`twin.commit_design_sketch` (self-contained SVG, each label marked
+*intended*, *assumption* or *open*), and a `design_decision` that names the
+selected assembly (parts, connections, joint types), the rejected
+alternatives and any candidate standard or bought parts. Both
+`design_sketch` and `design_decision` are required deliverables, the gate is
+G5, and the objective says outright that no CAD is authored in this phase.
+
+A sketch shows intent and is never evidence. Sketches and renders are
+committed with `metadata.authority = "illustrative"`, the gate review brief
+reports each work product's authority (`illustrative` for a sketch, render
+or image, otherwise the recorded authority), and `twin.record_claim` refuses
+a claim whose artefact is illustrative: a requirement is satisfied by the
+CAD model, analysis or test that shows it, not by a drawing of the idea.
+
 ### Waiver / release model {#waiver-release-model}
 
 `evaluate_g8_release`'s "waivers approved" and "build/manufacturing release
