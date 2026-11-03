@@ -886,6 +886,36 @@ just as illustrative. A part may be given as `bbox_mm`, the two corners of
 its bounding box, which is what a CAD assembly reports per part: a sketch
 drawn from CAD (type E, later work) can feed the same renderer.
 
+A block layout is accurate and dry, so a concept can also get an appealing
+picture that stays honest about what it is (sketch type A).
+`twin.render_concept_image` takes either the `layout_node_id` of a sketch
+drawn by `twin.render_concept_sketch` (which now keeps its layout in
+`metadata.concept_layout`) or an inline layout in the same schema, plus a
+short `visual_brief` from the model: the product, its materials, its style.
+The layout is drawn as a grey isometric block image, the same projection as
+the sketch's isometric view, and sent with the brief to an image model, which
+is told to keep the proportions and arrangement and to render the finished
+product. The result is a `render` work product with
+`metadata.authority = "illustrative"`, linked `generated_from` to its sketch.
+It records what conditioned it in `metadata.conditioned_on` (the layout's
+source, its content hash, the sketch node when there is one, and
+`image_conditioning`: `layout_png` when the layout image reached the model,
+`none` when only the brief and the part list did), along with the brief, the
+exact prompt, the provider and the model. The label "AI concept image,
+illustrative only" is drawn as a banner into the pixels and kept in the PNG's
+text chunk; where Pillow is missing the image is wrapped in an SVG whose text
+element carries the label instead, and no layout image is sent. Like every
+sketch and render it can never back a requirement claim. Generation is opt-in
+because each image is a paid call: `METAFORGE_IMAGE_PROVIDER=openai` turns on
+OpenAI's images API (`METAFORGE_IMAGE_MODEL`, default `gpt-image-1`, which
+takes the layout through its edits endpoint), using the existing
+`OPENAI_API_KEY`, with `METAFORGE_IMAGE_TIMEOUT_S` (default 120) bounding the
+call. With no provider configured the tool fails at once with a message
+saying what to set, a provider that does not answer in time is a timeout
+error, and neither writes anything. Outcomes are counted in
+`metaforge_concept_image_total{outcome}`, and `ConceptImageGenerationUnavailable`
+warns when most requests in an hour fail.
+
 The concept decision carries what it selects as data, not prose.
 `twin.record_decision` takes an `assembly` (each part with its source, made,
 bought or standard, plus material, process, quantity and a provenance tag,

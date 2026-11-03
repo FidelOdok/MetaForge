@@ -13,6 +13,7 @@ shape it answers in plain English so the LLM can match intent fast.
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,8 @@ from tool_registry.tools.twin.concept_sketch import (
     EXPLODE_DIRECTIONS,
     PROVENANCE_TAGS,
     VIEWS,
+    iso_faces,
+    layout_to_dict,
     parse_layout,
     render_concept_sketch,
 )
@@ -168,6 +171,87 @@ def _depends_on_kwarg(arguments: dict[str, Any], tool: str) -> dict[str, Any]:
     return {"depends_on": refs} if refs else {}
 
 
+#: The sizes the image provider accepts (FORGE-761).
+_CONCEPT_IMAGE_SIZES: tuple[str, ...] = ("1024x1024", "1536x1024", "1024x1536")
+
+
+def _concept_layout_properties() -> dict[str, Any]:
+    """The block layout's input schema, shared by the sketch and the concept image."""
+    vec3 = {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+    provenance = {"type": "string", "enum": list(PROVENANCE_TAGS)}
+    return {
+        "concept_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The concept this sketch shows, for the title block.",
+        },
+        "parts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 60,
+            "description": "The blocks. x is width, y depth, z height.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1},
+                    "shape": {"type": "string", "enum": ["box", "cylinder"]},
+                    "size_mm": {
+                        **vec3,
+                        "description": "Extents [x, y, z], each above zero.",
+                    },
+                    "position_mm": {
+                        **vec3,
+                        "description": "Minimum corner [x, y, z] (def 0,0,0).",
+                    },
+                    "bbox_mm": {
+                        "type": "array",
+                        "items": vec3,
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": (
+                            "[[xmin, ymin, zmin], [xmax, ymax, zmax]] in place "
+                            "of size_mm and position_mm, as a CAD assembly "
+                            "reports its parts."
+                        ),
+                    },
+                    "provenance": provenance,
+                    "axis": {
+                        "type": "string",
+                        "enum": ["x", "y", "z"],
+                        "description": "A cylinder's axis (def z).",
+                    },
+                    "explode": {
+                        "type": "string",
+                        "enum": list(EXPLODE_DIRECTIONS),
+                        "description": (
+                            "The axis this part assembles along, for the exploded view (def auto)."
+                        ),
+                    },
+                },
+                "required": ["name", "provenance"],
+            },
+        },
+        "connections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "a": {"type": "string", "description": "A part name."},
+                    "b": {"type": "string", "description": "Another part name."},
+                    "joint": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Joint type, e.g. '8 mm dowel'.",
+                    },
+                    "provenance": provenance,
+                },
+                "required": ["a", "b", "joint"],
+            },
+        },
+        "notes": {"type": "string", "description": "One line for the title block."},
+    }
+
+
 class TwinServer(McpToolServer):
     """MCP adapter wrapping ``TwinAPI`` for harness consumption."""
 
@@ -187,6 +271,7 @@ class TwinServer(McpToolServer):
         document_recorder: Any = None,
         blob_stager: Any = None,
         design_sketch_recorder: Any = None,
+        concept_image_renderer: Any = None,
         sketch_interpreter: Any = None,
         sketch_reading_decider: Any = None,
         hazard_analysis_recorder: Any = None,
@@ -312,6 +397,10 @@ class TwinServer(McpToolServer):
         # committing to real CAD/build work. Same injection seam as
         # geometry_recorder; None keeps tool_registry free of api_gateway.
         self._design_sketch_recorder = design_sketch_recorder
+        # FORGE-761: an injected async ``render(...)`` (make_concept_image_
+        # recorder) that has an image model draw a concept from its block
+        # layout and a visual brief, and commits it as an illustrative render.
+        self._concept_image_renderer = concept_image_renderer
         # FORGE-762: an injected async ``interpret(...)`` (make_sketch_interpreter)
         # that has a vision model read an uploaded sketch into a *proposed*
         # concept reading, and ``decide(...)`` (make_sketch_reading_decider)
@@ -549,6 +638,8 @@ class TwinServer(McpToolServer):
             self._register_commit_design_sketch()
             # FORGE-760: the drawn sketch commits through the same recorder.
             self._register_render_concept_sketch()
+        if concept_image_renderer is not None:
+            self._register_render_concept_image()
         if sketch_interpreter is not None:
             self._register_interpret_sketch()
         if sketch_reading_decider is not None:
@@ -3531,8 +3622,6 @@ class TwinServer(McpToolServer):
     # ------------------------------------------------------------------
 
     def _register_render_concept_sketch(self) -> None:
-        vec3 = {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
-        provenance = {"type": "string", "enum": list(PROVENANCE_TAGS)}
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="twin.render_concept_sketch",
@@ -3553,76 +3642,7 @@ class TwinServer(McpToolServer):
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "concept_name": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "The concept this sketch shows, for the title block.",
-                        },
-                        "parts": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 60,
-                            "description": "The blocks. x is width, y depth, z height.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {"type": "string", "minLength": 1},
-                                    "shape": {"type": "string", "enum": ["box", "cylinder"]},
-                                    "size_mm": {
-                                        **vec3,
-                                        "description": "Extents [x, y, z], each above zero.",
-                                    },
-                                    "position_mm": {
-                                        **vec3,
-                                        "description": "Minimum corner [x, y, z] (def 0,0,0).",
-                                    },
-                                    "bbox_mm": {
-                                        "type": "array",
-                                        "items": vec3,
-                                        "minItems": 2,
-                                        "maxItems": 2,
-                                        "description": (
-                                            "[[xmin, ymin, zmin], [xmax, ymax, zmax]] in place "
-                                            "of size_mm and position_mm, as a CAD assembly "
-                                            "reports its parts."
-                                        ),
-                                    },
-                                    "provenance": provenance,
-                                    "axis": {
-                                        "type": "string",
-                                        "enum": ["x", "y", "z"],
-                                        "description": "A cylinder's axis (def z).",
-                                    },
-                                    "explode": {
-                                        "type": "string",
-                                        "enum": list(EXPLODE_DIRECTIONS),
-                                        "description": (
-                                            "The axis this part assembles along, for the "
-                                            "exploded view (def auto)."
-                                        ),
-                                    },
-                                },
-                                "required": ["name", "provenance"],
-                            },
-                        },
-                        "connections": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "a": {"type": "string", "description": "A part name."},
-                                    "b": {"type": "string", "description": "Another part name."},
-                                    "joint": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "description": "Joint type, e.g. '8 mm dowel'.",
-                                    },
-                                    "provenance": provenance,
-                                },
-                                "required": ["a", "b", "joint"],
-                            },
-                        },
-                        "notes": {"type": "string", "description": "One line for the title block."},
+                        **_concept_layout_properties(),
                         "name": {
                             "type": "string",
                             "description": "Work product name (def 'Concept sketch: <concept>').",
@@ -3679,6 +3699,9 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             domain=domain if isinstance(domain, str) and domain else "mechanical",
             source_tool="twin.render_concept_sketch",
+            # FORGE-761: the layout itself, so twin.render_concept_image can
+            # start from exactly what this sketch shows.
+            extra_metadata={"concept_layout": layout_to_dict(layout)},
         )
         width, depth, height = layout.overall()
         return {
@@ -3688,6 +3711,182 @@ class TwinServer(McpToolServer):
             "connection_count": len(layout.connections),
             "overall_mm": {"width": width, "depth": depth, "height": height},
         }
+
+    # ------------------------------------------------------------------
+    # twin.render_concept_image (FORGE-761)
+    # ------------------------------------------------------------------
+
+    def _register_render_concept_image(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.render_concept_image",
+                adapter_id="twin",
+                name="Render Concept Image",
+                description=(
+                    "Have an image model draw an appealing concept image from a block layout "
+                    "and a short visual brief (the product, its materials, its style), and "
+                    "commit it as an illustrative RENDER work product. Give either "
+                    "layout_node_id (a sketch made by twin.render_concept_sketch) or an "
+                    "inline layout in the same schema, plus visual_brief. The layout is "
+                    "drawn as an isometric block image the model must follow, so the "
+                    "picture keeps the concept's proportions. The image is stamped 'AI "
+                    "concept image, illustrative only', records what conditioned it (layout "
+                    "hash and node, brief, prompt, provider, model), is linked to its "
+                    "sketch, and can never back a requirement claim. Costs a paid image "
+                    "generation call; fails clearly when no image provider is configured."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "layout_node_id": {
+                            "type": "string",
+                            "description": (
+                                "A design_sketch node made by twin.render_concept_sketch. "
+                                "Give this or layout, not both."
+                            ),
+                        },
+                        "layout": {
+                            "type": "object",
+                            "description": (
+                                "An inline block layout, the same schema as "
+                                "twin.render_concept_sketch. Give this or layout_node_id."
+                            ),
+                            "properties": _concept_layout_properties(),
+                            "required": ["concept_name", "parts"],
+                        },
+                        "visual_brief": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1500,
+                            "description": (
+                                "What the product should look like: what it is, its "
+                                "materials and finish, its style. Not dimensions; those "
+                                "come from the layout."
+                            ),
+                        },
+                        "size": {
+                            "type": "string",
+                            "enum": list(_CONCEPT_IMAGE_SIZES),
+                            "description": "Image size in pixels (def 1024x1024).",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Work product name (def 'Concept image: <concept>').",
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "domain": {"type": "string", "description": "Discipline (def mech)."},
+                    },
+                    "required": ["visual_brief"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "authority": {"type": "string"},
+                        "label": {"type": "string"},
+                        "format": {"type": "string"},
+                        "content_hash": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "conditioned_on": {"type": "object"},
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                        "linked_to_layout": {"type": "boolean"},
+                        "project_linked": {"type": "boolean"},
+                        "images": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=30),
+            ),
+            handler=self.render_concept_image,
+        )
+
+    async def _layout_from_sketch(self, node_ref: Any) -> tuple[Any, dict[str, Any]]:
+        """The layout a render_concept_sketch node shows, and what identifies it."""
+        tool = "twin.render_concept_image"
+        if not isinstance(node_ref, str) or not node_ref.strip():
+            raise ValueError(f"{tool}: 'layout_node_id' must be a non-empty string")
+        try:
+            node_id = UUID(node_ref.strip())
+        except ValueError as exc:
+            raise ValueError(f"{tool}: 'layout_node_id' is not a node id: {node_ref!r}") from exc
+        wp = await self._twin.get_work_product(node_id)
+        if wp is None:
+            raise ValueError(f"{tool}: no work product {node_id}")
+        wp_type = str(getattr(wp.type, "value", wp.type))
+        stored = (wp.metadata or {}).get("concept_layout")
+        if wp_type != "design_sketch" or not isinstance(stored, dict):
+            raise ValueError(
+                f"{tool}: {node_id} is not a sketch drawn by twin.render_concept_sketch "
+                "(no stored block layout); give the layout inline instead"
+            )
+        try:
+            layout = parse_layout(stored)
+        except ValueError as exc:
+            raise ValueError(f"{tool}: the layout stored on {node_id} is invalid: {exc}") from exc
+        return layout, {
+            "layout_source": "design_sketch",
+            "layout_node_id": str(node_id),
+            "layout_content_hash": wp.content_hash,
+        }
+
+    async def render_concept_image(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.render_concept_image"
+        brief = arguments.get("visual_brief")
+        if not isinstance(brief, str) or not brief.strip():
+            raise ValueError(f"{tool}: 'visual_brief' is required (non-empty string)")
+        node_ref = arguments.get("layout_node_id")
+        inline = arguments.get("layout")
+        if (node_ref is None) == (inline is None):
+            raise ValueError(f"{tool}: give exactly one of 'layout_node_id' or 'layout'")
+        size = arguments.get("size") or _CONCEPT_IMAGE_SIZES[0]
+        if size not in _CONCEPT_IMAGE_SIZES:
+            raise ValueError(f"{tool}: 'size' must be one of {', '.join(_CONCEPT_IMAGE_SIZES)}")
+        name = arguments.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValueError(f"{tool}: 'name' must be a non-empty string")
+
+        # Validate the layout before any paid call: a bad one names its fault.
+        if node_ref is not None:
+            layout, conditioned_on = await self._layout_from_sketch(node_ref)
+        else:
+            if not isinstance(inline, dict):
+                raise ValueError(f"{tool}: 'layout' must be an object")
+            try:
+                layout = parse_layout(inline)
+            except ValueError as exc:
+                raise ValueError(f"{tool}: bad layout: {exc}") from exc
+            # The hash a sketch of this layout carries: same layout, same SVG.
+            svg = render_concept_sketch(layout)
+            conditioned_on = {
+                "layout_source": "inline_layout",
+                "layout_content_hash": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
+            }
+        width, height = (int(v) for v in size.split("x"))
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        with tracer.start_as_current_span("twin.render_concept_image") as span:
+            span.set_attribute("concept_image.layout_source", conditioned_on["layout_source"])
+            span.set_attribute("concept_image.part_count", len(layout.parts))
+            result: dict[str, Any] = await self._concept_image_renderer(
+                visual_brief=brief,
+                concept_name=layout.concept_name,
+                part_names=[p.name for p in layout.parts],
+                layout_faces=iso_faces(layout, width, height),
+                conditioned_on=conditioned_on,
+                layout_node_id=conditioned_on.get("layout_node_id"),
+                name=name.strip() if isinstance(name, str) else None,
+                size=size,
+                project_id=project_id if isinstance(project_id, str) else None,
+                domain=domain if isinstance(domain, str) and domain else "mechanical",
+            )
+        logger.info(
+            "concept_image_tool_done",
+            layout_source=conditioned_on["layout_source"],
+            node_id=result.get("node_id"),
+        )
+        return result
 
     # ------------------------------------------------------------------
     # Structured-document work products (MET-747 lifecycle-mapping follow-up)

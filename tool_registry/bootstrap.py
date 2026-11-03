@@ -403,6 +403,7 @@ async def bootstrap_tool_registry(
     firmware_scaffold_creator: Any = None,
     harness_estimate_getter: Any = None,
     item_history_reader: Any = None,
+    concept_image_renderer: Any = None,
     # FORGE-451: the machine library (models, instances, limits).
     machine_library: Any = None,
     # FORGE-427: vendor connectors (quotes, held orders, order status).
@@ -617,6 +618,11 @@ async def bootstrap_tool_registry(
             node_id=None, project_id=None)`` (make_item_history_reader,
             FORGE-523). When supplied, registers ``twin.item_history``.
             ``None`` skips registration.
+        concept_image_renderer: Optional async ``render(...)``
+            (make_concept_image_recorder, FORGE-761). When supplied, registers
+            ``twin.render_concept_image``: an image model draws a concept from
+            its block layout and a visual brief, committed as an illustrative
+            render. ``None`` skips registration.
 
     Returns:
         The populated ToolRegistry.
@@ -864,6 +870,7 @@ async def bootstrap_tool_registry(
                     firmware_scaffold_creator=firmware_scaffold_creator,
                     harness_estimate_getter=harness_estimate_getter,
                     item_history_reader=item_history_reader,
+                    concept_image_renderer=concept_image_renderer,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

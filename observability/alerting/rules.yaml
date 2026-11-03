@@ -942,3 +942,23 @@ groups:
             satisfy (a check that may be wrong, a missing tool), so the supervisor
             stopped instead of spending retries. The supervision log on the run
             says which; it usually means a bug to file, not a design to redo.
+
+  # FORGE-761 -- AI concept images (api_gateway/twin/concept_image.py).
+  - name: metaforge_concept_image
+    rules:
+      - alert: ConceptImageGenerationUnavailable
+        expr: >-
+          sum(increase(metaforge_concept_image_total{outcome=~"unavailable|timeout|failed"}[1h]))
+          / clamp_min(sum(increase(metaforge_concept_image_total[1h])), 1) > 0.5
+          and sum(increase(metaforge_concept_image_total[1h])) >= 3
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Concept images cannot be generated"
+          description: >-
+            More than half of the last hour's concept image requests found no image
+            provider configured, timed out, or got an error back. Nothing wrong is
+            recorded, since a failed generation stores nothing, but concept phases
+            get no illustrative images. Check METAFORGE_IMAGE_PROVIDER, the provider
+            key and the gateway logs (concept_image_unavailable, concept_image_failed).

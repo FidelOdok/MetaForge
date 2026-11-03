@@ -54,6 +54,7 @@ def make_design_sketch_recorder(twin: Any, project_backend: Any = None) -> Any:
         project_id: str | None = None,
         domain: str = "mechanical",
         source_tool: str = "decide_sketch_needed",
+        extra_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -81,7 +82,10 @@ def make_design_sketch_recorder(twin: Any, project_backend: Any = None) -> Any:
             except Exception as exc:  # noqa: BLE001 — degrade like robot_description_recorder
                 logger.warning("design_sketch_blob_store_skipped", wp_id=str(wp_id), error=str(exc))
 
+            # Extra fields first, so they can never override the ones below
+            # (an extra "authority" must not make a sketch into evidence).
             metadata: dict[str, Any] = {
+                **(extra_metadata or {}),
                 "original_filename": filename,
                 "content_sha256": content_hash,
                 "authored_by": source_tool,

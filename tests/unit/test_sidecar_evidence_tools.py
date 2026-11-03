@@ -26,6 +26,8 @@ WIRED = {
     "twin.interpret_sketch",
     "twin.confirm_sketch_reading",
     "twin.render_concept_sketch",
+    # FORGE-761: the AI concept image, registered with or without a provider.
+    "twin.render_concept_image",
     "twin.commit_hazard_analysis",
     "twin.commit_system_architecture",
     "twin.commit_technical_drawing",

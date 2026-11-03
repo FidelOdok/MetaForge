@@ -948,6 +948,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     # FORGE-630: twin.render_work_product -- the model converted to GLB and
     # rendered by blender.render over the same lazy-bridge seam.
+    from api_gateway.twin.concept_image import make_concept_image_recorder
     from api_gateway.twin.render_recorder import make_work_product_renderer
 
     work_product_renderer_bridge = _LazyBridge()
@@ -1291,6 +1292,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         overhang_evaluator=overhang_evaluator_fn,
         # FORGE-630: renders of a work product, bound to active_bridge below.
         work_product_renderer=work_product_renderer_fn,
+        # FORGE-761: AI concept images from a block layout and a brief. The
+        # provider is resolved per call, so an unconfigured one is a clear
+        # error on that call and never a startup failure.
+        concept_image_renderer=make_concept_image_recorder(twin, project_backend),
         # FORGE-687: design files, bound to active_bridge below.
         design_files_recorder=design_files_recorder_fn,
         # FORGE-316: automatic selective re-run of exactly what a

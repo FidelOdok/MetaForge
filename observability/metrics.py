@@ -875,6 +875,19 @@ class MetricsRegistry:
         labels=["action", "reason"],
     )
 
+    # ── Concept image (FORGE-761) ──────────────────────────────────────
+
+    CONCEPT_IMAGE_TOTAL = MetricDefinition(
+        name="metaforge_concept_image_total",
+        type="counter",
+        description=(
+            "AI concept images generated from a block layout and a visual brief, by "
+            "outcome: generated, unavailable (no image provider configured), timeout, "
+            "failed (the provider answered with an error) or store_failed (FORGE-761)"
+        ),
+        labels=["outcome"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1000,6 +1013,7 @@ class MetricsRegistry:
             cls.FLOW_ITEM_SLOT_TOTAL,
             cls.TWIN_PRD_REQUIREMENT_VALUE_TOTAL,
             cls.TWIN_RECORD_STALENESS_TOTAL,
+            cls.CONCEPT_IMAGE_TOTAL,
             cls.SKETCH_READING_TOTAL,
         ]
 
@@ -1876,6 +1890,12 @@ class MetricsCollector:
                     "agreed": "true" if agreed else "false",
                 },
             )
+
+    def record_concept_image(self, outcome: str) -> None:
+        """Record one concept image generation outcome (FORGE-761)."""
+        counter = self._instruments.get(MetricsRegistry.CONCEPT_IMAGE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
 
     def record_sketch_reading(self, outcome: str) -> None:
         """Record one sketch reading outcome (FORGE-762)."""
