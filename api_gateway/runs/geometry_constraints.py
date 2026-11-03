@@ -288,6 +288,87 @@ def classify(metric: str) -> str | None:
     return None
 
 
+#: FORGE-748: words in a metric name that say which limit or how it is
+#: measured, not which part it is about.
+_QUALIFIER_WORDS = frozenset(
+    {
+        "min",
+        "max",
+        "minimum",
+        "maximum",
+        "nominal",
+        "target",
+        "limit",
+        "allowed",
+        "allowable",
+        "required",
+        "mm",
+        "cm",
+        "the",
+        "and",
+        "of",
+        "per",
+    }
+)
+#: Words that make a size the whole product's, measured on the assembly.
+_PRODUCT_WORDS = frozenset({"product", "overall", "outer", "envelope", "total", "assembly"})
+#: A part this much thinner than its middle extent is a panel, whose smallest
+#: extent is its thickness rather than a depth.
+_PANEL_RATIO = 0.25
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z]+", text.lower()))
+
+
+def _subject(metric: str) -> set[str]:
+    """The words of a size metric that name what it is about (``seat`` in ``seat_width_min``)."""
+    return {
+        w
+        for w in _words(metric)
+        if len(w) > 2
+        and w not in _QUALIFIER_WORDS
+        and not any(w.startswith(s) for s in _SIZE_WORDS + _THICKNESS_WORDS)
+    }
+
+
+def _models_for(
+    metric: str, models: list[tuple[str, dict[str, Any]]]
+) -> tuple[list[tuple[str, dict[str, Any]]], str | None]:
+    """The cad_models a size limit applies to, or none and why (FORGE-748).
+
+    ``seat_width_min >= 400 mm`` was compared with every part: four 40 mm
+    legs and the backrest each "violated" the seat's width, and a seat panel's
+    18 mm thickness its depth. A metric that names a part is measured on the
+    models named for it; a product-level one on the assembly when there is
+    one; anything else on every model, as before.
+    """
+    subject = _subject(metric)
+    assemblies = [m for m in models if is_assembly(m[1]) or len(assembly_parts(m[1])) > 1]
+    named = [m for m in models if subject & _words(m[0])] if subject else []
+    if subject and not subject & _PRODUCT_WORDS and named and len(named) < len(models):
+        return named, None
+    if subject and not subject & _PRODUCT_WORDS and not named:
+        return [], f"no cad_model is named for '{' '.join(sorted(subject))}'"
+    if subject and assemblies and (subject & _PRODUCT_WORDS or len(named) == len(models)):
+        return assemblies, None
+    return models, None
+
+
+def _size_value(metric: str, ext: tuple[float, float, float]) -> float:
+    """The extent a size metric means, for a solid or a panel (FORGE-748).
+
+    Depth is the smallest extent of a solid, but a panel's smallest extent is
+    its thickness: a seat's 18 mm is not its depth. On a panel, depth is read
+    as the smaller of its two in-plane sizes. Width keeps its meaning (the
+    middle extent) everywhere.
+    """
+    m = metric.lower()
+    if "depth" in m and "width" not in m and ext[1] > 0 and ext[2] <= _PANEL_RATIO * ext[1]:
+        return ext[1]
+    return ext[_axis_index(metric)]
+
+
 def _axis_index(metric: str) -> int:
     m = metric.lower()
     if "width" in m:
@@ -377,7 +458,13 @@ def check_geometry_constraints(
         op_name = str(getattr(constraint, "operator", "") or "<=")
         compare = _OPS.get(op_name)
         scale = _TO_MM.get(str(getattr(constraint, "unit", "") or "").lower())
-        for model_name, meta in models:
+        targets = models
+        if kind == "envelope":
+            targets, why = _models_for(metric, models)
+            if why:
+                result.not_evaluated.append(f"{label}: {why}")
+                continue
+        for model_name, meta in targets:
             if kind == "material":
                 required = _required_material(constraint)
                 recorded = str(meta.get("material") or "")
@@ -423,7 +510,7 @@ def check_geometry_constraints(
                 if ext is None:
                     result.not_evaluated.append(f"{label}: '{model_name}' records no size")
                     continue
-                values = [(model_name, ext[_axis_index(str(constraint.metric))])]
+                values = [(model_name, _size_value(str(constraint.metric), ext))]
             for where, value in values:
                 result.evaluated += 1
                 if not compare(value, target):

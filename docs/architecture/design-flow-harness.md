@@ -175,6 +175,17 @@ supports, is left out of both geometry checks: it is not product geometry, so
 it is neither a loose design part nor held to the product's size, stock or
 material limits.
 
+A size limit is measured on what it names. A metric that names a part
+(`seat_width_min`, `leg_height_max`) is compared only with the cad_models whose
+names contain that word (`Chair Seat`), and is reported as not evaluated when
+no model is named for it, rather than being applied to every part. A
+product-level metric (`product_envelope_width`, `overall_height`), or one whose
+word every model shares, is compared with the assembly when the design has one.
+A metric that names nothing still applies to every model. Extents are sorted
+largest first: length is the largest, width the middle and height or depth the
+smallest, except that a panel's depth (a part whose smallest extent is under a
+quarter of its middle one) is its smaller in-plane size, never its thickness.
+
 A revision that a retry or rework turned down is not part of the design
 either. When a reviewer retries or reworks a phase, that
 attempt's drafts are closed as `rejected` or `abandoned` on their
