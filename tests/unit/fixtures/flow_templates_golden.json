@@ -948,7 +948,7 @@
   }
  },
  "concept_v1": {
-  "content_hash": "809971a9e54a336a3c9f2d230655c9fb1f5133d2275e4e8fa1e766556f938018",
+  "content_hash": "b328e8232f0b2b0e36e05f69d7d29d2ae51c473d7c782a6e2ef5193c859f7eee",
   "definition": {
    "id": "concept_v1",
    "name": "Concept design (Intent -> Requirements -> Route -> Concept -> Verification plan), stops before CAD",
@@ -1160,7 +1160,7 @@
      ],
      "enforce_deliverables": true,
      "gate": {
-      "name": "Concept hand-off (verification plan)",
+      "name": "Concept sign-off (verification plan)",
       "auto_approve": false,
       "criteria": [
        "Every requirement has a verification method, load case or measurement, and acceptance criterion",
