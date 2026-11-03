@@ -569,6 +569,52 @@ def is_analysis_model(metadata: dict[str, Any]) -> bool:
     return str(metadata.get("model_role") or "") == "analysis"
 
 
+#: FORGE-752: parts that sit inside the parts they join. A bounding box
+#: cannot tell a dowel in its hole from two parts colliding, so these are not
+#: compared for overlap.
+FASTENER_WORDS = frozenset(
+    {
+        "dowel",
+        "dowels",
+        "screw",
+        "screws",
+        "bolt",
+        "bolts",
+        "nut",
+        "nuts",
+        "pin",
+        "pins",
+        "insert",
+        "inserts",
+        "rivet",
+        "rivets",
+        "fastener",
+        "fasteners",
+        "fixing",
+        "fixings",
+        "peg",
+        "pegs",
+        "biscuit",
+        "biscuits",
+        "washer",
+        "washers",
+        "nail",
+        "nails",
+        "connector",
+        "connectors",
+    }
+)
+_FASTENER_ROLES = frozenset({"fastener", "joinery", "hardware", "fixing"})
+
+
+def is_fastener(part: dict[str, Any]) -> bool:
+    """Whether an assembly part is a fastener or joinery piece (by role or name)."""
+    role = str(part.get("role") or part.get("kind") or "").strip().lower()
+    if role in _FASTENER_ROLES:
+        return True
+    return bool(_words(str(part.get("name") or "")) & FASTENER_WORDS)
+
+
 def check_assembly(models: Iterable[tuple[str, str, dict[str, Any]]]) -> GeometryCheck:
     """FORGE-511: a design with several parts needs an assembly that places them sanely.
 
@@ -612,9 +658,17 @@ def check_assembly(models: Iterable[tuple[str, str, dict[str, Any]]]) -> Geometr
             b = _bounds(p.get("position_bbox_mm"))
             if b is not None:
                 boxes.append((str(p.get("name") or p.get("node_id") or "part"), b))
+        fasteners = {
+            str(p.get("name") or p.get("node_id") or "part") for p in refs if is_fastener(p)
+        }
         for a in range(len(boxes)):
             for c in range(a + 1, len(boxes)):
                 (na, (alo, ahi)), (nc, (clo, chi)) = boxes[a], boxes[c]
+                if na in fasteners or nc in fasteners:
+                    # FORGE-748/752: a dowel in its drilled hole always shares
+                    # the joined part's bounding box; boxes cannot tell that
+                    # from an interference, so fasteners are not compared.
+                    continue
                 depth = [min(ahi[k], chi[k]) - max(alo[k], clo[k]) for k in range(3)]
                 if all(d > TOUCH_TOLERANCE_MM for d in depth):
                     result.violations.append(
