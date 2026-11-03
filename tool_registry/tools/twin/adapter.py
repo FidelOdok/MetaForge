@@ -36,6 +36,13 @@ from tool_registry.mcp_server.handlers import (
     ToolManifest,
 )
 from tool_registry.mcp_server.server import McpToolServer
+from tool_registry.tools.twin.concept_sketch import (
+    EXPLODE_DIRECTIONS,
+    PROVENANCE_TAGS,
+    VIEWS,
+    parse_layout,
+    render_concept_sketch,
+)
 from tool_registry.tools.twin.queries import (
     detect_mutations,
     serialise_node,
@@ -540,6 +547,8 @@ class TwinServer(McpToolServer):
             self._register_record_document()
         if design_sketch_recorder is not None:
             self._register_commit_design_sketch()
+            # FORGE-760: the drawn sketch commits through the same recorder.
+            self._register_render_concept_sketch()
         if sketch_interpreter is not None:
             self._register_interpret_sketch()
         if sketch_reading_decider is not None:
@@ -3499,6 +3508,169 @@ class TwinServer(McpToolServer):
             reason=reason if isinstance(reason, str) else "",
         )
         return result
+
+    # ------------------------------------------------------------------
+    # twin.render_concept_sketch (FORGE-760)
+    # ------------------------------------------------------------------
+
+    def _register_render_concept_sketch(self) -> None:
+        vec3 = {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+        provenance = {"type": "string", "enum": list(PROVENANCE_TAGS)}
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.render_concept_sketch",
+                adapter_id="twin",
+                name="Render Concept Sketch",
+                description=(
+                    "Draw a labelled concept sketch from a block layout and commit it as a "
+                    "DESIGN_SKETCH work product (illustrative: it shows intent and is never "
+                    "evidence). Give each part a name, a box or cylinder shape, its size and "
+                    "position in mm (or its bounding box) and a provenance tag: verified "
+                    "(checked against a source), intended, assumption, or open (an unresolved "
+                    "question). Give the joints between parts. The renderer draws front, side "
+                    "and top views with dimension lines, an isometric view and an exploded "
+                    "view with labels, every label styled by its tag. Same layout, same SVG. "
+                    "Use this rather than hand-writing SVG for twin.commit_design_sketch."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "concept_name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The concept this sketch shows, for the title block.",
+                        },
+                        "parts": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 60,
+                            "description": "The blocks. x is width, y depth, z height.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string", "minLength": 1},
+                                    "shape": {"type": "string", "enum": ["box", "cylinder"]},
+                                    "size_mm": {
+                                        **vec3,
+                                        "description": "Extents [x, y, z], each above zero.",
+                                    },
+                                    "position_mm": {
+                                        **vec3,
+                                        "description": "Minimum corner [x, y, z] (def 0,0,0).",
+                                    },
+                                    "bbox_mm": {
+                                        "type": "array",
+                                        "items": vec3,
+                                        "minItems": 2,
+                                        "maxItems": 2,
+                                        "description": (
+                                            "[[xmin, ymin, zmin], [xmax, ymax, zmax]] in place "
+                                            "of size_mm and position_mm, as a CAD assembly "
+                                            "reports its parts."
+                                        ),
+                                    },
+                                    "provenance": provenance,
+                                    "axis": {
+                                        "type": "string",
+                                        "enum": ["x", "y", "z"],
+                                        "description": "A cylinder's axis (def z).",
+                                    },
+                                    "explode": {
+                                        "type": "string",
+                                        "enum": list(EXPLODE_DIRECTIONS),
+                                        "description": (
+                                            "The axis this part assembles along, for the "
+                                            "exploded view (def auto)."
+                                        ),
+                                    },
+                                },
+                                "required": ["name", "provenance"],
+                            },
+                        },
+                        "connections": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "a": {"type": "string", "description": "A part name."},
+                                    "b": {"type": "string", "description": "Another part name."},
+                                    "joint": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "Joint type, e.g. '8 mm dowel'.",
+                                    },
+                                    "provenance": provenance,
+                                },
+                                "required": ["a", "b", "joint"],
+                            },
+                        },
+                        "notes": {"type": "string", "description": "One line for the title block."},
+                        "name": {
+                            "type": "string",
+                            "description": "Work product name (def 'Concept sketch: <concept>').",
+                        },
+                        "description_text": {
+                            "type": "string",
+                            "description": "Short rationale for what this sketch is checking.",
+                        },
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Existing work-product node ids this sketch reviews.",
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "domain": {"type": "string", "description": "Discipline (def mech)."},
+                    },
+                    "required": ["concept_name", "parts"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "views": {"type": "array", "items": {"type": "string"}},
+                        "part_count": {"type": "integer"},
+                        "connection_count": {"type": "integer"},
+                        "overall_mm": {"type": "object"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.render_concept_sketch,
+        )
+
+    async def render_concept_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        # Validate everything before anything is written: a bad layout raises
+        # a ValueError that names the part or connection at fault.
+        layout = parse_layout(arguments)
+        name = arguments.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValueError("twin.render_concept_sketch: 'name' must be a non-empty string")
+        svg = render_concept_sketch(layout)
+        source_node_ids = arguments.get("source_node_ids")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        out: dict[str, Any] = await self._design_sketch_recorder(
+            name=name.strip() if name else f"Concept sketch: {layout.concept_name}",
+            html_content=svg,
+            description_text=arguments.get("description_text") or "",
+            source_node_ids=source_node_ids if isinstance(source_node_ids, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            domain=domain if isinstance(domain, str) and domain else "mechanical",
+            source_tool="twin.render_concept_sketch",
+        )
+        width, depth, height = layout.overall()
+        return {
+            **out,
+            "views": list(VIEWS),
+            "part_count": len(layout.parts),
+            "connection_count": len(layout.connections),
+            "overall_mm": {"width": width, "depth": depth, "height": height},
+        }
 
     # ------------------------------------------------------------------
     # Structured-document work products (MET-747 lifecycle-mapping follow-up)

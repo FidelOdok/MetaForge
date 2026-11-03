@@ -339,6 +339,8 @@ ADDITIVE: frozenset[str] = frozenset(
         # an uploaded image replaces only an unconfirmed reading, in a new
         # revision, so nothing a person decided is lost.
         "twin.interpret_sketch",
+        # FORGE-760: draws a sketch and adds it as a new design_sketch node.
+        "twin.render_concept_sketch",
         "twin.commit_engineering_change",
         "twin.commit_geometry",
         # FORGE-647: a live-view placement, see guardrails.BOOKKEEPING.

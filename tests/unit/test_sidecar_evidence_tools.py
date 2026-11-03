@@ -25,6 +25,7 @@ WIRED = {
     # FORGE-762: a vision model's proposed sketch reading, and a person's decision.
     "twin.interpret_sketch",
     "twin.confirm_sketch_reading",
+    "twin.render_concept_sketch",
     "twin.commit_hazard_analysis",
     "twin.commit_system_architecture",
     "twin.commit_technical_drawing",

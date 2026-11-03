@@ -870,6 +870,22 @@ alternatives and any candidate standard or bought parts. Both
 `design_sketch` and `design_decision` are required deliverables, the gate is
 G5, and the objective says outright that no CAD is authored in this phase.
 
+A concept's sketch does not have to be hand-written SVG.
+`twin.render_concept_sketch` draws it from a block layout: named boxes and
+cylinders, each with a size and position in mm and a provenance tag
+(`verified`, `intended`, `assumption` or `open`), and the connections
+between them with their joint types. The renderer
+(`tool_registry/tools/twin/concept_sketch.py`) is pure standard library and
+deterministic, so the same layout always gives the same bytes. It draws
+front, side and top orthographic views with dimension lines (sketch type B),
+an isometric view (C) and an exploded isometric view with leader-line
+labels (D), styles every label by its tag, and closes with a title block
+that reads "Illustrative concept sketch, not a design record". The result is
+committed through the same recorder as `twin.commit_design_sketch`, so it is
+just as illustrative. A part may be given as `bbox_mm`, the two corners of
+its bounding box, which is what a CAD assembly reports per part: a sketch
+drawn from CAD (type E, later work) can feed the same renderer.
+
 The concept decision carries what it selects as data, not prose.
 `twin.record_decision` takes an `assembly` (each part with its source, made,
 bought or standard, plus material, process, quantity and a provenance tag,
