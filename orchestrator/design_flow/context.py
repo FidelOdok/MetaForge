@@ -31,6 +31,15 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "CONCEPT_PHASE_ID",
+    "DECIDING_QUESTIONS_MISSING",
+    "INTENT_PHASE_ID",
+    "DecidingAnswers",
+    "DecidingQuestion",
+    "Lesson",
+    "concept_pick_note",
+    "deciding_answers_gap",
+    "parse_deciding_answers",
     "MAX_EXTRA_QUESTIONS",
     "ClarifyingQuestion",
     "FlowContext",
@@ -39,21 +48,12 @@ __all__ = [
     "DFM_REVIEW_MISSING",
     "DFM_REVIEW_PHASE_ID",
     "DESIGN_PHASE_ID",
-    "KICKOFF_AUTO",
-    "KICKOFF_MISSING",
-    "KICKOFF_PHASE_ID",
-    "Kickoff",
-    "KickoffDirection",
-    "KickoffLesson",
-    "KickoffQuestion",
     "INDUSTRIAL_DESIGN_PHASE_ID",
     "INDUSTRIAL_DESIGN_MISSING",
     "IndustrialDesignRecord",
     "industrial_design_gap",
     "parse_industrial_design",
     "assembly_conformance_gap",
-    "kickoff_gap",
-    "parse_kickoff",
     "PROCESS_RANKING_MISSING",
     "ROUTE_DECISION_MISSING",
     "DfmReview",
@@ -930,36 +930,34 @@ def assembly_conformance_gap(assembly: ConceptAssembly | None, cad_names: list[s
     )
 
 
-# ── kickoff: deciding questions, directions and the pick ─────────────────
+# ── deciding answers: asked once, at intent (FORGE-766) ───────────────────
 #
-# The first phase of mech_v1 settles the direction before anything is
-# designed: the few questions whose answers change the design most, two or
-# three named directions for the product type, and the one the person picks
-# (or "auto": the agent chooses and says why). Recorded as ``kickoff`` on a
-# design decision; every later phase brief carries it, so nothing is asked
-# twice, and the concept phase builds on the picked direction.
+# The few questions whose answers change the design most (who uses it, the
+# load, the budget, the quantity, the process available, the style) are
+# asked once, in mech_v1's intent phase, with where each answer came from,
+# together with the lessons of earlier runs on the project. Recorded as
+# ``deciding_questions`` on a design decision; every later phase brief
+# carries the answers, so nothing is asked twice. Choosing a direction is
+# the concept phase's job, once the requirements and the process are known.
 
-#: The phase that records the kickoff, and whose gate shows the directions.
-KICKOFF_PHASE_ID = "kickoff"
-#: The pick that leaves the choice to the agent ("you choose").
-KICKOFF_AUTO = "auto"
+#: The phase that records the deciding answers.
+INTENT_PHASE_ID = "intent"
 #: Where an answer came from: the goal or flow context, the person, an
 #: assumption the agent states, or still open.
-KICKOFF_ANSWER_SOURCES: tuple[str, ...] = ("stated", "person", "assumed", "open")
-#: The most deciding questions a kickoff asks: a few, not a questionnaire.
-MAX_KICKOFF_QUESTIONS = 8
-#: The most lessons a kickoff record carries.
-MAX_KICKOFF_LESSONS = 10
+ANSWER_SOURCES: tuple[str, ...] = ("stated", "person", "assumed", "open")
+#: The most deciding questions: a few, not a questionnaire.
+MAX_DECIDING_QUESTIONS = 8
+#: The most lessons the record carries.
+MAX_LESSONS = 10
 
-KICKOFF_MISSING = (
-    "kickoff decision (record-decision with kickoff: questions [{id, question, answer, "
-    "source}], directions [{name, rationale, risk}] (two or three), picked (a direction "
-    "name, or 'auto' with chosen and why), lessons [{text, source_run}])"
+DECIDING_QUESTIONS_MISSING = (
+    "deciding questions decision (record-decision with deciding_questions: questions "
+    "[{id, question, answer, source}], lessons [{text, source_run}])"
 )
 
 
 @dataclass(frozen=True)
-class KickoffQuestion:
+class DecidingQuestion:
     id: str
     question: str
     answer: str = ""
@@ -975,17 +973,7 @@ class KickoffQuestion:
 
 
 @dataclass(frozen=True)
-class KickoffDirection:
-    name: str
-    rationale: str
-    risk: str
-
-    def as_metadata(self) -> dict[str, object]:
-        return {"name": self.name, "rationale": self.rationale, "risk": self.risk}
-
-
-@dataclass(frozen=True)
-class KickoffLesson:
+class Lesson:
     text: str
     source_run: str = ""
 
@@ -994,81 +982,39 @@ class KickoffLesson:
 
 
 @dataclass(frozen=True)
-class Kickoff:
-    """A kickoff record, as recorded on a design decision."""
+class DecidingAnswers:
+    """The deciding answers, as recorded on a design decision at intent."""
 
-    questions: tuple[KickoffQuestion, ...]
-    directions: tuple[KickoffDirection, ...]
-    #: A direction's name, or :data:`KICKOFF_AUTO`.
-    picked: str
-    lessons: tuple[KickoffLesson, ...] = ()
-    #: For ``auto``: the direction the agent chose.
-    chosen: str = ""
-    #: Why that direction (required for ``auto``, optional for a person's pick).
-    why: str = ""
-
-    @property
-    def is_auto(self) -> bool:
-        return self.picked == KICKOFF_AUTO
-
-    @property
-    def direction(self) -> KickoffDirection:
-        """The direction the concept phase builds on."""
-        name = self.chosen if self.is_auto else self.picked
-        return next(d for d in self.directions if d.name == name)
-
-    def pick_line(self) -> str:
-        d = self.direction
-        if self.is_auto:
-            return f"{d.name} (left to the agent, which chose it because {self.why})"
-        return f"{d.name} (picked by the person)" + (f": {self.why}" if self.why else "")
+    questions: tuple[DecidingQuestion, ...]
+    lessons: tuple[Lesson, ...] = ()
 
     def summary(self) -> str:
-        """One line for the gate reason: the directions, their risks and the pick."""
+        """One line for the intent gate reason."""
         assumed = sum(1 for q in self.questions if q.source == "assumed")
         open_ = sum(1 for q in self.questions if q.source == "open")
         counts = f"{len(self.questions)} deciding question(s)"
         if assumed or open_:
             counts += f" ({assumed} assumed, {open_} open)"
-        directions = "; ".join(f"{d.name}: {d.rationale} (risk: {d.risk})" for d in self.directions)
         lessons = f"; {len(self.lessons)} lesson(s) from earlier runs" if self.lessons else ""
-        return f"kickoff: {counts}{lessons}; directions: {directions}; picked: {self.pick_line()}"
-
-    def gate_note(self) -> str:
-        """The gate's "pick a direction" card, as text."""
-        others = ", ".join(d.name for d in self.directions if d.name != self.direction.name)
-        return (
-            f"{self.summary()}. Approving accepts {self.direction.name}; to pick "
-            f"{others or 'another direction'} instead, retry naming it (or say 'you choose')"
-        )
+        return f"deciding answers: {counts}{lessons}"
 
     def brief(self, *, include_lessons: bool = True) -> str:
-        """The block every phase after the kickoff carries in its brief."""
+        """The block every phase after intent carries in its brief."""
         lines = [
-            "Kickoff (settled at the start of this run; treat these answers as given and "
-            "do not ask them again):"
+            "Deciding answers (settled at intent; treat them as given and do not ask them again):"
         ]
         for q in self.questions:
             answer = q.answer if q.source != "open" else "(open: not yet answered)"
             lines.append(f"  - {q.question} {answer} [{q.source}]")
-        d = self.direction
-        lines.append(f"Direction: {self.pick_line()}. {d.rationale}. Main risk: {d.risk}.")
-        others = [x.name for x in self.directions if x.name != d.name]
-        if others:
-            lines.append(f"Directions not taken: {', '.join(others)}.")
         if include_lessons and self.lessons:
             lines.append("Lessons from earlier runs:")
             lines.extend(f"  - {lesson.text}" for lesson in self.lessons)
         return "\n".join(lines)
 
     def markdown(self) -> str:
-        lines = ["## Kickoff", "", "| Question | Answer | Source |", "|---|---|---|"]
+        lines = ["## Deciding questions", "", "| Question | Answer | Source |", "|---|---|---|"]
         for q in self.questions:
             lines.append(f"| {q.question} | {q.answer} | {q.source} |")
-        lines += ["", "| Direction | Rationale | Main risk |", "|---|---|---|"]
-        for d in self.directions:
-            lines.append(f"| {d.name} | {d.rationale} | {d.risk} |")
-        lines += ["", f"Picked: {self.pick_line()}"]
         if self.lessons:
             lines += ["", "Lessons from earlier runs:"]
             lines += [f"- {lesson.text}" for lesson in self.lessons]
@@ -1077,39 +1023,26 @@ class Kickoff:
     def as_metadata(self) -> dict[str, object]:
         return {
             "questions": [q.as_metadata() for q in self.questions],
-            "directions": [d.as_metadata() for d in self.directions],
-            "picked": self.picked,
-            "chosen": self.chosen,
-            "why": self.why,
             "lessons": [lesson.as_metadata() for lesson in self.lessons],
         }
 
 
-def _kickoff_question(raw: object, where: str) -> KickoffQuestion:
+def _deciding_question(raw: object, where: str) -> DecidingQuestion:
     if not isinstance(raw, dict):
         raise ValueError(f"{where} must be an object")
     qid, question = _text(raw.get("id")), _text(raw.get("question"))
     if not qid or not question:
         raise ValueError(f"{where} needs an id and a question")
     source = _text(raw.get("source")) or "stated"
-    if source not in KICKOFF_ANSWER_SOURCES:
-        raise ValueError(f"{where}.source must be one of {', '.join(KICKOFF_ANSWER_SOURCES)}")
+    if source not in ANSWER_SOURCES:
+        raise ValueError(f"{where}.source must be one of {', '.join(ANSWER_SOURCES)}")
     answer = _text(raw.get("answer"))
     if not answer and source != "open":
         raise ValueError(f"{where} needs an answer, or source 'open' when nobody can answer yet")
-    return KickoffQuestion(id=qid, question=question, answer=answer, source=source)
+    return DecidingQuestion(id=qid, question=question, answer=answer, source=source)
 
 
-def _kickoff_direction(raw: object, where: str) -> KickoffDirection:
-    if not isinstance(raw, dict):
-        raise ValueError(f"{where} must be an object")
-    name, rationale, risk = (_text(raw.get(k)) for k in ("name", "rationale", "risk"))
-    if not name or not rationale or not risk:
-        raise ValueError(f"{where} needs a name, a one-line rationale and its main risk")
-    return KickoffDirection(name=name, rationale=rationale, risk=risk)
-
-
-def _kickoff_lesson(raw: object, where: str) -> KickoffLesson:
+def _lesson(raw: object, where: str) -> Lesson:
     if isinstance(raw, str):
         raw = {"text": raw}
     if not isinstance(raw, dict):
@@ -1117,89 +1050,66 @@ def _kickoff_lesson(raw: object, where: str) -> KickoffLesson:
     text = _text(raw.get("text"))
     if not text:
         raise ValueError(f"{where} needs its text")
-    return KickoffLesson(text=text, source_run=_text(raw.get("source_run")))
+    return Lesson(text=text, source_run=_text(raw.get("source_run")))
 
 
-def _direction_named(name: str, directions: list[KickoffDirection]) -> KickoffDirection | None:
-    key = _name_key(name)
-    if not key:
-        return None
-    return next((d for d in directions if _name_key(d.name) == key), None)
+def parse_deciding_answers(value: object) -> DecidingAnswers:
+    """A ``deciding_questions`` value checked; raises ``ValueError`` saying why.
 
-
-def parse_kickoff(value: object) -> Kickoff:
-    """A ``kickoff`` value checked; raises ``ValueError`` saying why.
-
-    One to :data:`MAX_KICKOFF_QUESTIONS` deciding questions with unique ids,
-    each answered with its source (or ``open``); two or three directions with
-    distinct names, each with a rationale and its main risk; and a pick that
-    names one of them, or ``auto`` with the direction the agent chose and why.
+    One to :data:`MAX_DECIDING_QUESTIONS` questions with unique ids, each
+    answered with its source (or ``open``), and any lessons from earlier runs.
     """
     if not isinstance(value, dict):
-        raise ValueError("kickoff must be an object with questions, directions and picked")
+        raise ValueError("deciding_questions must be an object with questions and lessons")
     raw_questions = value.get("questions")
     if not isinstance(raw_questions, list) or not raw_questions:
-        raise ValueError("kickoff.questions must list the deciding questions")
-    if len(raw_questions) > MAX_KICKOFF_QUESTIONS:
+        raise ValueError("deciding_questions.questions must list the deciding questions")
+    if len(raw_questions) > MAX_DECIDING_QUESTIONS:
         raise ValueError(
-            f"kickoff.questions lists {len(raw_questions)}; ask at most "
-            f"{MAX_KICKOFF_QUESTIONS}, the ones that change the design most"
+            f"deciding_questions.questions lists {len(raw_questions)}; ask at most "
+            f"{MAX_DECIDING_QUESTIONS}, the ones that change the design most"
         )
     questions = [
-        _kickoff_question(raw, f"kickoff.questions[{i}]") for i, raw in enumerate(raw_questions)
+        _deciding_question(raw, f"deciding_questions.questions[{i}]")
+        for i, raw in enumerate(raw_questions)
     ]
     ids = [q.id for q in questions]
     repeated = sorted({i for i in ids if ids.count(i) > 1})
     if repeated:
-        raise ValueError(f"kickoff.questions ids must be unique; repeated: {', '.join(repeated)}")
-    raw_directions = value.get("directions")
-    if not isinstance(raw_directions, list) or not 2 <= len(raw_directions) <= 3:
-        raise ValueError("kickoff.directions must name two or three directions")
-    directions = [
-        _kickoff_direction(raw, f"kickoff.directions[{i}]") for i, raw in enumerate(raw_directions)
-    ]
-    keys = [_name_key(d.name) for d in directions]
-    if len(set(keys)) != len(keys):
-        raise ValueError("kickoff.directions names must be distinct")
-    picked = _text(value.get("picked"))
-    if not picked:
-        raise ValueError("kickoff.picked must name a direction, or be 'auto'")
-    chosen = ""
-    why = _text(value.get("why"))
-    if picked.lower() == KICKOFF_AUTO:
-        picked = KICKOFF_AUTO
-        match = _direction_named(_text(value.get("chosen")), directions)
-        if match is None:
-            raise ValueError("a kickoff picked 'auto' needs chosen: the direction the agent chose")
-        if not why:
-            raise ValueError("a kickoff picked 'auto' needs why: the reason for that direction")
-        chosen = match.name
-    else:
-        match = _direction_named(picked, directions)
-        if match is None:
-            raise ValueError(f"kickoff.picked '{picked}' is not one of kickoff.directions")
-        picked = match.name
+        raise ValueError(
+            f"deciding_questions.questions ids must be unique; repeated: {', '.join(repeated)}"
+        )
     raw_lessons = value.get("lessons") or []
     if not isinstance(raw_lessons, list):
-        raise ValueError("kickoff.lessons must be a list")
-    lessons = [_kickoff_lesson(raw, f"kickoff.lessons[{i}]") for i, raw in enumerate(raw_lessons)]
-    return Kickoff(
-        questions=tuple(questions),
-        directions=tuple(directions),
-        picked=picked,
-        lessons=tuple(lessons[:MAX_KICKOFF_LESSONS]),
-        chosen=chosen,
-        why=why,
+        raise ValueError("deciding_questions.lessons must be a list")
+    lessons = [
+        _lesson(raw, f"deciding_questions.lessons[{i}]") for i, raw in enumerate(raw_lessons)
+    ]
+    return DecidingAnswers(questions=tuple(questions), lessons=tuple(lessons[:MAX_LESSONS]))
+
+
+def deciding_answers_gap(answers: DecidingAnswers | None) -> str | None:
+    """What the intent gate is missing, when the phase asks for the answers."""
+    return DECIDING_QUESTIONS_MISSING if answers is None else None
+
+
+#: The phase that chooses what to build; its gate is where a direction is picked.
+CONCEPT_PHASE_ID = "concept_selection"
+
+
+def concept_pick_note(options: tuple[ConceptOption, ...] | None) -> str | None:
+    """The concept gate's "pick a direction" card, as text, or None without options."""
+    if not options:
+        return None
+    chosen = next(o for o in options if o.selected)
+    listed = "; ".join(
+        f"{o.name}{' (selected)' if o.selected else ''}: {o.summary}" for o in options
     )
-
-
-def kickoff_gap(kickoff: Kickoff | None) -> str | None:
-    """What the kickoff gate is missing, or None when it may pass.
-
-    A malformed record never reaches here: the recorder refuses it, and the
-    gate reader skips one that does not parse, so it reads as missing.
-    """
-    return KICKOFF_MISSING if kickoff is None else None
+    others = ", ".join(o.name for o in options if not o.selected)
+    return (
+        f"concepts: {listed}. Approving accepts {chosen.name}; to pick "
+        f"{others or 'another concept'} instead, retry naming it (or say 'you choose')"
+    )
 
 
 # ── industrial design as constraints and evidence (FORGE-764) ──────────────

@@ -24,7 +24,7 @@ from api_gateway.chat.harness_backend import design_flow_approval_timeout_second
 from api_gateway.chat.routes import get_metrics
 from mcp_core.context import ItemSlotClaim, McpCallContext, current_context, with_context
 from mcp_core.profiles import phase_overflow, tools_for_phase, unmapped_disciplines
-from orchestrator.design_flow.context import KICKOFF_PHASE_ID
+from orchestrator.design_flow.context import INTENT_PHASE_ID
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.prior_lessons import PriorLesson, render_lessons
 from orchestrator.design_flow.slots import effective_slots, slots_brief
@@ -39,15 +39,15 @@ from skill_registry.skill_context import (
 
 logger = structlog.get_logger(__name__)
 
-#: ``project_id -> Kickoff | None``: the project's latest kickoff record.
-KickoffReader = Callable[[str | None], Awaitable[Any]]
+#: ``project_id -> DecidingAnswers | None``: the answers asked once at intent.
+AnswersReader = Callable[[str | None], Awaitable[Any]]
 #: ``project_id -> lessons``: what earlier runs on the project learned.
 LessonsReader = Callable[[str | None], Awaitable[list[PriorLesson]]]
-#: The concept phase: it builds on the picked direction, and is handed the
-#: sketch readings a person confirmed (FORGE-762).
+#: The concept phase: its gate is where a direction is picked, and it is
+#: handed the sketch readings a person confirmed (FORGE-762).
 CONCEPT_PHASE_ID = "concept_selection"
 #: Phases briefed with earlier runs' lessons.
-LESSON_PHASES = frozenset({KICKOFF_PHASE_ID, CONCEPT_PHASE_ID})
+LESSON_PHASES = frozenset({INTENT_PHASE_ID, CONCEPT_PHASE_ID})
 
 #: Disciplines already reported as having no tool profile, so the debug line
 #: appears once per process rather than once per phase.
@@ -363,12 +363,12 @@ class ReActPhaseBrain:
         max_steps: int | None = None,
         provider: str | None = None,
         model: str | None = None,
-        kickoff_reader: KickoffReader | None = None,
+        answers_reader: AnswersReader | None = None,
         lessons_reader: LessonsReader | None = None,
     ) -> None:
         self._bridge = mcp_bridge
         self._session_id = session_id
-        self._kickoff_reader = kickoff_reader
+        self._answers_reader = answers_reader
         self._lessons_reader = lessons_reader
         self._max_steps = max_steps
         self._provider = provider
@@ -377,30 +377,23 @@ class ReActPhaseBrain:
         # its disciplines (the "select" pillar — procedural context).
         self._cards: list[SkillCard] = load_skill_cards()
 
-    async def _kickoff_blocks(self, phase: Phase, context: FlowContext) -> str:
-        """The kickoff record and earlier runs' lessons, for the phases that need them.
+    async def _answers_blocks(self, phase: Phase, context: FlowContext) -> str:
+        """The deciding answers and earlier runs' lessons, for the phases that need them.
 
-        Every phase after the kickoff gets the kickoff record (the answers,
-        never asked again, and the picked direction). The kickoff and concept
-        phases also get the lessons of earlier runs on this project. Each read
-        is best-effort: a failure costs the block, never the phase.
+        FORGE-766: every phase after intent gets the deciding answers, never
+        asked again. The intent and concept phases also get the lessons of
+        earlier runs on this project. Each read is best-effort: a failure
+        costs the block, never the phase.
         """
         blocks: list[str] = []
-        kickoff = None
-        if phase.id != KICKOFF_PHASE_ID and self._kickoff_reader is not None:
+        answers = None
+        if phase.id != INTENT_PHASE_ID and self._answers_reader is not None:
             try:
-                kickoff = await self._kickoff_reader(context.project_id)
+                answers = await self._answers_reader(context.project_id)
             except Exception as exc:  # noqa: BLE001 - the brief goes on without it
-                logger.warning("design_flow_kickoff_read_failed", phase=phase.id, error=str(exc))
-        if kickoff is not None:
-            lessons_here = phase.id in LESSON_PHASES
-            block = kickoff.brief(include_lessons=not lessons_here)
-            if phase.id == CONCEPT_PHASE_ID:
-                block += (
-                    f"\nBuild on the picked direction ({kickoff.direction.name}): one of the "
-                    "concepts develops it, and any concept that departs from it says why."
-                )
-            blocks.append(block)
+                logger.warning("design_flow_answers_read_failed", phase=phase.id, error=str(exc))
+        if answers is not None:
+            blocks.append(answers.brief(include_lessons=phase.id not in LESSON_PHASES))
         if phase.id in LESSON_PHASES and self._lessons_reader is not None:
             try:
                 lessons = await self._lessons_reader(context.project_id)
@@ -411,9 +404,9 @@ class ReActPhaseBrain:
                 "Lessons from earlier runs on this project (gate rejections, reviewer "
                 "findings and recorded lessons). Do not repeat these mistakes"
                 + (
-                    "; carry the ones that bear on this design into the kickoff record's "
+                    "; carry the ones that bear on this design into the deciding answers' "
                     "lessons, with their source run:"
-                    if phase.id == KICKOFF_PHASE_ID
+                    if phase.id == INTENT_PHASE_ID
                     else "; each concept says how it avoids the ones that apply:"
                 )
             )
@@ -429,7 +422,7 @@ class ReActPhaseBrain:
         phase: Phase,
         context: FlowContext,
         phase_inputs: str = "",
-        kickoff_block: str = "",
+        answers_block: str = "",
     ) -> str:
         prior = (
             "\n".join(f"  - {p.title}: {o.summary}" for p, o in context.completed)
@@ -469,7 +462,7 @@ class ReActPhaseBrain:
             f"Product goal: {goal}\n"
             f"{project_line}\n\n"
             f"Prior phases completed:\n{prior}\n\n"
-            f"{kickoff_block}"
+            f"{answers_block}"
             f"Your objective for THIS phase:\n{phase.objective}\n\n"
             f"{inputs_block}"
             f"{deliverables}\n"
@@ -508,7 +501,7 @@ class ReActPhaseBrain:
             phase,
             context,
             phase_inputs,
-            kickoff_block=await self._kickoff_blocks(phase, context),
+            answers_block=await self._answers_blocks(phase, context),
         )
         budget = phase_step_budget(phase, self._max_steps)
         logger.info(

@@ -1,9 +1,9 @@
-"""What earlier runs on a project learned, for the kickoff and concept briefs.
+"""What earlier runs on a project learned, for the intent and concept briefs.
 
 The Chair run's concept had no joints. An earlier run on the same project had
 already been sent back for exactly that, and nothing carried the finding
 forward: every run started from the goal alone. This module turns earlier
-runs' records into a short, deduplicated list of lessons that the kickoff and
+runs' records into a short, deduplicated list of lessons that the intent and
 concept phases are briefed with.
 
 Three sources, read by the caller and handed in as plain data, so this stays
@@ -15,7 +15,7 @@ pure and the two engines share it:
   earlier run (``request["gate_reviews"]``), skipping approvals' reasons,
   which say why something passed, not what went wrong;
 - **recorded lessons**: lessons already written down, such as an earlier
-  kickoff record's ``lessons`` and the twin's rejected revisions.
+  deciding answers' ``lessons`` and the twin's rejected revisions.
 
 Newest first, deduplicated on the normalised text, capped at
 :data:`MAX_PRIOR_LESSONS` so the brief stays short.

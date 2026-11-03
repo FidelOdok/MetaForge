@@ -132,7 +132,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         dfm_review: dict[str, Any] | None = None,
         assembly: dict[str, Any] | None = None,
         concept_options: list[dict[str, Any]] | None = None,
-        kickoff: dict[str, Any] | None = None,
+        deciding_questions: dict[str, Any] | None = None,
         industrial_design: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
@@ -174,14 +174,14 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 id_record = parse_industrial_design(industrial_design)
         except ValueError as exc:
             raise ValueError(f"twin.record_decision: {exc}") from exc
-        # The kickoff: deciding questions, directions and the pick, as data
-        # the kickoff gate and every later phase brief read.
-        kickoff_record = None
-        if kickoff is not None:
-            from orchestrator.design_flow.context import parse_kickoff
+        # FORGE-766: the deciding answers asked once at intent, as data
+        # every later phase brief reads.
+        answers_record = None
+        if deciding_questions is not None:
+            from orchestrator.design_flow.context import parse_deciding_answers
 
             try:
-                kickoff_record = parse_kickoff(kickoff)
+                answers_record = parse_deciding_answers(deciding_questions)
             except ValueError as exc:
                 raise ValueError(f"twin.record_decision: {exc}") from exc
         route_decision = None
@@ -212,8 +212,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
             )
             if selected_assembly is not None:
                 markdown += "\n" + selected_assembly.markdown()
-            if kickoff_record is not None:
-                markdown += "\n" + kickoff_record.markdown()
+            if answers_record is not None:
+                markdown += "\n" + answers_record.markdown()
             content = markdown.encode("utf-8")
             content_hash = hashlib.sha256(content).hexdigest()
             filename = f"{_slug(title)}.md"
@@ -323,8 +323,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["assembly"] = selected_assembly.as_metadata()
             if options is not None:
                 metadata["concept_options"] = [o.as_metadata() for o in options]
-            if kickoff_record is not None:
-                metadata["kickoff"] = kickoff_record.as_metadata()
+            if answers_record is not None:
+                metadata["deciding_questions"] = answers_record.as_metadata()
             if id_record is not None:
                 metadata["industrial_design"] = id_record.as_metadata()
             metadata.update(pin_metadata(pins))

@@ -22,9 +22,19 @@ phases:
     identify: the system's purpose, its primary stakeholder(s), the initial operating context,
     the system boundary (what's in scope vs out of scope), and the desired outcome. Record
     ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'),
-    scoped to the project.
+    scoped to the project. Then settle the deciding questions, once: the few whose answers change
+    this design most (who uses it, the load it carries, the budget, the quantity, the process
+    available, the style), at most eight. Answer each from the goal and the flow context first
+    (source stated); ask the person only what those leave open (source person); where nobody can
+    answer, state your assumption (source assumed) or leave it open (source open). Read the
+    lessons from earlier runs on this project in this brief and keep the ones that bear on this
+    design. Record one decision with twin.record_decision whose deciding_questions field holds
+    questions [{id, question, answer, source}] and lessons [{text, source_run}]. Later phases
+    are briefed with these answers and must not ask them again. Do not choose a design
+    direction here; the concept phase does, once the requirements and the process are known.
   expected_artifacts:
   - intent
+  - design_decision
   required_deliverables:
   - intent
   gate:
@@ -34,6 +44,7 @@ phases:
     - Primary stakeholder(s) identified
     - System boundary (in/out of scope) defined
     - Desired outcome stated
+    - Deciding questions answered once, each with its source, with earlier runs' lessons
 - id: needs
   title: Stakeholder Needs
   objective: >-

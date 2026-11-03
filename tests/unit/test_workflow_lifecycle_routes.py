@@ -79,7 +79,7 @@ class TestCatalogue:
         body = client.get("/v1/design-flows").json()
         flow = next(f for f in body["flows"] if f["id"] == "mech_v1")
         assert flow["graph"]["linear"] is True
-        assert flow["graph"]["waves"][0] == ["kickoff"]
+        assert flow["graph"]["waves"][0] == ["intent"]
         phase = flow["phases"][0]
         assert phase["dependsOn"] is None and phase["condition"] is None
 

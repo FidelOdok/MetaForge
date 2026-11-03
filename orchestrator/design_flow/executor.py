@@ -35,14 +35,16 @@ from orchestrator.design_flow.checks import (
     value_names,
 )
 from orchestrator.design_flow.context import (
+    CONCEPT_PHASE_ID,
     DESIGN_PHASE_ID,
     DFM_REVIEW_PHASE_ID,
     INDUSTRIAL_DESIGN_PHASE_ID,
-    KICKOFF_PHASE_ID,
+    INTENT_PHASE_ID,
     assembly_conformance_gap,
+    concept_pick_note,
+    deciding_answers_gap,
     dfm_review_gap,
     industrial_design_gap,
-    kickoff_gap,
     route_decision_gap,
 )
 from orchestrator.design_flow.coupling import iteration_feedback, judge_history, wants_another_pass
@@ -148,7 +150,7 @@ class ReadinessReport:
     missing: list[str] = field(default_factory=list)
     checked: bool = True  # False when no evaluator was available to check
     #: What the reviewer is asked to decide on, shown in the gate reason
-    #: (the kickoff's directions and pick).
+    #: (the concepts to pick from).
     notes: list[str] = field(default_factory=list)
 
 
@@ -956,19 +958,24 @@ class DesignFlowExecutor:
             if gap is not None:
                 missing.append(gap)
         notes: list[str] = []
-        if phase.id == KICKOFF_PHASE_ID and hasattr(self._evaluator, "kickoff"):
-            # The kickoff gate is where the person picks a direction: it needs
-            # the record, and its reason lists the directions to pick from.
+        if phase.id == INTENT_PHASE_ID and hasattr(self._evaluator, "deciding_answers"):
+            # FORGE-766: the deciding answers are recorded before intent passes.
             try:
-                kickoff = await self._evaluator.kickoff(ctx.project_id)
-                gap = kickoff_gap(kickoff)
+                gap = deciding_answers_gap(await self._evaluator.deciding_answers(ctx.project_id))
             except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
-                logger.warning("design_flow_kickoff_error", error=str(exc))
-                kickoff, gap = None, None
+                logger.warning("design_flow_deciding_answers_error", error=str(exc))
+                gap = None
             if gap is not None:
                 missing.append(gap)
-            elif kickoff is not None:
-                notes.append(kickoff.gate_note())
+        if phase.id == CONCEPT_PHASE_ID and hasattr(self._evaluator, "concept_options"):
+            # FORGE-766: the concept gate is where a direction is picked.
+            try:
+                note = concept_pick_note(await self._evaluator.concept_options(ctx.project_id))
+            except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+                logger.warning("design_flow_concept_options_error", error=str(exc))
+                note = None
+            if note is not None:
+                notes.append(note)
         return ReadinessReport(
             ready=not missing,
             present=sorted(required & present),
