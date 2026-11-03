@@ -870,6 +870,19 @@ alternatives and any candidate standard or bought parts. Both
 `design_sketch` and `design_decision` are required deliverables, the gate is
 G5, and the objective says outright that no CAD is authored in this phase.
 
+The concept decision carries what it selects as data, not prose.
+`twin.record_decision` takes an `assembly` (each part with its source, made,
+bought or standard, plus material, process, quantity and a provenance tag,
+and each connection between two named parts with its joint and fasteners)
+and `concept_options` (every concept considered, with its sketch and exactly
+one selected). Both are checked when recorded: a connection to a part that is
+not listed, or one with no joint, is refused. The G5 gate gains a "Selected
+assembly recorded" check that passes when the latest assembly joins its parts
+with stated joints, and is not evaluated when no decision carries one. The
+standard and bought parts the joints rely on are recorded with
+`twin.record_component_selection` and `selection: "candidate"`; the BOM view
+reports that state, so a candidate never reads as a chosen part.
+
 A sketch shows intent and is never evidence. Sketches and renders are
 committed with `metadata.authority = "illustrative"`, the gate review brief
 reports each work product's authority (`illustrative` for a sketch, render

@@ -1258,6 +1258,25 @@ class TwinServer(McpToolServer):
                                 "reads it."
                             ),
                         },
+                        "assembly": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-758: on the concept decision, the selected assembly: "
+                                "parts [{name, source (made | bought | standard), material, "
+                                "process, quantity, provenance}] and connections [{parts: "
+                                "[a, b], joint, fasteners, provenance}]. Every connection "
+                                "states its joint; provenance is verified, intended, "
+                                "assumption or open. Design builds to it."
+                            ),
+                        },
+                        "concept_options": {
+                            "type": "array",
+                            "description": (
+                                "FORGE-758: on the concept decision, each concept considered: "
+                                "{name, summary, sketch_ref, selected}, exactly one selected."
+                            ),
+                            "items": {"type": "object"},
+                        },
                         "manufacturing_route": {
                             "type": "object",
                             "description": (
@@ -1352,6 +1371,16 @@ class TwinServer(McpToolServer):
             if not isinstance(review, dict):
                 raise ValueError("twin.record_decision: 'dfm_review' must be an object")
             kwargs["dfm_review"] = review
+        assembly = arguments.get("assembly")
+        if assembly is not None:
+            if not isinstance(assembly, dict):
+                raise ValueError("twin.record_decision: 'assembly' must be an object")
+            kwargs["assembly"] = assembly
+        options = arguments.get("concept_options")
+        if options is not None:
+            if not isinstance(options, list):
+                raise ValueError("twin.record_decision: 'concept_options' must be an array")
+            kwargs["concept_options"] = options
         return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------
@@ -1398,6 +1427,15 @@ class TwinServer(McpToolServer):
                         "role": {
                             "type": ["string", "null"],
                             "description": "Subsystem role, e.g. 'mcu' (from search_intent).",
+                        },
+                        "selection": {
+                            "type": "string",
+                            "enum": ["candidate", "selected"],
+                            "default": "selected",
+                            "description": (
+                                "FORGE-758: 'candidate' for a part the concept relies on "
+                                "before design confirms it; 'selected' once chosen."
+                            ),
                         },
                         "quantity": {"type": "integer", "minimum": 1, "default": 1},
                         "unit_cost_usd": {"type": ["number", "null"]},
@@ -1528,6 +1566,11 @@ class TwinServer(McpToolServer):
             )
 
         role = arguments.get("role")
+        selection = arguments.get("selection", "selected")
+        if selection not in ("candidate", "selected"):
+            raise ValueError(
+                "twin.record_component_selection: 'selection' must be 'candidate' or 'selected'"
+            )
         quantity = arguments.get("quantity", 1)
         try:
             quantity_int = int(quantity)
@@ -1571,6 +1614,7 @@ class TwinServer(McpToolServer):
             ),
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            selection=selection,
             **_item_kwargs(arguments),
         )
 

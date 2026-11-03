@@ -696,7 +696,42 @@ async def evaluate_g5_concept_selection(twin: TwinAPI, project_id: UUID) -> Gate
     real today and what's deliberately out of scope (the Decision Agent).
     """
     checks = await _evaluate_decision_checks(twin, project_id)
+    checks.append(await _evaluate_selected_assembly_check(twin, project_id))
     return GateEvaluation(gate_id="G5", status=_status_from_checks(checks), checks=checks)
+
+
+async def _evaluate_selected_assembly_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
+    """FORGE-758: a concept names the assembly it selects, joints included.
+
+    Not evaluated when no decision carries one, so a flow whose concept is
+    not a mechanical assembly is not failed for lacking it.
+    """
+    decisions = await twin.list_work_products(
+        work_product_type=WorkProductType.DESIGN_DECISION, project_id=project_id
+    )
+    assemblies = [d.metadata["assembly"] for d in decisions if d.metadata.get("assembly")]
+    if not assemblies:
+        return GateCheck(
+            id="concept:selected_assembly",
+            label="Selected assembly recorded",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no decision records a selected assembly",
+        )
+    latest = assemblies[-1]
+    parts = latest.get("parts") or []
+    connections = latest.get("connections") or []
+    unjoined = [c for c in connections if not str(c.get("joint") or "").strip()]
+    passed = bool(parts) and not unjoined and (len(parts) < 2 or bool(connections))
+    return GateCheck(
+        id="concept:selected_assembly",
+        label="Selected assembly recorded",
+        status=GateCheckStatus.PASS if passed else GateCheckStatus.FAIL,
+        detail=(
+            f"{len(parts)} part(s), {len(connections)} connection(s) with joints"
+            if passed
+            else "the selected assembly has parts with no connection or a connection with no joint"
+        ),
+    )
 
 
 async def _evaluate_design_sketch_check(twin: TwinAPI, project_id: UUID) -> GateCheck:

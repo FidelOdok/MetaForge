@@ -665,3 +665,208 @@ def dfm_review_gap(review: DfmReview | None) -> str | None:
             f"{review.failed} failing feature(s); rework the design or reopen the process"
         )
     return None
+
+
+# ── the concept's selected assembly (FORGE-758) ───────────────────────────
+#
+# The Chair run reached CAD with its joints undecided: the concept was prose,
+# so nothing said which parts met where or how they were held. A concept
+# decision now carries the assembly it selects as data: the parts (made,
+# bought or standard), the connections between them and each one's joint,
+# every entry tagged with how sure it is. Design builds to it.
+
+PART_SOURCES: tuple[str, ...] = ("made", "bought", "standard")
+PROVENANCE_TAGS: tuple[str, ...] = ("verified", "intended", "assumption", "open")
+
+
+@dataclass(frozen=True)
+class AssemblyPart:
+    name: str
+    source: str = "made"
+    material: str = ""
+    process: str = ""
+    quantity: int = 1
+    provenance: str = "intended"
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "source": self.source,
+            "material": self.material,
+            "process": self.process,
+            "quantity": self.quantity,
+            "provenance": self.provenance,
+        }
+
+
+@dataclass(frozen=True)
+class AssemblyConnection:
+    parts: tuple[str, str]
+    joint: str
+    fasteners: str = ""
+    provenance: str = "intended"
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "parts": list(self.parts),
+            "joint": self.joint,
+            "fasteners": self.fasteners,
+            "provenance": self.provenance,
+        }
+
+
+@dataclass(frozen=True)
+class ConceptAssembly:
+    parts: tuple[AssemblyPart, ...]
+    connections: tuple[AssemblyConnection, ...] = ()
+
+    def summary(self) -> str:
+        joints = "; ".join(f"{c.parts[0]} to {c.parts[1]}: {c.joint}" for c in self.connections)
+        head = f"{len(self.parts)} part(s), {len(self.connections)} connection(s)"
+        return f"{head} ({joints})" if joints else head
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "parts": [p.as_metadata() for p in self.parts],
+            "connections": [c.as_metadata() for c in self.connections],
+        }
+
+    def markdown(self) -> str:
+        lines = [
+            "## Selected assembly",
+            "",
+            "| Part | Source | Material | Process | Qty | Status |",
+            "|---|---|---|---|---|---|",
+        ]
+        for p in self.parts:
+            lines.append(
+                f"| {p.name} | {p.source} | {p.material} | {p.process} | {p.quantity} "
+                f"| {p.provenance} |"
+            )
+        if self.connections:
+            lines += ["", "| Connection | Joint | Fasteners | Status |", "|---|---|---|---|"]
+            for c in self.connections:
+                lines.append(
+                    f"| {c.parts[0]} to {c.parts[1]} | {c.joint} | {c.fasteners} | {c.provenance} |"
+                )
+        return "\n".join(lines) + "\n"
+
+
+def _provenance(value: object, where: str) -> str:
+    tag = _text(value) or "intended"
+    if tag not in PROVENANCE_TAGS:
+        raise ValueError(f"{where}.provenance must be one of {', '.join(PROVENANCE_TAGS)}")
+    return tag
+
+
+def _assembly_part(raw: object, where: str) -> AssemblyPart:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{where} must be an object")
+    name = _text(raw.get("name"))
+    if not name:
+        raise ValueError(f"{where} needs a name")
+    source = _text(raw.get("source")) or "made"
+    if source not in PART_SOURCES:
+        raise ValueError(f"{where}.source must be one of {', '.join(PART_SOURCES)}")
+    quantity = raw.get("quantity", 1)
+    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 1:
+        raise ValueError(f"{where}.quantity must be a whole number of at least 1")
+    return AssemblyPart(
+        name=name,
+        source=source,
+        material=_text(raw.get("material")),
+        process=_text(raw.get("process")),
+        quantity=quantity,
+        provenance=_provenance(raw.get("provenance"), where),
+    )
+
+
+def _assembly_connection(raw: object, where: str, names: list[str]) -> AssemblyConnection:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{where} must be an object")
+    ends = raw.get("parts")
+    if not isinstance(ends, list) or len(ends) != 2:
+        raise ValueError(f"{where}.parts must name the two parts it joins")
+    a, b = _text(ends[0]), _text(ends[1])
+    unknown = [n for n in (a, b) if n not in names]
+    if unknown:
+        raise ValueError(f"{where} joins a part not in assembly.parts: {', '.join(unknown)}")
+    joint = _text(raw.get("joint"))
+    if not joint:
+        raise ValueError(f"{where} needs its joint (e.g. dowel, mortise and tenon, bolted)")
+    return AssemblyConnection(
+        parts=(a, b),
+        joint=joint,
+        fasteners=_text(raw.get("fasteners")),
+        provenance=_provenance(raw.get("provenance"), where),
+    )
+
+
+def parse_concept_assembly(value: object) -> ConceptAssembly:
+    """An ``assembly`` value checked; raises ``ValueError`` saying why.
+
+    At least one part, unique names, and every connection between two named
+    parts with its joint stated: a connection with no joint is exactly the
+    gap the concept phase exists to close.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("assembly must be an object with parts and connections")
+    raw_parts = value.get("parts")
+    if not isinstance(raw_parts, list) or not raw_parts:
+        raise ValueError("assembly.parts must list at least one part")
+    parts = [_assembly_part(raw, f"assembly.parts[{i}]") for i, raw in enumerate(raw_parts)]
+    names = [p.name for p in parts]
+    repeated = sorted({n for n in names if names.count(n) > 1})
+    if repeated:
+        raise ValueError(f"assembly.parts names must be unique; repeated: {', '.join(repeated)}")
+    raw_connections = value.get("connections") or []
+    if not isinstance(raw_connections, list):
+        raise ValueError("assembly.connections must be a list")
+    connections = [
+        _assembly_connection(raw, f"assembly.connections[{i}]", names)
+        for i, raw in enumerate(raw_connections)
+    ]
+    return ConceptAssembly(parts=tuple(parts), connections=tuple(connections))
+
+
+@dataclass(frozen=True)
+class ConceptOption:
+    name: str
+    summary: str
+    selected: bool = False
+    sketch_ref: str = ""
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "summary": self.summary,
+            "selected": self.selected,
+            "sketch_ref": self.sketch_ref,
+        }
+
+
+def parse_concept_options(value: object) -> tuple[ConceptOption, ...]:
+    """A ``concept_options`` value checked: each concept, exactly one selected."""
+    if not isinstance(value, list) or not value:
+        raise ValueError("concept_options must list the concepts considered")
+    options: list[ConceptOption] = []
+    for i, raw in enumerate(value):
+        where = f"concept_options[{i}]"
+        if not isinstance(raw, dict):
+            raise ValueError(f"{where} must be an object")
+        name = _text(raw.get("name"))
+        summary = _text(raw.get("summary"))
+        if not name or not summary:
+            raise ValueError(f"{where} needs a name and a summary")
+        options.append(
+            ConceptOption(
+                name=name,
+                summary=summary,
+                selected=raw.get("selected") is True,
+                sketch_ref=_text(raw.get("sketch_ref")),
+            )
+        )
+    chosen = [o for o in options if o.selected]
+    if len(chosen) != 1:
+        raise ValueError(f"concept_options must mark exactly one selected, got {len(chosen)}")
+    return tuple(options)

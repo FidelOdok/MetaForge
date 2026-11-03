@@ -130,6 +130,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         manufacturing_route: dict[str, Any] | None = None,
         process_ranking: Any = None,
         dfm_review: dict[str, Any] | None = None,
+        assembly: dict[str, Any] | None = None,
+        concept_options: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
         from twin_core.models.enums import WorkProductType
@@ -146,6 +148,22 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 ranking = parse_process_ranking(process_ranking)
             if dfm_review is not None:
                 review = parse_dfm_review(dfm_review)
+        except ValueError as exc:
+            raise ValueError(f"twin.record_decision: {exc}") from exc
+        # FORGE-758: the concept's selected assembly and the options it was
+        # chosen from, as data the design phase and its gate can read.
+        selected_assembly = None
+        options = None
+        try:
+            from orchestrator.design_flow.context import (
+                parse_concept_assembly,
+                parse_concept_options,
+            )
+
+            if assembly is not None:
+                selected_assembly = parse_concept_assembly(assembly)
+            if concept_options is not None:
+                options = parse_concept_options(concept_options)
         except ValueError as exc:
             raise ValueError(f"twin.record_decision: {exc}") from exc
         route_decision = None
@@ -174,6 +192,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
             markdown = render_decision_markdown(
                 title, rationale, alternatives, supersedes, [p.ref for p in explicit]
             )
+            if selected_assembly is not None:
+                markdown += "\n" + selected_assembly.markdown()
             content = markdown.encode("utf-8")
             content_hash = hashlib.sha256(content).hexdigest()
             filename = f"{_slug(title)}.md"
@@ -279,6 +299,10 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["process_ranking"] = ranking.as_metadata()
             if review is not None:
                 metadata["dfm_review"] = review.as_metadata()
+            if selected_assembly is not None:
+                metadata["assembly"] = selected_assembly.as_metadata()
+            if options is not None:
+                metadata["concept_options"] = [o.as_metadata() for o in options]
             metadata.update(pin_metadata(pins))
             if pins:
                 # FORGE-528's list of refs, now every pin (one depends_on).
