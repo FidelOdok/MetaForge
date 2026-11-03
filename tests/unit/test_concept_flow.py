@@ -55,3 +55,25 @@ def test_its_phases_are_mech_v1s_so_they_cannot_drift() -> None:
     concept, mech = _phases("concept_v1"), _phases("mech_v1")
     for phase_id in SHARED_PHASES:
         assert concept[phase_id] == mech[phase_id], f"{phase_id} drifted from mech_v1"
+
+
+def test_it_ends_with_a_sign_off_even_when_intent_is_reused() -> None:
+    """Reuse makes intent conditional, and a skipped gate signs nothing off.
+
+    On a project whose intent and deciding answers are current, flow.propose
+    gives intent a reuse condition; the flow must still end with a person
+    approving the result.
+    """
+    from dataclasses import replace
+
+    from orchestrator.design_flow.invariants import validate_flow
+
+    flow = get_flow("concept_v1")
+    reused = replace(
+        flow,
+        phases=tuple(
+            replace(p, condition="intent_current == false") if p.id == "intent" else p
+            for p in flow.phases
+        ),
+    )
+    assert not [v for v in validate_flow(reused).violations if v.rule == "release-gate-exists"]

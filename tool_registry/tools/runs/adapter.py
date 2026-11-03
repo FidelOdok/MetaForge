@@ -49,7 +49,8 @@ class RunsServer(McpToolServer):
                     "Flows: 'hardware_v1' (full 8-phase hardware/robotics "
                     "lifecycle — the usual choice), 'mech_v1' (mechanical "
                     "vertical: requirements/CAD/FEA), 'design_v1' (thin demo "
-                    "vertical). Always pass the project_id when working inside "
+                    "vertical), 'concept_v1' (concept design: decides what to "
+                    "build and stops before CAD). Always pass the project_id when working inside "
                     "a project."
                 ),
                 capability="run_launch",

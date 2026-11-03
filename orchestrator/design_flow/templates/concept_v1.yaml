@@ -7,12 +7,16 @@
 # candidate bought and standard parts), whose gate is where the person picks
 # a direction. A concept approved here is the starting point for mech_v1.
 #
+# The verification plan's gate is the flow's sign-off: on a project whose
+# intent is reused, the intent gate is skipped, and a flow must still end with
+# a person approving the result.
+#
 # The requirements, route selection and concept phases are mech_v1's, copied
 # verbatim; tests/unit/test_concept_flow.py fails if the two drift apart.
 # `version` is recorded on every run started from this template. Bump it
 # when the phases or gates change.
 id: concept_v1
-version: 1.0.0
+version: 1.0.1
 extends: spine_v1
 name: Concept design (Intent -> Requirements -> Route -> Concept -> Verification plan), stops before CAD
 label: Concept design
@@ -124,7 +128,7 @@ phases:
   required_deliverables:
   - design_decision
   gate:
-    name: Concept hand-off (verification plan)
+    name: Concept sign-off (verification plan)
     criteria:
     - Every requirement has a verification method, load case or measurement, and acceptance criterion
     - Each verification is assigned to the phase that will do it
