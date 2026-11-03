@@ -656,7 +656,14 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
     "render": frozenset({"twin.render_work_product"}),
     # FORGE-757: the concept phase's labelled sketches.
     # FORGE-760: or drawn by the procedural renderer from a block layout.
-    "design_sketch": frozenset({"twin.commit_design_sketch", "twin.render_concept_sketch"}),
+    # FORGE-761: and an optional AI concept image of a drawn layout.
+    "design_sketch": frozenset(
+        {
+            "twin.commit_design_sketch",
+            "twin.render_concept_sketch",
+            "twin.render_concept_image",
+        }
+    ),
     # FORGE-687: KiCad and firmware outputs, kept by twin.record_design_files.
     # Only the recorder is always kept: the tools that make the files come
     # with the phase's own profile (pcb_design, electronics), and a phase

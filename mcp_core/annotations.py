@@ -370,6 +370,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-630: adds a render node linked to the model it shows; the
         # model itself is never touched. With store=false it records nothing.
         "twin.render_work_product",
+        # FORGE-761: adds an illustrative render node linked to its layout
+        # sketch; the sketch is never touched.
+        "twin.render_concept_image",
         # FORGE-687: a new design-files node (or the next revision of its
         # item); the files it reads on the workspace are not touched.
         "twin.record_design_files",
@@ -598,6 +601,8 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "vendor.quote",
         "vendor.place_order",
         "vendor.order_status",
+        # FORGE-761: the brief and layout image go to the configured image API.
+        "twin.render_concept_image",
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",

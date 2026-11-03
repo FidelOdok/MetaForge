@@ -2002,6 +2002,15 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         factory = getattr(structured_document_recorder, f"make_{name}")
         _try(name, lambda f=factory: f(twin, project_backend))
 
+    # FORGE-761: twin.render_concept_image. Registered whether or not an image
+    # provider is configured; an unconfigured one fails the call clearly.
+    def _concept_image() -> Any:
+        from api_gateway.twin.concept_image import make_concept_image_recorder
+
+        return make_concept_image_recorder(twin, project_backend)
+
+    _try("concept_image_renderer", _concept_image)
+
     # FORGE-630: twin.render_work_product, whose blender.render call goes
     # through this server's own registry once it exists.
     try:

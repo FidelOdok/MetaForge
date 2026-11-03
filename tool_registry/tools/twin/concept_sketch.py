@@ -604,8 +604,10 @@ def explode_offsets(layout: ConceptLayout) -> list[Vec]:
     return offsets
 
 
-def _iso_part(part: SketchPart, offset: Vec, to_page: Callable[[Vec], Point]) -> list[str]:
-    stroke = f"s-{part.provenance}"
+def _part_faces(
+    part: SketchPart, offset: Vec, to_page: Callable[[Vec], Point]
+) -> list[tuple[str, list[Point]]]:
+    """A part's visible faces in the isometric view, as (face class, outline)."""
     if part.shape == "box":
         lo, hi = _add(part.position, offset), _add(part.upper, offset)
         x0, y0, z0 = lo
@@ -615,10 +617,7 @@ def _iso_part(part: SketchPart, offset: Vec, to_page: Callable[[Vec], Point]) ->
             ("face-right", [(x1, y0, z0), (x1, y1, z0), (x1, y1, z1), (x1, y0, z1)]),
             ("face-top", [(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]),
         )
-        return [
-            f'<polygon class="{cls} {stroke}" points="{_poly([to_page(c) for c in pts])}"/>'
-            for cls, pts in faces
-        ]
+        return [(cls, [to_page(c) for c in pts]) for cls, pts in faces]
     a = _AXIS_INDEX[part.axis]
     u, v = (i for i in range(3) if i != a)
     c = _add(part.centre, offset)
@@ -636,10 +635,89 @@ def _iso_part(part: SketchPart, offset: Vec, to_page: Callable[[Vec], Point]) ->
         caps[end] = ring
     body = _hull([to_page(p) for ring in caps.values() for p in ring])
     visible = 1.0 if _VIEW_DIR[a] > 0 else -1.0
+    return [("face-right", body), ("cap", [to_page(p) for p in caps[visible]])]
+
+
+def _iso_part(part: SketchPart, offset: Vec, to_page: Callable[[Vec], Point]) -> list[str]:
+    stroke = f"s-{part.provenance}"
     return [
-        f'<polygon class="face-right {stroke}" points="{_poly(body)}"/>',
-        f'<polygon class="cap {stroke}" points="{_poly([to_page(p) for p in caps[visible]])}"/>',
+        f'<polygon class="{cls} {stroke}" points="{_poly(pts)}"/>'
+        for cls, pts in _part_faces(part, offset, to_page)
     ]
+
+
+def _painter_order(layout: ConceptLayout, offsets: list[Vec]) -> list[int]:
+    # Farthest from the viewer first.
+    return sorted(
+        range(len(layout.parts)),
+        key=lambda i: (
+            sum(_add(layout.parts[i].centre, offsets[i])[k] * _VIEW_DIR[k] for k in range(3)),
+            i,
+        ),
+    )
+
+
+def iso_faces(
+    layout: ConceptLayout, width: float, height: float, margin: float = 0.08
+) -> list[tuple[str, str, list[Point]]]:
+    """The isometric view as filled polygons in a ``width`` x ``height`` page.
+
+    Each entry is ``(part name, face class, outline)``, in painter's order
+    (draw them in order and nearer faces cover farther ones). Face classes
+    are ``face-front``, ``face-right``, ``face-top`` and ``cap``. This is
+    what a raster backend draws to condition an image model on the layout
+    (FORGE-761): the same projection as the sketch's isometric view, so the
+    picture and the sketch agree on proportions.
+    """
+    zero: list[Vec] = [(0.0, 0.0, 0.0)] * len(layout.parts)
+    projected = [_iso(c) for part in layout.parts for c in _corners(part, (0.0, 0.0, 0.0))]
+    min_x = min(p[0] for p in projected)
+    max_x = max(p[0] for p in projected)
+    min_y = min(p[1] for p in projected)
+    max_y = max(p[1] for p in projected)
+    area_w, area_h = width * (1 - 2 * margin), height * (1 - 2 * margin)
+    scale = min(area_w / max(max_x - min_x, 1e-9), area_h / max(max_y - min_y, 1e-9))
+    ox = (width - (max_x - min_x) * scale) / 2
+    oy = (height - (max_y - min_y) * scale) / 2
+
+    def to_page(p: Vec) -> Point:
+        ix, iy = _iso(p)
+        return (ox + (ix - min_x) * scale, oy + (iy - min_y) * scale)
+
+    out: list[tuple[str, str, list[Point]]] = []
+    for i in _painter_order(layout, zero):
+        part = layout.parts[i]
+        out += [(part.name, cls, pts) for cls, pts in _part_faces(part, zero[i], to_page)]
+    return out
+
+
+def layout_to_dict(layout: ConceptLayout) -> dict[str, Any]:
+    """A parsed layout back as tool input, so a stored sketch can be redrawn.
+
+    ``parse_layout(layout_to_dict(x))`` gives ``x`` again, and therefore the
+    same SVG. Kept on the sketch's metadata so a later tool (the AI concept
+    image, FORGE-761) can start from exactly the layout the sketch shows.
+    """
+    return {
+        "concept_name": layout.concept_name,
+        "parts": [
+            {
+                "name": p.name,
+                "shape": p.shape,
+                "size_mm": list(p.size),
+                "position_mm": list(p.position),
+                "provenance": p.provenance,
+                "axis": p.axis,
+                "explode": p.explode,
+            }
+            for p in layout.parts
+        ],
+        "connections": [
+            {"a": c.a, "b": c.b, "joint": c.joint, "provenance": c.provenance}
+            for c in layout.connections
+        ],
+        "notes": layout.notes,
+    }
 
 
 def _iso_anchor(part: SketchPart, offset: Vec) -> Vec:
@@ -701,14 +779,7 @@ def _iso_view(
         f'<text class="view-title" x="{_n(px + 10)}" y="{_n(py + 20)}">{title}</text>',
     ]
     # Painter's order: farthest from the viewer first.
-    order = sorted(
-        range(len(layout.parts)),
-        key=lambda i: (
-            sum(_add(layout.parts[i].centre, offsets[i])[k] * _VIEW_DIR[k] for k in range(3)),
-            i,
-        ),
-    )
-    for i in order:
+    for i in _painter_order(layout, offsets):
         out += _iso_part(layout.parts[i], offsets[i], to_page)
 
     if view == "exploded":
