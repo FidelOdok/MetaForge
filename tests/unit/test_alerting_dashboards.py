@@ -118,7 +118,8 @@ class TestAlertingRules:
         # + 2 gate reviewer: failing, disagrees often (FORGE-726).
         # + 1 run supervisor platform issue (FORGE-734).
         # + 1 concept images unavailable (FORGE-761).
-        assert len(rules) == 60
+        # + 1 sketch readings unavailable (FORGE-762).
+        assert len(rules) == 61
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -181,7 +182,8 @@ class TestAlertingRules:
         # + 2 gate reviewer (FORGE-726).
         # + 1 run supervisor (FORGE-734).
         # + 1 concept images unavailable (FORGE-761).
-        assert len(warnings) == 46
+        # + 1 sketch readings unavailable (FORGE-762).
+        assert len(warnings) == 47
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -291,6 +293,8 @@ class TestAlertingRules:
                 "RunSupervisorFoundPlatformIssue",
                 # FORGE-761: concept images cannot be generated.
                 "ConceptImageGenerationUnavailable",
+                # FORGE-762: uploaded sketches cannot be read.
+                "SketchReadingUnavailable",
             ]
         )
 

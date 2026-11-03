@@ -344,6 +344,8 @@ async def bootstrap_tool_registry(
     component_catalog_store: Any = None,
     component_intent_llm: Any = None,
     design_sketch_recorder: Any = None,
+    sketch_interpreter: Any = None,
+    sketch_reading_decider: Any = None,
     hazard_analysis_recorder: Any = None,
     system_architecture_recorder: Any = None,
     technical_drawing_recorder: Any = None,
@@ -468,6 +470,11 @@ async def bootstrap_tool_registry(
             HTML reference sketch as a DESIGN_SKETCH work product -- the
             human-approval gate before committing to real CAD/build work.
             ``None`` skips registration (same pattern as ``document_recorder``).
+        sketch_interpreter, sketch_reading_decider: Optional async callables
+            (FORGE-762, ``api_gateway.twin.sketch_reading``). When supplied,
+            register ``twin.interpret_sketch`` (a vision model's proposed
+            reading of an uploaded sketch) and ``twin.confirm_sketch_reading``
+            (a person's confirm or reject, a human-authority tool).
         hazard_analysis_recorder, system_architecture_recorder,
             technical_drawing_recorder, compliance_checklist_recorder,
             procurement_record_recorder: Optional async ``commit(...)``
@@ -824,6 +831,8 @@ async def bootstrap_tool_registry(
                     document_recorder=document_recorder,
                     blob_stager=blob_stager,
                     design_sketch_recorder=design_sketch_recorder,
+                    sketch_interpreter=sketch_interpreter,
+                    sketch_reading_decider=sketch_reading_decider,
                     hazard_analysis_recorder=hazard_analysis_recorder,
                     system_architecture_recorder=system_architecture_recorder,
                     technical_drawing_recorder=technical_drawing_recorder,

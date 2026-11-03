@@ -272,6 +272,8 @@ class TwinServer(McpToolServer):
         blob_stager: Any = None,
         design_sketch_recorder: Any = None,
         concept_image_renderer: Any = None,
+        sketch_interpreter: Any = None,
+        sketch_reading_decider: Any = None,
         hazard_analysis_recorder: Any = None,
         system_architecture_recorder: Any = None,
         technical_drawing_recorder: Any = None,
@@ -399,6 +401,13 @@ class TwinServer(McpToolServer):
         # recorder) that has an image model draw a concept from its block
         # layout and a visual brief, and commits it as an illustrative render.
         self._concept_image_renderer = concept_image_renderer
+        # FORGE-762: an injected async ``interpret(...)`` (make_sketch_interpreter)
+        # that has a vision model read an uploaded sketch into a *proposed*
+        # concept reading, and ``decide(...)`` (make_sketch_reading_decider)
+        # for a person's confirm or reject. Same injection seam as every
+        # recorder here; None keeps tool_registry free of api_gateway.
+        self._sketch_interpreter = sketch_interpreter
+        self._sketch_reading_decider = sketch_reading_decider
         # Lifecycle-mapping follow-up (MET-747): five structured-document
         # work-product types sharing api_gateway.twin.structured_document_
         # recorder's persistence helper. Same injection seam as every
@@ -631,6 +640,10 @@ class TwinServer(McpToolServer):
             self._register_render_concept_sketch()
         if concept_image_renderer is not None:
             self._register_render_concept_image()
+        if sketch_interpreter is not None:
+            self._register_interpret_sketch()
+        if sketch_reading_decider is not None:
+            self._register_confirm_sketch_reading()
         if hazard_analysis_recorder is not None:
             self._register_commit_hazard_analysis()
         if system_architecture_recorder is not None:
@@ -1369,6 +1382,18 @@ class TwinServer(McpToolServer):
                                 "assumption or open. Design builds to it."
                             ),
                         },
+                        "industrial_design": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-764: on the industrial design decision: "
+                                "joint_language and edge_treatment (what mechanical design "
+                                "follows), ergonomics {verdict (pass | fail | "
+                                "not_applicable), source of the limits, or reason when "
+                                "nobody handles it}, finishes [{part, appearance, "
+                                "compatible}] from check_cmf_compatibility, and "
+                                "open_decisions. The gate is not ready while any are open."
+                            ),
+                        },
                         "concept_options": {
                             "type": "array",
                             "description": (
@@ -1476,6 +1501,11 @@ class TwinServer(McpToolServer):
             if not isinstance(assembly, dict):
                 raise ValueError("twin.record_decision: 'assembly' must be an object")
             kwargs["assembly"] = assembly
+        id_record = arguments.get("industrial_design")
+        if id_record is not None:
+            if not isinstance(id_record, dict):
+                raise ValueError("twin.record_decision: 'industrial_design' must be an object")
+            kwargs["industrial_design"] = id_record
         options = arguments.get("concept_options")
         if options is not None:
             if not isinstance(options, list):
@@ -3409,6 +3439,183 @@ class TwinServer(McpToolServer):
                 {"source_tool": source_tool} if isinstance(source_tool, str) and source_tool else {}
             ),
         )
+
+    # ------------------------------------------------------------------
+    # twin.interpret_sketch / twin.confirm_sketch_reading (FORGE-762)
+    # ------------------------------------------------------------------
+
+    def _register_interpret_sketch(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.interpret_sketch",
+                adapter_id="twin",
+                name="Interpret Sketch",
+                description=(
+                    "Have a vision model read a person's hand sketch or reference image of a "
+                    "product idea and PROPOSE concept intent: the parts it sees, the "
+                    "connections and joints between them, rough proportions (always tagged "
+                    "'assumption'), and open questions for anything it cannot tell. The "
+                    "image is kept as an illustrative 'image' work product, which can never "
+                    "back a requirement claim. The reading is stored with status 'proposed' "
+                    "and is NOT concept input until a person confirms it with "
+                    "twin.confirm_sketch_reading. Give either 'image_base64' + 'mime_type', or "
+                    "'work_product_id' of an image already uploaded (files.import)."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Display name for a newly stored image.",
+                        },
+                        "image_base64": {
+                            "type": "string",
+                            "description": (
+                                "The image, base64-encoded (PNG, JPEG, GIF or WebP, at most 5 MB)."
+                            ),
+                        },
+                        "mime_type": {
+                            "type": "string",
+                            "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"],
+                        },
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "An uploaded 'image' work product to read instead.",
+                        },
+                        "note": {
+                            "type": "string",
+                            "description": "What the person says the sketch shows, if anything.",
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "status": {"type": "string", "enum": ["proposed"]},
+                        "authority": {"type": "string", "enum": ["illustrative"]},
+                        "reading": {
+                            "type": "object",
+                            "properties": {
+                                "summary": {"type": "string"},
+                                "parts": {"type": "array", "items": {"type": "object"}},
+                                "connections": {"type": "array", "items": {"type": "object"}},
+                                "proportions": {"type": "array", "items": {"type": "object"}},
+                                "open_questions": {"type": "array", "items": {"type": "string"}},
+                            },
+                        },
+                        "read_by": {"type": "object"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "next_step": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=180),
+            ),
+            handler=self.interpret_sketch,
+        )
+
+    async def interpret_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.interpret_sketch"
+        encoded = arguments.get("image_base64")
+        work_product_id = arguments.get("work_product_id")
+        if bool(encoded) == bool(work_product_id):
+            raise ValueError(f"{tool}: give exactly one of 'image_base64' or 'work_product_id'")
+        image: bytes | None = None
+        if encoded:
+            if not isinstance(encoded, str):
+                raise ValueError(f"{tool}: 'image_base64' must be a string")
+            if encoded.lstrip().startswith("data:") and "," in encoded:
+                encoded = encoded.split(",", 1)[1]
+            try:
+                image = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"{tool}: 'image_base64' is not valid base64") from exc
+            if not arguments.get("mime_type"):
+                raise ValueError(f"{tool}: 'mime_type' is required with 'image_base64'")
+        name = arguments.get("name")
+        note = arguments.get("note")
+        project_id = arguments.get("project_id")
+        result: dict[str, Any] = await self._sketch_interpreter(
+            name=name if isinstance(name, str) and name.strip() else None,
+            image_bytes=image,
+            mime_type=arguments.get("mime_type"),
+            work_product_id=str(work_product_id) if work_product_id else None,
+            note=note if isinstance(note, str) else "",
+            project_id=project_id if isinstance(project_id, str) else None,
+        )
+        return result
+
+    def _register_confirm_sketch_reading(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.confirm_sketch_reading",
+                adapter_id="twin",
+                name="Confirm Sketch Reading",
+                description=(
+                    "Record a PERSON's decision on a proposed sketch reading "
+                    "(twin.interpret_sketch): 'confirm' makes it concept input for the "
+                    "concept phase, 'reject' sets it aside. The deciding person is NOT an "
+                    "argument: this call is always held for a person, and whoever approves "
+                    "it is recorded as the decider. Passing 'decided_by', 'approver' or "
+                    "'approved_by' is an error. Confirming keeps every proportion an "
+                    "assumption and the image illustrative."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "description": "The image work product holding the reading.",
+                        },
+                        "decision": {"type": "string", "enum": ["confirm", "reject"]},
+                        "reason": {"type": "string", "description": "Why, in a sentence."},
+                    },
+                    "required": ["node_id", "decision"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "status": {"type": "string", "enum": ["confirmed", "rejected"]},
+                        "decided_by": {"type": "string"},
+                        "decided_at": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=10),
+            ),
+            handler=self.confirm_sketch_reading,
+        )
+
+    async def confirm_sketch_reading(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.confirm_sketch_reading"
+        node_id = arguments.get("node_id")
+        if not node_id or not isinstance(node_id, str):
+            raise ValueError(f"{tool}: 'node_id' is required")
+        decision = arguments.get("decision")
+        if decision not in ("confirm", "reject"):
+            raise ValueError(f"{tool}: 'decision' must be 'confirm' or 'reject'")
+        # A confirmed reading becomes concept input, so the decider is the
+        # person who answered the approval, never a name the model typed.
+        reject_caller_supplied_approver(tool, arguments)
+        decided_by = arguments.get(APPROVED_BY_ARG)
+        if not isinstance(decided_by, str) or not decided_by.strip():
+            raise HumanAuthorityRequiredError(
+                tool, "no approver reached the tool, so nothing was decided"
+            )
+        reason = arguments.get("reason")
+        result: dict[str, Any] = await self._sketch_reading_decider(
+            node_id,
+            decision=decision,
+            decided_by=decided_by,
+            reason=reason if isinstance(reason, str) else "",
+        )
+        return result
 
     # ------------------------------------------------------------------
     # twin.render_concept_sketch (FORGE-760)

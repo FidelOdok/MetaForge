@@ -127,6 +127,10 @@ HUMAN_AUTHORITY_TOOLS: frozenset[str] = frozenset(
         # supplied one, and the difference is the whole bug.
         "twin.approve_design_loop",
         "twin.approve_engineering_change",
+        # FORGE-762: confirming a vision model's reading of a sketch is what
+        # turns it into concept input. The person confirming is the content,
+        # so the model can neither name them nor confirm its own reading.
+        "twin.confirm_sketch_reading",
     }
 )
 

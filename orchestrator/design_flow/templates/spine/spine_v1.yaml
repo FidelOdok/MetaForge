@@ -167,9 +167,16 @@ phases:
     choice; ask for it if it was not stated. Choose a library appearance per visible part
     (library.list_appearances; a new one is registered with library.register_appearance, held
     for the person's approval, with its colour code and a sourced screen value), and run
-    check_cmf_compatibility against each part's material. Record one decision with
-    twin.record_decision covering the envelope, the ergonomics verdict and the finishes, naming
-    every unknown and every assumed value.
+    check_cmf_compatibility against each part's material. (4) Joint and edge language: decide
+    how joints show (hidden, flush or expressed, and with which fixings) and how edges are
+    treated (radius or chamfer and where), from the selected concept and the process limits,
+    and record them with twin.record_constraint_set so mechanical design works to them. Record
+    one decision with twin.record_decision covering the envelope, the ergonomics verdict and the
+    finishes, naming every unknown and every assumed value, with its industrial_design field:
+    joint_language, edge_treatment, ergonomics (verdict and the source of the limits, or the
+    reason nobody handles it), finishes (part, appearance, and whether check_cmf_compatibility
+    passed) and open_decisions. Settle each open decision with the person before the gate; the
+    gate is not ready while any remain open.
   expected_artifacts:
   - design_decision
   - constraint_set
@@ -185,6 +192,8 @@ phases:
     - Ergonomics checked against sourced limits for the stated users, or recorded as not applicable with the reason
     - Finishes chosen per visible part and compatible with its material, or the open items listed
     - Unknown and assumed values named
+    - Joint and edge language recorded as constraints for mechanical design
+    - No industrial design decision left open
 - id: design
   title: Detailed Design
   objective: >-

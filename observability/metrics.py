@@ -850,6 +850,19 @@ class MetricsRegistry:
         labels=["recommendation", "decision", "agreed"],
     )
 
+    # ── Sketch reading (FORGE-762) ─────────────────────────────────────
+
+    SKETCH_READING_TOTAL = MetricDefinition(
+        name="metaforge_sketch_reading_total",
+        type="counter",
+        description=(
+            "Sketch readings by a vision model, by outcome: proposed, refused_output "
+            "(the reply did not fit the schema), unavailable (no vision model answered), "
+            "confirmed and rejected (a person's decision) (FORGE-762)"
+        ),
+        labels=["outcome"],
+    )
+
     # ── Run supervisor (FORGE-734) ─────────────────────────────────────
 
     SUPERVISOR_ACTION_TOTAL = MetricDefinition(
@@ -1001,6 +1014,7 @@ class MetricsRegistry:
             cls.TWIN_PRD_REQUIREMENT_VALUE_TOTAL,
             cls.TWIN_RECORD_STALENESS_TOTAL,
             cls.CONCEPT_IMAGE_TOTAL,
+            cls.SKETCH_READING_TOTAL,
         ]
 
     @classmethod
@@ -1880,6 +1894,12 @@ class MetricsCollector:
     def record_concept_image(self, outcome: str) -> None:
         """Record one concept image generation outcome (FORGE-761)."""
         counter = self._instruments.get(MetricsRegistry.CONCEPT_IMAGE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_sketch_reading(self, outcome: str) -> None:
+        """Record one sketch reading outcome (FORGE-762)."""
+        counter = self._instruments.get(MetricsRegistry.SKETCH_READING_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
 

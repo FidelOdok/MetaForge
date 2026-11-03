@@ -22,6 +22,9 @@ WIRED = {
     "twin.evaluate_overhang_metric",
     "twin.rank_sensitivity",
     "twin.commit_design_sketch",
+    # FORGE-762: a vision model's proposed sketch reading, and a person's decision.
+    "twin.interpret_sketch",
+    "twin.confirm_sketch_reading",
     "twin.render_concept_sketch",
     # FORGE-761: the AI concept image, registered with or without a provider.
     "twin.render_concept_image",
