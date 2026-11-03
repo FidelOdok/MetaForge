@@ -36,18 +36,18 @@ from tool_registry.mcp_server.handlers import (
     ToolManifest,
 )
 from tool_registry.mcp_server.server import McpToolServer
-from tool_registry.tools.twin.queries import (
-    detect_mutations,
-    serialise_node,
-    serialise_subgraph,
-    serialise_violation,
-)
 from tool_registry.tools.twin.concept_sketch import (
     EXPLODE_DIRECTIONS,
     PROVENANCE_TAGS,
     VIEWS,
     parse_layout,
     render_concept_sketch,
+)
+from tool_registry.tools.twin.queries import (
+    detect_mutations,
+    serialise_node,
+    serialise_subgraph,
+    serialise_violation,
 )
 from tool_registry.tools.twin.urdf import UrdfParseError, parse_urdf
 
@@ -3311,7 +3311,7 @@ class TwinServer(McpToolServer):
                             "type": "array",
                             "minItems": 1,
                             "maxItems": 60,
-                            "description": "The blocks of the layout. x is width, y depth, z height.",
+                            "description": "The blocks. x is width, y depth, z height.",
                             "items": {
                                 "type": "object",
                                 "properties": {

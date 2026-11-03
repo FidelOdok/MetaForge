@@ -156,9 +156,7 @@ def _provenance(value: Any, field: str, default: str | None = None) -> str:
     if value is None and default is not None:
         return default
     if value not in PROVENANCE_TAGS:
-        raise ValueError(
-            f"{field} must be one of {', '.join(PROVENANCE_TAGS)}, got {value!r}"
-        )
+        raise ValueError(f"{field} must be one of {', '.join(PROVENANCE_TAGS)}, got {value!r}")
     return str(value)
 
 
@@ -324,7 +322,8 @@ _STYLE = """
 .arrow{fill:#4a525a}
 .dim{font:11px sans-serif;fill:#1d252c}
 .joint{stroke:#6b747c;stroke-width:1;stroke-dasharray:4 3;fill:none}
-.joint-text{font:italic 10px sans-serif;fill:#3b444c;stroke:#ffffff;stroke-width:3;paint-order:stroke}
+.joint-text{font:italic 10px sans-serif;fill:#3b444c;
+stroke:#ffffff;stroke-width:3;paint-order:stroke}
 .rule{stroke:#c3cad1;stroke-width:0.7}
 .th{font:600 11px sans-serif;fill:#1d252c}
 .block{fill:#fbfbf8;stroke:#1d252c;stroke-width:1.2}
@@ -353,6 +352,12 @@ def _arrow(x: float, y: float, dx: float, dy: float) -> str:
     return f'<polygon class="arrow" points="{_poly(pts)}"/>'
 
 
+def _label_width(label: str) -> float:
+    # A rough width for 11px sans-serif, enough to tell whether the text
+    # fits between a dimension's arrows. No font metrics: stays stdlib.
+    return 6.2 * len(label) + 16
+
+
 def _dim_h(x1: float, x2: float, y_geom: float, y_dim: float, label: str) -> list[str]:
     out = ['<g class="dimension">']
     beyond = 4.0 if y_dim > y_geom else -4.0
@@ -366,9 +371,13 @@ def _dim_h(x1: float, x2: float, y_geom: float, y_dim: float, label: str) -> lis
     )
     out.append(_arrow(x1, y_dim, -1, 0))
     out.append(_arrow(x2, y_dim, 1, 0))
+    if abs(x2 - x1) >= _label_width(label):
+        x_text, anchor = (x1 + x2) / 2, "middle"
+    else:
+        x_text, anchor = max(x1, x2) + 6, "start"
     out.append(
-        f'<text class="dim" x="{_n((x1 + x2) / 2)}" y="{_n(y_dim - 3)}" '
-        f'text-anchor="middle">{_t(label)}</text>'
+        f'<text class="dim" x="{_n(x_text)}" y="{_n(y_dim - 3)}" '
+        f'text-anchor="{anchor}">{_t(label)}</text>'
     )
     out.append("</g>")
     return out
@@ -389,10 +398,20 @@ def _dim_v(y1: float, y2: float, x_geom: float, x_dim: float, label: str) -> lis
     out.append(_arrow(x_dim, top, 0, -1))
     out.append(_arrow(x_dim, bottom, 0, 1))
     mid = (y1 + y2) / 2
-    out.append(
-        f'<text class="dim" x="{_n(x_dim - 3)}" y="{_n(mid)}" text-anchor="middle" '
-        f'transform="rotate(-90 {_n(x_dim - 3)} {_n(mid)})">{_t(label)}</text>'
-    )
+    if bottom - top >= _label_width(label):
+        out.append(
+            f'<text class="dim" x="{_n(x_dim - 3)}" y="{_n(mid)}" text-anchor="middle" '
+            f'transform="rotate(-90 {_n(x_dim - 3)} {_n(mid)})">{_t(label)}</text>'
+        )
+    else:
+        # Too short to write along: the text goes beside the line, away
+        # from the part, so it never sits on the arrows.
+        side = 1.0 if x_dim > x_geom else -1.0
+        anchor = "start" if side > 0 else "end"
+        out.append(
+            f'<text class="dim" x="{_n(x_dim + 6 * side)}" y="{_n(mid + 4)}" '
+            f'text-anchor="{anchor}">{_t(label)}</text>'
+        )
     out.append("</g>")
     return out
 
@@ -566,8 +585,7 @@ def explode_offsets(layout: ConceptLayout) -> list[Vec]:
             continue
         if part.explode == "auto":
             rel = [
-                (part.centre[i] - centre[i]) / extent[i] if extent[i] > 0 else 0.0
-                for i in range(3)
+                (part.centre[i] - centre[i]) / extent[i] if extent[i] > 0 else 0.0 for i in range(3)
             ]
             # Height first, then width, then depth: most products assemble
             # top-down, so a tie explodes vertically.
@@ -632,9 +650,10 @@ def _iso_anchor(part: SketchPart, offset: Vec) -> Vec:
 
 def _label(part: SketchPart, anchor: Point, lx: float, ly: float) -> list[str]:
     tag = part.provenance
+    leader = _poly([anchor, (lx - 10, ly - 4), (lx - 2, ly - 4)])
     out = [
         f'<g class="label" data-part="{_t(part.name)}" data-provenance="{tag}">',
-        f'<polyline class="leader" points="{_poly([anchor, (lx - 10, ly - 4), (lx - 2, ly - 4)])}"/>',
+        f'<polyline class="leader" points="{leader}"/>',
         f'<circle class="anchor" cx="{_n(anchor[0])}" cy="{_n(anchor[1])}" r="2"/>',
         f'<line class="swatch s-{tag}" x1="{_n(lx)}" y1="{_n(ly - 4)}" '
         f'x2="{_n(lx + 18)}" y2="{_n(ly - 4)}"/>',
@@ -658,7 +677,9 @@ def _iso_view(
 ) -> list[str]:
     px, py, pw, ph = box
     projected = [
-        _iso(c) for part, off in zip(layout.parts, offsets, strict=True) for c in _corners(part, off)
+        _iso(c)
+        for part, off in zip(layout.parts, offsets, strict=True)
+        for c in _corners(part, off)
     ]
     min_x = min(p[0] for p in projected)
     max_x = max(p[0] for p in projected)
@@ -683,9 +704,7 @@ def _iso_view(
     order = sorted(
         range(len(layout.parts)),
         key=lambda i: (
-            sum(
-                _add(layout.parts[i].centre, offsets[i])[k] * _VIEW_DIR[k] for k in range(3)
-            ),
+            sum(_add(layout.parts[i].centre, offsets[i])[k] * _VIEW_DIR[k] for k in range(3)),
             i,
         ),
     )
@@ -720,72 +739,64 @@ def _iso_view(
 # -- tables, legend and title block -------------------------------------------
 
 
+def _cell(cls: str, x: float, y: float, text: str) -> str:
+    return f'<text class="{cls}" x="{_n(x)}" y="{_n(y)}">{text}</text>'
+
+
+def _rule(x: float, y: float, width: float = 740) -> str:
+    return f'<line class="rule" x1="{_n(x)}" y1="{_n(y)}" x2="{_n(x + width)}" y2="{_n(y)}"/>'
+
+
+def _tag_cell(tag: str, x: float, y: float) -> str:
+    return _cell(f"t-{tag}", x, y, f"? {tag}" if tag == "open" else tag)
+
+
 def _schedule(layout: ConceptLayout, x: float, y: float) -> tuple[list[str], float]:
-    out = [
-        '<g class="schedule">',
-        f'<text class="view-title" x="{_n(x)}" y="{_n(y)}">PART SCHEDULE (mm)</text>',
-    ]
+    out = ['<g class="schedule">', _cell("view-title", x, y, "PART SCHEDULE (mm)")]
     cols = (0, 26, 240, 310, 450, 600)
     heads = ("#", "Part", "Shape", "W x D x H", "Position (min corner)", "Provenance")
     row_y = y + 22
-    out += [
-        f'<text class="th" x="{_n(x + c)}" y="{_n(row_y)}">{h}</text>'
-        for c, h in zip(cols, heads, strict=True)
-    ]
+    out += [_cell("th", x + c, row_y, h) for c, h in zip(cols, heads, strict=True)]
     for i, p in enumerate(layout.parts, start=1):
         row_y += 18
         shape = p.shape if p.shape == "box" else f"cylinder ({p.axis})"
         size = " x ".join(fmt_mm(v) for v in p.size)
         pos = ", ".join(fmt_mm(v) for v in p.position)
         cells = (str(i), _t(p.name, 34), shape, size, pos)
-        out.append(f'<line class="rule" x1="{_n(x)}" y1="{_n(row_y - 13)}" x2="{_n(x + 740)}" y2="{_n(row_y - 13)}"/>')
-        out += [
-            f'<text class="small" x="{_n(x + c)}" y="{_n(row_y)}">{cell}</text>'
-            for c, cell in zip(cols, cells, strict=False)
-        ]
-        out.append(
-            f'<text class="t-{p.provenance}" x="{_n(x + cols[5])}" y="{_n(row_y)}">'
-            f'{"? " if p.provenance == "open" else ""}{p.provenance}</text>'
-        )
+        out.append(_rule(x, row_y - 13))
+        out += [_cell("small", x + c, row_y, cell) for c, cell in zip(cols, cells, strict=False)]
+        out.append(_tag_cell(p.provenance, x + cols[5], row_y))
     if layout.connections:
         row_y += 34
-        out.append(f'<text class="view-title" x="{_n(x)}" y="{_n(row_y)}">CONNECTIONS</text>')
+        out.append(_cell("view-title", x, row_y, "CONNECTIONS"))
         row_y += 22
         ccols = (0, 240, 480, 600)
-        out += [
-            f'<text class="th" x="{_n(x + c)}" y="{_n(row_y)}">{h}</text>'
-            for c, h in zip(ccols, ("Part", "Joins", "Joint", "Provenance"), strict=True)
-        ]
+        heads = ("Part", "Joins", "Joint", "Provenance")
+        out += [_cell("th", x + c, row_y, h) for c, h in zip(ccols, heads, strict=True)]
         for conn in layout.connections:
             row_y += 18
-            out.append(f'<line class="rule" x1="{_n(x)}" y1="{_n(row_y - 13)}" x2="{_n(x + 740)}" y2="{_n(row_y - 13)}"/>')
+            out.append(_rule(x, row_y - 13))
             for c, cell in zip(ccols, (conn.a, conn.b, conn.joint), strict=False):
-                out.append(f'<text class="small" x="{_n(x + c)}" y="{_n(row_y)}">{_t(cell, 34)}</text>')
-            out.append(
-                f'<text class="t-{conn.provenance}" x="{_n(x + ccols[3])}" y="{_n(row_y)}">'
-                f'{"? " if conn.provenance == "open" else ""}{conn.provenance}</text>'
-            )
+                out.append(_cell("small", x + c, row_y, _t(cell, 34)))
+            out.append(_tag_cell(conn.provenance, x + ccols[3], row_y))
     out.append("</g>")
     return out, row_y - y + 10
 
 
-def _legend_and_title(layout: ConceptLayout, x: float, y: float, w: float) -> tuple[list[str], float]:
-    out = [
-        '<g class="legend">',
-        f'<text class="view-title" x="{_n(x)}" y="{_n(y)}">PROVENANCE</text>',
-    ]
+def _legend_and_title(
+    layout: ConceptLayout, x: float, y: float, w: float
+) -> tuple[list[str], float]:
+    out = ['<g class="legend">', _cell("view-title", x, y, "PROVENANCE")]
     row_y = y + 4
     for tag in PROVENANCE_TAGS:
         row_y += 20
         out.append(
-            f'<rect class="face-ortho s-{tag}" x="{_n(x)}" y="{_n(row_y - 11)}" width="26" height="13"/>'
+            f'<rect class="face-ortho s-{tag}" x="{_n(x)}" y="{_n(row_y - 11)}" '
+            'width="26" height="13"/>'
         )
         if tag == "open":
-            out.append(f'<text class="open-mark" x="{_n(x + 9)}" y="{_n(row_y)}">?</text>')
-        out.append(
-            f'<text class="t-{tag}" x="{_n(x + 36)}" y="{_n(row_y)}">{tag}: '
-            f"{_PROVENANCE_MEANING[tag]}</text>"
-        )
+            out.append(_cell("open-mark", x + 9, row_y, "?"))
+        out.append(_cell(f"t-{tag}", x + 36, row_y, f"{tag}: {_PROVENANCE_MEANING[tag]}"))
     out.append("</g>")
 
     by = row_y + 22
@@ -842,7 +853,8 @@ def _render(layout: ConceptLayout) -> str:
     ortho_w, ortho_h, row1 = 370.0, 340.0, 64.0
     scale = _ortho_scale(layout, ortho_w, ortho_h)
     for col, view in enumerate(("front", "side", "top")):
-        body += _ortho_view(layout, view, (20 + col * (ortho_w + 15), row1, ortho_w, ortho_h), scale)
+        panel = (20 + col * (ortho_w + 15), row1, ortho_w, ortho_h)
+        body += _ortho_view(layout, view, panel, scale)
 
     # Row 2: isometric and exploded, tall enough for one label per part.
     row2 = row1 + ortho_h + 16

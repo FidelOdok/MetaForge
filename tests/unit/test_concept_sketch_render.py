@@ -134,8 +134,8 @@ def test_every_part_is_labelled_with_its_provenance_in_both_isometric_views() ->
     expected = {(p["name"], p.get("provenance", "assumption")) for p in _chair()["parts"]}
     assert set(labels) == expected
     assert len(labels) == 2 * len(_chair()["parts"])
-    assert "Seat <tspan class=\"tag\">[intended]</tspan>" in svg
-    assert "Backrest <tspan class=\"tag\">[open]</tspan>" in svg
+    assert 'Seat <tspan class="tag">[intended]</tspan>' in svg
+    assert 'Backrest <tspan class="tag">[open]</tspan>' in svg
 
 
 def test_each_provenance_is_styled_differently() -> None:
