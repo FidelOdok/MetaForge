@@ -16,6 +16,8 @@ export interface BomComponent {
   datasheetUrl: string | null;
   footprint: string | null;
   cadModelUrl: string | null;
+  /** A part the concept relies on before design confirms it (FORGE-758). */
+  selection?: 'candidate' | 'selected';
 }
 
 /** One derived EBOM line (FORGE-267) -- a leaf product-hierarchy position

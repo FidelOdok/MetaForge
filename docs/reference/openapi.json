@@ -1687,6 +1687,15 @@
             "title": "Quantity",
             "type": "integer"
           },
+          "selection": {
+            "default": "selected",
+            "enum": [
+              "candidate",
+              "selected"
+            ],
+            "title": "Selection",
+            "type": "string"
+          },
           "status": {
             "enum": [
               "available",
@@ -16088,7 +16097,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.3.0"
+    "version": "0.3.658"
   },
   "openapi": "3.1.0",
   "paths": {

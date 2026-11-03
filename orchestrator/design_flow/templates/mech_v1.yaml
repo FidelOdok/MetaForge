@@ -80,11 +80,13 @@ phases:
     simple block layout of its parts, with part names, joint types, and the key sizes taken from
     the requirements. Mark every label as intended, assumption or open (an unresolved question);
     a sketch shows intent and never claims a measured, verified or manufacturable result. Choose
-    one concept and record a decision with twin.record_decision: the selected assembly (every
-    part, every connection between parts and its joint type), the alternatives and why each was
-    rejected, parent_refs to the requirements it serves. Name the standard or bought parts the
-    joints rely on (dowels, screws, inserts) with their sizes and sources as candidates for the
-    design phase. Do not author CAD in this phase.
+    one concept and record a decision with twin.record_decision: the selected assembly in its
+    assembly field (every part with its source, made, bought or standard, and every connection
+    between parts with its joint type), concept_options naming each concept with exactly one
+    selected, the alternatives and why each was rejected, parent_refs to the requirements it
+    serves. Record the standard or bought parts the joints rely on (dowels, screws, inserts) with
+    twin.record_component_selection and selection candidate, with their sizes and sources, for the
+    design phase to confirm. Do not author CAD in this phase.
   expected_artifacts:
   - design_sketch
   - design_decision
