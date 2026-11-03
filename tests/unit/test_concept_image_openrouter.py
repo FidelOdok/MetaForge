@@ -167,3 +167,17 @@ def test_openrouter_without_its_key_says_so() -> None:
 def test_an_openrouter_key_alone_does_not_turn_on_paid_generation() -> None:
     with pytest.raises(ImageGenerationUnavailableError, match="openrouter"):
         resolve_image_generator({"OPENROUTER_API_KEY": KEY})
+
+
+def test_the_key_is_found_under_the_names_a_deployment_already_uses() -> None:
+    on = {"METAFORGE_IMAGE_PROVIDER": "openrouter"}
+    for env in (
+        {**on, "OPEN_ROUTER_API_KEY": KEY},
+        {**on, "METAFORGE_LLM_PROVIDER": "openrouter", "METAFORGE_LLM_API_KEY": KEY},
+    ):
+        assert isinstance(resolve_image_generator(env), OpenRouterImageGenerator)
+    # The generic LLM key is only OpenRouter's when OpenRouter is the provider.
+    with pytest.raises(ImageGenerationUnavailableError, match="not set"):
+        resolve_image_generator(
+            {**on, "METAFORGE_LLM_PROVIDER": "anthropic", "METAFORGE_LLM_API_KEY": KEY}
+        )

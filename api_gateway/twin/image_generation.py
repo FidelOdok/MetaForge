@@ -15,7 +15,9 @@ Two real implementations, chosen by environment:
   Unset, ``off`` or ``none`` means no provider. Generation costs money per
   image, so nothing is enabled just because an API key happens to be present.
 * ``openrouter`` (FORGE-769): OpenRouter's chat completions with the image
-  output modality, on the gateway's existing ``OPENROUTER_API_KEY``. The
+  output modality, on the key the deployment already has: ``OPENROUTER_API_KEY``,
+  ``OPEN_ROUTER_API_KEY``, or ``METAFORGE_LLM_API_KEY`` when OpenRouter is the
+  gateway's LLM provider. The
   layout PNG goes in the message beside the prompt, and the image comes back
   in the reply, so GPT Image or Google's Gemini image model is a model slug.
 * ``openai``: OpenAI's images API on ``OPENAI_API_KEY`` (``images.edit``
@@ -314,6 +316,22 @@ def _describe(exc: BaseException) -> str:
     return f"{head}: {_KEY_LIKE.sub('[redacted]', str(exc))[:400]}"
 
 
+#: Where an OpenRouter key may already be: its own name, the spelling the
+#: knowledge layer and the compose file use, and the gateway's generic LLM key
+#: when OpenRouter is the gateway's LLM provider.
+OPENROUTER_KEY_ALIASES: tuple[str, ...] = (OPENROUTER_KEY_ENV, "OPEN_ROUTER_API_KEY")
+
+
+def _openrouter_key(env: Mapping[str, str]) -> str:
+    for name in OPENROUTER_KEY_ALIASES:
+        value = (env.get(name) or "").strip()
+        if value:
+            return value
+    if (env.get("METAFORGE_LLM_PROVIDER") or "").strip().lower() == "openrouter":
+        return (env.get("METAFORGE_LLM_API_KEY") or "").strip()
+    return ""
+
+
 def resolve_image_generator(env: Mapping[str, str] | None = None) -> ImageGenerator:
     """The configured provider, or :class:`ImageGenerationUnavailableError` saying why."""
     env = os.environ if env is None else env
@@ -326,7 +344,7 @@ def resolve_image_generator(env: Mapping[str, str] | None = None) -> ImageGenera
         )
     model = (env.get(MODEL_ENV) or "").strip()
     if provider == "openrouter":
-        key = (env.get(OPENROUTER_KEY_ENV) or "").strip()
+        key = _openrouter_key(env)
         if not key:
             raise ImageGenerationUnavailableError(
                 f"{PROVIDER_ENV}=openrouter but {OPENROUTER_KEY_ENV} is not set"
