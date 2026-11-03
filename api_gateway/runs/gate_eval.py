@@ -243,6 +243,15 @@ class ProjectGateEvaluator:
         logger.info("gate_eval_route_decision", project_id=project_id, decision=decision.summary())
         return decision
 
+    async def industrial_design(self, project_id: str | None) -> Any:
+        """The latest industrial design record (FORGE-764), or ``None``."""
+        from orchestrator.design_flow.context import parse_industrial_design
+
+        found = await self._latest_decision(
+            project_id, "industrial_design", parse_industrial_design
+        )
+        return found[0] if found is not None else None
+
     async def concept_assembly(self, project_id: str | None) -> Any:
         """The latest selected concept assembly (FORGE-763), or ``None``."""
         from orchestrator.design_flow.context import parse_concept_assembly
