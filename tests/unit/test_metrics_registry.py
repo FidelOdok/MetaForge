@@ -77,7 +77,7 @@ class TestMetricsRegistryGroupedAccess:
         # + 5 host watchdog (FORGE-713).
         # + 2 gate reviewer (FORGE-726).
         # + 1 run supervisor (FORGE-734).
-        assert len(all_metrics) == 93
+        assert len(all_metrics) == 94
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
