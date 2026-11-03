@@ -180,7 +180,8 @@ class TestAlertingRules:
         # + 3 host watchdog (FORGE-713).
         # + 2 gate reviewer (FORGE-726).
         # + 1 run supervisor (FORGE-734).
-        assert len(warnings) == 45
+        # + 1 sketch readings unavailable (FORGE-762).
+        assert len(warnings) == 46
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -288,6 +289,8 @@ class TestAlertingRules:
                 "GateReviewerDisagreesOften",
                 # FORGE-734: run supervisor.
                 "RunSupervisorFoundPlatformIssue",
+                # FORGE-762: uploaded sketches cannot be read.
+                "SketchReadingUnavailable",
             ]
         )
 
