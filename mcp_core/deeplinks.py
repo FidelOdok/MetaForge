@@ -60,6 +60,12 @@ _ROUTES: dict[str, tuple[str, str | None, str | None, str]] = {
     "twin.render_work_product": ("twin?tab=model", "node_id", "node", "View the renders"),
     "twin.render_concept_image": ("twin?tab=model", "node_id", "node", "View the concept image"),
     "twin.critique_concept_image": ("twin?tab=model", "node_id", "node", "View the concept image"),
+    "twin.generate_concept_mesh": (
+        "twin?tab=model",
+        "node_id",
+        "node",
+        "View the reference model",
+    ),
     "twin.interpret_sketch": ("twin?tab=model", "node_id", "node", "View the sketch"),
     "twin.commit_system_architecture": (
         "twin?tab=structure",

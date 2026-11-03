@@ -336,6 +336,7 @@ class TwinServer(McpToolServer):
         design_sketch_recorder: Any = None,
         concept_image_renderer: Any = None,
         concept_image_critic: Any = None,
+        concept_mesh_generator: Any = None,
         sketch_interpreter: Any = None,
         sketch_reading_decider: Any = None,
         hazard_analysis_recorder: Any = None,
@@ -469,6 +470,10 @@ class TwinServer(McpToolServer):
         # image_critic) that has a vision model check a stored concept image
         # against the selected assembly. Advisory; the image stays illustrative.
         self._concept_image_critic = concept_image_critic
+        # FORGE-778: an injected async ``generate(...)`` (make_concept_mesh_
+        # recorder) that has an image-to-3D model turn a concept image into an
+        # illustrative GLB render. Never a cad_model, never evidence.
+        self._concept_mesh_generator = concept_mesh_generator
         # FORGE-762: an injected async ``interpret(...)`` (make_sketch_interpreter)
         # that has a vision model read an uploaded sketch into a *proposed*
         # concept reading, and ``decide(...)`` (make_sketch_reading_decider)
@@ -710,6 +715,8 @@ class TwinServer(McpToolServer):
             self._register_render_concept_image()
         if concept_image_critic is not None:
             self._register_critique_concept_image()
+        if concept_mesh_generator is not None:
+            self._register_generate_concept_mesh()
         if sketch_interpreter is not None:
             self._register_interpret_sketch()
         if sketch_reading_decider is not None:
@@ -4043,6 +4050,108 @@ class TwinServer(McpToolServer):
             "concept_image_critique_tool_done",
             node_id=result.get("node_id"),
             verdict=(result.get("critique") or {}).get("verdict"),
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # twin.generate_concept_mesh (FORGE-778)
+    # ------------------------------------------------------------------
+
+    def _register_generate_concept_mesh(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.generate_concept_mesh",
+                adapter_id="twin",
+                name="Generate Concept Mesh",
+                description=(
+                    "Have an image-to-3D model turn a concept image into a 3D reference "
+                    "mesh for concept review, committed as an illustrative RENDER work "
+                    "product in GLB. Give image_node_id (a render made by "
+                    "twin.render_concept_image) or a text prompt, not both. The mesh is "
+                    "labelled 'AI 3D reference model, illustrative only', records the "
+                    "provider, task id and model version, is linked generated_from its "
+                    "image, and is never a cad_model: its dimensions are a guess and it can "
+                    "never back a requirement claim. Costs a paid generation that can take "
+                    "several minutes; fails clearly when no mesh provider is configured."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "image_node_id": {
+                            "type": "string",
+                            "description": (
+                                "A render node made by twin.render_concept_image. Give "
+                                "this or prompt, not both."
+                            ),
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1024,
+                            "description": "Text to model from, when there is no image.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Work product name (def 'Reference model: <concept>').",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project UUID to link (def the image's project).",
+                        },
+                        "domain": {"type": "string", "description": "Discipline (def mech)."},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "format": {"type": "string"},
+                        "provider": {"type": "string"},
+                        "model_version": {"type": "string"},
+                        "task_id": {"type": "string"},
+                        "size_bytes": {"type": "integer"},
+                        "source_image_node_id": {"type": ["string", "null"]},
+                        "authority": {"type": "string"},
+                        "label": {"type": "string"},
+                        "content_hash": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.generate_concept_mesh,
+        )
+
+    async def generate_concept_mesh(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.generate_concept_mesh"
+        image_node_id = arguments.get("image_node_id")
+        prompt = arguments.get("prompt")
+        if (image_node_id is None) == (prompt is None):
+            raise ValueError(f"{tool}: give exactly one of 'image_node_id' or 'prompt'")
+        for field, value in (("image_node_id", image_node_id), ("prompt", prompt)):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{tool}: '{field}' must be a non-empty string")
+        name = arguments.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValueError(f"{tool}: 'name' must be a non-empty string")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("concept_mesh.mode", "image" if image_node_id else "text")
+            result: dict[str, Any] = await self._concept_mesh_generator(
+                image_node_id=image_node_id.strip() if isinstance(image_node_id, str) else None,
+                prompt=prompt.strip() if isinstance(prompt, str) else None,
+                name=name.strip() if isinstance(name, str) else None,
+                project_id=project_id if isinstance(project_id, str) and project_id else None,
+                domain=domain if isinstance(domain, str) and domain else "mechanical",
+            )
+        logger.info(
+            "concept_mesh_tool_done",
+            node_id=result.get("node_id"),
+            task_id=result.get("task_id"),
         )
         return result
 

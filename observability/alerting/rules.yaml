@@ -963,6 +963,27 @@ groups:
             get no illustrative images. Check METAFORGE_IMAGE_PROVIDER, the provider
             key and the gateway logs (concept_image_unavailable, concept_image_failed).
 
+  # FORGE-778 -- AI 3D reference meshes (api_gateway/twin/concept_mesh.py).
+  - name: metaforge_concept_mesh
+    rules:
+      - alert: ConceptMeshGenerationUnavailable
+        expr: >-
+          sum(increase(metaforge_concept_mesh_total{outcome=~"unavailable|timeout|failed"}[6h]))
+          / clamp_min(sum(increase(metaforge_concept_mesh_total[6h])), 1) > 0.5
+          and sum(increase(metaforge_concept_mesh_total[6h])) >= 3
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Concept reference meshes cannot be generated"
+          description: >-
+            More than half of the last six hours' concept mesh requests found no mesh
+            provider configured, timed out, or had the Tripo task fail or refused.
+            Nothing wrong is recorded, since a failed generation stores nothing, but
+            concept reviews get no 3D reference model. Check METAFORGE_MESH_PROVIDER,
+            TRIPO_API_KEY (and its credit), METAFORGE_MESH_TIMEOUT_S and the gateway
+            logs (concept_mesh_unavailable, concept_mesh_timeout, concept_mesh_failed).
+
   # FORGE-772 -- concept image checks (api_gateway/twin/image_critique.py).
   - name: metaforge_concept_image_critique
     rules:

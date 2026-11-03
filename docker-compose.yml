@@ -130,6 +130,11 @@ services:
       - METAFORGE_IMAGE_PROVIDER=${METAFORGE_IMAGE_PROVIDER:-}
       - METAFORGE_IMAGE_MODEL=${METAFORGE_IMAGE_MODEL:-}
       - METAFORGE_IMAGE_TIMEOUT_S=${METAFORGE_IMAGE_TIMEOUT_S:-}
+      # FORGE-778: AI 3D reference meshes (twin.generate_concept_mesh); opt-in, paid.
+      - METAFORGE_MESH_PROVIDER=${METAFORGE_MESH_PROVIDER:-}
+      - TRIPO_API_KEY=${TRIPO_API_KEY:-}
+      - METAFORGE_MESH_TIMEOUT_S=${METAFORGE_MESH_TIMEOUT_S:-}
+      - METAFORGE_MESH_MODEL_VERSION=${METAFORGE_MESH_MODEL_VERSION:-}
       # Per-step models: the gate reviewer when the project policy names none,
       # and vision calls (reading sketches). Unset, both use the chat model.
       - METAFORGE_REVIEWER_MODEL=${METAFORGE_REVIEWER_MODEL:-}
@@ -556,6 +561,11 @@ services:
       - METAFORGE_IMAGE_PROVIDER=${METAFORGE_IMAGE_PROVIDER:-}
       - METAFORGE_IMAGE_MODEL=${METAFORGE_IMAGE_MODEL:-}
       - METAFORGE_IMAGE_TIMEOUT_S=${METAFORGE_IMAGE_TIMEOUT_S:-}
+      # FORGE-778: AI 3D reference meshes (twin.generate_concept_mesh); opt-in, paid.
+      - METAFORGE_MESH_PROVIDER=${METAFORGE_MESH_PROVIDER:-}
+      - TRIPO_API_KEY=${TRIPO_API_KEY:-}
+      - METAFORGE_MESH_TIMEOUT_S=${METAFORGE_MESH_TIMEOUT_S:-}
+      - METAFORGE_MESH_MODEL_VERSION=${METAFORGE_MESH_MODEL_VERSION:-}
       # Per-step models: the gate reviewer when the project policy names none,
       # and vision calls (reading sketches). Unset, both use the chat model.
       - METAFORGE_REVIEWER_MODEL=${METAFORGE_REVIEWER_MODEL:-}

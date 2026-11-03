@@ -949,6 +949,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-630: twin.render_work_product -- the model converted to GLB and
     # rendered by blender.render over the same lazy-bridge seam.
     from api_gateway.twin.concept_image import make_concept_image_recorder
+    from api_gateway.twin.concept_mesh import make_concept_mesh_recorder
     from api_gateway.twin.image_critique import make_concept_image_critic
     from api_gateway.twin.render_recorder import make_work_product_renderer
 
@@ -1300,6 +1301,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-772: a vision model checks a stored concept image against the
         # selected assembly; advisory, "unchecked" when no model can.
         concept_image_critic=make_concept_image_critic(twin, project_backend),
+        # FORGE-778: an illustrative 3D reference mesh from a concept image.
+        # The provider is resolved per call, like the image provider.
+        concept_mesh_generator=make_concept_mesh_recorder(twin, project_backend),
         # FORGE-687: design files, bound to active_bridge below.
         design_files_recorder=design_files_recorder_fn,
         # FORGE-316: automatic selective re-run of exactly what a

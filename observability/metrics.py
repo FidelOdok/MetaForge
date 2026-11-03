@@ -901,6 +901,19 @@ class MetricsRegistry:
         labels=["verdict"],
     )
 
+    # ── Concept mesh (FORGE-778) ───────────────────────────────────────
+
+    CONCEPT_MESH_TOTAL = MetricDefinition(
+        name="metaforge_concept_mesh_total",
+        type="counter",
+        description=(
+            "AI 3D reference meshes generated from a concept image or a prompt, by "
+            "outcome: generated, unavailable (no mesh provider configured), timeout, "
+            "failed (the provider refused or the task failed) or store_failed (FORGE-778)"
+        ),
+        labels=["outcome"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1029,6 +1042,7 @@ class MetricsRegistry:
             cls.CONCEPT_IMAGE_TOTAL,
             cls.SKETCH_READING_TOTAL,
             cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
+            cls.CONCEPT_MESH_TOTAL,
         ]
 
     @classmethod
@@ -1916,6 +1930,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CONCEPT_IMAGE_CRITIQUE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"verdict": verdict})
+
+    def record_concept_mesh(self, outcome: str) -> None:
+        """Record one concept mesh generation outcome (FORGE-778)."""
+        counter = self._instruments.get(MetricsRegistry.CONCEPT_MESH_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
 
     def record_sketch_reading(self, outcome: str) -> None:
         """Record one sketch reading outcome (FORGE-762)."""

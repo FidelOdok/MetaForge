@@ -653,7 +653,8 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
         }
     ),
     # FORGE-630: studio renders of a model, kept in the twin.
-    "render": frozenset({"twin.render_work_product"}),
+    # FORGE-778: and an illustrative 3D reference mesh of a concept image.
+    "render": frozenset({"twin.render_work_product", "twin.generate_concept_mesh"}),
     # FORGE-757: the concept phase's labelled sketches.
     # FORGE-760: or drawn by the procedural renderer from a block layout.
     # FORGE-761: and an optional AI concept image of a drawn layout.

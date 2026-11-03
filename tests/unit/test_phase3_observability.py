@@ -110,7 +110,7 @@ class TestTelemetryMetricsGroupAccess:
         # + 1 client-mode phase tasks (FORGE-581).
         # + 1 concept image (FORGE-761).
         # + 1 sketch reading (FORGE-762).
-        assert len(MetricsRegistry.all_metrics()) == 96  # + 5 watchdog, + 2 gate reviewer
+        assert len(MetricsRegistry.all_metrics()) == 97  # + 5 watchdog, + 2 gate reviewer, + 1 concept mesh
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
