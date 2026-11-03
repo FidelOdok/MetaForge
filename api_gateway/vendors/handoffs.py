@@ -81,6 +81,83 @@ HANDOFFS: tuple[Handoff, ...] = (
         based_in="US",
         note="Flat parts from 2D outlines; bends are specified on upload.",
     ),
+    # FORGE-753: online laser and sheet services by region, from each vendor's
+    # own site (checked 2026-11-03). Whether they cut wood is in the note:
+    # several cut metal only.
+    Handoff(
+        id="razorlab",
+        name="RazorLAB",
+        url="https://razorlab.online/",
+        services=("laser_cutting",),
+        formats=("ai", "svg", "dxf"),
+        based_in="London, UK",
+        note="Cuts plywood and MDF (thicknesses not published), acrylic, card, fabric. "
+        "AI or SVG preferred, DXF usually fine; 20 MB maximum.",
+    ),
+    Handoff(
+        id="cutlasercut",
+        name="CutLaserCut",
+        url="https://cutlasercut.com/",
+        services=("laser_cutting",),
+        formats=("ai", "eps", "dxf", "cdr", "svg", "pdf"),
+        based_in="London, UK",
+        note="Birch plywood 3, 6, 9 and 12 mm (thin birch 0.4 to 1.5 mm). DXF as AutoCAD 2004.",
+    ),
+    Handoff(
+        id="fractory",
+        name="Fractory",
+        url="https://fractory.com/",
+        services=("laser_cutting", "sheet_metal", "cnc"),
+        formats=("step", "stp", "sldprt", "ipt", "dxf"),
+        based_in="Manchester, UK",
+        note="Metals only; no wood or plywood. 3D files preferred, DXF for flat cutting.",
+    ),
+    Handoff(
+        id="formulor",
+        name="Formulor",
+        url="https://www.formulor.de/en/",
+        services=("laser_cutting",),
+        formats=("svg", "dxf", "pdf", "eps", "ai"),
+        based_in="Pfinztal, Germany (EU)",
+        note="Plywood: beech 2 mm, birch 0.8 and 3 mm, poplar 4 and 5 mm; "
+        "also MDF, veneer, acrylic.",
+    ),
+    Handoff(
+        id="laserboost",
+        name="LaserBoost",
+        url="https://www.laserboost.com/en/",
+        services=("laser_cutting", "sheet_metal"),
+        formats=("dxf", "dwg", "svg", "ai", "pdf", "eps", "step", "sldprt"),
+        based_in="Madrid, Spain (EU)",
+        note="Metals only, 0.5 to 15 mm, sheets up to 1500 x 3000 mm; no wood.",
+    ),
+    Handoff(
+        id="xometry_eu",
+        name="Xometry Europe",
+        url="https://xometry.eu/en/",
+        services=("laser_cutting", "sheet_metal", "additive"),
+        formats=("step", "stp", "sldprt", "stl", "ipt", "3dxml", "catpart", "prt", "sat", "dxf"),
+        based_in="Hohenbrunn, Germany (EU)",
+        note="DXF preferred for sheet cutting; DWG and PDF go to a manual quote. Wood not stated.",
+    ),
+    Handoff(
+        id="oshcut",
+        name="OSH Cut",
+        url="https://www.oshcut.com/",
+        services=("laser_cutting", "sheet_metal"),
+        formats=("dxf", "svg", "ai", "step", "stp", "sldprt", "iges", "igs", "x_t", "sat"),
+        based_in="Spanish Fork, Utah, US",
+        note="Metal sheet and tube only, with bending and hardware insertion; no wood.",
+    ),
+    Handoff(
+        id="ponoko",
+        name="Ponoko",
+        url="https://www.ponoko.com/",
+        services=("laser_cutting", "sheet_metal", "cnc", "additive"),
+        formats=("dxf", "svg", "ai", "eps", "pdf", "step", "stp", "stl", "iges", "igs", "3mf"),
+        based_in="Oakland, California, US",
+        note="Plywood (birch, coloured, bamboo) up to 6.7 mm for laser cutting. DXF recommended.",
+    ),
 )
 
 

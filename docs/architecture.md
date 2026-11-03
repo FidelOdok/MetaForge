@@ -702,7 +702,9 @@ it once their API access is approved.
 
 Vendors with no ordering API are handed off instead:
 `vendor.handoffs` reads a small catalogue (`api_gateway/vendors/handoffs.py`:
-AISLER, Craftcloud, Xometry, SendCutSend) and, for a service and some work
+AISLER, Craftcloud, Xometry, SendCutSend, and online laser and sheet services
+in the UK, EU and US, each noting where it is based and whether it cuts
+wood) and, for a service and some work
 products, returns each vendor's upload page, accepted formats, the files
 that fit and their gateway download paths. It sends nothing; the person
 uploads.

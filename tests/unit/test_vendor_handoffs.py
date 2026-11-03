@@ -50,7 +50,8 @@ async def test_cnc_lists_vendors_and_the_files_each_can_take(twin: Any) -> None:
     stl = await _file(twin, "bracket.stl")
     result = await handoffs_for("cnc", [step, stl])
     by_id = {v["id"]: v for v in result["vendors"]}
-    assert set(by_id) == {"xometry"}
+    # FORGE-753 added regional vendors; xometry still takes both files.
+    assert {"xometry", "fractory", "ponoko"} <= set(by_id)
     assert by_id["xometry"]["usable_files"] == [step, stl]
     assert by_id["xometry"]["ready"] is True
     files = {f["work_product_id"]: f for f in result["files"]}
@@ -97,4 +98,4 @@ async def test_the_tool_reads_only_and_stays_closed_world(twin: Any) -> None:
     assert "vendor.handoffs" in PROFILES["manufacturing"]
     server = VendorServer(LocalVendorService())
     result = await server.handoffs({"service": "additive", "work_product_ids": []})
-    assert {v["id"] for v in result["vendors"]} == {"craftcloud", "xometry"}
+    assert {"craftcloud", "xometry", "xometry_eu", "ponoko"} == {v["id"] for v in result["vendors"]}

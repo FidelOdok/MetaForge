@@ -1,0 +1,135 @@
+{
+  "category": "FDM printers",
+  "checked": "2026-11-03",
+  "about": "Published manufacturer specifications. Each value cites the official page it was read from; notes say where a page was read through a search index's copy. Not prices; confirm on the manufacturer's site before relying on a figure.",
+  "models": [
+    {
+      "kind": "fdm_printer",
+      "make": "Prusa",
+      "model": "MK4S",
+      "processes": [
+        "fdm"
+      ],
+      "capabilities": {
+        "build_volume_mm": {
+          "value": [
+            250,
+            210,
+            220
+          ],
+          "url": "https://www.prusa3d.com/product/original-prusa-mk4s-3d-printer-5/"
+        },
+        "nozzle_mm": {
+          "value": 0.4,
+          "url": "https://www.prusa3d.com/product/original-prusa-mk4s-3d-printer-5/"
+        },
+        "materials": {
+          "value": [
+            "PLA",
+            "PETG",
+            "Flex",
+            "PVA",
+            "PC",
+            "PP",
+            "CPE",
+            "PVB"
+          ],
+          "url": "https://www.prusa3d.com/product/original-prusa-mk4s-3d-printer-5/"
+        }
+      },
+      "note": "ABS, ASA, HIPS and PA only with the Prusa enclosure and filtration."
+    },
+    {
+      "kind": "fdm_printer",
+      "make": "Bambu Lab",
+      "model": "X1 Carbon",
+      "processes": [
+        "fdm"
+      ],
+      "capabilities": {
+        "build_volume_mm": {
+          "value": [
+            256,
+            256,
+            256
+          ],
+          "url": "https://public-cdn.bambulab.com/store/bambulab-X1-carbon-tech-specs.pdf"
+        },
+        "nozzle_mm": {
+          "value": 0.4,
+          "url": "https://public-cdn.bambulab.com/store/bambulab-X1-carbon-tech-specs.pdf"
+        }
+      },
+      "note": "0.2, 0.6 and 0.8 mm nozzles optional. Read from the search index's copy of the official spec PDF."
+    },
+    {
+      "kind": "fdm_printer",
+      "make": "Bambu Lab",
+      "model": "P1S",
+      "processes": [
+        "fdm"
+      ],
+      "capabilities": {
+        "build_volume_mm": {
+          "value": [
+            256,
+            256,
+            256
+          ],
+          "url": "https://us.store.bambulab.com/products/p1s"
+        },
+        "nozzle_mm": {
+          "value": 0.4,
+          "url": "https://us.store.bambulab.com/products/p1s"
+        },
+        "materials": {
+          "value": [
+            "PLA",
+            "PETG",
+            "TPU",
+            "PVA",
+            "PET",
+            "PA",
+            "PC",
+            "ABS",
+            "ASA"
+          ],
+          "url": "https://us.store.bambulab.com/products/p1s"
+        }
+      },
+      "note": "PLA, PETG, TPU, PVA and PET ideal; PA, PC, ABS and ASA capable. Read from the search index's copy of the official store page."
+    },
+    {
+      "kind": "fdm_printer",
+      "make": "Bambu Lab",
+      "model": "A1",
+      "processes": [
+        "fdm"
+      ],
+      "capabilities": {
+        "build_volume_mm": {
+          "value": [
+            256,
+            256,
+            256
+          ],
+          "url": "https://bambulab.com/en/a1/tech-specs"
+        },
+        "nozzle_mm": {
+          "value": 0.4,
+          "url": "https://bambulab.com/en/a1/tech-specs"
+        },
+        "materials": {
+          "value": [
+            "PLA",
+            "PETG",
+            "TPU",
+            "PVA"
+          ],
+          "url": "https://us.store.bambulab.com/products/a1"
+        }
+      },
+      "note": "Open frame; ABS, ASA, PC, PA, PET and fibre filaments not recommended."
+    }
+  ]
+}
