@@ -282,7 +282,7 @@ class TestAllMetricsCombined:
         # + 2 project brief count/size (FORGE-530)
         # + 1 twin record staleness (FORGE-527)
         # + 1 client-mode phase tasks (FORGE-581).
-        assert len(MetricsRegistry.all_metrics()) == 93  # + 5 watchdog, + 2 gate reviewer
+        assert len(MetricsRegistry.all_metrics()) == 94  # + 5 watchdog, + 2 gate reviewer, + 1 sketch reading
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

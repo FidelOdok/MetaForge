@@ -1981,6 +1981,7 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         claim_recorder,
         design_sketch_recorder,
         evidence_recorder,
+        sketch_reading,
         structured_document_recorder,
     )
 
@@ -1992,6 +1993,12 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         "design_sketch_recorder",
         lambda: design_sketch_recorder.make_design_sketch_recorder(twin, project_backend),
     )
+    # FORGE-762: twin.interpret_sketch and twin.confirm_sketch_reading.
+    _try(
+        "sketch_interpreter",
+        lambda: sketch_reading.make_sketch_interpreter(twin, project_backend),
+    )
+    _try("sketch_reading_decider", lambda: sketch_reading.make_sketch_reading_decider(twin))
     for name in (
         "hazard_analysis_recorder",
         "system_architecture_recorder",

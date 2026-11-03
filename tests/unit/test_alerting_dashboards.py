@@ -117,7 +117,8 @@ class TestAlertingRules:
         # + 4 host watchdog (FORGE-713).
         # + 2 gate reviewer: failing, disagrees often (FORGE-726).
         # + 1 run supervisor platform issue (FORGE-734).
-        assert len(rules) == 59
+        # + 1 sketch readings unavailable (FORGE-762).
+        assert len(rules) == 60
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""

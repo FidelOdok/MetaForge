@@ -906,6 +906,26 @@ groups:
             recommendation on more than 30% of at least 20 gates. Do not move a
             project to auto_clean or auto on this evidence; look at where it disagrees.
 
+  # FORGE-762 -- sketch reading (api_gateway/twin/sketch_reading.py).
+  - name: metaforge_sketch_reading
+    rules:
+      - alert: SketchReadingUnavailable
+        expr: >-
+          sum(increase(metaforge_sketch_reading_total{outcome=~"unavailable|refused_output"}[1h]))
+          / clamp_min(sum(increase(metaforge_sketch_reading_total{outcome=~"proposed|unavailable|refused_output"}[1h])), 1) > 0.5
+          and sum(increase(metaforge_sketch_reading_total{outcome=~"proposed|unavailable|refused_output"}[1h])) >= 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Most uploaded sketches cannot be read"
+          description: >-
+            More than half of the last hour's sketch readings found no vision model
+            or got a reply that did not fit the schema. Nothing wrong is recorded,
+            since a failed reading stores nothing, but people cannot turn sketches
+            into concept input. Check the configured provider supports images and
+            the gateway logs (sketch_reading_unavailable, sketch_reading_refused_output).
+
   # FORGE-734 -- run supervisor (api_gateway/runs/supervisor.py).
   - name: metaforge_run_supervisor
     rules:

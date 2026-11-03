@@ -309,6 +309,35 @@ def phase_slot_scope(
         yield scoped
 
 
+#: The phase that is handed the sketch readings a person confirmed (FORGE-762).
+CONCEPT_PHASE_ID = "concept_selection"
+
+
+async def _phase_inputs(phase: Phase, context: FlowContext) -> str:
+    """Person-confirmed inputs for this phase, as prompt text.
+
+    Only the concept phase has any: the sketch readings a person confirmed.
+    A proposed or rejected reading is never offered. A twin that cannot be
+    read leaves the phase to run on its brief, logged, rather than failing it.
+    """
+    if phase.id != CONCEPT_PHASE_ID or not context.project_id:
+        return ""
+    try:
+        from api_gateway.twin.routes import get_twin
+        from api_gateway.twin.sketch_reading import (
+            concept_inputs_block,
+            confirmed_sketch_readings,
+        )
+
+        readings = await confirmed_sketch_readings(get_twin(), context.project_id)
+    except Exception as exc:  # noqa: BLE001 - an input we cannot read is skipped, not fatal
+        logger.warning("concept_sketch_inputs_unreadable", error=str(exc))
+        return ""
+    if readings:
+        logger.info("concept_sketch_inputs", project_id=context.project_id, readings=len(readings))
+    return concept_inputs_block(readings)
+
+
 class ReActPhaseBrain:
     """A :class:`~orchestrator.design_flow.executor.PhaseBrain` backed by ReAct.
 
@@ -335,7 +364,9 @@ class ReActPhaseBrain:
         # its disciplines (the "select" pillar — procedural context).
         self._cards: list[SkillCard] = load_skill_cards()
 
-    def _prompt(self, goal: str, phase: Phase, context: FlowContext) -> str:
+    def _prompt(
+        self, goal: str, phase: Phase, context: FlowContext, phase_inputs: str = ""
+    ) -> str:
         prior = (
             "\n".join(f"  - {p.title}: {o.summary}" for p, o in context.completed)
             or "  (none yet — this is the first phase)"
@@ -364,6 +395,8 @@ class ReActPhaseBrain:
         # FORGE-495: on a retry the gate's findings and the reviewer's reason
         # come before everything else, so they cannot be read past.
         retry_block = f"{context.retry_feedback}\n\n" if context.retry_feedback else ""
+        # FORGE-762: person-confirmed inputs, such as confirmed sketch readings.
+        inputs_block = f"{phase_inputs}\n" if phase_inputs else ""
         return (
             f"{retry_block}"
             f"{flow_block}"
@@ -373,6 +406,7 @@ class ReActPhaseBrain:
             f"{project_line}\n\n"
             f"Prior phases completed:\n{prior}\n\n"
             f"Your objective for THIS phase:\n{phase.objective}\n\n"
+            f"{inputs_block}"
             f"{deliverables}\n"
             f"{items_block}"
             f"{overlay_block}"
@@ -403,7 +437,8 @@ class ReActPhaseBrain:
         )
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
-        prompt = self._prompt(goal, phase, context)
+        phase_inputs = await _phase_inputs(phase, context)
+        prompt = self._prompt(goal, phase, context, phase_inputs)
         budget = phase_step_budget(phase, self._max_steps)
         logger.info(
             "design_flow_brain_phase",
