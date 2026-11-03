@@ -130,6 +130,10 @@ services:
       - METAFORGE_IMAGE_PROVIDER=${METAFORGE_IMAGE_PROVIDER:-}
       - METAFORGE_IMAGE_MODEL=${METAFORGE_IMAGE_MODEL:-}
       - METAFORGE_IMAGE_TIMEOUT_S=${METAFORGE_IMAGE_TIMEOUT_S:-}
+      # Per-step models: the gate reviewer when the project policy names none,
+      # and vision calls (reading sketches). Unset, both use the chat model.
+      - METAFORGE_REVIEWER_MODEL=${METAFORGE_REVIEWER_MODEL:-}
+      - METAFORGE_VISION_MODEL=${METAFORGE_VISION_MODEL:-}
       - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
       - LIGHTRAG_FALLBACK_MODEL=${LIGHTRAG_FALLBACK_MODEL:-}
       - PROPERTY_EXTRACTION_MODEL=${PROPERTY_EXTRACTION_MODEL:-}
@@ -552,6 +556,10 @@ services:
       - METAFORGE_IMAGE_PROVIDER=${METAFORGE_IMAGE_PROVIDER:-}
       - METAFORGE_IMAGE_MODEL=${METAFORGE_IMAGE_MODEL:-}
       - METAFORGE_IMAGE_TIMEOUT_S=${METAFORGE_IMAGE_TIMEOUT_S:-}
+      # Per-step models: the gate reviewer when the project policy names none,
+      # and vision calls (reading sketches). Unset, both use the chat model.
+      - METAFORGE_REVIEWER_MODEL=${METAFORGE_REVIEWER_MODEL:-}
+      - METAFORGE_VISION_MODEL=${METAFORGE_VISION_MODEL:-}
       - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
       # MET-436: digikey/mouser/nexar adapters + offer_resolver need these to
       # register with live credentials — the gateway service (docker-compose.yml)
@@ -702,6 +710,8 @@ services:
       - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
       - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
       - METAFORGE_LLM_API_KEY=${METAFORGE_LLM_API_KEY:-}
+      # The gate reviewer runs here too, so it reads the same reviewer model.
+      - METAFORGE_REVIEWER_MODEL=${METAFORGE_REVIEWER_MODEL:-}
       - METAFORGE_CHAT_SKILLS=${METAFORGE_CHAT_SKILLS:-off}
       - METAFORGE_CHAT_MAX_STEPS=${METAFORGE_CHAT_MAX_STEPS:-}
       - METAFORGE_CHAT_WALL_CLOCK_SECONDS=${METAFORGE_CHAT_WALL_CLOCK_SECONDS:-}

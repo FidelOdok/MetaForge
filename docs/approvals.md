@@ -274,10 +274,26 @@ worker runs one `review_gate` step (the in-process engine does the same). It
 reads the policy and, unless it is `off`, builds a **review brief** (the
 phase's objective and deliverables, the twin's work products for the project,
 the gate's check results and the run's earlier decisions), runs a review turn
-with its own model (`reviewer_model`, as `provider:model` or a model id), the
-`gate-review` skill as its rubric and the read-only `review` tool profile, and
-posts the result to `POST /v1/runs/{id}/gate-review`. The gateway stores it on
-the gate (`review` on the approval item) and applies the policy. A reviewer
+with its own model, the `gate-review` skill as its rubric and the read-only
+`review` tool profile, and posts the result to `POST /v1/runs/{id}/gate-review`.
+The gateway stores it on the gate (`review` on the approval item) and applies
+the policy.
+
+**The reviewer's model.** The server reviewer runs on the policy's
+`reviewer_model` when it names one (`provider:model`, or a model id for the
+gateway's provider), else on `METAFORGE_REVIEWER_MODEL` (same format, set on
+the gateway and the design-flow worker), else on the gateway's own chat model
+(a `gate_check` route when one is configured, otherwise `METAFORGE_LLM_MODEL`
+or the durable selection). Every review names the model that actually
+reviewed: `model` is the `provider:model` the provider pipeline recorded for
+the reply, so a review on the default model no longer reads as `default`, and
+`model_source` says which setting chose it (`policy`, `env` or `default`).
+The review step logs `gate_review_model_selected` and `gate_review_posted`
+with both, and the gateway's `gate_review_recorded` log carries them too. A
+weak default model can hold or retry a stronger agent's work, so set one of
+the two on any deployment whose chat model is not the one that should judge.
+A client reviewer is asked for the policy's `reviewer_model` only; the env
+setting names a model for the gateway's own provider chain. A reviewer
 that fails posts `recommendation: none` with the error, and the gate waits for
 a person as it would have anyway. `reviewer: client` leaves the review to a
 connected client's reviewer subagent.
