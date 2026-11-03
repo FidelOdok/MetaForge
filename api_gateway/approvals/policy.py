@@ -16,7 +16,9 @@ Two more fields say where the reviewer's intelligence comes from:
 ``client``: a connected client's reviewer subagent claims a review task;
 ``client_then_server``: the client first, the server when nobody claims it)
 and ``reviewer_model`` (the model the server reviewer uses, and the one a
-client reviewer is asked to use).
+client reviewer is asked to use). An empty ``reviewer_model`` means
+``METAFORGE_REVIEWER_MODEL`` for the server reviewer, then the gateway's own
+model (``api_gateway.runs.gate_review.reviewer_model``).
 
 Invariants enforced elsewhere: a failed check never offers approve; sign-offs
 and spending actions always wait for a person; a reviewer's decision is

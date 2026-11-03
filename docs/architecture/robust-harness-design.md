@@ -297,9 +297,11 @@ fast model (`claude-haiku-4-5-20251001`) for `flow_generator`, `gate_check`,
 `classification` and `summarisation`, and the strong model (`claude-opus-4-8`)
 for `phase_brain:mechanical` and `phase_brain:simulation`. Copy it, edit it to
 providers the deployment has credentials for, and point
-`METAFORGE_MODEL_ROUTES_PATH` at it. Today `gate_check` and `summarisation` make no
-model call (gates and trajectory summaries are deterministic); the routes exist
-so the first model-backed check or summary lands on the cheap model.
+`METAFORGE_MODEL_ROUTES_PATH` at it. Gate checks and trajectory summaries are
+deterministic and make no model call; the one `gate_check` caller today is the
+server gate reviewer, which uses the route only when neither the project
+policy's `reviewer_model` nor `METAFORGE_REVIEWER_MODEL` names a model (see
+[the approvals page](../approvals.md)).
 
 Precedence, highest first: an explicit per-call provider/model, the running
 phase's own `model` (flow-generator input I5), the project's routes, the table

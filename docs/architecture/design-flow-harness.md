@@ -1078,12 +1078,52 @@ starts, the phase brain lists the project's confirmed readings and adds them
 to the phase prompt, labelled as intent: proportions as assumptions and open
 questions as still open. A proposed or rejected reading is never offered.
 
-The vision model is the gateway's configured provider chain, less the
-families whose adapter cannot carry an image (Gemini, Bedrock and Codex). If
+The vision model is the gateway's configured provider chain, with
+`METAFORGE_VISION_MODEL` as its model when set, less the families whose
+adapter cannot carry an image (Gemini, Bedrock and Codex). The call is shared
+in `api_gateway/twin/vision.py` so any other image reader uses the same
+chain and the same setting. If
 none is left, or none answers within `METAFORGE_SKETCH_READING_TIMEOUT_S`
 (120 s by default), the tool fails with a message saying so. Outcomes are
 counted in `metaforge_sketch_reading_total`, and the
 `SketchReadingUnavailable` alert fires when most readings in an hour fail.
+
+### Models per step {#models-per-step}
+
+Each step of the concept pipeline names its model in one place. Every
+setting is optional; unset, the step uses the default in the last column.
+
+| Step | Setting | Format | Default |
+| --- | --- | --- | --- |
+| Concept phase reasoning (server mode) | the phase's `model` in the flow, or a `phase_brain` route | `provider:model` | the gateway's chat model |
+| Reading a sketch (`twin.interpret_sketch`) | `METAFORGE_VISION_MODEL` | a model id for the chat provider (on OpenRouter a `vendor/model` slug) | the gateway's chat model |
+| Concept image (`twin.render_concept_image`) | `METAFORGE_IMAGE_MODEL` (with `METAFORGE_IMAGE_PROVIDER`) | an image model slug | `google/gemini-2.5-flash-image` on OpenRouter, `gpt-image-1` on OpenAI; off until a provider is set |
+| Gate review (server reviewer) | the policy's `reviewer_model`, then `METAFORGE_REVIEWER_MODEL` | `provider:model`, or a model id for the chat provider | a `gate_check` route, else the gateway's chat model |
+
+The gateway's chat model is `METAFORGE_LLM_MODEL` on `METAFORGE_LLM_PROVIDER`,
+or the durable harness selection when one is stored.
+
+**The concept phase's own model.** A flow phase carries an optional `model`
+(`provider:model`) that its phase brain runs on, ahead of every route (see
+[per-role model routing](robust-harness-design.md#per-role-model-routing)).
+In a template, set it beside the `use` line, for example `model:
+anthropic:claude-opus-4-8` under `- use: concept_selection`; a
+generated flow sets it with the `set_model` operation. A
+`phase_brain:<discipline>` route applies to every phase with that
+discipline, so it is the wider choice: in `mech_v1` the concept phase shares
+the `manufacturing` discipline with the route selection phase. In client mode
+the connected client runs the phase, so the client's own model reasons and
+these settings do not apply to it.
+
+**The reviewer.** The policy's `reviewer_model` wins, then
+`METAFORGE_REVIEWER_MODEL`, then the default. Each stored review records the
+`provider:model` that wrote it and `model_source` (`policy`, `env` or
+`default`); see [the approvals page](../approvals.md).
+
+The compose file passes `METAFORGE_REVIEWER_MODEL` to the gateway, the MCP
+sidecar and the design-flow worker (which runs the reviewer), and
+`METAFORGE_VISION_MODEL` to the gateway and the MCP sidecar, next to the
+`METAFORGE_IMAGE_*` settings.
 
 ### Waiver / release model {#waiver-release-model}
 

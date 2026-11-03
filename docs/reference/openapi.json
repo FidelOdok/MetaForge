@@ -5521,6 +5521,11 @@
             "title": "Model",
             "type": "string"
           },
+          "model_source": {
+            "default": "",
+            "title": "Model Source",
+            "type": "string"
+          },
           "phase": {
             "title": "Phase",
             "type": "string"
