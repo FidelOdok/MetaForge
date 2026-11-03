@@ -1291,6 +1291,18 @@ class TwinServer(McpToolServer):
                                 "assumption or open. Design builds to it."
                             ),
                         },
+                        "industrial_design": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-764: on the industrial design decision: "
+                                "joint_language and edge_treatment (what mechanical design "
+                                "follows), ergonomics {verdict (pass | fail | "
+                                "not_applicable), source of the limits, or reason when "
+                                "nobody handles it}, finishes [{part, appearance, "
+                                "compatible}] from check_cmf_compatibility, and "
+                                "open_decisions. The gate is not ready while any are open."
+                            ),
+                        },
                         "concept_options": {
                             "type": "array",
                             "description": (
@@ -1398,6 +1410,11 @@ class TwinServer(McpToolServer):
             if not isinstance(assembly, dict):
                 raise ValueError("twin.record_decision: 'assembly' must be an object")
             kwargs["assembly"] = assembly
+        id_record = arguments.get("industrial_design")
+        if id_record is not None:
+            if not isinstance(id_record, dict):
+                raise ValueError("twin.record_decision: 'industrial_design' must be an object")
+            kwargs["industrial_design"] = id_record
         options = arguments.get("concept_options")
         if options is not None:
             if not isinstance(options, list):

@@ -39,6 +39,11 @@ __all__ = [
     "DFM_REVIEW_MISSING",
     "DFM_REVIEW_PHASE_ID",
     "DESIGN_PHASE_ID",
+    "INDUSTRIAL_DESIGN_PHASE_ID",
+    "INDUSTRIAL_DESIGN_MISSING",
+    "IndustrialDesignRecord",
+    "industrial_design_gap",
+    "parse_industrial_design",
     "assembly_conformance_gap",
     "PROCESS_RANKING_MISSING",
     "ROUTE_DECISION_MISSING",
@@ -914,3 +919,138 @@ def assembly_conformance_gap(assembly: ConceptAssembly | None, cad_names: list[s
         + " (build them, named as in the concept, or record a revised concept decision "
         "with its assembly if the design has moved on)"
     )
+
+
+# ── industrial design as constraints and evidence (FORGE-764) ──────────────
+#
+# The Chair's industrial design decision was prose: the joint and edge
+# language never reached the design, ergonomics and finishes were asserted
+# without the checks behind them, and open questions passed the gate. The
+# industrial design decision now carries them as data, and its gate is not
+# ready while a decision is still open.
+
+INDUSTRIAL_DESIGN_PHASE_ID = "industrial_design"
+
+INDUSTRIAL_DESIGN_MISSING = (
+    "industrial_design on the decision (record-decision with industrial_design: "
+    "joint_language, edge_treatment, ergonomics {verdict, source or reason}, "
+    "finishes [{part, appearance, compatible}], open_decisions)"
+)
+
+_ERGONOMICS_VERDICTS = ("pass", "fail", "not_applicable")
+
+
+@dataclass(frozen=True)
+class FinishChoice:
+    part: str
+    appearance: str
+    compatible: bool
+
+    def as_metadata(self) -> dict[str, object]:
+        return {"part": self.part, "appearance": self.appearance, "compatible": self.compatible}
+
+
+@dataclass(frozen=True)
+class IndustrialDesignRecord:
+    joint_language: str
+    edge_treatment: str
+    ergonomics_verdict: str
+    ergonomics_basis: str
+    finishes: tuple[FinishChoice, ...] = ()
+    open_decisions: tuple[str, ...] = ()
+
+    def summary(self) -> str:
+        return (
+            f"joints: {self.joint_language}; edges: {self.edge_treatment}; ergonomics "
+            f"{self.ergonomics_verdict.replace('_', ' ')}; {len(self.finishes)} finish(es)"
+        )
+
+    def as_metadata(self) -> dict[str, object]:
+        verdict = self.ergonomics_verdict
+        basis_key = "reason" if verdict == "not_applicable" else "source"
+        return {
+            "joint_language": self.joint_language,
+            "edge_treatment": self.edge_treatment,
+            "ergonomics": {"verdict": verdict, basis_key: self.ergonomics_basis},
+            "finishes": [f.as_metadata() for f in self.finishes],
+            "open_decisions": list(self.open_decisions),
+        }
+
+
+def parse_industrial_design(value: object) -> IndustrialDesignRecord:
+    """An ``industrial_design`` value checked; raises ``ValueError`` saying why.
+
+    The joint and edge language are what mechanical design must follow, so
+    both are required. Ergonomics needs its verdict and the sourced limit it
+    rests on, or, when nobody handles the product, the reason. Each finish
+    says whether the material compatibility check passed.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("industrial_design must be an object")
+    joint = _text(value.get("joint_language"))
+    edge = _text(value.get("edge_treatment"))
+    if not joint or not edge:
+        raise ValueError(
+            "industrial_design needs joint_language and edge_treatment "
+            "(e.g. 'exposed dowels, flush', 'R3 on every hand-contact edge')"
+        )
+    ergonomics = value.get("ergonomics")
+    if not isinstance(ergonomics, dict):
+        raise ValueError("industrial_design.ergonomics must be an object with its verdict")
+    verdict = _text(ergonomics.get("verdict"))
+    if verdict not in _ERGONOMICS_VERDICTS:
+        raise ValueError(
+            f"industrial_design.ergonomics.verdict must be one of {', '.join(_ERGONOMICS_VERDICTS)}"
+        )
+    if verdict == "not_applicable":
+        basis = _text(ergonomics.get("reason"))
+        if not basis:
+            raise ValueError("ergonomics not_applicable needs the reason nobody handles it")
+    else:
+        basis = _text(ergonomics.get("source"))
+        if not basis:
+            raise ValueError(
+                "industrial_design.ergonomics needs the source of its limits "
+                "(dataset, table and percentile)"
+            )
+    raw_finishes = value.get("finishes") or []
+    if not isinstance(raw_finishes, list):
+        raise ValueError("industrial_design.finishes must be a list")
+    finishes: list[FinishChoice] = []
+    for i, raw in enumerate(raw_finishes):
+        where = f"industrial_design.finishes[{i}]"
+        if not isinstance(raw, dict):
+            raise ValueError(f"{where} must be an object")
+        part, appearance = _text(raw.get("part")), _text(raw.get("appearance"))
+        if not part or not appearance:
+            raise ValueError(f"{where} needs part and appearance")
+        if not isinstance(raw.get("compatible"), bool):
+            raise ValueError(f"{where}.compatible must say whether check_cmf_compatibility passed")
+        finishes.append(FinishChoice(part, appearance, raw["compatible"]))
+    open_decisions = value.get("open_decisions") or []
+    if not isinstance(open_decisions, list):
+        raise ValueError("industrial_design.open_decisions must be a list")
+    return IndustrialDesignRecord(
+        joint_language=joint,
+        edge_treatment=edge,
+        ergonomics_verdict=verdict,
+        ergonomics_basis=basis,
+        finishes=tuple(finishes),
+        open_decisions=_texts(open_decisions),
+    )
+
+
+def industrial_design_gap(record: IndustrialDesignRecord | None) -> str | None:
+    """What the industrial design gate is missing, or None when it may pass."""
+    if record is None:
+        return INDUSTRIAL_DESIGN_MISSING
+    if record.open_decisions:
+        return "industrial design decisions still open: " + "; ".join(record.open_decisions)
+    if record.ergonomics_verdict == "fail":
+        return f"an ergonomics pass: the check against {record.ergonomics_basis} failed"
+    clashing = [f.part for f in record.finishes if not f.compatible]
+    if clashing:
+        return "finishes compatible with their material for: " + ", ".join(clashing)
+    if not record.finishes:
+        return "a finish per visible part (or list the finishes still to choose in open_decisions)"
+    return None

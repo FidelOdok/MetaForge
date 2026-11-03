@@ -132,6 +132,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         dfm_review: dict[str, Any] | None = None,
         assembly: dict[str, Any] | None = None,
         concept_options: list[dict[str, Any]] | None = None,
+        industrial_design: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
         from twin_core.models.enums import WorkProductType
@@ -164,6 +165,12 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 selected_assembly = parse_concept_assembly(assembly)
             if concept_options is not None:
                 options = parse_concept_options(concept_options)
+            # FORGE-764: the industrial design record its gate reads.
+            id_record = None
+            if industrial_design is not None:
+                from orchestrator.design_flow.context import parse_industrial_design
+
+                id_record = parse_industrial_design(industrial_design)
         except ValueError as exc:
             raise ValueError(f"twin.record_decision: {exc}") from exc
         route_decision = None
@@ -303,6 +310,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["assembly"] = selected_assembly.as_metadata()
             if options is not None:
                 metadata["concept_options"] = [o.as_metadata() for o in options]
+            if id_record is not None:
+                metadata["industrial_design"] = id_record.as_metadata()
             metadata.update(pin_metadata(pins))
             if pins:
                 # FORGE-528's list of refs, now every pin (one depends_on).

@@ -909,6 +909,18 @@ concept, the phase records a revised concept decision with its assembly, and
 the gate compares against that one. With no assembly on record the gate
 behaves as before.
 
+Industrial design hands mechanical design constraints, not prose. The
+shared industrial design phase now also decides the joint and edge language
+(how joints show and with which fixings; which edges get which radius or
+chamfer) and records it with `twin.record_constraint_set`. Its decision
+carries an `industrial_design` field: `joint_language`, `edge_treatment`,
+`ergonomics` (a verdict with the source of its limits, or the reason nobody
+handles the product), `finishes` (each part's appearance and whether
+`check_cmf_compatibility` passed) and `open_decisions`. Both gate engines
+read the latest one, and the gate is not ready while a decision is still
+open, the ergonomics check failed, a finish clashes with its material, or no
+finish is chosen.
+
 A sketch shows intent and is never evidence. Sketches and renders are
 committed with `metadata.authority = "illustrative"`, the gate review brief
 reports each work product's authority (`illustrative` for a sketch, render
