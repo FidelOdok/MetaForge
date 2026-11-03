@@ -481,6 +481,39 @@ def _usd_geometry(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def parse_stock(raw: Any) -> list[dict[str, Any]]:
+    """The sizes a material is sold in (FORGE-754), each with its source.
+
+    ``[{form, thickness_mm, width_mm, length_mm, source_kind, source_ref}]``.
+    A sheet or board names all three sizes; other forms give what applies.
+    Nesting and part splitting read these instead of assuming a sheet size.
+    """
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list):
+        raise CatalogError("stock must be a list of {form, thickness_mm, width_mm, length_mm}")
+    out: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
+        where = f"stock {i + 1}"
+        if not isinstance(item, dict):
+            raise CatalogError(f"{where} must be an object")
+        form = str(item.get("form") or "")
+        if form not in MATERIAL_FORMS:
+            raise CatalogError(f"{where}: form must be one of {', '.join(MATERIAL_FORMS)}")
+        size: dict[str, Any] = {"form": form}
+        for key in ("thickness_mm", "width_mm", "length_mm"):
+            if item.get(key) is not None:
+                size[key] = _number(f"{where} {key}", item.get(key))
+        if form in ("sheet", "board", "plate") and not all(
+            k in size for k in ("thickness_mm", "width_mm", "length_mm")
+        ):
+            raise CatalogError(f"{where}: a {form} needs thickness_mm, width_mm and length_mm")
+        kind, ref = _source(where, item)
+        size.update(source_kind=kind, source_ref=ref, needs_review=kind == "assumption")
+        out.append(size)
+    return out
+
+
 def parse_suppliers(raw: Any) -> list[dict[str, str]]:
     if raw in (None, []):
         return []
@@ -575,6 +608,8 @@ class MaterialEntry:
     version: int = 1
     updated_at: float = 0.0
     kind: str = field(default="material")
+    #: FORGE-754: the stock sizes it is sold in, each sourced (see ``parse_stock``).
+    stock: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         out = asdict(self)
@@ -914,6 +949,7 @@ class SqliteCatalog:
                 processes=[str(p).strip().lower() for p in data.get("processes") or [] if p],
                 notes=str(data.get("notes") or ""),
                 updated_at=now,
+                stock=parse_stock(data.get("stock")),
             )
         elif kind == "component":
             family = str(data.get("family") or "")
@@ -1006,7 +1042,7 @@ class SqliteCatalog:
                 "notes",
             }
         else:
-            allowed = {"title", "designation", "forms", "properties", "processes", "notes"}
+            allowed = {"title", "designation", "forms", "properties", "processes", "notes", "stock"}
         unknown = set(changes) - allowed
         if unknown:
             raise CatalogError(f"cannot change {', '.join(sorted(unknown))}")
@@ -1079,6 +1115,8 @@ class SqliteCatalog:
                 entry.processes = [str(p).strip().lower() for p in changes["processes"] or []]
             if "designation" in changes:
                 entry.designation = str(changes["designation"] or "").strip()
+            if "stock" in changes:
+                entry.stock = parse_stock(changes["stock"])
         if "title" in changes:
             entry.title = str(changes["title"] or "").strip()
         if "notes" in changes:

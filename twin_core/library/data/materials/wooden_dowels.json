@@ -1,0 +1,175 @@
+{
+  "checked": "2026-11-03",
+  "source": "Bosch DIY product page (fluted beech dowels); Ostermann REDOCOL fluted dowel datasheet to DIN 68150",
+  "about": "Wooden dowels for joining sheet goods. Sizes only; no published joint strength exists from these sources.",
+  "entries": [
+    {
+      "kind": "component",
+      "body": {
+        "name": "dowel_beech_fluted_bosch_6x30",
+        "title": "Fluted beech dowel 6 x 30 mm (Bosch)",
+        "family": "pin",
+        "origin": "purchased",
+        "size": "6 x 30",
+        "specs": {
+          "nominal_diameter_mm": {
+            "value": 6,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          },
+          "length_mm": {
+            "value": 30,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          }
+        },
+        "material": "beech",
+        "suppliers": [
+          {
+            "supplier": "Bosch",
+            "sku": "2 609 255 309",
+            "url": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          }
+        ],
+        "notes": "Fluted beechwood dowel, pack of 50. No standard is cited by the supplier. No joint strength is published for dowel joints in birch plywood: treat as an open question until tested or calculated."
+      }
+    },
+    {
+      "kind": "component",
+      "body": {
+        "name": "dowel_beech_fluted_bosch_8x40",
+        "title": "Fluted beech dowel 8 x 40 mm (Bosch)",
+        "family": "pin",
+        "origin": "purchased",
+        "size": "8 x 40",
+        "specs": {
+          "nominal_diameter_mm": {
+            "value": 8,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          },
+          "length_mm": {
+            "value": 40,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          }
+        },
+        "material": "beech",
+        "suppliers": [
+          {
+            "supplier": "Bosch",
+            "sku": "2 609 255 311",
+            "url": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          }
+        ],
+        "notes": "Fluted beechwood dowel, pack of 40. No standard is cited by the supplier. No joint strength is published for dowel joints in birch plywood: treat as an open question until tested or calculated."
+      }
+    },
+    {
+      "kind": "component",
+      "body": {
+        "name": "dowel_beech_fluted_bosch_10x40",
+        "title": "Fluted beech dowel 10 x 40 mm (Bosch)",
+        "family": "pin",
+        "origin": "purchased",
+        "size": "10 x 40",
+        "specs": {
+          "nominal_diameter_mm": {
+            "value": 10,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          },
+          "length_mm": {
+            "value": 40,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          }
+        },
+        "material": "beech",
+        "suppliers": [
+          {
+            "supplier": "Bosch",
+            "sku": "2 609 255 313",
+            "url": "https://www.bosch-diy.com/za/en/p/dowels-2762853"
+          }
+        ],
+        "notes": "Fluted beechwood dowel, pack of 30. No standard is cited by the supplier. No joint strength is published for dowel joints in birch plywood: treat as an open question until tested or calculated."
+      }
+    },
+    {
+      "kind": "component",
+      "body": {
+        "name": "dowel_beech_fluted_din68150_8x30",
+        "title": "Fluted beech dowel 8 x 30 mm, DIN 68150 (Ostermann REDOCOL)",
+        "family": "pin",
+        "origin": "standard",
+        "standard": "DIN 68150",
+        "size": "8 x 30",
+        "specs": {
+          "nominal_diameter_mm": {
+            "value": 8,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://web.ostermann.eu/mamdata/PDF_Daten/Technische_Merkblaetter/Verbindungstechnik/Riffelduebel/REDOCOL_Riffelduebel_de.pdf"
+          },
+          "length_mm": {
+            "value": 30,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://web.ostermann.eu/mamdata/PDF_Daten/Technische_Merkblaetter/Verbindungstechnik/Riffelduebel/REDOCOL_Riffelduebel_de.pdf"
+          }
+        },
+        "material": "beech",
+        "notes": "Ostermann REDOCOL pre-glued fluted dowel to DIN 68150: diameter tolerance +/- 0.2 mm, length +/- 1 mm, 20 lengthwise flutes, 60 degree chamfer, kiln-dried beech at 8 to 10% moisture (manufacturer datasheet, 1/2026). DIN 68150's own size table is not public. No joint strength is published."
+      }
+    },
+    {
+      "kind": "component",
+      "body": {
+        "name": "dowel_beech_fluted_din68150_8x35",
+        "title": "Fluted beech dowel 8 x 35 mm, DIN 68150 (Ostermann REDOCOL)",
+        "family": "pin",
+        "origin": "standard",
+        "standard": "DIN 68150",
+        "size": "8 x 35",
+        "specs": {
+          "nominal_diameter_mm": {
+            "value": 8,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://web.ostermann.eu/mamdata/PDF_Daten/Technische_Merkblaetter/Verbindungstechnik/Riffelduebel/REDOCOL_Riffelduebel_de.pdf"
+          },
+          "length_mm": {
+            "value": 35,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://web.ostermann.eu/mamdata/PDF_Daten/Technische_Merkblaetter/Verbindungstechnik/Riffelduebel/REDOCOL_Riffelduebel_de.pdf"
+          }
+        },
+        "material": "beech",
+        "notes": "Ostermann REDOCOL pre-glued fluted dowel to DIN 68150: diameter tolerance +/- 0.2 mm, length +/- 1 mm, 20 lengthwise flutes, 60 degree chamfer, kiln-dried beech at 8 to 10% moisture (manufacturer datasheet, 1/2026). DIN 68150's own size table is not public. No joint strength is published."
+      }
+    },
+    {
+      "kind": "component",
+      "body": {
+        "name": "dowel_beech_fluted_din68150_8x40",
+        "title": "Fluted beech dowel 8 x 40 mm, DIN 68150 (Ostermann REDOCOL)",
+        "family": "pin",
+        "origin": "standard",
+        "standard": "DIN 68150",
+        "size": "8 x 40",
+        "specs": {
+          "nominal_diameter_mm": {
+            "value": 8,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://web.ostermann.eu/mamdata/PDF_Daten/Technische_Merkblaetter/Verbindungstechnik/Riffelduebel/REDOCOL_Riffelduebel_de.pdf"
+          },
+          "length_mm": {
+            "value": 40,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://web.ostermann.eu/mamdata/PDF_Daten/Technische_Merkblaetter/Verbindungstechnik/Riffelduebel/REDOCOL_Riffelduebel_de.pdf"
+          }
+        },
+        "material": "beech",
+        "notes": "Ostermann REDOCOL pre-glued fluted dowel to DIN 68150: diameter tolerance +/- 0.2 mm, length +/- 1 mm, 20 lengthwise flutes, 60 degree chamfer, kiln-dried beech at 8 to 10% moisture (manufacturer datasheet, 1/2026). DIN 68150's own size table is not public. No joint strength is published."
+      }
+    }
+  ]
+}

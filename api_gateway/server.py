@@ -1633,6 +1633,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from twin_core.library.catalog import SqliteCatalog
 
         init_catalog(SqliteCatalog(str(default_machine_library_path())))
+        # FORGE-754: sheet goods by thickness with stock sizes, and the
+        # standard parts that join them. Idempotent; never overwrites.
+        try:
+            from api_gateway.library.catalog_routes import get_catalog as _seed_catalog_of
+            from twin_core.library.material_seed import seed_catalog
+
+            seed_catalog(_seed_catalog_of())
+        except Exception as exc:  # noqa: BLE001 - a seed failure must not stop the gateway
+            logger.warning("material_seed_failed", error=str(exc))
         # FORGE-446: this process resolves material names against its own catalog.
         from api_gateway.library.catalog_routes import get_catalog
         from twin_core.library.material_resolver import catalog_source, install_material_source
