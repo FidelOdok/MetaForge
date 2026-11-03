@@ -70,6 +70,8 @@ def test_phases_declare_disciplines() -> None:
         "feasibility",
         # FORGE-611: the process is chosen before design, checked after it.
         "route_selection",
+        # FORGE-757: the concept (sketches + selected assembly) before CAD.
+        "concept_selection",
         # FORGE-634: industrial design fixes the form factor before design.
         "industrial_design",
         "design",
@@ -79,4 +81,5 @@ def test_phases_declare_disciplines() -> None:
     mby = {p.id: p for p in mech.phases}
     assert mby["design"].disciplines == ("mechanical",)
     assert mby["industrial_design"].disciplines == ("industrial_design",)
+    assert mby["concept_selection"].disciplines == ("manufacturing",)
     assert mby["simulation"].disciplines == ("simulation",)

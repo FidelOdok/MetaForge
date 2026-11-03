@@ -144,7 +144,7 @@ async def test_bracket_from_intent_to_a_verified_completion() -> None:
     ran = [c[0] for c in brain.calls]
     assert ran == [
         "intent", "needs", "requirements", "feasibility", "route_selection",
-        "design", "dfm_review", "simulation",
+        "concept_selection", "design", "dfm_review", "simulation",
         "design", "dfm_review", "simulation",
     ]  # fmt: skip
     assert ("simulation", "rework") in decisions

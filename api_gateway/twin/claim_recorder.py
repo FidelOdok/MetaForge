@@ -32,6 +32,32 @@ from twin_core.models.enums import EdgeType
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.claim_recorder")
 
+
+#: Work product types that only ever show intent (FORGE-759).
+ILLUSTRATIVE_TYPES = frozenset({"design_sketch", "render", "image"})
+
+
+def _type_name(wp: Any) -> str:
+    t = getattr(wp, "type", "")
+    return str(getattr(t, "value", t))
+
+
+def is_illustrative(wp: Any) -> bool:
+    """A sketch, render or image, or anything its metadata marks illustrative."""
+    meta = getattr(wp, "metadata", None) or {}
+    return _type_name(wp) in ILLUSTRATIVE_TYPES or meta.get("authority") == "illustrative"
+
+
+async def _work_product(twin: Any, node_id: Any) -> Any:
+    getter = getattr(twin, "get_work_product", None)
+    if getter is None:
+        return None
+    try:
+        return await getter(node_id)
+    except Exception:  # noqa: BLE001 - not a work product: an entity or constraint
+        return None
+
+
 _DEFAULT_CLAIM_TYPE = "satisfies"
 
 
@@ -62,6 +88,15 @@ def make_claim_recorder(twin: Any) -> Any:
             artefact_id = await resolve_ref(
                 twin, artefact_ref, project_id=project_id, include_work_products=True
             )
+            # FORGE-759: a sketch, render or image shows intent; claiming it
+            # satisfies a requirement would make a picture into evidence.
+            artefact = await _work_product(twin, artefact_id)
+            if artefact is not None and is_illustrative(artefact):
+                raise ValueError(
+                    f"claim recorder: {artefact_ref!r} is an illustrative "
+                    f"{_type_name(artefact)}, which shows intent and cannot satisfy a "
+                    "requirement; claim against the CAD model, analysis or test that does"
+                )
             resolved_evidence_ids = (
                 await resolve_refs(twin, evidence_refs, project_id=project_id)
                 if evidence_refs

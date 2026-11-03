@@ -81,6 +81,12 @@ def deliverable_hints(pid: str) -> dict[str, str]:
         "do NOT record a different type (decision, entity, documentation) in its place"
     )
     return {
+        "design_sketch": (
+            "draw it with the commit-design-sketch tool as self-contained SVG (front, side "
+            "and isometric views of the block layout), labelling every part, joint and key "
+            "size as intended, assumption or open; a sketch shows intent and never claims a "
+            f"measured, verified or manufacturable result, project_id={pid}"
+        ),
         "design_decision": (
             "record it with the record-decision tool (title, rationale, alternatives), "
             "and depends_on=[the constraint set's item_ref] when it rests on requirements "

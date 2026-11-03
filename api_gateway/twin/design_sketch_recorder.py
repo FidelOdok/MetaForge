@@ -88,6 +88,9 @@ def make_design_sketch_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "description_text": description_text,
                 "approved": False,
                 "approved_at": None,
+                # A sketch shows intent: nothing reads a measurement from it and
+                # it can never satisfy a requirement (FORGE-759).
+                "authority": "illustrative",
             }
             if minio_object_key:
                 metadata["minio_object_key"] = minio_object_key

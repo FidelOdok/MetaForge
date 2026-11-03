@@ -132,6 +132,12 @@ TAILORING: list[dict[str, Any]] = [
         "rationale": "outcomes come before tasks",
     },
     {
+        "op": "set_outcome",
+        "phase": "concept_selection",
+        "value": "a machined L-bracket concept selected over welded and folded alternatives",
+        "rationale": "outcomes come before tasks",
+    },
+    {
         # FORGE-634: mech_v1 carries an industrial design phase. A mounting
         # bracket is bolted in place and never handled or seen, and its
         # envelope is already a requirement, so the client drops the phase,
