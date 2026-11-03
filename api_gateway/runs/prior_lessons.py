@@ -1,4 +1,4 @@
-"""Collect what earlier runs on a project learned, for the kickoff and concept briefs.
+"""Collect what earlier runs on a project learned, for the intent and concept briefs.
 
 The pure half (``orchestrator.design_flow.prior_lessons``) turns run records
 into lessons; this half reads them, best-effort, from where they live:
@@ -7,7 +7,7 @@ into lessons; this half reads them, best-effort, from where they live:
   gateway. The Temporal worker is another process whose store is empty, so
   there the same records are read from the run ledger file the gateway writes
   (compose shares ``~/.metaforge`` between the two), opened read-only;
-- the twin: the latest kickoff record's lessons (an earlier run already
+- the twin: the latest deciding answers' lessons (an earlier run already
   gathered them) and the rejected item revisions, each with its gate reason.
 
 A source that cannot be read costs its lessons, never the phase.
@@ -100,7 +100,7 @@ async def collect_prior_lessons(
 
     Deduplicated and capped (``MAX_PRIOR_LESSONS``). ``records`` defaults to
     :func:`run_records`; ``evaluator`` (a ``ProjectGateEvaluator``) gives the
-    latest kickoff record's lessons, ``twin`` the rejected item revisions.
+    latest deciding answers' lessons, ``twin`` the rejected item revisions.
     """
     if not project_id:
         return []
@@ -117,18 +117,18 @@ async def collect_prior_lessons(
             span.record_exception(exc)
             logger.warning("prior_lessons_runs_failed", project_id=project_id, error=str(exc))
         recorded: list[PriorLesson] = []
-        if evaluator is not None and hasattr(evaluator, "kickoff"):
+        if evaluator is not None and hasattr(evaluator, "deciding_answers"):
             try:
-                kickoff = await evaluator.kickoff(project_id)
-                if kickoff is not None:
+                answers = await evaluator.deciding_answers(project_id)
+                if answers is not None:
                     recorded = [
                         PriorLesson(lesson.text, lesson.source_run, "recorded")
-                        for lesson in kickoff.lessons
+                        for lesson in answers.lessons
                     ]
             except Exception as exc:  # noqa: BLE001
                 span.record_exception(exc)
                 logger.warning(
-                    "prior_lessons_kickoff_failed", project_id=project_id, error=str(exc)
+                    "prior_lessons_recorded_failed", project_id=project_id, error=str(exc)
                 )
         revisions: list[PriorLesson] = []
         if twin is not None:

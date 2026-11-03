@@ -1402,16 +1402,14 @@ class TwinServer(McpToolServer):
                             ),
                             "items": {"type": "object"},
                         },
-                        "kickoff": {
+                        "deciding_questions": {
                             "type": "object",
                             "description": (
-                                "On the kickoff decision: questions [{id, question, answer, "
-                                "source (stated | person | assumed | open)}], at most 8; "
-                                "directions [{name, rationale, risk}], two or three; picked "
-                                "(a direction name, or 'auto' with chosen = the direction you "
-                                "chose and why); lessons [{text, source_run}] from earlier "
-                                "runs. The kickoff gate reads it and every later phase is "
-                                "briefed with it."
+                                "FORGE-766: on the intent decision, the deciding questions "
+                                "asked once: questions [{id, question, answer, source "
+                                "(stated | person | assumed | open)}], at most 8, and lessons "
+                                "[{text, source_run}] from earlier runs. Every later phase "
+                                "is briefed with them and must not ask them again."
                             ),
                         },
                         "manufacturing_route": {
@@ -1523,11 +1521,11 @@ class TwinServer(McpToolServer):
             if not isinstance(options, list):
                 raise ValueError("twin.record_decision: 'concept_options' must be an array")
             kwargs["concept_options"] = options
-        kickoff = arguments.get("kickoff")
-        if kickoff is not None:
-            if not isinstance(kickoff, dict):
-                raise ValueError("twin.record_decision: 'kickoff' must be an object")
-            kwargs["kickoff"] = kickoff
+        answers = arguments.get("deciding_questions")
+        if answers is not None:
+            if not isinstance(answers, dict):
+                raise ValueError("twin.record_decision: 'deciding_questions' must be an object")
+            kwargs["deciding_questions"] = answers
         return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------
