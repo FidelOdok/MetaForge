@@ -11,6 +11,10 @@ from orchestrator.design_flow.spec import FLOWS, get_flow
 def test_every_flow_starts_with_intent_then_needs_then_requirements() -> None:
     for flow_id, flow in FLOWS.items():
         ids = [p.id for p in flow.phases]
+        # mech_v1 opens with a short kickoff (deciding questions and the pick
+        # of a direction) before the intent; nothing else may come first.
+        if ids[0] == "kickoff":
+            ids = ids[1:]
         assert ids[:3] == ["intent", "needs", "requirements"], (
             f"{flow_id} does not start intent -> needs -> requirements: {ids}"
         )

@@ -103,6 +103,12 @@ def context(*, loads: str | None = LOADS_AND_USE, budget: str | None = "GBP 200"
 TAILORING: list[dict[str, Any]] = [
     {
         "op": "set_outcome",
+        "phase": "kickoff",
+        "value": "deciding questions answered and a one-piece machined bracket direction picked",
+        "rationale": "outcomes come before tasks",
+    },
+    {
+        "op": "set_outcome",
         "phase": "intent",
         "value": "why the bracket exists and what it must hold, agreed",
         "rationale": "outcomes come before tasks",

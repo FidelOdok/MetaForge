@@ -609,11 +609,41 @@
   "version": "1.2.0"
  },
  "mech_v1": {
-  "content_hash": "da342059a891449e08ce3cd228a5fe020893ec23f0a345f87ba61fa9ebeb5d9f",
+  "content_hash": "ee75d863ade0e15000f381f0f643c74dcda07e642c2e7ba24c0cfbb7c7d243f5",
   "definition": {
    "id": "mech_v1",
    "name": "Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven",
    "phases": [
+    {
+     "id": "kickoff",
+     "title": "Kickoff",
+     "objective": "Set the design direction before anything else, in a few minutes. (1) Deciding questions: name the few questions whose answers change this design most (who uses it, the load it carries, the budget, the quantity, the process available, the style), at most eight. Answer each from the goal and the flow context first (source stated); ask the person only what those leave open (source person); where nobody can answer, state your assumption (source assumed) or leave it open (source open). Later phases are briefed with these answers and must not ask them again. (2) Earlier runs: read the lessons from earlier runs on this project in this brief (gate rejections, reviewer findings, recorded lessons) and keep the ones that bear on this design. (3) Directions: name two or three distinct directions for this product type (for a chair: four-leg dowelled, slot-together flat-pack, cantilever), each with a one-line rationale and its main risk, fitting the answers. (4) The pick: if the person picked a direction, record it; if they said \"you choose\", or nobody can answer yet, record picked 'auto' with the direction you chose and why. Record one decision with twin.record_decision whose kickoff field holds questions [{id, question, answer, source}], directions [{name, rationale, risk}], picked, chosen and why (for auto), and lessons [{text, source_run}]. The gate shows the directions: approving accepts the pick; a retry naming another direction records that one instead. Author no requirements, sketches or CAD here.",
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "enforce_deliverables": true,
+     "gate": {
+      "name": "Kickoff (pick a direction)",
+      "auto_approve": false,
+      "criteria": [
+       "The deciding questions answered, each with its source, none to be asked again",
+       "Lessons from earlier runs on this project carried into the record",
+       "Two or three named directions, each with a rationale and its main risk",
+       "A direction picked by the person, or chosen by the agent with its reason"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null
+     },
+     "disciplines": [],
+     "model": null,
+     "slots": [],
+     "depends_on": null,
+     "condition": null,
+     "outcome": ""
+    },
     {
      "id": "intent",
      "title": "Intent",
@@ -773,7 +803,7 @@
     {
      "id": "concept_selection",
      "title": "Concept Design",
-     "objective": "Before any CAD, decide what to build and show it. Work from this brief: the requirements and load cases, the chosen manufacturing route, the library's process, machine and material limits (library.process_limits, library.machine_limits, library.get_material), the standard parts and components that can join it (library.standard_part, component.search_intent), and the findings and lessons of earlier runs on this project. Propose 2 or 3 concepts that differ in structure or joinery, each one fit for the route. For each concept draw a labelled sketch with twin.commit_design_sketch as self-contained SVG: front, side and isometric views of a simple block layout of its parts, with part names, joint types, and the key sizes taken from the requirements. Mark every label as intended, assumption or open (an unresolved question); a sketch shows intent and never claims a measured, verified or manufacturable result. Choose one concept and record a decision with twin.record_decision: the selected assembly in its assembly field (every part with its source, made, bought or standard, and every connection between parts with its joint type), concept_options naming each concept with exactly one selected, the alternatives and why each was rejected, parent_refs to the requirements it serves. Record the standard or bought parts the joints rely on (dowels, screws, inserts) with twin.record_component_selection and selection candidate, with their sizes and sources, for the design phase to confirm. Do not author CAD in this phase.",
+     "objective": "Before any CAD, decide what to build and show it. Work from this brief: the direction picked at kickoff and its answers (one concept develops that direction; a concept that departs from it says why), the requirements and load cases, the chosen manufacturing route, the library's process, machine and material limits (library.process_limits, library.machine_limits, library.get_material), the standard parts and components that can join it (library.standard_part, component.search_intent), and the findings and lessons of earlier runs on this project. Propose 2 or 3 concepts that differ in structure or joinery, each one fit for the route. For each concept draw a labelled sketch with twin.commit_design_sketch as self-contained SVG: front, side and isometric views of a simple block layout of its parts, with part names, joint types, and the key sizes taken from the requirements. Mark every label as intended, assumption or open (an unresolved question); a sketch shows intent and never claims a measured, verified or manufacturable result. Choose one concept and record a decision with twin.record_decision: the selected assembly in its assembly field (every part with its source, made, bought or standard, and every connection between parts with its joint type), concept_options naming each concept with exactly one selected, the alternatives and why each was rejected, parent_refs to the requirements it serves. Record the standard or bought parts the joints rely on (dowels, screws, inserts) with twin.record_component_selection and selection candidate, with their sizes and sources, for the design phase to confirm. Do not author CAD in this phase.",
      "expected_artifacts": [
       "design_sketch",
       "design_decision"

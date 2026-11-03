@@ -38,9 +38,11 @@ from orchestrator.design_flow.context import (
     DESIGN_PHASE_ID,
     DFM_REVIEW_PHASE_ID,
     INDUSTRIAL_DESIGN_PHASE_ID,
+    KICKOFF_PHASE_ID,
     assembly_conformance_gap,
     dfm_review_gap,
     industrial_design_gap,
+    kickoff_gap,
     route_decision_gap,
 )
 from orchestrator.design_flow.coupling import iteration_feedback, judge_history, wants_another_pass
@@ -145,6 +147,9 @@ class ReadinessReport:
     present: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     checked: bool = True  # False when no evaluator was available to check
+    #: What the reviewer is asked to decide on, shown in the gate reason
+    #: (the kickoff's directions and pick).
+    notes: list[str] = field(default_factory=list)
 
 
 @runtime_checkable
@@ -378,6 +383,8 @@ def _gate_reason(
             f" | Deliverables present: {readiness.present or '—'};"
             f" missing: {readiness.missing or 'none'}"
         )
+    for note in readiness.notes:
+        head += f" | {note}"
     # MET-583: surface real constraint state to the approver at every gate,
     # whether or not this gate enforces it.
     if constraints is not None and constraints.checked:
@@ -948,11 +955,26 @@ class DesignFlowExecutor:
                 gap = None
             if gap is not None:
                 missing.append(gap)
+        notes: list[str] = []
+        if phase.id == KICKOFF_PHASE_ID and hasattr(self._evaluator, "kickoff"):
+            # The kickoff gate is where the person picks a direction: it needs
+            # the record, and its reason lists the directions to pick from.
+            try:
+                kickoff = await self._evaluator.kickoff(ctx.project_id)
+                gap = kickoff_gap(kickoff)
+            except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+                logger.warning("design_flow_kickoff_error", error=str(exc))
+                kickoff, gap = None, None
+            if gap is not None:
+                missing.append(gap)
+            elif kickoff is not None:
+                notes.append(kickoff.gate_note())
         return ReadinessReport(
             ready=not missing,
             present=sorted(required & present),
             missing=missing,
             checked=True,
+            notes=notes,
         )
 
     async def _iterate_block(

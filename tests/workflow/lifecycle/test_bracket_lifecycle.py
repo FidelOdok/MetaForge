@@ -304,7 +304,9 @@ async def test_reused_phases_are_skipped_by_the_real_engine() -> None:
         await asyncio.sleep(0.005)
     await asyncio.wait_for(task, timeout=5.0)
 
+    # The kickoff is never reused: each run picks its own direction.
     assert ran == [
+        "kickoff",
         "feasibility",
         "route_selection",
         "concept_selection",

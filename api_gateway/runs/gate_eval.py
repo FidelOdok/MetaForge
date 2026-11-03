@@ -243,6 +243,16 @@ class ProjectGateEvaluator:
         logger.info("gate_eval_route_decision", project_id=project_id, decision=decision.summary())
         return decision
 
+    async def kickoff(self, project_id: str | None) -> Any:
+        """The project's latest kickoff record (questions, directions, pick), or ``None``."""
+        from orchestrator.design_flow.context import parse_kickoff
+
+        found = await self._latest_decision(project_id, "kickoff", parse_kickoff)
+        if found is None:
+            logger.info("gate_eval_kickoff_missing", project_id=project_id)
+            return None
+        return found[0]
+
     async def industrial_design(self, project_id: str | None) -> Any:
         """The latest industrial design record (FORGE-764), or ``None``."""
         from orchestrator.design_flow.context import parse_industrial_design
