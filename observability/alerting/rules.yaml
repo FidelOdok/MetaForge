@@ -962,3 +962,24 @@ groups:
             recorded, since a failed generation stores nothing, but concept phases
             get no illustrative images. Check METAFORGE_IMAGE_PROVIDER, the provider
             key and the gateway logs (concept_image_unavailable, concept_image_failed).
+
+  # FORGE-772 -- concept image checks (api_gateway/twin/image_critique.py).
+  - name: metaforge_concept_image_critique
+    rules:
+      - alert: ConceptImageCritiqueUnchecked
+        expr: >-
+          sum(increase(metaforge_concept_image_critique_total{verdict="unchecked"}[6h]))
+          / clamp_min(sum(increase(metaforge_concept_image_critique_total[6h])), 1) > 0.8
+          and sum(increase(metaforge_concept_image_critique_total[6h])) >= 5
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Concept images are not being checked against their assembly"
+          description: >-
+            Most concept image checks in the last six hours came back unchecked: no
+            concept assembly was on record, no vision model answered, or its reply
+            did not fit the schema. The images are still made and labelled
+            illustrative, but nobody is told when one drifts from the concept. Check
+            the configured provider supports images and the gateway logs
+            (concept_image_critique_unavailable, concept_image_critique_refused_output).

@@ -662,6 +662,8 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
             "twin.commit_design_sketch",
             "twin.render_concept_sketch",
             "twin.render_concept_image",
+            # FORGE-772: and the vision check of that image.
+            "twin.critique_concept_image",
         }
     ),
     # FORGE-687: KiCad and firmware outputs, kept by twin.record_design_files.

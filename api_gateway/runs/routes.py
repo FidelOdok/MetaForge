@@ -554,6 +554,7 @@ from orchestrator.design_flow.context import (  # noqa: E402
     INDUSTRIAL_DESIGN_PHASE_ID,
     INTENT_PHASE_ID,
     assembly_conformance_gap,
+    concept_image_check_note,
     concept_pick_note,
     deciding_answers_gap,
     dfm_review_gap,
@@ -685,6 +686,18 @@ class _GateCheckers:
             # FORGE-766: the concept gate is where a direction is picked; its
             # reason lists the concepts and how to pick another.
             note = concept_pick_note(await self._evaluator.concept_options(project_id))
+            if note is not None:
+                route_note += f"; {note}"
+        if phase_id == CONCEPT_PHASE_ID and hasattr(self._evaluator, "concept_image_checks"):
+            # FORGE-772: how each concept image matches its assembly; a note,
+            # never a gap. An unreadable check costs the note, not the gate.
+            try:
+                note = concept_image_check_note(
+                    await self._evaluator.concept_image_checks(project_id)
+                )
+            except Exception as exc:  # noqa: BLE001 - advisory, never fails a gate
+                logger.warning("gate_concept_image_check_error", error=str(exc))
+                note = None
             if note is not None:
                 route_note += f"; {note}"
 

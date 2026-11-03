@@ -37,6 +37,7 @@ __all__ = [
     "DecidingAnswers",
     "DecidingQuestion",
     "Lesson",
+    "concept_image_check_note",
     "concept_pick_note",
     "deciding_answers_gap",
     "parse_deciding_answers",
@@ -1109,6 +1110,43 @@ def concept_pick_note(options: tuple[ConceptOption, ...] | None) -> str | None:
     return (
         f"concepts: {listed}. Approving accepts {chosen.name}; to pick "
         f"{others or 'another concept'} instead, retry naming it (or say 'you choose')"
+    )
+
+
+#: The most issues the concept gate note names per image.
+_MAX_IMAGE_ISSUES = 3
+
+
+def concept_image_check_note(checks: list[dict[str, object]] | None) -> str | None:
+    """The concept gate's line on how each concept image matches its assembly.
+
+    ``checks`` holds one entry per concept image, ``{"concept", "verdict",
+    "issues", "reason"}``, as stored by the vision check (FORGE-772). The line
+    is advisory: an image is illustrative, so a drifting one is reported for
+    the reviewer and never blocks the gate. ``None`` without any image.
+    """
+    if not checks:
+        return None
+    parts: list[str] = []
+    for check in checks:
+        concept = _text(check.get("concept")) or "concept"
+        verdict = _text(check.get("verdict")) or "unchecked"
+        raw_issues = check.get("issues")
+        issues = [_text(i) for i in raw_issues if _text(i)] if isinstance(raw_issues, list) else []
+        if verdict == "inconsistent" and issues:
+            more = len(issues) - _MAX_IMAGE_ISSUES
+            listed = ", ".join(issues[:_MAX_IMAGE_ISSUES])
+            if more > 0:
+                listed += f" and {more} more"
+            parts.append(f"{concept} {verdict}: {listed}")
+        elif verdict == "unchecked" and _text(check.get("reason")):
+            parts.append(f"{concept} unchecked ({_text(check.get('reason'))[:120]})")
+        else:
+            parts.append(f"{concept} {verdict}")
+    return (
+        "concept image check: "
+        + "; ".join(parts)
+        + " (advisory: the images are illustrative and never evidence)"
     )
 
 

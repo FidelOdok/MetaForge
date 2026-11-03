@@ -1000,6 +1000,37 @@ error, and neither writes anything. Outcomes are counted in
 `metaforge_concept_image_total{outcome}`, and `ConceptImageGenerationUnavailable`
 warns when most requests in an hour fail.
 
+Image models drift: they add parts, drop parts and draw joints the concept
+does not have. So once a concept image exists, a vision model checks it
+against the concept's selected assembly, the `assembly` on the project's
+latest concept decision (or the decision named by `decision_ref`, or an
+inline `assembly`). It is asked whether every made part is visible, whether
+each connection and joint looks as the decision says, and whether anything
+major is drawn that the concept does not have, and it answers in strict JSON:
+`parts_seen` (name, present, note), `joints` (the two parts, whether they
+match, note), `extras`, a `verdict` of `consistent`, `inconsistent` or
+`unclear`, and a `summary`. The verdict is held to its own findings, so a
+"consistent" reply that reports a missing made part is stored as
+inconsistent, and a made part it never mentions makes it unclear. The result
+is stored on the render as `metadata.critique` with the provider and model
+that judged and the decision it was compared with. It uses the same vision
+path as sketch reading (`api_gateway/twin/image_critique.py`). It is
+advisory and best-effort: with no assembly on record, no vision model, a
+model that does not answer, or a reply that does not fit the schema, the
+critique is `{"verdict": "unchecked", "reason": ...}` and the image is still
+returned. An image of a concept the decision did not select is not judged
+against the selected one's assembly; it is unchecked with that reason unless
+its own assembly is given. `twin.critique_concept_image` checks an image
+already in the twin (its `node_id`, and optionally `decision_ref` or
+`assembly`) and stores the result in a new revision, which is how an image
+made before the concept decision gets checked. Both gate engines add a note
+to the concept gate's reason, for example "concept image check: C
+consistent; A inconsistent: Wheel Hook Left not visible". The note never
+blocks the gate, and the critique never makes an image evidence: the render
+stays illustrative and `twin.record_claim` still refuses it. Checks are
+counted in `metaforge_concept_image_critique_total{verdict}`, and
+`ConceptImageCritiqueUnchecked` reports when most go unchecked.
+
 The concept decision carries what it selects as data, not prose.
 `twin.record_decision` takes an `assembly` (each part with its source, made,
 bought or standard, plus material, process, quantity and a provenance tag,

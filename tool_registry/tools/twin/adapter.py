@@ -252,6 +252,51 @@ def _concept_layout_properties() -> dict[str, Any]:
     }
 
 
+def _critique_assembly_properties() -> dict[str, Any]:
+    """What a concept image is checked against (FORGE-772), for both image tools."""
+    return {
+        "decision_ref": {
+            "type": "string",
+            "description": (
+                "The concept design_decision (id, or exact name in the project) whose "
+                "assembly the image is checked against. Default: the project's latest "
+                "decision carrying an assembly."
+            ),
+        },
+        "assembly": {
+            "type": "object",
+            "description": (
+                "An inline assembly to check against instead, in twin.record_decision's "
+                "assembly schema: parts [{name, source made/bought/standard}], connections "
+                "[{parts [a, b], joint}]."
+            ),
+            "properties": {
+                "parts": {"type": "array", "items": {"type": "object"}},
+                "connections": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["parts"],
+        },
+    }
+
+
+def _critique_assembly_args(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """``decision_ref`` and ``assembly`` from a call, checked for shape only."""
+    out: dict[str, Any] = {}
+    ref = arguments.get("decision_ref")
+    if ref is not None:
+        if not isinstance(ref, str) or not ref.strip():
+            raise ValueError(f"{tool}: 'decision_ref' must be a non-empty string")
+        out["decision_ref"] = ref.strip()
+    assembly = arguments.get("assembly")
+    if assembly is not None:
+        if not isinstance(assembly, dict):
+            raise ValueError(f"{tool}: 'assembly' must be an object")
+        out["assembly"] = assembly
+    if len(out) == 2:
+        raise ValueError(f"{tool}: give 'decision_ref' or 'assembly', not both")
+    return out
+
+
 class TwinServer(McpToolServer):
     """MCP adapter wrapping ``TwinAPI`` for harness consumption."""
 
@@ -272,6 +317,7 @@ class TwinServer(McpToolServer):
         blob_stager: Any = None,
         design_sketch_recorder: Any = None,
         concept_image_renderer: Any = None,
+        concept_image_critic: Any = None,
         sketch_interpreter: Any = None,
         sketch_reading_decider: Any = None,
         hazard_analysis_recorder: Any = None,
@@ -401,6 +447,10 @@ class TwinServer(McpToolServer):
         # recorder) that has an image model draw a concept from its block
         # layout and a visual brief, and commits it as an illustrative render.
         self._concept_image_renderer = concept_image_renderer
+        # FORGE-772: an injected async ``critique(node_id, ...)`` (make_concept_
+        # image_critic) that has a vision model check a stored concept image
+        # against the selected assembly. Advisory; the image stays illustrative.
+        self._concept_image_critic = concept_image_critic
         # FORGE-762: an injected async ``interpret(...)`` (make_sketch_interpreter)
         # that has a vision model read an uploaded sketch into a *proposed*
         # concept reading, and ``decide(...)`` (make_sketch_reading_decider)
@@ -640,6 +690,8 @@ class TwinServer(McpToolServer):
             self._register_render_concept_sketch()
         if concept_image_renderer is not None:
             self._register_render_concept_image()
+        if concept_image_critic is not None:
+            self._register_critique_concept_image()
         if sketch_interpreter is not None:
             self._register_interpret_sketch()
         if sketch_reading_decider is not None:
@@ -3747,8 +3799,12 @@ class TwinServer(McpToolServer):
                     "picture keeps the concept's proportions. The image is stamped 'AI "
                     "concept image, illustrative only', records what conditioned it (layout "
                     "hash and node, brief, prompt, provider, model), is linked to its "
-                    "sketch, and can never back a requirement claim. Costs a paid image "
-                    "generation call; fails clearly when no image provider is configured."
+                    "sketch, and can never back a requirement claim. A vision model then "
+                    "checks it against the concept's selected assembly (the project's latest "
+                    "concept decision, or decision_ref / assembly) and stores the advisory "
+                    "result as critique; when it cannot, critique.verdict is 'unchecked'. "
+                    "Costs a paid image generation call; fails clearly when no image "
+                    "provider is configured."
                 ),
                 capability="twin_design_sketch",
                 input_schema={
@@ -3789,6 +3845,7 @@ class TwinServer(McpToolServer):
                             "type": "string",
                             "description": "Work product name (def 'Concept image: <concept>').",
                         },
+                        **_critique_assembly_properties(),
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                     },
@@ -3809,6 +3866,7 @@ class TwinServer(McpToolServer):
                         "linked_to_layout": {"type": "boolean"},
                         "project_linked": {"type": "boolean"},
                         "images": {"type": "array", "items": {"type": "object"}},
+                        "critique": {"type": "object"},
                     },
                 },
                 phase=2,
@@ -3895,11 +3953,77 @@ class TwinServer(McpToolServer):
                 size=size,
                 project_id=project_id if isinstance(project_id, str) else None,
                 domain=domain if isinstance(domain, str) and domain else "mechanical",
+                **_critique_assembly_args(tool, arguments),
             )
         logger.info(
             "concept_image_tool_done",
             layout_source=conditioned_on["layout_source"],
             node_id=result.get("node_id"),
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # twin.critique_concept_image (FORGE-772)
+    # ------------------------------------------------------------------
+
+    def _register_critique_concept_image(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.critique_concept_image",
+                adapter_id="twin",
+                name="Critique Concept Image",
+                description=(
+                    "Have a vision model check a concept image made by "
+                    "twin.render_concept_image against the concept's selected assembly: is "
+                    "every made part visible, do the connections and joints look as decided, "
+                    "and is anything major drawn that the concept does not have. The "
+                    "assembly is the project's latest concept decision, or the one named by "
+                    "decision_ref, or an inline assembly. The result (parts_seen, joints, "
+                    "extras, verdict consistent / inconsistent / unclear, summary, and the "
+                    "model that judged) is stored on the image as critique, in a new "
+                    "revision. It is advisory and never makes the image evidence; when no "
+                    "vision model can check it, the verdict is 'unchecked' with the reason."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "description": "A render node made by twin.render_concept_image.",
+                        },
+                        **_critique_assembly_properties(),
+                    },
+                    "required": ["node_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "concept_name": {"type": "string"},
+                        "critique": {"type": "object"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.critique_concept_image,
+        )
+
+    async def critique_concept_image(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.critique_concept_image"
+        node_id = arguments.get("node_id")
+        if not isinstance(node_id, str) or not node_id.strip():
+            raise ValueError(f"{tool}: 'node_id' is required (non-empty string)")
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("concept_image.node_id", node_id)
+            result: dict[str, Any] = await self._concept_image_critic(
+                node_id.strip(), **_critique_assembly_args(tool, arguments)
+            )
+        logger.info(
+            "concept_image_critique_tool_done",
+            node_id=result.get("node_id"),
+            verdict=(result.get("critique") or {}).get("verdict"),
         )
         return result
 
