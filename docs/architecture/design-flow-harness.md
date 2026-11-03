@@ -983,11 +983,15 @@ illustrative only" is drawn as a banner into the pixels and kept in the PNG's
 text chunk; where Pillow is missing the image is wrapped in an SVG whose text
 element carries the label instead, and no layout image is sent. Like every
 sketch and render it can never back a requirement claim. Generation is opt-in
-because each image is a paid call: `METAFORGE_IMAGE_PROVIDER=openai` turns on
-OpenAI's images API (`METAFORGE_IMAGE_MODEL`, default `gpt-image-1`, which
-takes the layout through its edits endpoint), using the existing
-`OPENAI_API_KEY`, with `METAFORGE_IMAGE_TIMEOUT_S` (default 120) bounding the
-call. With no provider configured the tool fails at once with a message
+because each image is a paid call. `METAFORGE_IMAGE_PROVIDER=openrouter`
+uses the gateway's existing `OPENROUTER_API_KEY`: the layout image and the
+prompt go to OpenRouter's chat completions with the image output modality,
+and the picture comes back in the reply, so any image model on OpenRouter is
+a `METAFORGE_IMAGE_MODEL` slug (default `google/gemini-2.5-flash-image`;
+GPT Image models work the same way). `METAFORGE_IMAGE_PROVIDER=openai` calls
+OpenAI's images API directly instead (default `gpt-image-1`, which takes the
+layout through its edits endpoint) on `OPENAI_API_KEY`.
+`METAFORGE_IMAGE_TIMEOUT_S` (default 120) bounds the call either way. With no provider configured the tool fails at once with a message
 saying what to set, a provider that does not answer in time is a timeout
 error, and neither writes anything. Outcomes are counted in
 `metaforge_concept_image_total{outcome}`, and `ConceptImageGenerationUnavailable`
