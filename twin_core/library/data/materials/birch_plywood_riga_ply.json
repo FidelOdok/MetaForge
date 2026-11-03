@@ -1,0 +1,481 @@
+{
+  "checked": "2026-11-03",
+  "source": "Latvijas Finieris (Riga Wood): Riga Wood Plywood Handbook (2022, revised 2025) and Riga Ply datasheet (10/2025)",
+  "about": "Birch plywood by thickness. 3 mm is not made by this manufacturer (thinnest 4 mm). Read from the manufacturer's PDFs on the checked date.",
+  "entries": [
+    {
+      "kind": "material",
+      "body": {
+        "name": "plywood_birch_riga_ply_4mm",
+        "title": "Birch plywood 4 mm, Riga Ply (sanded)",
+        "family": "sheet_good",
+        "designation": "Riga Ply birch plywood, 4 mm nominal, 3 plies, sanded, EN 314-2 class 3 bond",
+        "forms": [
+          "sheet"
+        ],
+        "properties": {
+          "bending_strength_mpa": {
+            "value": 75.3,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "bending_strength_across_mpa": {
+            "value": 12.1,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "youngs_modulus_mpa": {
+            "value": 16941,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "youngs_modulus_across_mpa": {
+            "value": 1059,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "ultimate_strength_mpa": {
+            "value": 47.7,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          },
+          "tensile_strength_across_mpa": {
+            "value": 30.3,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          }
+        },
+        "stock": [
+          {
+            "form": "sheet",
+            "thickness_mm": 4.0,
+            "width_mm": 1250,
+            "length_mm": 2500,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 4.0,
+            "width_mm": 1220,
+            "length_mm": 2440,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 4.0,
+            "width_mm": 1525,
+            "length_mm": 3050,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 4.0,
+            "width_mm": 1500,
+            "length_mm": 3000,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          }
+        ],
+        "notes": "Sanded thickness 3.6 mm (Table 4.1); thickness tolerance 3.5 to 4.1 mm at 9 +/- 3% moisture (datasheet). Strengths are characteristic values (f_m,k, f_t,k) and moduli are mean bending values, from tests to EN 789 for design to EN 1995-1-1; along and across are relative to the face grain. ultimate_strength_mpa is the characteristic tension strength along the face grain. Density is not published per thickness: the handbook gives 670 to 760 kg/m3 (EN 323, section 3.2). Panel shear f_v,k 10.0 MPa, G 750 MPa (Tables 4.7, 4.11). Mean screw withdrawal (EN 320, 4.2 mm screw, 2.7 mm pilot, 19 mm deep, Table 4.22): 60, printed in kg and left unconverted; these are means, not design values. Stock formats are from the datasheet's format list, which does not say which formats each thickness is made in: confirm with a supplier. No dowel joint strength is published by the manufacturer."
+      }
+    },
+    {
+      "kind": "material",
+      "body": {
+        "name": "plywood_birch_riga_ply_6_5mm",
+        "title": "Birch plywood 6.5 mm, Riga Ply (sanded)",
+        "family": "sheet_good",
+        "designation": "Riga Ply birch plywood, 6.5 mm nominal, 5 plies, sanded, EN 314-2 class 3 bond",
+        "forms": [
+          "sheet"
+        ],
+        "properties": {
+          "bending_strength_mpa": {
+            "value": 58.2,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "bending_strength_across_mpa": {
+            "value": 33.2,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "youngs_modulus_mpa": {
+            "value": 13101,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "youngs_modulus_across_mpa": {
+            "value": 4899,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "ultimate_strength_mpa": {
+            "value": 43.9,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          },
+          "tensile_strength_across_mpa": {
+            "value": 34.1,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          }
+        },
+        "stock": [
+          {
+            "form": "sheet",
+            "thickness_mm": 6.5,
+            "width_mm": 1250,
+            "length_mm": 2500,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 6.5,
+            "width_mm": 1220,
+            "length_mm": 2440,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 6.5,
+            "width_mm": 1525,
+            "length_mm": 3050,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 6.5,
+            "width_mm": 1500,
+            "length_mm": 3000,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          }
+        ],
+        "notes": "Sanded thickness 6.4 mm (Table 4.1); thickness tolerance 6.1 to 6.9 mm at 9 +/- 3% moisture (datasheet). Strengths are characteristic values (f_m,k, f_t,k) and moduli are mean bending values, from tests to EN 789 for design to EN 1995-1-1; along and across are relative to the face grain. ultimate_strength_mpa is the characteristic tension strength along the face grain. Density is not published per thickness: the handbook gives 670 to 760 kg/m3 (EN 323, section 3.2). Panel shear f_v,k 10.0 MPa, G 750 MPa (Tables 4.7, 4.11). Mean screw withdrawal (EN 320, 4.2 mm screw, 2.7 mm pilot, 19 mm deep, Table 4.22): 135, printed in kg and left unconverted; these are means, not design values. Stock formats are from the datasheet's format list, which does not say which formats each thickness is made in: confirm with a supplier. No dowel joint strength is published by the manufacturer."
+      }
+    },
+    {
+      "kind": "material",
+      "body": {
+        "name": "plywood_birch_riga_ply_9mm",
+        "title": "Birch plywood 9 mm, Riga Ply (sanded)",
+        "family": "sheet_good",
+        "designation": "Riga Ply birch plywood, 9 mm nominal, 7 plies, sanded, EN 314-2 class 3 bond",
+        "forms": [
+          "sheet"
+        ],
+        "properties": {
+          "bending_strength_mpa": {
+            "value": 52.1,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "bending_strength_across_mpa": {
+            "value": 36.7,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "youngs_modulus_mpa": {
+            "value": 11720,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "youngs_modulus_across_mpa": {
+            "value": 6280,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "ultimate_strength_mpa": {
+            "value": 42.4,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          },
+          "tensile_strength_across_mpa": {
+            "value": 35.6,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          }
+        },
+        "stock": [
+          {
+            "form": "sheet",
+            "thickness_mm": 9.0,
+            "width_mm": 1250,
+            "length_mm": 2500,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 9.0,
+            "width_mm": 1220,
+            "length_mm": 2440,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 9.0,
+            "width_mm": 1525,
+            "length_mm": 3050,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 9.0,
+            "width_mm": 1500,
+            "length_mm": 3000,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          }
+        ],
+        "notes": "Sanded thickness 9.2 mm (Table 4.1); thickness tolerance 8.8 to 9.5 mm at 9 +/- 3% moisture (datasheet). Strengths are characteristic values (f_m,k, f_t,k) and moduli are mean bending values, from tests to EN 789 for design to EN 1995-1-1; along and across are relative to the face grain. ultimate_strength_mpa is the characteristic tension strength along the face grain. Density is not published per thickness: the handbook gives 670 to 760 kg/m3 (EN 323, section 3.2). Panel shear f_v,k 10.0 MPa, G 750 MPa (Tables 4.7, 4.11). Mean screw withdrawal (EN 320, 4.2 mm screw, 2.7 mm pilot, 19 mm deep, Table 4.22): 175, printed in kg and left unconverted; these are means, not design values. Stock formats are from the datasheet's format list, which does not say which formats each thickness is made in: confirm with a supplier. No dowel joint strength is published by the manufacturer."
+      }
+    },
+    {
+      "kind": "material",
+      "body": {
+        "name": "plywood_birch_riga_ply_12mm",
+        "title": "Birch plywood 12 mm, Riga Ply (sanded)",
+        "family": "sheet_good",
+        "designation": "Riga Ply birch plywood, 12 mm nominal, 9 plies, sanded, EN 314-2 class 3 bond",
+        "forms": [
+          "sheet"
+        ],
+        "properties": {
+          "bending_strength_mpa": {
+            "value": 49.0,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "bending_strength_across_mpa": {
+            "value": 38.0,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "youngs_modulus_mpa": {
+            "value": 11026,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "youngs_modulus_across_mpa": {
+            "value": 6974,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "ultimate_strength_mpa": {
+            "value": 41.6,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          },
+          "tensile_strength_across_mpa": {
+            "value": 36.4,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          }
+        },
+        "stock": [
+          {
+            "form": "sheet",
+            "thickness_mm": 12.0,
+            "width_mm": 1250,
+            "length_mm": 2500,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 12.0,
+            "width_mm": 1220,
+            "length_mm": 2440,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 12.0,
+            "width_mm": 1525,
+            "length_mm": 3050,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 12.0,
+            "width_mm": 1500,
+            "length_mm": 3000,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          }
+        ],
+        "notes": "Sanded thickness 12.0 mm (Table 4.1); thickness tolerance 11.5 to 12.5 mm at 9 +/- 3% moisture (datasheet). Strengths are characteristic values (f_m,k, f_t,k) and moduli are mean bending values, from tests to EN 789 for design to EN 1995-1-1; along and across are relative to the face grain. ultimate_strength_mpa is the characteristic tension strength along the face grain. Density is not published per thickness: the handbook gives 670 to 760 kg/m3 (EN 323, section 3.2). Panel shear f_v,k 10.0 MPa, G 750 MPa (Tables 4.7, 4.11). Mean screw withdrawal (EN 320, 4.2 mm screw, 2.7 mm pilot, 19 mm deep, Table 4.22): 240, printed in kg and left unconverted; these are means, not design values. Stock formats are from the datasheet's format list, which does not say which formats each thickness is made in: confirm with a supplier. No dowel joint strength is published by the manufacturer."
+      }
+    },
+    {
+      "kind": "material",
+      "body": {
+        "name": "plywood_birch_riga_ply_15mm",
+        "title": "Birch plywood 15 mm, Riga Ply (sanded)",
+        "family": "sheet_good",
+        "designation": "Riga Ply birch plywood, 15 mm nominal, 11 plies, sanded, EN 314-2 class 3 bond",
+        "forms": [
+          "sheet"
+        ],
+        "properties": {
+          "bending_strength_mpa": {
+            "value": 47.2,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "bending_strength_across_mpa": {
+            "value": 38.6,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "youngs_modulus_mpa": {
+            "value": 10611,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "youngs_modulus_across_mpa": {
+            "value": 7389,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "ultimate_strength_mpa": {
+            "value": 41.1,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          },
+          "tensile_strength_across_mpa": {
+            "value": 36.9,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          }
+        },
+        "stock": [
+          {
+            "form": "sheet",
+            "thickness_mm": 15.0,
+            "width_mm": 1250,
+            "length_mm": 2500,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 15.0,
+            "width_mm": 1220,
+            "length_mm": 2440,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 15.0,
+            "width_mm": 1525,
+            "length_mm": 3050,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 15.0,
+            "width_mm": 1500,
+            "length_mm": 3000,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          }
+        ],
+        "notes": "Sanded thickness 14.8 mm (Table 4.1); thickness tolerance 14.3 to 15.3 mm at 9 +/- 3% moisture (datasheet). Strengths are characteristic values (f_m,k, f_t,k) and moduli are mean bending values, from tests to EN 789 for design to EN 1995-1-1; along and across are relative to the face grain. ultimate_strength_mpa is the characteristic tension strength along the face grain. Density is not published per thickness: the handbook gives 670 to 760 kg/m3 (EN 323, section 3.2). Panel shear f_v,k 10.0 MPa, G 750 MPa (Tables 4.7, 4.11). Mean screw withdrawal (EN 320, 4.2 mm screw, 2.7 mm pilot, 19 mm deep, Table 4.22): 285 (face), 210 (edge), printed in kg and left unconverted; these are means, not design values. Stock formats are from the datasheet's format list, which does not say which formats each thickness is made in: confirm with a supplier. No dowel joint strength is published by the manufacturer."
+      }
+    },
+    {
+      "kind": "material",
+      "body": {
+        "name": "plywood_birch_riga_ply_18mm",
+        "title": "Birch plywood 18 mm, Riga Ply (sanded)",
+        "family": "sheet_good",
+        "designation": "Riga Ply birch plywood, 18 mm nominal, 13 plies, sanded, EN 314-2 class 3 bond",
+        "forms": [
+          "sheet"
+        ],
+        "properties": {
+          "bending_strength_mpa": {
+            "value": 45.9,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "bending_strength_across_mpa": {
+            "value": 38.9,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.4, sanded)"
+          },
+          "youngs_modulus_mpa": {
+            "value": 10335,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "youngs_modulus_across_mpa": {
+            "value": 7665,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.9, sanded)"
+          },
+          "ultimate_strength_mpa": {
+            "value": 40.8,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          },
+          "tensile_strength_across_mpa": {
+            "value": 37.2,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2026/05/RigaWood_PlywoodHandbook.pdf (Riga Wood Plywood Handbook, Table 4.6, sanded)"
+          }
+        },
+        "stock": [
+          {
+            "form": "sheet",
+            "thickness_mm": 18.0,
+            "width_mm": 1250,
+            "length_mm": 2500,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 18.0,
+            "width_mm": 1220,
+            "length_mm": 2440,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 18.0,
+            "width_mm": 1525,
+            "length_mm": 3050,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          },
+          {
+            "form": "sheet",
+            "thickness_mm": 18.0,
+            "width_mm": 1500,
+            "length_mm": 3000,
+            "source_kind": "manufacturer_spec",
+            "source_ref": "https://www.finieris.com/wp-content/uploads/2025/10/Riga-Ply-datasheet-EN.pdf (Riga Ply datasheet, formats)"
+          }
+        ],
+        "notes": "Sanded thickness 17.6 mm (Table 4.1); thickness tolerance 17.1 to 18.1 mm at 9 +/- 3% moisture (datasheet). Strengths are characteristic values (f_m,k, f_t,k) and moduli are mean bending values, from tests to EN 789 for design to EN 1995-1-1; along and across are relative to the face grain. ultimate_strength_mpa is the characteristic tension strength along the face grain. Density is not published per thickness: the handbook gives 670 to 760 kg/m3 (EN 323, section 3.2). Panel shear f_v,k 10.0 MPa, G 750 MPa (Tables 4.7, 4.11). Mean screw withdrawal (EN 320, 4.2 mm screw, 2.7 mm pilot, 19 mm deep, Table 4.22): 285 (face), 210 (edge), printed in kg and left unconverted; these are means, not design values. Stock formats are from the datasheet's format list, which does not say which formats each thickness is made in: confirm with a supplier. No dowel joint strength is published by the manufacturer."
+      }
+    }
+  ]
+}
