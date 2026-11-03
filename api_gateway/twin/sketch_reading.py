@@ -331,9 +331,13 @@ def make_default_vision_call(
                 f"no vision model answered within {limit:g} s"
             ) from exc
         except AllProvidersFailedError as exc:
-            raise SketchVisionUnavailableError(f"no vision model could read the sketch: {exc}") from exc
+            raise SketchVisionUnavailableError(
+                f"no vision model could read the sketch: {exc}"
+            ) from exc
         text = result.get("text", "") if isinstance(result, dict) else str(result or "")
-        return VisionReply(text=text, provider=answered.get("provider"), model=answered.get("model"))
+        return VisionReply(
+            text=text, provider=answered.get("provider"), model=answered.get("model")
+        )
 
     return call
 
@@ -701,10 +705,14 @@ def concept_inputs_block(readings: list[dict[str, Any]]) -> str:
         if parts:
             lines.append(f"  parts: {parts}")
         for c in reading.get("connections") or []:
-            lines.append(f"  joint: {c.get('from_part')} to {c.get('to_part')}, {c.get('joint_type')}")
+            lines.append(
+                f"  joint: {c.get('from_part')} to {c.get('to_part')}, {c.get('joint_type')}"
+            )
         for p in reading.get("proportions") or []:
             value = p.get("value")
-            size = f"{value:g} {p.get('unit', '')}".strip() if isinstance(value, int | float) else ""
+            size = (
+                f"{value:g} {p.get('unit', '')}".strip() if isinstance(value, int | float) else ""
+            )
             rel = f" relative to {p['relative_to']}" if p.get("relative_to") else ""
             lines.append(f"  assumption: {p.get('subject')} {size}{rel}".rstrip())
         for q in reading.get("open_questions") or []:

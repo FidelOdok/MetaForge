@@ -364,9 +364,7 @@ class ReActPhaseBrain:
         # its disciplines (the "select" pillar — procedural context).
         self._cards: list[SkillCard] = load_skill_cards()
 
-    def _prompt(
-        self, goal: str, phase: Phase, context: FlowContext, phase_inputs: str = ""
-    ) -> str:
+    def _prompt(self, goal: str, phase: Phase, context: FlowContext, phase_inputs: str = "") -> str:
         prior = (
             "\n".join(f"  - {p.title}: {o.summary}" for p, o in context.completed)
             or "  (none yet — this is the first phase)"
