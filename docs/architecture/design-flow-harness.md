@@ -164,7 +164,10 @@ phase window (the same `since_ts` window the deliverable check uses) that
 committed more than one part `cad_model` and no assembly referencing them
 (superseded nodes, and parts from earlier phases, are ignored) (`multi-part design has no assembly`), and, when an assembly exists, fails
 part position boxes that overlap by more than 0.01 mm or an assembly bounding
-box that does not enclose its parts.
+box that does not enclose its parts. A fastener or joinery part (named as a
+dowel, screw, bolt, pin, insert, peg, biscuit and the like, or given the role
+`fastener`) is not compared for overlap: a dowel in its drilled hole always
+shares the joined part's bounding box, which boxes cannot tell from a collision.
 
 Coverage is met when any one assembly covers every part, so a sub-assembly
 committed after the top-level one no longer flips a covered design to "no
