@@ -177,15 +177,46 @@ def stamp_label(image: GeneratedImage, size: str) -> tuple[bytes, str, str]:
 
 
 def build_prompt(visual_brief: str, concept_name: str, part_names: list[str]) -> str:
-    """The prompt sent to the model: the brief, plus what the layout is."""
+    """The prompt sent to the model: the brief, plus what the layout is.
+
+    FORGE-777: image models follow the product's layout but improvise what it
+    holds (in the bike-rack run: extra handlebars, merged frames, bikes hung
+    at impossible angles). The prompt says the product's parts are exactly
+    the layout's, and that anything shown in use is whole and realistic.
+    """
     parts = ", ".join(part_names[:30])
     return (
         f"Product concept image: {concept_name}. {visual_brief.strip()}\n"
         "The reference image is a grey block layout of the product seen in isometric view: "
         "keep its overall proportions and the arrangement of its parts, and render it as "
         "the finished product described above, on a plain studio background. "
-        f"Parts, as laid out: {parts}. Do not add text, dimensions or logos."
+        f"Parts, as laid out: {parts}. Draw exactly these parts, joined as laid out, and "
+        "add no others. If the brief shows the product in use, every item it holds or "
+        "supports is whole and correctly built, appears once each in the number the "
+        "brief gives, and sits on the product the way the product holds it; never "
+        "duplicate, merge or detach their parts. Do not add text, dimensions or logos."
     )
+
+
+def _decision_selects(known: Any, concept_name: str) -> bool:
+    """Is ``known`` a decision that is about this concept (or about no option)?"""
+    if known is None:
+        return False
+    options = getattr(known, "options", None)
+    if not options:
+        return True
+    from api_gateway.twin.image_critique import _option_for
+
+    option = _option_for(concept_name, options)
+    return option is not None and bool(option.selected)
+
+
+def _usable(parse: Any, value: Any) -> bool:
+    try:
+        parse(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _slug(name: str) -> str:
@@ -235,8 +266,15 @@ def make_concept_image_recorder(
         domain: str = "mechanical",
         decision_ref: str | None = None,
         assembly: dict[str, Any] | None = None,
+        layout_assembly: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from api_gateway.twin.image_critique import check_image, resolve_assembly, unchecked
+        from api_gateway.twin.image_critique import (
+            KnownAssembly,
+            check_image,
+            resolve_assembly,
+            unchecked,
+        )
+        from orchestrator.design_flow.context import parse_concept_assembly
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
 
@@ -260,6 +298,20 @@ def make_concept_image_recorder(
                 known = await resolve_assembly(twin, project_id=project_id)
             except Exception as exc:  # noqa: BLE001 - the check is best-effort
                 lookup_failed = f"the concept decision could not be read: {exc}"
+            # FORGE-776: an image is of one concept. The project's decision is
+            # used only when it selects this concept (or names no options);
+            # otherwise, or with no decision yet, the concept's own layout is
+            # what the picture should show.
+            if (
+                lookup_failed is None
+                and layout_assembly is not None
+                and _usable(parse_concept_assembly, layout_assembly)
+                and not _decision_selects(known, concept_name)
+            ):
+                known = KnownAssembly(
+                    assembly=parse_concept_assembly(layout_assembly),
+                    source={"kind": "sketch_layout", "layout_node_id": layout_node_id},
+                )
 
         with tracer.start_as_current_span("twin.render_concept_image") as span:
             span.set_attribute("concept_image.concept", concept_name)

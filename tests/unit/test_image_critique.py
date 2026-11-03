@@ -317,17 +317,45 @@ async def test_a_failing_vision_model_never_fails_the_image(
     assert h.outcomes == ["generated"]
 
 
-async def test_without_an_assembly_nothing_is_sent_to_a_vision_model(
+async def test_without_a_decision_the_image_is_checked_against_its_own_layout(
     h: CritiqueHarness,
 ) -> None:
+    """FORGE-776: images are made before the concept decision is recorded."""
     out = await h.image()
     critique = await h.stored(out["node_id"])
-    assert critique["verdict"] == "unchecked"
-    assert "no concept assembly on record" in critique["reason"]
-    assert h.vision.calls == []
+    assert critique["assembly_source"]["kind"] == "sketch_layout"
+    assert critique["verdict"] != "unchecked"
+    assert len(h.vision.calls) == 1
 
 
-async def test_an_image_of_a_rejected_concept_is_not_judged_by_the_selected_assembly(
+async def test_without_any_assembly_nothing_is_sent_to_a_vision_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api_gateway.twin.concept_image import make_concept_image_recorder
+    from tests.unit.test_concept_image import FakeGenerator
+    from twin_core.api import InMemoryTwinAPI
+
+    vision = FakeVision()
+    gen = FakeGenerator()
+    render = make_concept_image_recorder(
+        InMemoryTwinAPI.create(),
+        generator=gen,
+        blob_writer=lambda *a, **k: "key",
+        vision_call=vision,
+    )
+    out = await render(
+        visual_brief=BRIEF,
+        concept_name="Concept A",
+        part_names=["Seat"],
+        layout_faces=[],
+        conditioned_on={"layout_source": "inline_layout"},
+    )
+    assert out["critique"]["verdict"] == "unchecked"
+    assert "no concept assembly on record" in out["critique"]["reason"]
+    assert vision.calls == []
+
+
+async def test_an_image_of_a_rejected_concept_is_judged_by_its_own_layout(
     h: CritiqueHarness,
 ) -> None:
     await h.decision(options=OPTIONS)
@@ -336,9 +364,9 @@ async def test_an_image_of_a_rejected_concept_is_not_judged_by_the_selected_asse
         {"layout": layout, "visual_brief": BRIEF, "project_id": PROJECT}
     )
     critique = await h.stored(out["node_id"])
-    assert critique["verdict"] == "unchecked"
-    assert "selected concept Concept A, not Concept B" in critique["reason"]
-    assert h.vision.calls == []
+    # FORGE-776: it is judged by its own layout instead.
+    assert critique["assembly_source"]["kind"] == "sketch_layout"
+    assert len(h.vision.calls) == 1
 
 
 async def test_an_inline_assembly_checks_any_concept(h: CritiqueHarness) -> None:
@@ -389,7 +417,8 @@ async def test_a_bad_explicit_assembly_is_refused_before_any_paid_call(
 
 async def test_the_standalone_tool_checks_a_stored_image(h: CritiqueHarness) -> None:
     out = await h.image()
-    assert (await h.stored(out["node_id"]))["verdict"] == "unchecked"
+    # Made before any decision, it was checked against its own layout.
+    assert (await h.stored(out["node_id"]))["assembly_source"]["kind"] == "sketch_layout"
     decision = await h.decision(options=OPTIONS)
 
     result = await h.server.critique_concept_image({"node_id": out["node_id"]})

@@ -279,6 +279,24 @@ def _critique_assembly_properties() -> dict[str, Any]:
     }
 
 
+def _layout_assembly(layout: Any) -> dict[str, Any]:
+    """The concept's own parts and joints, from its sketch layout (FORGE-776).
+
+    An image is of one concept, and that concept's layout names exactly what
+    the picture should show. Every block is something the concept makes, as
+    far as the picture is concerned; its tag is carried as the provenance.
+    """
+    return {
+        "parts": [
+            {"name": p.name, "source": "made", "provenance": p.provenance} for p in layout.parts
+        ],
+        "connections": [
+            {"parts": [c.a, c.b], "joint": c.joint, "provenance": c.provenance}
+            for c in layout.connections
+        ],
+    }
+
+
 def _critique_assembly_args(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """``decision_ref`` and ``assembly`` from a call, checked for shape only."""
     out: dict[str, Any] = {}
@@ -3953,6 +3971,7 @@ class TwinServer(McpToolServer):
                 size=size,
                 project_id=project_id if isinstance(project_id, str) else None,
                 domain=domain if isinstance(domain, str) and domain else "mechanical",
+                layout_assembly=_layout_assembly(layout),
                 **_critique_assembly_args(tool, arguments),
             )
         logger.info(

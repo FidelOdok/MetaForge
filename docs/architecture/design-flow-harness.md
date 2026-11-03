@@ -1018,9 +1018,17 @@ path as sketch reading (`api_gateway/twin/image_critique.py`). It is
 advisory and best-effort: with no assembly on record, no vision model, a
 model that does not answer, or a reply that does not fit the schema, the
 critique is `{"verdict": "unchecked", "reason": ...}` and the image is still
-returned. An image of a concept the decision did not select is not judged
-against the selected one's assembly; it is unchecked with that reason unless
-its own assembly is given. `twin.critique_concept_image` checks an image
+returned. An image is of one concept, so the project's concept decision is
+used only when it selects that concept (or names no options). Otherwise, and
+before any decision is recorded (the concept phase makes its images first),
+the image is checked against its own sketch layout: the parts and joints the
+concept's block layout names, recorded as `assembly_source.kind =
+"sketch_layout"`. The MCP sidecar gets the gateway's `METAFORGE_LLM_*`
+provider settings, so these vision calls use the deployment's model provider
+and key rather than an unconfigured default. The image prompt asks for
+exactly the layout's parts, joined as laid out, and for anything shown in use
+(the bikes on a bike rack) to be whole, correctly built and held the way the
+product holds it. `twin.critique_concept_image` checks an image
 already in the twin (its `node_id`, and optionally `decision_ref` or
 `assembly`) and stores the result in a new revision, which is how an image
 made before the concept decision gets checked. Both gate engines add a note

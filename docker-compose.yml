@@ -560,6 +560,14 @@ services:
       # and vision calls (reading sketches). Unset, both use the chat model.
       - METAFORGE_REVIEWER_MODEL=${METAFORGE_REVIEWER_MODEL:-}
       - METAFORGE_VISION_MODEL=${METAFORGE_VISION_MODEL:-}
+      # FORGE-775: the model provider the sidecar's own model calls use (vision for
+      # twin.interpret_sketch and the concept image check). Without these the sidecar
+      # fell back to the in-code default provider with no key, and every check was
+      # unchecked.
+      - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
+      - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
+      - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
+      - METAFORGE_LLM_API_KEY=${METAFORGE_LLM_API_KEY:-}
       - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
       # MET-436: digikey/mouser/nexar adapters + offer_resolver need these to
       # register with live credentials — the gateway service (docker-compose.yml)
