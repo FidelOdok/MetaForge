@@ -1212,6 +1212,25 @@ def _design_flow_nudge(families: list[str]) -> str:
     )
 
 
+# How a chat reply reads. The dashboard renders Markdown and generative UI
+# blocks, and many readers are not engineers, so replies lead with the answer
+# and stay short instead of walking through everything the agent looked at.
+ANSWER_STYLE = (
+    "Answer style: lead with the answer in one or two plain sentences. Keep the "
+    "whole reply short, usually under 120 words, and use everyday words; explain "
+    "a technical term the first time it matters. Use short paragraphs or a "
+    "brief bullet list; no Markdown tables, no long headings, no restating the "
+    "question, and no narrating which tools you called unless the person asks. "
+    "End with the one next step or question that matters, if there is one."
+)
+ANSWER_STYLE_BLOCKS = (
+    "When options, figures, a table, a question with a few answers, a needed "
+    "measurement or a warning would be clearer as a component, show it with "
+    "chat.render_ui instead of describing it in prose, and do not repeat in your "
+    "text what the blocks show."
+)
+
+
 def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> str:
     """Layered system prompt for the native path (MET-566).
 
@@ -1244,6 +1263,9 @@ def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> st
         "provided in the conversation; when you rely on a retrieved fragment, "
         "cite its bracketed source id."
     )
+    sections.append(ANSWER_STYLE)
+    if "chat.render_ui" in runtime.tools.names():
+        sections.append(ANSWER_STYLE_BLOCKS)
     return "\n\n".join(sections)
 
 

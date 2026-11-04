@@ -50,6 +50,27 @@ The turn's blocks are stored on the agent's reply and returned on every
 message as `blocks` (empty for a message without any). See
 `MessageResponse` in the [gateway API reference](reference/gateway-api.md).
 
+## Answer style
+
+The chat system prompt (`ANSWER_STYLE` in
+`api_gateway/chat/harness_backend.py`) asks for the answer first, in one or
+two plain sentences, a reply usually under 120 words, everyday words, no
+Markdown tables and no narration of which tools were called. When
+`chat.render_ui` is registered it also tells the model to show options,
+figures, questions, measurements and warnings as blocks rather than prose.
+This is guidance to the model, not a hard limit: a long reply is still shown
+in full.
+
+## What the agent did
+
+The Engineering chat shows a turn's progress as a few plain steps ("Read the
+design record", "Ran a stress check", "Waiting for your approval: proposed a
+design change"), each marked in progress, done, did not work or needs you
+(`dashboard/src/components/chat/activity.ts`). A tool's start and its result
+are one line; thinking and typing events are not shown. The raw stream
+events are still available under *Raw events* when response detail is set
+to *verbose*, and the list is hidden at *concise*.
+
 ## Storage
 
 `chat_messages.blocks` is a JSON column. The gateway adds it to an existing

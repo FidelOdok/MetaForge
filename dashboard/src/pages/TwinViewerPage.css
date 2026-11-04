@@ -1317,23 +1317,6 @@
   color: var(--tw-muted);
   margin-top: 8px;
 }
-.sc-activity {
-  font-size: 12px;
-  border-top: 1px solid var(--tw-line);
-  padding: 8px 0;
-}
-.sc-activity summary {
-  cursor: pointer;
-  color: var(--tw-muted);
-}
-.sc-activity > div {
-  padding: 8px 0;
-}
-.sc-activity time {
-  float: right;
-  color: var(--tw-muted);
-}
-.sc-activity pre,
 .sc-popover pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
