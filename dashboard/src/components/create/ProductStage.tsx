@@ -3,6 +3,7 @@ import { Box, Image as ImageIcon, Loader2, MessageSquare, Sparkles } from 'lucid
 import { PreviewHost } from '../preview/PreviewHost';
 import { previewEngineFor, is3dEngine } from '../preview/registry';
 import { useNodeVersionHistory } from '../../hooks/use-twin';
+import { SketchLayer } from '../sketch/SketchLayer';
 import type { TwinNode } from '../../types/twin';
 
 /** Dimensionally defined outputs. Everything else visual is a concept. */
@@ -14,8 +15,12 @@ export function wpTypeOf(node: TwinNode): string {
   return String(node.properties?.wp_type ?? '');
 }
 
+/** A person's own sketch is drawn on the stage's sketch layer, never shown as a result. */
+const SKETCH_TYPES = new Set(['sketch_strokes']);
+
 export function isVisual(node: TwinNode): boolean {
   const t = wpTypeOf(node);
+  if (SKETCH_TYPES.has(t)) return false;
   if (ENGINEERING_TYPES.has(t) || CONCEPT_TYPES.has(t)) return true;
   const { engine } = previewEngineFor(node);
   return is3dEngine(engine) || engine === 'image';
@@ -32,6 +37,8 @@ export function defaultStageNode(nodes: TwinNode[]): TwinNode | undefined {
 }
 
 interface ProductStageProps {
+  /** With a project, the stage carries the freehand sketch layer. */
+  projectId?: string;
   nodes: TwinNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -41,7 +48,7 @@ interface ProductStageProps {
   presenting?: boolean;
 }
 
-export function ProductStage({ nodes, selectedId, onSelect, onDiscuss, working, presenting }: ProductStageProps) {
+export function ProductStage({ projectId, nodes, selectedId, onSelect, onDiscuss, working, presenting }: ProductStageProps) {
   const visual = useMemo(
     () => nodes.filter(isVisual).sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')),
     [nodes],
@@ -50,6 +57,8 @@ export function ProductStage({ nodes, selectedId, onSelect, onDiscuss, working, 
   const history = useNodeVersionHistory(node?.id);
   const revision = history.data?.length ? Math.max(...history.data.map((r) => r.revision)) : null;
   const engineering = node ? isEngineering(node) : false;
+  const references = useMemo(() => visual.filter((n) => previewEngineFor(n).engine === 'image'), [visual]);
+  const sketch = projectId ? <SketchLayer projectId={projectId} referenceNodes={references} /> : null;
 
   return (
     <section className={`cv-stage ${presenting ? 'is-presenting' : ''}`} aria-label="Product">
@@ -67,6 +76,7 @@ export function ProductStage({ nodes, selectedId, onSelect, onDiscuss, working, 
           </div>
           <div className="cv-stage-canvas">
             <PreviewHost key={node.id} node={node} mode="modal" />
+            {sketch}
           </div>
           {working && (
             <div className="cv-stage-working" role="status">
@@ -107,8 +117,9 @@ export function ProductStage({ nodes, selectedId, onSelect, onDiscuss, working, 
           <p>
             {working
               ? 'The first result shows here as soon as it exists.'
-              : 'Describe it in the conversation. Sketches and photos you attach help.'}
+              : 'Describe it in the conversation, or draw it here. Sketches and photos you attach help.'}
           </p>
+          {sketch}
         </div>
       )}
     </section>

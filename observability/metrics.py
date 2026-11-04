@@ -931,6 +931,18 @@ class MetricsRegistry:
         buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
     )
 
+    # ── Sketch saves from the Create stage (FORGE-789) ─────────────────
+
+    SKETCH_SAVE_TOTAL = MetricDefinition(
+        name="metaforge_sketch_save_total",
+        type="counter",
+        description=(
+            "Saves of a person's freehand sketch as a sketch_strokes revision, by "
+            "outcome: saved, duplicate (a retried save id) and failed (FORGE-789)"
+        ),
+        labels=["outcome"],
+    )
+
     # ── Sketch reading (FORGE-762) ─────────────────────────────────────
 
     SKETCH_READING_TOTAL = MetricDefinition(
@@ -1140,6 +1152,7 @@ class MetricsRegistry:
             cls.TWIN_RECORD_STALENESS_TOTAL,
             cls.CONCEPT_IMAGE_TOTAL,
             cls.SKETCH_READING_TOTAL,
+            cls.SKETCH_SAVE_TOTAL,
             cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
             cls.CONCEPT_MESH_TOTAL,
         ]
@@ -2051,6 +2064,12 @@ class MetricsCollector:
     def record_sketch_reading(self, outcome: str) -> None:
         """Record one sketch reading outcome (FORGE-762)."""
         counter = self._instruments.get(MetricsRegistry.SKETCH_READING_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_sketch_save(self, outcome: str) -> None:
+        """Record one sketch save outcome (FORGE-789)."""
+        counter = self._instruments.get(MetricsRegistry.SKETCH_SAVE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
 

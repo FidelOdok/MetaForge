@@ -314,3 +314,20 @@ describe('PreviewHost: 3D, FEA and modes', () => {
     expect(onOpen).toHaveBeenCalled();
   });
 });
+
+describe('PreviewHost: freehand sketch', () => {
+  it('shows a saved sketch read-only, labelled as a human sketch and not CAD', () => {
+    render(
+      <PreviewHost
+        node={node({ wp_type: 'sketch_strokes', format: 'svg', item_key: 'SKT-SKETCH', item_revision: 2 }, { name: 'Sketch' })}
+        mode="panel"
+      />,
+    );
+    expect(screen.getByTestId('preview-host')).toHaveAttribute('data-engine', 'sketch');
+    expect(screen.getByTestId('preview-sketch-label')).toHaveTextContent(
+      'Human sketch · not CAD · scale unknown · plane unassigned · SKT-SKETCH@2',
+    );
+    expect(screen.getByTestId('preview-sketch')).toHaveAttribute('src', expect.stringContaining('/file'));
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});

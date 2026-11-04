@@ -261,4 +261,54 @@ describe('ActivityOverlay', () => {
     expect(container.querySelector('[data-testid="activity-overlay"]')).toBeNull();
     expect(useOperationsStore.getState().projects.p1?.dismissed).toEqual(['run:a']);
   });
+
+  // ASVG-015: a depicted element opens what it shows, by mouse or keyboard.
+  it('opens the related artifact when the drawing is activated', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/create/p1');
+    seed([
+      opEvent({ sequence: 1, operation_id: 'job:sketch-s1', kind: 'job', run_id: null, domain: 'sketch', title: 'Saving sketch', type: 'accepted' }),
+      opEvent({
+        sequence: 2,
+        operation_id: 'job:sketch-s1',
+        kind: 'job',
+        run_id: null,
+        domain: 'sketch',
+        title: 'Sketch saved',
+        type: 'completed',
+        state: 'completed',
+        artifact_refs: [{ kind: 'work_product', id: 'node-7', label: 'Sketch SKT-SKETCH@2', url: null, authority: 'illustrative' }],
+      }),
+    ]);
+    render(<ActivityOverlay projectId="p1" />);
+    expect(screen.getByRole('heading', { name: 'Sketch saved' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Expand activity' }));
+    const inspect = screen.getByRole('button', { name: 'Inspect Sketch SKT-SKETCH@2' });
+    inspect.focus();
+    await user.keyboard('{Enter}');
+    expect(window.location.pathname).toBe('/twin');
+    expect(window.location.search).toBe('?node=node-7');
+  });
+
+  it('shows the stage detail when a stage is activated and nothing was produced yet', async () => {
+    const user = userEvent.setup();
+    seed([
+      opEvent({ sequence: 1, operation_id: 'job:j1', kind: 'job', run_id: null, stage_id: 'cad.profile', stage_title: 'Drawing the profile', domain: 'mechanical' }),
+      opEvent({ sequence: 2, operation_id: 'job:j1', kind: 'job', run_id: null, stage_id: 'eda.place', stage_title: 'Placing parts', domain: 'electronics' }),
+    ]);
+    render(<ActivityOverlay projectId="p1" />);
+    await user.click(screen.getByRole('button', { name: 'Expand activity' }));
+    // The drawing has nothing to open, so it opens the current stage's detail.
+    await user.click(screen.getByRole('button', { name: 'Show the details of this step' }));
+    const detail = screen.getByTestId('activity-stage-detail');
+    expect(detail).toHaveTextContent('Placing parts');
+    expect(detail).toHaveTextContent('Nothing produced yet.');
+    // A lane's stage opens its own detail, and toggles closed again.
+    const lane = screen.getByRole('button', { name: 'Drawing the profile' });
+    await user.click(lane);
+    expect(screen.getByTestId('activity-stage-detail')).toHaveTextContent('Drawing the profile');
+    expect(lane).toHaveAttribute('aria-expanded', 'true');
+    await user.click(lane);
+    expect(screen.queryByTestId('activity-stage-detail')).toBeNull();
+  });
 });

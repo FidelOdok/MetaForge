@@ -133,6 +133,17 @@ export function PreviewHost({ node, mode, onOpenInViewer }: PreviewHostProps) {
           <img src={inlineUrl} alt={node.name} data-testid="preview-image" style={{ maxWidth: '100%', maxHeight: mode === 'modal' ? '100%' : 260, objectFit: 'contain', borderRadius: 4 }} />
         </div>,
       );
+    // FORGE-789: a person's sketch, read-only. Never presented as a model.
+    case 'sketch':
+      return frame(
+        <figure className="flex flex-1 flex-col items-center justify-center gap-2" style={{ margin: 0, padding: mode === 'modal' ? 32 : 8, minHeight: 0, background: 'var(--mf-c-0a0b0f)' }}>
+          <figcaption className="font-mono" data-testid="preview-sketch-label" style={{ fontSize: 11, color: PC.onSurfaceVariant }}>
+            Human sketch · not CAD · scale unknown · plane unassigned
+            {node.properties?.item_key ? ` · ${String(node.properties.item_key)}@${String(node.properties.item_revision ?? '')}` : ''}
+          </figcaption>
+          <img src={inlineUrl} alt={`Sketch: ${node.name}`} data-testid="preview-sketch" style={{ maxWidth: '100%', maxHeight: mode === 'modal' ? '100%' : 260, objectFit: 'contain', borderRadius: 4, background: '#fff' }} />
+        </figure>,
+      );
     case 'pdf':
       return frame(
         <iframe src={inlineUrl} title={node.name} data-testid="preview-pdf" style={{ flex: 1, width: '100%', height: mode === 'modal' ? '100%' : 300, border: 'none', background: 'var(--mf-c-fff)' }} />,

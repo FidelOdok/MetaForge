@@ -16341,6 +16341,445 @@
         "title": "SimulationResultResponse",
         "type": "object"
       },
+      "SketchRevisionResponse": {
+        "description": "The current revision of a project's sketch, with its strokes.",
+        "properties": {
+          "authority": {
+            "default": "human_sketch",
+            "title": "Authority",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "parent_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Revision"
+          },
+          "plane_state": {
+            "default": "UNASSIGNED",
+            "title": "Plane State",
+            "type": "string"
+          },
+          "reference_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Node Id"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "save_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Save Id"
+          },
+          "scale": {
+            "default": "unknown",
+            "title": "Scale",
+            "type": "string"
+          },
+          "space": {
+            "default": "sketch_unit",
+            "title": "Space",
+            "type": "string"
+          },
+          "strokes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Strokes",
+            "type": "array"
+          },
+          "viewport": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewport"
+          }
+        },
+        "required": [
+          "node_id",
+          "name",
+          "strokes"
+        ],
+        "title": "SketchRevisionResponse",
+        "type": "object"
+      },
+      "SketchSaveRequest": {
+        "description": "A save of the whole sketch. Each save becomes the item's next revision.",
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "name": {
+            "default": "Sketch",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "plane_state": {
+            "const": "UNASSIGNED",
+            "default": "UNASSIGNED",
+            "title": "Plane State",
+            "type": "string"
+          },
+          "reference_node_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Node Id"
+          },
+          "save_id": {
+            "maxLength": 100,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Save Id",
+            "type": "string"
+          },
+          "scale": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "Scale",
+            "type": "string"
+          },
+          "strokes": {
+            "items": {
+              "$ref": "#/components/schemas/SketchStroke"
+            },
+            "maxItems": 2000,
+            "title": "Strokes",
+            "type": "array"
+          },
+          "viewport": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SketchViewport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "save_id"
+        ],
+        "title": "SketchSaveRequest",
+        "type": "object"
+      },
+      "SketchSaveResponse": {
+        "description": "The revision a save made (or, for a retried save id, already made).",
+        "properties": {
+          "authority": {
+            "default": "human_sketch",
+            "title": "Authority",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "parent_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Revision"
+          },
+          "plane_state": {
+            "default": "UNASSIGNED",
+            "title": "Plane State",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "save_id": {
+            "title": "Save Id",
+            "type": "string"
+          },
+          "scale": {
+            "default": "unknown",
+            "title": "Scale",
+            "type": "string"
+          },
+          "stroke_count": {
+            "title": "Stroke Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "save_id",
+          "operation_id",
+          "stroke_count",
+          "content_hash"
+        ],
+        "title": "SketchSaveResponse",
+        "type": "object"
+      },
+      "SketchStroke": {
+        "description": "One stroke in sketch units. ``points`` are what is drawn, in order.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 10000,
+            "minItems": 1,
+            "title": "Points",
+            "type": "array"
+          },
+          "pressure": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pressure"
+          },
+          "source": {
+            "default": "human",
+            "enum": [
+              "human",
+              "generated"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "tool": {
+            "default": "pen",
+            "enum": [
+              "pen",
+              "line",
+              "arc",
+              "circle",
+              "rectangle",
+              "spline"
+            ],
+            "title": "Tool",
+            "type": "string"
+          },
+          "width": {
+            "default": 2.0,
+            "maximum": 32.0,
+            "minimum": 0.5,
+            "title": "Width",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "points"
+        ],
+        "title": "SketchStroke",
+        "type": "object"
+      },
+      "SketchViewport": {
+        "description": "The drawing viewport in CSS pixels when the sketch was last edited (SKP-001).",
+        "properties": {
+          "height_px": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 100000.0,
+            "title": "Height Px",
+            "type": "number"
+          },
+          "width_px": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 100000.0,
+            "title": "Width Px",
+            "type": "number"
+          }
+        },
+        "required": [
+          "width_px",
+          "height_px"
+        ],
+        "title": "SketchViewport",
+        "type": "object"
+      },
       "SlotView": {
         "description": "A deliverable slot: one item the phase writes.",
         "properties": {
@@ -19002,7 +19441,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.3.678"
+    "version": "0.1.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -31525,6 +31964,120 @@
           }
         },
         "summary": "Get Project Prd",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches": {
+      "post": {
+        "description": "Save a person's freehand sketch as the next revision of the project's sketch.\n\nThe strokes are stored as JSON with a generated SVG. The revision is a\nhuman sketch, not CAD: its scale is unknown and its plane is unassigned.\nA retried ``save_id`` returns the revision it already made, with\n``duplicate`` set, and adds nothing. The save is reported on the project's\noperation stream as a ``sketch`` operation.",
+        "operationId": "save_sketch_v1_twin_projects__project_id__sketches_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SketchSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SketchSaveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Sketch",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/current": {
+      "get": {
+        "description": "The current revision of the project's sketch, with its strokes. 404 when there is none.",
+        "operationId": "get_current_sketch_v1_twin_projects__project_id__sketches_current_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The sketch item; the newest when left out",
+            "in": "query",
+            "name": "item_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The sketch item; the newest when left out",
+              "title": "Item Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SketchRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Current Sketch",
         "tags": [
           "twin"
         ]

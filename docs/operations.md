@@ -20,6 +20,7 @@ The code lives in `api_gateway/operations/`: `schemas.py` (the contract),
 | A design-flow or plain run | `run:<run_id>` | `run` | the flow's phases |
 | A slow tool job | `job:<job_id>` | `job` | none |
 | A Create chat turn | `chat:<turn_id>` | `chat` | none |
+| A sketch save from the Create stage | `job:sketch-<save_id>` | `job` (domain `sketch`) | none |
 
 Approvals are not operations. A run waiting at a gate emits a
 `review_required` event whose `action_refs` name the approval to decide

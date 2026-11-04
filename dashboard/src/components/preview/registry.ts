@@ -41,6 +41,8 @@ export type PreviewEngine =
   | 'robot'
   // FORGE-687: a node kept by twin.record_design_files (sheets, layers, sources).
   | 'design'
+  // FORGE-789: a person's freehand sketch from the Create stage (SVG of its strokes).
+  | 'sketch'
   | 'text'
   | 'none';
 
@@ -127,6 +129,7 @@ export const ENGINE_LABELS: Record<PreviewEngine, string> = {
   html: 'HTML sketch',
   robot: 'Robot viewer',
   design: 'Design files',
+  sketch: 'Freehand sketch',
   text: 'Text',
   none: 'No preview engine',
 };
@@ -185,6 +188,7 @@ export function previewEngineFor(subject: PreviewSubject): PreviewResolution {
   if (subject.designFiles && MESH_FORMATS.has(fmt)) return { engine: 'mesh3d', format: fmt };
   if (subject.designFiles) return { engine: 'design', format: fmt };
   if (wpType === 'robot_description') return { engine: 'robot', format: fmt };
+  if (wpType === 'sketch_strokes') return { engine: 'sketch', format: fmt };
   if (wpType === 'simulation_result') return { engine: 'sim', format: fmt };
   if (wpType === 'design_decision' && isTextualOrUnknown(fmt)) return { engine: 'decision', format: fmt };
   if (wpType === 'constraint_set' && isTextualOrUnknown(fmt)) return { engine: 'requirements', format: fmt };

@@ -211,6 +211,20 @@ which `library.dispatch_job` sends; and `IMAGE = "image"`, a picture (a
 reference photo, a sketch, a screenshot), with its pixel size in
 `metadata.width_px` and `metadata.height_px`.
 
+`SKETCH_STROKES = "sketch_strokes"` is a person's freehand sketch drawn on the
+Create stage. Its primary file is an SVG rendering (`format` is `svg`) and the
+strokes themselves are the named file `strokes.json` (in
+`metadata.sketch_files`, or inline in `metadata.strokes` when the blob store
+was unavailable). Each stroke has a stable id, a tool, points in sketch units
+(the shorter side of the drawing viewport spans one unit, origin at its
+centre) and pressure when the pen reported it. The metadata always says
+`authority: human_sketch`, `scale: unknown` and `plane_state: UNASSIGNED`: a
+human sketch is not CAD, nothing reads a measurement from it, and it has no
+plane until one is proposed and confirmed. `parent_revision` names the
+revision it was drawn on top of, and `save_id` is the client's id for the
+save, so a retried save returns the revision it already made. See
+[the Create view](create-view.md#sketching-on-the-stage).
+
 **Pydantic Model**:
 
 ```python
@@ -1184,6 +1198,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `firmware_source` | definition | `FW` | `WorkProduct` `firmware_source`: a firmware project's sources and build output (`twin.record_design_files`, or `twin.create_firmware_scaffold`) |
 | `purchased_model` | definition | `PMD` | `WorkProduct` `cad_model`: a bought part's OpenUSD package with its GLB preview, licence, attribution and mass (`twin.record_design_files` after `simready.import`) |
 | `gcode` | definition | `GC` | `WorkProduct` `gcode`: G-code for one printer with the `config.ini` it was sliced with (`twin.record_design_files` after `slicer.slice`), which `library.dispatch_job` sends |
+| `sketch_strokes` | definition | `SKT` | `WorkProduct` `sketch_strokes`: a person's freehand strokes from the Create stage, as JSON in a viewport-independent sketch space plus a generated SVG. Each save is the next revision. A human sketch, not CAD: scale unknown, plane `UNASSIGNED` |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |

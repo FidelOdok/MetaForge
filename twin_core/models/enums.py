@@ -162,6 +162,10 @@ class WorkProductType(StrEnum):
     # A picture: a reference photo, a sketch, a screenshot, a marked-up
     # drawing. Uploaded as input (and the source of tripo/meshy image_to_3d).
     IMAGE = "image"
+    # A person's freehand strokes from the Create stage: the strokes as JSON
+    # in a viewport-independent sketch space plus an SVG rendering. A human
+    # sketch, never CAD: its scale is unknown and its plane is unassigned.
+    SKETCH_STROKES = "sketch_strokes"
 
 
 class ConstraintSeverity(StrEnum):

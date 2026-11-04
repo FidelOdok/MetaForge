@@ -15,7 +15,7 @@ const WP_TYPES = [
   'test_result', 'manufacturing_file', 'constraint_set', 'prd', 'pinmap', 'gerber', 'pick_and_place',
   'documentation', 'design_decision', 'cad_source_script', 'robot_description', 'design_sketch',
   'hazard_analysis', 'system_architecture', 'technical_drawing', 'compliance_checklist', 'procurement_record',
-  'load_case', 'render', 'gcode', 'image', 'something_new', '',
+  'load_case', 'render', 'gcode', 'image', 'sketch_strokes', 'something_new', '',
 ];
 
 // Every format the registry knows, plus binaries it must refuse and junk.
@@ -38,6 +38,8 @@ describe('previewEngineFor: explicit type/format expectations', () => {
     ['cad_model', 'step', 'cad3d'],
     ['gcode', 'gcode', 'text'],
     ['image', 'png', 'image'],
+    // A person's freehand sketch: its own engine, never a plain image or a model.
+    ['sketch_strokes', 'svg', 'sketch'],
     ['cad_model', 'stp', 'cad3d'],
     ['cad_model', '', 'cad3d'],
     ['cad_model', 'fcstd', 'cad3d'],

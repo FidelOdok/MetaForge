@@ -446,3 +446,46 @@
     max-height: 50%;
   }
 }
+
+/* ASVG-015: depicted elements open what they show. */
+.act-scene-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.act-scene-btn:focus-visible,
+.act-stage-btn:focus-visible,
+.act-inspect-link:focus-visible {
+  outline: 2px solid #ff5a0a;
+  outline-offset: 2px;
+}
+.act-stage-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.act-inspect-link {
+  margin-left: 8px;
+  color: inherit;
+  text-decoration: underline;
+}
+.act-stage-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.act-stage-artifacts {
+  margin: 4px 0;
+  padding-left: 16px;
+}
