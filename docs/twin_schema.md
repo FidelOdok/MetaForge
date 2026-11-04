@@ -2428,7 +2428,12 @@ concept and illustrative artifacts never exact, validated or released.
 with `project_id`, optional `base_revision`, and `design_ir` or `script`):
 
 1. The design IR is lowered by the CadQuery Lowering Pass (or the CadQuery
-   script runs) in the CadQuery adapter, through MCP.
+   script runs) in the CadQuery adapter, through MCP. The adapter writes the
+   result's STEP with its solids unwrapped: every compound is opened down to
+   the shapes it holds, one solid is written directly and several as a
+   compound of solids, so a shelled or filleted enclosure reads back as a
+   solid. A bare face or an open shell is written as what it is and still
+   fails the check below.
 2. `cadquery.validate_shape` checks the B-Rep: OCCT `BRepCheck_Analyzer`
    validity, at least one solid where one is expected, every solid closed,
    every solid's volume above zero, and no free edges on a solid. The
