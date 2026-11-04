@@ -2752,7 +2752,9 @@ class UnifiedMcpServer:
                 # The client answered for the person without showing them the
                 # prompt. The hold stays open for the dashboard, and this
                 # connection is not asked again.
-                self._elicitation_unattended = True
+                self._elicitation_unattended.add(self._unattended_key())
+                while len(self._elicitation_unattended) > _MAX_UNATTENDED_SESSIONS:
+                    self._elicitation_unattended.pop()
                 route = "dashboard"
                 where = self._durable_where(route, approvals_url)
                 logger.warning(
