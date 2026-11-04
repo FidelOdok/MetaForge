@@ -6,6 +6,7 @@ import { useHealth } from '../../hooks/use-health';
 import { useLayoutStore } from '../../store/layout-store';
 import type { DependencyStatus } from '../../types/health';
 import { ThemeToggle } from './ThemeToggle';
+import { ViewSwitch } from './ViewSwitch';
 import { SAMPLE_WORKSPACE_HREF, SECTION_LABELS, isSampleWorkspace } from './nav';
 
 interface TopbarProps {
@@ -79,6 +80,7 @@ export function Topbar({ onMenu, navOpen = false }: TopbarProps) {
       </div>
 
       <div className="topbar-actions">
+        <ViewSwitch />
         <ThemeToggle compact />
         {sample ? (
           <a className="nav-sample-link" href="/twin" title="Exit sample workspace">

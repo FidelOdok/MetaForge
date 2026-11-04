@@ -1,6 +1,7 @@
 import { AxiosError, type AxiosAdapter, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import type { BomComponent } from '../types/bom';
 import type { HierarchyNode } from '../types/hierarchy';
+import { routeSampleCreate } from './sample-create';
 
 /* Offline sample workspace for the digital twin (`?demo=1`). Illustrative data only: no gateway, solver or agent is called. */
 
@@ -1481,6 +1482,8 @@ function route(
 ): unknown {
   const now = new Date().toISOString();
   const s = state;
+  const created = routeSampleCreate(method, path, body, s.project.id, s.project.work_products[0]?.id ?? '');
+  if (created !== undefined) return created;
   if (method === 'get') {
     if (path === '/health') {
       return { status: 'healthy', version: 'sample', uptime_seconds: 0, timestamp: now, components: [] };

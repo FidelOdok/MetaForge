@@ -1,0 +1,183 @@
+import type {
+  BriefKey,
+  BuildStatus,
+  CreationView,
+  InspectionMethod,
+  MakeRoute,
+  MeasurementStatus,
+  ResultStatus,
+  Stage,
+} from '../../api/endpoints/create';
+import type { ApprovalKind } from '../../types/approvals';
+
+/** Plain words for everything the Create view shows. One place, so the tone stays the same. */
+
+export const STAGE_COPY: Record<Stage, { label: string; meaning: string }> = {
+  concept: { label: 'Concept', meaning: 'The idea is taking shape. Details can still change freely.' },
+  design_in_development: {
+    label: 'Design in development',
+    meaning: 'A dimensioned design exists and is still being worked on and checked.',
+  },
+  checked_design: { label: 'Checked design', meaning: 'The design checks are recorded. Next: decide how to make it.' },
+  ready_for_making: {
+    label: 'Ready for making',
+    meaning: 'A build is prepared and waiting for your release.',
+  },
+  released_for_making: {
+    label: 'Released for making',
+    meaning: 'You released one exact revision for making.',
+  },
+  build_completed: { label: 'Build completed', meaning: 'Making has ended. Now inspect what came out.' },
+  accepted_product: { label: 'Accepted product', meaning: 'The build met every required check and you accepted it.' },
+};
+
+export const JOURNEY = [
+  'Describe',
+  'Clarify',
+  'Design',
+  'Check',
+  'Approve',
+  'Make',
+  'Inspect',
+  'Improve or accept',
+] as const;
+
+/** Which journey step a creation is on, from its readiness and records. */
+export function journeyStep(view: CreationView | undefined): number {
+  if (!view) return 0;
+  const { readiness, creation } = view;
+  const latest = creation.builds[creation.builds.length - 1];
+  if (latest?.acceptance || latest?.status === 'failed') return 7;
+  switch (readiness.stage) {
+    case 'concept': {
+      const items = creation.brief.items;
+      const filled = Object.values(items).filter((i) => i && i.status !== 'missing').length;
+      if (filled === 0 && !readiness.has_concept) return 0;
+      const openAssumptions = creation.brief.assumptions.some((a) => a.status === 'open');
+      return openAssumptions || filled < 3 ? 1 : 2;
+    }
+    case 'design_in_development':
+      return readiness.blockers.some((b) => b.id === 'approvals') ? 4 : 3;
+    case 'checked_design':
+    case 'ready_for_making':
+      return 4;
+    case 'released_for_making':
+      return 5;
+    case 'build_completed':
+      return 6;
+    case 'accepted_product':
+      return 7;
+  }
+}
+
+export const BRIEF_COPY: Record<BriefKey, { label: string; question: string; placeholder: string }> = {
+  intended_use: {
+    label: 'Intended use',
+    question: 'What problem does it solve, and who uses it?',
+    placeholder: 'Holds my headphones under the desk',
+  },
+  size_and_fit: {
+    label: 'Size and fit',
+    question: 'How big can it be, and what must it fit?',
+    placeholder: 'Clamps a 25 mm desk edge, under 120 mm long',
+  },
+  appearance: { label: 'Appearance', question: 'Style, colour and finish?', placeholder: 'Matte black, rounded edges' },
+  materials: { label: 'Materials', question: 'Any material you want or must avoid?', placeholder: 'PETG or PLA' },
+  design_budget: {
+    label: 'Design budget',
+    question: 'How much may the design work spend (model and compute)?',
+    placeholder: 'Up to £5 of generation credits',
+  },
+  manufacturing_budget: {
+    label: 'Making budget',
+    question: 'How much may making it cost?',
+    placeholder: 'Under £10 a piece',
+  },
+  quantity: {
+    label: 'Quantity',
+    question: 'A prototype, a one-off or repeat production?',
+    placeholder: 'One prototype, then 20',
+  },
+  making_context: {
+    label: 'How you can make it',
+    question: 'Machines you have, or suppliers you prefer?',
+    placeholder: 'Prusa MK4 at home',
+  },
+  success_criteria: {
+    label: 'Success criteria',
+    question: 'What must be true for it to be good enough? One per line.',
+    placeholder: 'Holds 400 g without bending\nSlides on by hand',
+  },
+  inspection_needs: {
+    label: 'How it will be checked',
+    question: 'How will you check the physical result?',
+    placeholder: 'Photo from the side, measure the clamp gap',
+  },
+};
+
+export const MEASUREMENT_STATUS_COPY: Record<MeasurementStatus, string> = {
+  user_confirmed: 'User-confirmed',
+  estimated: 'Estimated',
+  unconfirmed: 'Unconfirmed',
+};
+
+export const ROUTE_COPY: Record<MakeRoute, { label: string; purpose: string }> = {
+  home: { label: 'Make at home', purpose: 'Your own equipment, with guided hands-on steps.' },
+  workshop: { label: 'Use my workshop', purpose: 'Registered in-house machines and processes.' },
+  external: { label: 'Have it made', purpose: 'An external manufacturer quotes and makes it.' },
+};
+
+export const METHOD_COPY: Record<InspectionMethod, string> = {
+  camera: 'Camera observation',
+  measurement: 'Calibrated measurement',
+  telemetry: 'Machine telemetry',
+  operator: 'Operator confirmation',
+  instrument: 'Test or instrument',
+};
+
+export const RESULT_COPY: Record<ResultStatus, string> = {
+  passed: 'Passed',
+  failed: 'Failed',
+  inconclusive: 'Inconclusive',
+  awaiting_review: 'Awaiting review',
+};
+
+export const BUILD_STATUS_COPY: Record<BuildStatus, string> = {
+  preparing: 'Being prepared',
+  released: 'Released for making',
+  making: 'Being made',
+  completed: 'Making finished',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+/**
+ * The kind of commitment a waiting decision is. They are kept apart so a
+ * design approval is never mistaken for spending money or moving a machine.
+ */
+export type Commitment = 'design' | 'sharing' | 'spending' | 'machine' | 'files' | 'process';
+
+export const COMMITMENT_COPY: Record<Commitment, string> = {
+  design: 'Design approval',
+  sharing: 'External file sharing',
+  spending: 'Spending',
+  machine: 'Physical machine action',
+  files: 'Adding files',
+  process: 'Process checkpoint',
+};
+
+const MACHINE_TOOLS = /^(library\.(start|send|dispatch)|octoprint|moonraker|printer|machine)/;
+const SPEND_TOOLS = /^(tripo|meshy|zoo|slant3d\.(quote|order)|vendors?\.)/;
+const SHARE_TOOLS = /(\.share|\.send|upload_to|vendors?\.handoff)/;
+
+export function commitmentOf(kind: ApprovalKind, detail: Record<string, unknown>): Commitment {
+  if (kind === 'upload') return 'files';
+  if (kind === 'gate' || kind.startsWith('flow')) return 'process';
+  if (kind === 'tool_call' || kind === 'human_authority') {
+    const tool = String(detail.tool ?? '');
+    if (MACHINE_TOOLS.test(tool)) return 'machine';
+    if (SPEND_TOOLS.test(tool)) return 'spending';
+    if (SHARE_TOOLS.test(tool)) return 'sharing';
+  }
+  return 'design';
+}
