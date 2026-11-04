@@ -2,6 +2,9 @@ import { useRef } from 'react';
 import { AlertTriangle, ArrowUp, Check, Loader2, Paperclip, X } from 'lucide-react';
 import { useCreateStore, type Intent } from '../../store/create-store';
 import { AutoGrowTextarea } from './AutoGrowTextarea';
+import { ReferenceChip } from './ReferenceChip';
+import { referenceRecord } from '../../api/endpoints/create';
+import { useCreation } from '../../hooks/use-creation';
 
 const INTENTS: Array<{ id: Intent; label: string; hint: string }> = [
   { id: 'ask', label: 'Ask', hint: 'Discuss the product. Nothing is changed.' },
@@ -26,6 +29,10 @@ export function CreateComposer({ projectId, tools, busy, placeholder, autoFocus 
   const setIntent = useCreateStore((s) => s.setIntent);
   const attach = useCreateStore((s) => s.attach);
   const removeAttachment = useCreateStore((s) => s.removeAttachment);
+  const updateAttachment = useCreateStore((s) => s.updateAttachment);
+  // FORGE-794: an added reference shows its role and whether it is included.
+  const brief = useCreation(session.attachments.some((a) => a.workProductId) ? projectId : null).data?.creation
+    .brief;
   const submit = useCreateStore((s) => s.submit);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -86,7 +93,24 @@ export function CreateComposer({ projectId, tools, busy, placeholder, autoFocus 
               ) : (
                 <AlertTriangle size={13} aria-hidden="true" />
               )}
-              <span className="cv-attachment-name">{a.name}</span>
+              {a.state === 'added' && a.workProductId ? (
+                <ReferenceChip
+                  projectId={projectId}
+                  record={{
+                    ...referenceRecord(brief, a.workProductId, a.name),
+                    ...(a.role ? { role: a.role } : {}),
+                    ...(a.active === undefined ? {} : { active: a.active }),
+                  }}
+                  onLocalChange={(change) =>
+                    updateAttachment(projectId, a.id, {
+                      ...(change.role ? { role: change.role } : {}),
+                      ...(change.active === undefined ? {} : { active: change.active }),
+                    })
+                  }
+                />
+              ) : (
+                <span className="cv-attachment-name">{a.name}</span>
+              )}
               <span className="cv-attachment-state">
                 {a.state === 'uploading'
                   ? 'Uploading'

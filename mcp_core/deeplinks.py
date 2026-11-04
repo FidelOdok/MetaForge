@@ -67,6 +67,7 @@ _ROUTES: dict[str, tuple[str, str | None, str | None, str]] = {
         "View the reference model",
     ),
     "twin.interpret_sketch": ("twin?tab=model", "node_id", "node", "View the sketch"),
+    "twin.generate_sketch": ("twin?tab=model", "node_id", "node", "View the generated concept"),
     "twin.commit_system_architecture": (
         "twin?tab=structure",
         "node_id",

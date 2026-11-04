@@ -95,6 +95,7 @@ from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
 from api_gateway.twin.sketch_compiler_routes import router as twin_sketch_compiler_router
+from api_gateway.twin.sketch_generation_routes import router as twin_sketch_generation_router
 from api_gateway.twin.sketch_plane_routes import router as twin_sketch_plane_router
 from api_gateway.twin.sketch_routes import router as twin_sketch_router
 from api_gateway.uploads.routes import router as uploads_router
@@ -975,6 +976,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.concept_mesh import make_concept_mesh_recorder
     from api_gateway.twin.image_critique import make_concept_image_critic
     from api_gateway.twin.render_recorder import make_work_product_renderer
+    from api_gateway.twin.sketch_generation import make_sketch_generator
 
     work_product_renderer_bridge = _LazyBridge()
     work_product_renderer_fn = make_work_product_renderer(
@@ -1327,6 +1329,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-778: an illustrative 3D reference mesh from a concept image.
         # The provider is resolved per call, like the image provider.
         concept_mesh_generator=make_concept_mesh_recorder(twin, project_backend),
+        # FORGE-794: concept sketch proposals from text, references or a
+        # sketch, as jobs on their target. Held for approval like any paid
+        # image tool; the provider is resolved per call.
+        sketch_generator=make_sketch_generator(twin, project_backend),
         # FORGE-687: design files, bound to active_bridge below.
         design_files_recorder=design_files_recorder_fn,
         # FORGE-316: automatic selective re-run of exactly what a
@@ -2356,6 +2362,8 @@ def create_app(
     app.include_router(twin_sketch_plane_router)
     # FORGE-791: interpretations of a sketch and their promotion.
     app.include_router(twin_sketch_compiler_router)
+    # FORGE-794: AI concept sketches generated from text, references or a sketch.
+    app.include_router(twin_sketch_generation_router)
     # CDE slice 6: exact CAD builds and revision-linked STEP exports.
     app.include_router(twin_exact_cad_router)
     # FORGE-793: interface edges and cross-domain impact. The hooks give the

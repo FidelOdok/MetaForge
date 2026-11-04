@@ -184,6 +184,13 @@ def _depends_on_kwarg(arguments: dict[str, Any], tool: str) -> dict[str, Any]:
 _CONCEPT_IMAGE_SIZES: tuple[str, ...] = ("1024x1024", "1536x1024", "1024x1536")
 #: The straight-on views a multiview reference mesh is made from.
 _MESH_VIEWS: tuple[str, ...] = ("front", "left", "back", "right")
+#: The styles twin.generate_sketch draws in (FORGE-794).
+_SKETCH_STYLES: tuple[str, ...] = (
+    "industrial_sketch",
+    "marker_render",
+    "line_art",
+    "concept_drawing",
+)
 #: How long a concept mesh usually takes, said on its job (FORGE-783).
 CONCEPT_MESH_EXPECTED_SECONDS = 150
 
@@ -362,6 +369,7 @@ class TwinServer(McpToolServer):
         concept_image_critic: Any = None,
         concept_mesh_generator: Any = None,
         job_runner: Any = None,
+        sketch_generator: Any = None,
         exact_cad_service: Any = None,
         sketch_interpreter: Any = None,
         sketch_reading_decider: Any = None,
@@ -500,6 +508,10 @@ class TwinServer(McpToolServer):
         # recorder) that has an image-to-3D model turn a concept image into an
         # illustrative GLB render. Never a cad_model, never evidence.
         self._concept_mesh_generator = concept_mesh_generator
+        # FORGE-794: an injected async ``generate(project_id=, request=, wait=,
+        # session_id=)`` (make_sketch_generator) that draws a concept sketch
+        # proposal from text, references or a sketch, as a job on its target.
+        self._sketch_generator = sketch_generator
         # FORGE-783: where slow tools run as polled jobs. ``None`` means this
         # process's default runner (tool_registry.jobs), opened on first use.
         self._job_runner = job_runner
@@ -752,6 +764,8 @@ class TwinServer(McpToolServer):
             self._register_generate_concept_mesh()
             # FORGE-783: its jobs are read back with twin.job_status.
             self._register_job_status()
+        if sketch_generator is not None:
+            self._register_generate_sketch()
         if exact_cad_service is not None:
             self._register_exact_cad()
             if concept_mesh_generator is None:
@@ -4574,6 +4588,182 @@ class TwinServer(McpToolServer):
             node_id=result.get("node_id"),
             task_id=result.get("task_id"),
             mode=mode,
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # twin.generate_sketch (FORGE-794)
+    # ------------------------------------------------------------------
+
+    def _register_generate_sketch(self) -> None:
+        region = {
+            "type": "object",
+            "properties": {
+                "polygon": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 200,
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                    },
+                    "description": (
+                        "A closed polygon in sketch units: the image centre is the origin "
+                        "and its shorter side spans one unit, y down."
+                    ),
+                },
+                "label": {"type": "string", "maxLength": 200},
+            },
+            "required": ["polygon"],
+        }
+        strings = {"type": "array", "items": {"type": "string", "maxLength": 300}, "maxItems": 20}
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.generate_sketch",
+                adapter_id="twin",
+                name="Generate Concept Sketch",
+                description=(
+                    "Have an image model draw a freeform product concept sketch and store it "
+                    "as an illustrative generated_sketch PROPOSAL. Modes: text (intent, "
+                    "constraints and a style: industrial_sketch, marker_render, line_art or "
+                    "concept_drawing), reference (conditioned on the project's active "
+                    "references, each used for its role: inspiration for mood, geometry for "
+                    "shape, a specification's stated values as constraints; verification "
+                    "evidence is never sent) or sketch (refines a saved SKT sketch drawn to "
+                    "an image; the strokes are never changed). Left out, the mode follows "
+                    "from sketch_key, then reference_ids, then text. mask (a polygon in "
+                    "sketch units) plus mask_instruction edits one region: a provider that "
+                    "takes a mask gets one, otherwise the result is composited back outside "
+                    "it, and the pixels outside the mask and inside locked_regions are "
+                    "compared with the input; below the threshold the proposal is flagged "
+                    "for review. negative and protected_features go into the prompt. "
+                    "n_variants defaults to 1. A proposal never replaces the accepted "
+                    "concept: a person accepts it in the Create view. Every output records "
+                    "its prompt, references and hashes, mask, sketch revision, provider, "
+                    "model, cost when reported, job and base revision, and is labelled "
+                    "illustrative: never an editable sketch, never CAD, never evidence. "
+                    "Costs a paid image call per variant. A client call returns at once "
+                    "with job_id and poll 'twin.job_status'; a newer call on the same "
+                    "target supersedes it, and one that arrives after another concept was "
+                    "accepted ends stale and is kept as history only. wait: true waits."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "intent": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1500,
+                            "description": "What the product is and what to draw.",
+                        },
+                        "constraints": strings,
+                        "negative": {**strings, "description": "What the image must not do."},
+                        "protected_features": {
+                            **strings,
+                            "description": "Features that must not change.",
+                        },
+                        "style": {"type": "string", "enum": list(_SKETCH_STYLES)},
+                        "mode": {"type": "string", "enum": ["text", "reference", "sketch"]},
+                        "reference_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": 8,
+                            "description": (
+                                "Reference work products of this project; inactive ones "
+                                "are left out."
+                            ),
+                        },
+                        "sketch_key": {
+                            "type": "string",
+                            "description": "A saved sketch item (SKT-...) to refine.",
+                        },
+                        "sketch_revision": {
+                            "type": "string",
+                            "description": "SKT-...@n it is for; refused if the head moved.",
+                        },
+                        "mask": region,
+                        "mask_instruction": {"type": "string", "maxLength": 500},
+                        "locked_regions": {"type": "array", "items": region, "maxItems": 10},
+                        "n_variants": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 4,
+                            "description": "How many alternatives (def 1).",
+                        },
+                        "size": {"type": "string", "enum": list(_CONCEPT_IMAGE_SIZES)},
+                        "baseline_key": {
+                            "type": "string",
+                            "description": "The accepted concept line (GSK-...) to build on.",
+                        },
+                        "expected_baseline": {
+                            "type": "string",
+                            "description": "GSK-...@n the caller saw; refused if it moved.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project UUID (def the session's project).",
+                        },
+                        "wait": {
+                            "type": "boolean",
+                            "description": "Wait for the result instead of returning a job.",
+                        },
+                    },
+                    "required": ["intent"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "poll": {"type": "string"},
+                        "operation_id": {"type": "string"},
+                        "mode": {"type": "string"},
+                        "target_key": {"type": "string"},
+                        "base_revision": {"type": "string"},
+                        "reused": {"type": "boolean"},
+                        "expected_seconds": {"type": ["number", "null"]},
+                        "node_id": {"type": "string"},
+                        "proposals": {"type": "array", "items": {"type": "object"}},
+                        "authority": {"type": "string"},
+                        "label": {"type": "string"},
+                        "stale": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.generate_sketch,
+        )
+
+    async def generate_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.generate_sketch"
+        intent = arguments.get("intent")
+        if not isinstance(intent, str) or not intent.strip():
+            raise ValueError(f"{tool}: 'intent' is required (non-empty string)")
+        wait = arguments.get("wait")
+        if wait is not None and not isinstance(wait, bool):
+            raise ValueError(f"{tool}: 'wait' must be true or false")
+        session_id, ctx_project = session_of_call()
+        project_id = arguments.get("project_id") or ctx_project
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise ValueError(f"{tool}: 'project_id' is required outside a project session")
+        request = {k: v for k, v in arguments.items() if k not in {"project_id", "wait"}}
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("sketch_generation.mode", str(arguments.get("mode") or "auto"))
+            result: dict[str, Any] = await self._sketch_generator(
+                project_id=project_id.strip(),
+                request=request,
+                wait=caller_waits() if wait is None else wait,
+                session_id=session_id,
+            )
+        logger.info(
+            "sketch_generation_tool_done",
+            job_id=result.get("job_id"),
+            node_id=result.get("node_id"),
+            mode=result.get("mode"),
         )
         return result
 

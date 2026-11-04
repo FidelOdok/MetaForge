@@ -1259,6 +1259,47 @@ none is left, or none answers within `METAFORGE_SKETCH_READING_TIMEOUT_S`
 counted in `metaforge_sketch_reading_total`, and the
 `SketchReadingUnavailable` alert fires when most readings in an hour fail.
 
+#### Generating a freeform concept sketch {#sketch-generation}
+
+`twin.generate_sketch` (and the Create stage's **Generate**, which calls the
+same service over `/v1/twin/projects/{id}/sketch-generations`) draws a
+freeform concept sketch through the same image providers as
+`twin.render_concept_image`. The module is
+`api_gateway/twin/sketch_generation.py`. Three modes: `text` (intent,
+constraints and a style), `reference` (the project's active references, each
+sent for its role: an inspiration image for mood, a geometry image for
+shape, a specification's stated values as constraints in words; verification
+evidence is never sent) and `sketch` (a saved `sketch_strokes` revision
+drawn to a PNG here and refined; the strokes are never written). Left out,
+the mode follows from a sketch, then active references, then text.
+
+The providers now take an `ImageRequest` (several conditioning images and an
+optional mask) and say what they can do in `ProviderCapabilities`, read from
+the adapter code:
+
+| Provider | Mask | Images per call | Partial images |
+|---|---|---|---|
+| `openai` (`images.edit`) | yes | 16 | no (not called with streaming) |
+| `openrouter` (chat completions) | no | 4 | no |
+
+A region edit sends the mask to a provider that takes one; otherwise the
+output is composited back outside the mask. The pixels outside the mask and
+inside locked regions are compared with the input either way, and a proposal
+under `METAFORGE_SKETCH_PRESERVATION_THRESHOLD` (0.9) is flagged for review.
+With no provider streaming partial images, generation reports only real
+stages: `queued`, `started`, a milestone when the image arrives, a
+`review_required` event when preservation fails, and `completed`.
+
+Generation runs as a job on its target (`SKT-X:full` or
+`SKT-X:region-<hash>`, `CONCEPT:full` without a sketch): a newer request on
+the same target supersedes an older one, identical requests within 30 s
+coalesce, and a result that arrives after another concept was accepted ends
+`stale`, stored as history and never accepted. `n_variants` defaults to 1.
+Each output is a proposal; only a person's accept moves the accepted concept
+(see [generated concept sketches](../twin_schema.md#generated-sketch)). The
+tool is held for approval and counted against the image spend cap like
+`twin.render_concept_image`.
+
 ### Models per step {#models-per-step}
 
 Each step of the concept pipeline names its model in one place. Every
@@ -1269,6 +1310,7 @@ setting is optional; unset, the step uses the default in the last column.
 | Concept phase reasoning (server mode) | the phase's `model` in the flow, or a `phase_brain` route | `provider:model` | the gateway's chat model |
 | Reading a sketch (`twin.interpret_sketch`) | `METAFORGE_VISION_MODEL` | a model id for the chat provider (on OpenRouter a `vendor/model` slug) | the gateway's chat model |
 | Concept image (`twin.render_concept_image`) | `METAFORGE_IMAGE_MODEL` (with `METAFORGE_IMAGE_PROVIDER`) | an image model slug | `google/gemini-2.5-flash-image` on OpenRouter, `gpt-image-1` on OpenAI; off until a provider is set |
+| Concept sketch (`twin.generate_sketch`, Create **Generate**) | `METAFORGE_IMAGE_MODEL` (with `METAFORGE_IMAGE_PROVIDER`) | an image model slug | the same as the concept image |
 | Concept reference mesh (`twin.generate_concept_mesh`) | `METAFORGE_MESH_MODEL_VERSION` (with `METAFORGE_MESH_PROVIDER=tripo`) | a Tripo `model` version | `v3.1-20260211`; off until the provider is set |
 | Gate review (server reviewer) | the policy's `reviewer_model`, then `METAFORGE_REVIEWER_MODEL` | `provider:model`, or a model id for the chat provider | a `gate_check` route, else the gateway's chat model |
 

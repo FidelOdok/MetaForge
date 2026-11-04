@@ -41,6 +41,12 @@ from api_gateway.create.models import (
     EvidenceKind,
     HistoryEntry,
     InspectionCheck,
+    ReferenceAssociation,
+    ReferenceDisclosure,
+    ReferenceFact,
+    ReferenceRecord,
+    ReferenceRole,
+    ReferenceVersion,
     Release,
     ResultStatus,
     Revision,
@@ -48,6 +54,13 @@ from api_gateway.create.models import (
     now_iso,
 )
 from api_gateway.create.readiness import Readiness, WorkProductSummary, derive
+from api_gateway.create.references import (
+    MAX_TEXT_BYTES,
+    facts_from_reading,
+    facts_from_text,
+    is_text_reference,
+    publish_conflicts,
+)
 from api_gateway.create.store import CreationConflictError, SqliteCreationStore
 from observability.tracing import get_tracer
 
@@ -310,6 +323,9 @@ async def put_brief(project_id: str, body: BriefUpdate, request: Request) -> Cre
     def mutate(c: Creation) -> str:
         before = c.brief
         c.brief = body.brief
+        if "reference_details" not in body.brief.model_fields_set:
+            # FORGE-794: a client that does not know reference roles keeps them.
+            c.brief.reference_details = before.reference_details
         changed = [k for k in BRIEF_KEYS if before.items.get(k) != body.brief.items.get(k)]
         if before.measurements != body.brief.measurements:
             changed.append("measurements")
@@ -602,6 +618,269 @@ async def decide_build(
         return f"Build {b.number} {body.decision}ed by {approver.actor_id}"
 
     return await _write(request, project_id, body, "build_decision", mutate)
+
+
+# ---------------------------------------------------------------------------
+# References: roles, inclusion, facts and conflicts (FORGE-794)
+# ---------------------------------------------------------------------------
+
+
+class ReferenceUpdate(VersionedWrite):
+    role: ReferenceRole | None = None
+    associations: list[ReferenceAssociation] | None = Field(None, max_length=50)
+    active: bool | None = Field(None, description="Include it in the next instruction")
+    protected_features: list[str] | None = Field(None, max_length=50)
+
+
+class FactsRequest(VersionedWrite):
+    note: str = Field("", max_length=500, description="What the person says the reference shows")
+
+
+class ReferencesView(CreationView):
+    reference: ReferenceRecord | None = None
+    #: Authoritative references that disagree, each raised for review.
+    conflicts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+#: ``() -> VisionCall``; tests replace it so no model is called.
+_vision_call_factory: Any = None
+
+
+def set_vision_call_factory(factory: Any) -> None:
+    """Install what makes the vision call fact extraction uses (tests)."""
+    global _vision_call_factory  # noqa: PLW0603
+    _vision_call_factory = factory
+
+
+async def _reference_wp(project_id: str, wp_id: str) -> Any:
+    """The reference work product, refused unless it is this project's (REF-007)."""
+    from uuid import UUID
+
+    from api_gateway.twin.routes import get_twin
+
+    try:
+        uid = UUID(wp_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid work product id") from exc
+    twin: Any = get_twin()
+    wp = await twin.get_work_product(uid)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"No work product {wp_id}")
+    if str(getattr(wp, "project_id", "") or "") != project_id:
+        raise HTTPException(status_code=403, detail="That work product is not in this project")
+    return wp
+
+
+def _reference_file(wp: Any) -> tuple[str, int | None]:
+    """The reference's file name and size, checked like an upload (REF-007)."""
+    from api_gateway.twin.import_commit import ImportRejected, check_importable
+
+    meta = wp.metadata or {}
+    name = str(meta.get("original_filename") or wp.name or "")
+    size = meta.get("file_size") or meta.get("size_bytes")
+    if name and "." in name:
+        try:
+            check_importable(name, int(size) if isinstance(size, int) and size > 0 else 1)
+        except ImportRejected as exc:
+            raise HTTPException(status_code=422, detail=f"Not a usable reference: {exc}") from exc
+    return name, size if isinstance(size, int) else None
+
+
+def _source_hash(wp: Any) -> str:
+    meta = wp.metadata or {}
+    return str(meta.get("content_sha256") or wp.content_hash or "")[:64]
+
+
+def _upsert_reference(
+    c: Creation, wp: Any, actor: str, *, note: str, **changes: Any
+) -> ReferenceRecord:
+    """The project's record for ``wp``, updated, with a version when it changed."""
+    name, size = _reference_file(wp)
+    record = c.brief.reference(str(wp.id))
+    created = record is None
+    if record is None:
+        record = ReferenceRecord(work_product_id=str(wp.id), name=name or wp.name or "")
+        c.brief.reference_details.append(record)
+    if str(wp.id) not in c.brief.references:
+        c.brief.references.append(str(wp.id))
+    before = (record.role, record.active, list(record.protected_features), record.source_hash)
+    for key, value in changes.items():
+        if value is not None:
+            setattr(record, key, value)
+    record.source_hash = _source_hash(wp) or record.source_hash
+    record.size = size if size is not None else record.size
+    record.name = record.name or name
+    after = (record.role, record.active, list(record.protected_features), record.source_hash)
+    if created or before != after or note:
+        record.versions.append(
+            ReferenceVersion(
+                version=len(record.versions) + 1,
+                source_hash=record.source_hash,
+                role=record.role,
+                active=record.active,
+                protected_features=list(record.protected_features),
+                actor=actor,
+                note=note or ("added" if created else "changed"),
+            )
+        )
+        del record.versions[:-100]
+    return record
+
+
+@router.put("/{project_id}/references/{wp_id}", response_model=ReferencesView)
+async def put_reference(
+    project_id: str, wp_id: str, body: ReferenceUpdate, request: Request
+) -> ReferencesView:
+    """Set a reference's role, associations, inclusion or protected features.
+
+    Each change is a version in the reference's history. Two authoritative
+    references that now state different values are raised for review.
+    """
+    wp = await _reference_wp(project_id, wp_id)
+    actor = str(approver_from_request(request).actor_id)
+    holder: dict[str, ReferenceRecord] = {}
+
+    def mutate(c: Creation) -> str:
+        holder["r"] = _upsert_reference(
+            c,
+            wp,
+            actor,
+            note="",
+            role=body.role,
+            associations=body.associations,
+            active=body.active,
+            protected_features=[p.strip()[:300] for p in body.protected_features if p.strip()]
+            if body.protected_features is not None
+            else None,
+        )
+        r = holder["r"]
+        return f"Reference {r.name or r.work_product_id}: {r.role.replace('_', ' ')}" + (
+            "" if r.active else " (left out)"
+        )
+
+    view = await _write(request, project_id, body, "reference", mutate)
+    conflicts = publish_conflicts(project_id, view.creation.brief.reference_details)
+    return ReferencesView(
+        **view.model_dump(),
+        reference=view.creation.brief.reference(wp_id),
+        conflicts=conflicts,
+    )
+
+
+async def _extract_facts(wp: Any, record_role: str, note: str) -> tuple[list[ReferenceFact], str]:
+    """Candidate facts from a reference, and who read them (``text_parser`` or the model)."""
+    import asyncio
+
+    from api_gateway.twin.blob_store import resolve_work_product_blob
+
+    meta = wp.metadata or {}
+    name = str(meta.get("original_filename") or wp.name or "")
+    mime = str(meta.get("mime_type") or meta.get("content_type") or "")
+    source_hash = _source_hash(wp)
+    if is_text_reference(mime, name):
+        content, _ = await asyncio.to_thread(resolve_work_product_blob, wp)
+        text = content[:MAX_TEXT_BYTES].decode("utf-8", errors="replace")
+        return (
+            facts_from_text(
+                text, reference_id=str(wp.id), source_hash=source_hash, role=record_role
+            ),
+            "text_parser",
+        )
+    reading = (meta.get("sketch_reading") or {}).get("proposal")
+    reader = "sketch_reading (stored)"
+    if not isinstance(reading, dict):
+        from api_gateway.twin.sketch_reading import (
+            make_default_vision_call,
+            normalise_mime_type,
+            read_sketch,
+        )
+
+        content, filename = await asyncio.to_thread(resolve_work_product_blob, wp)
+        try:
+            image_mime = normalise_mime_type(mime, filename or name)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="Facts can be read from text references and images only",
+            ) from exc
+        call = _vision_call_factory() if _vision_call_factory else make_default_vision_call()
+        parsed, reply = await read_sketch(content, image_mime, note=note, vision_call=call)
+        reading = parsed.model_dump()
+        reader = f"{reply.provider or 'vision'}/{reply.model or 'model'}"
+    return (
+        facts_from_reading(
+            reading, reference_id=str(wp.id), source_hash=source_hash, extracted_by=reader
+        ),
+        reader,
+    )
+
+
+@router.post("/{project_id}/references/{wp_id}/facts", response_model=ReferencesView)
+async def extract_reference_facts(
+    project_id: str, wp_id: str, body: FactsRequest, request: Request
+) -> ReferencesView:
+    """Extract candidate facts from a reference, each with a citation (REF-005).
+
+    A specification or manufacturing rule's explicit values are ``stated``;
+    everything read off an image, or from a non-authoritative text, is
+    ``estimated``. Nothing is ever ``measured``. Conflicts between
+    authoritative references are raised for review (REF-006).
+    """
+    from api_gateway.twin.sketch_reading import SketchReadingError
+    from api_gateway.twin.vision import VisionUnavailableError
+
+    wp = await _reference_wp(project_id, wp_id)
+    actor = str(approver_from_request(request).actor_id)
+    existing = get_create_store().get(project_id).brief.reference(wp_id)
+    role = existing.role if existing is not None else "inspiration"
+    with tracer.start_as_current_span("create.reference_facts") as span:
+        span.set_attribute("project.id", project_id)
+        span.set_attribute("reference.role", role)
+        try:
+            facts, reader = await _extract_facts(wp, role, body.note)
+        except HTTPException:
+            raise
+        except VisionUnavailableError as exc:
+            span.record_exception(exc)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (SketchReadingError, ValueError) as exc:
+            span.record_exception(exc)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        span.set_attribute("reference.facts", len(facts))
+
+    def mutate(c: Creation) -> str:
+        record = _upsert_reference(c, wp, actor, note=f"facts extracted by {reader}")
+        record.facts = facts
+        if not reader.startswith(("text_parser", "sketch_reading")):
+            record.disclosures.append(
+                ReferenceDisclosure(
+                    provider=reader.split("/")[0],
+                    model=reader.partition("/")[2],
+                    purpose="reference fact extraction",
+                    source_hash=record.source_hash,
+                )
+            )
+        stated = sum(1 for f in facts if f.basis == "stated")
+        return f"{len(facts)} fact(s) from {record.name or wp_id} ({stated} stated)"
+
+    view = await _write(request, project_id, body, "reference_facts", mutate)
+    logger.info("create_reference_facts", project_id=project_id, reference=wp_id, facts=len(facts))
+    conflicts = publish_conflicts(project_id, view.creation.brief.reference_details)
+    return ReferencesView(
+        **view.model_dump(),
+        reference=view.creation.brief.reference(wp_id),
+        conflicts=conflicts,
+    )
+
+
+@router.get("/{project_id}/references/conflicts")
+async def get_reference_conflicts(project_id: str) -> dict[str, Any]:
+    """Authoritative references that state different values for one parameter."""
+    from api_gateway.create.references import detect_conflicts
+
+    records = get_create_store().get(project_id).brief.reference_details
+    names = {r.work_product_id: r.name or r.work_product_id for r in records}
+    return {"conflicts": [c.as_dict(names) for c in detect_conflicts(records)]}
 
 
 @router.post("/{project_id}/duplicate", response_model=DuplicateResponse, status_code=201)
