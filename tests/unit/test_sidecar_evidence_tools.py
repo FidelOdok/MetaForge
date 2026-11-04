@@ -30,6 +30,8 @@ WIRED = {
     "twin.render_concept_image",
     # FORGE-772: the vision check of a concept image, with or without a model.
     "twin.critique_concept_image",
+    # FORGE-778: the illustrative 3D reference mesh, with or without a provider.
+    "twin.generate_concept_mesh",
     "twin.commit_hazard_analysis",
     "twin.commit_system_architecture",
     "twin.commit_technical_drawing",

@@ -45,6 +45,8 @@ describe('previewEngineFor: explicit type/format expectations', () => {
     ['cad_model', 'stl', 'mesh3d'],
     ['cad_model', '3mf', 'mesh3d'],
     ['cad_model', 'glb', 'mesh3d'],
+    // an illustrative AI reference mesh of a concept image
+    ['render', 'glb', 'mesh3d'],
     ['manufacturing_file', 'stl', 'mesh3d'],
     ['', 'gltf', 'mesh3d'],
     // documents

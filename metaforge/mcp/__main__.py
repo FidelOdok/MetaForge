@@ -2027,6 +2027,15 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("concept_image_critic", _concept_image_critic)
 
+    # FORGE-778: twin.generate_concept_mesh. Registered whether or not a mesh
+    # provider is configured; an unconfigured one fails the call clearly.
+    def _concept_mesh() -> Any:
+        from api_gateway.twin.concept_mesh import make_concept_mesh_recorder
+
+        return make_concept_mesh_recorder(twin, project_backend)
+
+    _try("concept_mesh_generator", _concept_mesh)
+
     # FORGE-630: twin.render_work_product, whose blender.render call goes
     # through this server's own registry once it exists.
     try:

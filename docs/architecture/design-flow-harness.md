@@ -1039,6 +1039,34 @@ stays illustrative and `twin.record_claim` still refuses it. Checks are
 counted in `metaforge_concept_image_critique_total{verdict}`, and
 `ConceptImageCritiqueUnchecked` reports when most go unchecked.
 
+A concept image can also be turned into a 3D reference model for concept
+review. `twin.generate_concept_mesh` takes the `image_node_id` of a render
+made by `twin.render_concept_image` (or, with no image, a text `prompt`;
+exactly one of the two) and sends it to Tripo's image-to-3D API: the image is
+uploaded (`POST /files`), a task is created
+(`POST /generation/image-to-model`, or `/generation/text-to-model` for a
+prompt), the task is polled (`GET /tasks/{task_id}`) every 5 seconds, and the
+GLB at `output.model_url` is downloaded at once, since Tripo's model links
+expire within minutes. The label banner drawn on the concept image is cropped
+off before upload so it is not modelled as part of the product. The mesh is a
+`render` work product with `format: glb` and `metadata.authority =
+"illustrative"`, linked `generated_from` the image, recording the provider,
+the Tripo task id and model version, and the label "AI 3D reference model,
+illustrative only". It is never a `cad_model`: its dimensions are the
+model's guess, not the layout's, and `twin.record_claim` refuses it like
+every render. The twin viewer previews it with its 3D mesh engine. It is off
+unless `METAFORGE_MESH_PROVIDER=tripo`, with the key in `TRIPO_API_KEY` (a
+key alone turns nothing on, since every mesh is paid);
+`METAFORGE_MESH_TIMEOUT_S` (default 600) bounds the whole generation, and
+`METAFORGE_MESH_MODEL_VERSION` picks Tripo's `model`. A node that is not a
+concept image, a missing or oversized prompt, or an unreadable image is
+refused before any paid call. A failed, cancelled, banned or expired task is
+an error naming its status, a task still running at the deadline is a
+timeout, a rejected key is reported without the key, and none of them writes
+anything. Outcomes are counted in `metaforge_concept_mesh_total{outcome}`,
+and `ConceptMeshGenerationUnavailable` warns when most requests in six hours
+fail.
+
 The concept decision carries what it selects as data, not prose.
 `twin.record_decision` takes an `assembly` (each part with its source, made,
 bought or standard, plus material, process, quantity and a provenance tag,
@@ -1137,6 +1165,7 @@ setting is optional; unset, the step uses the default in the last column.
 | Concept phase reasoning (server mode) | the phase's `model` in the flow, or a `phase_brain` route | `provider:model` | the gateway's chat model |
 | Reading a sketch (`twin.interpret_sketch`) | `METAFORGE_VISION_MODEL` | a model id for the chat provider (on OpenRouter a `vendor/model` slug) | the gateway's chat model |
 | Concept image (`twin.render_concept_image`) | `METAFORGE_IMAGE_MODEL` (with `METAFORGE_IMAGE_PROVIDER`) | an image model slug | `google/gemini-2.5-flash-image` on OpenRouter, `gpt-image-1` on OpenAI; off until a provider is set |
+| Concept reference mesh (`twin.generate_concept_mesh`) | `METAFORGE_MESH_MODEL_VERSION` (with `METAFORGE_MESH_PROVIDER=tripo`) | a Tripo `model` version | `v3.1-20260211`; off until the provider is set |
 | Gate review (server reviewer) | the policy's `reviewer_model`, then `METAFORGE_REVIEWER_MODEL` | `provider:model`, or a model id for the chat provider | a `gate_check` route, else the gateway's chat model |
 
 The gateway's chat model is `METAFORGE_LLM_MODEL` on `METAFORGE_LLM_PROVIDER`,

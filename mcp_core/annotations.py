@@ -380,6 +380,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-772: stores a vision model's advisory check of a concept image
         # on it, in a new revision; nothing a person decided is touched.
         "twin.critique_concept_image",
+        # FORGE-778: adds an illustrative GLB render node linked to its concept
+        # image; the image is never touched.
+        "twin.generate_concept_mesh",
         # FORGE-687: a new design-files node (or the next revision of its
         # item); the files it reads on the workspace are not touched.
         "twin.record_design_files",
@@ -617,6 +620,8 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "twin.interpret_sketch",
         # FORGE-772: so does a concept image being checked.
         "twin.critique_concept_image",
+        # FORGE-778: the concept image (or prompt) goes to the mesh provider's API.
+        "twin.generate_concept_mesh",
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",
