@@ -176,20 +176,51 @@ def stamp_label(image: GeneratedImage, size: str) -> tuple[bytes, str, str]:
     return svg.encode("utf-8"), "image/svg+xml", "svg"
 
 
-def build_prompt(visual_brief: str, concept_name: str, part_names: list[str]) -> str:
+#: What each orthographic view is, in words the image model is given.
+_VIEW_WORDS = {
+    "front": "its front face, from directly in front",
+    "back": "its back face, from directly behind",
+    "left": "its left side, from directly to its left",
+    "right": "its right side, from directly to its right",
+}
+
+
+def build_prompt(
+    visual_brief: str, concept_name: str, part_names: list[str], view: str = "isometric"
+) -> str:
     """The prompt sent to the model: the brief, plus what the layout is.
 
     FORGE-777: image models follow the product's layout but improvise what it
     holds (in the bike-rack run: extra handlebars, merged frames, bikes hung
     at impossible angles). The prompt says the product's parts are exactly
     the layout's, and that anything shown in use is whole and realistic.
+
+    ``view`` other than ``isometric`` asks for a straight-on orthographic
+    view from that side, so a set of them can feed a multiview 3D model.
     """
     parts = ", ".join(part_names[:30])
+    if view == "isometric":
+        framing = (
+            "The reference image is a grey block layout of the product seen in isometric "
+            "view: keep its overall proportions and the arrangement of its parts, and render "
+            "it as the finished product described above, on a plain studio background. "
+        )
+    else:
+        if view not in _VIEW_WORDS:
+            raise ValueError(f"concept image: unknown view {view!r}")
+        name = view.upper()
+        framing = (
+            f"The reference image is a grey block layout of the product in a straight-on "
+            f"orthographic {name} view, showing {_VIEW_WORDS[view]}. Render a straight-on "
+            f"orthographic {name} view of the product, no perspective: the camera level and "
+            "square to that side, the outline matching the reference exactly, the whole "
+            "product in frame. Keep its proportions and the arrangement of its parts, and "
+            "render it as the finished product described above, on a plain white studio "
+            "background with soft even light. "
+        )
     return (
         f"Product concept image: {concept_name}. {visual_brief.strip()}\n"
-        "The reference image is a grey block layout of the product seen in isometric view: "
-        "keep its overall proportions and the arrangement of its parts, and render it as "
-        "the finished product described above, on a plain studio background. "
+        f"{framing}"
         f"Parts, as laid out: {parts}. Draw exactly these parts, joined as laid out, and "
         "add no others. If the brief shows the product in use, every item it holds or "
         "supports is whole and correctly built, appears once each in the number the "
@@ -267,6 +298,7 @@ def make_concept_image_recorder(
         decision_ref: str | None = None,
         assembly: dict[str, Any] | None = None,
         layout_assembly: dict[str, Any] | None = None,
+        view: str = "isometric",
     ) -> dict[str, Any]:
         from api_gateway.twin.image_critique import (
             KnownAssembly,
@@ -284,6 +316,8 @@ def make_concept_image_recorder(
         if len(brief) > MAX_BRIEF_CHARS:
             raise ValueError(f"concept image: 'visual_brief' is longer than {MAX_BRIEF_CHARS}")
         parse_size(size)
+        if view != "isometric" and view not in _VIEW_WORDS:
+            raise ValueError(f"concept image: unknown view {view!r}")
         # The assembly the image is checked against, found before any paid
         # call: one asked for by name or given inline that cannot be used is
         # the caller's error; a project lookup that fails only skips the check.
@@ -316,6 +350,7 @@ def make_concept_image_recorder(
         with tracer.start_as_current_span("twin.render_concept_image") as span:
             span.set_attribute("concept_image.concept", concept_name)
             span.set_attribute("concept_image.size", size)
+            span.set_attribute("concept_image.view", view)
             try:
                 gen = generator or resolve_image_generator()
             except ImageGenerationUnavailableError as exc:
@@ -327,7 +362,7 @@ def make_concept_image_recorder(
             conditioning = rasterise_layout(layout_faces, size)
             mode = "layout_png" if conditioning is not None else "none"
             span.set_attribute("concept_image.conditioning", mode)
-            prompt = build_prompt(brief, concept_name, part_names)
+            prompt = build_prompt(brief, concept_name, part_names, view)
             limit = timeout_s if timeout_s is not None else timeout_from_env()
             try:
                 image = await generate_with_timeout(
@@ -388,6 +423,7 @@ def make_concept_image_recorder(
 
             conditioning_record = {
                 **conditioned_on,
+                "view": view,
                 "image_conditioning": used,
             }
             if used == "none":
@@ -456,6 +492,7 @@ def make_concept_image_recorder(
                 provider=image.provider,
                 model=image.model,
                 conditioning=used,
+                view=view,
                 format=fmt,
                 layout_node_id=layout_node_id,
                 project_id=project_id,
@@ -468,6 +505,7 @@ def make_concept_image_recorder(
                 "content_hash": content_hash,
                 "minio_object_key": key,
                 "conditioned_on": conditioning_record,
+                "view": view,
                 "provider": image.provider,
                 "model": image.model,
                 "linked_to_layout": linked_to_layout,
