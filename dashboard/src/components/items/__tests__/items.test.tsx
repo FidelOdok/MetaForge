@@ -28,7 +28,7 @@ import {
   useItemHistory,
   useRunChanges,
 } from '../../../hooks/use-items';
-import { CurrentItemsPanel } from '../CurrentItemsPanel';
+import { CurrentItemsPanel, GROUP_PREVIEW } from '../CurrentItemsPanel';
 import { ItemHistoryPanel } from '../ItemHistoryPanel';
 import { RevisionCompare } from '../RevisionCompare';
 import { RevisionPicker } from '../RevisionPicker';
@@ -45,11 +45,15 @@ beforeEach(() => {
 });
 
 describe('CurrentItemsPanel', () => {
-  it('lists one row per current item, grouped by type, with ref, gate and run', () => {
+  it('lists one row per current item, grouped by type, with ref, gate and run behind IDs', () => {
     render(<CurrentItemsPanel view={CURRENT_VIEW} projectId="proj-001" />);
-    expect(screen.getByText('Parts')).toBeInTheDocument();
-    expect(screen.getByText('Requirements')).toBeInTheDocument();
+    expect(screen.getAllByText('Parts').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Requirements').length).toBeGreaterThan(0);
     const bracket = screen.getByTestId('item-row-CAD-BRACKET');
+    // References, gate and run are details, off until asked for.
+    expect(within(bracket).queryByText('CAD-BRACKET@3')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('item-row-CS-PAYLOAD')).queryByText('no evidence')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Show references, gates and runs'));
     expect(within(bracket).getByText('CAD-BRACKET@3')).toBeInTheDocument();
     expect(within(bracket).getByText(/gate G6/)).toBeInTheDocument();
     expect(within(bracket).getByText('evidence out of date')).toBeInTheDocument();
@@ -58,6 +62,42 @@ describe('CurrentItemsPanel', () => {
     expect(screen.queryByText('DRAFT')).not.toBeInTheDocument();
     expect(screen.getByText('2 older revisions hidden')).toBeInTheDocument();
     expect(screen.getByText('Pinmap')).toBeInTheDocument();
+  });
+
+  it('narrows the list by search, type and needs-attention', () => {
+    render(<CurrentItemsPanel view={CURRENT_VIEW} projectId="proj-001" />);
+    fireEvent.change(screen.getByLabelText('Search items'), { target: { value: 'pay' } });
+    expect(screen.getByTestId('item-row-CS-PAYLOAD')).toBeInTheDocument();
+    expect(screen.queryByTestId('item-row-CAD-BRACKET')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pinmap')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Search items'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Parts 1' }));
+    expect(screen.getByTestId('item-row-CAD-BRACKET')).toBeInTheDocument();
+    expect(screen.queryByTestId('item-row-CS-PAYLOAD')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('records')).not.toBeInTheDocument();
+
+    // The bracket's evidence is out of date, so it needs attention; the payload does not.
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Needs attention 1' }));
+    expect(screen.getByTestId('item-row-CAD-BRACKET')).toBeInTheDocument();
+    expect(screen.queryByTestId('item-row-CS-PAYLOAD')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Search items'), { target: { value: 'zzz' } });
+    expect(screen.getByText('Nothing matches')).toBeInTheDocument();
+  });
+
+  it('shows the first rows of a long group and the rest on request', () => {
+    const many = Array.from({ length: GROUP_PREVIEW + 3 }, (_, i) => ({
+      ...CURRENT_VIEW.items[1]!,
+      key: `CS-${i}`,
+      name: `Constraint ${i}`,
+      node_id: `n-${i}`,
+    }));
+    render(<CurrentItemsPanel view={{ ...CURRENT_VIEW, items: many }} projectId="proj-001" />);
+    expect(screen.queryByText(`Constraint ${GROUP_PREVIEW}`)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show 3 more' }));
+    expect(screen.getByText(`Constraint ${GROUP_PREVIEW + 2}`)).toBeInTheDocument();
   });
 
   it('shows open drafts labelled DRAFT when Working is on', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { render, screen } from '../../test/test-utils';
+import { render, screen, within } from '../../test/test-utils';
 
 const mockUseProposeRequirementFix = vi.fn();
 vi.mock('../../hooks/use-requirements', () => ({
@@ -30,7 +30,7 @@ vi.mock('../../hooks/use-test-plan', () => ({
   useGenerateTestPlan: vi.fn(),
 }));
 
-import { RequirementsPage } from '../RequirementsPage';
+import { MATRIX_PREVIEW, RequirementsPage } from '../RequirementsPage';
 import {
   useRequirementCoverage,
   useRequirementMatrix,
@@ -252,9 +252,57 @@ describe('RequirementsPage', () => {
     render(<RequirementsPage />);
     const matrix = screen.getByTestId('requirements-matrix');
     expect(matrix).toHaveTextContent('moving_mass_budget');
-    expect(matrix).toHaveTextContent('fail');
+    expect(matrix).toHaveTextContent('Not met');
     expect(matrix).toHaveTextContent('deflection');
-    expect(matrix).toHaveTextContent('pass');
+    expect(matrix).toHaveTextContent('Met');
+  });
+
+  it('filters the matrix by status and search', async () => {
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    mockUseRequirementMatrix.mockReturnValue({
+      data: MATRIX_REPORT,
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementMatrix>);
+    const user = userEvent.setup();
+    render(<RequirementsPage />);
+    const matrix = screen.getByTestId('requirements-matrix');
+
+    await user.click(within(matrix).getByRole('button', { name: 'Not met 1' }));
+    expect(matrix).toHaveTextContent('moving_mass_budget');
+    expect(matrix).not.toHaveTextContent('deflection');
+
+    await user.click(within(matrix).getByRole('button', { name: 'All 2' }));
+    await user.type(within(matrix).getByLabelText('Search requirements'), 'deflect');
+    expect(matrix).toHaveTextContent('deflection');
+    expect(matrix).not.toHaveTextContent('moving_mass_budget');
+
+    await user.clear(within(matrix).getByLabelText('Search requirements'));
+    await user.type(within(matrix).getByLabelText('Search requirements'), 'nothing like this');
+    expect(within(matrix).getByText('Nothing matches')).toBeInTheDocument();
+  });
+
+  it('shows the first rows of a long matrix and the rest on request', async () => {
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    const rows = Array.from({ length: MATRIX_PREVIEW + 4 }, (_, i) => ({
+      ...MATRIX_REPORT.rows[1]!,
+      requirementId: `r${i}`,
+      requirementName: `req_${i}`,
+    }));
+    mockUseRequirementMatrix.mockReturnValue({
+      data: { rows },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementMatrix>);
+    const user = userEvent.setup();
+    render(<RequirementsPage />);
+    expect(screen.queryByText(`req_${MATRIX_PREVIEW}`)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show 4 more' }));
+    expect(screen.getByText(`req_${MATRIX_PREVIEW + 3}`)).toBeInTheDocument();
   });
 
   it('shows the constraint set revision the requirements are read from (FORGE-528)', () => {
@@ -270,7 +318,7 @@ describe('RequirementsPage', () => {
       isLoading: false,
     } as unknown as ReturnType<typeof useRequirementMatrix>);
     render(<RequirementsPage />);
-    expect(screen.getByTestId('requirements-revision')).toHaveTextContent('current: CS-ARM@2');
+    expect(screen.getByTestId('requirements-revision')).toHaveTextContent('from CS-ARM@2');
     expect(screen.getAllByTestId('requirement-revision-ref')).toHaveLength(2);
   });
 
