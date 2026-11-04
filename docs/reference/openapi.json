@@ -1202,6 +1202,137 @@
         "title": "Assumption",
         "type": "object"
       },
+      "AttachFaceRequest": {
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "face_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Face Id",
+            "type": "string"
+          },
+          "item_key": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Item Key",
+            "type": "string"
+          },
+          "op_id": {
+            "maxLength": 100,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Op Id",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "op_id",
+          "item_key",
+          "face_id"
+        ],
+        "title": "AttachFaceRequest",
+        "type": "object"
+      },
+      "AttachableResponse": {
+        "description": "The CAD revisions a sketch can be attached to (validated exact heads).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AttachableRevision"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "project_id",
+          "items"
+        ],
+        "title": "AttachableResponse",
+        "type": "object"
+      },
+      "AttachableRevision": {
+        "properties": {
+          "geometry_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry State"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "item_ref": {
+            "title": "Item Ref",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "item_key",
+          "name",
+          "revision",
+          "item_ref",
+          "node_id"
+        ],
+        "title": "AttachableRevision",
+        "type": "object"
+      },
       "AttemptPromotionRequest": {
         "properties": {
           "comment": {
@@ -5871,7 +6002,7 @@
       },
       "FaceAttachment": {
         "additionalProperties": false,
-        "description": "Where a face-attached plane sits on a model.\n\n``face_ref`` is opaque (whatever the CAD side names the face). The\n``signature`` is a placeholder for the geometry fingerprint (normal,\ncentroid, area) that will let a topology change be detected; it is not\nchecked yet.",
+        "description": "Where a face-attached plane sits on a model (CDE slice 9).\n\n``item_key`` and ``revision`` name the CAD revision; ``face_ref`` is the\nface id ``cadquery.describe_faces`` gave on that revision (meaningful on\nthat revision only). ``signature`` is the face's geometry signature\n(:class:`twin_core.geometry.face_signature.FaceSignature`): the semantic\ntag, normal, offset, area, centroid, loop edge count and adjacent normals\nthat find the face again when the CAD item moves on (PLN-009).\n``remapped_from`` is the attachment this one was found from by a remap,\nas ``KEY@n#face``. While the plane is ``REATTACHMENT_REQUIRED`` the\nattachment and frame are the last valid ones, and ``pending`` says what\nthe remap saw (outcome, candidate faces, the revision it looked at).",
         "properties": {
           "face_ref": {
             "maxLength": 200,
@@ -5884,6 +6015,30 @@
             "minLength": 1,
             "title": "Item Key",
             "type": "string"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending"
+          },
+          "remapped_from": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remapped From"
           },
           "revision": {
             "anyOf": [
@@ -5915,6 +6070,221 @@
           "face_ref"
         ],
         "title": "FaceAttachment",
+        "type": "object"
+      },
+      "FaceListResponse": {
+        "properties": {
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "face_count": {
+            "default": 0,
+            "title": "Face Count",
+            "type": "integer"
+          },
+          "faces": {
+            "items": {
+              "$ref": "#/components/schemas/FaceView"
+            },
+            "title": "Faces",
+            "type": "array"
+          },
+          "geometry_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry State"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "item_ref": {
+            "title": "Item Ref",
+            "type": "string"
+          },
+          "mesh_map": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            "title": "Mesh Map",
+            "type": "object"
+          },
+          "mesh_source": {
+            "default": "",
+            "title": "Mesh Source",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "part_size": {
+            "title": "Part Size",
+            "type": "number"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "solid_count": {
+            "default": 0,
+            "title": "Solid Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id",
+          "item_key",
+          "revision",
+          "item_ref",
+          "node_id",
+          "part_size",
+          "faces"
+        ],
+        "title": "FaceListResponse",
+        "type": "object"
+      },
+      "FaceView": {
+        "properties": {
+          "adjacent": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Adjacent",
+            "type": "array"
+          },
+          "area": {
+            "title": "Area",
+            "type": "number"
+          },
+          "bounding_box": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bounding Box"
+          },
+          "centroid": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Centroid",
+            "type": "array"
+          },
+          "face_id": {
+            "title": "Face Id",
+            "type": "string"
+          },
+          "longest_edge": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longest Edge"
+          },
+          "mesh": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mesh"
+          },
+          "normal": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Normal",
+            "type": "array"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "number"
+          },
+          "outer_loop_edges": {
+            "default": 0,
+            "title": "Outer Loop Edges",
+            "type": "integer"
+          },
+          "semantic_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic Tag"
+          },
+          "signature_summary": {
+            "default": "",
+            "title": "Signature Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "face_id",
+          "normal",
+          "offset",
+          "area",
+          "centroid"
+        ],
+        "title": "FaceView",
         "type": "object"
       },
       "FactCitation": {
@@ -16893,6 +17263,78 @@
           "outcome"
         ],
         "title": "ResolveHoldRequest",
+        "type": "object"
+      },
+      "ResolveReattachmentRequest": {
+        "properties": {
+          "action": {
+            "enum": [
+              "pick_face",
+              "detach_unassigned",
+              "detach_principal"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "face_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Face Id"
+          },
+          "op_id": {
+            "maxLength": 100,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Op Id",
+            "type": "string"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrincipalPlane"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "op_id",
+          "action"
+        ],
+        "title": "ResolveReattachmentRequest",
         "type": "object"
       },
       "ResultUpdate": {
@@ -36421,6 +36863,49 @@
         ]
       }
     },
+    "/v1/twin/projects/{project_id}/attachable-geometry": {
+      "get": {
+        "description": "CAD items whose head is validated exact geometry (a face can be picked on them).",
+        "operationId": "get_attachable_geometry_v1_twin_projects__project_id__attachable_geometry_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachableResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Attachable Geometry",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/projects/{project_id}/impact": {
       "get": {
         "description": "Recorded impacts, newest first.",
@@ -37019,6 +37504,75 @@
           }
         },
         "summary": "Plan Item Migration",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/items/{item_key}/faces": {
+      "get": {
+        "description": "The planar faces of a validated CAD revision, with the GLB mesh map. Reads only.",
+        "operationId": "get_candidate_faces_v1_twin_projects__project_id__items__item_key__faces_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "title": "Item Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Candidate Faces",
         "tags": [
           "twin"
         ]
@@ -37891,6 +38445,68 @@
         ]
       }
     },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/attach-face": {
+      "post": {
+        "description": "Put the sketch on a planar face of a validated CAD revision.\n\nThe plane frame comes from the face: origin at the face centroid on its\nplane, U along the longest straight edge of its outer loop, the normal\noutward, right-handed. The face's geometry signature is stored so the\nface can be found again when the CAD item changes. A retried ``op_id``\nreturns the revision it already made.",
+        "operationId": "attach_sketch_to_face_v1_twin_projects__project_id__sketches__sketch_key__plane_attach_face_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachFaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaneChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attach Sketch To Face",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/confirm": {
       "post": {
         "description": "Place the sketch on the plane the person chose, as the plane item's next revision.\n\nThe choice is applied as given; no inference is consulted. A retried\n``op_id`` returns the revision it already made; choosing the plane the\nsketch is already on changes nothing.",
@@ -38134,6 +38750,68 @@
           }
         },
         "summary": "Preview Sketch Plane Reassign",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/resolve-reattachment": {
+      "post": {
+        "description": "Answer ``REATTACHMENT_REQUIRED``: pick a face, or detach the sketch.\n\n``pick_face`` attaches to ``face_id`` on the attached item's current\nrevision; ``detach_principal`` moves the sketch onto ``principal``\nkeeping its local coordinates; ``detach_unassigned`` keeps it as a\nconcept with no plane. Refused (409) when the plane does not need it.",
+        "operationId": "resolve_sketch_reattachment_v1_twin_projects__project_id__sketches__sketch_key__plane_resolve_reattachment_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveReattachmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaneChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Sketch Reattachment",
         "tags": [
           "twin"
         ]
