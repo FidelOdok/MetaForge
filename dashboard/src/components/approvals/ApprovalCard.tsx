@@ -40,6 +40,7 @@ const KIND_LABELS: Record<ApprovalItem['kind'], string> = {
   sketch: 'Sketch',
   drawing: 'Drawing',
   upload: 'Upload',
+  parametric_sketch: 'Parametric sketch',
 };
 
 const DECISION_LABELS: Record<ApprovalDecision, string> = {

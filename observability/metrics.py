@@ -1010,6 +1010,20 @@ class MetricsRegistry:
         labels=["action", "proposed_by"],
     )
 
+    # ── Sketch compiler (FORGE-791) ────────────────────────────────────
+
+    SKETCH_COMPILE_TOTAL = MetricDefinition(
+        name="metaforge_sketch_compile_total",
+        type="counter",
+        description=(
+            "Sketch compiler writes, by stage (interpretation, promotion, approval) and "
+            "outcome (proposed, promoted, approved, duplicate, refused, failed). A refusal "
+            "is a promotion whose accepted rules do not hold, or a stale or empty one "
+            "(FORGE-791)"
+        ),
+        labels=["stage", "outcome"],
+    )
+
     # ── Sketch reading (FORGE-762) ─────────────────────────────────────
 
     SKETCH_READING_TOTAL = MetricDefinition(
@@ -1222,6 +1236,7 @@ class MetricsRegistry:
             cls.SKETCH_READING_TOTAL,
             cls.SKETCH_SAVE_TOTAL,
             cls.SKETCH_PLANE_TOTAL,
+            cls.SKETCH_COMPILE_TOTAL,
             cls.EXACT_CAD_BUILD_TOTAL,
             cls.GEOMETRY_VALIDITY_TOTAL,
             cls.STEP_EXPORT_TOTAL,
@@ -2182,6 +2197,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.SKETCH_PLANE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"action": action, "proposed_by": proposed_by})
+
+    def record_sketch_compile(self, stage: str, outcome: str) -> None:
+        """Record one sketch compiler write (FORGE-791)."""
+        counter = self._instruments.get(MetricsRegistry.SKETCH_COMPILE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"stage": stage, "outcome": outcome})
 
     def record_supervisor_action(self, action: str, reason: str) -> None:
         """Record one run supervisor action (FORGE-734)."""

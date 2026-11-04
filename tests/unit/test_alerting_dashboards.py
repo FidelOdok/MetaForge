@@ -123,8 +123,9 @@ class TestAlertingRules:
         # + 1 concept meshes unavailable (FORGE-778).
         # + 1 tool jobs failing (FORGE-783).
         # + 1 sketch saves (FORGE-789), + 1 scheduling (FORGE-788), + 1 sketch planes (FORGE-790).
+        # + 1 sketch compiler (FORGE-791).
         # + 2 exact CAD (GeometryValidityFailureSpike, StepRoundTripFailing).
-        assert len(rules) == 72
+        assert len(rules) == 73
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -191,8 +192,9 @@ class TestAlertingRules:
         # + 1 concept meshes unavailable (FORGE-778).
         # + ToolJobsFailingOrInterrupted (FORGE-783).
         # + 1 sketch saves (FORGE-789), + 1 scheduling (FORGE-788), + 1 sketch planes (FORGE-790).
+        # + 1 sketch compiler (FORGE-791).
         # + 2 exact CAD (CDE slice 6).
-        assert len(warnings) == 57
+        assert len(warnings) == 58
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -312,6 +314,7 @@ class TestAlertingRules:
                 "SketchReadingUnavailable",
                 "SketchSavesFailing",
                 "SketchPlaneChangesFailing",
+                "SketchCompilerFailing",
                 "GeometryValidityFailureSpike",
                 "StepRoundTripFailing",
                 # FORGE-778: concept reference meshes cannot be generated.

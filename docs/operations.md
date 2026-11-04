@@ -26,6 +26,7 @@ sidecar) and `routes.py`.
 | A Create chat turn | `chat:<turn_id>` | `chat` | none |
 | A sketch save from the Create stage | `job:sketch-<save_id>` | `job` (domain `sketch`) | none |
 | A sketch plane change (confirm, reassign, undo, archive) | `job:sketch-plane-<op_id>` | `job` (domain `sketch`) | none |
+| Making a sketch editable: the stored proposal, its promotion and sign-off | `job:sketch-compile-<interpretation_id>` | `job` (domain `sketch`) | `interpretation_proposed`, `parametric_review` |
 
 Approvals are not operations. A run waiting at a gate emits a
 `review_required` event whose `action_refs` name the approval to decide

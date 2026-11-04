@@ -11,7 +11,9 @@ export type ApprovalKind =
   | 'design_loop'
   | 'sketch'
   | 'drawing'
-  | 'upload';
+  | 'upload'
+  /** A sketch promoted from its interpretation (FORGE-791). */
+  | 'parametric_sketch';
 
 export type ApprovalStatus =
   | 'pending'

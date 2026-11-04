@@ -41,6 +41,7 @@ The id is `<prefix>:<native id>`. The prefix says which store holds the item;
 | `design_loop:` | `design_loop` | The winning candidate of a closed design loop | `POST /v1/design-loop/{id}/approve` |
 | `sketch:` | `sketch` | A design sketch work product | `POST /v1/twin/nodes/{id}/approve-sketch` |
 | `drawing:` | `drawing` | A technical drawing work product | `POST /v1/twin/nodes/{id}/approve-technical-drawing` |
+| `parametric_sketch:` | `parametric_sketch` | A sketch promoted from its interpretation on the Create stage, with only the accepted rules. A human-authority kind. See [the sketch compiler](twin_schema.md#sketch-compiler) | `POST /v1/twin/nodes/{id}/approve-parametric-sketch` |
 | `upload:` | `upload` | Files staged from outside: a plugin tool call, a signed upload link, the local plugin, or the API. A human-authority kind. See [Files in and out](file-transfer.md) | approve imports the files, reject deletes them |
 
 ## The item
@@ -73,7 +74,8 @@ and keeps its full message.
 not ready, `retry` is absent once retries are used up, and `rework` is offered
 only with `rework_targets` (the earlier phase ids of the run's own flow) while
 rework cycles remain. Held tool calls, change proposals offer `approve` and
-`reject`; design loops, sketches and drawings offer `approve` only.
+`reject`; design loops, sketches, parametric sketches and drawings offer
+`approve` only.
 
 When a pending item cannot be decided here, `decidable` is false and
 `not_decidable_reason` says why. A held tool call is decidable here whichever
@@ -131,7 +133,7 @@ restart:
 |------|--------------------|
 | `gate`, `tool` | The run's `request.decisions` log, written with the run ledger on the decision's transition. |
 | `change` | `reviewer`, `reviewer_verified`, `decision_surface`, `decision_on_behalf_of`, `decision_agent` on the proposal. |
-| `sketch`, `drawing` | `approved_by`, `approver_verified`, `approval_surface`, `approval_on_behalf_of`, `approval_agent` in the work product metadata. |
+| `sketch`, `drawing`, `parametric_sketch` | `approved_by`, `approver_verified`, `approval_surface`, `approval_on_behalf_of`, `approval_agent` in the work product metadata. |
 | `design_loop` | The same fields on the winning iteration node. |
 
 A decision made on an older route reports `surface: "unknown"`, because no
@@ -529,8 +531,8 @@ An agent decision without `X-MetaForge-On-Behalf-Of` is a 422.
 
 **Human-authority approvals stay human.** Items of kind `human_authority`
 (`twin.attempt_promotion`, `twin.approve_design_loop`,
-`twin.approve_engineering_change`), `design_loop` and `upload` cannot be decided by an
-agent. For an agent caller they show `decidable: false` with an explanation,
+`twin.approve_engineering_change`), `design_loop`, `upload` and `parametric_sketch`
+cannot be decided by an agent. For an agent caller they show `decidable: false` with an explanation,
 and a decision attempt is a 403. The gateway owner can delegate them by setting
 `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true` on the gateway (default off).
 

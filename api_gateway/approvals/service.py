@@ -449,10 +449,30 @@ def _loop_item(winner: Any) -> ApprovalItem:
     )
 
 
+_WP_LABELS = {
+    "sketch": "Design sketch",
+    "drawing": "Technical drawing",
+    "parametric_sketch": "Parametric sketch",
+}
+_WP_SUMMARIES = {
+    "sketch": "{label} awaiting sign-off before build work",
+    "drawing": "{label} awaiting sign-off before build work",
+    "parametric_sketch": (
+        "{label} awaiting sign-off: its accepted rules and confirmed dimensions become "
+        "the editable sketch"
+    ),
+}
+_WP_TYPES = {
+    "sketch": WorkProductType.DESIGN_SKETCH,
+    "drawing": WorkProductType.TECHNICAL_DRAWING,
+    "parametric_sketch": WorkProductType.PARAMETRIC_SKETCH,
+}
+
+
 def _wp_item(kind: str, wp: Any) -> ApprovalItem:
     item_id = f"{kind}:{wp.id}"
     approved = bool(wp.metadata.get("approved"))
-    label = "Design sketch" if kind == "sketch" else "Technical drawing"
+    label = _WP_LABELS[kind]
     fallback = (
         DecisionRecord(
             decision="approve",
@@ -470,10 +490,10 @@ def _wp_item(kind: str, wp: Any) -> ApprovalItem:
     decidable, why = _decidable(not approved, allowed)
     return ApprovalItem(
         id=item_id,
-        kind="sketch" if kind == "sketch" else "drawing",
+        kind=kind,  # type: ignore[arg-type]
         status="approved" if approved else "pending",
         title=f"{label}: {wp.name}",
-        summary="" if approved else f"{label} awaiting sign-off before build work",
+        summary="" if approved else _WP_SUMMARIES[kind].format(label=label),
         project_id=str(wp.project_id) if wp.project_id else None,
         created_at=_iso(wp.created_at),
         route="dashboard",
@@ -493,10 +513,7 @@ async def _twin_items(app: Any) -> list[ApprovalItem]:
     if twin is None:
         return []
     items: list[ApprovalItem] = []
-    for kind, wp_type in (
-        ("sketch", WorkProductType.DESIGN_SKETCH),
-        ("drawing", WorkProductType.TECHNICAL_DRAWING),
-    ):
+    for kind, wp_type in _WP_TYPES.items():
         try:
             for wp in await twin.list_work_products(work_product_type=wp_type):
                 items.append(_wp_item(kind, wp))
@@ -623,7 +640,13 @@ async def _decide_upload(
 
 #: Kinds only a person may decide, unless the owner delegates them (FORGE-510).
 #: An upload is one: the agent that sent the files may not let them in itself.
-HUMAN_AUTHORITY_KINDS: tuple[str, ...] = ("human_authority", "design_loop", "upload")
+HUMAN_AUTHORITY_KINDS: tuple[str, ...] = (
+    "human_authority",
+    "design_loop",
+    "upload",
+    # A parametric sketch is the sketch a person stands behind (PR-004).
+    "parametric_sketch",
+)
 ALLOW_AGENT_HUMAN_AUTHORITY_ENV = "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY"
 AGENT_HUMAN_AUTHORITY_REASON = (
     "this approval needs a human decision; agents may not decide it unless the gateway "
@@ -742,10 +765,7 @@ async def get_item(app: Any, item_id: str) -> ApprovalItem:
             raise _not_found(item_id)
         return _loop_item(winner)
     wp = await twin.get_work_product(UUID(raw))
-    expected = (
-        WorkProductType.DESIGN_SKETCH if kind == "sketch" else WorkProductType.TECHNICAL_DRAWING
-    )
-    if wp is None or wp.type != expected:
+    if wp is None or wp.type != _WP_TYPES.get(kind):
         raise _not_found(item_id)
     return _wp_item(kind, wp)
 
@@ -862,6 +882,10 @@ async def decide(
             await _decide_upload(app, raw, decision, reason, approver, surface)
         elif kind == "sketch":
             await twin_routes.approve_sketch_node(UUID(raw), label, audit)
+        elif kind == "parametric_sketch":
+            from api_gateway.twin.sketch_compiler_routes import approve_parametric_node
+
+            await approve_parametric_node(UUID(raw), label, audit)
         else:
             await twin_routes.approve_drawing_node(UUID(raw), label, audit)
     except Exception:

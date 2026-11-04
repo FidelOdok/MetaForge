@@ -41,9 +41,11 @@ doc §6.2.3/§6.6.4), a Lowering Pass/OCCT-`TNaming` concern, not something
 this schema tracks or validates.
 """
 
+from __future__ import annotations
+
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Vec3 = tuple[float, float, float]
 
@@ -100,26 +102,61 @@ class CreateParametricEntity(IREntityBase):
 # ---------------------------------------------------------------------------
 
 
-class SketchLine(BaseModel):
+class SketchStrokeRange(BaseModel):
+    """A run of one stroke's points (indices into its ``points``, inclusive)."""
+
+    stroke_id: str = Field(min_length=1, max_length=100)
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+
+
+class SketchElementBase(BaseModel):
+    """Optional identity and provenance on every sketch element.
+
+    All of these default to "not set", so a sketch written before they
+    existed (an agent's ``generate_cad_ir`` output, a hand-written IR) reads
+    and lowers exactly as before.
+
+    A sketch compiled from a person's strokes sets them: a stable ``id`` per
+    element (the stroke id plus a segment number), the strokes and point
+    ranges it was fitted to (SKP-001, SKP-006), the fit's ``confidence`` and
+    ``residual``, and ``estimated`` on every element read off a drawing. An
+    estimated element is a reading, never a measurement (PR-003, FSG-009).
+    ``construction`` marks helper geometry (a symmetry axis): constrained and
+    solved, but never part of a profile, and skipped by the Lowering Passes.
+    """
+
+    id: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"^[^.]+$")
+    source_stroke_ids: list[str] = Field(default_factory=list, max_length=50)
+    source_ranges: list[SketchStrokeRange] = Field(default_factory=list, max_length=50)
+    estimated: bool = False
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    residual: float | None = Field(default=None, ge=0)
+    construction: bool = False
+
+
+class SketchLine(SketchElementBase):
     type: Literal["line"] = "line"
     start: tuple[float, float]
     end: tuple[float, float]
 
 
-class SketchCircle(BaseModel):
+class SketchCircle(SketchElementBase):
     type: Literal["circle"] = "circle"
     center: tuple[float, float]
     radius: float = Field(gt=0)
 
 
-class SketchRectangle(BaseModel):
+class SketchRectangle(SketchElementBase):
     type: Literal["rectangle"] = "rectangle"
     origin: tuple[float, float]
     width: float = Field(gt=0)
     height: float = Field(gt=0)
 
 
-class SketchArc(BaseModel):
+class SketchArc(SketchElementBase):
+    """An arc, from ``start_angle`` to ``end_angle`` (degrees) in increasing angle."""
+
     type: Literal["arc"] = "arc"
     center: tuple[float, float]
     radius: float = Field(gt=0)
@@ -127,10 +164,107 @@ class SketchArc(BaseModel):
     end_angle: float
 
 
+class SketchEllipse(SketchElementBase):
+    """A full ellipse. ``rotation`` is the major axis direction in degrees."""
+
+    type: Literal["ellipse"] = "ellipse"
+    center: tuple[float, float]
+    major_radius: float = Field(gt=0)
+    minor_radius: float = Field(gt=0)
+    rotation: float = 0.0
+
+    @model_validator(mode="after")
+    def _minor_not_larger(self) -> SketchEllipse:
+        if self.minor_radius > self.major_radius:
+            raise ValueError("an ellipse's minor_radius cannot exceed its major_radius")
+        return self
+
+
+class SketchSpline(SketchElementBase):
+    """A smooth curve through ``points`` in order (Catmull-Rom).
+
+    ``closed`` joins the last point to the first.
+    """
+
+    type: Literal["spline"] = "spline"
+    points: list[tuple[float, float]] = Field(min_length=2, max_length=500)
+    closed: bool = False
+
+
 SketchElement = Annotated[
-    SketchLine | SketchCircle | SketchRectangle | SketchArc,
+    SketchLine | SketchCircle | SketchRectangle | SketchArc | SketchEllipse | SketchSpline,
     Field(discriminator="type"),
 ]
+
+SketchConstraintType = Literal[
+    "coincident",
+    "horizontal",
+    "vertical",
+    "parallel",
+    "perpendicular",
+    "tangent",
+    "equal",
+    "concentric",
+    "symmetric",
+    "radius",
+    "length",
+]
+#: Constraints that carry a value.
+SKETCH_DIMENSION_TYPES: frozenset[str] = frozenset({"radius", "length"})
+#: How many refs each constraint type takes.
+SKETCH_CONSTRAINT_ARITY: dict[str, int] = {
+    "coincident": 2,
+    "horizontal": 1,
+    "vertical": 1,
+    "parallel": 2,
+    "perpendicular": 2,
+    "tangent": 2,
+    "equal": 2,
+    "concentric": 2,
+    "symmetric": 3,
+    "radius": 1,
+    "length": 1,
+}
+
+
+class SketchConstraint(BaseModel):
+    """A geometric rule or a dimension over a sketch's elements.
+
+    ``refs`` name elements by ``id``, or one of their points as
+    ``<id>.start``, ``<id>.end`` or ``<id>.center``. (They are not ``*_ref``
+    fields: they point inside one sketch entity, not at other entities, so
+    the document-level referential-integrity scan does not see them.)
+
+    ``status`` is ``proposed`` until a person accepts or rejects it; only
+    ``accepted`` constraints are solved, checked or promoted (SKP-004).
+    ``source`` says where a value came from: ``estimated`` (read off a
+    drawing), ``inferred`` (a rule guessed from a drawing) or
+    ``human_confirmed`` (a person stands behind it, PR-004). A dimension's
+    ``unit`` is ``unknown`` until a person confirms one.
+    """
+
+    id: str = Field(min_length=1, max_length=300)
+    type: SketchConstraintType
+    refs: list[str] = Field(min_length=1, max_length=3)
+    value: float | None = None
+    unit: Literal["unknown", "mm", "in", "deg"] | None = None
+    status: Literal["proposed", "accepted", "rejected"] = "proposed"
+    source: Literal["estimated", "inferred", "human_confirmed"] = "inferred"
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    #: Tangency between two circles or arcs: touching outside or inside.
+    variant: Literal["external", "internal"] | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> SketchConstraint:
+        arity = SKETCH_CONSTRAINT_ARITY[self.type]
+        if len(self.refs) != arity:
+            raise ValueError(f"a {self.type} constraint takes {arity} refs, not {len(self.refs)}")
+        if self.type in SKETCH_DIMENSION_TYPES:
+            if self.value is None or not (self.value > 0) or self.value != self.value:
+                raise ValueError(f"a {self.type} dimension needs a positive value")
+        elif self.source == "estimated":
+            raise ValueError("only a dimension can be estimated; a rule is inferred or confirmed")
+        return self
 
 
 class CreateBodyEntity(IREntityBase):
@@ -141,11 +275,21 @@ class CreateBodyEntity(IREntityBase):
 
 
 class SketchEntity(IREntityBase):
+    """A 2D profile on a plane of a body.
+
+    ``constraints`` (accepted ones, from a promoted parametric sketch) and
+    ``plane_id`` (a sketch plane the plane manager assigned) are optional and
+    carried through as data: no Lowering Pass reads them yet, so a sketch
+    without them is unchanged.
+    """
+
     op: Literal["sketch"] = "sketch"
     body_ref: str
     plane: Literal["XY", "XZ", "YZ"] = "XY"
     offset: float = 0.0
     elements: list[SketchElement] = Field(default_factory=list)
+    constraints: list[SketchConstraint] = Field(default_factory=list)
+    plane_id: str | None = Field(default=None, max_length=200)
 
 
 class PadEntity(IREntityBase):

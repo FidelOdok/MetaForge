@@ -298,7 +298,12 @@ async def _lower_one(
                 "body_id": obj_ids[entity.body_ref],
                 "plane": entity.plane,
                 "offset": entity.offset,
-                "elements": [_lower_sketch_element(el) for el in entity.elements],
+                "elements": [
+                    # Construction geometry is solved, never part of the profile.
+                    _lower_sketch_element(el)
+                    for el in entity.elements
+                    if not el.construction
+                ],
             },
         )
         return str(result["obj_id"])
