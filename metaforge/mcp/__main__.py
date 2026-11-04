@@ -1946,6 +1946,11 @@ async def _bootstrap(
     from metaforge.mcp.live_publisher import http_operation_publisher
 
     set_operation_event_publisher(http_operation_publisher())
+    # FORGE-793: a head this process moves walks its interface edges with the
+    # same approval policy, pin map diff and operation event as the gateway.
+    from api_gateway.twin.impact_service import install_impact_hooks
+
+    install_impact_hooks()
     # FORGE-788: a job whose target item moved on while it ran ends stale here
     # too, against the same twin the sidecar's tools write to.
     from api_gateway.operations.heads import make_item_head_resolver

@@ -87,6 +87,7 @@ from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
 from api_gateway.twin.face_attachment_routes import router as twin_face_attachment_router
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
+from api_gateway.twin.impact_routes import router as twin_impact_router
 from api_gateway.twin.item_migration_routes import router as twin_item_migration_router
 from api_gateway.twin.item_routes import router as twin_items_router
 from api_gateway.twin.live_routes import publish_local as _publish_live_local
@@ -2364,6 +2365,13 @@ def create_app(
     app.include_router(twin_exact_cad_router)
     # CDE slice 9: sketches on model faces and their reattachment.
     app.include_router(twin_face_attachment_router)
+    # FORGE-793: interface edges and cross-domain impact. The hooks give the
+    # twin's impact walk the approval policy, the operation stream and the
+    # pin map diff; the MCP sidecar installs the same ones.
+    app.include_router(twin_impact_router)
+    from api_gateway.twin.impact_service import install_impact_hooks
+
+    install_impact_hooks()
     app.include_router(hierarchy_router)
     app.include_router(bom_router)
     app.include_router(bom_risk_router)

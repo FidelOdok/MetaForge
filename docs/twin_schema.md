@@ -1217,6 +1217,8 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
+| `interface_edge` | record | | `WorkProduct` `interface_edge`: a typed coupling between two items in different domains, pinned to their revisions. Its status (`proposed`, `confirmed`, `removed`) changes in place; it is never deleted. See [interface edges](#interface-edges-and-cross-domain-impact) |
+| `change_impact` | record | | `WorkProduct` `change_impact`: what one change did across domains, the stale results it left and the reruns it proposes, each rerun's approval decision recorded in place |
 | `approval` | record | | approvals service |
 | `session` | record | | `agent_sessions` (Postgres) |
 | `run` | record | | runs / design-flow workflow |
@@ -1681,7 +1683,90 @@ WebAssembly.
 
 ---
 
-### 2.34 Migrating legacy nodes into items {#migrating-legacy-nodes}
+### 2.34 Interface edges and cross-domain impact {#interface-edges-and-cross-domain-impact}
+
+A change to one item can matter to items in other domains: moving an enclosure's standoffs moves where the board's mounting holes must be; changing a pin map changes what the firmware drivers address. Interface edges record those couplings explicitly, and the impact walker follows them when a head moves. This is product dependency between items. It is not the workflow-step DAG in `orchestrator/dependency_engine.py`, which orders agent steps and is unchanged (see [cross-domain impact](architecture.md#cross-domain-impact)).
+
+#### Interface edges
+
+An `InterfaceEdge` (`twin_core/models/interface.py`) is typed and revision-aware:
+
+| Field | Meaning |
+|-------|---------|
+| `type` | `mounts_to` (a part carries a board's mounting holes), `clearance_to` (an enclosure must clear a board outline or component envelope), `connects_via` (a connector meets a cable or cut-out), `pin_maps_to` (an MCU pin or net is used by a firmware module, driver or config), `simulation_input_of` (geometry, material or load feeds a simulation), `feature_of` (a sketch or sketch plane feeds what is built from it) |
+| `source`, `target` | each an item key pinned to the revision the coupling was stated against (`ref`, `revision`, `domain`, `item_type`, `node_id`), or a result record as `record:<uuid>` |
+| `domain_pair` | the two ends' domains, from the item type (`cad_model` is mechanical, `pcb_layout` and `pinmap` electronics, `firmware_source` firmware) |
+| `declared_by` | `human`, `tool` (recorded as a fact by the tool that ran) or `inferred` (MetaForge read it from data) |
+| `confidence` | 1.0 for a person's edge; an inference says how sure it is |
+| `status` | `proposed`, `confirmed` or `removed`. An inferred edge is `proposed` until a person confirms it; a person's edge is confirmed at once. A removed edge is kept, never deleted, and never proposed again |
+| `coupled_parameters` | what crosses the interface, when known (`mounting_holes`, pin `PA5`, peripheral `SPI1`) |
+| `evidence` | what an inferred or tool edge was read from (the names it matched, the files, the counts it compared) |
+
+`mounts_to`, `clearance_to` and `connects_via` are symmetric: a change on either end reaches the other. A stored edge is an `interface_edge` work product. Two types are derived on read rather than stored twice: `simulation_input_of` from a `simulation_result`'s own revision pins, and `feature_of` from the sketch layer's `DEPENDS_ON` edges (kinds `sketch_plane` and `sketch_compiler`). Both are `declared_by: tool`, `confirmed` and `derived: true`. Confirming an edge re-pins both ends to their current heads; the list route reports an edge whose pinned revision is behind the head (`source_behind`, `target_behind`).
+
+Proposals come only from data the tools already recorded (`api_gateway/twin/interface_proposals.py`). With no data behind a pair there is no edge.
+
+| Edge | Proposed from |
+|------|---------------|
+| `mounts_to` | the board revision's `mounting_holes` and the enclosure revision's `mounting_standoffs` (or `mounting_holes`), the fields the cross-domain mounting check reads. Confidence grows with the holes that sit on a standoff |
+| `clearance_to` | the board's `dimensions` or `board_outline` and the enclosure's `dimensions` |
+| `connects_via` | the board's `connectors` and the enclosure's `cutouts` |
+| `pin_maps_to` | the pin map's recorded file (JSON or CSV) against the firmware item's source files: a firmware that names a pin (`PA5`), a peripheral (`SPI1`, or its `hspi1` handle) or a net from the pin map. The matched names become `coupled_parameters`; the files are in `evidence.modules` |
+
+An enclosure is a `cad_model` or `assembly` item whose head carries `subtype: enclosure` or one of the enclosure fields. Proposals run on `POST .../interfaces/propose` and after each head move of a board, enclosure, pin map or firmware item; `simulation_input_of` and `feature_of` need none.
+
+#### The impact walker
+
+`twin_core/impact/cross_domain.py` takes a change (`item_key`, old and new revision, and the changed parameters when known) and walks the edges breadth first, bounded by `max_depth` (default 4, at most 8), recording any cycle it meets. For each affected item or result it reports the domain, whether it is direct (one edge away) or indirect, every edge (coupling) that reaches it with a plain rationale ("Enclosure: mounting hole positions changed; Main board mounting depends on them"), and a proposed action. An edge whose `coupled_parameters` the change does not touch is not followed, and the item is listed in `not_affected` with the reason; with `include_unaffected`, every other item is listed too (XDM-006). Changed parameters are unknown (never narrowing) unless they can be read: a pin map's pins are diffed from its files, and otherwise metadata is compared only when the content itself did not change.
+
+Only a confirmed edge marks results stale or proposes reruns. A proposed edge is reported as a possible impact with the action "Confirm or remove the suggested link", so an unconfirmed guess never invalidates anything.
+
+The walk reuses what exists: [record pins](#records-pinned-to-revisions) for what a revision's results are, and `StalenessEngine.preview_impact` for constraints and engineering entities pinned through `metadata.depends_on` (reported as review actions).
+
+#### Revision-scoped invalidation
+
+When a head moves (a write outside a run, or a gate approving a change set), `record_pins.on_head_moved` marks records pinned to older revisions of that item `stale` as before, then runs the walk. A directly affected item's results whose check read the changed item across the interface are marked `stale` too: a firmware build or static check across `pin_maps_to`, a DRC or clearance check across `mounts_to`, `clearance_to` or `connects_via`, an FEA across `simulation_input_of`. Each keeps its own pins, and `stale_for` names the input it was valid against (`{"PIN-MAIN": {"pinned": 1, "current": 2}}`). Nothing is deleted or relabelled as a pass: an old result stays browsable as history with the revision it was for. Indirect impacts are reported, not invalidated, since the item between has not changed yet.
+
+The outcome is recorded as a `change_impact` work product: the impact graph, the affected items by domain, the stale results (with what each said before, `previous_status`), the proposed reruns and review actions, the plain summary and next action, the approval policy it was judged under, and its operation id. It is the change transaction view of CHG-001: operation, source and target revision, targets, proposed effects, impact graph and approval policy (`transaction` in the API).
+
+#### Validation statuses {#validation-statuses}
+
+Every check result maps onto one vocabulary (`twin_core/consistency/validation_status.py`): `PASS`, `WARN`, `FAIL`, `INCOMPLETE`, `NOT_EVALUATED` and `STALE`. The existing status fields are mapped, not replaced:
+
+| Existing field | Mapping |
+|----------------|---------|
+| `GateCheckStatus` | `pass`, `fail`, `not_evaluated`: same names |
+| cross-domain `CheckStatus` | `no_data` is `NOT_EVALUATED` |
+| requirement matrix status | `uncertain` is `WARN`, `no_data` is `NOT_EVALUATED`, `unverified` is `INCOMPLETE`, `stale` is `STALE` |
+| `ConstraintStatus` | `unevaluated` is `NOT_EVALUATED` |
+| a record's `staleness` | anything but `current` or `revalidated` is `STALE`, whatever the result said |
+
+`NOT_EVALUATED` means no result exists; `INCOMPLETE` means a result exists but carries no verdict (a `passed` flag, a `status` word, or violation and error counts). A `CheckResult` binds the check to its input revisions (`KEY@n`) and the record holding the tool's actual output; a `PASS` or `WARN` without both is downgraded to `NOT_EVALUATED`. Lack of evidence is never a pass.
+
+#### API
+
+| Route | Purpose |
+|-------|---------|
+| `GET /v1/twin/projects/{id}/interfaces` | every edge (stored and derived) and the items they join; `include_removed`, `include_derived` |
+| `POST /v1/twin/projects/{id}/interfaces` | a person declares an edge (`type`, `source`, `target`, `coupled_parameters`, `rationale`); declaring a proposed link confirms it |
+| `POST /v1/twin/projects/{id}/interfaces/propose` | propose edges from recorded data, optionally for one `item_key` |
+| `POST /v1/twin/projects/{id}/interfaces/{edge_id}/confirm` | confirm, re-pinned to the current heads |
+| `DELETE /v1/twin/projects/{id}/interfaces/{edge_id}` | remove (kept as `removed`) |
+| `POST /v1/twin/projects/{id}/impact/preview` | the impact of a proposed change; writes nothing, results it would stale are `marked: false` |
+| `GET /v1/twin/projects/{id}/impact` | recorded impacts, newest first |
+| `GET /v1/twin/projects/{id}/impact/{change_or_revision}` | one recorded impact by id, by `KEY@n`, or the latest for a bare `KEY` |
+
+The proposed reruns, their dispositions and approvals are described in [approvals](approvals.md#re-checks-after-a-cross-domain-change); the operation event in [operations](operations.md#cross-domain-impact).
+
+Observability: `metaforge_cross_domain_impact_total{event, kind}` (`previewed`, `recorded`, `failed`, `result_invalidated` by check kind, `rerun_proposed` by disposition, `rerun_decided`) and `metaforge_interface_edge_total{type, provenance, action}`; the `CrossDomainImpactFailing` alert; log events `cross_domain_impact_recorded`, `cross_domain_impact_failed`, `cross_domain_impact_previewed`, `record_marked_stale_for_input`, `interface_edge_declared`, `interface_edge_proposed`, `interface_edge_confirmed`, `interface_edge_removed`, `interface_edges_proposed`, `impact_rerun_decided`; spans `twin.impact.analyse`, `twin.interfaces.*`, `twin.impact.publish` and `twin.impact_routes.*`. A failed walk after a head move is logged and counted, never raised: the head move stands.
+
+Limits: rerun approval records the decision; the tool is then run by the agent or person, and its new result supersedes the stale one through its pins. Board and enclosure proposals read the recorded metadata fields, not the KiCad or STEP files themselves.
+
+*Source: `twin_core/models/interface.py`, `twin_core/impact/`, `twin_core/consistency/validation_status.py`, `api_gateway/twin/interface_proposals.py`, `api_gateway/twin/impact_service.py`, `api_gateway/twin/impact_routes.py`*
+
+---
+
+### 2.35 Migrating legacy nodes into items {#migrating-legacy-nodes}
 
 A project written before items existed holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
 

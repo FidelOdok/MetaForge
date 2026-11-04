@@ -1058,6 +1058,26 @@ groups:
             face_remap_failed): a spike of "unavailable" means the CadQuery
             adapter image does not serve cadquery.describe_faces yet.
 
+  # FORGE-793 -- cross-domain impact (twin_core/impact/cross_domain.py).
+  - name: metaforge_cross_domain_impact
+    rules:
+      - alert: CrossDomainImpactFailing
+        expr: >-
+          sum(increase(metaforge_cross_domain_impact_total{event="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_cross_domain_impact_total{event=~"recorded|failed"}[30m])), 1) > 0.2
+          and sum(increase(metaforge_cross_domain_impact_total{event=~"recorded|failed"}[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cross-domain impact is not being recorded"
+          description: >-
+            More than a fifth of the last half hour's design changes failed
+            their cross-domain impact walk. The changes themselves are saved,
+            but results that depend on them across an interface (a DRC run, a
+            firmware build) may still read as current. Check the logs
+            (cross_domain_impact_failed).
+
   # FORGE-734 -- run supervisor (api_gateway/runs/supervisor.py).
   - name: metaforge_run_supervisor
     rules:

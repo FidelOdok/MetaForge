@@ -51,7 +51,16 @@ def test_definitions_are_the_versioned_types() -> None:
 
 
 def test_records_are_append_only_and_never_definitions() -> None:
-    for name in ("design_decision", "simulation_result", "approval", "session", "run"):
+    for name in (
+        "design_decision",
+        "simulation_result",
+        "approval",
+        "session",
+        "run",
+        # Cross-domain interface edges and the impact a change had.
+        "interface_edge",
+        "change_impact",
+    ):
         spec = classify(name)
         assert spec is not None and spec.kind is TwinTypeKind.RECORD
         assert not is_definition(name)

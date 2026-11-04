@@ -181,6 +181,16 @@ class WorkProductType(StrEnum):
     # interpretation and the strokes revision. Held for approval like a
     # design_sketch.
     PARAMETRIC_SKETCH = "parametric_sketch"
+    # A typed, revision-aware coupling between two items in different
+    # domains (twin_core/models/interface.py): a board mounted to an
+    # enclosure, a pin map used by a firmware module. Its source and target
+    # are item keys with pinned revisions; its status changes in place
+    # (proposed, confirmed, removed), so it is never deleted.
+    INTERFACE_EDGE = "interface_edge"
+    # What one change did across domains (twin_core/impact/cross_domain.py):
+    # the impact graph, the results it made stale and the reruns it proposes,
+    # with each rerun's approval decision recorded in place.
+    CHANGE_IMPACT = "change_impact"
 
 
 class ConstraintSeverity(StrEnum):

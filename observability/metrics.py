@@ -1040,6 +1040,30 @@ class MetricsRegistry:
         labels=["commit"],
     )
 
+    # ── Cross-domain dependency and impact (FORGE-793) ─────────────────
+
+    CROSS_DOMAIN_IMPACT_TOTAL = MetricDefinition(
+        name="metaforge_cross_domain_impact_total",
+        type="counter",
+        description=(
+            "Cross-domain impact events, by event (previewed, recorded, failed, "
+            "result_invalidated, rerun_proposed, rerun_decided) and kind (the trigger for "
+            "previewed/recorded/failed, the check kind for result_invalidated, the "
+            "disposition or decision for reruns) (FORGE-793)"
+        ),
+        labels=["event", "kind"],
+    )
+    INTERFACE_EDGE_TOTAL = MetricDefinition(
+        name="metaforge_interface_edge_total",
+        type="counter",
+        description=(
+            "Interface edge actions, by type (mounts_to, clearance_to, connects_via, "
+            "pin_maps_to, simulation_input_of, feature_of), provenance (human, tool, "
+            "inferred) and action (declared, proposed, confirmed, removed) (FORGE-793)"
+        ),
+        labels=["type", "provenance", "action"],
+    )
+
     # ── Sketch compiler (FORGE-791) ────────────────────────────────────
 
     SKETCH_COMPILE_TOTAL = MetricDefinition(
@@ -1275,6 +1299,8 @@ class MetricsRegistry:
             cls.STEP_EXPORT_TOTAL,
             cls.STEP_ROUND_TRIP_TOTAL,
             cls.CAD_ARTIFACT_DURATION,
+            cls.CROSS_DOMAIN_IMPACT_TOTAL,
+            cls.INTERFACE_EDGE_TOTAL,
             cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
             cls.CONCEPT_MESH_TOTAL,
         ]
@@ -2224,6 +2250,20 @@ class MetricsCollector:
         hist = self._instruments.get(MetricsRegistry.CAD_ARTIFACT_DURATION.name)
         if hist is not None:
             hist.record(max(0.0, float(seconds)), attributes={"stage": stage})
+
+    def record_cross_domain_impact(self, event: str, kind: str) -> None:
+        """Record one cross-domain impact event (FORGE-793)."""
+        counter = self._instruments.get(MetricsRegistry.CROSS_DOMAIN_IMPACT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"event": event, "kind": kind})
+
+    def record_interface_edge(self, edge_type: str, provenance: str, action: str) -> None:
+        """Record one interface edge action (FORGE-793)."""
+        counter = self._instruments.get(MetricsRegistry.INTERFACE_EDGE_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1, attributes={"type": edge_type, "provenance": provenance, "action": action}
+            )
 
     def record_sketch_plane(self, action: str, proposed_by: str) -> None:
         """Record one sketch plane manager action (FORGE-790)."""
