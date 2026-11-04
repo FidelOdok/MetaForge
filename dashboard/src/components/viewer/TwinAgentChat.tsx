@@ -23,6 +23,7 @@ import {
 import { useHarnessModels, useHarnessProviders, useHarnessTools } from '../../hooks/use-harness';
 import { ActivitySteps } from '../chat/ActivitySteps';
 import { MessageBody } from '../chat/MessageBody';
+import { TurnInProgress } from '../chat/TurnInProgress';
 import { assistantKeys, useDecideProposal, useProposals } from '../../hooks/use-assistant';
 import { twinKeys } from '../../hooks/use-twin';
 import { twinChatKeys, useCapturedSessions, useTwinChatThread, useTwinChatThreads } from '../../hooks/use-twin-chat';
@@ -69,7 +70,17 @@ const COMMANDS: [string, string][] = [
   ['/propose', 'Propose a reviewable change to the selected component.'],
 ];
 
-const STREAM_EVENTS = ['agent.thinking', 'agent.action_started', 'agent.step', 'message.delta', 'context.stats', 'agent.done'];
+const STREAM_EVENTS = [
+  'agent.thinking',
+  'agent.action_started',
+  'agent.step',
+  'tool.approval_requested',
+  'scope.changed',
+  'error',
+  'message.delta',
+  'context.stats',
+  'agent.done',
+];
 
 // Strips the context suffixes this drawer appends to a user turn before display.
 const CONTEXT_SUFFIX =
@@ -109,6 +120,9 @@ export function TwinAgentChat({
   const [draft, setDraft] = useState('');
   const [interaction, setInteraction] = useState<Interaction>('discuss');
   const [busy, setBusy] = useState(false);
+  // The message being worked on, shown at once with a thinking bubble until the reply lands.
+  const [sent, setSent] = useState<{ text: string; at: number } | null>(null);
+  const streamRef = useRef<HTMLDivElement>(null);
   const [notice, setNotice] = useState('');
   const [tab, setTab] = useState<PanelTab>('conversation');
   const [popover, setPopover] = useState<Popover | null>(null);
@@ -244,6 +258,7 @@ export function TwinAgentChat({
     setNotice('');
     const refNode = fromBlock ? undefined : contextNode;
     const text = (answer ?? draft).trim();
+    setSent({ text, at: Date.now() });
     try {
       const refs: { id: string; name: string }[] = [];
       for (const att of fromBlock ? [] : attachments) {
@@ -272,6 +287,8 @@ export function TwinAgentChat({
         }
       }
       if (controller.signal.aborted) return;
+      // The message now shows in the conversation; the box is free for the next one.
+      if (!fromBlock) setDraft('');
       let target = activeThreadId;
       if (!target) {
         target = (await createTwinChatThread(projectId)).id;
@@ -314,20 +331,20 @@ export function TwinAgentChat({
         },
         controller.signal,
       );
-      if (!fromBlock) {
-        setDraft('');
-        setAttachments([]);
-      }
+      // The draft was cleared when the message went up; anything typed since is the next message.
+      if (!fromBlock) setAttachments([]);
       await queryClient.invalidateQueries({ queryKey: twinChatKeys.all });
       await queryClient.invalidateQueries({ queryKey: assistantKeys.all });
-      setNotice('Turn finished. Review the gateway response below.');
     } catch {
+      // Put the text back so a failed send never loses it, unless something new was typed.
+      if (!fromBlock) setDraft((d) => d || text);
       setNotice(
         controller.signal.aborted
           ? 'Stop requested. Refresh the conversation to check what was recorded.'
           : 'The response could not be confirmed. Refresh the conversation before resending; your message may already have been recorded.',
       );
     } finally {
+      setSent(null);
       setBusy(false);
       abortRef.current = null;
     }
@@ -362,6 +379,23 @@ export function TwinAgentChat({
   }
 
   const messages = thread.data?.messages ?? [];
+  // Once the server's copy of the sent message arrives (it is stored before the
+  // agent runs), show that one instead of the local copy.
+  const sentIsStored =
+    !!sent &&
+    messages.some(
+      (m) =>
+        m.actor_kind === 'user' &&
+        // Only a copy stored for this send: the same words asked earlier are a different message.
+        Date.parse(m.created_at) >= sent.at - 10_000 &&
+        (m.content.split(CONTEXT_SUFFIX)[0] ?? '').trim() === sent.text,
+    );
+
+  // Keep the newest turn in view as messages and progress arrive.
+  useEffect(() => {
+    const el = streamRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length, sent, activity.length]);
 
   return (
     <aside ref={rootRef} className="twin-agent sample-chat" aria-label="Digital twin agent">
@@ -411,16 +445,16 @@ export function TwinAgentChat({
       </div>
 
       {tab === 'conversation' ? (
-        <div className="sc-stream" aria-label="Conversation messages" aria-busy={busy}>
+        <div ref={streamRef} className="sc-stream" aria-label="Conversation messages" aria-busy={busy}>
           {!projectId ? (
             <p>Choose a project to begin a conversation.</p>
           ) : threads.isError || thread.isError ? (
             <p role="alert">
               Conversation unavailable. <Link to="/settings">Check the gateway connection.</Link>
             </p>
-          ) : thread.isLoading && activeThreadId ? (
+          ) : thread.isLoading && activeThreadId && !sent ? (
             <p role="status">Loading conversation…</p>
-          ) : messages.length ? (
+          ) : messages.length || sent ? (
             messages.map((m, index) => (
               <article key={m.id} className={`sc-turn ${m.actor_kind === 'user' ? 'sc-user' : 'sc-agent'}`}>
                 <header>
@@ -468,10 +502,26 @@ export function TwinAgentChat({
               </div>
             </div>
           )}
-          {verbosity !== 'concise' && activity.length > 0 && (
-            <ActivitySteps events={activity} open={busy || verbosity === 'verbose'} showRaw={verbosity === 'verbose'} />
+          {sent && !sentIsStored && (
+            <article className="sc-turn sc-user" data-testid="sent-turn">
+              <header>
+                <strong>You</strong>
+                <time>{new Date(sent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+              </header>
+              <MessageBody text={sent.text} plain />
+            </article>
           )}
-          {busy && <p role="status">Agent turn in progress…</p>}
+          {sent && (
+            <TurnInProgress
+              events={activity.filter((e) => Date.parse(e.at) >= sent.at)}
+              startedAt={sent.at}
+              who="MetaForge agent"
+            />
+          )}
+          {/* While a turn runs its steps show in the bubble above; afterwards they collapse here. */}
+          {!busy && verbosity !== 'concise' && activity.length > 0 && (
+            <ActivitySteps events={activity} open={verbosity === 'verbose'} showRaw={verbosity === 'verbose'} />
+          )}
         </div>
       ) : (
         <div className="sc-stream sc-changes">

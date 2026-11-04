@@ -18,6 +18,13 @@ describe('Markdown in a reply', () => {
     expect(screen.getByText(/bad/)).toBeInTheDocument();
   });
 
+  it('turns a twin citation into a small source link', () => {
+    render(<MessageBody text={'Steel suits it [work_product://5b8304c6-5be4] for modest loads.'} />);
+    const link = screen.getByRole('link', { name: 'source' });
+    expect(link).toHaveAttribute('href', '/twin?node=5b8304c6-5be4');
+    expect(screen.queryByText(/work_product:\/\//)).not.toBeInTheDocument();
+  });
+
   it('shows markup in the text as text', () => {
     const { container } = render(<MessageBody text={'<img src=x onerror=alert(1)> <b>hi</b>'} />);
     expect(container.querySelector('img, b')).toBeNull();

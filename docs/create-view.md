@@ -58,8 +58,10 @@ The composer has three intents:
 | Design | every harness tool | A design pass; writes are still held by the approval policy |
 
 Instructions are sent one at a time. Anything sent while a pass is running is
-shown as *Queued* and goes next; the one being worked on reads *Being
-applied*. A send that fails stays in the conversation with *Retry*, *Edit*
+shown as *Queued* and goes next; the one being worked on reads *Sent ·
+working on it*, with MetaForge's thinking bubble under it (see
+[generative UI](generative-ui.md#while-the-agent-works)) until the reply
+arrives. A send that fails stays in the conversation with *Retry*, *Edit*
 (back into the composer) and *Discard*, so a failure never loses the text.
 
 The draft, the chosen intent, attached references and queued instructions

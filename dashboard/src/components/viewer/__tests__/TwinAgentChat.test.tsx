@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '../../../test/test-utils';
 import apiClient from '../../../api/client';
+import * as chatApi from '../../../api/endpoints/twin-chat';
 import { installSampleAdapter, setSampleModeForTests, SAMPLE_PROJECT_ID } from '../../../lib/sample-workspace';
 import { TwinAgentChat } from '../TwinAgentChat';
 import type { TwinNode } from '../../../types/twin';
@@ -53,8 +54,9 @@ describe('TwinAgentChat', () => {
     const option = screen.getByRole('button', { name: /Reduce telemetry/ });
     await waitFor(() => expect(option).not.toBeDisabled());
     fireEvent.click(option);
-    expect(await screen.findByText('Go with reducing telemetry.')).toBeInTheDocument();
     expect(await screen.findByText(/Scripted sample response/)).toBeInTheDocument();
+    // The answer shows once, as the stored message, after the local copy is replaced.
+    expect(screen.getAllByText('Go with reducing telemetry.')).toHaveLength(1);
   });
 
   it('sends a turn and shows the scripted reply', async () => {
@@ -65,10 +67,48 @@ describe('TwinAgentChat', () => {
     const send = screen.getByRole('button', { name: 'Send message' });
     await waitFor(() => expect(send).not.toBeDisabled());
     fireEvent.click(send);
-    expect(await screen.findByText(/Turn finished/)).toBeInTheDocument();
     expect(await screen.findByText(/Scripted sample response/)).toBeInTheDocument();
     // The context snapshot appended to the turn is not echoed back.
     expect(screen.queryByText(/context snapshot/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('turn-in-progress')).not.toBeInTheDocument();
+  });
+
+  it('shows the message and a thinking bubble at once, while the agent works', async () => {
+    let finish: (value: unknown) => void = () => {};
+    const sending = vi.spyOn(chatApi, 'sendTwinChatMessage').mockImplementation(
+      () => new Promise((resolve) => (finish = resolve)) as never,
+    );
+    renderChat();
+    const box = await screen.findByLabelText('Message to engineering agent');
+    await waitFor(() => expect(box).not.toBeDisabled());
+    fireEvent.change(box, { target: { value: 'Is the bracket strong enough?' } });
+    const send = screen.getByRole('button', { name: 'Send message' });
+    await waitFor(() => expect(send).not.toBeDisabled());
+    fireEvent.click(send);
+
+    // Not blank: the question is in the conversation and the agent is visibly working.
+    expect(await screen.findByTestId('sent-turn')).toHaveTextContent('Is the bracket strong enough?');
+    expect(screen.getByTestId('turn-in-progress')).toHaveTextContent('Thinking…');
+    // The box is free for the next message.
+    expect(box).toHaveValue('');
+
+    finish({});
+    await waitFor(() => expect(screen.queryByTestId('turn-in-progress')).not.toBeInTheDocument());
+    sending.mockRestore();
+  });
+
+  it('puts the text back if the send fails', async () => {
+    const sending = vi.spyOn(chatApi, 'sendTwinChatMessage').mockRejectedValue(new Error('offline'));
+    renderChat();
+    const box = await screen.findByLabelText('Message to engineering agent');
+    await waitFor(() => expect(box).not.toBeDisabled());
+    fireEvent.change(box, { target: { value: 'Try again later' } });
+    const send = screen.getByRole('button', { name: 'Send message' });
+    await waitFor(() => expect(send).not.toBeDisabled());
+    fireEvent.click(send);
+    await waitFor(() => expect(box).toHaveValue('Try again later'));
+    expect(screen.getByText(/could not be confirmed/)).toBeInTheDocument();
+    sending.mockRestore();
   });
 
   it('lists pending changes and approves one from the review dialog', async () => {

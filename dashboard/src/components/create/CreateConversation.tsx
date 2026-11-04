@@ -1,8 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { Loader2, RotateCcw, Pencil, X } from 'lucide-react';
 import { useTwinChatThread, useTwinChatThreads } from '../../hooks/use-twin-chat';
 import { displayText, intentOf, useCreateStore, type Intent } from '../../store/create-store';
 import { MessageBody } from '../chat/MessageBody';
+import { TurnInProgress } from '../chat/TurnInProgress';
+import { useTurnStream } from '../chat/useTurnStream';
 
 const TURN_LABEL: Record<Intent, string> = {
   ask: 'Question',
@@ -44,14 +46,46 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
   }, [projectId, threadId, session.threadId, setThread]);
 
   const thread = useTwinChatThread(projectId, threadId, busy);
-  const messages = thread.data?.messages ?? [];
+  const sending = session.queue.find((i) => i.state === 'sending');
+  // When each instruction started sending, for the thinking bubble's timer.
+  const startedAt = useRef(new Map<string, number>());
+  if (sending && !startedAt.current.has(sending.id)) startedAt.current.set(sending.id, Date.now());
+  // Fetch the reply the moment the turn ends, not at the next poll: the
+  // conversation sat idle for up to ten seconds with the answer already saved.
+  const refetch = thread.refetch;
+  const events = useTurnStream(threadId, !!sending, () => void refetch());
+  const wasBusy = useRef(busy);
+  useEffect(() => {
+    if (wasBusy.current && !busy) void refetch();
+    wasBusy.current = busy;
+  }, [busy, refetch]);
+  // The server stores the message as soon as it arrives; while it is still
+  // being worked on, show it once, as the instruction with its state.
+  const pendingTexts = new Set(session.queue.filter((i) => i.state !== 'failed').map((i) => i.text.trim()));
+  const messages = (thread.data?.messages ?? []).filter(
+    (m, i, all) =>
+      !(
+        m.actor_kind === 'user' &&
+        pendingTexts.has(displayText(m.content).trim()) &&
+        !all.slice(i + 1).some((later) => later.actor_kind !== 'user')
+      ),
+  );
   // Scroll the conversation itself, never the page: scrollIntoView also moves
   // the window, which on a phone skipped past the product to the chat.
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = list.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, session.queue.length]);
+  }, [messages.length, session.queue.length, events.length]);
+
+  // Between the turn ending and the reply being fetched, the newest message is
+  // still the person's own: keep the bubble up rather than go quiet.
+  const last = messages[messages.length - 1];
+  const awaitingReply =
+    !sending &&
+    session.queue.length === 0 &&
+    last?.actor_kind === 'user' &&
+    Date.now() - Date.parse(last.created_at) < 120_000;
 
   let lastIntent: Intent = 'ask';
   return (
@@ -85,39 +119,45 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
         );
       })}
       {session.queue.map((ins) => (
-        <article key={ins.id} className={`cv-msg is-mine is-${ins.state}`}>
-          <header>
-            <span className="cv-msg-who">You</span>
-            <span className="cv-tag cv-tag-turn">{TURN_LABEL[ins.intent]}</span>
-            <span className={`cv-state cv-state-${ins.state}`}>
-              {ins.state === 'sending' ? (
-                <>
-                  <Loader2 size={12} className="cv-spin" aria-hidden="true" /> Being applied
-                </>
-              ) : ins.state === 'queued' ? (
-                'Queued · sent when the current pass ends'
-              ) : (
-                'Not sent'
-              )}
-            </span>
-          </header>
-          <p>{ins.text}</p>
-          {ins.state === 'failed' && (
-            <footer className="cv-msg-actions">
-              <span className="cv-error">{ins.error}</span>
-              <button type="button" className="cv-link" onClick={() => retry(projectId, ins.id, tools)}>
-                <RotateCcw size={12} /> Retry
-              </button>
-              <button type="button" className="cv-link" onClick={() => restore(projectId, ins.id)}>
-                <Pencil size={12} /> Edit
-              </button>
-              <button type="button" className="cv-link" onClick={() => discard(projectId, ins.id)}>
-                <X size={12} /> Discard
-              </button>
-            </footer>
+        <Fragment key={ins.id}>
+          <article className={`cv-msg is-mine is-${ins.state}`}>
+            <header>
+              <span className="cv-msg-who">You</span>
+              <span className="cv-tag cv-tag-turn">{TURN_LABEL[ins.intent]}</span>
+              <span className={`cv-state cv-state-${ins.state}`}>
+                {ins.state === 'sending' ? (
+                  <>
+                    <Loader2 size={12} className="cv-spin" aria-hidden="true" /> Sent · working on it
+                  </>
+                ) : ins.state === 'queued' ? (
+                  'Queued · sent when the current pass ends'
+                ) : (
+                  'Not sent'
+                )}
+              </span>
+            </header>
+            <p>{ins.text}</p>
+            {ins.state === 'failed' && (
+              <footer className="cv-msg-actions">
+                <span className="cv-error">{ins.error}</span>
+                <button type="button" className="cv-link" onClick={() => retry(projectId, ins.id, tools)}>
+                  <RotateCcw size={12} /> Retry
+                </button>
+                <button type="button" className="cv-link" onClick={() => restore(projectId, ins.id)}>
+                  <Pencil size={12} /> Edit
+                </button>
+                <button type="button" className="cv-link" onClick={() => discard(projectId, ins.id)}>
+                  <X size={12} /> Discard
+                </button>
+              </footer>
+            )}
+          </article>
+          {ins.state === 'sending' && (
+            <TurnInProgress events={events} startedAt={startedAt.current.get(ins.id) ?? Date.now()} />
           )}
-        </article>
+        </Fragment>
       ))}
+      {awaitingReply && last && <TurnInProgress events={events} startedAt={Date.parse(last.created_at)} />}
     </div>
   );
 }
