@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { createTwinChatThread, sendTwinChatMessage } from '../api/endpoints/twin-chat';
 import { createUpload } from '../api/endpoints/uploads';
-import { conflictOf, getCreation, putBrief, refusalOf } from '../api/endpoints/create';
+import { conflictOf, getCreation, putBrief, refusalOf, type ReferenceRole } from '../api/endpoints/create';
+import { useSketchStore } from './sketch-store';
+import { useSketchGenerationStore } from './sketch-generation-store';
 
 /**
  * The Create view's working state, per creation (project).
@@ -26,6 +28,16 @@ export interface Attachment {
   state: AttachmentState;
   workProductId?: string;
   error?: string;
+  /** FORGE-794: what the reference is for, as the person set it on the chip. */
+  role?: ReferenceRole;
+  /** FORGE-794: left out of the next instruction when false. */
+  active?: boolean;
+}
+
+/** A reference an instruction carries, with its role (DI-002). */
+export interface InstructionReference {
+  id: string;
+  role?: ReferenceRole;
 }
 
 export type InstructionState = 'queued' | 'sending' | 'failed';
@@ -35,6 +47,10 @@ export interface Instruction {
   text: string;
   intent: Intent;
   references: string[];
+  /** FORGE-794: the active references with their roles. */
+  referenceRoles?: InstructionReference[];
+  /** FORGE-794: the sketch revision and selected region the instruction is about. */
+  context?: { sketchRevision?: string | null; region?: Array<[number, number]> | null };
   state: InstructionState;
   error?: string;
   createdAt: string;
@@ -99,6 +115,7 @@ interface CreateStore {
   setThread: (projectId: string, threadId: string | null) => void;
   attach: (projectId: string, files: File[]) => void;
   removeAttachment: (projectId: string, id: string) => void;
+  updateAttachment: (projectId: string, id: string, change: Partial<Pick<Attachment, 'role' | 'active'>>) => void;
   submit: (projectId: string, tools: Record<Intent, string[]>) => boolean;
   /** Send an answer given through a reply component (a choice, a measurement), leaving the draft alone. */
   reply: (projectId: string, text: string, tools: Record<Intent, string[]>) => boolean;
@@ -154,12 +171,17 @@ export const useCreateStore = create<CreateStore>()(
         updateInstruction(projectId, next.id, { state: 'sending', error: undefined, operationId: `chat:${turnId}` });
         try {
           const threadId = await ensureThread(projectId);
+          const roles = new Map((next.referenceRoles ?? []).map((r) => [r.id, r.role]));
           const refs = next.references.length
             ? '\n\nAttached twin work products (references, not inline image content): ' +
-              JSON.stringify(next.references.map((id) => ({ id })))
+              JSON.stringify(next.references.map((id) => (roles.get(id) ? { id, role: roles.get(id) } : { id })))
+            : '';
+          const ctx = next.context?.sketchRevision
+            ? `\n\nCurrent sketch revision: ${next.context.sketchRevision}` +
+              (next.context.region ? `; selected region (sketch units): ${JSON.stringify(next.context.region)}` : '')
             : '';
           const sent = await sendTwinChatMessage(threadId, {
-            content: next.text + refs + INTENT_INSTRUCTION[next.intent],
+            content: next.text + refs + ctx + INTENT_INSTRUCTION[next.intent],
             tools: turnTools.get(next.id) ?? [],
             client_turn_id: turnId,
           });
@@ -248,6 +270,9 @@ export const useCreateStore = create<CreateStore>()(
         removeAttachment: (projectId, id) =>
           patch(projectId, (s) => ({ attachments: s.attachments.filter((a) => a.id !== id) })),
 
+        updateAttachment: (projectId, id, change) =>
+          patch(projectId, (s) => ({ attachments: s.attachments.map((a) => (a.id === id ? { ...a, ...change } : a)) })),
+
         submit: (projectId, tools) => {
           const s = get().session(projectId);
           const text = s.draft.trim();
@@ -255,6 +280,12 @@ export const useCreateStore = create<CreateStore>()(
           if (s.attachments.some((a) => a.state === 'uploading')) return false;
           const id = nextId('ins');
           turnTools.set(id, tools[s.intent] ?? []);
+          // DI-002: the active references (with roles), the current sketch
+          // revision and the selected region travel with the instruction.
+          const included = s.attachments.filter((a) => a.workProductId && a.active !== false);
+          const sketchRevision = useSketchStore.getState().docs[projectId]?.savedRevision ?? null;
+          const gen = useSketchGenerationStore.getState().session(projectId);
+          const region = gen.regionOnly && gen.mask ? (gen.mask.polygon as Array<[number, number]>) : null;
           patch(projectId, (cur) => ({
             draft: '',
             attachments: cur.attachments.filter((a) => a.state !== 'added'),
@@ -264,7 +295,9 @@ export const useCreateStore = create<CreateStore>()(
                 id,
                 text,
                 intent: cur.intent,
-                references: cur.attachments.filter((a) => a.workProductId).map((a) => a.workProductId!),
+                references: included.map((a) => a.workProductId!),
+                referenceRoles: included.map((a) => ({ id: a.workProductId!, ...(a.role ? { role: a.role } : {}) })),
+                context: sketchRevision ? { sketchRevision, region } : undefined,
                 state: 'queued',
                 createdAt: new Date().toISOString(),
               },

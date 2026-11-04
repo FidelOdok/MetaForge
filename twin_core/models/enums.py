@@ -181,6 +181,12 @@ class WorkProductType(StrEnum):
     # interpretation and the strokes revision. Held for approval like a
     # design_sketch.
     PARAMETRIC_SKETCH = "parametric_sketch"
+    # An AI-generated concept sketch (PNG): a proposal from twin.generate_sketch
+    # or the Create stage's Generate, or, as an item revision, the accepted
+    # baseline. Always illustrative: never an editable sketch, never CAD, and
+    # never evidence. Records its prompt, references, mask, source sketch
+    # revision, provider and model.
+    GENERATED_SKETCH = "generated_sketch"
 
 
 class ConstraintSeverity(StrEnum):

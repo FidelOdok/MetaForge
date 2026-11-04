@@ -76,12 +76,134 @@ class Assumption(BaseModel):
     status: Literal["open", "confirmed", "revised"] = "open"
 
 
+#: What a reference is for (FORGE-794, REF-002). Only ``specification`` and
+#: ``manufacturing_rule`` are authoritative: their explicit values can be
+#: stated facts, and two of them that disagree need a person's review.
+ReferenceRole = Literal[
+    "inspiration",
+    "geometry",
+    "functional_demo",
+    "specification",
+    "manufacturing_rule",
+    "verification_evidence",
+    "existing_design",
+]
+REFERENCE_ROLES: tuple[str, ...] = (
+    "inspiration",
+    "geometry",
+    "functional_demo",
+    "specification",
+    "manufacturing_rule",
+    "verification_evidence",
+    "existing_design",
+)
+AUTHORITATIVE_ROLES: frozenset[str] = frozenset({"specification", "manufacturing_rule"})
+AssociationKind = Literal["project", "component", "parameter", "plane", "interface", "requirement"]
+#: ``stated``: an explicit value in a specification or manufacturing rule.
+#: ``estimated``: anything read off an image or a non-authoritative text. Never
+#: ``measured``: nothing here measures.
+FactBasis = Literal["stated", "estimated"]
+
+
+class ReferenceAssociation(BaseModel):
+    """What a reference is about: the project, a component, a parameter, a plane..."""
+
+    kind: AssociationKind
+    id: str = Field(..., min_length=1, max_length=200)
+    label: str = Field("", max_length=200)
+
+
+class FactCitation(BaseModel):
+    """Where a fact came from: which reference, which part of it, which version."""
+
+    reference_id: str = Field(..., min_length=1, max_length=200)
+    #: ``line 12``, ``whole image`` or a short description of the region.
+    region: str = Field(..., min_length=1, max_length=200)
+    source_hash: str = Field("", max_length=64)
+    excerpt: str = Field("", max_length=300)
+
+
+class ReferenceFact(BaseModel):
+    """A candidate fact extracted from a reference (REF-005). Never measured truth."""
+
+    id: str = Field(..., min_length=1, max_length=64)
+    parameter: str = Field(..., min_length=1, max_length=200)
+    value: float | None = None
+    text: str = Field("", max_length=300)
+    unit: str = Field("", max_length=32)
+    basis: FactBasis = "estimated"
+    #: ``low`` for a stated value; ``high`` for anything read off an image.
+    uncertainty: Literal["low", "medium", "high"] = "high"
+    citation: FactCitation
+    extracted_by: str = Field("", max_length=200)
+    extracted_at: str = Field(default_factory=now_iso)
+
+
+class ReferenceVersion(BaseModel):
+    """One change to a reference's file or meaning (REF-006 history)."""
+
+    version: int = Field(..., ge=1)
+    source_hash: str = Field("", max_length=64)
+    role: ReferenceRole = "inspiration"
+    active: bool = True
+    protected_features: list[str] = Field(default_factory=list)
+    changed_at: str = Field(default_factory=now_iso)
+    actor: str = Field("", max_length=200)
+    note: str = Field("", max_length=300)
+
+
+class ReferenceDisclosure(BaseModel):
+    """A reference sent to an external provider (REF-007)."""
+
+    provider: str = Field(..., max_length=100)
+    model: str = Field("", max_length=200)
+    purpose: str = Field("", max_length=100)
+    source_hash: str = Field("", max_length=64)
+    operation_id: str = Field("", max_length=200)
+    sent_at: str = Field(default_factory=now_iso)
+
+
+class ReferenceRecord(BaseModel):
+    """What the Create journey knows about one reference work product (REF-002..007).
+
+    Extends ``Brief.references`` (the ids) rather than replacing it: an id in
+    ``references`` with no record here is an ``inspiration`` that is active.
+    """
+
+    work_product_id: str = Field(..., min_length=1, max_length=200)
+    name: str = Field("", max_length=300)
+    role: ReferenceRole = "inspiration"
+    associations: list[ReferenceAssociation] = Field(default_factory=list, max_length=50)
+    #: Included in the next instruction or generation (REF-004).
+    active: bool = True
+    protected_features: list[str] = Field(default_factory=list, max_length=50)
+    #: sha256 of the reference's file as last seen.
+    source_hash: str = Field("", max_length=64)
+    mime: str = Field("", max_length=100)
+    size: int | None = None
+    versions: list[ReferenceVersion] = Field(default_factory=list)
+    facts: list[ReferenceFact] = Field(default_factory=list, max_length=500)
+    disclosures: list[ReferenceDisclosure] = Field(default_factory=list)
+
+    @property
+    def authoritative(self) -> bool:
+        return self.role in AUTHORITATIVE_ROLES
+
+
 class Brief(BaseModel):
     items: dict[str, BriefItem] = Field(default_factory=dict)
     measurements: list[Measurement] = Field(default_factory=list)
     assumptions: list[Assumption] = Field(default_factory=list)
     # Work products (images, sketches, documents, designs) that inform the design.
     references: list[str] = Field(default_factory=list)
+    # FORGE-794: role, associations, inclusion, protected features, hash,
+    # version history and extracted facts of those references.
+    reference_details: list[ReferenceRecord] = Field(default_factory=list)
+
+    def reference(self, work_product_id: str) -> ReferenceRecord | None:
+        return next(
+            (r for r in self.reference_details if r.work_product_id == work_product_id), None
+        )
 
 
 class RouteChoice(BaseModel):

@@ -381,10 +381,14 @@ In every mode:
   project, flow, run, approval, review, phase, session, library and vendor
   tools. `phase.claim` keeps its own narrower rule, below.
 - **Spend cap.** Paid tools are capped per project per rolling hour: 20
-  `twin.render_concept_image` (`METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`) and 3
+  `twin.render_concept_image` and 20 `twin.generate_sketch` (each
+  `METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`, counted per tool) and 3
   `twin.generate_concept_mesh` (`METAFORGE_AUTO_APPROVE_MESH_PER_HOUR`). Over
   the cap the call is held for a person, and the hold's reason and the held
-  result's `note` say the cap was reached.
+  result's `note` say the cap was reached. A person generating on the Create
+  stage is the approver of their own request, but past the same hourly count
+  of images the gateway answers `409 spend_confirmation_required` and
+  generates only when the person confirms.
 - **Audit.** Every policy approval is written to the ledger on route `policy`,
   `approved_by` `policy:<mode>:<project>` (unverified), with the tool and the
   arguments hash, and marked used at once (it runs that call, not a retry). It

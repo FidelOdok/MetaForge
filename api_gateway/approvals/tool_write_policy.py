@@ -51,6 +51,8 @@ __all__ = [
 SPEND_CAPS: dict[str, tuple[str, int]] = {
     "twin.render_concept_image": ("METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR", 20),
     "twin.generate_concept_mesh": ("METAFORGE_AUTO_APPROVE_MESH_PER_HOUR", 3),
+    # FORGE-794: a concept sketch is one image per variant, so the image cap.
+    "twin.generate_sketch": ("METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR", 20),
 }
 
 #: The rolling window the spend cap counts over.

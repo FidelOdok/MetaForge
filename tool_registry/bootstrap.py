@@ -406,6 +406,7 @@ async def bootstrap_tool_registry(
     concept_image_renderer: Any = None,
     concept_image_critic: Any = None,
     concept_mesh_generator: Any = None,
+    sketch_generator: Any = None,
     # FORGE-451: the machine library (models, instances, limits).
     machine_library: Any = None,
     # FORGE-427: vendor connectors (quotes, held orders, order status).
@@ -634,6 +635,11 @@ async def bootstrap_tool_registry(
             (make_concept_mesh_recorder, FORGE-778). When supplied, registers
             ``twin.generate_concept_mesh``: an image-to-3D model turns a
             concept image into an illustrative GLB render. ``None`` skips
+            registration.
+        sketch_generator: Optional async ``generate(...)``
+            (make_sketch_generator, FORGE-794). When supplied, registers
+            ``twin.generate_sketch``: an illustrative concept sketch proposal
+            from text, references or a saved sketch. ``None`` skips
             registration.
 
     Returns:
@@ -885,6 +891,7 @@ async def bootstrap_tool_registry(
                     concept_image_renderer=concept_image_renderer,
                     concept_image_critic=concept_image_critic,
                     concept_mesh_generator=concept_mesh_generator,
+                    sketch_generator=sketch_generator,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

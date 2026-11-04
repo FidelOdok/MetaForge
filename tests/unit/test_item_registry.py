@@ -47,6 +47,8 @@ def test_definitions_are_the_versioned_types() -> None:
         # The sketch compiler's proposal and its promoted result.
         "sketch_interpretation",
         "parametric_sketch",
+        # The accepted AI-generated concept sketch (each acceptance a revision).
+        "generated_sketch",
     }
 
 

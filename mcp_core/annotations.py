@@ -386,6 +386,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-778: adds an illustrative GLB render node linked to its concept
         # image; the image is never touched.
         "twin.generate_concept_mesh",
+        # FORGE-794: adds an illustrative generated_sketch proposal; the sketch,
+        # its references and the accepted concept are never touched.
+        "twin.generate_sketch",
         # FORGE-687: a new design-files node (or the next revision of its
         # item); the files it reads on the workspace are not touched.
         "twin.record_design_files",
@@ -625,6 +628,9 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "twin.critique_concept_image",
         # FORGE-778: the concept image (or prompt) goes to the mesh provider's API.
         "twin.generate_concept_mesh",
+        # FORGE-794: the prompt, the drawn sketch and active reference images go to
+        # the configured image API.
+        "twin.generate_sketch",
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",

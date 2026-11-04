@@ -28,6 +28,19 @@ Two real implementations, chosen by environment:
   (default 120).
 * Key values are never logged or returned.
 
+FORGE-794 (sketch generation) adds a richer request beside that callable:
+:class:`ImageRequest` carries several conditioning images (references with
+their roles, a rendered sketch) and an optional edit mask, and each provider
+says what it can do in :class:`ProviderCapabilities`. Verified from the
+adapter code here:
+
+* ``openai``: ``images.edit`` takes a list of input images and a ``mask``
+  (transparent where the model may paint), so a region edit is masked at the
+  provider. It is not called with streaming, so there are no partial images.
+* ``openrouter``: several images ride in the chat message, but there is no
+  mask parameter and no streamed partial image in the reply, so a region edit
+  is composited back outside the mask after the call.
+
 No provider configured is :class:`ImageGenerationUnavailableError`, raised at
 once; a provider that does not answer in time is
 :class:`ImageGenerationTimeoutError`. Neither ever hangs a tool call.
@@ -92,6 +105,50 @@ class GeneratedImage:
     model: str
     #: Whether the conditioning image actually reached the model.
     conditioned: bool = False
+    #: What the provider said the call cost, in US dollars, when it said.
+    cost_usd: float | None = None
+    #: Whether the edit mask reached the provider (FORGE-794).
+    masked: bool = False
+    #: How many conditioning images reached the provider (FORGE-794).
+    images_sent: int = 0
+
+
+@dataclass(frozen=True)
+class ConditioningImage:
+    """One image a generation is conditioned on, and why (FORGE-794)."""
+
+    data: bytes
+    mime: str = "image/png"
+    #: What the image is for: ``sketch``, ``baseline`` or a reference role.
+    role: str = "reference"
+
+
+@dataclass(frozen=True)
+class ImageRequest:
+    """A generation request richer than ``(prompt, conditioning, size)`` (FORGE-794).
+
+    ``mask`` is a PNG the size of the first image, transparent where the model
+    may paint and opaque where it must not, which is the convention of
+    OpenAI's ``images.edit``. It is only sent to a provider whose
+    :class:`ProviderCapabilities` says ``mask``.
+    """
+
+    prompt: str
+    size: str
+    images: tuple[ConditioningImage, ...] = ()
+    mask: bytes | None = None
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """What a provider adapter can actually do, read from its code (FORGE-794)."""
+
+    #: Takes an edit mask, so a region edit is limited at the provider.
+    mask: bool = False
+    #: The most conditioning images one call carries.
+    max_images: int = 1
+    #: Streams partial images before the final one.
+    partial_images: bool = False
 
 
 #: ``(prompt, conditioning_png | None, size) -> GeneratedImage``
@@ -123,11 +180,74 @@ class OpenAIImageGenerator:
     """OpenAI's images API: ``images.edit`` with the layout, else ``images.generate``."""
 
     provider = "openai"
+    #: ``images.edit`` takes up to 16 images and a mask; no streaming is used.
+    capabilities = ProviderCapabilities(mask=True, max_images=16, partial_images=False)
 
     def __init__(self, *, model: str, api_key: str, timeout_s: float) -> None:
         self.model = model
         self._api_key = api_key
         self._timeout_s = timeout_s
+
+    async def generate_request(self, request: ImageRequest) -> GeneratedImage:
+        """Generate from an :class:`ImageRequest`: every image, and the mask (FORGE-794)."""
+        try:
+            from openai import AsyncOpenAI
+        except ImportError as exc:  # pragma: no cover - the gateway image has it
+            raise ImageGenerationUnavailableError(
+                "the openai package is not installed, so no image can be generated"
+            ) from exc
+
+        images = list(request.images[: self.capabilities.max_images])
+        mask = request.mask if images else None
+        client = AsyncOpenAI(api_key=self._api_key, timeout=self._timeout_s, max_retries=0)
+        with tracer.start_as_current_span("image_generation.openai.request") as span:
+            span.set_attribute("image_generation.model", self.model)
+            span.set_attribute("image_generation.images", len(images))
+            span.set_attribute("image_generation.masked", mask is not None)
+            try:
+                response: Any
+                if images:
+                    files = [(f"input-{i}.png", img.data, img.mime) for i, img in enumerate(images)]
+                    kwargs: dict[str, Any] = {
+                        "model": self.model,
+                        "image": files if len(files) > 1 else files[0],
+                        "prompt": request.prompt,
+                        "size": request.size,
+                    }
+                    if mask is not None:
+                        kwargs["mask"] = ("mask.png", mask, "image/png")
+                    response = await client.images.edit(**kwargs)
+                else:
+                    response = await client.images.generate(
+                        model=self.model,
+                        prompt=request.prompt,
+                        size=request.size,  # type: ignore[arg-type]
+                    )
+            except Exception as exc:
+                span.record_exception(exc)
+                if type(exc).__name__ in {"APITimeoutError", "TimeoutError"}:
+                    raise ImageGenerationTimeoutError(
+                        f"openai {self.model} did not answer in {self._timeout_s:g}s"
+                    ) from exc
+                raise ImageGenerationError(
+                    f"openai {self.model} refused the request: {_describe(exc)}"
+                ) from exc
+            finally:
+                await client.close()
+
+        data = getattr(response, "data", None) or []
+        b64 = getattr(data[0], "b64_json", None) if data else None
+        if not b64:
+            raise ImageGenerationError(f"openai {self.model} returned no image data")
+        return GeneratedImage(
+            image_bytes=base64.b64decode(b64),
+            mime="image/png",
+            provider=self.provider,
+            model=self.model,
+            conditioned=bool(images),
+            masked=mask is not None,
+            images_sent=len(images),
+        )
 
     async def __call__(self, prompt: str, conditioning: bytes | None, size: str) -> GeneratedImage:
         try:
@@ -190,6 +310,8 @@ class OpenRouterImageGenerator:
     """
 
     provider = "openrouter"
+    #: Several images ride in one message; no mask parameter, no streamed images.
+    capabilities = ProviderCapabilities(mask=False, max_images=4, partial_images=False)
 
     def __init__(
         self,
@@ -223,22 +345,36 @@ class OpenRouterImageGenerator:
         }
 
     async def __call__(self, prompt: str, conditioning: bytes | None, size: str) -> GeneratedImage:
+        images = (ConditioningImage(conditioning, "image/png", "layout"),) if conditioning else ()
+        return await self.generate_request(ImageRequest(prompt=prompt, size=size, images=images))
+
+    async def generate_request(self, request: ImageRequest) -> GeneratedImage:
+        """Generate from an :class:`ImageRequest`; the mask is never sent (FORGE-794)."""
         import httpx
 
+        images = list(request.images[: self.capabilities.max_images])
+        body = self._body(request.prompt, None, request.size)
+        content = body["messages"][0]["content"]
+        for img in images:
+            data = base64.b64encode(img.data).decode("ascii")
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:{img.mime};base64,{data}"}}
+            )
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "X-Title": "MetaForge",
         }
         with tracer.start_as_current_span("image_generation.openrouter") as span:
             span.set_attribute("image_generation.model", self.model)
-            span.set_attribute("image_generation.conditioned", conditioning is not None)
+            span.set_attribute("image_generation.conditioned", bool(images))
+            span.set_attribute("image_generation.images", len(images))
             try:
                 async with httpx.AsyncClient(
                     timeout=self._timeout_s, transport=self._transport
                 ) as client:
                     response = await client.post(
                         f"{self._base_url}/chat/completions",
-                        json=self._body(prompt, conditioning, size),
+                        json=body,
                         headers=headers,
                     )
                     if response.status_code in (401, 403):
@@ -254,6 +390,7 @@ class OpenRouterImageGenerator:
                         )
                     payload = response.json()
                     image_bytes, mime = await _openrouter_image(payload, client, self.model)
+                    cost = _openrouter_cost(payload)
             except ImageGenerationError as exc:
                 span.record_exception(exc)
                 raise
@@ -272,8 +409,21 @@ class OpenRouterImageGenerator:
             mime=mime,
             provider=self.provider,
             model=self.model,
-            conditioned=conditioning is not None,
+            conditioned=bool(images),
+            cost_usd=cost,
+            images_sent=len(images),
         )
+
+
+def _openrouter_cost(payload: Any) -> float | None:
+    """The cost OpenRouter reported in ``usage.cost``, if it reported one."""
+    try:
+        raw = (payload.get("usage") or {}).get("cost")
+    except AttributeError:
+        return None
+    if isinstance(raw, int | float) and not isinstance(raw, bool):
+        return float(raw)
+    return None
 
 
 _DATA_URL = re.compile(r"^data:(image/[a-z0-9.+-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
@@ -384,3 +534,33 @@ async def generate_with_timeout(
         raise ImageGenerationTimeoutError(
             f"the image provider did not answer in {timeout_s:g}s"
         ) from exc
+
+
+def capabilities_of(generator: Any) -> ProviderCapabilities:
+    """What ``generator`` can do; a plain callable takes one image and no mask."""
+    caps = getattr(generator, "capabilities", None)
+    return caps if isinstance(caps, ProviderCapabilities) else ProviderCapabilities()
+
+
+async def generate_request_with_timeout(
+    generator: Any, request: ImageRequest, *, timeout_s: float
+) -> GeneratedImage:
+    """Run an :class:`ImageRequest`, abandoning it after ``timeout_s`` (FORGE-794).
+
+    A generator with ``generate_request`` gets the whole request. A plain
+    ``(prompt, conditioning, size)`` callable gets the first image only and
+    no mask, which is what its capabilities say.
+    """
+    call = getattr(generator, "generate_request", None)
+    if callable(call):
+        awaitable = call(request)
+    else:
+        first = request.images[0].data if request.images else None
+        awaitable = generator(request.prompt, first, request.size)
+    try:
+        result: GeneratedImage = await asyncio.wait_for(awaitable, timeout=timeout_s)
+    except TimeoutError as exc:
+        raise ImageGenerationTimeoutError(
+            f"the image provider did not answer in {timeout_s:g}s"
+        ) from exc
+    return result

@@ -263,6 +263,17 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "material are required input. Depends on the interpretation and the strokes."
         ),
     ),
+    TwinTypeSpec(
+        "generated_sketch",
+        TwinTypeKind.DEFINITION,
+        "work_product:generated_sketch",
+        key_prefix="GSK",
+        description=(
+            "The accepted AI-generated concept sketch for a sketch or a text concept: each "
+            "accepted proposal is the next revision, so earlier accepted images stay "
+            "available. Illustrative only: not an editable sketch, not CAD, not evidence."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",

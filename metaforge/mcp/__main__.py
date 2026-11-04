@@ -2112,6 +2112,15 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("concept_mesh_generator", _concept_mesh)
 
+    # FORGE-794: twin.generate_sketch. Registered whether or not an image
+    # provider is configured; an unconfigured one fails the call clearly.
+    def _sketch_generator() -> Any:
+        from api_gateway.twin.sketch_generation import make_sketch_generator
+
+        return make_sketch_generator(twin, project_backend)
+
+    _try("sketch_generator", _sketch_generator)
+
     # FORGE-630: twin.render_work_product, whose blender.render call goes
     # through this server's own registry once it exists.
     try:
