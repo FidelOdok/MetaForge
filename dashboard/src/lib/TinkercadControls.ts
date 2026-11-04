@@ -262,6 +262,31 @@ export class TinkercadControls {
     this._goal.el = THREE.MathUtils.clamp(v[1] * DEG, this.minElevation, this.maxElevation);
   }
 
+  /**
+   * Put the camera on the side `offset` points to, looking back at the
+   * target (FORGE-790: "Normal to sketch"). `offset` is a world direction;
+   * elevation is clamped like any other view, so a straight-down look stops
+   * at the turntable's limit.
+   */
+  setViewDirection(offset: THREE.Vector3) {
+    const len = offset.length();
+    if (!(len > 0)) return;
+    const d = offset.clone().divideScalar(len);
+    let el: number;
+    let az: number;
+    if (this.upAxis === 'z') {
+      el = Math.asin(THREE.MathUtils.clamp(d.z, -1, 1));
+      az = Math.atan2(d.y, d.x);
+    } else {
+      el = Math.asin(THREE.MathUtils.clamp(d.y, -1, 1));
+      az = Math.atan2(d.x, d.z);
+    }
+    // Looking straight along the up axis leaves azimuth free: keep the current one.
+    if (Math.abs(Math.cos(el)) < 1e-6) az = this._goal.az;
+    this._goal.az = az;
+    this._goal.el = THREE.MathUtils.clamp(el, this.minElevation, this.maxElevation);
+  }
+
   /** Fit an object or Box3 in view, keeping the current angles. */
   frame(objectOrBox: THREE.Object3D | THREE.Box3, fitRatio?: number) {
     const ratio = fitRatio !== undefined ? fitRatio : 1.4;

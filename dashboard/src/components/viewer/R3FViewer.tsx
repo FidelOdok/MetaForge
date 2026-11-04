@@ -1,5 +1,5 @@
 import { VIEWER_COLOR_MANAGEMENT, VIEWER_GPU_PREFERENCE } from './viewerColor';
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
@@ -74,6 +74,11 @@ interface R3FViewerProps {
   /** Called after a successful boolean-cut with the new node's id, so the
    * host page can pivot its own "selected node" state (MET-612). */
   onBooleanCutComplete?: (newNodeId: string) => void;
+  /** Extra scene content drawn in the same Canvas, such as a sketch on its
+   * plane (FORGE-790). */
+  sceneExtras?: ReactNode;
+  /** Show the scene even with no model loaded (a placed sketch on its own). */
+  showEmptyScene?: boolean;
 }
 
 // Kinetic Console palette (see project_kinetic_console_design) — this file
@@ -545,7 +550,7 @@ function GizmoControls() {
   );
 }
 
-export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps) {
+export function R3FViewer({ onPartClick, onBooleanCutComplete, sceneExtras, showEmptyScene }: R3FViewerProps) {
   const glbUrl = useViewerStore((s) => s.glbUrl);
   const modelFormat = useViewerStore((s) => s.modelFormat);
   const manifest = useViewerStore((s) => s.manifest);
@@ -585,7 +590,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
 
   const bgColor = isDark ? '#18181b' : '#f4f4f5';
 
-  if (!robotDescription && (!glbUrl || !manifest)) {
+  if (!robotDescription && (!glbUrl || !manifest) && !showEmptyScene) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-zinc-400">
         Upload a STEP file or load a model to view it in 3D
@@ -657,6 +662,8 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
         )}
 
         <CameraController />
+
+        {sceneExtras}
 
         {/* ViewCube — click a face/edge/corner to snap the camera to that
             orientation, or drag to orbit manually (Tinkercad-style nav). */}

@@ -92,6 +92,7 @@ from api_gateway.twin.live_routes import router as twin_live_router
 from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
+from api_gateway.twin.sketch_plane_routes import router as twin_sketch_plane_router
 from api_gateway.twin.sketch_routes import router as twin_sketch_router
 from api_gateway.uploads.routes import router as uploads_router
 from api_gateway.vendors.routes import router as vendors_router
@@ -2334,6 +2335,8 @@ def create_app(
     app.include_router(twin_baselines_router)
     # FORGE-789: freehand sketches drawn on the Create stage.
     app.include_router(twin_sketch_router)
+    # FORGE-790: the plane a sketch is placed on.
+    app.include_router(twin_sketch_plane_router)
     app.include_router(hierarchy_router)
     app.include_router(bom_router)
     app.include_router(bom_risk_router)

@@ -122,7 +122,8 @@ class TestAlertingRules:
         # + 1 concept images unchecked (FORGE-772, severity: info).
         # + 1 concept meshes unavailable (FORGE-778).
         # + 1 tool jobs failing (FORGE-783).
-        assert len(rules) == 69  # + 1 sketch saves (FORGE-789), + 1 scheduling (FORGE-788)
+        # + 1 sketch saves (FORGE-789), + 1 scheduling (FORGE-788), + 1 sketch planes (FORGE-790).
+        assert len(rules) == 70
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -188,7 +189,8 @@ class TestAlertingRules:
         # + 1 sketch readings unavailable (FORGE-762).
         # + 1 concept meshes unavailable (FORGE-778).
         # + ToolJobsFailingOrInterrupted (FORGE-783).
-        assert len(warnings) == 54  # + 1 sketch saves (FORGE-789), + 1 scheduling (FORGE-788)
+        # + 1 sketch saves (FORGE-789), + 1 scheduling (FORGE-788), + 1 sketch planes (FORGE-790).
+        assert len(warnings) == 55
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -307,6 +309,7 @@ class TestAlertingRules:
                 # FORGE-762: uploaded sketches cannot be read.
                 "SketchReadingUnavailable",
                 "SketchSavesFailing",
+                "SketchPlaneChangesFailing",
                 # FORGE-778: concept reference meshes cannot be generated.
                 "ConceptMeshGenerationUnavailable",
                 "ToolJobsFailingOrInterrupted",

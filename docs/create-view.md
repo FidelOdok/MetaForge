@@ -145,7 +145,7 @@ not CAD · scale unknown · no plane yet*, and the saved record says the same:
 Nothing reads a measurement from it. Points are kept in sketch units (the
 shorter side of the drawing area spans one unit, origin at its centre), so a
 sketch looks the same on any screen size and is not stretched by a resize.
-Proposing and confirming a plane for a sketch is a later step.
+A plane is only chosen when the sketch needs one (below).
 
 **Saving.** The sketch saves itself 1.5 seconds after the last stroke is
 finished, and on *Save sketch*. Each save is the whole sketch and becomes the
@@ -170,7 +170,39 @@ reload.
 Engineering view and the twin viewer list it and preview it read-only, with
 the same *Human sketch · not CAD · scale unknown · plane unassigned* label. It
 is never chosen as the result shown on the Create stage; the sketch layer is
-where it is drawn and shown.
+where it is drawn and shown. Once it is placed on a plane, the twin viewer
+draws it on that plane, with its plane controls (see
+[the dashboard tour](dashboard-tour.md)).
+
+### Placing a sketch on a plane
+
+Drawing never needs a plane. Once a sketch is saved, the status bar offers
+**Use in 3D**. Only then does a compact choice appear beside it, without
+covering the stage:
+
+| Choice | Does |
+|---|---|
+| Front | Places the sketch on the XZ plane (seen from the front) |
+| Side | Places it on the YZ plane (seen from the side) |
+| Top | Places it on the XY plane (seen from above) |
+| Select surface | Placing a sketch on a model face. Shown but disabled: it is not available yet |
+| Keep as concept | Closes the choice. The sketch stays without a plane and nothing is written |
+
+When the choice opens, MetaForge proposes a plane: another sketch of the
+same component already on a plane, the orthographic view the camera is on
+(in Engineering), the component's base plane, then a guess from the
+sketch's name and shape. A clear proposal is outlined; when the guesses are
+weak or disagree, the choice says *Not sure which plane fits. Please choose
+one.* Nothing is placed until the person picks: the pick is applied exactly
+as made, and a later proposal never overrides it.
+
+Choosing a plane writes the next revision of the sketch's `sketch_plane`
+item (`PLN-SKETCH@1`, ...), linked to the sketch revision it was chosen for,
+and appears in the activity overlay as *Placing sketch on Front*, then
+*Sketch placed on Front (XZ)*. The status bar then reads *on the Front
+plane* instead of *no plane yet*. The sketch's scale stays unknown: placing
+it says where it sits, not how big it is. See
+[sketch planes](twin_schema.md#sketch-planes).
 
 ## Conversation and instructions
 
@@ -371,12 +403,17 @@ creation and its readiness.
 | `POST /duplicate` | Copy into a new project |
 | `DELETE /` | Remove the Create records (refused while a build is active) |
 
-The sketch layer uses two twin routes:
+The sketch layer uses these twin routes:
 
 | Method and path | Does |
 |---|---|
 | `POST /v1/twin/projects/{project_id}/sketches` | Save the sketch as the next revision (idempotent per `save_id`) |
 | `GET /v1/twin/projects/{project_id}/sketches/current` | The current revision with its strokes (`404` when none is saved) |
+| `GET /v1/twin/projects/{project_id}/sketches/{sketch_key}/plane` | The sketch's plane (`UNASSIGNED` when none was chosen) |
+| `POST .../plane/propose` | A proposed plane with who proposed it, its confidence and whether it is ambiguous. Writes nothing |
+| `POST .../plane/confirm` | Place the sketch on the chosen plane (idempotent per `op_id`) |
+| `POST .../plane/reassign/preview`, `POST .../plane/reassign` | Preview, then commit, a move to another plane in one of three modes |
+| `POST .../plane/undo`, `POST .../plane/archive` | Undo the last plane change, or archive the plane, each as a new revision |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the
@@ -384,8 +421,10 @@ refused with `403`. The full schemas are in the
 
 ## Not yet
 
-- A sketch has no plane, no scale and no constraints. Assigning a plane,
-  dimensioning and turning strokes into editable geometry are later steps.
+- A sketch has no scale and no constraints. Dimensioning and turning strokes
+  into editable geometry are later steps. Planes are Front, Side and Top
+  only: placing a sketch on a model face (and checking that attachment when
+  the model changes), and offset or custom planes, are later steps.
 - Pen pressure is recorded with each point but not yet drawn as varying
   width.
 

@@ -361,6 +361,33 @@ the list.
 
 ![The same tab on a table assembly: a plywood top on four steel legs, with the inspector listing each part against the library material it was assigned](assets/dashboard/table.png)
 
+**A selected sketch.** Selecting a `sketch_strokes` node on the Model tab
+shows compact plane controls over the 3D viewer, only while the sketch is
+the selection: the active plane (*Front (XZ)*, *Side (YZ)*, *Top (XY)* or
+*No plane*), its state badge (`CONFIRMED`, `UNASSIGNED`, `ARCHIVED`, ...)
+and revision, the U, V and normal axes, the unit, *Grid* and *Axes*
+toggles, *Normal to sketch*, reassign and *Undo*. A sketch with no plane
+offers *Choose a plane*, the same choice as in
+[Create](create-view.md#placing-a-sketch-on-a-plane), with the camera's
+orthographic view (when it is on one) sent as a hint.
+
+A confirmed sketch is drawn on its plane in the same scene as the model:
+its strokes transformed by the plane frame, with the plane's axes and a
+grid. Its scale is unknown, so it is drawn at an assumed size sized to the
+model and labelled *Scale unknown · shown at an assumed size (display
+only)*; nothing is measured from it. *Normal to sketch* turns the camera to
+face the plane and changes nothing else: moving the camera never moves a
+plane.
+
+Reassign picks the new plane and a mode: *Keep sketch coordinates*
+(`preserve_local`), *Keep world position* (`preserve_world`, refused when
+the sketch does not lie in the new plane) or *Project onto the new plane*
+(`project_to_target`). *Preview* draws where the strokes would land,
+dashed, and writes nothing; *Apply* commits a new plane revision (and a new
+sketch revision when the strokes move); *Undo* restores the state before
+the last change as a further revision. See
+[sketch planes](twin_schema.md#sketch-planes).
+
 Selecting a `simulation_result` node adds an **FEA result** panel to the
 inspector: max von Mises and max displacement with their units, the
 load case that produced them, the mesh statistics and, when the run

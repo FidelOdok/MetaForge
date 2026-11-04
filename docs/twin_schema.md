@@ -223,7 +223,13 @@ human sketch is not CAD, nothing reads a measurement from it, and it has no
 plane until one is proposed and confirmed. `parent_revision` names the
 revision it was drawn on top of, and `save_id` is the client's id for the
 save, so a retried save returns the revision it already made. See
-[the Create view](create-view.md#sketching-on-the-stage).
+[the Create view](create-view.md#sketching-on-the-stage). Once the sketch
+is placed on a plane, a later save records the plane's state and
+`plane_ref` at the time of the save instead of `UNASSIGNED`; the payload can
+never set either.
+
+`SKETCH_PLANE = "sketch_plane"` is the plane a sketch is placed on. See
+[Sketch planes](#sketch-planes) below.
 
 **Pydantic Model**:
 
@@ -1198,7 +1204,8 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `firmware_source` | definition | `FW` | `WorkProduct` `firmware_source`: a firmware project's sources and build output (`twin.record_design_files`, or `twin.create_firmware_scaffold`) |
 | `purchased_model` | definition | `PMD` | `WorkProduct` `cad_model`: a bought part's OpenUSD package with its GLB preview, licence, attribution and mass (`twin.record_design_files` after `simready.import`) |
 | `gcode` | definition | `GC` | `WorkProduct` `gcode`: G-code for one printer with the `config.ini` it was sliced with (`twin.record_design_files` after `slicer.slice`), which `library.dispatch_job` sends |
-| `sketch_strokes` | definition | `SKT` | `WorkProduct` `sketch_strokes`: a person's freehand strokes from the Create stage, as JSON in a viewport-independent sketch space plus a generated SVG. Each save is the next revision. A human sketch, not CAD: scale unknown, plane `UNASSIGNED` |
+| `sketch_strokes` | definition | `SKT` | `WorkProduct` `sketch_strokes`: a person's freehand strokes from the Create stage, as JSON in a viewport-independent sketch space plus a generated SVG. Each save is the next revision. A human sketch, not CAD: scale unknown, plane `UNASSIGNED` until one is confirmed |
+| `sketch_plane` | definition | `PLN` | `WorkProduct` `sketch_plane`: the plane one sketch is placed on (frame, unit, lifecycle state, who proposed it). One item per sketch; every confirm, reassign, undo or archive is the next revision, with a `DEPENDS_ON` edge to the sketch revision it is for |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
@@ -1405,6 +1412,87 @@ Observability: `record_pinned`, `record_superseded`, `records_marked_stale`, `re
 Limits: records written before pinning existed carry no pins and read as `current`; a record about a record (a decision citing evidence) is not pinned through it.
 
 *Source: `twin_core/consistency/record_pins.py`, `api_gateway/twin/record_pins.py`, `api_gateway/runs/analysis_constraints.py`, `api_gateway/runs/gate_eval.py`*
+
+---
+
+### 2.32 Sketch planes {#sketch-planes}
+
+A sketch is drawn with no plane. When it needs a physical meaning (it is used
+in 3D, or later made editable), a person places it on a plane. The plane is a
+`sketch_plane` item, `PLN-<name>` for the sketch `SKT-<name>`, and the model
+is `twin_core/models/sketch_plane.py`.
+
+| Field | Meaning |
+|---|---|
+| `plane_id` | Stable id, the plane item's key |
+| `owner_component` | The item key of the component the sketch belongs to, if any |
+| `kind` | `unassigned`, `principal` or `face`. `offset` and `custom` are reserved names and refused today |
+| `principal` | `XY`, `XZ` or `YZ` for a principal plane |
+| `origin`, `u_axis`, `v_axis`, `normal` | The frame. U and V are unit length and orthogonal, and `normal` must equal `u_axis` x `v_axis` (right-handed) |
+| `transform` | The 4x4 local-to-world matrix, row-major, whose columns are U, V, normal and origin. Derived when left out; refused when it does not match the frame |
+| `unit` | `mm`, `in` or `unknown`. An unknown unit is kept as it is and never converted |
+| `scale` | Model units per sketch unit; `null` is an unknown scale, which every freehand sketch has. A known scale needs a known unit |
+| `source_revision` | The sketch revision (`SKT-...@n`) the plane was set against |
+| `attachment` | For a face plane: `item_key`, `revision`, an opaque `face_ref` and a `signature` placeholder. Checking it against topology changes is later work |
+| `state` | `UNASSIGNED`, `PROPOSED`, `CONFIRMED`, `ATTACHED`, `INVALID`, `REATTACHMENT_REQUIRED` or `ARCHIVED` |
+| `proposed_by`, `confidence` | Where the plane came from (`user`, `face`, `existing_sketch`, `view`, `component_frame`, `model`) and how sure that source was |
+
+**Frame conventions.** The principal planes use the design IR's names
+(`SketchEntity.plane`) with CadQuery's named-plane axes:
+
+| Principal | View | U | V | Normal |
+|---|---|---|---|---|
+| `XY` | Top | +X | +Y | +Z |
+| `XZ` | Front | +X | +Z | -Y |
+| `YZ` | Side | +Y | +Z | +X |
+
+A stroke's points are in sketch space (x right, y down, as drawn on the
+screen). On the plane, `u = x` and `v = -y`, so up on the screen is +V, and
+world is `origin + u * U + v * V`. A confirmed principal plane maps onto a
+design IR sketch as `{"plane": principal, "offset": origin . normal}`.
+
+**Lifecycle.** A sketch with no plane item reads as `UNASSIGNED`. A proposal
+is returned as `PROPOSED` and never stored. Confirming stores `CONFIRMED`
+(a face plane would be `ATTACHED`). Archiving stores `ARCHIVED`. `INVALID`
+and `REATTACHMENT_REQUIRED` are for face attachments that no longer hold.
+Every change is the plane item's next revision; undo is a new revision with
+the content from before the last change (`restored_from`), so history is
+never rewritten. Each revision's metadata carries the whole plane, the
+action (`confirmed`, `reassigned`, `undone`, `archived`), `undo_to`, the
+client's `op_id` (a retried op returns the revision it already made), and,
+when a reassign moved the strokes, `strokes_rewritten: {from, to}`.
+
+**Graph links.** Each plane revision has a `DEPENDS_ON` edge
+(`metadata.kind: sketch_plane`) to the sketch revision it was set against,
+and the same pin in `metadata.depends_on_items`. The edge kind is not a
+record pin, so saving new strokes does not mark the plane stale. A later CAD
+feature built from the sketch depends on both.
+
+**Proposal order.** A proposal reads, in order: the explicit selection, the
+plane of another sketch of the same component (0.8), the client's
+orthographic view hint (0.7), the component frame's XY plane (0.5), then a
+heuristic over the sketch's name and shape (at most 0.45). It is
+`ambiguous` when the best guess is below 0.3, or the top two name different
+planes within 0.15 of each other. A plane already confirmed for the sketch
+is returned as the candidate whatever the hints say: explicit always wins.
+
+**Reassign modes.** `preserve_local` keeps the stroke coordinates (the
+sketch moves with its plane). `preserve_world` keeps every point where it is
+and is refused when the sketch does not lie in the new plane.
+`project_to_target` projects the points straight onto the new plane and
+reports how far they moved. A preview writes nothing; a commit that moves
+the strokes also saves them as the sketch's next revision.
+
+Routes, under `/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane`:
+`GET` (the current plane), `POST propose`, `POST confirm`,
+`POST reassign/preview`, `POST reassign`, `POST undo` and `POST archive`.
+Each write is reported as a `sketch` operation `job:sketch-plane-<op_id>`.
+Nothing takes the camera: the plane changes only through these explicit
+calls. Actions are counted in `metaforge_sketch_plane_total` by `action` and
+`proposed_by`, and `SketchPlaneChangesFailing` fires when more than a fifth
+of the writes in half an hour fail.
+
+*Source: `twin_core/models/sketch_plane.py`, `api_gateway/twin/sketch_planes.py`, `api_gateway/twin/sketch_plane_routes.py`*
 
 ---
 

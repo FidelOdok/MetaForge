@@ -9,6 +9,12 @@ vi.mock('../../../api/endpoints/sketches', () => ({
   getCurrentSketch: (...args: unknown[]) => getCurrentSketch(...args),
 }));
 
+// FORGE-790: the layer reads the sketch's plane once it is saved; no plane here.
+vi.mock('../../../api/endpoints/sketchPlanes', async (orig) => ({
+  ...(await orig<typeof import('../../../api/endpoints/sketchPlanes')>()),
+  getSketchPlane: vi.fn().mockRejectedValue(new Error('no plane in this test')),
+}));
+
 import { AUTOSAVE_MS, SketchLayer } from '../SketchLayer';
 
 const P = 'proj-layer';

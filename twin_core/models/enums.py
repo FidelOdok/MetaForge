@@ -166,6 +166,11 @@ class WorkProductType(StrEnum):
     # in a viewport-independent sketch space plus an SVG rendering. A human
     # sketch, never CAD: its scale is unknown and its plane is unassigned.
     SKETCH_STROKES = "sketch_strokes"
+    # The plane a sketch is placed on (twin_core/models/sketch_plane.py): a
+    # right-handed frame, its unit, lifecycle state and who proposed it. One
+    # item per sketch; every assignment, reassignment, undo or archive is its
+    # next revision, with a DEPENDS_ON edge to the sketch revision it is for.
+    SKETCH_PLANE = "sketch_plane"
 
 
 class ConstraintSeverity(StrEnum):

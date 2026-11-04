@@ -63,9 +63,12 @@ export async function saveSketch(projectId: string, body: SketchSaveBody): Promi
 }
 
 /** `GET /v1/twin/projects/{id}/sketches/current`; `null` when none is saved yet. */
-export async function getCurrentSketch(projectId: string, signal?: AbortSignal): Promise<SketchRevision | null> {
+export async function getCurrentSketch(projectId: string, signal?: AbortSignal, itemKey?: string | null): Promise<SketchRevision | null> {
   try {
-    const { data } = await apiClient.get<SketchRevision>(`/twin/projects/${enc(projectId)}/sketches/current`, { signal });
+    const { data } = await apiClient.get<SketchRevision>(`/twin/projects/${enc(projectId)}/sketches/current`, {
+      signal,
+      ...(itemKey ? { params: { item_key: itemKey } } : {}),
+    });
     return data;
   } catch (err) {
     const status = (err as { response?: { status?: number } }).response?.status;

@@ -960,6 +960,25 @@ groups:
             but they are not reaching the digital twin and the Engineering view
             cannot show them. Check the gateway logs (sketch_save_failed).
 
+  # FORGE-790 -- sketch plane changes (api_gateway/twin/sketch_planes.py).
+  - name: metaforge_sketch_plane
+    rules:
+      - alert: SketchPlaneChangesFailing
+        expr: >-
+          sum(increase(metaforge_sketch_plane_total{action="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_sketch_plane_total{action=~"confirmed|reassigned|undone|archived|failed"}[30m])), 1) > 0.2
+          and sum(increase(metaforge_sketch_plane_total{action=~"confirmed|reassigned|undone|archived|failed"}[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sketch plane changes are failing"
+          description: >-
+            More than a fifth of the last half hour's sketch plane changes
+            (confirm, reassign, undo, archive) failed. Sketches stay drawn and
+            saved, but they cannot be placed on a plane or moved, so they do not
+            appear in 3D. Check the gateway logs (sketch_plane_change_failed).
+
   # FORGE-734 -- run supervisor (api_gateway/runs/supervisor.py).
   - name: metaforge_run_supervisor
     rules:

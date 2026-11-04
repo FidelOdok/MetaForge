@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  Box,
   Circle,
   Eraser,
   Image as ImageIcon,
@@ -38,6 +39,10 @@ import {
   type Point,
   type Viewport,
 } from './geometry';
+import { PlanePrompt } from './PlanePrompt';
+import { useSketchPlane } from '../../hooks/use-sketch-plane';
+import { isPlaced } from '../../api/endpoints/sketchPlanes';
+import { VIEW_NAMES } from '../../lib/sketch/planeMath';
 import '../../styles/sketch.css';
 
 /** Idle time after the last stroke before the sketch saves itself. */
@@ -142,6 +147,11 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
   const regionRef = useRef<SVGRectElement>(null);
   const gesture = useRef<Gesture | null>(null);
   const [size, setSize] = useState<Viewport>({ width: 1, height: 1 });
+  // The plane prompt appears only when the person asks to use the sketch in 3D (UXS-006).
+  const [planePrompt, setPlanePrompt] = useState(false);
+  const planeQuery = useSketchPlane(projectId, doc.itemKey);
+  const plane = planeQuery.data?.plane ?? null;
+  const placed = isPlaced(plane);
 
   // Materialise the project's doc (and its restored draft) in the store once.
   useEffect(() => {
@@ -481,7 +491,8 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
       {(doc.strokes.length > 0 || doc.savedRevision || doc.pendingSaveId) && (
         <div className="sk-status" role="status">
           <span className="sk-honesty" title="A human sketch is not a CAD model. Its size is unknown and it has no plane until you confirm one.">
-            Your sketch · not CAD · scale unknown · no plane yet
+            Your sketch · not CAD · scale unknown ·{' '}
+            {placed && plane?.principal ? `on the ${VIEW_NAMES[plane.principal]} plane` : 'no plane yet'}
           </span>
           <span className="sk-save-state" data-testid="sketch-save-state">
             {doc.saveState === 'saving'
@@ -502,7 +513,22 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
           >
             <Save size={14} aria-hidden="true" /> {doc.saveState === 'failed' ? 'Retry save' : 'Save sketch'}
           </button>
+          {doc.itemKey && !placed && (
+            <button
+              type="button"
+              className="sk-save"
+              title="Choose the plane this sketch sits on, so it can be shown in 3D"
+              aria-expanded={planePrompt}
+              onClick={() => setPlanePrompt((open) => !open)}
+            >
+              <Box size={14} aria-hidden="true" /> Use in 3D
+            </button>
+          )}
         </div>
+      )}
+
+      {planePrompt && doc.itemKey && (
+        <PlanePrompt projectId={projectId} sketchKey={doc.itemKey} onDone={() => setPlanePrompt(false)} />
       )}
     </div>
   );

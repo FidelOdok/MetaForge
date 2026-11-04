@@ -25,6 +25,7 @@ sidecar) and `routes.py`.
 | A slow tool job | `job:<job_id>` | `job` | none |
 | A Create chat turn | `chat:<turn_id>` | `chat` | none |
 | A sketch save from the Create stage | `job:sketch-<save_id>` | `job` (domain `sketch`) | none |
+| A sketch plane change (confirm, reassign, undo, archive) | `job:sketch-plane-<op_id>` | `job` (domain `sketch`) | none |
 
 Approvals are not operations. A run waiting at a gate emits a
 `review_required` event whose `action_refs` name the approval to decide

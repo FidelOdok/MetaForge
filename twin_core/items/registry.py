@@ -230,6 +230,17 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "unassigned."
         ),
     ),
+    TwinTypeSpec(
+        "sketch_plane",
+        TwinTypeKind.DEFINITION,
+        "work_product:sketch_plane",
+        key_prefix="PLN",
+        description=(
+            "The plane a sketch is placed on: a right-handed frame, unit and lifecycle "
+            "state. One item per sketch; each assignment, reassignment, undo or archive "
+            "is the next revision, pinned to the sketch revision it is for."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",
