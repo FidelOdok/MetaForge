@@ -48,6 +48,7 @@ from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
 from mcp_core.deeplinks import DeepLinkBuilder, links_for
 from mcp_core.elicitation import (
     ELICITATION_PROTOCOL_VERSION,
+    ElicitationUnavailableError,
     Elicitor,
     declares_form_elicitation,
     elicitation_gate,
@@ -62,6 +63,7 @@ from mcp_core.guardrails import (
     ApprovalNotConfiguredError,
     ApprovalOutcome,
     ApprovalRejectedError,
+    ApprovalResolution,
     Approver,
     ApproverArgumentRejectedError,
     Caller,
@@ -362,6 +364,10 @@ class UnifiedMcpServer:
         # one. Held rather than used -- whether we may actually ask depends
         # on what the client said at initialize.
         self._elicitor = elicitor
+        # Set once this client has answered a prompt for the person instead
+        # of showing it to them. From then on it is treated as a client that
+        # cannot be asked, so held writes queue where someone can see them.
+        self._elicitation_unattended = False
         # FORGE-465: the transport's way to send a notification for the call
         # being handled (progress on a held write). None: nothing can be
         # sent, so a held write gets the window that fits a client's own
@@ -718,6 +724,12 @@ class UnifiedMcpServer:
         if current_modern_request() is not None:
             mrtr = current_mrtr()
             return bool(mrtr and mrtr.can_ask and self._approval_ledger is not None)
+        # A client that already answered a prompt for the person will do it
+        # again, and asking only burns another hold. Deliberately after the
+        # branch above: a returned question (MRTR) is answered by the next
+        # request, so it never fails this way.
+        if self._elicitation_unattended:
+            return False
         # A live question needs a channel back to the client; a returned one
         # (above) does not.
         if self._elicitor is None:
@@ -2320,66 +2332,91 @@ class UnifiedMcpServer:
         progress = self._has_progress_channel(progress_token)
         window = hold_window_seconds(progress=progress)
         approvals_url = self._deeplinks.build("approvals")
-        where = (
-            "the client's own approval prompt"
-            if route == "elicitation"
-            else f"the MetaForge dashboard Approvals page ({approvals_url})"
-            if approvals_url
-            else "the MetaForge dashboard Approvals page"
-        )
-        logger.info(
-            "mcp_tool_call_held_for_approval",
-            tool_id=tool_id,
-            caller=caller.value,
-            reason=decision.reason,
-            route=route,
-            window_seconds=window,
-            progress=progress,
-        )
+
+        def where_for(route: str) -> str:
+            if route == "elicitation":
+                return "the client's own approval prompt"
+            if approvals_url:
+                return f"the MetaForge dashboard Approvals page ({approvals_url})"
+            return "the MetaForge dashboard Approvals page"
+
         held_from = time.monotonic()
         approval_ids: list[str] = []
-        heartbeat: asyncio.Task[None] | None = None
-        if route == "elicitation" and progress and progress_token is not None:
-            # The longer window only stands because the client's timeout
-            # keeps being reset, so an inline prompt sends progress too.
-            text = (
-                f"{tool_id} is waiting for your answer in this client's approval "
-                f"prompt. Waiting up to {window:.0f}s."
-            )
-            self._send_progress(progress_token, 0.0, window, text, "elicitation")
-            heartbeat = asyncio.ensure_future(
-                self._hold_heartbeat(progress_token, window, text, "elicitation", held_from)
-            )
 
-        async def on_held(approval_id: str) -> None:
-            nonlocal heartbeat
-            approval_ids.append(approval_id)
-            if not progress or progress_token is None:
-                return
-            text = hold_notice_text(tool_id, approval_id, approvals_url, window)
-            self._send_progress(progress_token, 0.0, window, text, approval_id)
-            heartbeat = asyncio.ensure_future(
-                self._hold_heartbeat(progress_token, window, text, approval_id, held_from)
+        async def hold_on(gate: ApprovalGateFn, route: str) -> ApprovalResolution:
+            logger.info(
+                "mcp_tool_call_held_for_approval",
+                tool_id=tool_id,
+                caller=caller.value,
+                reason=decision.reason,
+                route=route,
+                window_seconds=window,
+                progress=progress,
             )
+            heartbeat: asyncio.Task[None] | None = None
+            if route == "elicitation" and progress and progress_token is not None:
+                # The longer window only stands because the client's timeout
+                # keeps being reset, so an inline prompt sends progress too.
+                text = (
+                    f"{tool_id} is waiting for your answer in this client's approval "
+                    f"prompt. Waiting up to {window:.0f}s."
+                )
+                self._send_progress(progress_token, 0.0, window, text, "elicitation")
+                heartbeat = asyncio.ensure_future(
+                    self._hold_heartbeat(progress_token, window, text, "elicitation", held_from)
+                )
 
-        try:
-            resolution = resolve_approval(
-                await gate(
-                    ApprovalAsk(
-                        tool_id=tool_id,
-                        arguments=arguments,
-                        caller=caller,
-                        reason=decision.reason,
-                        project=_effective_project(arguments),
-                        timeout_seconds=window,
-                        on_held=on_held if route == "dashboard" else None,
-                        client=self._client_label(),
+            async def on_held(approval_id: str) -> None:
+                nonlocal heartbeat
+                approval_ids.append(approval_id)
+                if not progress or progress_token is None:
+                    return
+                text = hold_notice_text(tool_id, approval_id, approvals_url, window)
+                self._send_progress(progress_token, 0.0, window, text, approval_id)
+                heartbeat = asyncio.ensure_future(
+                    self._hold_heartbeat(progress_token, window, text, approval_id, held_from)
+                )
+
+            try:
+                return resolve_approval(
+                    await gate(
+                        ApprovalAsk(
+                            tool_id=tool_id,
+                            arguments=arguments,
+                            caller=caller,
+                            reason=decision.reason,
+                            project=_effective_project(arguments),
+                            timeout_seconds=window,
+                            on_held=on_held if route == "dashboard" else None,
+                            client=self._client_label(),
+                        )
                     )
                 )
+            finally:
+                if heartbeat is not None:
+                    heartbeat.cancel()
+
+        try:
+            resolution = await hold_on(gate, route)
+        except ElicitationUnavailableError as exc:
+            # The client declared elicitation and then answered for the
+            # person, so the prompt reached nobody. Falling back now is not
+            # asking a second person -- there was no first answer. The gate
+            # above already closed its own ledger entry.
+            self._elicitation_unattended = True
+            logger.warning(
+                "mcp_elicitation_unattended_fallback",
+                tool_id=tool_id,
+                client=self._client_label(),
+                detail=str(exc),
             )
-        finally:
-            if heartbeat is not None:
-                heartbeat.cancel()
+            if self._approval_gate is None:
+                # Nowhere left to ask. Refusing is the same honest answer as
+                # a missing gate above, for the same reason.
+                raise ApprovalNotConfiguredError(tool_id, decision.reason) from exc
+            route = "dashboard"
+            resolution = await hold_on(self._approval_gate, route)
+        where = where_for(route)
         held_seconds = time.monotonic() - held_from
         outcome = resolution.outcome
         approval_id = resolution.approval_id or (approval_ids[0] if approval_ids else None)

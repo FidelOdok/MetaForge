@@ -65,7 +65,10 @@ rework cycles remain. Held tool calls, change proposals offer `approve` and
 When a pending item cannot be decided here, `decidable` is false and
 `not_decidable_reason` says why. A hold on the `elicitation` route is the main
 case: the question is on screen in the client's own prompt, and that prompt
-gets the answer.
+gets the answer. Unless it was never shown — see
+[A client that answers for the person](#a-client-that-answers-for-the-person),
+where the elicitation hold is closed and the call is held again on the
+`dashboard` route, which is decidable here.
 
 ## Deciding
 
@@ -122,6 +125,38 @@ with the answer. The approval entry, the approver record and the "dashboard
 answer wins" rule are the same as for an inline prompt. An answer can be
 used once. Details are in
 [the MCP protocol notes](mcp_spec.md#questions-returned-inside-results-forge-601).
+
+## A client that answers for the person
+
+A client declares elicitation at `initialize`, so the server routes its held
+writes to that client's own prompt. Some clients answer the request themselves
+without showing anything: Claude Code 2.1.x returns `decline` in about 20 ms.
+Taken for a refusal, that left every held write on such a connection
+unanswerable — never shown inline, never queued where a person could find it,
+and reported to the agent as "a reviewer rejected it" when no reviewer had
+seen it.
+
+So a `decline` or `cancel` that comes back faster than anyone could have read
+the prompt (one second, `mcp_core.elicitation.UNATTENDED_ANSWER_SECONDS`) is
+not treated as an answer:
+
+- the elicitation hold is closed as `cancelled`, so nothing is left in the
+  queue looking as though somebody had been asked;
+- the same call is held again on the `dashboard` route, where it is pending
+  and decidable in this API, in the dashboard and in `forge approvals`;
+- the connection is marked as one that cannot be asked, so the rest of the
+  session queues straight away instead of burning a hold per call;
+- with no dashboard gate configured the call is refused as
+  `not_configured`. The fallback is a queue somebody can see, not a way
+  through the gate.
+
+Only `decline` and `cancel` are judged by the clock. An `accept` carries a
+real answer however fast it arrives, so a person who clicks No quickly is
+still a rejection. It is a heuristic and it fails safe: a genuine instant
+refusal leaves the call waiting in the dashboard rather than closed, and
+nothing runs that a person has not approved. The fallback is logged as
+`mcp_elicitation_unattended_fallback`, and the gate logs
+`elicitation_unattended` with the action and how long it waited.
 
 ## Gates in the client chat
 
