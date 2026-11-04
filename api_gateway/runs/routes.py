@@ -636,9 +636,12 @@ class _GateCheckers:
         if isinstance(phase, dict):
             required = list(phase.get("required_deliverables") or [])
             phase_id = str(phase.get("id") or "")
+            gate = phase.get("gate")
+            gate_id = str((gate.get("gate_id") if isinstance(gate, dict) else None) or "")
         else:
             required = list(getattr(phase, "required_deliverables", []) or [])
             phase_id = str(getattr(phase, "id", "") or "")
+            gate_id = str(getattr(getattr(phase, "gate", None), "gate_id", None) or "")
         # ``since_ts=0`` asks "what has this project ever recorded", which is
         # the right question for a durable engine: the phase that produced the
         # deliverable may have run in a different process, hours earlier and
@@ -687,6 +690,18 @@ class _GateCheckers:
                 missing.append(gap)
             elif assembly is not None:
                 route_note += f"; built to the concept: {assembly.summary()}"
+
+        if gate_id == "G8" and hasattr(self._evaluator, "exact_cad_readiness"):
+            # CDE slice 6 (DEF-007): the release gate needs every CAD item at a
+            # validated exact revision with a round-trip-passed STEP of it.
+            readiness = await self._evaluator.exact_cad_readiness(project_id)
+            pending = [r for r in readiness if not r.ready]
+            if pending:
+                missing.append(
+                    "exact CAD incomplete: " + "; ".join(r.summary() for r in pending[:5])
+                )
+            elif readiness:
+                route_note += f"; {len(readiness)} CAD item(s) validated with round-tripped STEP"
 
         if phase_id == INTENT_PHASE_ID and hasattr(self._evaluator, "deciding_answers"):
             # FORGE-766: the deciding answers are recorded before intent passes.

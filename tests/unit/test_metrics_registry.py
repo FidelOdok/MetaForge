@@ -82,7 +82,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 tool jobs (FORGE-783).
         # + 1 concept mesh (FORGE-778), + 1 FORGE-780.
         # + 1 sketch saves (FORGE-789), + 1 scheduling (FORGE-788), + 1 sketch planes (FORGE-790).
-        assert len(all_metrics) == 109
+        # + 5 exact CAD, validity and STEP (CDE slice 6).
+        assert len(all_metrics) == 114
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

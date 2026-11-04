@@ -93,6 +93,7 @@ from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
 from api_gateway.twin.sketch_plane_routes import router as twin_sketch_plane_router
+from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
 from api_gateway.twin.sketch_routes import router as twin_sketch_router
 from api_gateway.uploads.routes import router as uploads_router
 from api_gateway.vendors.routes import router as vendors_router
@@ -908,6 +909,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
     git_registry = GitRepoRegistry.from_env(twin.graph)
     init_git_registry(git_registry)
     geometry_recorder_fn = make_geometry_recorder(twin, project_backend, git_registry)
+    # CDE slice 6: exact CAD on commit, B-Rep validity and revision-linked
+    # STEP, over the same lazy-bridge seam (bound to active_bridge below).
+    from api_gateway.twin.exact_cad import ExactCadService, set_exact_cad_service
+
+    exact_cad_bridge = _LazyBridge()
+    exact_cad_service = ExactCadService(
+        twin, bridge=exact_cad_bridge, recorder=geometry_recorder_fn
+    )
+    set_exact_cad_service(exact_cad_service)
     # FORGE-233: empty until the real MCP bridge exists (below, after
     # bootstrap_tool_registry returns) -- see _LazyBridgeMeasure's own
     # docstring for why this can't just be constructed with the bridge
@@ -1328,6 +1338,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # of an approver binding -- there is no tool that approves, so there
         # is nothing to inject for one.
         design_flow_catalogue_reader=make_catalogue_reader(),
+        # CDE slice 6: twin.build_exact_cad and twin.export_cad_step.
+        exact_cad_service=exact_cad_service,
         design_flow_proposer=make_proposer(),
         design_flow_status_reader=make_run_status_reader(),
         design_flow_run_starter=make_run_starter(),
@@ -1436,6 +1448,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-272: same for interference_check_bridge (interference_check's
     # real cadquery.boolean_operation call).
     interference_check_bridge.bridge = active_bridge
+    # CDE slice 6: same for exact_cad_bridge (cadquery.execute_script,
+    # cadquery.validate_shape and cadquery.export_step).
+    exact_cad_bridge.bridge = active_bridge
     # FORGE-301: same for geometry_diff_bridge (geometry_diff's
     # freecad.describe_step_file calls).
     geometry_diff_bridge.bridge = active_bridge
@@ -2337,6 +2352,8 @@ def create_app(
     app.include_router(twin_sketch_router)
     # FORGE-790: the plane a sketch is placed on.
     app.include_router(twin_sketch_plane_router)
+    # CDE slice 6: exact CAD builds and revision-linked STEP exports.
+    app.include_router(twin_exact_cad_router)
     app.include_router(hierarchy_router)
     app.include_router(bom_router)
     app.include_router(bom_risk_router)

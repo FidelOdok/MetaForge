@@ -105,6 +105,23 @@ def _count_diff(prior: dict[str, Any] | None, current: dict[str, Any]) -> dict[s
     }
 
 
+async def _release_cad_heads(twin: Any, project_id: UUID) -> list[str]:
+    """Mark the project's validated CAD heads ``released``. Never raises."""
+    from twin_core.geometry_state import exact_cad_readiness, mark_released
+
+    released: list[str] = []
+    try:
+        for entry in await exact_cad_readiness(twin, project_id):
+            if not entry.ready:
+                continue
+            node = await twin.graph.get_node(UUID(entry.node_id))
+            if node is not None and await mark_released(twin, node):
+                released.append(f"{entry.item_key}@{entry.head_revision}")
+    except Exception as exc:  # noqa: BLE001 - the package itself is recorded
+        logger.warning("release_cad_marking_failed", project_id=str(project_id), error=str(exc))
+    return released
+
+
 def make_release_package_creator(
     twin: Any,
     *,
@@ -170,9 +187,15 @@ def make_release_package_creator(
                 project_id=project_id,
             )
 
+            # CDE slice 6: the release path is the only one that marks CAD
+            # revisions released. G8 passed, so each CAD head is validated
+            # with a round-tripped STEP of that very revision.
+            released = await _release_cad_heads(twin, pid)
+
             logger.info(
                 "release_package_created",
                 project_id=project_id,
+                released_cad=released,
                 node_id=recorded["node_id"],
                 hierarchy_count=len(snapshot["hierarchy_node_ids"]),
                 bom_count=len(snapshot["bom_item_ids"]),
