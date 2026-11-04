@@ -1078,6 +1078,41 @@ groups:
             firmware build) may still read as current. Check the logs
             (cross_domain_impact_failed).
 
+  # FORGE-794 -- AI sketch generation (api_gateway/twin/sketch_generation.py).
+  - name: metaforge_sketch_generation
+    rules:
+      - alert: SketchGenerationFailing
+        expr: >-
+          sum(increase(metaforge_sketch_generation_total{outcome=~"failed|timeout|unavailable"}[30m]))
+          / clamp_min(sum(increase(metaforge_sketch_generation_total{outcome=~"generated|preservation_flagged|stale|failed|timeout|unavailable"}[30m])), 1) > 0.3
+          and sum(increase(metaforge_sketch_generation_total{outcome=~"generated|preservation_flagged|stale|failed|timeout|unavailable"}[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Concept sketches cannot be generated"
+          description: >-
+            More than three in ten of the last half hour's concept sketch
+            generations failed, timed out or found no image provider. The
+            accepted concept stays on the stage, but new proposals are not
+            arriving. Check METAFORGE_IMAGE_PROVIDER and its key, and the
+            gateway logs (sketch_generation_failed).
+      - alert: SketchGenerationPreservationFlaggedOften
+        expr: >-
+          sum(increase(metaforge_sketch_generation_total{outcome="preservation_flagged"}[1h]))
+          / clamp_min(sum(increase(metaforge_sketch_generation_total{outcome=~"generated|preservation_flagged"}[1h])), 1) > 0.5
+          and sum(increase(metaforge_sketch_generation_total{outcome=~"generated|preservation_flagged"}[1h])) >= 6
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Region edits often change what they had to keep"
+          description: >-
+            More than half of the last hour's sketch generations were flagged
+            because the image changed areas outside the selected region or a
+            locked feature. They were held for review, not accepted, but the
+            provider or model may be a poor fit for region edits.
+
   # FORGE-734 -- run supervisor (api_gateway/runs/supervisor.py).
   - name: metaforge_run_supervisor
     rules:

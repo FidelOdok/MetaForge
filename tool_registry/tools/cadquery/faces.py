@@ -268,7 +268,7 @@ def describe_faces(
     max_faces: int = MAX_FACES,
 ) -> dict[str, Any]:
     """The planar faces of a STEP's B-Rep. See the module docstring."""
-    from tool_registry.tools.cadquery.validity import _decode, _require_cq, _shape_of
+    from tool_registry.tools.cadquery.validity import _decode, _require_cq, step_shape
 
     content = _decode(step_base64)
     if not deflection > 0:
@@ -281,7 +281,8 @@ def describe_faces(
             handle.write(content)
             path = handle.name
         try:
-            shape = _shape_of(cq, cq.importers.importStep(path))
+            # step_shape casts compounds to their real leaves, as every STEP writer does.
+            shape = step_shape(cq, cq.importers.importStep(path))
         finally:
             try:
                 Path(path).unlink()

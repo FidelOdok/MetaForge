@@ -28,6 +28,7 @@ import os
 import re
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -151,6 +152,100 @@ def _require_cq() -> Any:
     import cadquery as cq  # type: ignore[import-untyped]
 
     return cq
+
+
+def flatten_compounds(
+    roots: list[Any],
+    *,
+    is_compound: Callable[[Any], bool],
+    children: Callable[[Any], list[Any]],
+) -> list[Any]:
+    """The non-compound shapes under ``roots``, depth first. Pure.
+
+    A compound (at any depth) is replaced by its children; everything else is
+    kept as it is, so a solid stays a solid and an open shell or a bare face
+    stays what it is and still fails the validity check.
+    """
+    leaves: list[Any] = []
+    stack = list(reversed(roots))
+    while stack:
+        node = stack.pop()
+        if is_compound(node):
+            stack.extend(reversed(children(node)))
+        else:
+            leaves.append(node)
+    return leaves
+
+
+def _occt_tree() -> tuple[Callable[[Any], bool], Callable[[Any], list[Any]]]:
+    """``(is_compound, children)`` on raw OCCT shapes (``TopoDS_Shape``)."""
+    from OCP.TopAbs import TopAbs_COMPOUND  # type: ignore[import-not-found]
+    from OCP.TopoDS import TopoDS_Iterator  # type: ignore[import-not-found]
+
+    def is_compound(shape: Any) -> bool:
+        return bool(shape.ShapeType() == TopAbs_COMPOUND)
+
+    def children(shape: Any) -> list[Any]:
+        out = []
+        it = TopoDS_Iterator(shape)
+        while it.More():
+            out.append(it.Value())
+            it.Next()
+        return out
+
+    return is_compound, children
+
+
+def step_shape(cq: Any, obj: Any) -> Any:
+    """The shape to write as STEP for a script, Workplane, Shape or Assembly.
+
+    CadQuery can hand back a ``Compound`` object whose underlying OCCT shape is
+    really a solid (``faces(">Z").shell(-1)`` does). ``cq.exporters.export``
+    flattens a Workplane by iterating it, which on such an object yields the
+    solid's *shell*, so the STEP held a shell and read back with no solid.
+    Here every compound is walked on the OCCT shape itself and each leaf is
+    cast to its real type: one leaf is written as it is, several as a compound
+    of them. Returns ``None`` when ``obj`` holds no shape at all.
+    """
+    workplane_t, shape_t, assembly_t = (
+        t if isinstance(t, type) else None
+        for t in (getattr(cq, n, None) for n in ("Workplane", "Shape", "Assembly"))
+    )
+    if shape_t is None:
+        return None
+    if workplane_t is not None and isinstance(obj, workplane_t):
+        roots = [v.wrapped for v in obj.vals() if isinstance(v, shape_t)]
+    elif isinstance(obj, shape_t):
+        roots = [obj.wrapped]
+    elif assembly_t is not None and isinstance(obj, assembly_t):
+        roots = [obj.toCompound().wrapped]
+    else:
+        return None
+
+    is_compound, children = _occt_tree()
+    leaves = flatten_compounds(
+        [r for r in roots if not r.IsNull()], is_compound=is_compound, children=children
+    )
+    shapes = [cq.Shape.cast(leaf) for leaf in leaves]
+    if not shapes:
+        return None
+    return shapes[0] if len(shapes) == 1 else cq.Compound.makeCompound(shapes)
+
+
+def write_step(cq: Any, obj: Any, path: str) -> int:
+    """Write ``obj`` to ``path`` as STEP with its solids kept as solids.
+
+    Returns the number of solids written. Falls back to
+    ``cq.exporters.export`` only for an object :func:`step_shape` cannot read.
+    """
+    shape = step_shape(cq, obj)
+    if shape is None:
+        cq.exporters.export(obj, path)
+        return 0
+    shape.exportStep(path)
+    solids = len(shape.Solids())
+    logger.debug("cadquery_step_written", path=path, solids=solids)
+    return solids
 
 
 def _shape_of(cq: Any, workplane: Any) -> Any:
@@ -330,7 +425,7 @@ def export_step(step_base64: str, *, work_dir: str, schema: str | None = None) -
             source_path = handle.name
         out_path = source_path[:-5] + "-export.step"
         try:
-            shape = _shape_of(cq, cq.importers.importStep(source_path))
+            shape = step_shape(cq, cq.importers.importStep(source_path))
             if shape is None:
                 raise ValueError("the STEP holds no shape to export")
             source = measure(shape)
@@ -380,7 +475,10 @@ __all__ = [
     "classify",
     "configured_schema",
     "export_step",
+    "flatten_compounds",
     "measure",
     "schema_from_step_text",
+    "step_shape",
     "validate_step",
+    "write_step",
 ]

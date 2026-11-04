@@ -1202,137 +1202,6 @@
         "title": "Assumption",
         "type": "object"
       },
-      "AttachFaceRequest": {
-        "properties": {
-          "base_revision": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Revision"
-          },
-          "face_id": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Face Id",
-            "type": "string"
-          },
-          "item_key": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Item Key",
-            "type": "string"
-          },
-          "op_id": {
-            "maxLength": 100,
-            "minLength": 8,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "title": "Op Id",
-            "type": "string"
-          },
-          "revision": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Revision"
-          }
-        },
-        "required": [
-          "op_id",
-          "item_key",
-          "face_id"
-        ],
-        "title": "AttachFaceRequest",
-        "type": "object"
-      },
-      "AttachableResponse": {
-        "description": "The CAD revisions a sketch can be attached to (validated exact heads).",
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/AttachableRevision"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "project_id": {
-            "title": "Project Id",
-            "type": "string"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "required": [
-          "project_id",
-          "items"
-        ],
-        "title": "AttachableResponse",
-        "type": "object"
-      },
-      "AttachableRevision": {
-        "properties": {
-          "geometry_state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Geometry State"
-          },
-          "item_key": {
-            "title": "Item Key",
-            "type": "string"
-          },
-          "item_ref": {
-            "title": "Item Ref",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "node_id": {
-            "title": "Node Id",
-            "type": "string"
-          },
-          "revision": {
-            "title": "Revision",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "item_key",
-          "name",
-          "revision",
-          "item_ref",
-          "node_id"
-        ],
-        "title": "AttachableRevision",
-        "type": "object"
-      },
       "AttemptPromotionRequest": {
         "properties": {
           "comment": {
@@ -2224,6 +2093,24 @@
         "title": "BooleanCutResponse",
         "type": "object"
       },
+      "BranchBody": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "BranchBody",
+        "type": "object"
+      },
       "Brief": {
         "properties": {
           "assumptions": {
@@ -2245,6 +2132,13 @@
               "$ref": "#/components/schemas/Measurement"
             },
             "title": "Measurements",
+            "type": "array"
+          },
+          "reference_details": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceRecord"
+            },
+            "title": "Reference Details",
             "type": "array"
           },
           "references": {
@@ -4611,6 +4505,24 @@
         "title": "Decision",
         "type": "object"
       },
+      "DecisionBody": {
+        "properties": {
+          "expected_baseline": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Baseline"
+          }
+        },
+        "title": "DecisionBody",
+        "type": "object"
+      },
       "DecisionRecord": {
         "description": "Who decided, and through what.",
         "properties": {
@@ -5959,7 +5871,7 @@
       },
       "FaceAttachment": {
         "additionalProperties": false,
-        "description": "Where a face-attached plane sits on a model (CDE slice 9).\n\n``item_key`` and ``revision`` name the CAD revision; ``face_ref`` is the\nface id ``cadquery.describe_faces`` gave on that revision (meaningful on\nthat revision only). ``signature`` is the face's geometry signature\n(:class:`twin_core.geometry.face_signature.FaceSignature`): the semantic\ntag, normal, offset, area, centroid, loop edge count and adjacent normals\nthat find the face again when the CAD item moves on (PLN-009).\n``remapped_from`` is the attachment this one was found from by a remap,\nas ``KEY@n#face``. While the plane is ``REATTACHMENT_REQUIRED`` the\nattachment and frame are the last valid ones, and ``pending`` says what\nthe remap saw (outcome, candidate faces, the revision it looked at).",
+        "description": "Where a face-attached plane sits on a model.\n\n``face_ref`` is opaque (whatever the CAD side names the face). The\n``signature`` is a placeholder for the geometry fingerprint (normal,\ncentroid, area) that will let a topology change be detected; it is not\nchecked yet.",
         "properties": {
           "face_ref": {
             "maxLength": 200,
@@ -5972,30 +5884,6 @@
             "minLength": 1,
             "title": "Item Key",
             "type": "string"
-          },
-          "pending": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pending"
-          },
-          "remapped_from": {
-            "anyOf": [
-              {
-                "maxLength": 300,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Remapped From"
           },
           "revision": {
             "anyOf": [
@@ -6029,219 +5917,71 @@
         "title": "FaceAttachment",
         "type": "object"
       },
-      "FaceListResponse": {
+      "FactCitation": {
+        "description": "Where a fact came from: which reference, which part of it, which version.",
         "properties": {
-          "cached": {
-            "default": false,
-            "title": "Cached",
-            "type": "boolean"
-          },
-          "face_count": {
-            "default": 0,
-            "title": "Face Count",
-            "type": "integer"
-          },
-          "faces": {
-            "items": {
-              "$ref": "#/components/schemas/FaceView"
-            },
-            "title": "Faces",
-            "type": "array"
-          },
-          "geometry_state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Geometry State"
-          },
-          "item_key": {
-            "title": "Item Key",
-            "type": "string"
-          },
-          "item_ref": {
-            "title": "Item Ref",
-            "type": "string"
-          },
-          "mesh_map": {
-            "additionalProperties": {
-              "additionalProperties": {
-                "type": "integer"
-              },
-              "type": "object"
-            },
-            "title": "Mesh Map",
-            "type": "object"
-          },
-          "mesh_source": {
+          "excerpt": {
             "default": "",
-            "title": "Mesh Source",
+            "maxLength": 300,
+            "title": "Excerpt",
             "type": "string"
           },
-          "node_id": {
-            "title": "Node Id",
+          "reference_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reference Id",
             "type": "string"
           },
-          "part_size": {
-            "title": "Part Size",
-            "type": "number"
-          },
-          "project_id": {
-            "title": "Project Id",
+          "region": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Region",
             "type": "string"
           },
-          "revision": {
-            "title": "Revision",
-            "type": "integer"
-          },
-          "solid_count": {
-            "default": 0,
-            "title": "Solid Count",
-            "type": "integer"
+          "source_hash": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Source Hash",
+            "type": "string"
           }
         },
         "required": [
-          "project_id",
-          "item_key",
-          "revision",
-          "item_ref",
-          "node_id",
-          "part_size",
-          "faces"
+          "reference_id",
+          "region"
         ],
-        "title": "FaceListResponse",
+        "title": "FactCitation",
         "type": "object"
       },
-      "FaceView": {
+      "FactsRequest": {
         "properties": {
-          "adjacent": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Adjacent",
-            "type": "array"
-          },
-          "area": {
-            "title": "Area",
-            "type": "number"
-          },
-          "bounding_box": {
+          "expected_version": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "type": "number"
-                },
-                "type": "object"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Bounding Box"
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
           },
-          "centroid": {
-            "maxItems": 3,
-            "minItems": 3,
-            "prefixItems": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Centroid",
-            "type": "array"
-          },
-          "face_id": {
-            "title": "Face Id",
+          "note": {
+            "default": "",
+            "description": "What the person says the reference shows",
+            "maxLength": 500,
+            "title": "Note",
             "type": "string"
           },
-          "longest_edge": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Longest Edge"
-          },
-          "mesh": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "integer"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mesh"
-          },
-          "normal": {
-            "maxItems": 3,
-            "minItems": 3,
-            "prefixItems": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Normal",
-            "type": "array"
-          },
-          "offset": {
-            "title": "Offset",
-            "type": "number"
-          },
-          "outer_loop_edges": {
-            "default": 0,
-            "title": "Outer Loop Edges",
-            "type": "integer"
-          },
-          "semantic_tag": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Semantic Tag"
-          },
-          "signature_summary": {
+          "summary": {
             "default": "",
-            "title": "Signature Summary",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
             "type": "string"
           }
         },
-        "required": [
-          "face_id",
-          "normal",
-          "offset",
-          "area",
-          "centroid"
-        ],
-        "title": "FaceView",
+        "title": "FactsRequest",
         "type": "object"
       },
       "FallbackInfo": {
@@ -7783,6 +7523,170 @@
         "title": "GenerateFeatureRequest",
         "type": "object"
       },
+      "GenerateSketchRequest": {
+        "description": "One generation request (FSG-001..006, DI-002).",
+        "properties": {
+          "baseline_key": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Key"
+          },
+          "confirm_spend": {
+            "default": false,
+            "title": "Confirm Spend",
+            "type": "boolean"
+          },
+          "constraints": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Constraints",
+            "type": "array"
+          },
+          "expected_baseline": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Baseline"
+          },
+          "intent": {
+            "maxLength": 1500,
+            "minLength": 1,
+            "title": "Intent",
+            "type": "string"
+          },
+          "locked_regions": {
+            "items": {
+              "$ref": "#/components/schemas/Region"
+            },
+            "maxItems": 10,
+            "title": "Locked Regions",
+            "type": "array"
+          },
+          "mask": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Region"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mask_instruction": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Mask Instruction",
+            "type": "string"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "text",
+                  "reference",
+                  "sketch"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "n_variants": {
+            "default": 1,
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "N Variants",
+            "type": "integer"
+          },
+          "negative": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Negative",
+            "type": "array"
+          },
+          "protected_features": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Protected Features",
+            "type": "array"
+          },
+          "reference_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Reference Ids",
+            "type": "array"
+          },
+          "size": {
+            "default": "1024x1024",
+            "title": "Size",
+            "type": "string"
+          },
+          "sketch_key": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Key"
+          },
+          "sketch_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Revision"
+          },
+          "style": {
+            "default": "industrial_sketch",
+            "enum": [
+              "industrial_sketch",
+              "marker_render",
+              "line_art",
+              "concept_drawing"
+            ],
+            "title": "Style",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent"
+        ],
+        "title": "GenerateSketchRequest",
+        "type": "object"
+      },
       "GenerateTestPlanRequest": {
         "properties": {
           "project_id": {
@@ -7845,6 +7749,100 @@
           "model"
         ],
         "title": "GeneratedByView",
+        "type": "object"
+      },
+      "GenerationStarted": {
+        "properties": {
+          "accepted_baseline": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Baseline"
+          },
+          "authority": {
+            "default": "illustrative",
+            "title": "Authority",
+            "type": "string"
+          },
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expected_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Seconds"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_key": {
+            "title": "Target Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "operation_id",
+          "mode",
+          "target_key",
+          "base_revision"
+        ],
+        "title": "GenerationStarted",
         "type": "object"
       },
       "GeometryDiffResponse": {
@@ -15832,6 +15830,491 @@
         "title": "RecordStalenessResponse",
         "type": "object"
       },
+      "ReferenceAssociation": {
+        "description": "What a reference is about: the project, a component, a parameter, a plane...",
+        "properties": {
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "project",
+              "component",
+              "parameter",
+              "plane",
+              "interface",
+              "requirement"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "ReferenceAssociation",
+        "type": "object"
+      },
+      "ReferenceDisclosure": {
+        "description": "A reference sent to an external provider (REF-007).",
+        "properties": {
+          "model": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Model",
+            "type": "string"
+          },
+          "operation_id": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 100,
+            "title": "Provider",
+            "type": "string"
+          },
+          "purpose": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "sent_at": {
+            "title": "Sent At",
+            "type": "string"
+          },
+          "source_hash": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Source Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "ReferenceDisclosure",
+        "type": "object"
+      },
+      "ReferenceFact": {
+        "description": "A candidate fact extracted from a reference (REF-005). Never measured truth.",
+        "properties": {
+          "basis": {
+            "default": "estimated",
+            "enum": [
+              "stated",
+              "estimated"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "citation": {
+            "$ref": "#/components/schemas/FactCitation"
+          },
+          "extracted_at": {
+            "title": "Extracted At",
+            "type": "string"
+          },
+          "extracted_by": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Extracted By",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "parameter": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Parameter",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Text",
+            "type": "string"
+          },
+          "uncertainty": {
+            "default": "high",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Uncertainty",
+            "type": "string"
+          },
+          "unit": {
+            "default": "",
+            "maxLength": 32,
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "id",
+          "parameter",
+          "citation"
+        ],
+        "title": "ReferenceFact",
+        "type": "object"
+      },
+      "ReferenceRecord": {
+        "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
+        "properties": {
+          "active": {
+            "default": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "associations": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceAssociation"
+            },
+            "maxItems": 50,
+            "title": "Associations",
+            "type": "array"
+          },
+          "disclosures": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceDisclosure"
+            },
+            "title": "Disclosures",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceFact"
+            },
+            "maxItems": 500,
+            "title": "Facts",
+            "type": "array"
+          },
+          "mime": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Mime",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Name",
+            "type": "string"
+          },
+          "protected_features": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Protected Features",
+            "type": "array"
+          },
+          "role": {
+            "default": "inspiration",
+            "enum": [
+              "inspiration",
+              "geometry",
+              "functional_demo",
+              "specification",
+              "manufacturing_rule",
+              "verification_evidence",
+              "existing_design"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "source_hash": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          },
+          "work_product_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id"
+        ],
+        "title": "ReferenceRecord",
+        "type": "object"
+      },
+      "ReferenceUpdate": {
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Include it in the next instruction",
+            "title": "Active"
+          },
+          "associations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReferenceAssociation"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Associations"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "protected_features": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protected Features"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "inspiration",
+                  "geometry",
+                  "functional_demo",
+                  "specification",
+                  "manufacturing_rule",
+                  "verification_evidence",
+                  "existing_design"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "title": "ReferenceUpdate",
+        "type": "object"
+      },
+      "ReferenceVersion": {
+        "description": "One change to a reference's file or meaning (REF-006 history).",
+        "properties": {
+          "active": {
+            "default": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "actor": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Actor",
+            "type": "string"
+          },
+          "changed_at": {
+            "title": "Changed At",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Note",
+            "type": "string"
+          },
+          "protected_features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Protected Features",
+            "type": "array"
+          },
+          "role": {
+            "default": "inspiration",
+            "enum": [
+              "inspiration",
+              "geometry",
+              "functional_demo",
+              "specification",
+              "manufacturing_rule",
+              "verification_evidence",
+              "existing_design"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "source_hash": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ReferenceVersion",
+        "type": "object"
+      },
+      "ReferencesView": {
+        "properties": {
+          "brief_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Brief Keys",
+            "type": "array"
+          },
+          "conflicts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "creation": {
+            "$ref": "#/components/schemas/Creation"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/Readiness"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferenceRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "creation",
+          "readiness"
+        ],
+        "title": "ReferencesView",
+        "type": "object"
+      },
+      "Region": {
+        "description": "A closed polygon in sketch units, and an optional name for what it protects.",
+        "properties": {
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
+          "polygon": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 200,
+            "minItems": 3,
+            "title": "Polygon",
+            "type": "array"
+          }
+        },
+        "required": [
+          "polygon"
+        ],
+        "title": "Region",
+        "type": "object"
+      },
       "Release": {
         "properties": {
           "approver": {
@@ -16410,78 +16893,6 @@
           "outcome"
         ],
         "title": "ResolveHoldRequest",
-        "type": "object"
-      },
-      "ResolveReattachmentRequest": {
-        "properties": {
-          "action": {
-            "enum": [
-              "pick_face",
-              "detach_unassigned",
-              "detach_principal"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
-          "base_revision": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Revision"
-          },
-          "face_id": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Face Id"
-          },
-          "op_id": {
-            "maxLength": 100,
-            "minLength": 8,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "title": "Op Id",
-            "type": "string"
-          },
-          "principal": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PrincipalPlane"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "revision": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Revision"
-          }
-        },
-        "required": [
-          "op_id",
-          "action"
-        ],
-        "title": "ResolveReattachmentRequest",
         "type": "object"
       },
       "ResultUpdate": {
@@ -27051,6 +27462,175 @@
         ]
       }
     },
+    "/v1/create/{project_id}/references/conflicts": {
+      "get": {
+        "description": "Authoritative references that state different values for one parameter.",
+        "operationId": "get_reference_conflicts_v1_create__project_id__references_conflicts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Reference Conflicts V1 Create  Project Id  References Conflicts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Reference Conflicts",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/references/{wp_id}": {
+      "put": {
+        "description": "Set a reference's role, associations, inclusion or protected features.\n\nEach change is a version in the reference's history. Two authoritative\nreferences that now state different values are raised for review.",
+        "operationId": "put_reference_v1_create__project_id__references__wp_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wp_id",
+            "required": true,
+            "schema": {
+              "title": "Wp Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferencesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Reference",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/references/{wp_id}/facts": {
+      "post": {
+        "description": "Extract candidate facts from a reference, each with a citation (REF-005).\n\nA specification or manufacturing rule's explicit values are ``stated``;\neverything read off an image, or from a non-authoritative text, is\n``estimated``. Nothing is ever ``measured``. Conflicts between\nauthoritative references are raised for review (REF-006).",
+        "operationId": "extract_reference_facts_v1_create__project_id__references__wp_id__facts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wp_id",
+            "required": true,
+            "schema": {
+              "title": "Wp Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferencesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extract Reference Facts",
+        "tags": [
+          "create"
+        ]
+      }
+    },
     "/v1/create/{project_id}/route": {
       "put": {
         "description": "Choose how it will be made: at home, in a workshop or by a manufacturer.",
@@ -35841,49 +36421,6 @@
         ]
       }
     },
-    "/v1/twin/projects/{project_id}/attachable-geometry": {
-      "get": {
-        "description": "CAD items whose head is validated exact geometry (a face can be picked on them).",
-        "operationId": "get_attachable_geometry_v1_twin_projects__project_id__attachable_geometry_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachableResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Attachable Geometry",
-        "tags": [
-          "twin"
-        ]
-      }
-    },
     "/v1/twin/projects/{project_id}/impact": {
       "get": {
         "description": "Recorded impacts, newest first.",
@@ -36487,75 +37024,6 @@
         ]
       }
     },
-    "/v1/twin/projects/{project_id}/items/{item_key}/faces": {
-      "get": {
-        "description": "The planar faces of a validated CAD revision, with the GLB mesh map. Reads only.",
-        "operationId": "get_candidate_faces_v1_twin_projects__project_id__items__item_key__faces_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "item_key",
-            "required": true,
-            "schema": {
-              "title": "Item Key",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "revision",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Revision"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FaceListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Candidate Faces",
-        "tags": [
-          "twin"
-        ]
-      }
-    },
     "/v1/twin/projects/{project_id}/live": {
       "get": {
         "description": "SSE: a ``live.snapshot`` of the project's assemblies in progress, then\none ``live.event`` per placement change.",
@@ -36771,6 +37239,363 @@
           }
         },
         "summary": "Get Project Prd",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketch-generations": {
+      "get": {
+        "description": "Accepted concept lines (head and history) and recent proposals.",
+        "operationId": "list_generations_v1_twin_projects__project_id__sketch_generations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Generations V1 Twin Projects  Project Id  Sketch Generations Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Generations",
+        "tags": [
+          "twin"
+        ]
+      },
+      "post": {
+        "description": "Start a concept sketch generation as a job on its target.\n\nThe mode follows from the request: a ``sketch_key`` refines that sketch,\nactive references condition it, otherwise it is drawn from text. A\n``mask`` limits it to a region. ``n_variants`` defaults to 1. Each output\nis stored as a proposal; nothing replaces the accepted concept until a\nperson accepts one.",
+        "operationId": "start_generation_v1_twin_projects__project_id__sketch_generations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateSketchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Generation",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketch-generations/compare": {
+      "get": {
+        "description": "Two concepts side by side: their records and the share of pixels that differ.",
+        "operationId": "compare_generations_v1_twin_projects__project_id__sketch_generations_compare_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A generated concept node id",
+            "in": "query",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "description": "A generated concept node id",
+              "title": "A",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Another generated concept node id",
+            "in": "query",
+            "name": "b",
+            "required": true,
+            "schema": {
+              "description": "Another generated concept node id",
+              "title": "B",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Compare Generations V1 Twin Projects  Project Id  Sketch Generations Compare Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare Generations",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketch-generations/{node_id}/accept": {
+      "post": {
+        "description": "Make a proposal the accepted concept. The previous one stays in the line's history.",
+        "operationId": "accept_generation_v1_twin_projects__project_id__sketch_generations__node_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Accept Generation V1 Twin Projects  Project Id  Sketch Generations  Node Id  Accept Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept Generation",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketch-generations/{node_id}/branch": {
+      "post": {
+        "description": "Start a separate accepted line from this concept; the current one is untouched.",
+        "operationId": "branch_generation_v1_twin_projects__project_id__sketch_generations__node_id__branch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BranchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Branch Generation V1 Twin Projects  Project Id  Sketch Generations  Node Id  Branch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Branch Generation",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketch-generations/{node_id}/reject": {
+      "post": {
+        "description": "Set a proposal aside. It stays in the history, marked rejected.",
+        "operationId": "reject_generation_v1_twin_projects__project_id__sketch_generations__node_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Generation V1 Twin Projects  Project Id  Sketch Generations  Node Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Generation",
         "tags": [
           "twin"
         ]
@@ -37066,68 +37891,6 @@
         ]
       }
     },
-    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/attach-face": {
-      "post": {
-        "description": "Put the sketch on a planar face of a validated CAD revision.\n\nThe plane frame comes from the face: origin at the face centroid on its\nplane, U along the longest straight edge of its outer loop, the normal\noutward, right-handed. The face's geometry signature is stored so the\nface can be found again when the CAD item changes. A retried ``op_id``\nreturns the revision it already made.",
-        "operationId": "attach_sketch_to_face_v1_twin_projects__project_id__sketches__sketch_key__plane_attach_face_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "sketch_key",
-            "required": true,
-            "schema": {
-              "title": "Sketch Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachFaceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlaneChangeResult"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Attach Sketch To Face",
-        "tags": [
-          "twin"
-        ]
-      }
-    },
     "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/confirm": {
       "post": {
         "description": "Place the sketch on the plane the person chose, as the plane item's next revision.\n\nThe choice is applied as given; no inference is consulted. A retried\n``op_id`` returns the revision it already made; choosing the plane the\nsketch is already on changes nothing.",
@@ -37371,68 +38134,6 @@
           }
         },
         "summary": "Preview Sketch Plane Reassign",
-        "tags": [
-          "twin"
-        ]
-      }
-    },
-    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/resolve-reattachment": {
-      "post": {
-        "description": "Answer ``REATTACHMENT_REQUIRED``: pick a face, or detach the sketch.\n\n``pick_face`` attaches to ``face_id`` on the attached item's current\nrevision; ``detach_principal`` moves the sketch onto ``principal``\nkeeping its local coordinates; ``detach_unassigned`` keeps it as a\nconcept with no plane. Refused (409) when the plane does not need it.",
-        "operationId": "resolve_sketch_reattachment_v1_twin_projects__project_id__sketches__sketch_key__plane_resolve_reattachment_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "sketch_key",
-            "required": true,
-            "schema": {
-              "title": "Sketch Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveReattachmentRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlaneChangeResult"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Resolve Sketch Reattachment",
         "tags": [
           "twin"
         ]

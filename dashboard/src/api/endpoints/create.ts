@@ -65,11 +65,80 @@ export interface Assumption {
   status: 'open' | 'confirmed' | 'revised';
 }
 
+/** What a reference is for (FORGE-794). Only the last two are authoritative. */
+export const REFERENCE_ROLES = [
+  'inspiration',
+  'geometry',
+  'functional_demo',
+  'existing_design',
+  'verification_evidence',
+  'specification',
+  'manufacturing_rule',
+] as const;
+export type ReferenceRole = (typeof REFERENCE_ROLES)[number];
+
+export const REFERENCE_ROLE_LABELS: Record<ReferenceRole, string> = {
+  inspiration: 'Inspiration',
+  geometry: 'Shape',
+  functional_demo: 'How it works',
+  existing_design: 'Current design',
+  verification_evidence: 'Evidence',
+  specification: 'Specification',
+  manufacturing_rule: 'Making rule',
+};
+
+export interface ReferenceAssociation {
+  kind: 'project' | 'component' | 'parameter' | 'plane' | 'interface' | 'requirement';
+  id: string;
+  label?: string;
+}
+
+export interface FactCitation {
+  reference_id: string;
+  region: string;
+  source_hash: string;
+  excerpt: string;
+}
+
+export interface ReferenceFact {
+  id: string;
+  parameter: string;
+  value: number | null;
+  text: string;
+  unit: string;
+  /** `stated` only for an explicit value in a specification or making rule. Never measured. */
+  basis: 'stated' | 'estimated';
+  uncertainty: 'low' | 'medium' | 'high';
+  citation: FactCitation;
+}
+
+export interface ReferenceRecord {
+  work_product_id: string;
+  name: string;
+  role: ReferenceRole;
+  associations: ReferenceAssociation[];
+  active: boolean;
+  protected_features: string[];
+  source_hash: string;
+  versions: Array<{ version: number; role: ReferenceRole; active: boolean; note: string; changed_at: string }>;
+  facts: ReferenceFact[];
+  disclosures: Array<{ provider: string; model: string; purpose: string; sent_at: string }>;
+}
+
+export interface ReferenceConflict {
+  key: string;
+  parameter: string;
+  summary: string;
+  citations: FactCitation[];
+}
+
 export interface Brief {
   items: Partial<Record<BriefKey, BriefItem>>;
   measurements: Measurement[];
   assumptions: Assumption[];
   references: string[];
+  /** Role, inclusion, protected features, history and facts of the references. */
+  reference_details?: ReferenceRecord[];
 }
 
 export interface RouteChoice {
@@ -330,6 +399,57 @@ export async function duplicateCreation(
 
 export async function deleteCreation(projectId: string): Promise<void> {
   await apiClient.delete(base(projectId));
+}
+
+export interface ReferencesView extends CreationView {
+  reference: ReferenceRecord | null;
+  conflicts: Array<Record<string, unknown>>;
+}
+
+export interface ReferenceUpdate {
+  role?: ReferenceRole;
+  active?: boolean;
+  protected_features?: string[];
+  associations?: ReferenceAssociation[];
+}
+
+/** `PUT /v1/create/{id}/references/{wp}`: role, inclusion, protected features. */
+export async function putReference(projectId: string, workProductId: string, update: ReferenceUpdate): Promise<ReferencesView> {
+  const { data } = await apiClient.put<ReferencesView>(
+    `${base(projectId)}/references/${encodeURIComponent(workProductId)}`,
+    update,
+    { headers: SURFACE_HEADERS },
+  );
+  return data;
+}
+
+/** `POST /v1/create/{id}/references/{wp}/facts`: candidate facts with citations. */
+export async function extractReferenceFacts(projectId: string, workProductId: string, note = ''): Promise<ReferencesView> {
+  const { data } = await apiClient.post<ReferencesView>(
+    `${base(projectId)}/references/${encodeURIComponent(workProductId)}/facts`,
+    { note },
+    { headers: SURFACE_HEADERS },
+  );
+  return data;
+}
+
+/** The record for a reference, or the default an unconfigured one has. */
+export function referenceRecord(brief: Brief | undefined, workProductId: string, name = ''): ReferenceRecord {
+  const found = brief?.reference_details?.find((r) => r.work_product_id === workProductId);
+  return (
+    found ?? {
+      work_product_id: workProductId,
+      name,
+      role: 'inspiration',
+      associations: [],
+      active: true,
+      protected_features: [],
+      source_hash: '',
+      versions: [],
+      facts: [],
+      disclosures: [],
+    }
+  );
 }
 
 /** The 409 body of a stale write, when that is what an error is. */

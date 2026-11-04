@@ -1078,6 +1078,41 @@ class MetricsRegistry:
         labels=["stage", "outcome"],
     )
 
+    # ── Sketch generation and references (FORGE-794) ───────────────────
+
+    SKETCH_GENERATION_TOTAL = MetricDefinition(
+        name="metaforge_sketch_generation_total",
+        type="counter",
+        description=(
+            "AI concept sketch generations, by mode (text, reference, sketch) and outcome: "
+            "generated, preservation_flagged (a region edit changed what it had to keep), "
+            "stale (the accepted baseline moved while it ran; kept as history), "
+            "superseded, cancelled, unavailable, timeout, failed, accepted, rejected "
+            "(FORGE-794)"
+        ),
+        labels=["mode", "outcome"],
+    )
+    SKETCH_GENERATION_FIRST_RESULT_SECONDS = MetricDefinition(
+        name="metaforge_sketch_generation_first_result_seconds",
+        type="histogram",
+        description=(
+            "Seconds from a sketch generation request to its first stored proposal, by "
+            "mode and provider: the measured first-useful-result latency (FORGE-794)"
+        ),
+        labels=["mode", "provider"],
+        unit="s",
+        buckets=[0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60, 120],
+    )
+    REFERENCE_CONFLICT_TOTAL = MetricDefinition(
+        name="metaforge_reference_conflict_total",
+        type="counter",
+        description=(
+            "Conflicts raised for review between two authoritative references that state "
+            "different values for the same parameter (FORGE-794)"
+        ),
+        labels=[],
+    )
+
     # ── Sketch reading (FORGE-762) ─────────────────────────────────────
 
     SKETCH_READING_TOTAL = MetricDefinition(
@@ -1294,6 +1329,9 @@ class MetricsRegistry:
             cls.FACE_REMAP_TOTAL,
             cls.PLANE_BLOCKED_COMMIT_TOTAL,
             cls.SKETCH_COMPILE_TOTAL,
+            cls.SKETCH_GENERATION_TOTAL,
+            cls.SKETCH_GENERATION_FIRST_RESULT_SECONDS,
+            cls.REFERENCE_CONFLICT_TOTAL,
             cls.EXACT_CAD_BUILD_TOTAL,
             cls.GEOMETRY_VALIDITY_TOTAL,
             cls.STEP_EXPORT_TOTAL,
@@ -2294,6 +2332,26 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.SKETCH_COMPILE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"stage": stage, "outcome": outcome})
+
+    def record_sketch_generation(self, mode: str, outcome: str) -> None:
+        """Record one sketch generation outcome (FORGE-794)."""
+        counter = self._instruments.get(MetricsRegistry.SKETCH_GENERATION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"mode": mode, "outcome": outcome})
+
+    def record_sketch_generation_latency(self, mode: str, provider: str, seconds: float) -> None:
+        """Record the measured time to a generation's first stored proposal (FORGE-794)."""
+        histogram = self._instruments.get(
+            MetricsRegistry.SKETCH_GENERATION_FIRST_RESULT_SECONDS.name
+        )
+        if histogram is not None:
+            histogram.record(max(seconds, 0.0), attributes={"mode": mode, "provider": provider})
+
+    def record_reference_conflict(self) -> None:
+        """Record one conflict between authoritative references (FORGE-794)."""
+        counter = self._instruments.get(MetricsRegistry.REFERENCE_CONFLICT_TOTAL.name)
+        if counter is not None:
+            counter.add(1)
 
     def record_supervisor_action(self, action: str, reason: str) -> None:
         """Record one run supervisor action (FORGE-734)."""

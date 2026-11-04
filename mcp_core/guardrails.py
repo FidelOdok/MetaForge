@@ -329,6 +329,8 @@ ILLUSTRATIVE: frozenset[str] = frozenset(
         "twin.critique_concept_image",
         "twin.generate_concept_mesh",
         "twin.render_work_product",
+        # FORGE-794: a concept sketch proposal; never replaces the accepted one.
+        "twin.generate_sketch",
     }
 )
 

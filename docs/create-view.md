@@ -278,6 +278,98 @@ and revolve features with depth, angle and material marked as needed input:
 nothing the drawing does not say is invented. See
 [the sketch compiler](twin_schema.md#sketch-compiler).
 
+### Generating a concept
+
+**Generate**, at the top right of the stage, draws a freeform concept
+sketch with an image model. It opens a small panel on the stage; there is no
+separate studio. What the image is drawn from follows from what is there:
+
+| There is | Mode | What is sent |
+|---|---|---|
+| Only a description | From your description | The description, any constraints and a style |
+| Active references | From your references | Each reference for its role (below) |
+| A saved sketch | From your sketch | The strokes, drawn to an image, refined or completed |
+
+The panel asks for a description (the composer's draft fills it), a style
+(industrial sketch, marker render, line art or concept drawing), how many
+alternatives (one unless more are chosen: each is a paid image) and what to
+avoid. The person's strokes are never changed: the generated image is a
+separate layer under them.
+
+**A region.** Drawing a rectangle with the region tool selects the strokes in
+it and also becomes the region a generation may change. With *Change only the
+selected region* ticked, the description becomes the instruction for that
+region. The region is in the stage's sketch space: a generated image has its
+centre at the sketch origin and its shorter side spanning one sketch unit,
+so the region lands on the same pixels. A provider that takes an edit mask
+gets one; with any other, the new image is put back outside the region.
+Either way, the pixels outside the region, and inside any locked feature,
+are compared with what was there. When less than 90% of them are kept
+(`METAFORGE_SKETCH_PRESERVATION_THRESHOLD`), the proposal is marked *Check
+it* with what changed, and the activity overlay asks for a review rather
+than presenting it as done. Features to keep and things to avoid also go
+into the prompt.
+
+**Alternatives.** Every image is a proposal in the strip under the panel,
+labelled *Generated concept · illustrative*. Each has **Accept**,
+**Reject**, **Compare** (pick two to see them side by side with the share of
+pixels that differ) and **Branch** (start a separate line of concepts from
+it). Nothing replaces the accepted concept until the person accepts one; the
+previous accepted concept stays in the line's history.
+
+**While it runs.** Clicks are debounced, so a burst of them sends one
+request. A new request on the same target (the sketch, or the sketch and the
+same region) replaces one still running, and an identical one joins it. The
+accepted concept stays on the stage during generation and when it fails. The
+activity overlay shows the real stages (queued, started, image received,
+completed) and no invented progress: no provider configured today streams
+partial images. A result that arrives after another concept was accepted is
+kept as history, marked stale, and cannot be accepted. The time to the first
+stored proposal is measured and recorded on it; nothing promises a fixed
+time.
+
+**Spend.** Past the project's hourly image limit
+(`METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`, 20 by default), the panel says how
+many images were made in the last hour and generates only when the person
+chooses **Generate anyway**. An agent uses `twin.generate_sketch`, which is
+held for approval like every paid image tool.
+
+A generated image is illustrative: never an editable sketch and never CAD.
+**Make editable** works on the person's own strokes. Turning a generated
+image into editable shapes is not built yet.
+
+### References and their roles
+
+Each added reference shows as a compact chip with its role and whether the
+next instruction includes it. The roles are:
+
+| Role | Used as |
+|---|---|
+| Inspiration | Mood, style and materials only; its shape is not copied |
+| Shape | Its overall shape and proportions are followed |
+| How it works | How the product is used or works |
+| Current design | The current design, kept recognisable |
+| Evidence | Verification evidence. Never sent to an image model |
+| Specification | Authoritative: its explicit values are stated facts |
+| Making rule | Authoritative: a manufacturing rule |
+
+Clicking the eye leaves a reference out of (or puts it back into) the next
+instruction and generation. The arrow opens the rest only when asked for:
+features to keep unchanged, and **Find facts**. Facts are candidates with a
+citation (the reference, the line or region, the file's hash) and an
+uncertainty. A value read off an image is always *estimated*, never
+measured; only an explicit value with a unit in a specification or making
+rule is *stated*. When two authoritative references state different values
+for the same thing (120 mm against 125 mm), the activity overlay asks the
+person to choose, naming both sources.
+
+Every change of role, inclusion or file is kept as a version of the
+reference. A reference must belong to the project and be a file type the
+uploads accept. Which references were sent to which external provider, and
+when, is recorded on the reference. An instruction carries its active
+references with their roles, the current sketch revision and the selected
+region.
+
 ## Conversation and instructions
 
 The composer has three intents:
@@ -476,6 +568,9 @@ creation and its readiness.
 | `POST /builds/{id}/accept` | Accept or reject a finished build (a person only) |
 | `POST /duplicate` | Copy into a new project |
 | `DELETE /` | Remove the Create records (refused while a build is active) |
+| `PUT /references/{work_product_id}` | Set a reference's role, associations, inclusion and features to keep; each change is a version |
+| `POST /references/{work_product_id}/facts` | Extract candidate facts with citations; conflicts between authoritative references are raised for review |
+| `GET /references/conflicts` | Authoritative references that disagree |
 
 The sketch layer uses these twin routes:
 
@@ -494,6 +589,11 @@ The sketch layer uses these twin routes:
 | `POST /v1/twin/projects/{project_id}/sketches/{sketch_key}/interpretations` | Store a proposal made by **Make editable** (idempotent per `interpretation_id`; `409` when the sketch was redrawn since) |
 | `POST /v1/twin/projects/{project_id}/interpretations/{key}/promote` | Promote a proposal's accepted rules to a parametric sketch held for sign-off (idempotent per `promote_id`; `409` when a rule does not hold) |
 | `POST /v1/twin/nodes/{node_id}/approve-parametric-sketch` | Sign off a parametric sketch |
+| `POST /v1/twin/projects/{project_id}/sketch-generations` | Start a concept generation as a job on its target (`409` with `spend_confirmation_required` past the hourly limit; refused for an agent) |
+| `GET /v1/twin/projects/{project_id}/sketch-generations` | The accepted concept lines with their history, and recent proposals |
+| `GET .../sketch-generations/compare?a=&b=` | Two concepts side by side, with the share of pixels that differ |
+| `POST .../sketch-generations/{node_id}/accept` | Make a proposal the accepted concept (`409` when it is stale or another was accepted since) |
+| `POST .../sketch-generations/{node_id}/reject`, `POST .../branch` | Set a proposal aside, or start a separate line from it |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the
@@ -504,9 +604,13 @@ refused with `403`. The full schemas are in the
 - An editable sketch's shapes are lines, arcs, circles, ellipses and smooth
   curves; there are no angle or point-to-point distance dimensions yet, and
   shapes cannot be dragged. A generated (raster) image cannot be made
-  editable yet: only strokes drawn on the stage. Planes are Front, Side and
-  Top, or a flat surface of a validated part; curved surfaces, and offset or
-  custom planes, are later steps.
+  editable yet: only strokes drawn on the stage.
+- Generated concepts: no configured provider streams partial images, so
+  there is no progressive preview. Front, side and top views are not
+  proposed together. Facts are read from text references and images, not
+  from PDFs.
+- Planes are Front, Side and Top, or a flat surface of a validated part;
+  curved surfaces, and offset or custom planes, are later steps.
 - Pen pressure is recorded with each point but not yet drawn as varying
   width.
 

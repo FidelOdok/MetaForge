@@ -41,6 +41,8 @@ import {
 } from './geometry';
 import { PlanePrompt } from './PlanePrompt';
 import { SketchCompiler } from './SketchCompiler';
+import { AcceptedConceptImage, GeneratePanel } from './GeneratePanel';
+import { useSketchGenerationStore } from '../../store/sketch-generation-store';
 import { useSketchPlane } from '../../hooks/use-sketch-plane';
 import { isPlaced, needsReattachment } from '../../api/endpoints/sketchPlanes';
 import { ReattachChoices } from './ReattachChoices';
@@ -341,6 +343,8 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
     if (g.tool === 'region') {
       const hit = store.doc(projectId).strokes.filter((s) => touchesRect(s.points, a, b)).map((s) => s.id);
       store.select(projectId, hit);
+      // FORGE-794: the same region is the mask a region-only generation uses.
+      useSketchGenerationStore.getState().setRegion(projectId, a, b);
       return;
     }
     const strokeTool = STROKE_TOOL[g.tool];
@@ -424,6 +428,8 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
         onPointerCancel={(e) => finish(e, true)}
         style={{ cursor: tool === 'erase' ? 'cell' : drawing ? 'crosshair' : undefined }}
       >
+        {/* FORGE-794: the accepted generated concept, under the strokes, illustrative. */}
+        <AcceptedConceptImage projectId={projectId} />
         <StrokePaths
           strokes={doc.strokes}
           selection={doc.selection}
@@ -533,6 +539,14 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
           )}
         </div>
       )}
+
+      {/* FORGE-794: Generate a concept from the description, references or sketch. */}
+      <GeneratePanel
+        projectId={projectId}
+        sketchKey={doc.strokes.length > 0 ? doc.itemKey : null}
+        sketchRevision={doc.savedRevision}
+        sketchUnsaved={!!doc.pendingSaveId}
+      />
 
       {planePrompt && doc.itemKey && !needsReattachment(plane) && (
         <PlanePrompt projectId={projectId} sketchKey={doc.itemKey} onDone={() => setPlanePrompt(false)} />

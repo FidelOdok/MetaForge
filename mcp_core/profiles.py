@@ -668,6 +668,8 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
             "twin.render_concept_image",
             # FORGE-772: and the vision check of that image.
             "twin.critique_concept_image",
+            # FORGE-794: and a freeform concept sketch proposal.
+            "twin.generate_sketch",
         }
     ),
     # FORGE-687: KiCad and firmware outputs, kept by twin.record_design_files.

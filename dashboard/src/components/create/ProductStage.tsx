@@ -16,8 +16,12 @@ export function wpTypeOf(node: TwinNode): string {
   return String(node.properties?.wp_type ?? '');
 }
 
-/** A person's own sketch is drawn on the stage's sketch layer, never shown as a result. */
-const SKETCH_TYPES = new Set(['sketch_strokes']);
+/**
+ * A person's own sketch is drawn on the stage's sketch layer, never shown as a
+ * result. A generated concept (FORGE-794) is shown there too, and only once
+ * accepted: a proposal never takes the stage on its own.
+ */
+const SKETCH_TYPES = new Set(['sketch_strokes', 'generated_sketch']);
 
 export function isVisual(node: TwinNode): boolean {
   const t = wpTypeOf(node);

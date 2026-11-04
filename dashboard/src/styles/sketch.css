@@ -200,3 +200,152 @@
 .cv-stage-empty {
   position: relative;
 }
+
+/* ── FORGE-794: Generate a concept, variants strip, compare ─────────── */
+.sk-accepted-concept {
+  opacity: 0.85;
+  pointer-events: none;
+}
+.sk-generate {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: min(360px, calc(100% - 24px));
+  pointer-events: auto;
+  color: #e2e2eb;
+  font-size: 12px;
+}
+.sk-generate .sk-save {
+  background: rgba(17, 19, 25, 0.8);
+}
+.sk-generate .sk-save.is-on {
+  border-color: var(--sk-select);
+}
+.sk-generate-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(17, 19, 25, 0.92);
+}
+.sk-generate-mode,
+.sk-hint {
+  margin: 0;
+  color: #b4b4c2;
+}
+.sk-generate-row {
+  display: flex;
+  gap: 8px;
+}
+.sk-field {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+.sk-field textarea,
+.sk-field input,
+.sk-field select {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: inherit;
+  font: inherit;
+  padding: 4px 6px;
+}
+.sk-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sk-generate-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sk-generate-spend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: #fbbf24;
+}
+.sk-generate-error {
+  margin: 0;
+  color: #fca5a5;
+}
+.sk-variants {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(17, 19, 25, 0.8);
+}
+.sk-variant {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 92px;
+  margin: 0;
+}
+.sk-variant img {
+  width: 92px;
+  height: 92px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+}
+.sk-variant figcaption {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b4b4c2;
+}
+.sk-variant.is-accepted img {
+  outline: 2px solid rgba(61, 214, 140, 0.8);
+}
+.sk-variant.is-flagged img {
+  outline: 2px solid rgba(245, 158, 11, 0.9);
+}
+.sk-variant-actions {
+  display: flex;
+  justify-content: space-between;
+}
+.sk-generated-label {
+  width: 100%;
+  text-align: right;
+  color: #fbbf24;
+}
+.sk-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(17, 19, 25, 0.92);
+}
+.sk-compare img {
+  width: 100%;
+  border-radius: 6px;
+  background: #fff;
+}
+.sk-compare p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .sk-generate {
+    top: auto;
+    bottom: 56px;
+  }
+}

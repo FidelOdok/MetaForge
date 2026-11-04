@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createEvent, fireEvent, render, screen, waitFor } from '../../../test/test-utils';
 import { useSketchStore } from '../../../store/sketch-store';
+import { useSketchGenerationStore } from '../../../store/sketch-generation-store';
 
 const saveSketch = vi.fn();
 const getCurrentSketch = vi.fn();
@@ -206,6 +207,10 @@ describe('SketchLayer', () => {
     drag([[50, 50], [200, 200]]);
     const first = doc().strokes[0]!.id;
     expect(doc().selection).toEqual([first]);
+    // FORGE-794: the same region becomes the mask of a region-only generation.
+    const mask = useSketchGenerationStore.getState().session(P).mask;
+    expect(mask?.polygon).toHaveLength(4);
+    expect(useSketchGenerationStore.getState().session(P).regionOnly).toBe(true);
     fireEvent.keyDown(window, { key: 'Delete' });
     expect(doc().strokes).toHaveLength(1);
     expect(doc().strokes[0]!.id).not.toBe(first);

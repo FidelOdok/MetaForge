@@ -237,6 +237,11 @@ estimated), and `PARAMETRIC_SKETCH = "parametric_sketch"` is the sketch a
 person promoted from one, held for approval. See
 [The sketch compiler](#sketch-compiler) below.
 
+`GENERATED_SKETCH = "generated_sketch"` is an AI-generated concept sketch: a
+proposal until a person accepts it, then a revision of a `GSK-*` item.
+Always illustrative. See [Generated concept sketches](#generated-sketch)
+below.
+
 **Pydantic Model**:
 
 ```python
@@ -1214,6 +1219,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `sketch_plane` | definition | `PLN` | `WorkProduct` `sketch_plane`: the plane one sketch is placed on (frame, unit, lifecycle state, who proposed it). One item per sketch; every confirm, reassign, undo or archive is the next revision, with a `DEPENDS_ON` edge to the sketch revision it is for |
 | `sketch_interpretation` | definition | `SKI` | `WorkProduct` `sketch_interpretation`: the sketch compiler's proposal for a sketch, fitted primitives and proposed, accepted and rejected constraints, all estimated. `DEPENDS_ON` the strokes revision it was made from. A proposal, not CAD |
 | `parametric_sketch` | definition | `PSK` | `WorkProduct` `parametric_sketch`: a sketch a person promoted, with only the accepted constraints (re-checked by the gateway) and a feature plan whose depth, angle and material are required input. `DEPENDS_ON` the interpretation and the strokes. Held for approval |
+| `generated_sketch` | definition | `GSK` | `WorkProduct` `generated_sketch`: the accepted AI-generated concept sketch for a sketch or a text concept; each accepted proposal is the next revision. Illustrative only: never an editable sketch, CAD or evidence |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
@@ -1609,7 +1615,7 @@ representations apart, each with its own authority and revisions:
 
 | Representation | Where | Authority |
 |---|---|---|
-| A generated image of a sketch | `image` or `render` | `illustrative` |
+| A generated image of a sketch | `image`, `render` or `generated_sketch` (`GSK-*`, [below](#generated-sketch)) | `illustrative` |
 | The person's strokes | `sketch_strokes` (`SKT-*`) | `human_sketch`: not CAD, scale unknown |
 | The interpretation | `sketch_interpretation` (`SKI-*`) | `proposal`: every value `estimated` |
 | The parametric sketch | `parametric_sketch` (`PSK-*`) | `human_accepted`: accepted rules only, held for approval |
@@ -1860,7 +1866,82 @@ Limits: rerun approval records the decision; the tool is then run by the agent o
 
 ---
 
-### 2.35 Migrating legacy nodes into items {#migrating-legacy-nodes}
+### 2.35 Generated concept sketches {#generated-sketch}
+
+`GENERATED_SKETCH = "generated_sketch"` is a concept sketch an image model
+drew from a description, the project's references or a saved sketch (the
+Create stage's **Generate**, or `twin.generate_sketch`). It is a fifth
+representation beside the four in [the sketch compiler](#sketch-compiler),
+with its own authority: always `illustrative`. A generated raster is never an
+editable sketch, never CAD and never evidence (`editable: false`,
+`representation: "generated_raster"`).
+
+Each image is first a **proposal**: a `generated_sketch` node with no item,
+`metadata.generation_status` `proposed`, then `accepted`, `rejected` or
+`stale`. Accepting one makes it the next revision of the source's
+`generated_sketch` item (`GSK-*`), so the item's head is the accepted concept
+and earlier accepted concepts stay as earlier revisions. Accepting never
+copies pixels: the revision points at the same blob. A branch is a new item
+seeded with one concept; the current line is untouched. Proposals are linked
+`GENERATED_FROM` the sketch revision, the accepted concept and the reference
+images they were made from.
+
+Every output records, in `metadata.provenance`:
+
+| Field | Holds |
+|---|---|
+| `prompt`, `negative_prompt` | Exactly what was sent, and what it was told to avoid |
+| `intent`, `constraints`, `negative`, `protected_features` | What the person asked for |
+| `style`, `mode` | `industrial_sketch`, `marker_render`, `line_art` or `concept_drawing`; `text`, `reference` or `sketch` |
+| `references` | Each reference's id, role, source hash, whether its image or its stated facts were sent, and why not when it was left out |
+| `mask`, `locked_regions` | The region polygon in sketch units, how it was applied (`provider_mask` or `composited`), and the locked regions |
+| `source_sketch`, `baseline_input` | The `SKT-*@n` revision and the accepted concept it was built from |
+| `provider`, `model`, `cost_usd` | Who drew it, and the cost when the provider reported one (`cost_reported`) |
+| `job_id`, `operation_id`, `target_key`, `base_revision`, `target_revision` | The job and operation that made it, the target it ran on, the accepted concept it started from, and the revision it became when accepted |
+| `frame`, `size` | Image centre at the sketch origin, shorter side one sketch unit; the pixel size |
+
+`metadata.preservation` holds the region check: the share of pixels kept
+outside the mask (from the provider and after compositing), each locked
+region's score, which protected features were checked by pixels, the
+threshold and whether it passed. `review_required` is set when it did not.
+`latency_s` is the measured time from the request to the stored proposal. A
+proposal that arrived after another concept was accepted is stored with
+status `stale` and `stale_reason`, as history only.
+
+Accepting is refused (`409`) for a stale, rejected or accepted proposal, and
+when the accepted concept moved since the person looked, unless the head is a
+sibling variant of the same request (a switch, not a race).
+
+**References.** The Create brief keeps a record per reference
+(`brief.reference_details`, beside the ids in `brief.references`): its role
+(`inspiration`, `geometry`, `functional_demo`, `specification`,
+`manufacturing_rule`, `verification_evidence`, `existing_design`), its
+associations (project, component, parameter, plane, interface or
+requirement), whether it is `active` for the next instruction, the features
+to keep unchanged, the file's `source_hash`, a version per change, the
+candidate facts and the providers it was sent to. A fact carries a
+`citation` (reference, region or line, source hash, excerpt), a unit, an
+`uncertainty` and a `basis`: `estimated` for anything read off an image or a
+non-authoritative text, `stated` only for an explicit value with a unit in a
+`specification` or `manufacturing_rule`. Nothing is `measured`. Two
+authoritative references stating different values for one parameter (in one
+base unit per quantity) are raised as a `review_required` operation event
+with both citations.
+
+Metrics: `metaforge_sketch_generation_total{mode, outcome}` (generated,
+preservation_flagged, stale, superseded, cancelled, unavailable, timeout,
+failed, accepted, rejected), the histogram
+`metaforge_sketch_generation_first_result_seconds{mode, provider}` and
+`metaforge_reference_conflict_total`. `SketchGenerationFailing` fires when
+more than three in ten generations in half an hour fail, and
+`SketchGenerationPreservationFlaggedOften` (info) when most region edits in
+an hour are flagged.
+
+*Source: `api_gateway/twin/sketch_generation.py`, `api_gateway/twin/sketch_generation_routes.py`, `api_gateway/create/references.py`*
+
+---
+
+### 2.36 Migrating legacy nodes into items {#migrating-legacy-nodes}
 
 A project written before items existed holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
 
@@ -2607,7 +2688,12 @@ concept and illustrative artifacts never exact, validated or released.
 with `project_id`, optional `base_revision`, and `design_ir` or `script`):
 
 1. The design IR is lowered by the CadQuery Lowering Pass (or the CadQuery
-   script runs) in the CadQuery adapter, through MCP.
+   script runs) in the CadQuery adapter, through MCP. The adapter writes the
+   result's STEP with its solids unwrapped: every compound is opened down to
+   the shapes it holds, one solid is written directly and several as a
+   compound of solids, so a shelled or filleted enclosure reads back as a
+   solid. A bare face or an open shell is written as what it is and still
+   fails the check below.
 2. `cadquery.validate_shape` checks the B-Rep: OCCT `BRepCheck_Analyzer`
    validity, at least one solid where one is expected, every solid closed,
    every solid's volume above zero, and no free edges on a solid. The

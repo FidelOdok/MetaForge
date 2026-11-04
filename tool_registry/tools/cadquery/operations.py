@@ -70,6 +70,22 @@ except ImportError:
     HAS_CADQUERY = False
 
 
+def _export_shape(obj: Any, output_path: str) -> None:
+    """Export ``obj`` to ``output_path``; a STEP keeps its solids as solids.
+
+    ``cq.exporters.export`` can write a shelled solid as a bare shell (see
+    :func:`validity.step_shape`), which then reads back with no solid and
+    fails the validity check, so STEP goes through :func:`validity.write_step`.
+    Every other format is unchanged.
+    """
+    if output_path.lower().endswith((".step", ".stp")):
+        from tool_registry.tools.cadquery.validity import write_step
+
+        write_step(cq, obj, output_path)
+    else:
+        cq.exporters.export(obj, output_path)
+
+
 class CadqueryNotAvailableError(RuntimeError):
     """Raised when CadQuery is not available."""
 
@@ -954,7 +970,7 @@ class CadqueryOperations:
                 props["mass_kg"] = round(
                     props["volume_mm3"] * _MM3_TO_M3 * resolve_density_kg_m3(material), 6
                 )
-            cq.exporters.export(workplane, output_path)
+            _export_shape(workplane, output_path)
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
@@ -1063,7 +1079,7 @@ class CadqueryOperations:
                 output_path = os.path.join(self.work_dir, f"{stem_a}_{operation}.step")
             self._ensure_output_dir(output_path)
 
-            cq.exporters.export(result, output_path)
+            _export_shape(result, output_path)
             props = self._get_shape_properties(result)
 
             elapsed = time.monotonic() - start
@@ -1174,7 +1190,12 @@ class CadqueryOperations:
                 output_path = os.path.join(self.work_dir, f"{stem}.{output_format}")
             self._ensure_output_dir(output_path)
 
-            cq.exporters.export(shape, output_path, exportType=output_format.upper())
+            if output_format.upper() in ("STEP", "STP"):
+                from tool_registry.tools.cadquery.validity import write_step
+
+                write_step(cq, shape, output_path)
+            else:
+                cq.exporters.export(shape, output_path, exportType=output_format.upper())
             file_size = os.path.getsize(output_path)
 
             elapsed = time.monotonic() - start
@@ -2101,7 +2122,7 @@ class CadqueryOperations:
                 raise ValueError("Script must assign its output to a variable named 'result'")
 
             # Export and get properties
-            cq.exporters.export(result_obj, output_path)
+            _export_shape(result_obj, output_path)
             props = self._get_shape_properties(result_obj)
 
             elapsed = time.monotonic() - start
@@ -2337,7 +2358,7 @@ class CadqueryOperations:
                 props["mass_kg"] = round(
                     props["volume_mm3"] * _MM3_TO_M3 * resolve_density_kg_m3(material), 6
                 )
-            cq.exporters.export(enclosure, output_path)
+            _export_shape(enclosure, output_path)
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
