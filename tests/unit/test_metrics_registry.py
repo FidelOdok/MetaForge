@@ -79,7 +79,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 run supervisor (FORGE-734).
         # + 1 concept image (FORGE-761), + 1 sketch reading (FORGE-762).
         # + 1 concept image critique (FORGE-772).
-        assert len(all_metrics) == 98  # + 1 concept mesh (FORGE-778), + 1 FORGE-780
+        # + 1 tool jobs (FORGE-783).
+        assert len(all_metrics) == 99  # + 1 concept mesh (FORGE-778), + 1 FORGE-780
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

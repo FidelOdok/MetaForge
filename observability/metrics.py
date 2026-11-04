@@ -761,6 +761,16 @@ class MetricsRegistry:
         ),
         labels=[],
     )
+    TOOL_JOB_TOTAL = MetricDefinition(
+        name="metaforge_tool_job_total",
+        type="counter",
+        description=(
+            "State changes of slow tool calls run as polled jobs, by tool and status: "
+            "queued, running, succeeded, failed, or interrupted (cancelled, or left "
+            "running by a process that restarted) (FORGE-783)"
+        ),
+        labels=["tool", "status"],
+    )
     MCP_ERROR_TOTAL = MetricDefinition(
         name="metaforge_mcp_error_total",
         type="counter",
@@ -1006,6 +1016,7 @@ class MetricsRegistry:
             cls.MCP_ADAPTER_PROBE_TOTAL,
             cls.MCP_CODE_VERSION_CHECK_TOTAL,
             cls.MCP_ORIGIN_REJECTED_TOTAL,
+            cls.TOOL_JOB_TOTAL,
         ]
 
     @classmethod
@@ -1956,6 +1967,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CONCEPT_MESH_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome, "mode": mode})
+
+    def record_tool_job(self, tool: str, status: str) -> None:
+        """Record one state change of a tool job (FORGE-783)."""
+        counter = self._instruments.get(MetricsRegistry.TOOL_JOB_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool": tool, "status": status})
 
     def record_sketch_reading(self, outcome: str) -> None:
         """Record one sketch reading outcome (FORGE-762)."""

@@ -111,7 +111,8 @@ class TestTelemetryMetricsGroupAccess:
         # + 1 concept image (FORGE-761).
         # + 1 sketch reading (FORGE-762).
         # + 5 watchdog, + 2 gate reviewer, + 1 concept mesh (FORGE-778).
-        assert len(MetricsRegistry.all_metrics()) == 98  # + durable tool approvals (FORGE-780)
+        # + 1 tool jobs (FORGE-783).
+        assert len(MetricsRegistry.all_metrics()) == 99  # + durable tool approvals (FORGE-780)
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

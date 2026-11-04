@@ -9,12 +9,18 @@ are unioned. With no rotation that is exact; with one it can only grow the
 box, so the result says it is approximate. A file with no scene graph to
 follow falls back to the union of the accessors' own boxes, also approximate.
 
+:func:`envelope_fit` finds the one uniform factor that best fits a model's box
+to a concept's envelope, and :func:`scale_glb` applies it by giving the scene
+a parent node with that ``scale``: only the JSON chunk changes, never a vertex
+buffer, and every node keeps its own transform under the new parent.
+
 Pure stdlib.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import struct
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +30,13 @@ _JSON_CHUNK = 0x4E4F534A  # "JSON"
 
 Matrix = list[float]  # column-major 4x4, as glTF stores it
 _IDENTITY: Matrix = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+
+#: The name of the parent node :func:`scale_glb` adds.
+SCALE_NODE_NAME = "metaforge_envelope_scale"
+#: How the two horizontal glTF axes may be paired with the concept's width and
+#: depth: a generator may face the product along x or along z.
+AXIS_MAPPINGS: tuple[str, ...] = ("x=width, z=depth", "z=width, x=depth")
 
 
 class GlbBoundsError(ValueError):
@@ -195,6 +208,16 @@ def glb_bounds(glb: bytes) -> GlbBounds:
     )
 
 
+def paired_size(size_m: tuple[float, float, float], mapping: str) -> tuple[float, float, float]:
+    """``size_m`` (glTF x, y up, z) as (width, depth, height) under ``mapping``."""
+    gx, gy, gz = size_m
+    if mapping == AXIS_MAPPINGS[0]:
+        return (gx, gz, gy)
+    if mapping == AXIS_MAPPINGS[1]:
+        return (gz, gx, gy)
+    raise ValueError(f"unknown axis mapping {mapping!r}")
+
+
 def envelope_deviation(
     size_m: tuple[float, float, float],
     envelope_mm: tuple[float, float, float],
@@ -214,14 +237,9 @@ def envelope_deviation(
     deviation is then of proportions only.
     """
     width, depth, height = (v / 1000.0 for v in envelope_mm)
-    gx, gy, gz = size_m
-    pairings = {
-        "x=width, z=depth": (gx, gz),
-        "z=width, x=depth": (gz, gx),
-    }
     best: dict[str, Any] | None = None
-    for mapping, (mw, md) in pairings.items():
-        model = (mw, md, gy)
+    for mapping in AXIS_MAPPINGS:
+        model = paired_size(size_m, mapping)
         factor = 1.0
         if not scaled_to_metres:
             largest = max(model)
@@ -237,3 +255,129 @@ def envelope_deviation(
     best.pop("_score")
     best["basis"] = "absolute" if scaled_to_metres else "proportional"
     return best
+
+
+def envelope_fit(
+    size_m: tuple[float, float, float],
+    envelope_mm: tuple[float, float, float],
+) -> dict[str, Any]:
+    """The uniform factor that best fits a model's box to the envelope.
+
+    ``size_m`` is in glTF axes (x, y up, z) and the model's own units;
+    ``envelope_mm`` is (width, depth, height). For each pairing of the
+    horizontal axes (:data:`AXIS_MAPPINGS`) the factor ``s`` minimising
+    ``sum((ln(s * model_i) - ln(envelope_i)) ** 2)`` over the three axes is
+    the geometric mean of the per-axis ratios; the pairing whose residual is
+    smaller wins. A log error weighs "twice too big" and "half too small"
+    alike, so no one axis dominates.
+
+    Returns ``scale_factor`` (model units to metres), ``axis_mapping``, and
+    ``proportion_error_pct`` per axis after scaling: what a uniform factor
+    cannot fix, because the model's proportions differ from the envelope's.
+    ``ValueError`` when an axis of either box is not positive.
+    """
+    wanted = (envelope_mm[0] / 1000.0, envelope_mm[1] / 1000.0, envelope_mm[2] / 1000.0)
+    if any(not w > 0 for w in wanted):
+        raise ValueError("the envelope has an axis that is not positive")
+    if any(not v > 0 for v in size_m):
+        raise ValueError("the model has an axis with no extent; it cannot be fitted")
+    best: tuple[float, str, float, tuple[float, float, float]] | None = None
+    for mapping in AXIS_MAPPINGS:
+        model = paired_size(size_m, mapping)
+        logs = [math.log(w / m) for m, w in zip(model, wanted, strict=True)]
+        log_factor = sum(logs) / len(logs)
+        residual = sum((v - log_factor) ** 2 for v in logs)
+        if best is None or residual < best[0] - 1e-12:
+            best = (residual, mapping, math.exp(log_factor), model)
+    assert best is not None
+    residual, mapping, factor, model = best
+    error = {
+        axis: round((got * factor - want) / want * 100, 1)
+        for axis, got, want in zip(("width", "depth", "height"), model, wanted, strict=True)
+    }
+    return {
+        "scale_factor": factor,
+        "axis_mapping": mapping,
+        "proportion_error_pct": error,
+        "log_residual": residual,
+    }
+
+
+def _chunks_after_json(glb: bytes) -> bytes:
+    """Every chunk after the JSON one (the BIN chunk, usually), unchanged."""
+    (length,) = struct.unpack_from("<I", glb, 12)
+    (total,) = struct.unpack_from("<I", glb, 8)
+    end = min(total, len(glb)) if total >= 20 + length else len(glb)
+    return glb[20 + length : end]
+
+
+def _scale_in_place(node: dict[str, Any], factor: float) -> None:
+    """Scale one node's whole local transform uniformly, about its parent's origin.
+
+    ``S * T * R * Sc`` is ``T(f t) * R * (f Sc)`` because a uniform scale
+    commutes with any rotation, so this is exact for a rotated node too.
+    """
+    matrix = node.get("matrix")
+    if isinstance(matrix, list) and len(matrix) == 16:
+        node["matrix"] = [
+            float(v) * factor if (i % 4) < 3 else float(v) for i, v in enumerate(matrix)
+        ]
+        return
+    t = node.get("translation") or [0.0, 0.0, 0.0]
+    s = node.get("scale") or [1.0, 1.0, 1.0]
+    node["translation"] = [float(v) * factor for v in t]
+    node["scale"] = [float(v) * factor for v in s]
+
+
+def scale_glb(glb: bytes, factor: float) -> bytes:
+    """``glb`` scaled uniformly by ``factor``, by editing its JSON chunk alone.
+
+    The usual file has one scene: a new parent node carrying ``scale`` takes
+    the scene's root nodes as its children and becomes the scene's only
+    root, so every node keeps its own transform (and any animation of it).
+    A file whose scenes do not share one root list, or that has no scene,
+    has each root node's own transform scaled instead, which is the same
+    result for a static model. Buffers, accessors and every other chunk are
+    copied byte for byte.
+    """
+    if not math.isfinite(factor) or not factor > 0:
+        raise GlbBoundsError(f"a scale factor must be positive and finite, not {factor!r}")
+    doc = gltf_json(glb)
+    (version,) = struct.unpack_from("<I", glb, 4)
+    rest = _chunks_after_json(glb)
+    nodes = doc.get("nodes")
+    if not isinstance(nodes, list):
+        nodes = []
+        doc["nodes"] = nodes
+    raw_scenes = doc.get("scenes")
+    scenes = [s for s in raw_scenes if isinstance(s, dict)] if isinstance(raw_scenes, list) else []
+    root_lists = [list(s.get("nodes") or []) for s in scenes]
+    if root_lists and root_lists[0] and all(r == root_lists[0] for r in root_lists):
+        index = len(nodes)
+        nodes.append(
+            {
+                "name": SCALE_NODE_NAME,
+                "scale": [factor, factor, factor],
+                "children": root_lists[0],
+            }
+        )
+        for scene in scenes:
+            scene["nodes"] = [index]
+    else:
+        children = {c for n in nodes if isinstance(n, dict) for c in (n.get("children") or [])}
+        roots = {i for lst in root_lists for i in lst if isinstance(i, int)}
+        if not roots:
+            roots = {i for i in range(len(nodes)) if i not in children}
+        for i in sorted(roots):
+            if 0 <= i < len(nodes) and isinstance(nodes[i], dict):
+                _scale_in_place(nodes[i], factor)
+    raw = json.dumps(doc, separators=(",", ":")).encode("utf-8")
+    raw += b" " * (-len(raw) % 4)
+    total = 12 + 8 + len(raw) + len(rest)
+    return (
+        _MAGIC
+        + struct.pack("<II", version, total)
+        + struct.pack("<II", len(raw), _JSON_CHUNK)
+        + raw
+        + rest
+    )

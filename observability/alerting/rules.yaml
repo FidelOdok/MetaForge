@@ -998,6 +998,28 @@ groups:
             TRIPO_API_KEY (and its credit), METAFORGE_MESH_TIMEOUT_S and the gateway
             logs (concept_mesh_unavailable, concept_mesh_timeout, concept_mesh_failed).
 
+  # FORGE-783 -- slow tool calls run as polled jobs (tool_registry/jobs.py).
+  - name: metaforge_tool_jobs
+    rules:
+      - alert: ToolJobsFailingOrInterrupted
+        expr: >-
+          sum by (tool) (increase(metaforge_tool_job_total{status=~"failed|interrupted"}[6h]))
+          / clamp_min(sum by (tool) (increase(metaforge_tool_job_total{status="queued"}[6h])), 1)
+          > 0.5
+          and sum by (tool) (increase(metaforge_tool_job_total{status="queued"}[6h])) >= 3
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Jobs of {{ $labels.tool }} are failing or being interrupted"
+          description: >-
+            More than half of the last six hours' jobs of {{ $labels.tool }} ended
+            failed or interrupted. A failed job records its error (read it with
+            twin.job_status); an interrupted one was running when its process
+            restarted, so the work was lost and has to be asked for again. Check the
+            tool_job_state log events and whether the gateway or MCP sidecar is
+            restarting.
+
   # FORGE-772 -- concept image checks (api_gateway/twin/image_critique.py).
   - name: metaforge_concept_image_critique
     rules:

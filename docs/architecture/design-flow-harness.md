@@ -1092,8 +1092,10 @@ that is not a concept image, an image drawn for a different view than its key,
 or images drawn from different layouts are refused before any paid call. The
 mesh records `view_image_node_ids` and is linked `generated_from` every view.
 
-Every mode takes the generation options `auto_size` (default true, so the
-model comes back in metres), `face_limit` (default 100000; 500 to 20000, with
+Every mode takes the generation options `auto_size` (Tripo scales the model
+to metres; default false when the images came from a block layout, since the
+fit to the envelope described below replaces it, and true otherwise),
+`face_limit` (default 100000; 500 to 20000, with
 a default of 20000, under `smart_low_poly`), `texture` (default true),
 `generate_parts` (default false) and `smart_low_poly` (default false). They
 are sent to Tripo, which documents them on all three endpoints, and stored as
@@ -1107,13 +1109,47 @@ exact without rotation and a superset with one (`bbox_approximate`), and a
 file with no scene graph falls back to the union of the accessors' boxes. It
 is stored as `bbox_m` in glTF axes (x, y up, z). When the images came from a
 block layout, its overall size is stored as `envelope_mm` (width, depth,
-height) with `deviation_pct` per axis: height is glTF y, and the two
-horizontal axes are paired whichever way fits better, reported as
-`axis_mapping`. With `auto_size` the deviation is absolute; without it the
-model is in its own units, so it is scaled to the envelope's largest axis and
-the deviation is of proportions only (`deviation_basis`). A model that came
-out 14% too deep reads `deviation_pct.depth: 14.0`. The file is never
-rescaled.
+height). Height is glTF y, and the two horizontal axes are paired whichever
+way fits better, reported as `axis_mapping`.
+
+With an envelope the model is then scaled to it (`fit_to_envelope`, default
+true when there is an envelope). One uniform factor is chosen: the one that
+minimises the summed squared log ratio of model to envelope over the three
+axes, which is the geometric mean of the three ratios, with the horizontal
+pairing whose remaining error is smaller. It is applied by giving the scene a
+new parent node with that `scale` in the glTF JSON chunk; no vertex buffer is
+rewritten, and every existing node keeps its own transform beneath it (a file
+whose scenes do not share one root list has each root's own transform scaled
+instead). The stored GLB is the scaled one, and the provider's own file is
+kept beside it in the blob store (`provider_glb_object_key`, with its hash and
+size). The record carries `scale_factor`, the box before and after
+(`bbox_m_before` in the provider's units, `bbox_m` in metres) and
+`proportion_error_pct`, what no uniform scale can remove: a model that came
+out 14% too deep for its width and height reads about +9% depth and -4% on
+the other two once fitted. A real run returned 763 x 720 x 500 mm with
+`auto_size` for a microwave whose envelope is 490 x 395 x 290 mm, so a fit is
+the norm rather than the exception. With `fit_to_envelope` false, or with no
+envelope, the file is stored as the provider made it and `deviation_pct`
+compares it with the envelope: absolute with `auto_size`, and of proportions
+only without it, the model then being scaled to the envelope's largest axis
+for the comparison (`deviation_basis`).
+
+A generation takes about 150 seconds, longer than a client waits for one MCP
+call (Claude Code gives up at 120 and showed an error for a mesh the server
+went on to store). So a client's call returns at once with a job:
+`{"job_id", "status": "running", "poll": "twin.job_status",
+"expected_seconds": 150}`. The paid generation runs as a background task, and
+its result (the `node_id` and the rest) is stored on the job, which the
+read-only `twin.job_status` returns; the next reply to the same session after
+the job finishes also says so, once. Everything that would refuse the call is
+still checked before it returns, so a bad call fails at once and pays nothing.
+An identical call (same arguments, session and project) while the job runs,
+or within 10 minutes of its success, returns the same job rather than paying
+for a second mesh. The design-flow worker, a call claiming a run and an
+in-process caller still wait for the mesh itself, and `wait` chooses
+explicitly. Jobs are stored in SQLite per process; a restart marks the jobs it
+left running as `interrupted`. See [MCP specification](../mcp_spec.md) for the
+job protocol.
 
 The concept decision carries what it selects as data, not prose.
 `twin.record_decision` takes an `assembly` (each part with its source, made,

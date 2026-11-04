@@ -1834,6 +1834,11 @@ class UnifiedMcpServer:
         decided = await self._approval_decided_notice()
         if decided is not None:
             content.append({"type": "text", "text": decided})
+        # FORGE-783: this session's background jobs that have finished since.
+        jobs = self._job_notice(str(tool_name))
+        if jobs is not None:
+            content.append({"type": "text", "text": jobs[0]})
+            meta["finishedJobs"] = jobs[1]
         # FORGE-724: approvals the person has not heard of, said once.
         notice = await self._approval_notice(str(tool_name))
         if notice is not None:
@@ -2930,6 +2935,57 @@ class UnifiedMcpServer:
             "with the same arguments."
             for approval_id, tool_id in approved
         )
+
+    def _job_notice(self, tool_name: str) -> tuple[str, list[dict[str, Any]]] | None:
+        """One sentence per job of this session that finished since (FORGE-783).
+
+        A slow tool returns a job and runs in the background; the agent may
+        never poll. The next reply to the same session says the job ended,
+        once, the same way a decided approval is said (FORGE-780).
+        """
+        try:
+            from mcp_core.context import current_context
+            from tool_registry.jobs import active_job_runner
+
+            runner = active_job_runner()
+            if runner is None:
+                return None
+            if current_context().service_verified:
+                return None  # the design-flow worker waits; nobody to tell
+            done = runner.take_notices(self._session_key())
+        except Exception as exc:  # noqa: BLE001 - a notice must never fail a tool call
+            logger.debug("job_notice_unavailable", error=str(exc))
+            return None
+        if not done:
+            return None
+        sentences = []
+        items = []
+        for job in done:
+            if job.status == "succeeded":
+                node = (job.result or {}).get("node_id")
+                what = f" (node {node})" if node else ""
+                sentences.append(
+                    f"MetaForge: job {job.job_id} for {job.tool_id} succeeded{what}; "
+                    "twin.job_status has its full result."
+                )
+            elif job.status == "failed":
+                sentences.append(
+                    f"MetaForge: job {job.job_id} for {job.tool_id} failed: {job.error}"
+                )
+            else:
+                sentences.append(
+                    f"MetaForge: job {job.job_id} for {job.tool_id} was interrupted by a "
+                    "server restart and did not finish; call the tool again."
+                )
+            items.append({"jobId": job.job_id, "tool": job.tool_id, "status": job.status})
+        logger.info(
+            "approval_notice_added",
+            session=self._session_key(),
+            kind="job",
+            jobs=[j.job_id for j in done],
+            tool=tool_name,
+        )
+        return " ".join(sentences), items
 
     async def _held_result(self, exc: ApprovalHandedOffError) -> dict[str, Any]:
         """A held ``tools/call`` as a result the agent reads (FORGE-780)."""
