@@ -2448,7 +2448,12 @@ class UnifiedMcpServer:
         # phase claim under ``auto``) runs, approved by the policy and on the
         # ledger, without asking anyone. Anything else is held as before.
         policy_approval = getattr(self._approval_ledger, "policy_approval", None)
-        if policy_approval is not None and tool_id in POLICY_APPROVABLE_TOOLS:
+        # FORGE-781: the same rule as the durable path. A client on the
+        # multi-round request flow (Claude Code) comes this way, and a project
+        # set to auto_clean or auto had its illustrative writes held anyway.
+        if policy_approval is not None and (
+            tool_id in POLICY_APPROVABLE_TOOLS or not never_auto_approved(tool_id)
+        ):
             by_policy = await policy_approval(
                 ApprovalAsk(
                     tool_id=tool_id,
