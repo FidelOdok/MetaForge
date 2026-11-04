@@ -16,26 +16,16 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from unittest import mock
 
 import pytest
 
-from mcp_core import elicitation
 from mcp_core.elicitation import (
-    ELICITATION_ROUTE,
     ElicitAction,
-    ElicitationUnavailableError,
     ElicitResult,
     approval_request,
     elicitation_gate,
 )
-from mcp_core.guardrails import (
-    ApprovalAsk,
-    ApprovalNotConfiguredError,
-    ApprovalOutcome,
-    Approver,
-    Caller,
-)
+from mcp_core.guardrails import ApprovalAsk, ApprovalOutcome, Caller
 from metaforge.mcp.server import UnifiedMcpServer
 from tool_registry.mcp_server.handlers import ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
@@ -125,19 +115,10 @@ def test_message_names_the_tool_and_the_caller() -> None:
 
 
 def _outcome(result: ElicitResult) -> ApprovalOutcome:
-    """The outcome when a person answered the prompt.
-
-    A person's answer takes longer than ``UNATTENDED_ANSWER_SECONDS``, and
-    these tests are not going to sleep a second each to prove it, so the
-    floor that separates a person's answer from a client's is lowered
-    instead. The unattended case has tests of its own below.
-    """
-
     async def elicitor(message: str, schema: dict[str, Any]) -> ElicitResult:
         return result
 
-    with mock.patch.object(elicitation, "UNATTENDED_ANSWER_SECONDS", 0.0):
-        return asyncio.run(elicitation_gate(elicitor)(_ask()))
+    return asyncio.run(elicitation_gate(elicitor)(_ask()))
 
 
 def test_accept_with_approve_true_runs_it() -> None:
@@ -348,127 +329,3 @@ def test_dashboard_queue_still_serves_clients_that_cannot_elicit() -> None:
     _initialise(server, version="2024-11-05", capabilities={})
     asyncio.run(server._authorise("twin.commit_geometry", {"obj_id": "bracket"}))
     assert len(dashboard_calls) == 1
-
-
-# ---------------------------------------------------------------------------
-# A client that answers for the person, with no prompt ever shown
-# ---------------------------------------------------------------------------
-
-
-async def _declining(message: str, schema: dict[str, Any]) -> ElicitResult:
-    return ElicitResult(ElicitAction.DECLINE)
-
-
-def _instant(action: ElicitAction, content: dict[str, Any] | None = None) -> ApprovalOutcome:
-    """The gate against a client that answers as fast as the machine allows."""
-
-    async def elicitor(message: str, schema: dict[str, Any]) -> ElicitResult:
-        return ElicitResult(action, content or {})
-
-    return asyncio.run(elicitation_gate(elicitor)(_ask()))
-
-
-@pytest.mark.parametrize("action", [ElicitAction.DECLINE, ElicitAction.CANCEL])
-def test_an_answer_nobody_could_have_read_is_not_an_answer(action: ElicitAction) -> None:
-    """Claude Code 2.1.x declares elicitation and then answers ``decline`` in
-    about 20 ms with no dialog on screen. Taken for a refusal, that made every
-    held write on the connection unanswerable: never shown inline, never
-    queued anywhere a person could find it, and reported back as "a reviewer
-    rejected it" when no reviewer had seen it."""
-    with pytest.raises(ElicitationUnavailableError):
-        _instant(action)
-
-
-def test_an_accept_is_an_answer_however_fast_it_arrives() -> None:
-    """Only decline and cancel are judged by the clock. An accept carries a
-    real answer, and a person who clicks No quickly still means No."""
-    assert _instant(ElicitAction.ACCEPT, {"approve": False}) is ApprovalOutcome.REJECTED
-    assert _instant(ElicitAction.ACCEPT, {"approve": True}) is ApprovalOutcome.APPROVED
-
-
-class _Ledger:
-    """Enough of ``ApprovalLedger`` to see what the gate wrote."""
-
-    def __init__(self) -> None:
-        self.closed: list[tuple[str, ApprovalOutcome]] = []
-
-    async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
-        return "run_test"
-
-    async def close_hold(
-        self,
-        approval_id: str,
-        outcome: ApprovalOutcome,
-        *,
-        route: str,
-        approver: Approver | None,
-        reason: str | None = None,
-    ) -> ApprovalOutcome:
-        self.closed.append((route, outcome))
-        return outcome
-
-
-def test_an_unattended_answer_leaves_no_hold_in_the_queue() -> None:
-    """The entry is opened before the question is asked, so one that reached
-    nobody has to be closed rather than left looking answered."""
-    ledger = _Ledger()
-
-    with pytest.raises(ElicitationUnavailableError):
-        asyncio.run(elicitation_gate(_declining, ledger)(_ask()))
-
-    assert ledger.closed == [(ELICITATION_ROUTE, ApprovalOutcome.CANCELLED)]
-
-
-def test_a_client_that_answers_for_the_person_falls_back_to_the_dashboard() -> None:
-    """Not a second person being asked the same question: there was no first
-    answer to discard."""
-    dashboard_calls: list[ApprovalAsk] = []
-
-    async def dashboard(ask: ApprovalAsk) -> ApprovalOutcome:
-        dashboard_calls.append(ask)
-        return ApprovalOutcome.APPROVED
-
-    server = UnifiedMcpServer(
-        [_Adapter()], caller=Caller.REMOTE, elicitor=_declining, approval_gate=dashboard
-    )
-    _initialise(server, version=ELICIT_VERSION, capabilities={"elicitation": {}})
-
-    asyncio.run(server._authorise("twin.commit_geometry", {"obj_id": "bracket"}))
-
-    assert len(dashboard_calls) == 1
-
-
-def test_the_fallback_is_remembered_for_the_connection() -> None:
-    """Asking a client that already answered for the person only burns
-    another hold, so the rest of the session queues straight away."""
-    asked: list[str] = []
-    dashboard_calls: list[ApprovalAsk] = []
-
-    async def recording(message: str, schema: dict[str, Any]) -> ElicitResult:
-        asked.append(message)
-        return ElicitResult(ElicitAction.DECLINE)
-
-    async def dashboard(ask: ApprovalAsk) -> ApprovalOutcome:
-        dashboard_calls.append(ask)
-        return ApprovalOutcome.APPROVED
-
-    server = UnifiedMcpServer(
-        [_Adapter()], caller=Caller.REMOTE, elicitor=recording, approval_gate=dashboard
-    )
-    _initialise(server, version=ELICIT_VERSION, capabilities={"elicitation": {}})
-
-    asyncio.run(server._authorise("twin.commit_geometry", {"obj_id": "bracket"}))
-    asyncio.run(server._authorise("twin.commit_geometry", {"obj_id": "plate"}))
-
-    assert len(asked) == 1
-    assert len(dashboard_calls) == 2
-    assert server.can_elicit is False
-
-
-def test_with_nowhere_else_to_ask_the_write_is_still_refused() -> None:
-    """The fallback is a queue somebody can see, not a way through the gate."""
-    server = UnifiedMcpServer([_Adapter()], caller=Caller.REMOTE, elicitor=_declining)
-    _initialise(server, version=ELICIT_VERSION, capabilities={"elicitation": {}})
-
-    with pytest.raises(ApprovalNotConfiguredError):
-        asyncio.run(server._authorise("twin.commit_geometry", {"obj_id": "bracket"}))

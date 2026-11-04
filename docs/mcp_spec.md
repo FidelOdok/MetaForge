@@ -389,17 +389,6 @@ in the `elicitation/create` message.
   (`202` over HTTP), logged as `mcp_elicitation_late_response_ignored`, and
   never applied. The call already ended as `timed_out` without running.
 
-#### An answer nobody read is not an answer
-
-A `decline` or `cancel` returned faster than a person could have read the
-prompt (one second) is treated as the client answering for them, not as a
-refusal: the inline hold is closed `cancelled`, the call is held again on the
-`dashboard` route, and the connection stops being asked for the rest of the
-session. An `accept` is always an answer. Logged as
-`elicitation_unattended` and `mcp_elicitation_unattended_fallback`; the
-reasoning is in
-[the approvals notes](approvals.md#a-client-that-answers-for-the-person).
-
 ### Message Format
 
 All messages follow the JSON-RPC 2.0 specification:
