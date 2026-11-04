@@ -93,6 +93,12 @@ export interface ApprovalItem {
   detail: Record<string, unknown>;
   decision: ApprovalDecisionRecord | null;
   review?: GateReview | null;
+  /**
+   * What the person is reviewing, as a revision (RT-030): a sketch's content
+   * hash, a gate's proposal, the design a change was made against. Sent back
+   * with a decision; once it moved on, the decision is refused with 409.
+   */
+  base_revision?: string | null;
 }
 
 export interface ApprovalList {
@@ -105,6 +111,8 @@ export interface ApprovalDecisionRequest {
   decision: ApprovalDecision;
   reason?: string;
   to_phase?: string;
+  /** The item's `base_revision` as reviewed; omitted, no check is made. */
+  base_revision?: string;
 }
 
 export interface ApprovalListFilters {

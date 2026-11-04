@@ -609,6 +609,18 @@
       "ApprovalRequest": {
         "description": "Body for ``POST /v1/runs/{id}/approval``.",
         "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
           "decision": {
             "enum": [
               "approve",
@@ -10525,6 +10537,17 @@
             "title": "Id",
             "type": "string"
           },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -11267,6 +11290,18 @@
             "title": "Requires Action",
             "type": "boolean"
           },
+          "retry_of": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
           "run_id": {
             "anyOf": [
               {
@@ -11321,6 +11356,18 @@
           },
           "state": {
             "$ref": "#/components/schemas/OperationState"
+          },
+          "target_key": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Key"
           },
           "target_revision": {
             "anyOf": [
@@ -11436,6 +11483,29 @@
         "title": "OperationListResponse",
         "type": "object"
       },
+      "OperationRetryResponse": {
+        "description": "``POST .../operations/{operation_id}/retry``.",
+        "properties": {
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "retry_of": {
+            "title": "Retry Of",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          }
+        },
+        "required": [
+          "operation_id",
+          "retry_of",
+          "state"
+        ],
+        "title": "OperationRetryResponse",
+        "type": "object"
+      },
       "OperationSnapshot": {
         "description": "The latest state of one operation, folded from its events.",
         "properties": {
@@ -11498,6 +11568,17 @@
             "title": "Requires Action",
             "type": "boolean"
           },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
           "run_id": {
             "anyOf": [
               {
@@ -11534,6 +11615,17 @@
           },
           "state": {
             "$ref": "#/components/schemas/OperationState"
+          },
+          "target_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Key"
           },
           "target_revision": {
             "anyOf": [
@@ -15539,6 +15631,19 @@
             "title": "Actor Kind",
             "type": "string"
           },
+          "client_turn_id": {
+            "anyOf": [
+              {
+                "maxLength": 96,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Client-chosen turn id; the turn's operation is chat:<client_turn_id>",
+            "title": "Client Turn Id"
+          },
           "content": {
             "description": "Message content",
             "minLength": 1,
@@ -19441,7 +19546,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.1.0"
+    "version": "0.3.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -27440,7 +27545,7 @@
     },
     "/v1/projects/{project_id}/operations/events": {
       "post": {
-        "description": "Accept an operation event from a process that has no stream of its own.\n\n202 with the stored ``project_seq``. A duplicate ``event_id`` is 200 with\nthe seq stored the first time. An event out of order, or a non-terminal\none after the operation ended, is 409.",
+        "description": "Accept an operation event from a process that has no stream of its own.\n\n202 with the stored ``project_seq``. A duplicate ``event_id`` is 200 with\nthe seq stored the first time. An event out of order, or a non-terminal\none after the operation ended, is 409. A ``completed`` event whose\n``base_revision`` is no longer its target's head is stored as ``stale``.",
         "operationId": "ingest_operation_event_v1_projects__project_id__operations_events_post",
         "parameters": [
           {
@@ -27582,7 +27687,7 @@
     },
     "/v1/projects/{project_id}/operations/{operation_id}/cancel": {
       "post": {
-        "description": "Cancel an operation that supports it: 202, 409 when not cancellable, 404 when unknown.",
+        "description": "Cancel an operation that supports it: 202, 409 when not cancellable, 404 when unknown.\n\nA design-flow run stops at its next step and is marked cancelled; what it\nalready committed to the twin stays. A job stops in this gateway, or in\nthe MCP sidecar when the sidecar runs it.",
         "operationId": "cancel_operation_v1_projects__project_id__operations__operation_id__cancel_post",
         "parameters": [
           {
@@ -27630,9 +27735,73 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "description": "The process running it could not be reached"
           }
         },
         "summary": "Cancel Operation",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/operations/{operation_id}/retry": {
+      "post": {
+        "description": "Run a failed operation again, as a new operation naming it in ``retry_of``.\n\n202 with the new ``operation_id`` (its ``accepted`` event is on the\nstream); 409 when the operation did not fail or its kind cannot be re-run\nsafely; 404 when unknown. Supported: failed design-flow runs and failed\njobs of tools that can be retried.",
+        "operationId": "retry_operation_v1_projects__project_id__operations__operation_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationRetryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown"
+          },
+          "409": {
+            "description": "Not retryable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "The process that ran it could not be reached"
+          }
+        },
+        "summary": "Retry Operation",
         "tags": [
           "operations"
         ]
@@ -28610,7 +28779,7 @@
     },
     "/v1/runs/{run_id}/approval": {
       "post": {
-        "description": "Answer the gate this run is parked at.\n\nAsync so the store transition \u2014 which resolves the in-process executor's\ngate future via the coordinator \u2014 runs on the event-loop thread (future\nresolution is not thread-safe from FastAPI's sync worker pool).\n\nOn Temporal the decision is also *signalled* into the workflow, which is\nwhat actually resumes it. The store transition stays, because\nthe run list, the SSE stream and the ledger all read from it.\n\nThe deciding human comes from the request, never the body.",
+        "description": "Answer the gate this run is parked at.\n\nAsync so the store transition \u2014 which resolves the in-process executor's\ngate future via the coordinator \u2014 runs on the event-loop thread (future\nresolution is not thread-safe from FastAPI's sync worker pool).\n\nOn Temporal the decision is also *signalled* into the workflow, which is\nwhat actually resumes it. The store transition stays, because\nthe run list, the SSE stream and the ledger all read from it.\n\nThe deciding human comes from the request, never the body.\n\nFORGE-788 (RT-030): a ``base_revision`` that is no longer the gate's\n(the run re-drafted, retried or moved on since the person looked) is 409.",
         "operationId": "submit_approval_v1_runs__run_id__approval_post",
         "parameters": [
           {

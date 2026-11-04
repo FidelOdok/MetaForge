@@ -7,11 +7,15 @@ gateway keeps those events in a durable log and streams them to the Create and
 Engineering views over one Server-Sent Events stream per project, so a browser
 that refreshes, navigates away and back, or reconnects after a gateway restart
 is sent what it missed instead of losing it (the backend of CDE
-slice 1; FRS sections 11B and 14).
+slice 1; FRS sections 11B and 14). CDE slice 2 adds scheduling: cancel and
+retry, supersede, coalescing and stale-result rejection, so a late result can
+never overwrite a newer revision (see [Scheduling](#scheduling)).
 
 The code lives in `api_gateway/operations/`: `schemas.py` (the contract),
 `store.py` (the SQLite log and snapshots), `hub.py` (the stream),
-`publisher.py` (what producers call) and `routes.py`.
+`publisher.py` (what producers call), `scheduling.py` (cancel and retry),
+`heads.py` (a target's current head), `sidecar.py` (the relay to the MCP
+sidecar) and `routes.py`.
 
 ## Identity
 
@@ -46,6 +50,8 @@ Approvals are not operations. A run waiting at a gate emits a
   "occurred_at": "ISO-8601 UTC",
   "base_revision": "string | null",
   "target_revision": "string | null",
+  "target_key": "string | null",
+  "retry_of": "string | null",
   "message": "server-authored plain text, never prompts or tool args",
   "severity": "info | warning | error",
   "artifact_refs": [{"kind": "work_product | file | glb | image | step", "id": "string", "label": "string", "url": "string | null", "authority": "illustrative | preview | exact | validated | null"}],
@@ -64,8 +70,15 @@ Rules:
   the store refuses one.
 - Terminal states are `completed`, `failed`, `cancelled`, `superseded` and
   `stale`. Once an operation is terminal, a later non-terminal event is
-  refused by the store and ignored by clients. A terminal event after a
-  terminal one is accepted (a completed result can later go `stale`).
+  refused by the store and ignored by clients. Of the terminal events, only
+  `stale` may follow an ending, and only a `completed` one (a completed result
+  can later go stale). Any other event after an ending is refused, so a late
+  result of a cancelled or superseded operation never becomes its outcome.
+- `target_key` names what the operation works on (an item key such as
+  `CAD-BRACKET`) and `base_revision` the revision of it the work started
+  from. Both are optional; see [Scheduling](#scheduling).
+- `retry_of` is set on an operation started by retrying a failed one, and
+  names it.
 - `progress` is null unless a measurable total exists. There is no ETA.
 - An artifact claims an `authority` only when evidence exists; a preview is
   never `validated`.
@@ -87,7 +100,8 @@ every event after this snapshot.
 
 An `OperationSnapshot` has `operation_id, kind, domain, title, state, run_id,
 started_at, updated_at, last_sequence, base_revision, target_revision,
-message, severity, artifact_refs, requires_action, action_refs, progress` and
+target_key, retry_of, message, severity, artifact_refs, requires_action,
+action_refs, progress` and
 `stages: [{stage_id, stage_title, domain, state, updated_at}]`. It is folded
 from the operation's events as they are stored: the latest event sets state,
 message, severity, progress and the actions on offer; artifacts accumulate;
@@ -119,19 +133,51 @@ SSE reader, which can send a bearer token.
 ### `POST /v1/projects/{project_id}/operations/{operation_id}/cancel`
 
 `202 {"operation_id", "state": "cancelled"}` when the operation was
-cancelled, `409` when it cannot be, `404` when it is unknown. What can be
-cancelled today:
+cancelled, `409` when it cannot be, `404` when it is unknown, `503` when the
+process that runs it could not be reached. What can be cancelled:
 
 | Operation | Cancellable |
 |-----------|-------------|
-| A plain run, not yet ended | yes |
-| A design-flow run | no (409): reject it at its next gate |
+| A plain run, not yet ended | yes, through the run state machine |
+| A design-flow run, not yet ended | yes: its Temporal workflow is cancelled (or the in-process executor stops at its next step), then the run is marked cancelled |
 | A job running in the gateway | yes, through `JobRunner.cancel` |
-| A job running in the MCP sidecar | no (409) |
+| A job running in the MCP sidecar | yes, relayed to the sidecar's `POST /v1/jobs/{job_id}/cancel` |
 | A chat turn | no (409) |
 
+Cancelling never rolls back the twin. A design-flow run's open drafts are
+closed as on any other ending, and whatever it already committed at an
+approved gate stays committed. When Temporal cannot be reached the run is not
+marked cancelled (503): a record that says cancelled while its workflow keeps
+spending would be wrong.
+
 The cancelled event itself comes from the run or job producer, as for any
-other transition.
+other transition. For a sidecar job the gateway also records it at once, with
+the same `event_id` and `sequence` the sidecar's runner uses, so the sidecar's
+own report is a duplicate.
+
+An operation offers a `cancel` action only while it can be cancelled, and a
+`retry` action only on a failure that can be retried. The dashboard shows
+exactly the actions listed.
+
+### `POST /v1/projects/{project_id}/operations/{operation_id}/retry`
+
+Runs a failed operation again, with the same request, as a new operation.
+`202 {"operation_id": "<the new one>", "retry_of": "<the failed one>",
+"state"}`; the new operation's first event is `accepted` and carries
+`retry_of`. `409` when the operation did not fail or cannot be re-run
+safely, `404` when it is unknown, `503` when the sidecar could not be
+reached.
+
+| Operation | Retryable |
+|-----------|-----------|
+| A failed design-flow run | yes: the same request starts a new run (its own change set; the failed run's drafts were already closed) |
+| A failed plain run | no (409): a chat turn or a held tool call cannot be started again safely |
+| A failed or interrupted job | yes, when its tool registered a retry (today `twin.generate_concept_mesh`): the same arguments, session, project, target and base revision, as a new job |
+| A failed job in the MCP sidecar | yes, relayed to the sidecar's `POST /v1/jobs/{job_id}/retry` |
+| A chat turn | no (409): send the message again |
+
+A retry with a stale `base_revision` ends `stale` straight away, before any
+work is paid for: it is honest that the design moved on.
 
 ### `POST /v1/projects/{project_id}/operations/events`
 
@@ -147,7 +193,11 @@ operation. A `project_id` in the body must match the path.
 | Duplicate `event_id` | 200 | the seq stored the first time, `"duplicate": true` |
 | Out of order, or after the operation ended | 409 | the reason |
 
-All four routes sit behind the gateway's authentication middleware like every
+A `completed` event naming a `target_key` and `base_revision` that is no
+longer the target's head is stored as `stale` (see
+[Scheduling](#scheduling)).
+
+All five routes sit behind the gateway's authentication middleware like every
 other route. Per-project access control is planned separately.
 
 ## Producers
@@ -170,6 +220,10 @@ transition callback and the run's tool events:
 | `canceled`, `rejected` | `cancelled` |
 | Refused before it started | `failed` |
 
+While a run has not ended its events offer `cancel`; a failed design flow's
+`failed` event offers `retry`. A run started by a retry names the failed run
+in `retry_of`.
+
 The run's `title` is its flow's name and its `domain` comes from the flow id;
 a stage's domain comes from the phase's disciplines, its id or the tool. A run
 with no project has nowhere to report until it has one. The run stream
@@ -185,16 +239,99 @@ order however they travel, and a deterministic `event_id`, so a retried post
 is a duplicate. The domain comes from the tool id prefix (`kicad.` is
 electronics, `cadquery.` mechanical, `calculix.` simulation, a concept tool
 concept). When a job's result has a `node_id`, it is an `artifact_ref`. Jobs
-gained two statuses: `cancelled` (`JobRunner.cancel`) and `superseded`
-(`JobRunner.supersede`); both end the job at once and stop its task. A job the
-store marks `interrupted` on opening is reported `failed`.
+gained three statuses: `cancelled` (`JobRunner.cancel`), `superseded`
+(`JobRunner.supersede`) and `stale` (see [Scheduling](#scheduling)); each ends
+the job at once and stops its task. A job the store marks `interrupted` on
+opening is reported `failed`. A job's events carry its `target_key`,
+`base_revision` and `retry_of` when it has them; an active job offers
+`cancel`, and a failed job of a tool that can be retried offers `retry`.
+
+**Chat turns** (`api_gateway/chat/operation_events.py`). A person's message
+in a project thread (`POST /v1/chat/threads/{id}/messages`) is one operation,
+`chat:<turn id>`:
+
+| Moment | Event |
+|--------|-------|
+| The message is stored, before any agent work | `accepted` |
+| The agent starts the turn | `started` |
+| The agent replied (or no agent is set up) | `completed` |
+| The reply is an error | `failed` |
+| The page went away and the turn was stopped | `cancelled` |
+
+The turn id is the request's optional `client_turn_id` when it is well formed
+and not yet used in the project, else the stored message's id. The Create
+view sends its instruction's id, so it knows the operation before the reply
+returns and shows the server's acknowledgement as soon as `accepted`
+arrives. The response carries the turn's `operation_id`. The messages are
+fixed phrases; the prompt and the reply never appear on the stream. A thread
+with no project reports nothing. A chat turn offers neither cancel nor
+retry.
 
 **Approvals (RT-030).** An approval item carries `base_revision` where the
-revision of what it is about is known (today a design sketch's or technical
-drawing's content hash). A decision may send the `base_revision` it saw; when
-the item has moved on since, the decision is refused with 409 and nothing is
-recorded. A decision without one, or on an item that tracks none, is
-unaffected.
+revision of what it is about is known:
+
+| Approval | `base_revision` |
+|----------|-----------------|
+| A design sketch or technical drawing | the content hash |
+| A design-flow gate | `gate:<digest>` of the gate's phase and attempt and the run's open drafts (each item's key, draft revision and the base revision it was drafted on) |
+| A design change proposal | `wp:<digest>` of the content of every work product it affects |
+
+A decision may send the `base_revision` it saw, on
+`POST /v1/approvals/{id}/decision` or on `POST /v1/runs/{id}/approval`. When
+the item has moved on since (the run re-drafted, retried or reached another
+gate; an affected work product changed), the decision is refused with 409 and
+nothing is recorded. A decision without one, or on an item that tracks none,
+is unaffected. The dashboard's approval cards send the revision they show.
+
+## Scheduling
+
+Several operations can work on the same thing. These rules keep the design's
+current state honest while they do (FRS DI-003, DEF-008, PERF-003 and
+PERF-004).
+
+**Targets.** A job may name a `target_key` (what it works on, usually an
+item key) and the `base_revision` of it the work starts from.
+`twin.generate_concept_mesh` takes both as optional arguments. An item's
+revision here is the twin's own `head_revision`, the number its `KEY@n` pins
+and change-set bases already compare (`api_gateway/operations/heads.py`).
+
+**Supersede.** A new job on a target ends the older jobs still open on the
+same target in the same project as `superseded`, and stops them. The job
+runner does this when it starts the new job; the gateway's publisher does the
+same for any open job operation it holds on that target, relaying to the
+sidecar when the sidecar runs it. Only jobs are superseded: a run has gates
+and drafts of its own and is never ended because something else started.
+Once superseded, a late result from that job is refused by the store.
+
+**Stale results.** A result whose `base_revision` is no longer the target's
+head never moves the head:
+
+- the twin refuses a write pinned to a base that moved (`KEY@n` raises
+  `ItemRevisionConflictError`, a change set raises `ChangeSetConflictError`);
+  a job whose work fails that way ends `stale`, not `failed`;
+- the job runner reads the head before the work starts (a job whose target
+  already moved ends `stale` and nothing is paid for) and again when its
+  result arrives (the result is kept on the job record, never adopted);
+- the gateway checks every `completed` event that names a target and base,
+  from any process, and stores it as `stale` when the head moved.
+
+A stale operation says which revision it worked from and which is current,
+and the last-known-good revision stays the head.
+
+**Coalescing.** An identical call (same tool, arguments, project, target and
+base revision) from any session within `METAFORGE_JOB_COALESCE_WINDOW_S`
+(default 30 s; `0` turns it off) returns the job already covering it instead
+of starting another, so a double click or a retried request is idempotent. The
+same session's identical call is reused for longer, as before (a running job,
+or one that succeeded in the last ten minutes).
+
+**The sidecar relay.** A job runs in the process it was called on, so a job
+called through `mcp-http` is cancelled or retried there. The sidecar serves
+`POST /v1/jobs/{job_id}/cancel` and `POST /v1/jobs/{job_id}/retry` with the
+same credential as `/mcp`; the gateway calls them at `METAFORGE_MCP_URL` with
+`METAFORGE_MCP_CLIENT_KEY` (else `METAFORGE_MCP_API_KEY`). With no
+`METAFORGE_MCP_URL` such a job is not cancellable from the gateway (409).
+Best effort: an unreachable sidecar is a 503, never retried.
 
 ## Storage and configuration
 
@@ -202,6 +339,9 @@ unaffected.
 |---------|---------|---------|
 | `METAFORGE_OPERATIONS_PATH` | `~/.metaforge/operations.db` | The SQLite log (on the `metaforge-home` volume in compose) |
 | `METAFORGE_OPERATIONS_RETENTION_DAYS` | `14` | Events older than this are pruned; `0` keeps everything |
+| `METAFORGE_JOB_COALESCE_WINDOW_S` | `30` | Seconds an identical job call from any session joins the open job; `0` turns it off |
+| `METAFORGE_MCP_URL` | unset (compose: `http://mcp-http:8765/mcp`) | Where the gateway relays cancel and retry for sidecar jobs |
+| `METAFORGE_MCP_CLIENT_KEY` | unset | The key the relay presents (else `METAFORGE_MCP_API_KEY`) |
 
 The store opens at gateway start-up beside the run ledger, and is skipped with
 it when `METAFORGE_RUNS_LEDGER_DISABLE` is on (the stream then lives in
@@ -221,14 +361,23 @@ that ended before the retention window are pruned with their events.
 | `metaforge_operation_stream_active` | gauge | none |
 | `metaforge_operation_active` | gauge | `kind` |
 | `metaforge_operation_event_publish_lag_seconds` | histogram | `kind` |
+| `metaforge_operation_scheduling_total` | counter | `kind`, `action` (`superseded`, `stale_rejected`, `coalesced`, `cancel`, `retry`), `outcome` (`ok`, `refused`, `error`) |
 
 Alerts in `observability/alerting/rules.yaml`: `OperationEventPublishFailing`
-(the store keeps failing to write) and `OperationsStalled` (operations are
-open and none has reported anything for an hour). Log events:
+(the store keeps failing to write), `OperationsStalled` (operations are
+open and none has reported anything for an hour) and
+`OperationCancelOrRetryFailing` (cancel or retry keeps failing because the
+workflow engine or the sidecar cannot be reached). Log events:
 `operation_event_published`, `operation_event_refused`,
 `operation_event_publish_failed`, `operation_stream_resync`,
-`operation_stream_closed`. Spans: `operations.publish`, `operations.list`,
-`operations.cancel`, `operations.stream.replay`.
+`operation_stream_closed`, `operation_superseded`, `operation_result_stale`,
+`operation_cancelled`, `operation_retried`, `operation_sidecar_relayed`,
+`operation_sidecar_unreachable`, `tool_job_reused` (with `coalesced`),
+`tool_job_retried`. Spans: `operations.publish`, `operations.list`,
+`operations.cancel`, `operations.retry`, `operations.supersede`,
+`operations.screen_result`, `operations.item_head`,
+`operations.sidecar_relay`, `operations.stream.replay`,
+`design_flow.cancel`.
 
 ## ADR: decisions
 
@@ -250,3 +399,13 @@ open and none has reported anything for an hour). Log events:
 - **No ETA.** `progress` only when a measurable total exists (for example
   checks done of total). A tool's static `expected_seconds` is never shown as
   an ETA.
+- **Stale is reported, the head is protected by the twin.** Slice 2 reuses
+  the twin's existing conflict checks (`KEY@n` pins and change-set bases)
+  rather than a new notion of "current"; the operation layer only reports
+  what they decide, and checks results from processes it does not run.
+- **Supersede jobs only.** Supersede ends jobs, whose result a newer one
+  replaces outright. Runs are never superseded: cancelling one is a person's
+  decision.
+- **Retry is a new operation.** A retry never reopens the failed operation;
+  it starts a new one that names it in `retry_of`, so the failure stays on
+  record as it happened.

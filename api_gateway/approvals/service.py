@@ -213,7 +213,20 @@ async def gate_item(run: Run, *, snap: dict[str, Any] | None = None) -> Approval
         },
         decision=None if pending else record,
         review=current_review(run, snap) if pending else None,
+        # FORGE-788 (RT-030): what the person reviews here (the gate's phase,
+        # attempt and the run's drafts). A decision naming an older one is 409.
+        base_revision=await _gate_revision(run, snap) if pending else None,
     )
+
+
+async def _gate_revision(run: Run, snap: dict[str, Any] | None) -> str | None:
+    from api_gateway.runs import change_sets as run_change_sets
+
+    try:
+        return await run_change_sets.gate_revision(run, snap)
+    except Exception as exc:  # noqa: BLE001 - a gate stays decidable without one
+        logger.info("approval_gate_revision_unavailable", run_id=run.id, error=str(exc))
+        return None
 
 
 _GATE_NAME = re.compile(r"^(?:Gate '([^']+)'|\[([^\]]+)\])")
@@ -306,7 +319,39 @@ def tool_item(run: Run) -> ApprovalItem:
 # ── assistant change proposals ───────────────────────────────────────────
 
 
-def change_item(p: DesignChangeProposal) -> ApprovalItem:
+async def _change_revision(app: Any, p: DesignChangeProposal) -> str | None:
+    """The revision of the design a pending change proposal was made against (RT-030).
+
+    A digest of the content of every work product the proposal affects, read
+    from the twin now. When any of them changes, the digest does, and a
+    decision sent with the one the person reviewed is refused (FORGE-788).
+    ``None`` when the proposal names none, is decided, or there is no twin.
+    """
+    import hashlib
+
+    if p.status is not ChangeStatus.PENDING or not p.work_products_affected:
+        return None
+    twin = _twin_of(app)
+    if twin is None:
+        return None
+    parts: list[str] = []
+    try:
+        for wp_id in sorted(str(w) for w in p.work_products_affected):
+            wp = await twin.get_work_product(UUID(wp_id))
+            if wp is None:
+                parts.append(f"{wp_id}:missing")
+                continue
+            marker = getattr(wp, "content_hash", None) or _iso(getattr(wp, "updated_at", None))
+            parts.append(f"{wp_id}:{marker or ''}")
+    except Exception as exc:  # noqa: BLE001 - the proposal stays decidable without one
+        logger.info(
+            "approval_change_revision_unavailable", change_id=str(p.change_id), error=str(exc)
+        )
+        return None
+    return "wp:" + hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def change_item(p: DesignChangeProposal, *, base_revision: str | None = None) -> ApprovalItem:
     item_id = f"change:{p.change_id}"
     pending = p.status is ChangeStatus.PENDING
     fallback = (
@@ -347,6 +392,7 @@ def change_item(p: DesignChangeProposal) -> ApprovalItem:
             "affected": [str(w) for w in p.work_products_affected],
         },
         decision=_record(item_id, fallback),
+        base_revision=base_revision,
     )
 
 
@@ -629,7 +675,8 @@ async def list_items(app: Any) -> list[ApprovalItem]:
     for r in tool_approvals.get_approval_store().list():
         if r.status is RunStatus.AWAITING_APPROVAL or r.approved_by or r.status in UNANSWERED:
             items.append(tool_item(r))
-    items.extend(change_item(p) for p in assistant_routes.workflow.list_proposals())
+    for p in assistant_routes.workflow.list_proposals():
+        items.append(change_item(p, base_revision=await _change_revision(app, p)))
     items.extend(await _twin_items(app))
     items.extend(_upload_items())
     items.sort(key=lambda i: i.created_at or "", reverse=True)
@@ -678,7 +725,7 @@ async def get_item(app: Any, item_id: str) -> ApprovalItem:
         proposal = _uuid(raw, item_id) and assistant_routes.workflow.get_proposal(UUID(raw))
         if not proposal:
             raise _not_found(item_id)
-        return change_item(proposal)
+        return change_item(proposal, base_revision=await _change_revision(app, proposal))
     if kind == "upload":
         try:
             return upload_item(upload_routes.get_upload_store().get(raw))

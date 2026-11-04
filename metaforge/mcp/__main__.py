@@ -813,6 +813,53 @@ def build_http_app(
         body = json.loads(raw)
         return JSONResponse(body.get("result", body))
 
+    # FORGE-788: a slow tool job runs in the process it was called on, so a
+    # job started here is cancelled or retried here. The gateway's operations
+    # view relays to these with the same credential as /mcp.
+    @app.post("/v1/jobs/{job_id}/cancel")
+    async def cancel_job(
+        job_id: str,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _check_auth(request, authorization)
+        from tool_registry.jobs import active_job_runner
+
+        runner = active_job_runner()
+        job = runner.get(job_id) if runner is not None else None
+        if runner is None or job is None:
+            return JSONResponse({"detail": f"job '{job_id}' is not known here"}, status_code=404)
+        if not runner.owns(job_id):
+            return JSONResponse(
+                {"detail": f"job '{job_id}' is {job.status}, not running", "status": job.status},
+                status_code=409,
+            )
+        ended = runner.cancel(job_id, reason="cancelled from the operations view")
+        status = ended.status if ended is not None else job.status
+        logger.info("mcp_job_cancel_relayed", job_id=job_id, status=status)
+        return JSONResponse({"job_id": job_id, "status": status}, status_code=202)
+
+    @app.post("/v1/jobs/{job_id}/retry")
+    async def retry_job(
+        job_id: str,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _check_auth(request, authorization)
+        from tool_registry.jobs import JobNotRetryableError, active_job_runner
+
+        runner = active_job_runner()
+        if runner is None or runner.get(job_id) is None:
+            return JSONResponse({"detail": f"job '{job_id}' is not known here"}, status_code=404)
+        try:
+            new = await runner.retry(job_id)
+        except JobNotRetryableError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        logger.info("mcp_job_retry_relayed", job_id=new.job_id, retry_of=job_id)
+        return JSONResponse(
+            {"job_id": new.job_id, "retry_of": job_id, "status": new.status}, status_code=202
+        )
+
     # FORGE-423: the server-to-client direction. Without it `can_elicit` is
     # false for every HTTP client -- which is every plugin -- so FORGE-360's
     # inline approvals existed only on stdio and every held write went to the
@@ -1899,6 +1946,13 @@ async def _bootstrap(
     from metaforge.mcp.live_publisher import http_operation_publisher
 
     set_operation_event_publisher(http_operation_publisher())
+    # FORGE-788: a job whose target item moved on while it ran ends stale here
+    # too, against the same twin the sidecar's tools write to.
+    from api_gateway.operations.heads import make_item_head_resolver
+    from tool_registry.jobs import set_job_head_resolver
+
+    _jobs_twin = twin
+    set_job_head_resolver(make_item_head_resolver(lambda: _jobs_twin))
 
     # FORGE-462: flow.* and run.* registered in the gateway and never here, so
     # no harness plugin could list, propose or start a design flow.

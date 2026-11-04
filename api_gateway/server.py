@@ -1602,6 +1602,19 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.operations.publisher import set_metrics_collector as _ops_metrics
 
     _ops_metrics(_collector)
+    # FORGE-788: scheduling. A job result whose base revision is no longer
+    # its target item's head is reported stale, never adopted; and a job the
+    # MCP sidecar runs is cancelled or retried by relaying to it.
+    from api_gateway.operations.heads import make_item_head_resolver
+    from api_gateway.operations.publisher import set_head_resolver, set_job_cancel_relay
+    from api_gateway.operations.sidecar import relay_job_cancel, sidecar_base_url
+    from tool_registry.jobs import set_job_head_resolver
+
+    _scheduling_twin = twin
+    _item_head = make_item_head_resolver(lambda: _scheduling_twin)
+    set_head_resolver(_item_head)
+    set_job_head_resolver(_item_head)
+    set_job_cancel_relay(relay_job_cancel if sidecar_base_url() else None)
     # Production-harness audit follow-up: the /v1/runs store was always
     # process-local despite a real SQLite ledger existing for exactly this
     # ("persistence lands in Phase 4" — never actually connected). Disabled

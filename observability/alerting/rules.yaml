@@ -1094,3 +1094,19 @@ groups:
             or its process may have stopped without ending it. Read the active
             operations with GET /v1/projects/{id}/operations?active=true and check
             the run supervisor and the tool_job_state log events.
+      # FORGE-788: cancel and retry relay to Temporal or the MCP sidecar.
+      - alert: OperationCancelOrRetryFailing
+        expr: >-
+          sum(increase(metaforge_operation_scheduling_total{action=~"cancel|retry",outcome="error"}[15m])) >= 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cancel or retry from the activity view keeps failing"
+          description: >-
+            Requests to cancel or retry an operation failed because the process
+            running it could not be reached, at least three times in fifteen
+            minutes. A person pressing Cancel is told it failed and the work keeps
+            running. Check that Temporal and the mcp-http sidecar are up, that the
+            gateway's METAFORGE_MCP_URL points at the sidecar, and the
+            design_flow_cancel_failed and operation_sidecar_unreachable log events.

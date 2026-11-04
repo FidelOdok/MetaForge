@@ -90,6 +90,10 @@ export interface OperationEvent {
   occurred_at: string;
   base_revision: string | null;
   target_revision: string | null;
+  /** What the operation works on (an item key); a newer one on it supersedes this (FORGE-788). */
+  target_key?: string | null;
+  /** The failed operation this one retries (FORGE-788). */
+  retry_of?: string | null;
   /** Server-authored plain text, never prompts or tool arguments. */
   message: string;
   severity: OperationSeverity;
@@ -119,6 +123,8 @@ export interface OperationSnapshot {
   last_sequence: number;
   base_revision: string | null;
   target_revision: string | null;
+  target_key?: string | null;
+  retry_of?: string | null;
   message: string;
   severity: OperationSeverity;
   artifact_refs: ArtifactRef[];
@@ -137,6 +143,13 @@ export interface OperationsSnapshotResponse {
 
 export interface OperationCancelResponse {
   operation_id: string;
+  state: OperationState;
+}
+
+/** `POST .../operations/{op}/retry`: the new operation and the one it retries. */
+export interface OperationRetryResponse {
+  operation_id: string;
+  retry_of: string;
   state: OperationState;
 }
 

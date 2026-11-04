@@ -48,6 +48,11 @@ services:
       - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-1800}
       - METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR=${METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR:-20}
       - METAFORGE_AUTO_APPROVE_MESH_PER_HOUR=${METAFORGE_AUTO_APPROVE_MESH_PER_HOUR:-3}
+      # FORGE-788: a slow tool job called through mcp-http runs there, so the
+      # operations view cancels or retries it by relaying to the sidecar, with
+      # the same key a client presents. Unset, such a job is not cancellable.
+      - METAFORGE_MCP_URL=${METAFORGE_MCP_URL:-http://mcp-http:8765/mcp}
+      - METAFORGE_MCP_CLIENT_KEY=${METAFORGE_MCP_API_KEY:-}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - TEMPORAL_HOST=temporal:7233
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317

@@ -7,10 +7,12 @@ import { useOperationsStore } from '../../../store/operations-store';
 import type { OperationEvent } from '../../../types/operations';
 
 const cancelOperation = vi.fn();
+const retryOperation = vi.fn();
 vi.mock('../../../api/endpoints/operations', () => ({
   getOperations: vi.fn(),
   operationsStreamUrl: vi.fn(),
   cancelOperation: (...args: unknown[]) => cancelOperation(...args),
+  retryOperation: (...args: unknown[]) => retryOperation(...args),
 }));
 
 const getApproval = vi.fn();
@@ -45,6 +47,7 @@ function setReducedMotion(reduce: boolean) {
 beforeEach(() => {
   useOperationsStore.getState().reset();
   cancelOperation.mockReset();
+  retryOperation.mockReset();
   getApproval.mockReset();
   setReducedMotion(false);
 });
@@ -129,7 +132,7 @@ describe('ActivityOverlay', () => {
     await user.click(screen.getByRole('button', { name: 'Expand activity' }));
     expect(screen.getByTestId('activity-status')).toHaveTextContent('Needs attention');
     expect(screen.queryByText(/%/)).toBeNull();
-    expect(screen.getByRole('link', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     const scene = document.querySelector('svg.act-scene');
     expect(scene?.getAttribute('data-state')).toBe('failed');
     expect(scene?.getAttribute('data-animated')).toBe('false');
@@ -149,6 +152,52 @@ describe('ActivityOverlay', () => {
     render(<ActivityOverlay projectId="p1" />);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(cancelOperation).toHaveBeenCalledWith('p1', 'run:a'));
+  });
+
+  it('retries through the gateway and shows a refusal beside the actions', async () => {
+    const user = userEvent.setup();
+    retryOperation.mockRejectedValueOnce({ response: { status: 409, data: { detail: 'only a failed design-flow run can be retried from here' } } });
+    seed([
+      opEvent({ sequence: 1 }),
+      opEvent({
+        sequence: 2,
+        type: 'failed',
+        state: 'failed',
+        severity: 'error',
+        action_refs: [{ kind: 'retry', id: 'run:a', label: 'Retry' }],
+      }),
+    ]);
+    render(<ActivityOverlay projectId="p1" />);
+    await user.click(screen.getByRole('button', { name: 'Expand activity' }));
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(retryOperation).toHaveBeenCalledWith('p1', 'run:a'));
+    expect(await screen.findByText(/only a failed design-flow run/)).toBeInTheDocument();
+  });
+
+  it('hands cancel, retry and approval to the host when it handles them', async () => {
+    const user = userEvent.setup();
+    const onAction = vi.fn().mockResolvedValue(undefined);
+    const onApproval = vi.fn();
+    seed([
+      opEvent({
+        sequence: 1,
+        type: 'review_required',
+        state: 'waiting_for_user',
+        requires_action: true,
+        action_refs: [
+          { kind: 'approval', id: 'gate:run_a', label: 'Review and decide' },
+          { kind: 'cancel', id: 'run:a', label: 'Cancel' },
+        ],
+      }),
+    ]);
+    render(<ActivityOverlay projectId="p1" onAction={onAction} onApproval={onApproval} />);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(onAction).toHaveBeenCalledTimes(1));
+    expect(onAction.mock.calls[0]![1]).toMatchObject({ kind: 'cancel' });
+    expect(cancelOperation).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Review and decide' }));
+    expect(onApproval).toHaveBeenCalledTimes(1);
+    expect(getApproval).not.toHaveBeenCalled();
   });
 
   it('gives a static scene under reduced motion', async () => {
