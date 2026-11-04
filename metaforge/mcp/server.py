@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import difflib
-import hashlib
 import inspect
 import json
 import os
@@ -39,11 +38,14 @@ import structlog
 
 from mcp_core.annotations import annotations_for
 from mcp_core.approval_hold import (
+    DEFAULT_ELICITATION_WAIT_SECONDS,
     HoldNotifier,
+    approval_key,
     hold_notice_text,
     hold_window_seconds,
     progress_interval_seconds,
     progress_notification,
+    tool_approval_ttl_seconds,
 )
 from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
 from mcp_core.deeplinks import DeepLinkBuilder, links_for
@@ -51,6 +53,7 @@ from mcp_core.elicitation import (
     ELICITATION_PROTOCOL_VERSION,
     ElicitationUnavailableError,
     Elicitor,
+    ask_on_hold,
     declares_form_elicitation,
     elicitation_gate,
 )
@@ -71,6 +74,7 @@ from mcp_core.guardrails import (
     Caller,
     HumanAuthorityRequiredError,
     decide,
+    never_auto_approved,
     reject_caller_supplied_approver,
     requires_human_authority,
     resolve_approval,
@@ -169,13 +173,17 @@ _APPROVAL_NOTICE_TTL_SECONDS = 15.0
 #: FORGE-745: tools a project's approval policy may approve without a person.
 #: The gateway decides whether it does; this only saves asking for the rest.
 POLICY_APPROVABLE_TOOLS = frozenset({"phase.claim"})
-#: FORGE-741: a hold handed to a person (a client that can neither be asked
-#: nor sent progress) stays open this long for the same call to come back to.
-HANDOFF_WINDOW_SECONDS = 1800.0
-#: How long the first call still waits, in case the person is already looking;
-#: well inside the shortest client tool timeout seen (Claude Code's 120 s).
+#: FORGE-741 / FORGE-780: how long a held call still waits on the dashboard
+#: before it returns, in case the person is already looking; well inside the
+#: shortest client tool timeout seen (Claude Code's 120 s). The hold itself
+#: lasts ``METAFORGE_TOOL_APPROVAL_TTL_S`` (30 min by default).
 HANDOFF_WAIT_SECONDS = 20.0
 HANDOFF_POLL_SECONDS = 1.0
+#: FORGE-780: how long a held call waits on the client's own prompt before it
+#: returns. An answer after this still lands on the approval record.
+ELICITATION_WAIT_SECONDS = DEFAULT_ELICITATION_WAIT_SECONDS
+#: Held calls per session watched for a decision, to tell the agent once.
+_WATCHED_HOLDS_PER_SESSION = 8
 _APPROVAL_NOTICE_SESSIONS = 512
 _METHOD_NOT_FOUND = METHOD_NOT_FOUND
 _TOOL_EXECUTION_ERROR = TOOL_EXECUTION_ERROR
@@ -332,8 +340,9 @@ class UnifiedMcpServer:
         # FORGE-724: pending-approval notices on tool results (off until attached).
         self._approvals_lister: Any = None
         self._approvals_told: dict[str, set[str]] = {}
-        # FORGE-741: handed-off holds, by call, as (approval id, open until).
-        self._handoffs: dict[str, tuple[str, float]] = {}
+        # FORGE-780: this session's held calls not yet decided, approval id ->
+        # tool, so the next reply after one is approved can say so.
+        self._watched_holds: dict[str, dict[str, str]] = {}
         self._pending_cache: dict[str | None, tuple[float, list[dict[str, Any]]]] = {}
         # FORGE-339: when set, ``tools/list`` serves only this profile's
         # tools. Validated here rather than on first request — a typo in a
@@ -1057,6 +1066,10 @@ class UnifiedMcpServer:
                 # FORGE-741: not a failure. The call waits on a person, and
                 # says who to tell and what to do once they have answered.
                 self._mark_failed(span, exc)
+                if method == "tools/call":
+                    # FORGE-780: a held call is a result the agent reads, not
+                    # a protocol error whose data a client may never show.
+                    return json.dumps(make_success(request_id, await self._held_result(exc)))
                 return json.dumps(
                     make_error(
                         request_id,
@@ -1795,6 +1808,10 @@ class UnifiedMcpServer:
             # that is technically present and never looked at is how this
             # stayed invisible in the first place.
             content.append({"type": "text", "text": held.as_sentence()})
+        # FORGE-780: a held call of this session that has since been approved.
+        decided = await self._approval_decided_notice()
+        if decided is not None:
+            content.append({"type": "text", "text": decided})
         # FORGE-724: approvals the person has not heard of, said once.
         notice = await self._approval_notice(str(tool_name))
         if notice is not None:
@@ -2393,6 +2410,18 @@ class UnifiedMcpServer:
         if not decision.requires_approval:
             return None
 
+        mrtr = current_mrtr() if current_modern_request() is not None else None
+        ledger = self._approval_ledger
+        if (
+            not (can_elicit and mrtr is not None)
+            and callable(getattr(ledger, "find_hold", None))
+            and callable(getattr(ledger, "consume_hold", None))
+        ):
+            # FORGE-780: the hold is a durable approval and the call returns.
+            return await self._hold_durably(
+                tool_id, arguments, caller, decision.reason, call_id, progress_token, can_elicit
+            )
+
         # FORGE-745: a call the project's approval policy already covers (a
         # phase claim under ``auto``) runs, approved by the policy and on the
         # ledger, without asking anyone. Anything else is held as before.
@@ -2423,7 +2452,6 @@ class UnifiedMcpServer:
         # window. Not a fallback chain -- once a client has been asked, going
         # on to the dashboard would put the same question to a second person
         # and discard the first answer.
-        mrtr = current_mrtr() if current_modern_request() is not None else None
         if can_elicit and mrtr is not None and self._approval_ledger is not None:
             # FORGE-601: the question goes back inside the result.
             gate: Any = mrtr_gate(mrtr, self._mrtr_signer, self._approval_ledger)
@@ -2479,24 +2507,6 @@ class UnifiedMcpServer:
         held_from = time.monotonic()
         approval_ids: list[str] = []
         heartbeat: asyncio.Task[None] | None = None
-        reader = getattr(self._approval_ledger, "read_hold", None)
-        if route == "dashboard" and not progress and reader is not None:
-            # FORGE-741: nothing can reach this client while it waits, so the
-            # wait was silent and ran out unanswered. Hand it to the person.
-            resolution = await self._hand_off(
-                tool_id, arguments, caller, decision.reason, where, approvals_url, reader
-            )
-            return await self._approved(
-                tool_id,
-                caller,
-                route,
-                resolution,
-                time.monotonic() - held_from,
-                None,
-                call_id,
-                None,
-                where,
-            )
         if route == "elicitation" and progress and progress_token is not None:
             # The longer window only stands because the client's timeout
             # keeps being reset, so an inline prompt sends progress too.
@@ -2571,98 +2581,340 @@ class UnifiedMcpServer:
             where,
         )
 
-    async def _hand_off(
+    async def _hold_durably(
         self,
         tool_id: str,
         arguments: dict[str, Any],
         caller: Caller,
         reason: str,
-        where: str,
-        approvals_url: str | None,
-        reader: Any,
-    ) -> ApprovalResolution:
-        """Hand a held call to a person rather than wait on it (FORGE-741).
+        call_id: str,
+        progress_token: str | int | None,
+        can_elicit: bool,
+    ) -> Approver | None:
+        """Hold a call as a durable approval and return at once (FORGE-780).
 
-        The hold is opened once, for :data:`HANDOFF_WINDOW_SECONDS`, and waited
-        on only briefly in case the person is already looking. After that the
-        call returns :class:`ApprovalHandedOffError` naming the approval. The
-        same call again (same session, tool and arguments) reads the decision:
-        approved runs it once, still pending hands it off again without a
-        second hold, anything else is the refusal it ended in. The person
-        decides on the dashboard and the approver comes off the ledger; the
-        caller never decides.
+        The approval is keyed by caller session, tool, canonical arguments and
+        project, and outlives this call:
+
+        1. An identical call whose approval was decided since it last came in
+           uses that decision once: an approval runs it, a refusal is reported.
+        2. A project policy that covers the call approves it, on the ledger.
+        3. Otherwise the hold is opened (or the pending one reused) and asked
+           briefly: in the client's own prompt when it can be asked, else by
+           waiting a moment on the ledger. Unanswered, the call returns
+           :class:`ApprovalHandedOffError` naming the approval. Any surface
+           decides it (the prompt, ``/v1/approvals``, ``approvals.decide``;
+           the first decision wins), and the identical retry then runs once.
         """
         from mcp_core.context import current_context
 
-        ctx = current_context()
+        ledger: Any = self._approval_ledger
+        try:
+            ctx = current_context()
+        except Exception:  # noqa: BLE001 - no context: one shared session
+            ctx = None
         session = str(ctx.session_id) if ctx is not None and ctx.session_is_stable else ""
-        key = hashlib.sha256(
-            json.dumps(
-                {"tool": tool_id, "arguments": arguments, "session": session},
-                sort_keys=True,
-                default=str,
-            ).encode()
-        ).hexdigest()
-        now = time.monotonic()
-        for stale in [k for k, (_, until) in self._handoffs.items() if until <= now]:
-            del self._handoffs[stale]
-        entry = self._handoffs.get(key)
-        repeated = entry is not None
-        if entry is None:
-            ledger = self._approval_ledger
-            assert ledger is not None  # reader came from it
-            approval_id = await ledger.open_hold(
+        project = _effective_project(arguments)
+        key, args_hash = approval_key(tool_id, arguments, session=session, project=project)
+        approvals_url = self._deeplinks.build("approvals")
+        route = "elicitation" if can_elicit and self._elicitor is not None else "dashboard"
+        where = self._durable_where(route, approvals_url)
+        ttl = tool_approval_ttl_seconds()
+
+        found = await ledger.find_hold(key)
+        if found is not None and found.resolution is not None:
+            used = await ledger.consume_hold(found.approval_id, retry=True)
+            if used is not None:
+                self._forget_hold(found.approval_id)
+                if used.outcome is ApprovalOutcome.APPROVED:
+                    logger.info(
+                        "mcp_tool_approval_approved_late_honoured",
+                        tool_id=tool_id,
+                        caller=caller.value,
+                        approval_id=found.approval_id,
+                        arguments_hash=args_hash,
+                    )
+                return await self._approved(
+                    tool_id, caller, "retry", used, 0.0, found.approval_id, call_id, None, where
+                )
+            found = None
+        if found is not None:
+            # Still pending: the same approval, never a second one.
+            logger.info(
+                "mcp_tool_call_still_held",
+                tool_id=tool_id,
+                caller=caller.value,
+                approval_id=found.approval_id,
+            )
+            self._watch_hold(found.approval_id, tool_id)
+            raise self._held_error(
+                tool_id,
+                found.approval_id,
+                where,
+                approvals_url,
+                found.expires_at,
+                repeated=True,
+                route=route,
+            )
+
+        note: str | None = None
+        policy_approval = getattr(ledger, "policy_approval", None)
+        if policy_approval is not None and (
+            tool_id in POLICY_APPROVABLE_TOOLS or not never_auto_approved(tool_id)
+        ):
+            by_policy = await policy_approval(
                 ApprovalAsk(
                     tool_id=tool_id,
                     arguments=arguments,
                     caller=caller,
                     reason=reason,
-                    project=_effective_project(arguments),
-                    timeout_seconds=HANDOFF_WINDOW_SECONDS,
+                    session_id=session or None,
+                    project=project,
                     client=self._client_label(),
-                ),
-                route="dashboard",
-            )
-            entry = (approval_id, now + HANDOFF_WINDOW_SECONDS)
-            self._handoffs[key] = entry
-            # The hand-off already told this session; the next result's
-            # "approvals waiting" notice need not repeat it.
-            told = str(ctx.session_id) if ctx is not None else "default"
-            self._approvals_told.setdefault(told, set()).add(approval_id)
-            logger.info(
-                "mcp_tool_call_handed_off",
-                tool_id=tool_id,
-                caller=caller.value,
-                approval_id=approval_id,
-                window_seconds=HANDOFF_WINDOW_SECONDS,
-            )
-        approval_id = entry[0]
-        wait_until = time.monotonic() + (0.0 if repeated else HANDOFF_WAIT_SECONDS)
-        while True:
-            resolution = await reader(approval_id)
-            if resolution is not None:
-                if self._handoffs.get(key) is not entry:
-                    # Another call with the same arguments used this answer first.
-                    break
-                del self._handoffs[key]
-                logger.info(
-                    "mcp_handed_off_call_decided",
-                    tool_id=tool_id,
-                    approval_id=approval_id,
-                    outcome=resolution.outcome.value,
+                    approval_key=key,
+                    arguments_hash=args_hash,
                 )
-                return resolution
-            if time.monotonic() >= wait_until:
-                break
-            await asyncio.sleep(HANDOFF_POLL_SECONDS)
-        raise ApprovalHandedOffError(
+            )
+            if by_policy is not None and by_policy.outcome is ApprovalOutcome.APPROVED:
+                logger.info(
+                    "mcp_tool_call_approved_by_policy",
+                    tool_id=tool_id,
+                    caller=caller.value,
+                    approval_id=by_policy.approval_id,
+                    arguments_hash=args_hash,
+                )
+                return await self._approved(
+                    tool_id, caller, "policy", by_policy, 0.0, None, call_id
+                )
+            if by_policy is not None:
+                note = by_policy.note
+
+        ask = ApprovalAsk(
+            tool_id=tool_id,
+            arguments=arguments,
+            caller=caller,
+            reason=f"{reason}. {note}" if note else reason,
+            session_id=session or None,
+            project=project,
+            timeout_seconds=ttl,
+            client=self._client_label(),
+            approval_key=key,
+            arguments_hash=args_hash,
+        )
+        approval_id = await ledger.open_hold(ask, route=route)
+        expires_at = time.time() + ttl
+        logger.info(
+            "mcp_tool_call_held_for_approval",
+            tool_id=tool_id,
+            caller=caller.value,
+            reason=reason,
+            route=route,
+            approval_id=approval_id,
+            window_seconds=ttl,
+            durable=True,
+            arguments_hash=args_hash,
+            cap_held=bool(note),
+        )
+        self._watch_hold(approval_id, tool_id)
+        held_from = time.monotonic()
+        outcome: ApprovalOutcome | None = None
+        if route == "elicitation" and self._elicitor is not None:
+            try:
+                outcome = await ask_on_hold(
+                    self._elicitor, ledger, ask, approval_id, wait_seconds=ELICITATION_WAIT_SECONDS
+                )
+            except ElicitationUnavailableError as exc:
+                # The client answered for the person without showing them the
+                # prompt. The hold stays open for the dashboard, and this
+                # connection is not asked again.
+                self._elicitation_unattended = True
+                route = "dashboard"
+                where = self._durable_where(route, approvals_url)
+                logger.warning(
+                    "mcp_elicitation_unattended_fallback",
+                    tool_id=tool_id,
+                    client=self._client_label(),
+                    approval_id=approval_id,
+                    detail=str(exc),
+                )
+        else:
+            outcome = await self._brief_wait(
+                ledger, tool_id, approval_id, progress_token, approvals_url, held_from
+            )
+        if outcome is not None:
+            used = await ledger.consume_hold(approval_id)
+            if used is not None:
+                self._forget_hold(approval_id)
+                return await self._approved(
+                    tool_id,
+                    caller,
+                    route,
+                    used,
+                    time.monotonic() - held_from,
+                    approval_id,
+                    call_id,
+                    None,
+                    where,
+                )
+        logger.info(
+            "mcp_tool_call_handed_off",
+            tool_id=tool_id,
+            caller=caller.value,
+            approval_id=approval_id,
+            route=route,
+            window_seconds=ttl,
+        )
+        raise self._held_error(
+            tool_id, approval_id, where, approvals_url, expires_at, route=route, note=note
+        )
+
+    def _durable_where(self, route: str, approvals_url: str | None) -> str:
+        """Every place a durable hold can be decided, for the agent to relay."""
+        page = (
+            f"the MetaForge dashboard Approvals page ({approvals_url})"
+            if approvals_url
+            else "the MetaForge dashboard Approvals page"
+        )
+        where = f"{page}, or in this client with /metaforge:approvals (approvals.decide)"
+        if route == "elicitation":
+            return f"this client's approval prompt, {where}"
+        return where
+
+    @staticmethod
+    def _held_error(
+        tool_id: str,
+        approval_id: str,
+        where: str,
+        approvals_url: str | None,
+        expires_at: float | None,
+        *,
+        repeated: bool = False,
+        route: str = "dashboard",
+        note: str | None = None,
+    ) -> ApprovalHandedOffError:
+        remaining = max(0.0, expires_at - time.time()) if expires_at is not None else None
+        stamp = (
+            datetime.fromtimestamp(expires_at, UTC).isoformat() if expires_at is not None else None
+        )
+        return ApprovalHandedOffError(
             tool_id,
             approval_id,
             where=where,
             url=approvals_url,
-            expires_in_seconds=max(0.0, entry[1] - time.monotonic()),
+            expires_in_seconds=remaining,
             repeated=repeated,
+            route=route,
+            expires_at=stamp,
+            note=note,
         )
+
+    async def _brief_wait(
+        self,
+        ledger: Any,
+        tool_id: str,
+        approval_id: str,
+        progress_token: str | int | None,
+        approvals_url: str | None,
+        held_from: float,
+    ) -> ApprovalOutcome | None:
+        """Wait a moment on the ledger in case the person is already looking."""
+        heartbeat: asyncio.Task[None] | None = None
+        wait = HANDOFF_WAIT_SECONDS
+        if wait > 0 and self._has_progress_channel(progress_token):
+            assert progress_token is not None
+            text = hold_notice_text(tool_id, approval_id, approvals_url, wait)
+            self._send_progress(progress_token, 0.0, wait, text, approval_id)
+            heartbeat = asyncio.ensure_future(
+                self._hold_heartbeat(progress_token, wait, text, approval_id, held_from)
+            )
+        try:
+            until = time.monotonic() + wait
+            while True:
+                resolution = await ledger.read_hold(approval_id)
+                if resolution is not None:
+                    return resolution.outcome
+                if time.monotonic() >= until:
+                    return None
+                await asyncio.sleep(HANDOFF_POLL_SECONDS)
+        finally:
+            if heartbeat is not None:
+                heartbeat.cancel()
+
+    def _session_key(self) -> str:
+        from mcp_core.context import current_context
+
+        try:
+            ctx = current_context()
+        except Exception:  # noqa: BLE001
+            return "default"
+        return str(ctx.session_id) if ctx is not None else "default"
+
+    def _watch_hold(self, approval_id: str, tool_id: str) -> None:
+        """Remember a held call, so the reply after its approval can say so."""
+        session = self._session_key()
+        watched = self._watched_holds.setdefault(session, {})
+        watched[approval_id] = tool_id
+        while len(watched) > _WATCHED_HOLDS_PER_SESSION:
+            watched.pop(next(iter(watched)))
+        while len(self._watched_holds) > _APPROVAL_NOTICE_SESSIONS:
+            self._watched_holds.pop(next(iter(self._watched_holds)))
+        # The held result already told this session about it; the pending
+        # notice (FORGE-724) need not repeat it.
+        told = self._approvals_told.setdefault(session, set())
+        told.update({approval_id, f"tool:{approval_id}"})
+
+    def _forget_hold(self, approval_id: str) -> None:
+        for watched in self._watched_holds.values():
+            watched.pop(approval_id, None)
+
+    async def _approval_decided_notice(self) -> str | None:
+        """One sentence naming this session's held calls approved since (FORGE-780)."""
+        watched = self._watched_holds.get(self._session_key())
+        reader = getattr(self._approval_ledger, "read_hold", None)
+        if not watched or reader is None:
+            return None
+        approved: list[tuple[str, str]] = []
+        for approval_id, tool_id in list(watched.items()):
+            try:
+                resolution = await reader(approval_id)
+            except Exception as exc:  # noqa: BLE001 - a notice must never fail a call
+                logger.debug("approval_decided_notice_unavailable", error=str(exc))
+                return None
+            if resolution is None:
+                continue
+            watched.pop(approval_id, None)
+            if resolution.outcome is ApprovalOutcome.APPROVED:
+                approved.append((approval_id, tool_id))
+        if not approved:
+            return None
+        logger.info(
+            "approval_notice_added",
+            session=self._session_key(),
+            kind="approved",
+            approvals=[a for a, _ in approved],
+        )
+        return " ".join(
+            f"MetaForge: approval {approval_id} for {tool_id} was approved; call it again "
+            "with the same arguments."
+            for approval_id, tool_id in approved
+        )
+
+    async def _held_result(self, exc: ApprovalHandedOffError) -> dict[str, Any]:
+        """A held ``tools/call`` as a result the agent reads (FORGE-780)."""
+        data = {"tool_id": exc.tool_id, "code": "approval_required", **exc.as_data()}
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": str(exc)},
+            {"type": "text", "text": json.dumps(data)},
+        ]
+        decided = await self._approval_decided_notice()
+        if decided is not None:
+            content.append({"type": "text", "text": decided})
+        return {
+            "content": content,
+            # The tool did not run; its output is not here.
+            "isError": True,
+            "_meta": {"approval": data},
+        }
 
     async def _approved(
         self,

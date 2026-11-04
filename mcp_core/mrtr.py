@@ -50,6 +50,7 @@ from mcp_core.elicitation import (
     ElicitResult,
     approval_request,
     inline_approver,
+    outcome_of_answer,
     result_from_payload,
 )
 from mcp_core.guardrails import (
@@ -259,16 +260,8 @@ def mrtr_elicitor(ctx: MrtrContext) -> Elicitor:
 
 
 def _outcome(result: ElicitResult) -> ApprovalOutcome:
-    """Same mapping as an inline prompt (``elicitation_gate``)."""
-    if result.action is ElicitAction.CANCEL:
-        return ApprovalOutcome.TIMED_OUT
-    if result.action is ElicitAction.DECLINE:
-        return ApprovalOutcome.REJECTED
-    return (
-        ApprovalOutcome.APPROVED
-        if result.content.get("approve") is True
-        else ApprovalOutcome.REJECTED
-    )
+    """Same mapping as an inline prompt (FORGE-780: accept approves)."""
+    return outcome_of_answer(result)
 
 
 def mrtr_gate(ctx: MrtrContext, signer: StateSigner, ledger: ApprovalLedger) -> ApprovalGateFn:

@@ -33,7 +33,7 @@ from typing import Any, Protocol
 
 import structlog
 
-from mcp_core.annotations import annotations_for
+from mcp_core.annotations import ADDITIVE, DESTRUCTIVE, annotations_for
 from mcp_core.cypher import is_read_only_cypher
 
 logger = structlog.get_logger(__name__)
@@ -316,6 +316,70 @@ def requires_human_authority(tool_id: str) -> bool:
     return tool_id in HUMAN_AUTHORITY_TOOLS
 
 
+# -- What a project's approval policy may decide (FORGE-780) -----------------
+
+#: Writes that only illustrate: a concept sketch, image or mesh, a check of
+#: one, a rendered view. Each adds a new node beside the work it shows and
+#: changes nothing that exists. Listed so ``auto_clean`` can name what it
+#: approves; every one is also ``ADDITIVE``.
+ILLUSTRATIVE: frozenset[str] = frozenset(
+    {
+        "twin.render_concept_sketch",
+        "twin.render_concept_image",
+        "twin.critique_concept_image",
+        "twin.generate_concept_mesh",
+        "twin.render_work_product",
+    }
+)
+
+#: Tool families that administer projects, flows, runs, approvals, sessions,
+#: the shared library and vendors. A policy never approves these: they change
+#: what a project is, who decides, or spend outside it.
+POLICY_ADMIN_PREFIXES: tuple[str, ...] = (
+    "project.",
+    "flow.",
+    "run.",
+    "approvals.",
+    "review.",
+    "phase.",
+    "session.",
+    "library.",
+    "vendor.",
+)
+
+
+def never_auto_approved(tool_id: str) -> bool:
+    """Whether no approval policy may approve this tool, in any mode.
+
+    Human-authority tools (a person is the content), destructive tools, and
+    project, flow or run administration always wait for a person. The one
+    exception, ``phase.claim`` under ``auto`` (FORGE-745), is decided by its
+    own narrower rule before this list is consulted.
+    """
+    return (
+        requires_human_authority(tool_id)
+        or tool_id in DESTRUCTIVE
+        or tool_id.startswith(POLICY_ADMIN_PREFIXES)
+    )
+
+
+def policy_may_approve(tool_id: str, mode: str) -> bool:
+    """Whether ``mode`` lets a project's policy approve a held ``tool_id``.
+
+    ``off`` and ``advise`` approve nothing. ``auto_clean`` approves additive
+    and illustrative writes. ``auto`` approves any write the guardrails hold
+    that is not on the never list. Scope, expiry, the operator cap and the
+    spend cap are the gateway's to check; this is only the per-tool rule.
+    """
+    if never_auto_approved(tool_id):
+        return False
+    if mode == "auto":
+        return True
+    if mode == "auto_clean":
+        return tool_id in ADDITIVE or tool_id in ILLUSTRATIVE
+    return False
+
+
 def decide(
     tool_id: str,
     *,
@@ -493,6 +557,11 @@ class ApprovalResolution:
     #: such as an inline elicitation answered in the client.
     approval_id: str | None = None
 
+    #: Why, in words a reviewer can read, when the answer is not an approval
+    #: (FORGE-780): a project policy that held a call over its spend cap says
+    #: so here, and the hold carries the sentence.
+    note: str | None = None
+
 
 def resolve_approval(raw: ApprovalOutcome | ApprovalResolution) -> ApprovalResolution:
     """Normalise what a gate returned.
@@ -575,6 +644,13 @@ class ApprovalAsk:
     #: can tell which harness asked. The model behind that client is not
     #: visible over MCP, so it is not recorded.
     client: str | None = None
+    #: The durable approval this hold is (FORGE-780): one key per caller
+    #: session, tool, canonical arguments and project, so the identical retry
+    #: finds the decision and a changed argument does not. See
+    #: :func:`mcp_core.approval_hold.approval_key`.
+    approval_key: str | None = None
+    #: The canonical hash of the arguments alone, for the audit trail.
+    arguments_hash: str | None = None
 
 
 def effective_hold_window(gate_timeout: float | None, ask: ApprovalAsk, default: float) -> float:
@@ -710,6 +786,9 @@ class ApprovalHandedOffError(RuntimeError):
         url: str | None = None,
         expires_in_seconds: float | None = None,
         repeated: bool = False,
+        route: str = "dashboard",
+        expires_at: str | None = None,
+        note: str | None = None,
     ) -> None:
         self.tool_id = tool_id
         self.approval_id = approval_id
@@ -717,15 +796,19 @@ class ApprovalHandedOffError(RuntimeError):
         self.url = url
         self.expires_in_seconds = expires_in_seconds
         self.repeated = repeated
+        self.route = route
+        self.expires_at = expires_at
+        self.note = note
         minutes = (
             f" It stays open for about {max(1, round(expires_in_seconds / 60))} minutes."
             if expires_in_seconds
             else ""
         )
         status = "is still waiting" if repeated else "is waiting"
+        why = f" {note}" if note else ""
         super().__init__(
             f"{tool_id} has not run: it {status} for a person to approve it "
-            f"(approval {approval_id}). Tell the person now that it needs their approval "
+            f"(approval {approval_id}).{why} Tell the person now that it needs their approval "
             f"on {where}.{minutes} After they say they approved it, call {tool_id} again "
             "with exactly the same arguments; it then runs once. Do not approve it "
             "yourself, and do not call it again in a loop."
@@ -734,16 +817,26 @@ class ApprovalHandedOffError(RuntimeError):
     def as_data(self) -> dict[str, Any]:
         """The same facts, structured, for the JSON-RPC error's ``data``."""
         out: dict[str, Any] = {
+            # FORGE-780: the call returned at once and the approval outlives
+            # it. ``held`` and ``next_step`` are the structured form of the
+            # sentence above.
+            "held": True,
             "outcome": "awaiting_person",
             "approval_id": self.approval_id,
-            "route": "dashboard",
+            "route": self.route,
             "where": self.where,
             "next": "call_again_with_same_arguments_after_approval",
+            "next_step": "retry this exact call once it is approved",
+            "repeated": self.repeated,
         }
         if self.url:
             out["approval_url"] = self.url
         if self.expires_in_seconds is not None:
             out["expires_in_seconds"] = round(self.expires_in_seconds)
+        if self.expires_at:
+            out["expires_at"] = self.expires_at
+        if self.note:
+            out["note"] = self.note
         return out
 
 
@@ -799,3 +892,46 @@ class ApprovalLedger(Protocol):
 
 
 ApprovalGateFn = Callable[[ApprovalAsk], Awaitable[ApprovalOutcome | ApprovalResolution]]
+
+
+@dataclass(frozen=True)
+class HeldApproval:
+    """A durable approval found by its key (FORGE-780).
+
+    ``resolution`` is ``None`` while the hold is pending. A decided hold is
+    used once: an identical retry runs on an approval, or reports a refusal,
+    and after that it is never honoured again.
+    """
+
+    approval_id: str
+    resolution: ApprovalResolution | None
+    tool_id: str = ""
+    expires_at: float | None = None
+
+
+class DurableApprovalLedger(ApprovalLedger, Protocol):
+    """A ledger whose holds outlive the call that opened them (FORGE-780).
+
+    The server holds a call, returns at once, and runs the identical retry
+    once the hold is approved. Both ledgers the server is built with in
+    production implement this; a ledger without it keeps the older blocking
+    wait.
+    """
+
+    async def find_hold(self, approval_key: str) -> HeldApproval | None:
+        """The newest live hold for ``approval_key``: pending, or decided and unused."""
+        ...
+
+    async def consume_hold(
+        self, approval_id: str, *, retry: bool = False
+    ) -> ApprovalResolution | None:
+        """Use a decided hold once. ``None`` when it was used, expired or is pending.
+
+        ``retry`` says the call using it came back after the original call
+        returned, so the approval is being honoured late.
+        """
+        ...
+
+    async def read_hold(self, approval_id: str) -> ApprovalResolution | None:
+        """The decision on a hold, or ``None`` while it awaits one."""
+        ...

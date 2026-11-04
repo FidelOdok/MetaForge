@@ -656,7 +656,7 @@ bearer token.
 | `1` | Other failure (network error, 5xx) |
 | `2` | Usage error (missing or unknown argument) |
 | `3` | Not found: no approval with that id (HTTP 404) |
-| `4` | Not decidable right now: expired, waiting on the elicitation route, gate not ready, retries or rework exhausted (HTTP 409) |
+| `4` | Not decidable right now: expired, already decided, gate not ready, retries or rework exhausted (HTTP 409) |
 | `5` | Invalid decision: not in `allowed_decisions`, bad `--to` phase, or missing required reason (HTTP 422, or the same check failing locally) |
 | `6` | Not authorized (HTTP 401 or 403) |
 

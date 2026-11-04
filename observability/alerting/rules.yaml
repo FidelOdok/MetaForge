@@ -217,6 +217,20 @@ groups:
         annotations:
           summary: "Held tool approvals are being expired by the gateway deadline"
           description: "More than 3 held approvals in 30m were expired by the gateway because their waiter never closed them, which usually means the MCP sidecar is crashing or restarting mid-hold. Check the tool_approval_hold_expired log event and the sidecar's restarts."
+      # FORGE-780: durable tool approvals that nobody decides. A hold that
+      # expires is a write the agent asked for and a person never saw; when
+      # most of them expire, people are not being told where to decide.
+      - alert: ToolApprovalsMostlyExpiring
+        expr: |
+          sum(increase(metaforge_tool_approval_total{outcome="expired"}[6h]))
+            > 0.5 * sum(increase(metaforge_tool_approval_total{outcome="held"}[6h]))
+          and sum(increase(metaforge_tool_approval_total{outcome="held"}[6h])) >= 4
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Most held tool approvals expire undecided"
+          description: "Over the last 6h more than half of the durable tool approvals held for a person expired before anyone approved or rejected them. Check that the Approvals page and approvals.decide are reachable, that agents relay the held result to the person, and the tool_approval_expired log event."
 
   - name: metaforge_fleet_alerts
     rules:

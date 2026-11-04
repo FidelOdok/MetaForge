@@ -15,6 +15,7 @@ just without a frontend wired to it yet.
 
 from __future__ import annotations
 
+import threading
 import time
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -148,6 +149,16 @@ def expire_overdue_holds() -> list[Run]:
             deadline=run.approval_deadline,
         )
         _get_metrics().record_tool_approval_resolution("timed_out", "deadline", "resolved")
+        if run.request.get(APPROVAL_KEY):
+            # FORGE-780: a durable hold nobody decided within its lifetime.
+            logger.info(
+                "tool_approval_expired",
+                run_id=run.id,
+                tool=run.request.get("tool"),
+                project=run.request.get("project"),
+                state="pending",
+            )
+            _record_outcome("expired")
     return expired
 
 
@@ -163,27 +174,56 @@ def init_approval_ledger(ledger: SqliteRunLedger | None) -> None:
         return
     restored = 0
     orphaned = 0
+    durable = 0
+    now = _approval_store.now()
     for row in ledger.list_runs():
         status = RunStatus(row["status"])
         error = row["error"]
+        request = row["request"] or {}
+        deadline: float | None = None
         if status is RunStatus.AWAITING_APPROVAL:
-            status = RunStatus.FAILED
-            error = _ORPHANED_ERROR
-            orphaned += 1
+            expires = request.get("expires_at")
+            if request.get(APPROVAL_KEY) and isinstance(expires, (int, float)):
+                # FORGE-780: a durable hold has no waiter to lose. It stays
+                # decidable for the rest of its lifetime, and the identical
+                # retry still finds it.
+                if expires > now:
+                    deadline = float(expires) + HOLD_DEADLINE_GRACE_SECONDS
+                    durable += 1
+                else:
+                    status = RunStatus.TIMED_OUT
+                    error = "expired while the gateway was down"
+            else:
+                status = RunStatus.FAILED
+                error = _ORPHANED_ERROR
+                orphaned += 1
+        decided = _last_decision(request)
         _approval_store.restore(
             Run(
                 id=row["id"],
                 status=status,
-                request=row["request"],
+                request=request,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 error=error,
                 result=row["result"],
                 history=[status],
+                approval_deadline=deadline,
+                # The approver lives in the persisted decision log; the run's
+                # own field is not a ledger column (FORGE-507).
+                approved_by=decided.get("approver") if decided else None,
+                approver_verified=bool(decided.get("approver_verified")) if decided else False,
             )
         )
         restored += 1
-    logger.info("tool_approval_ledger_wired", restored=restored, orphaned=orphaned)
+    logger.info("tool_approval_ledger_wired", restored=restored, orphaned=orphaned, durable=durable)
+
+
+def _last_decision(request: dict[str, Any]) -> dict[str, Any] | None:
+    log = request.get(_DECISIONS_KEY)
+    if isinstance(log, list) and log and isinstance(log[-1], dict):
+        return log[-1]
+    return None
 
 
 #: Approvals whose answer is also the decision on a stored flow version.
@@ -317,7 +357,14 @@ class HoldToolCallRequest(BaseModel):
     #: How long the caller will wait for an answer (FORGE-466). The gateway
     #: stores a deadline from it and expires the hold if the caller never
     #: closes it, so a crashed waiter cannot leave it pending forever.
+    #: For a durable hold (FORGE-780) it is the approval's lifetime.
     timeout_seconds: float | None = Field(default=None, gt=0, le=MAX_HOLD_TIMEOUT_SECONDS)
+    #: FORGE-780: the durable approval this hold is, keyed by caller session,
+    #: tool, canonical arguments and project. A live hold with the same key
+    #: is returned instead of a second one being opened.
+    approval_key: str | None = Field(default=None, max_length=128)
+    #: The canonical hash of the arguments, for the audit trail.
+    arguments_hash: str | None = Field(default=None, max_length=128)
 
 
 @router.post("", response_model=RunResponse, status_code=201)
@@ -334,36 +381,250 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
     A second store would have been the more obvious fix and the wrong one:
     two queues means a reviewer clearing one while the other fills, and no
     page that shows both.
+
+    With an ``approval_key`` (FORGE-780) the hold is a durable approval: a
+    live one with the same key is returned rather than a second opened.
     """
-    run = _approval_store.create(
-        {
-            "tool": body.tool,
-            "arguments": body.arguments,
-            "caller": body.caller,
-            "source": body.source,
-            "session_id": body.session_id,
-            "project": project_for_hold(body.project, body.arguments),
-            "route": body.route,
-            "client": body.client,
-        }
+    return RunResponse.from_run(
+        create_hold(
+            tool=body.tool,
+            arguments=body.arguments,
+            reason=body.reason,
+            caller=body.caller,
+            source=body.source,
+            session_id=body.session_id,
+            project=body.project,
+            route=body.route,
+            client=body.client,
+            timeout_seconds=body.timeout_seconds,
+            approval_key=body.approval_key,
+            arguments_hash=body.arguments_hash,
+        )
     )
+
+
+# -- Durable approvals (FORGE-780) --------------------------------------------
+#
+# A held call used to block until it was answered, and the client gave up
+# first; an approval that came later was recorded and never applied. A hold
+# with an ``approval_key`` is a record that outlives its call: it is decided
+# from anywhere (the client's prompt, /v1/approvals, approvals.decide; the
+# first decision wins), and the identical retry runs once on an approval.
+
+#: Request fields a durable hold carries.
+APPROVAL_KEY = "approval_key"
+_EXPIRES_AT = "expires_at"
+_CONSUMED_AT = "consumed_at"
+
+#: Serialises using a decided hold, so one approval runs one call. Sync route
+#: handlers run in a thread pool, so an event loop alone does not order them.
+_consume_lock = threading.Lock()
+
+_APPROVED = frozenset({RunStatus.RUNNING, RunStatus.COMPLETED})
+
+
+def _record_outcome(outcome: str) -> None:
+    try:
+        _get_metrics().record_tool_approval(outcome)
+    except Exception:  # noqa: BLE001, S110 - a metric must not fail an approval
+        pass
+
+
+def _iso_now() -> str:
+    return datetime.fromtimestamp(time.time(), UTC).isoformat()
+
+
+def create_hold(
+    *,
+    tool: str,
+    arguments: dict[str, Any],
+    reason: str,
+    caller: str = "untrusted",
+    source: str = "mcp",
+    session_id: str | None = None,
+    project: str | None = None,
+    route: str = "dashboard",
+    client: str | None = None,
+    timeout_seconds: float | None = None,
+    approval_key: str | None = None,
+    arguments_hash: str | None = None,
+) -> Run:
+    """Open a held approval, or return the live durable one with the same key."""
+    if approval_key:
+        existing = find_live_hold(approval_key)
+        if existing is not None:
+            logger.info(
+                "tool_approval_hold_reused",
+                run_id=existing.id,
+                tool=tool,
+                status=existing.status.value,
+            )
+            return existing
+    window = min(timeout_seconds or DEFAULT_HOLD_TIMEOUT_SECONDS, MAX_HOLD_TIMEOUT_SECONDS)
+    request: dict[str, Any] = {
+        "tool": tool,
+        "arguments": arguments,
+        "caller": caller,
+        "source": source,
+        "session_id": session_id,
+        "project": project_for_hold(project, arguments),
+        "route": route,
+        "client": client,
+    }
+    if approval_key:
+        request[APPROVAL_KEY] = approval_key
+        request["arguments_hash"] = arguments_hash
+        request[_EXPIRES_AT] = _approval_store.now() + window
+    run = _approval_store.create(request)
     _approval_store.start(run.id)
-    window = body.timeout_seconds or DEFAULT_HOLD_TIMEOUT_SECONDS
     run = _approval_store.request_approval(
         run.id,
-        reason=body.reason,
+        reason=reason,
         deadline=_approval_store.now() + window + HOLD_DEADLINE_GRACE_SECONDS,
     )
     logger.info(
         "tool_approval_held",
         run_id=run.id,
-        tool=body.tool,
-        caller=body.caller,
-        source=body.source,
-        route=body.route,
+        tool=tool,
+        caller=caller,
+        source=source,
+        route=route,
         deadline=run.approval_deadline,
+        durable=bool(approval_key),
+        arguments_hash=arguments_hash,
     )
+    if approval_key:
+        _record_outcome("held")
+    return run
+
+
+def _is_live(run: Run, now: float) -> bool:
+    """Pending, or decided, unused and inside its lifetime."""
+    request = run.request
+    if request.get(_CONSUMED_AT):
+        return False
+    if run.status is RunStatus.AWAITING_APPROVAL:
+        return True
+    if run.status in _APPROVED or run.status is RunStatus.REJECTED:
+        expires = request.get(_EXPIRES_AT)
+        return not isinstance(expires, (int, float)) or now < expires
+    return False
+
+
+def find_live_hold(approval_key: str) -> Run | None:
+    """The newest live durable hold for ``approval_key``, if any."""
+    expire_overdue_holds()
+    now = _approval_store.now()
+    keyed = [r for r in _approval_store.list() if r.request.get(APPROVAL_KEY) == approval_key]
+    for run in keyed:
+        _note_unused_expiry(run, now)
+    matches = [r for r in keyed if _is_live(r, now)]
+    return max(matches, key=lambda r: r.created_at) if matches else None
+
+
+def _note_unused_expiry(run: Run, now: float) -> None:
+    """Record, once, an approval that ran out of lifetime before it was used."""
+    request = run.request
+    expires = request.get(_EXPIRES_AT)
+    if (
+        run.status in _APPROVED
+        and not request.get(_CONSUMED_AT)
+        and not request.get("expired_unused_at")
+        and isinstance(expires, (int, float))
+        and now >= expires
+    ):
+        _approval_store.annotate(run.id, "expired_unused_at", _iso_now())
+        logger.info(
+            "tool_approval_expired",
+            run_id=run.id,
+            tool=request.get("tool"),
+            project=request.get("project"),
+            state="approved_unused",
+        )
+        _record_outcome("expired")
+
+
+def consume_hold(run_id: str, *, retry: bool = False) -> Run:
+    """Use a decided durable hold once. Refusals are ``HTTPException`` s.
+
+    An approval runs one call; a refusal is reported once. A pending hold,
+    one already used, and an approval past its lifetime are 409.
+    """
+    with _consume_lock:
+        try:
+            run = _approval_store.get(run_id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"approval '{run_id}' not found") from exc
+        request = run.request
+        if request.get(_CONSUMED_AT):
+            raise HTTPException(status_code=409, detail=f"approval '{run_id}' was already used")
+        if run.status is RunStatus.AWAITING_APPROVAL:
+            raise HTTPException(
+                status_code=409, detail=f"approval '{run_id}' is still waiting for a decision"
+            )
+        if run.status not in _APPROVED and run.status is not RunStatus.REJECTED:
+            raise HTTPException(
+                status_code=409, detail=f"approval '{run_id}' is {run.status.value}"
+            )
+        approved = run.status in _APPROVED
+        expires = request.get(_EXPIRES_AT)
+        if approved and isinstance(expires, (int, float)) and _approval_store.now() >= expires:
+            _note_unused_expiry(run, _approval_store.now())
+            raise HTTPException(
+                status_code=409,
+                detail=f"approval '{run_id}' expired before the call was made again",
+            )
+        run = _approval_store.annotate(run_id, _CONSUMED_AT, _iso_now())
+    if approved and request.get("route") != "policy":
+        outcome = "approved_late_honoured" if retry else "approved"
+        logger.info(
+            f"tool_approval_{outcome}",
+            run_id=run_id,
+            tool=request.get("tool"),
+            project=request.get("project"),
+            approved_by=run.approved_by,
+            arguments_hash=request.get("arguments_hash"),
+        )
+        _record_outcome(outcome)
+    elif not approved:
+        _record_outcome("rejected")
+    return run
+
+
+def approved_by_policy_in_window(project: str, tool: str, seconds: float) -> int:
+    """How many ``tool`` calls the project's policy approved in the last ``seconds``."""
+    since = _approval_store.now() - seconds
+    return sum(
+        1
+        for r in _approval_store.list()
+        if r.request.get("route") == "policy"
+        and r.request.get("tool") == tool
+        and r.request.get("project") == project
+        and r.created_at >= since
+    )
+
+
+@router.get("/by-key/{approval_key}", response_model=RunResponse)
+def get_live_hold(approval_key: str) -> RunResponse:
+    """The live durable hold for a key: pending, or decided and not yet used (FORGE-780)."""
+    run = find_live_hold(approval_key)
+    if run is None:
+        raise HTTPException(status_code=404, detail="no live approval for this call")
     return RunResponse.from_run(run)
+
+
+class ConsumeHoldRequest(BaseModel):
+    """Use a decided durable hold (FORGE-780)."""
+
+    #: True when the call using it is a retry made after the original call
+    #: had returned, so the approval arrived late and is honoured now.
+    retry: bool = False
+
+
+@router.post("/{run_id}/consume", response_model=RunResponse)
+def consume_tool_approval(run_id: str, body: ConsumeHoldRequest) -> RunResponse:
+    """Mark a decided durable hold used: one approval runs one call."""
+    return RunResponse.from_run(consume_hold(run_id, retry=body.retry))
 
 
 class PolicyApprovalRequest(BaseModel):
@@ -375,6 +636,9 @@ class PolicyApprovalRequest(BaseModel):
     session_id: str | None = None
     project: str | None = None
     client: str | None = None
+    #: FORGE-780: recorded on the approval so the audit names what ran.
+    approval_key: str | None = Field(default=None, max_length=128)
+    arguments_hash: str | None = Field(default=None, max_length=128)
 
 
 class PolicyApprovalResponse(BaseModel):
@@ -382,40 +646,77 @@ class PolicyApprovalResponse(BaseModel):
     #: The ledger entry the approval is recorded on, when approved.
     id: str | None = None
     approved_by: str | None = None
+    #: The policy mode in force for the call's project (FORGE-780).
+    mode: str | None = None
+    #: Why it was or was not approved.
+    reason: str | None = None
+    #: The policy would have approved it, but the project's spend cap for
+    #: this paid tool was reached; a person decides it.
+    cap_held: bool = False
 
 
 @router.post("/policy", response_model=PolicyApprovalResponse)
 async def approve_by_policy(body: PolicyApprovalRequest) -> PolicyApprovalResponse:
     """Approve a held call the project's policy covers, or say it does not.
 
-    Only a ``phase.claim`` on an open task of the project's own client-mode run
+    A ``phase.claim`` on an open task of the project's own client-mode run
     under an ``auto`` policy is covered (see
-    :mod:`api_gateway.approvals.claim_policy`). A covered call is written to the
-    ledger like any other, approved by ``policy:auto:<who set it>`` on route
-    ``policy``; anything else records nothing and the caller holds it for a
-    person as before.
+    :mod:`api_gateway.approvals.claim_policy`), approved by
+    ``policy:auto:<who set it>``. Any other held write is decided by
+    :mod:`api_gateway.approvals.tool_write_policy` (FORGE-780), approved by
+    ``policy:<mode>:<project>``. A covered call is written to the ledger like
+    any other, on route ``policy``; anything else records nothing and the
+    caller holds it for a person as before.
     """
-    from api_gateway.approvals.claim_policy import claim_covered_by_policy
-
-    approver = await claim_covered_by_policy(body.tool, body.arguments)
-    if approver is None:
-        return PolicyApprovalResponse(approved=False)
-    run = _approval_store.create(
-        {
-            "tool": body.tool,
-            "arguments": body.arguments,
-            "caller": body.caller,
-            "source": "mcp",
-            "session_id": body.session_id,
-            "project": project_for_hold(body.project, body.arguments),
-            "route": "policy",
-            "client": body.client,
-        }
+    from api_gateway.approvals.claim_policy import (
+        POLICY_APPROVABLE_TOOLS,
+        claim_covered_by_policy,
     )
+    from api_gateway.approvals.tool_write_policy import tool_write_covered_by_policy
+
+    project = project_for_hold(body.project, body.arguments)
+    mode: str | None = None
+    if body.tool in POLICY_APPROVABLE_TOOLS:
+        approver = await claim_covered_by_policy(body.tool, body.arguments)
+        reason = "covered by the project's approval policy"
+        if approver is None:
+            return PolicyApprovalResponse(approved=False)
+    else:
+        verdict = await tool_write_covered_by_policy(
+            body.tool, project, approved_in_window=approved_by_policy_in_window
+        )
+        mode = verdict.mode
+        if not verdict.approved or verdict.approver is None:
+            if verdict.cap_held:
+                _record_outcome("cap_held")
+            return PolicyApprovalResponse(
+                approved=False, mode=mode, reason=verdict.reason, cap_held=verdict.cap_held
+            )
+        approver = verdict.approver
+        reason = verdict.reason
+    request: dict[str, Any] = {
+        "tool": body.tool,
+        "arguments": body.arguments,
+        "caller": body.caller,
+        "source": "mcp",
+        "session_id": body.session_id,
+        "project": project,
+        "route": "policy",
+        "client": body.client,
+    }
+    if body.approval_key:
+        request[APPROVAL_KEY] = body.approval_key
+        # The call runs now, on this approval; it is never a pass for a retry.
+        request[_CONSUMED_AT] = _iso_now()
+    if body.arguments_hash:
+        request["arguments_hash"] = body.arguments_hash
+    if mode is not None:
+        request["policy_mode"] = mode
+    run = _approval_store.create(request)
     _approval_store.start(run.id)
     _approval_store.request_approval(
         run.id,
-        reason="covered by the project's approval policy",
+        reason=reason,
         deadline=_approval_store.now() + DEFAULT_HOLD_TIMEOUT_SECONDS,
     )
     run = _approval_store.submit_approval(
@@ -426,10 +727,23 @@ async def approve_by_policy(body: PolicyApprovalRequest) -> PolicyApprovalRespon
         approved=True,
         approver=approver,
         verified=False,
-        reason="covered by the project's approval policy",
+        reason=reason,
     )
     logger.info("tool_approval_by_policy", run_id=run.id, tool=body.tool, approved_by=approver)
-    return PolicyApprovalResponse(approved=True, id=run.id, approved_by=approver)
+    if mode is not None:
+        logger.info(
+            "tool_approval_auto_approved",
+            run_id=run.id,
+            tool=body.tool,
+            project=project,
+            mode=mode,
+            decided_by=approver,
+            arguments_hash=body.arguments_hash,
+        )
+        _record_outcome("auto_approved")
+    return PolicyApprovalResponse(
+        approved=True, id=run.id, approved_by=approver, mode=mode, reason=reason
+    )
 
 
 class ResolveHoldRequest(BaseModel):
@@ -626,18 +940,11 @@ def decide_tool_approval(run_id: str, decision: str, approver: Approver) -> Run:
             f"{current.error or 'nobody is waiting for this call any more'}. "
             "Nothing was recorded; ask for the call again if it is still wanted.",
         )
-    if (
-        current.request.get("route") == "elicitation"
-        and current.status is RunStatus.AWAITING_APPROVAL
-    ):
-        # FORGE-473: the question is on screen in the client right now, and
-        # that prompt is the one that gets the answer. A click here would be
-        # recorded and then overwritten by (or fight with) the inline answer.
-        raise HTTPException(
-            status_code=409,
-            detail=f"approval '{run_id}' is being answered in the client's own approval "
-            "prompt. Answer it there; it appears here as resolved once you do.",
-        )
+    # FORGE-780: an inline (elicitation) hold is decidable here too. FORGE-473
+    # refused it, so a hold whose client prompt had gone (the client timed the
+    # call out) could be answered nowhere. The first decision wins: the
+    # client's prompt, read back after this one, finds the hold decided and
+    # acts on what is on record.
     if decision in (ApprovalDecision.RETRY.value, ApprovalDecision.REWORK.value):
         # FORGE-495/500: retry and rework re-run design-flow phases; a tool call has none.
         raise HTTPException(

@@ -79,7 +79,7 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 run supervisor (FORGE-734).
         # + 1 concept image (FORGE-761), + 1 sketch reading (FORGE-762).
         # + 1 concept image critique (FORGE-772).
-        assert len(all_metrics) == 97  # + 1 concept mesh (FORGE-778)
+        assert len(all_metrics) == 98  # + 1 concept mesh (FORGE-778), + 1 FORGE-780
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -99,7 +99,8 @@ class TestMetricsRegistryGroupedAccess:
         # +1 design-flow tool refusal (FORGE-492)
         # +1 unreachable approval hold (FORGE-490)
         # +1 unified approval decision (FORGE-507)
-        assert len(MetricsRegistry.harness_metrics()) == 15
+        # +1 durable tool approvals (FORGE-780)
+        assert len(MetricsRegistry.harness_metrics()) == 16
 
     def test_all_metrics_equals_sum_of_groups(self) -> None:
         total = (

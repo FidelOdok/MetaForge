@@ -110,6 +110,19 @@ async def _call(server: UnifiedMcpServer, obj: str = "bracket") -> dict[str, Any
     )
 
 
+def _held(response: dict[str, Any]) -> dict[str, Any]:
+    """The held call's structured data (FORGE-780: a result, not a protocol error)."""
+    result = response["result"]
+    assert result["isError"] is True
+    data: dict[str, Any] = result["_meta"]["approval"]
+    assert data["held"] is True
+    return data
+
+
+def _message(response: dict[str, Any]) -> str:
+    return str(response["result"]["content"][0]["text"])
+
+
 async def _pending(http: httpx.AsyncClient) -> list[dict[str, Any]]:
     return (await http.get(LIST, params={"status": "pending"})).json()["runs"]
 
@@ -126,13 +139,14 @@ class TestTheCallIsHandedToAPerson:
             pending = await _pending(http)
 
         assert ran == []
-        data = response["error"]["data"]
+        data = _held(response)
         assert data["code"] == "approval_required"
         assert data["outcome"] == "awaiting_person"
-        assert data["retryable"] is True
         assert data["next"] == "call_again_with_same_arguments_after_approval"
+        assert data["next_step"] == "retry this exact call once it is approved"
         assert data["expires_in_seconds"] > 1700
-        message = response["error"]["message"]
+        assert data["expires_at"]
+        message = _message(response)
         assert "Tell the person" in message and "same arguments" in message
         # The hold is open on the ledger, under the id the client was given.
         assert [p["id"] for p in pending] == [data["approval_id"]]
@@ -148,8 +162,8 @@ class TestTheCallIsHandedToAPerson:
             pending = await _pending(http)
 
         assert ran == []
-        assert second["error"]["data"]["approval_id"] == first["error"]["data"]["approval_id"]
-        assert "still waiting" in second["error"]["message"]
+        assert _held(second)["approval_id"] == _held(first)["approval_id"]
+        assert "still waiting" in _message(second)
         assert len(pending) == 1
 
     async def test_after_the_person_approves_the_same_call_runs_once(
@@ -158,7 +172,7 @@ class TestTheCallIsHandedToAPerson:
         ran: list[dict[str, Any]] = []
         async with gateway as http:
             server = await _server(http, ran)
-            approval_id = (await _call(server))["error"]["data"]["approval_id"]
+            approval_id = _held(await _call(server))["approval_id"]
             decided = await http.post(f"{LIST}/{approval_id}", json={"decision": "approve"})
             assert decided.status_code == 200, decided.text
             again = await _call(server)
@@ -168,7 +182,7 @@ class TestTheCallIsHandedToAPerson:
         assert "error" not in again, again
         assert [a["obj_id"] for a in ran] == ["bracket"]
         # The approval was used up: the next call is a new hold, not a free pass.
-        assert third["error"]["data"]["approval_id"] != approval_id
+        assert _held(third)["approval_id"] != approval_id
         assert len(pending) == 1
 
     async def test_a_rejection_is_reported_and_nothing_runs(
@@ -177,7 +191,7 @@ class TestTheCallIsHandedToAPerson:
         ran: list[dict[str, Any]] = []
         async with gateway as http:
             server = await _server(http, ran)
-            approval_id = (await _call(server))["error"]["data"]["approval_id"]
+            approval_id = _held(await _call(server))["approval_id"]
             await http.post(f"{LIST}/{approval_id}", json={"decision": "reject"})
             again = await _call(server)
 
@@ -191,12 +205,12 @@ class TestTheCallIsHandedToAPerson:
         ran: list[dict[str, Any]] = []
         async with gateway as http:
             server = await _server(http, ran)
-            approval_id = (await _call(server, "bracket"))["error"]["data"]["approval_id"]
+            approval_id = _held(await _call(server, "bracket"))["approval_id"]
             await http.post(f"{LIST}/{approval_id}", json={"decision": "approve"})
             other = await _call(server, "a_different_part")
 
         assert ran == []
-        assert other["error"]["data"]["approval_id"] != approval_id
+        assert _held(other)["approval_id"] != approval_id
 
     async def test_a_person_who_answers_during_the_short_wait_runs_it_at_once(
         self, gateway: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch

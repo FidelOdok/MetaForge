@@ -331,15 +331,17 @@ def test_tool_retry_is_422(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
-def test_elicitation_hold_listed_but_not_decidable(client: TestClient) -> None:
+def test_elicitation_hold_is_decidable_here(client: TestClient) -> None:
+    # FORGE-780: an inline hold is decidable from anywhere; the first decision wins.
     run_id = _tool(route="elicitation")
     item = client.get(f"/v1/approvals/tool:{run_id}").json()
-    assert item["decidable"] is False
-    assert item["allowed_decisions"] == []
-    assert "client's own approval prompt" in item["not_decidable_reason"]
+    assert item["decidable"] is True
+    assert sorted(item["allowed_decisions"]) == ["approve", "reject"]
     resp = client.post(f"/v1/approvals/tool:{run_id}/decision", json={"decision": "approve"})
-    assert resp.status_code == 409
-    assert tool_approvals.get_approval_store().get(run_id).status is RunStatus.AWAITING_APPROVAL
+    assert resp.status_code == 200, resp.text
+    assert tool_approvals.get_approval_store().get(run_id).status is not RunStatus.AWAITING_APPROVAL
+    again = client.post(f"/v1/approvals/tool:{run_id}/decision", json={"decision": "reject"})
+    assert again.status_code == 409
 
 
 def test_expired_tool_hold_is_not_decidable(client: TestClient) -> None:
