@@ -8,6 +8,7 @@ for now we define Pydantic models that mirror the DB schema.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -46,5 +47,7 @@ class ChatMessageRecord(BaseModel):
     graph_ref_node: str | None = None
     graph_ref_type: str | None = None
     graph_ref_label: str | None = None
+    # Generative UI: validated blocks (api_gateway.chat.ui_blocks), agent replies only.
+    blocks: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

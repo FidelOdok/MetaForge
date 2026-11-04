@@ -223,6 +223,7 @@ def _make_message_response(msg: ChatMessageRecord) -> MessageResponse:
         graph_ref_node=msg.graph_ref_node,
         graph_ref_type=msg.graph_ref_type,
         graph_ref_label=msg.graph_ref_label,
+        blocks=msg.blocks,  # type: ignore[arg-type]  # validated on the way in
         created_at=msg.created_at,
         updated_at=msg.updated_at,
     )
@@ -623,6 +624,9 @@ async def _invoke_agent(
                 # ContextVar and attaches it as X-MetaForge-* headers) — without
                 # this, tools like twin.find_by_property that rely on ambient
                 # context ran completely unscoped in every real chat session.
+                # Generative UI: chat.render_ui and filed proposals land here,
+                # and are stored on the reply with its text.
+                ui_blocks: list[dict[str, Any]] = []
                 with with_context(_mcp_call_context_for_thread(thread)):
                     text = await run_chat_turn_streaming(
                         user_content,
@@ -652,6 +656,7 @@ async def _invoke_agent(
                         # everything -- for a non-project thread or a
                         # project with no discipline signal yet).
                         domains=domains,
+                        ui_blocks=ui_blocks,
                     )
                 await notify_agent_done(thread.id, "harness-agent")
                 await capture_turn_done(
@@ -663,6 +668,7 @@ async def _invoke_agent(
                     actor_id="harness-agent",
                     actor_kind="agent",
                     content=text,
+                    blocks=ui_blocks,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1031,6 +1037,7 @@ async def send_message(
                 actor_kind=agent_msg.actor_kind,
                 content=agent_msg.content,
                 status=agent_msg.status,
+                blocks=agent_msg.blocks,
             )
 
     return _make_message_response(msg)

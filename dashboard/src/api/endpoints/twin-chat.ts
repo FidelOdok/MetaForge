@@ -1,4 +1,5 @@
 import apiClient from '../client';
+import type { UiBlock } from '../../types/ui-blocks';
 import { apiUrl } from '../../lib/gatewayConfig';
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,8 @@ export interface TwinChatMessage {
   graph_ref_node?: string | null;
   graph_ref_type?: string | null;
   graph_ref_label?: string | null;
+  /** Generative UI: typed blocks rendered with an agent reply. */
+  blocks?: UiBlock[];
   created_at: string;
 }
 

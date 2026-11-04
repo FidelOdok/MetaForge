@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 import structlog
@@ -82,6 +83,7 @@ class ChatBackend(ABC):
         graph_ref_node: str | None = None,
         graph_ref_type: str | None = None,
         graph_ref_label: str | None = None,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> ChatMessageRecord: ...
 
     @abstractmethod
@@ -208,6 +210,7 @@ class InMemoryChatBackend(ChatBackend):
         graph_ref_node: str | None = None,
         graph_ref_type: str | None = None,
         graph_ref_label: str | None = None,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> ChatMessageRecord:
         now = datetime.now(UTC)
         msg = ChatMessageRecord(
@@ -220,6 +223,7 @@ class InMemoryChatBackend(ChatBackend):
             graph_ref_node=graph_ref_node,
             graph_ref_type=graph_ref_type,
             graph_ref_label=graph_ref_label,
+            blocks=blocks or [],
             created_at=now,
             updated_at=now,
         )
@@ -348,6 +352,7 @@ class PgChatBackend(ChatBackend):
         graph_ref_node: str | None = None,
         graph_ref_type: str | None = None,
         graph_ref_label: str | None = None,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> ChatMessageRecord:
         from api_gateway.db.engine import get_session
 
@@ -364,6 +369,7 @@ class PgChatBackend(ChatBackend):
                 graph_ref_node=graph_ref_node,
                 graph_ref_type=graph_ref_type,
                 graph_ref_label=graph_ref_label,
+                blocks=blocks,
             )
             await self._repo.update_thread_timestamp(session, thread_id, msg.created_at)
             return msg

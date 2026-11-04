@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Loader2, RotateCcw, Pencil, X } from 'lucide-react';
 import { useTwinChatThread, useTwinChatThreads } from '../../hooks/use-twin-chat';
 import { displayText, intentOf, useCreateStore, type Intent } from '../../store/create-store';
+import { MessageBody } from '../chat/MessageBody';
 
 const TURN_LABEL: Record<Intent, string> = {
   ask: 'Question',
@@ -28,6 +29,8 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
   const retry = useCreateStore((s) => s.retry);
   const restore = useCreateStore((s) => s.restore);
   const discard = useCreateStore((s) => s.discard);
+  const reply = useCreateStore((s) => s.reply);
+  const selectNode = useCreateStore((s) => s.selectNode);
   const busy = session.queue.some((i) => i.state === 'sending');
 
   const threads = useTwinChatThreads(projectId);
@@ -58,7 +61,7 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
           Your conversation appears here. Describe the product in your own words; questions come when they matter.
         </p>
       )}
-      {messages.map((m) => {
+      {messages.map((m, index) => {
         const mine = m.actor_kind === 'user';
         if (mine) lastIntent = intentOf(m.content);
         const label = mine ? TURN_LABEL[intentOf(m.content)] : REPLY_LABEL[lastIntent];
@@ -69,7 +72,15 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
               <span className={`cv-tag cv-tag-${mine ? 'turn' : lastIntent}`}>{label}</span>
               {m.graph_ref_label && <span className="cv-tag">About: {m.graph_ref_label}</span>}
             </header>
-            <p>{displayText(m.content)}</p>
+            <MessageBody
+              text={displayText(m.content)}
+              blocks={m.blocks}
+              plain={mine}
+              projectId={projectId}
+              interactive={!busy && session.queue.length === 0 && index === messages.length - 1}
+              onReply={(answer) => reply(projectId, answer, tools)}
+              onShowPart={(nodeId) => selectNode(projectId, nodeId)}
+            />
           </article>
         );
       })}

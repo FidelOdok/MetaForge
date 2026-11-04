@@ -29,6 +29,12 @@ from api_gateway.chat.experience_adapter import record_chat_experience
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
 from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_registry
 from api_gateway.chat.tool_approvals import approver_reachable, get_approval_store
+from api_gateway.chat.ui_blocks import (
+    BLOCK_TYPES,
+    MAX_BLOCKS,
+    InvalidBlocksError,
+    validate_blocks,
+)
 from mcp_core.profiles import MAX_TOOLS as PHASE_TOOL_CAP
 from observability.metrics import MetricsCollector
 from orchestrator.design_flow.grounding import (
@@ -81,6 +87,117 @@ _TRUTHY = {"1", "true", "on", "yes"}
 
 
 _DETACH_QUERIES = {"none", "off", "clear", "-"}
+
+
+_RENDER_UI_DESCRIPTION = (
+    "Show structured UI under your reply instead of describing it in prose. Use it "
+    "when a component is clearer than text: a question with a few answers "
+    "(choice), options and their trade-offs (comparison), a dimension you need "
+    "from the person (measurement_request), tabular data (table), figures "
+    "against their limits (metrics), a warning or risk (callout), a proposed "
+    "change (proposal, by change_id) or a part to look at (part, by twin node "
+    "id). Keep the prose short and do not repeat what the blocks show. Mark "
+    "figures with basis: illustrative, estimate, calculated, measured or "
+    "verified -- never present an estimate as measured. Block fields: "
+    "choice{prompt, options[{label, value?, description?}], multiple?}; "
+    "comparison{title?, criteria[], options[{name, summary?, pros[], cons[], "
+    "values{criterion: value}, recommended?}], basis?}; "
+    "measurement_request{label, unit, why?, critical?, current?}; "
+    "table{title?, columns[], rows[[cell]], basis?}; "
+    "metrics{title?, items[{label, value, unit?, limit?, limit_kind: max|min}], basis?}; "
+    "callout{tone: info|warning|risk|success, title, body?}; "
+    "proposal{change_id, title?, summary?}; part{node_id, label?, note?}. "
+    f"At most {MAX_BLOCKS} blocks per reply. An invalid block is refused with the reason."
+)
+
+
+def make_render_ui_tool(sink: list[dict[str, Any]]) -> NativeToolDef:
+    """``chat.render_ui`` — generative UI for the reply being written.
+
+    Validated blocks are appended to ``sink``, which the chat route stores on
+    the agent's reply. Validation happens here, at the tool call, so a bad
+    block comes back to the model as a tool error it can correct, and nothing
+    unvalidated is ever stored or rendered.
+    """
+
+    async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
+        try:
+            blocks = validate_blocks(arguments.get("blocks"))
+        except InvalidBlocksError as exc:
+            raise ValueError(f"chat.render_ui: {exc}") from exc
+        room = MAX_BLOCKS - len(sink)
+        if len(blocks) > room:
+            raise ValueError(
+                f"chat.render_ui: this reply already has {len(sink)} blocks; "
+                f"at most {MAX_BLOCKS} in total"
+            )
+        sink.extend(blocks)
+        logger.info("chat_ui_blocks_rendered", count=len(blocks), types=[b["type"] for b in blocks])
+        return {
+            "rendered": len(blocks),
+            "instruction": (
+                "The blocks appear under your reply. Refer to them briefly; do not "
+                "repeat their content in your text."
+            ),
+        }
+
+    return NativeToolDef(
+        name="chat.render_ui",
+        description=_RENDER_UI_DESCRIPTION,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "blocks": {
+                    "type": "array",
+                    "maxItems": MAX_BLOCKS,
+                    "items": {
+                        "type": "object",
+                        "properties": {"type": {"type": "string", "enum": list(BLOCK_TYPES)}},
+                        "required": ["type"],
+                    },
+                    "description": "The blocks to show, in order.",
+                }
+            },
+            "required": ["blocks"],
+        },
+        handler=handler,
+    )
+
+
+def _change_id_of(observation: Any) -> str | None:
+    """The change id in a ``twin.propose_change`` result, bare or enveloped."""
+    for candidate in (
+        observation,
+        *(observation.get(k) for k in ("data", "result") if isinstance(observation, dict)),
+    ):
+        if isinstance(candidate, dict) and isinstance(candidate.get("change_id"), str):
+            return str(candidate["change_id"])
+    return None
+
+
+def proposal_blocks(steps: list[ReActStep], existing: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A proposal card for each change the turn filed and did not already show.
+
+    The person approves or rejects where the proposal is mentioned, instead of
+    being sent to a separate Changes tab to find it.
+    """
+    shown = {b.get("change_id") for b in existing if b.get("type") == "proposal"}
+    added: list[dict[str, Any]] = []
+    for step in steps:
+        if step.tool_call is None or step.tool_call.name != "twin.propose_change":
+            continue
+        if not _step_succeeded(step):
+            continue
+        change_id = _change_id_of(step.observation)
+        if change_id is None or change_id in shown:
+            continue
+        shown.add(change_id)
+        summary = step.tool_call.arguments.get("description")
+        block: dict[str, Any] = {"type": "proposal", "change_id": change_id}
+        if isinstance(summary, str) and summary.strip():
+            block["summary"] = summary.strip()[:1000]
+        added.append(block)
+    return added[: max(0, MAX_BLOCKS - len(existing))]
 
 
 def make_set_project_scope_tool(thread_id: str, backend: ChatBackend) -> NativeToolDef:
@@ -1197,6 +1314,7 @@ async def _build_context(
     domains: tuple[str, ...] | None = None,
     tool_allowlist: frozenset[str] | None = None,
     approval_mode: str = "hold",
+    ui_blocks: list[dict[str, Any]] | None = None,
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -1246,6 +1364,8 @@ async def _build_context(
             )
         ]
     native_tools = native_tools + [make_read_tool_result_tool(runtime_cell)]
+    if ui_blocks is not None:
+        native_tools = native_tools + [make_render_ui_tool(ui_blocks)]
     if chat_skills_enabled() and twin is not None and mcp_bridge is not None:
         native_tools = native_tools + await skill_tools_from_registry(
             twin=twin,
@@ -2001,6 +2121,7 @@ async def run_chat_turn_streaming(
     project_id: str | None = None,
     domains: tuple[str, ...] | None = None,
     tool_allowlist: frozenset[str] | None = None,
+    ui_blocks: list[dict[str, Any]] | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -2048,6 +2169,7 @@ async def run_chat_turn_streaming(
         on_approval_request=on_approval_request,
         domains=domains,
         tool_allowlist=tool_allowlist,
+        ui_blocks=ui_blocks,
     )
 
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
@@ -2231,6 +2353,9 @@ async def run_chat_turn_streaming(
             model=model,
             path="native" if native else "react",
         )
+
+    if ui_blocks is not None:
+        ui_blocks.extend(proposal_blocks(result.steps, ui_blocks))
 
     answer = str(result.output or "").strip()
     # Never stream an empty answer — a completed turn with no final text (weak

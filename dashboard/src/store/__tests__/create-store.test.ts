@@ -31,6 +31,22 @@ describe('create store', () => {
     await waitFor(() => expect(useCreateStore.getState().session(P).queue).toHaveLength(0));
   });
 
+  it('sends an answer from a reply block as a question, leaving the draft alone', async () => {
+    const send = vi.spyOn(chat, 'sendTwinChatMessage').mockResolvedValue({} as never);
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());
+    const s = useCreateStore.getState();
+    s.setIntent(P, 'design');
+    s.setDraft(P, 'half-typed idea');
+    expect(s.reply(P, '  ', TOOLS)).toBe(false);
+    expect(s.reply(P, 'Desk thickness: 25 mm (measured by me)', TOOLS)).toBe(true);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const body = send.mock.calls[0]![1];
+    expect(body.content).toContain('Desk thickness: 25 mm');
+    // An answer never runs design tools, whatever mode the composer is in.
+    expect(body.tools).toEqual([]);
+    expect(useCreateStore.getState().session(P).draft).toBe('half-typed idea');
+  });
+
   it('queues behind a running pass and creates the thread only once', async () => {
     let release: () => void = () => undefined;
     const send = vi

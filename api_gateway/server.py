@@ -359,10 +359,15 @@ async def _init_database() -> None:
             logger.debug("pg_init_skipped", reason="DATABASE_URL not set")
             return
 
-        from api_gateway.db.models import Base
+        from sqlalchemy import text
+
+        from api_gateway.db.models import ADDITIVE_COLUMNS, Base
 
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            if conn.dialect.name == "postgresql":
+                for statement in ADDITIVE_COLUMNS:
+                    await conn.execute(text(statement))
         logger.info("pg_tables_created")
         _register_postgres_health_check()
     except Exception as exc:

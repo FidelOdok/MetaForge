@@ -662,7 +662,55 @@ const SAMPLE_WORKSPACE_SEED = {
           actor_kind: 'agent',
           actor_id: 'sample-agent',
           content:
-            'Sample analysis: peak draw is 2.61 A against a 2.40 A limit — 8.8% over budget.\n\n• Telemetry increased from 180 to 340 mA.\n• The added GPS draws 110 mA.\n• The latest enclosure revision leaves 0.7 mm connector clearance against a 1.0 mm requirement.\n\nOption A: reduce telemetry frequency and verify current on the bench.\nOption B: move GPS to the 3V3 rail, then check regulator headroom and interface levels.\n\nA proposal is ready in Changes. These are illustrative figures; no measurement or simulation has run.',
+            'Sample analysis: the 5V rail peaks **8.8% over budget**. Two changes account for it:\n\n- Telemetry rose from 180 to 340 mA.\n- The added GPS draws 110 mA.\n\nThese are illustrative figures; no measurement or simulation has run.',
+          blocks: [
+            {
+              type: 'metrics',
+              title: '5V rail',
+              basis: 'illustrative',
+              items: [
+                { label: 'Peak draw', value: 2.61, unit: 'A', limit: 2.4, limit_kind: 'max' },
+                { label: 'Connector clearance', value: 0.7, unit: 'mm', limit: 1.0, limit_kind: 'min' },
+              ],
+            },
+            {
+              type: 'comparison',
+              title: 'Ways to bring it back under budget',
+              basis: 'estimate',
+              criteria: ['Saving', 'Board change', 'Verify by'],
+              options: [
+                {
+                  name: 'Reduce telemetry',
+                  summary: 'Send telemetry at 1 Hz instead of 10 Hz.',
+                  values: { Saving: 'about 300 mA', 'Board change': 'None', 'Verify by': 'Bench current' },
+                  pros: ['Firmware only', 'Quick to try'],
+                  cons: ['Slower ground-station updates'],
+                  recommended: true,
+                },
+                {
+                  name: 'Move GPS to 3V3',
+                  summary: 'Power the GPS from the 3V3 regulator.',
+                  values: { Saving: 'about 110 mA', 'Board change': 'Reroute', 'Verify by': 'Regulator headroom' },
+                  pros: ['Keeps full telemetry'],
+                  cons: ['Board revision', 'Check interface levels'],
+                },
+              ],
+            },
+            {
+              type: 'proposal',
+              change_id: 'sample-proposal',
+              summary: 'Reduce telemetry from 10 Hz to 1 Hz; recheck current and control latency.',
+            },
+            {
+              type: 'choice',
+              prompt: 'Which would you like to pursue?',
+              options: [
+                { label: 'Reduce telemetry', value: 'Go with reducing telemetry.' },
+                { label: 'Move GPS to 3V3', value: 'Go with moving the GPS to the 3V3 rail.' },
+                { label: 'Show me more detail first', value: 'Show me the current budget per load first.' },
+              ],
+            },
+          ],
           status: 'completed',
           graph_ref_node: 'sample-power',
           graph_ref_label: '5V power budget',
@@ -682,7 +730,23 @@ const SAMPLE_WORKSPACE_SEED = {
           actor_kind: 'agent',
           actor_id: 'sample-agent',
           content:
-            'Sample review: revise the connector cutout from 0.7 mm to at least 1.0 mm clearance, then regenerate the geometry check. The old evidence must be marked stale.',
+            'Sample review: revise the connector cutout to at least 1.0 mm clearance, then regenerate the geometry check.',
+          blocks: [
+            {
+              type: 'callout',
+              tone: 'warning',
+              title: 'The old clearance evidence is stale',
+              body: 'It was measured on enclosure revision 2. Mark it stale before the next check.',
+            },
+            { type: 'part', node_id: 'sample-enclosure', label: 'enclosure.step', note: 'Connector cutout on the rear wall' },
+            {
+              type: 'measurement_request',
+              label: 'Connector body width',
+              unit: 'mm',
+              why: 'Sets the cutout size; the datasheet value is a guess until you measure the part.',
+              critical: true,
+            },
+          ],
           status: 'completed',
           graph_ref_node: 'sample-power',
           graph_ref_label: '5V power budget',

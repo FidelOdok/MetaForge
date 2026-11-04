@@ -35,7 +35,7 @@ const sidebars = {
       className: 'dx-group dx-group--guides',
       collapsible: false,
       collapsed: false,
-      items: ['cli-reference', 'dashboard-tour', 'create-view', 'simulation-results', 'approvals', 'file-transfer', 'session-capture', 'knowledge/datasheet-ingestion'],
+      items: ['cli-reference', 'dashboard-tour', 'create-view', 'generative-ui', 'simulation-results', 'approvals', 'file-transfer', 'session-capture', 'knowledge/datasheet-ingestion'],
     },
     {
       type: 'category',

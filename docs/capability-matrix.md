@@ -1664,6 +1664,7 @@ external MCP client like Claude Code.
 | Tool | Purpose | UAT scenario |
 |---|---|---|
 | `chat.set_project_scope` | Rescope the CURRENT chat thread to a project (id/name/substring, or `none` to leave) — in place, preserving the conversation | see [`cli-reference.md`](cli-reference.md#project-scoped-chat) |
+| `chat.render_ui` | Attach typed UI blocks (choice, comparison, measurement request, table, metrics, callout, proposal, part) to the reply being written; validated at the call | see [`generative-ui.md`](generative-ui.md) |
 
 ### CAD kernel capability contract
 

@@ -35,10 +35,26 @@ describe('TwinAgentChat', () => {
   it('opens the latest project thread with its messages and the node as context', async () => {
     renderChat();
     expect(await screen.findByText('5V rail over budget')).toBeInTheDocument();
-    expect(await screen.findByText(/peak draw is 2\.61 A/)).toBeInTheDocument();
+    expect(await screen.findByText(/the 5V rail peaks/)).toBeInTheDocument();
     expect(screen.getByText('electronics agent')).toBeInTheDocument();
     expect(screen.getByTitle('Inspect context')).toHaveTextContent('node');
     expect(await screen.findByText('Scripted sample assistant')).toBeInTheDocument();
+  });
+
+  it("renders the reply's blocks and sends a choice as the person's answer", async () => {
+    renderChat();
+    // Generative UI: figures against their limit, options compared, the proposal, a question.
+    expect(await screen.findByRole('region', { name: '5V rail' })).toHaveTextContent(/2\.61 A.*limit 2\.4 A/);
+    expect(screen.getByRole('region', { name: 'Ways to bring it back under budget' })).toHaveTextContent('Recommended');
+    expect(screen.getByRole('region', { name: 'Proposed change' })).toHaveTextContent('pending');
+    // Bold in the prose is rendered, not shown as asterisks.
+    expect(screen.getByText('8.8% over budget').tagName).toBe('STRONG');
+
+    const option = screen.getByRole('button', { name: /Reduce telemetry/ });
+    await waitFor(() => expect(option).not.toBeDisabled());
+    fireEvent.click(option);
+    expect(await screen.findByText('Go with reducing telemetry.')).toBeInTheDocument();
+    expect(await screen.findByText(/Scripted sample response/)).toBeInTheDocument();
   });
 
   it('sends a turn and shows the scripted reply', async () => {

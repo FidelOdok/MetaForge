@@ -11,7 +11,7 @@ the transaction boundary (unit-of-work pattern).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import structlog
@@ -21,6 +21,7 @@ from api_gateway.chat.models import (
     ChatMessageRecord,
     ChatThreadRecord,
 )
+from api_gateway.chat.ui_blocks import stored_blocks
 from observability.tracing import get_tracer
 
 if TYPE_CHECKING:
@@ -334,6 +335,7 @@ class PgChatRepository:
         graph_ref_node: str | None = None,
         graph_ref_type: str | None = None,
         graph_ref_label: str | None = None,
+        blocks: list[dict[str, Any]] | None = None,
         created_at: datetime | None = None,
     ) -> ChatMessageRecord:
         """Insert a message row and return its Pydantic record."""
@@ -353,6 +355,7 @@ class PgChatRepository:
                 graph_ref_node=graph_ref_node,
                 graph_ref_type=graph_ref_type,
                 graph_ref_label=graph_ref_label,
+                blocks=blocks or None,
                 created_at=now,
                 updated_at=now,
             )
@@ -369,6 +372,7 @@ class PgChatRepository:
                 graph_ref_node=row.graph_ref_node,
                 graph_ref_type=row.graph_ref_type,
                 graph_ref_label=row.graph_ref_label,
+                blocks=list(row.blocks or []),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -399,6 +403,7 @@ class PgChatRepository:
                     graph_ref_node=r.graph_ref_node,
                     graph_ref_type=r.graph_ref_type,
                     graph_ref_label=r.graph_ref_label,
+                    blocks=stored_blocks(r.blocks),
                     created_at=r.created_at,
                     updated_at=r.updated_at,
                 )
