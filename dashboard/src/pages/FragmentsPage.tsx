@@ -86,28 +86,49 @@ function FragmentPanel({ fragment }: { fragment: DesignFragment }) {
   );
 }
 
+/** `design_value:wing_area_m2` reads as `wing_area_m2`; every item here is a design value. */
+export function itemName(ref: string): string {
+  return ref.replace(/^design_value:/, '');
+}
+
+// One task, closed to a line by default: a fragment has a dozen tasks, and
+// all of them open made the page ten screens long.
 function TaskRow({ task }: { task: DesignFragmentTask }) {
   return (
     <li>
-      <strong>{task.title}</strong>
-      <dl className="run-facts">
-        <dt>Reads</dt>
-        <dd>{task.inputs.length ? task.inputs.join(', ') : 'nothing from other tasks'}</dd>
-        <dt>Writes</dt>
-        <dd>{task.outputs.join(', ')}</dd>
-        {task.checks.length > 0 && (
-          <>
-            <dt>Checks</dt>
-            <dd>{task.checks.join('; ')}</dd>
-          </>
-        )}
-        {task.capabilities.length > 0 && (
-          <>
-            <dt>Tools</dt>
-            <dd>{task.capabilities.join(', ')}</dd>
-          </>
-        )}
-      </dl>
+      <details className="fragment-task">
+        <summary>
+          <strong>{task.title}</strong>
+          <span className="field-help">
+            {' '}
+            · reads {task.inputs.length}, writes {task.outputs.length}
+            {task.checks.length > 0 ? `, ${task.checks.length} check${task.checks.length === 1 ? '' : 's'}` : ''}
+          </span>
+        </summary>
+        {/* Each label and value share a wrapper, so the grid keeps them together. */}
+        <dl className="run-facts">
+          <div>
+            <dt>Reads</dt>
+            <dd>{task.inputs.length ? task.inputs.map(itemName).join(', ') : 'nothing from other tasks'}</dd>
+          </div>
+          <div>
+            <dt>Writes</dt>
+            <dd>{task.outputs.map(itemName).join(', ')}</dd>
+          </div>
+          {task.checks.length > 0 && (
+            <div>
+              <dt>Checks</dt>
+              <dd>{task.checks.join('; ')}</dd>
+            </div>
+          )}
+          {task.capabilities.length > 0 && (
+            <div>
+              <dt>Tools</dt>
+              <dd>{task.capabilities.join(', ')}</dd>
+            </div>
+          )}
+        </dl>
+      </details>
     </li>
   );
 }

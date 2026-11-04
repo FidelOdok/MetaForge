@@ -64,6 +64,18 @@ describe('FragmentsPage', () => {
     expect(screen.getByText('calculix.run_thermal')).toBeInTheDocument();
   });
 
+  it('closes each task to one line, with its item names readable', () => {
+    mockQuery({ data: { fragments: [thermal] }, isSuccess: true, isLoading: false, isError: false });
+    const { container } = render(<FragmentsPage />);
+    const tasks = container.querySelectorAll('details.fragment-task');
+    expect(tasks.length).toBeGreaterThan(0);
+    tasks.forEach((t) => expect(t).not.toHaveAttribute('open'));
+    expect(tasks[0]!.querySelector('summary')).toHaveTextContent(/reads 1, writes 1/);
+    // Every item is a design value, so the prefix is noise.
+    expect(container).not.toHaveTextContent('design_value:');
+    expect(container).toHaveTextContent('heat_load_w');
+  });
+
   it('describes a coupled loop and its convergence rule', () => {
     mockQuery({ data: { fragments: [thermal] }, isSuccess: true, isLoading: false, isError: false });
     render(<FragmentsPage />);

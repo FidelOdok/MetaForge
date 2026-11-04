@@ -3713,3 +3713,11 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* Domain fragments: a task closed to one line until opened. */
+.fragment-task > summary {
+  cursor: pointer;
+  padding: 6px 0;
+}
+.fragment-task > .run-facts {
+  margin: 6px 0 12px;
+}
