@@ -349,34 +349,44 @@ inline) is not silent until it ends:
   or not the session declared `elicitation`; the response switches to SSE
   only once something is sent. Over stdio the notification is written to
   stdout like any other message.
-* **Window.** With a progress channel the hold waits
-  `METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` (default 180). Without one it
-  waits `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100), below common client
-  tool timeouts (Claude Code: 120), so the server answers before the client
-  gives up. When the server also has an approval ledger, a dashboard hold for a
-  client with no progress channel is handed off instead of waited on: it stays
-  open for 30 minutes, the call returns after 20 seconds with
-  `data.outcome = "awaiting_person"` and `retryable: true`, and the same call
-  made again after the person approves runs once. See
-  [Approvals](approvals.md#any-approval-in-the-client-chat). The window travels on the approval ask and sets the hold's
-  ledger deadline. A gate constructed with an explicit
+* **Durable hold.** With an approval ledger (both the sidecar and the
+  in-gateway server have one) a held call is not waited on. The approval is
+  recorded with a lifetime of `METAFORGE_TOOL_APPROVAL_TTL_S` (default 1800),
+  asked in the client's prompt or waited on for 20 seconds, and then the call
+  returns a result with `isError: true` and `_meta.approval.held = true`,
+  `approval_id`, `expires_at` and
+  `next_step: "retry this exact call once it is approved"`. The same session
+  calling the same tool with the same arguments after the approval runs once.
+  Lifecycle, deciding from anywhere and project policy:
+  [Held tool calls](approvals.md#held-tool-calls).
+* **Window.** Without a ledger the hold is waited on: with a progress channel
+  for `METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` (default 180), without one for
+  `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100), below common client tool
+  timeouts (Claude Code: 120). The window travels on the approval ask and sets
+  the hold's ledger deadline. A gate constructed with an explicit
   `timeout_seconds` caps it.
-* **Outcome.** An unapproved call is a JSON-RPC error with
-  `data.code = "approval_required"` and `data.outcome` one of `rejected`,
-  `timed_out`, `cancelled`, `not_configured` or `awaiting_person` (handed
-  off, with `approval_url`, `expires_in_seconds` and `next`), plus `approval_id`, `route`
-  (`dashboard` or `elicitation`), `where`, `held_seconds` and
-  `window_seconds` when known. `message` states the same facts, because it
-  is what a client shows the model.
+* **Outcome.** A held `tools/call` is the result above. A refused call is a
+  JSON-RPC error with `data.code = "approval_required"` and `data.outcome`
+  one of `rejected`, `timed_out`, `cancelled` or `not_configured`, plus
+  `approval_id`, `route` (`dashboard`, `elicitation`, `retry` or `policy`),
+  `where`, `held_seconds` and `window_seconds` when known. `message` states
+  the same facts, because it is what a client shows the model. The legacy
+  `tool/call` dialect also gets a held call as such an error, with
+  `data.outcome = "awaiting_person"`.
 
 #### Expired inline questions are withdrawn
 
-An inline (`elicitation`) hold uses the same window rule as a dashboard
-hold: `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100) without a progress
-channel, `METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` (default 180) with one,
-in which case progress is sent while the prompt is open. The window is
-logged as `window_seconds` on `mcp_tool_call_held_for_approval` and stated
-in the `elicitation/create` message.
+A durable inline hold asks for up to 20 seconds and states the approval's
+lifetime in the `elicitation/create` message. Without an approval ledger an
+inline hold uses the same window rule as a dashboard hold:
+`METAFORGE_APPROVAL_HOLD_SECONDS` (default 100) without a progress channel,
+`METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` (default 180) with one, in which
+case progress is sent while the prompt is open. The window is logged as
+`window_seconds` on `mcp_tool_call_held_for_approval`.
+
+The form has no checkbox: `requestedSchema` holds only an optional `note`,
+and `accept` approves, `decline` refuses, `cancel` decides nothing. An
+`accept` is an approval whatever its content.
 
 * **Withdrawal.** When the server stops waiting on an `elicitation/create`
   for any reason (window ended, call cancelled, call stream closed), it
@@ -386,15 +396,18 @@ in the `elicitation/create` message.
   stdio it is written to stdout. The server logs
   `mcp_elicitation_withdrawn` with `delivered`.
 * **Late answers.** A response to a withdrawn request is acknowledged
-  (`202` over HTTP), logged as `mcp_elicitation_late_response_ignored`, and
-  never applied. The call already ended as `timed_out` without running.
+  (`202` over HTTP). For a durable hold it is recorded on the approval
+  (`mcp_elicitation_late_answer_to_record`, then
+  `elicitation_late_answer_recorded`): an accept approves it and the identical
+  retry runs. It never runs the call itself. Otherwise it is logged as
+  `mcp_elicitation_late_response_ignored` and never applied.
 
 #### An answer nobody read is not an answer
 
 A `decline` or `cancel` returned faster than a person could have read the
 prompt (one second) is treated as the client answering for them, not as a
-refusal: the inline hold is closed `cancelled`, the call is held again on the
-`dashboard` route, and the connection stops being asked for the rest of the
+refusal: a durable hold stays pending for the dashboard and
+`approvals.decide`, and the connection stops being asked for the rest of the
 session. An `accept` is always an answer. Logged as
 `elicitation_unattended` and `mcp_elicitation_unattended_fallback`; the
 reasoning is in

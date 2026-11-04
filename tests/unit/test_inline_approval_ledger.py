@@ -172,11 +172,14 @@ class TestAnInlineAnswerIsInTheLedger:
         ran: list[str] = []
         async with gateway as http:
             server = await _server(http, ran, action=ElicitAction.CANCEL)
-            await _call(server)
+            response = await _call(server)
             entries = (await http.get(LIST, params={"status": "all"})).json()["runs"]
 
         assert ran == []
-        assert [e["status"] for e in entries] == ["timed_out"]
+        # FORGE-780: dismissing the prompt decides nothing. The approval stays
+        # open to be decided anywhere, and the call says so.
+        assert [e["status"] for e in entries] == ["awaiting_approval"]
+        assert response["result"]["_meta"]["approval"]["held"] is True
 
     async def test_the_default_listing_is_still_pending_only(
         self, gateway: httpx.AsyncClient
@@ -245,15 +248,29 @@ class TestAnUnreachableLedgerRefusesTheWrite:
 
 
 @pytest.mark.asyncio
-class TestTheDashboardCannotAnswerAnInlineHold:
-    async def test_a_click_on_a_live_inline_hold_is_refused(
-        self, gateway: httpx.AsyncClient
+class TestTheDashboardCanAnswerAnInlineHold:
+    """FORGE-780: an inline hold is decidable anywhere, and the first decision wins.
+
+    FORGE-473 refused a dashboard click on a live inline hold, so once the
+    client had timed the call out the hold could be answered nowhere.
+    """
+
+    async def test_a_click_on_a_live_inline_hold_is_recorded_and_the_call_runs_once(
+        self,
+        gateway: httpx.AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+        answered_by_a_person: None,
     ) -> None:
+        from metaforge.mcp import server as server_mod
+
+        monkeypatch.setattr(server_mod, "ELICITATION_WAIT_SECONDS", 5.0)
         release = asyncio.Event()
 
         async def elicitor(message: str, schema: dict[str, Any]) -> ElicitResult:
             await release.wait()
-            return ElicitResult(ElicitAction.ACCEPT, {"approve": True})
+            # The person then also declines in the prompt: too late, the
+            # dashboard click came first.
+            return ElicitResult(ElicitAction.DECLINE, {})
 
         ran: list[str] = []
         async with gateway as http:
@@ -283,7 +300,8 @@ class TestTheDashboardCannotAnswerAnInlineHold:
             assert len(pending) == 1
             clicked = await http.post(f"{LIST}/{pending[0]['id']}", json={"decision": "approve"})
             release.set()
-            await asyncio.wait_for(call, timeout=5.0)
+            response = await asyncio.wait_for(call, timeout=5.0)
 
-        assert clicked.status_code == 409
-        assert "approval prompt" in clicked.json()["detail"]
+        assert clicked.status_code == 200, clicked.text
+        assert "error" not in response, response
+        assert ran == ["twin.commit_geometry"]

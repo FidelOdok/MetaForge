@@ -61,12 +61,16 @@ __all__ = [
     "ElicitResult",
     "Elicitor",
     "ElicitationUnavailableError",
+    "LateAnswerSink",
     "approval_request",
+    "ask_on_hold",
     "cancelled_notification",
     "current_elicitor",
+    "current_late_answer_sink",
     "declares_form_elicitation",
     "elicitation_gate",
     "inline_approver",
+    "outcome_of_answer",
     "result_from_payload",
     "with_elicitor",
 ]
@@ -206,21 +210,34 @@ def approval_request(ask: ApprovalAsk) -> tuple[str, dict[str, Any]]:
         # FORGE-472: the person is told the deadline the server will keep.
         # Without it a form that quietly stopped mattering looked exactly like
         # one still waiting for an answer.
-        lines += [
-            "",
-            f"Answer within {ask.timeout_seconds:.0f} seconds. After that this "
-            f"request expires and {ask.tool_id} is not run.",
-        ]
+        if ask.approval_key is not None:
+            # FORGE-780: a durable hold. The prompt is one place to answer;
+            # the approval outlives it.
+            minutes = max(1, round(ask.timeout_seconds / 60))
+            lines += [
+                "",
+                f"Accept approves it, Decline refuses it. You can also decide it on the "
+                f"MetaForge Approvals page. The approval stays open for about {minutes} "
+                f"minutes; once approved, {ask.tool_id} runs when it is called again "
+                "with the same arguments.",
+            ]
+        else:
+            lines += [
+                "",
+                f"Accept approves it, Decline refuses it. Answer within "
+                f"{ask.timeout_seconds:.0f} seconds. After that this request expires "
+                f"and {ask.tool_id} is not run.",
+            ]
     message = "\n".join(lines)
 
+    # FORGE-780: no checkbox. The form used to carry a required boolean
+    # ``approve``, and Claude Code rendered it as an unticked box beside
+    # Accept: pressing Accept without ticking it sent ``approve: false`` and
+    # was recorded as a rejection. Accept and Decline are the decision now;
+    # the only field is an optional note.
     schema: dict[str, Any] = {
         "type": "object",
         "properties": {
-            "approve": {
-                "type": "boolean",
-                "title": f"Run {ask.tool_id}?",
-                "description": "Yes runs the tool now. No refuses it.",
-            },
             "note": {
                 "type": "string",
                 "title": "Note (optional)",
@@ -228,9 +245,26 @@ def approval_request(ask: ApprovalAsk) -> tuple[str, dict[str, Any]]:
                 "maxLength": 280,
             },
         },
-        "required": ["approve"],
     }
     return message, schema
+
+
+def outcome_of_answer(result: ElicitResult) -> ApprovalOutcome:
+    """What one answer to an approval prompt decides (FORGE-780).
+
+    ``accept`` approves, ``decline`` refuses, ``cancel`` (dismissed, or the
+    client could not ask) decides nothing and reads as ``TIMED_OUT``.
+
+    The content of an ``accept`` is not consulted. The form no longer asks a
+    yes/no question, and a client still answering an older form with an
+    unticked ``approve: false`` pressed Accept: reading that as a refusal is
+    the bug this replaced. Accept never silently becomes a rejection.
+    """
+    if result.action is ElicitAction.CANCEL:
+        return ApprovalOutcome.TIMED_OUT
+    if result.action is ElicitAction.DECLINE:
+        return ApprovalOutcome.REJECTED
+    return ApprovalOutcome.APPROVED
 
 
 def result_from_payload(payload: dict[str, Any]) -> ElicitResult:
@@ -304,15 +338,12 @@ def inline_approver() -> Approver:
 def elicitation_gate(elicitor: Elicitor, ledger: ApprovalLedger | None = None) -> ApprovalGateFn:
     """An :data:`ApprovalGateFn` that asks through the connected client.
 
-    The three-action response maps onto the outcomes F1 already defines,
-    and the mapping is the whole point of keeping three actions rather than
-    a boolean:
+    The three-action response maps onto the outcomes F1 already defines
+    (:func:`outcome_of_answer`):
 
-    * ``accept`` with ``approve: true`` -- approved.
-    * ``accept`` with ``approve: false`` -- the user answered the question
-      and the answer was no. Rejected.
-    * ``decline`` -- the user refused the prompt itself. Also rejected: they
-      were asked and did not allow it.
+    * ``accept`` -- approved (FORGE-780: whatever the form's content).
+    * ``decline`` -- the user refused the prompt itself. Rejected: they were
+      asked and did not allow it.
     * ``cancel`` -- dismissed. Nobody decided, so this is ``TIMED_OUT``, the
       outcome F1 created precisely so an agent is not told "a reviewer
       rejected it" when no reviewer looked.
@@ -353,16 +384,7 @@ def elicitation_gate(elicitor: Elicitor, ledger: ApprovalLedger | None = None) -
                 f"{ask.tool_id}: the client answered '{result.action.value}' in "
                 f"{waited * 1000:.0f} ms without putting the question to anyone"
             )
-        if result.action is ElicitAction.CANCEL:
-            return ApprovalOutcome.TIMED_OUT
-        if result.action is ElicitAction.DECLINE:
-            return ApprovalOutcome.REJECTED
-        approved = result.content.get("approve")
-        # A missing or non-boolean ``approve`` on an accept is a client that
-        # did not honour the schema. Treated as a refusal, not an approval:
-        # the failure mode of guessing wrong in the other direction is an
-        # unreviewed write.
-        return ApprovalOutcome.APPROVED if approved is True else ApprovalOutcome.REJECTED
+        return outcome_of_answer(result)
 
     if ledger is None:
         return ask_client
@@ -450,6 +472,133 @@ def elicitation_gate(elicitor: Elicitor, ledger: ApprovalLedger | None = None) -
 #: Closes started while a call was being cancelled. Held here so the task is
 #: not garbage-collected before it finishes.
 _background: set[asyncio.Task[Any]] = set()
+
+
+# --- A late answer still decides the approval (FORGE-780) -------------------
+#
+# A durable hold asks the client for a short while and then returns. The
+# elicitor withdraws the question when the wait ends, but a client may still
+# show it and the person may still answer. That answer is not thrown away: it
+# lands on the approval record, and the identical retry then runs on it.
+
+LateAnswerSink = Callable[[ElicitResult], None]
+
+_late_answer_sink: ContextVar[LateAnswerSink | None] = ContextVar(
+    "mcp_late_answer_sink", default=None
+)
+
+
+def current_late_answer_sink() -> LateAnswerSink | None:
+    """Where an answer to the question being asked goes if it arrives late.
+
+    Read by an elicitor when it sends the question, and kept beside the
+    question's id; ``None`` keeps FORGE-472's rule that a late answer is
+    ignored.
+    """
+    return _late_answer_sink.get()
+
+
+async def ask_on_hold(
+    elicitor: Elicitor,
+    ledger: ApprovalLedger,
+    ask: ApprovalAsk,
+    approval_id: str,
+    *,
+    wait_seconds: float,
+) -> ApprovalOutcome | None:
+    """Ask the client about an open durable hold, briefly (FORGE-780).
+
+    Returns the outcome on record once the person answered within
+    ``wait_seconds``, or ``None`` when nobody did: the hold then stays
+    pending, to be decided anywhere. A dismissal decides nothing either. An
+    answer that arrives after the wait is recorded on the hold by the late
+    sink, never applied to a call directly.
+
+    Raises :class:`ElicitationUnavailableError` when the client refused for
+    the person without showing the prompt; the hold is left pending for the
+    dashboard rather than closed, so nothing about it is lost.
+    """
+    message, schema = approval_request(ask)
+    # The person behind this session, taken now: a late answer arrives on
+    # another request whose context is not this one.
+    approver = inline_approver()
+
+    def record_late(result: ElicitResult) -> None:
+        outcome = outcome_of_answer(result)
+        if outcome not in (ApprovalOutcome.APPROVED, ApprovalOutcome.REJECTED):
+            return
+
+        async def close() -> None:
+            try:
+                recorded = await ledger.close_hold(
+                    approval_id, outcome, route=ELICITATION_ROUTE, approver=approver
+                )
+            except Exception as exc:  # noqa: BLE001 - the record stays pending
+                logger.warning(
+                    "elicitation_late_answer_not_recorded",
+                    approval_id=approval_id,
+                    tool_id=ask.tool_id,
+                    error=str(exc) or type(exc).__name__,
+                )
+                return
+            logger.info(
+                "elicitation_late_answer_recorded",
+                approval_id=approval_id,
+                tool_id=ask.tool_id,
+                answered=outcome.value,
+                recorded=recorded.value,
+            )
+
+        task = asyncio.ensure_future(close())
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+
+    token = _late_answer_sink.set(record_late)
+    started = time.monotonic()
+    try:
+        result = await asyncio.wait_for(elicitor(message, schema), timeout=wait_seconds)
+    except TimeoutError:
+        logger.info(
+            "elicitation_wait_ended_hold_open",
+            tool_id=ask.tool_id,
+            approval_id=approval_id,
+            wait_seconds=wait_seconds,
+        )
+        return None
+    finally:
+        _late_answer_sink.reset(token)
+    waited = time.monotonic() - started
+    if result.action is not ElicitAction.ACCEPT and waited < UNATTENDED_ANSWER_SECONDS:
+        logger.warning(
+            "elicitation_unattended",
+            tool_id=ask.tool_id,
+            action=result.action.value,
+            waited_seconds=round(waited, 3),
+        )
+        raise ElicitationUnavailableError(
+            f"{ask.tool_id}: the client answered '{result.action.value}' in "
+            f"{waited * 1000:.0f} ms without putting the question to anyone"
+        )
+    outcome = outcome_of_answer(result)
+    if outcome not in (ApprovalOutcome.APPROVED, ApprovalOutcome.REJECTED):
+        return None
+    try:
+        recorded = await ledger.close_hold(
+            approval_id, outcome, route=ELICITATION_ROUTE, approver=approver
+        )
+    except Exception as exc:  # noqa: BLE001 - an approval we cannot record must not run
+        logger.error(
+            "elicitation_ledger_close_failed",
+            approval_id=approval_id,
+            tool_id=ask.tool_id,
+            error=str(exc) or type(exc).__name__,
+        )
+        if outcome is ApprovalOutcome.APPROVED:
+            raise ApprovalLedgerUnavailableError(
+                ask.tool_id, f"approval {approval_id} could not be closed: {exc}"
+            ) from exc
+        return outcome
+    return recorded
 
 
 def first_available_gate(

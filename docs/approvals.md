@@ -70,19 +70,18 @@ rework cycles remain. Held tool calls, change proposals offer `approve` and
 `reject`; design loops, sketches and drawings offer `approve` only.
 
 When a pending item cannot be decided here, `decidable` is false and
-`not_decidable_reason` says why. A hold on the `elicitation` route is the main
-case: the question is on screen in the client's own prompt, and that prompt
-gets the answer. Unless it was never shown — see
-[A client that answers for the person](#a-client-that-answers-for-the-person),
-where the elicitation hold is closed and the call is held again on the
-`dashboard` route, which is decidable here.
+`not_decidable_reason` says why. A held tool call is decidable here whichever
+route asked it, including one whose question is also on screen in the client's
+own prompt: the first decision wins, and the prompt's answer, if it comes
+later, finds the hold already decided. See
+[Held tool calls](#held-tool-calls).
 
 ## Deciding
 
 | Status | When |
 |--------|------|
 | 404 | Unknown id. |
-| 409 | Not decidable now: already decided, expired or canceled, elicitation route, gate not ready for approve, retries or reworks used up, or the run's workflow no longer exists (only `reject` is offered then). Also an `approve` whose drafts were based on revisions that changed since (`PATCH_CONFLICT`): nothing is committed and the gate stays open; `retry` rebases. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate). |
+| 409 | Not decidable now: already decided, expired or canceled, gate not ready for approve, retries or reworks used up, or the run's workflow no longer exists (only `reject` is offered then). Also an `approve` whose drafts were based on revisions that changed since (`PATCH_CONFLICT`): nothing is committed and the gate stays open; `retry` rebases. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate). |
 | 422 | Decision not offered for this kind, invalid `to_phase`, or no `reason` for `reject`, `retry` or `rework`. |
 | 200 | `reject` on a gate whose workflow no longer exists: the decision is saved and there is no run left to signal. |
 | 503 | A gate decision was recorded but could not be delivered to the workflow; or committing a gate's drafts failed part-way (heads restored, approve again). |
@@ -147,20 +146,15 @@ So a `decline` or `cancel` that comes back faster than anyone could have read
 the prompt (one second, `mcp_core.elicitation.UNATTENDED_ANSWER_SECONDS`) is
 not treated as an answer:
 
-- the elicitation hold is closed as `cancelled`, so nothing is left in the
-  queue looking as though somebody had been asked;
-- the same call is held again on the `dashboard` route, where it is pending
-  and decidable in this API, in the dashboard and in `forge approvals`;
+- the hold stays pending, decidable in this API, in the dashboard, with
+  `approvals.decide` and in `forge approvals`, and the call returns `held`
+  (see [Held tool calls](#held-tool-calls));
 - the connection is marked as one that cannot be asked, so the rest of the
-  session queues straight away instead of burning a hold per call;
-- with no dashboard gate configured the call is refused as
-  `not_configured`. The fallback is a queue somebody can see, not a way
-  through the gate.
+  session is not put to its prompt again.
 
 Only `decline` and `cancel` are judged by the clock. An `accept` carries a
-real answer however fast it arrives, so a person who clicks No quickly is
-still a rejection. It is a heuristic and it fails safe: a genuine instant
-refusal leaves the call waiting in the dashboard rather than closed, and
+real answer however fast it arrives. It is a heuristic and it fails safe: a
+genuine instant refusal leaves the call waiting rather than closed, and
 nothing runs that a person has not approved. The fallback is logged as
 `mcp_elicitation_unattended_fallback`, and the gate logs
 `elicitation_unattended` with the action and how long it waited.
@@ -225,9 +219,10 @@ waiting for a person, from the MCP client (the Claude Code plugin's
   answers; the agent cannot. The answer is recorded through
   `POST /v1/approvals/{id}/inline-decision`, so the dashboard's rules apply:
   approve is not offered on a gate whose checks failed, retry and rework keep
-  their caps, reject, retry and rework need a reason, and a hold already being
-  asked in another client's prompt is not decidable here. Dismissing the prompt
-  leaves the item pending. The decision record shows `surface: "chat"`.
+  their caps, and reject, retry and rework need a reason. A held tool call is
+  decidable here even while another client's prompt asks it; the first
+  decision wins. Dismissing the prompt leaves the item pending. The decision
+  record shows `surface: "chat"`.
 
 Like `flow.await_gate`, `approvals.decide` is not held at the call (it only
 asks), and the design-flow worker may not call either tool.
@@ -247,29 +242,8 @@ Both are on the `core` profile, the plugin's default connection. To make room
 under its 40-tool cap, `memory.list_insights` and
 `memory.retrieve_similar_experience` moved to the full profile.
 
-**A held call is handed to the person.** Some clients can neither show an
-approval prompt nor be sent progress notifications, the claude.ai connector
-among them. Holding a write open for one of them was a silent wait: the person
-saw a tool call that would not finish, never an approval, and the hold ran out.
-For such a client the sidecar instead:
-
-1. records the hold on the ledger with a 30-minute window and waits 20 seconds
-   in case the person answers at once;
-2. returns a JSON-RPC error with `code: "approval_required"`,
-   `outcome: "awaiting_person"`, the `approval_id`, `where` (the dashboard
-   Approvals page and its link), `expires_in_seconds`,
-   `next: "call_again_with_same_arguments_after_approval"` and
-   `retryable: true`. Its message tells the agent to tell the person, and to
-   call the tool again with the same arguments once the person has approved;
-3. on that repeated call (same MCP session, tool and arguments) reads the
-   decision. Approved: the call runs, once, with the approver taken from the
-   ledger. Still pending: the same approval comes back with no second hold.
-   Rejected or expired: the usual refusal.
-
-The person decides on the dashboard. The agent's own word is never taken as
-the decision, so a model cannot approve its own write by saying the person
-agreed. A client that can show a prompt is still asked inline, and one that
-receives progress still waits with its window.
+**Held calls.** How a held tool call is answered from the client, and retried,
+is in [Held tool calls](#held-tool-calls).
 
 A held call that names a run (`run_id`, or a task id `<run_id>:<phase>:<n>`,
 as `phase.claim` does) and no project is recorded under the run's project, so
@@ -277,6 +251,122 @@ it shows on that project's Approvals page rather than only under All
 projects. The pending queue keeps polling in a background browser tab, so an
 item that appears while the person is in another window is there when they
 look.
+
+## Held tool calls
+
+A write that needs a person (an MCP caller outside a claimed run task, for
+example `twin.render_concept_image`, `twin.generate_concept_mesh` or
+`project.create`) is held as a **durable approval**. The approval outlives the
+tool call: the call returns at once, a person decides from anywhere, and the
+identical call made again runs once on the approval.
+
+Before this, the call blocked while the question waited in the client's
+prompt, and the client (Claude Code: 120 s) timed the call out first. An
+approval given later was recorded and never applied, the retry opened a new
+hold, and the dashboard could not decide the hold because it was "answered in
+the client's own approval prompt".
+
+### The lifecycle
+
+1. **Held.** The sidecar records the approval on the ledger with its key: the
+   tool, a canonical hash of the arguments (sorted JSON; the transport's
+   `_meta` and reserved `__` arguments are left out), the caller's MCP session
+   and the project (the `project_id` argument, else the session's project). It
+   is `pending` with an expiry, 30 minutes by default
+   (`METAFORGE_TOOL_APPROVAL_TTL_S`, at most 3600 seconds). A pending approval
+   with the same key is reused, never opened twice.
+2. **Asked briefly.** A client that can show a prompt is asked in it for up to
+   20 seconds. Any other client is waited on for 20 seconds in case the person
+   is already on the Approvals page, with progress notifications when the call
+   carries a `progressToken`. An answer in that time runs or refuses the call
+   at once.
+3. **Returned.** Unanswered, the call returns straight away. It is a tool
+   result with `isError: true` (the tool did not run) whose text tells the
+   agent to tell the person, and whose `_meta.approval` carries:
+
+   ```json
+   {"held": true, "approval_id": "run_...", "expires_at": "2026-11-04T10:30:00+00:00",
+    "expires_in_seconds": 1800, "next_step": "retry this exact call once it is approved",
+    "code": "approval_required", "outcome": "awaiting_person", "route": "elicitation",
+    "where": "...", "repeated": false}
+   ```
+
+   The same object is the second text block of the result, for a client that
+   does not show `_meta`. The legacy `tool/call` dialect returns it as the
+   JSON-RPC error data, as before.
+4. **Decided anywhere.** The client's prompt, `POST /v1/approvals/{id}/decision`
+   (the dashboard's Approvals page), and the plugin's `approvals.decide` all
+   decide the same record. The first decision wins; a later one is a 409. A
+   prompt answered after the call returned still lands on the record: the
+   sidecar keeps where a withdrawn question's answer goes, and an Accept or
+   Decline that arrives late approves or rejects the approval. Dismissing the
+   prompt decides nothing.
+5. **Retried.** The same session calling the same tool with the same arguments
+   (same hash, same project) finds the decision. Approved, unexpired and
+   unused: the call runs immediately and the approval is marked used. It is
+   single use; the next identical call is a new hold. Rejected: the refusal is
+   reported once. Pending: the same approval comes back with
+   `repeated: true`, no second hold. A changed argument is a different key and
+   needs a new approval.
+6. **Expired.** A pending approval past its expiry is closed `timed_out`, and
+   an approved one not used before its expiry is no longer honoured. The next
+   identical call opens a new hold.
+
+Durable holds survive a gateway restart: a pending one is restored as pending
+until its expiry, where a blocking hold whose waiter died with the process is
+marked failed as before. The approver is restored from the decision log.
+
+**The agent is told.** When a held call of the current session is approved,
+the next tool reply to that session carries one sentence: "approval `<id>` for
+`<tool>` was approved; call it again with the same arguments." It is said
+once, beside the pending-approvals notice
+([Any approval in the client chat](#any-approval-in-the-client-chat)).
+
+**Accept means approve.** The client prompt has no yes/no box any more: Accept
+approves, Decline refuses, and the only field is an optional note. The old
+form carried a required `approve` checkbox, and pressing Accept without ticking
+it was recorded as a rejection. Whatever an Accept carries, it is an approval;
+an Accept is never turned into a rejection.
+
+**Who decides is unchanged.** Human-authority tools still need a person: an
+agent caller of `/v1/approvals` is refused them (403), and the approver
+recorded is the one the deciding surface established, never anything the
+caller sent. `approver_verified` is `true` only for an authenticated
+principal.
+
+### A project's policy decides held writes
+
+The [approval policy](#approval-policy-and-the-gate-reviewer) that decides a
+project's gates also decides its held tool writes. Before holding a call the
+sidecar asks `POST /v1/chat/tool_approvals/policy`, and the gateway applies the
+policy of the project the call lands in:
+
+| Mode in force | Held tool writes |
+|---------------|------------------|
+| `off` | A person decides. |
+| `advise` | A person decides. There is no reviewer for a single tool call, so nothing more is recorded. |
+| `auto_clean` | Additive and illustrative writes are approved: a concept sketch, image or mesh, a render, a new record beside existing ones (the tools marked additive in the MCP annotations). Anything else is held. |
+| `auto` | Any write the guardrails hold is approved, until the policy's expiry, after which it is `advise`. |
+
+In every mode:
+
+- `METAFORGE_AUTO_APPROVE_MAX` is the ceiling: a project at `auto` under a cap
+  of `auto_clean` is decided as `auto_clean`.
+- Only the call's own project counts. A call whose `project_id` (argument, else
+  the session's project) is another project, or that names none, is decided by
+  a person.
+- Never approved by a policy: human-authority tools, destructive tools, and
+  project, flow, run, approval, review, phase, session, library and vendor
+  tools. `phase.claim` keeps its own narrower rule, below.
+- **Spend cap.** Paid tools are capped per project per rolling hour: 20
+  `twin.render_concept_image` (`METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`) and 3
+  `twin.generate_concept_mesh` (`METAFORGE_AUTO_APPROVE_MESH_PER_HOUR`). Over
+  the cap the call is held for a person, and the hold's reason and the held
+  result's `note` say the cap was reached.
+- **Audit.** Every policy approval is written to the ledger on route `policy`,
+  `approved_by` `policy:<mode>:<project>` (unverified), with the tool and the
+  arguments hash, and marked used at once (it runs that call, not a retry). It
+  is listed on the Approvals page as approved.
 
 ## Approval policy and the gate reviewer
 
@@ -379,9 +469,11 @@ records the approval on the ledger like any other, on route `policy`,
 approved by `policy:auto:<who set the policy>` (unverified). A claim lets one
 session do one phase of one run, and its work still goes through the gate the
 reviewer decides, so it adds nothing the person who chose `auto` had not
-already handed over. Every other write, a claim on a task that was submitted or
-belongs to another project, and every other mode are held for a person as
-before. No agent approves anything here and no model judges it.
+already handed over. A claim on a task that was submitted or belongs to
+another project, and a claim under any other mode, are held for a person as
+before. No agent approves anything here and no model judges it. Other held
+writes are decided by
+[the policy rules for held tool calls](#a-projects-policy-decides-held-writes).
 
 ## Delegating approvals to an agent
 
@@ -428,5 +520,16 @@ and a decision attempt is a 403. The gateway owner can delegate them by setting
 decisions made through this API, with `outcome` one of `ok`, `refused` (a 4xx)
 or `error`. There is no alert: a refusal is a reviewer answering something
 already closed, not a fault.
+
+`metaforge_tool_approval_total{outcome}` counts durable tool approvals:
+`held`, `approved` (answered while the call waited), `approved_late_honoured`
+(an identical retry ran on it), `rejected`, `auto_approved`, `cap_held` and
+`expired`. The gateway logs the same as `tool_approval_held`,
+`tool_approval_approved_late_honoured`, `tool_approval_auto_approved`,
+`tool_approval_cap_held` and `tool_approval_expired`; the sidecar logs
+`mcp_tool_call_held_for_approval` (with `durable=true` and the arguments
+hash), `mcp_tool_call_handed_off` and `mcp_tool_approval_approved_late_honoured`.
+The `ToolApprovalsMostlyExpiring` alert fires when more than half of the holds
+in six hours expire undecided.
 
 See [Gateway API reference](reference/gateway-api.md) for the generated schema.

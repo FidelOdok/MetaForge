@@ -216,8 +216,9 @@ async def decide_inline(
     Gates from ``flow.await_gate``, and any pending item from
     ``approvals.decide``. The decision goes through the same
     ``service.decide`` as a dashboard click, so a gate that is not ready
-    still cannot be approved, retry and rework caps still apply, and a hold
-    already being asked in another client's prompt is not decidable here.
+    still cannot be approved, and retry and rework caps still apply. A held
+    tool call is decidable here whichever route asked it; the first decision
+    on it wins (FORGE-780).
     """
     from api_gateway.auth.dependencies import current_principal
     from mcp_core.elicitation import LOCAL_ELICITATION_ACTOR

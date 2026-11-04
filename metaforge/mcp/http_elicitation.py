@@ -60,7 +60,9 @@ from mcp_core.elicitation import (
     ELICITATION_PROTOCOL_VERSION,
     ElicitAction,
     ElicitResult,
+    LateAnswerSink,
     cancelled_notification,
+    current_late_answer_sink,
     declares_form_elicitation,
     result_from_payload,
 )
@@ -169,6 +171,10 @@ class ElicitationHub:
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         #: Questions the server stopped waiting on, oldest first, with why.
         self._ended: OrderedDict[str, str] = OrderedDict()
+        #: FORGE-780: where a late answer to a question goes, by question id.
+        #: Only a durable hold's question has one; its answer then lands on
+        #: the approval record instead of being dropped.
+        self._late_sinks: OrderedDict[str, LateAnswerSink] = OrderedDict()
         self._next = 0
 
     # -- what a session declared ---------------------------------------
@@ -380,6 +386,11 @@ class ElicitationHub:
         self._pending[message_id] = future
         if call is not None:
             call.pending.add(message_id)
+        sink = current_late_answer_sink()
+        if sink is not None:
+            self._late_sinks[message_id] = sink
+            while len(self._late_sinks) > _MAX_ENDED:
+                self._late_sinks.popitem(last=False)
         logger.info("mcp_elicitation_sent", session_id=session_id, message_id=message_id, via=via)
         await queue.put(
             json.dumps(
@@ -465,6 +476,18 @@ class ElicitationHub:
             reason = self._ended.get(raw_id)
             if reason is None:
                 return False
+            sink = self._late_sinks.pop(raw_id, None)
+            if sink is not None:
+                # FORGE-780: the call that asked has returned, but its
+                # approval is a durable record. The answer decides that
+                # record; nothing runs until the identical retry.
+                logger.info(
+                    "mcp_elicitation_late_answer_to_record",
+                    message_id=raw_id,
+                    ended_because=reason,
+                )
+                sink(result_from_payload(payload))
+                return True
             logger.warning(
                 "mcp_elicitation_late_response_ignored",
                 message_id=raw_id,
@@ -474,6 +497,7 @@ class ElicitationHub:
                 else None,
             )
             return True
+        self._late_sinks.pop(raw_id, None)
         future.set_result(payload)
         return True
 

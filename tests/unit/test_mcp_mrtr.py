@@ -106,7 +106,8 @@ async def _entries(http: httpx.AsyncClient) -> list[dict[str, Any]]:
 
 
 def _approve(approve: bool = True) -> dict[str, Any]:
-    return {"q1": {"action": "accept", "content": {"approve": approve}}}
+    # FORGE-780: Accept or Decline is the decision; the form has no checkbox.
+    return {"q1": {"action": "accept" if approve else "decline", "content": {}}}
 
 
 @pytest.mark.asyncio
@@ -122,7 +123,7 @@ class TestAHeldWriteAsksInsideTheResult:
         question = result["inputRequests"]["q1"]
         assert question["method"] == "elicitation/create"
         assert question["params"]["mode"] == "form"
-        assert "approve" in question["params"]["requestedSchema"]["properties"]
+        assert question["params"]["requestedSchema"]["type"] == "object"
         assert result["requestState"]
         assert "ttlMs" not in result  # an interim result is not cacheable
         assert ran == []

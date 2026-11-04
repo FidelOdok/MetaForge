@@ -87,7 +87,9 @@ def test_schema_stays_inside_the_allowed_subset() -> None:
     """
     _, schema = approval_request(_ask())
     assert schema["type"] == "object"
-    assert schema["required"] == ["approve"]
+    # FORGE-780: no required yes/no box. Accept and Decline are the decision.
+    assert not schema.get("required")
+    assert "approve" not in schema["properties"]
     for prop in schema["properties"].values():
         assert prop["type"] in {"string", "number", "integer", "boolean"}
         assert "properties" not in prop and "items" not in prop
@@ -146,10 +148,15 @@ def test_accept_with_approve_true_runs_it() -> None:
     )
 
 
-def test_accept_with_approve_false_is_a_rejection() -> None:
-    """The user was asked and answered no. That is a decision, not a timeout."""
+def test_accept_with_the_box_unticked_is_not_a_rejection() -> None:
+    """FORGE-780: Accept approves.
+
+    The old form carried an ``approve`` checkbox, and pressing Accept without
+    ticking it sent ``approve: false``, which was recorded as a rejection. A
+    person who pressed Accept is never recorded as having said no.
+    """
     assert _outcome(ElicitResult(ElicitAction.ACCEPT, {"approve": False})) is (
-        ApprovalOutcome.REJECTED
+        ApprovalOutcome.APPROVED
     )
 
 
@@ -167,11 +174,10 @@ def test_cancel_is_a_timeout_not_a_rejection() -> None:
     assert _outcome(ElicitResult(ElicitAction.CANCEL)) is ApprovalOutcome.TIMED_OUT
 
 
-@pytest.mark.parametrize("content", [{}, {"approve": "yes"}, {"approve": None}])
-def test_accept_without_a_boolean_is_refused(content: dict[str, Any]) -> None:
-    """A client that did not honour the schema. Guessing wrong the other way
-    is an unreviewed write."""
-    assert _outcome(ElicitResult(ElicitAction.ACCEPT, content)) is ApprovalOutcome.REJECTED
+@pytest.mark.parametrize("content", [{}, {"approve": "yes"}, {"approve": None}, {"note": "ok"}])
+def test_accept_approves_whatever_the_content(content: dict[str, Any]) -> None:
+    """FORGE-780: the form asks nothing but an optional note, so Accept is the yes."""
+    assert _outcome(ElicitResult(ElicitAction.ACCEPT, content)) is ApprovalOutcome.APPROVED
 
 
 # ---------------------------------------------------------------------------
@@ -381,9 +387,8 @@ def test_an_answer_nobody_could_have_read_is_not_an_answer(action: ElicitAction)
 
 def test_an_accept_is_an_answer_however_fast_it_arrives() -> None:
     """Only decline and cancel are judged by the clock. An accept carries a
-    real answer, and a person who clicks No quickly still means No."""
-    assert _instant(ElicitAction.ACCEPT, {"approve": False}) is ApprovalOutcome.REJECTED
-    assert _instant(ElicitAction.ACCEPT, {"approve": True}) is ApprovalOutcome.APPROVED
+    real answer however fast it arrives."""
+    assert _instant(ElicitAction.ACCEPT, {}) is ApprovalOutcome.APPROVED
 
 
 class _Ledger:

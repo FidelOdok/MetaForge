@@ -251,13 +251,11 @@ def tool_item(run: Run) -> ApprovalItem:
     req = run.request
     route = req.get("route")
     kind = _tool_kind(req)
-    allowed = ["approve", "reject"] if pending and route != "elicitation" else []
+    # FORGE-780: decidable whichever route asked. An inline hold used to be
+    # "answered in the client's own approval prompt" only, and once the
+    # client had timed the call out there was nowhere left to answer it.
+    allowed = ["approve", "reject"] if pending else []
     not_decidable: str | None = None
-    if pending and route == "elicitation":
-        not_decidable = (
-            "this call is being answered in the client's own approval prompt; "
-            "answer it there and it shows here as resolved"
-        )
     if kind == "flow_patch":
         # FORGE-539: what a patch re-runs and what it keeps is the decision.
         detail = {
@@ -278,6 +276,10 @@ def tool_item(run: Run) -> ApprovalItem:
         title = "Flow version for approval" if kind == "flow_version" else "Flow proposal"
     else:
         detail = {"tool": req.get("tool"), "arguments": req.get("arguments") or {}}
+        if req.get("arguments_hash"):
+            # FORGE-780: what an approval covers, and whether it was used.
+            detail["arguments_hash"] = req.get("arguments_hash")
+            detail["used"] = bool(req.get("consumed_at"))
         title = f"Tool call: {req.get('tool') or 'unknown tool'}"
     record = _record(item_id, _run_fallback(run))
     decidable, why = _decidable(pending, allowed, not_decidable)

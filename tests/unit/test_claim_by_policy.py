@@ -181,7 +181,7 @@ class TestTheClaimIsApprovedByThePolicy:
             response = await _call(server, "phase.claim", {"task_id": task_id})
 
         assert ran == []
-        assert response["error"]["data"]["outcome"] == "awaiting_person"
+        assert response["result"]["_meta"]["approval"]["outcome"] == "awaiting_person"
 
     async def test_a_task_that_is_not_open_waits_for_a_person(
         self, gateway: httpx.AsyncClient
@@ -213,17 +213,22 @@ class TestTheClaimIsApprovedByThePolicy:
             await _call(server, "phase.claim", {"task_id": task_id})
         assert ran == []
 
-    async def test_any_other_write_still_waits_for_a_person(
+    async def test_another_write_in_the_project_is_decided_by_the_write_policy(
         self, gateway: httpx.AsyncClient
     ) -> None:
+        # FORGE-780 widened this: under ``auto`` the project's policy decides
+        # held tool writes too (see test_tool_write_policy.py), approved by
+        # ``policy:auto:<project>`` rather than by who set the policy.
         await _policy("auto")
         _open_task()
         ran: list[str] = []
         async with gateway as http:
             server = await _server(http, ran)
             response = await _call(server, "twin.commit_geometry", {"project_id": PROJECT})
-        assert ran == []
-        assert response["error"]["data"]["outcome"] == "awaiting_person"
+            entries = (await http.get(LIST, params={"status": "all"})).json()["runs"]
+        assert "error" not in response, response
+        assert ran == ["twin.commit_geometry"]
+        assert [e["approved_by"] for e in entries] == [f"policy:auto:{PROJECT}"]
 
 
 @pytest.mark.asyncio

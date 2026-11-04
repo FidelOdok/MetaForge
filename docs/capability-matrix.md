@@ -1064,14 +1064,14 @@ The three-action response maps onto the outcomes above:
 
 | Response | Outcome |
 |---|---|
-| `accept` with `approve: true` | approved |
-| `accept` with `approve: false` | `rejected` — they were asked and said no |
-| `decline` | `rejected` — they refused the prompt itself |
-| `cancel`, or no answer inside the window | `timed_out` — nobody decided |
+| `accept` | approved, whatever the content |
+| `decline` | `rejected`: they refused the prompt itself |
+| `cancel`, or no answer inside the window | nobody decided: a durable hold stays pending, a blocking one ends `timed_out` |
 
-An `accept` whose content does not carry a boolean `approve` is treated
-as a refusal. The failure mode of guessing the other way is an unreviewed
-write.
+The form has no yes/no checkbox, only an optional note, so Accept and Decline
+are the decision. An older form carried a required `approve` box, and an
+Accept with it unticked was recorded as a rejection; an Accept is now always
+an approval. See [Held tool calls](approvals.md#held-tool-calls).
 
 #### Over HTTP: which stream carries the question
 

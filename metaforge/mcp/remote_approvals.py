@@ -45,6 +45,7 @@ from mcp_core.guardrails import (
     ApprovalOutcome,
     ApprovalResolution,
     Approver,
+    HeldApproval,
     effective_hold_window,
     notify_held,
 )
@@ -353,6 +354,8 @@ class RemoteApprovalLedger:
                     "session_id": ask.session_id,
                     "project": ask.project,
                     "client": ask.client,
+                    "approval_key": ask.approval_key,
+                    "arguments_hash": ask.arguments_hash,
                 },
             )
             response.raise_for_status()
@@ -361,6 +364,11 @@ class RemoteApprovalLedger:
             logger.info("mcp_policy_approval_unavailable", tool_id=ask.tool_id, error=str(exc))
             return None
         if not body.get("approved"):
+            if body.get("cap_held"):
+                # FORGE-780: not an approval; the note goes on the hold.
+                return ApprovalResolution(
+                    outcome=ApprovalOutcome.REJECTED, note=str(body.get("reason") or "") or None
+                )
             return None
         return ApprovalResolution(
             outcome=ApprovalOutcome.APPROVED,
@@ -383,6 +391,8 @@ class RemoteApprovalLedger:
                     "route": route,
                     "client": ask.client,
                     "timeout_seconds": ask.timeout_seconds,
+                    "approval_key": ask.approval_key,
+                    "arguments_hash": ask.arguments_hash,
                 },
             )
             created.raise_for_status()
@@ -401,6 +411,59 @@ class RemoteApprovalLedger:
             "mcp_inline_ledger_opened", run_id=approval_id, tool_id=ask.tool_id, route=route
         )
         return approval_id
+
+    async def _get(self, url: str) -> httpx.Response:
+        if self._client is not None:
+            return await self._client.get(url, timeout=self._timeout)
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
+            return await http.get(url)
+
+    async def find_hold(self, approval_key: str) -> HeldApproval | None:
+        """The live durable hold for ``approval_key`` (FORGE-780).
+
+        Raises :class:`ApprovalLedgerUnavailableError` when the ledger cannot
+        be read, so an outage is never read as "nothing approved yet" and
+        turned into a second hold.
+        """
+        try:
+            current = await self._get(f"{self._endpoint}/by-key/{approval_key}")
+            if current.status_code == 404:
+                return None
+            current.raise_for_status()
+            body: dict[str, Any] = current.json()
+        except Exception as exc:  # noqa: BLE001 - reported as a refusal, never a pass
+            raise ApprovalLedgerUnavailableError(
+                approval_key[:12], str(exc) or type(exc).__name__
+            ) from exc
+        approval_id = str(body["id"])
+        expires = (body.get("request") or {}).get("expires_at")
+        return HeldApproval(
+            approval_id=approval_id,
+            resolution=_resolution_from(body, approval_id),
+            tool_id=str((body.get("request") or {}).get("tool") or ""),
+            expires_at=float(expires) if isinstance(expires, (int, float)) else None,
+        )
+
+    async def consume_hold(
+        self, approval_id: str, *, retry: bool = False
+    ) -> ApprovalResolution | None:
+        """Use a decided durable hold once (FORGE-780). ``None`` when it cannot be."""
+        try:
+            response = await self._post(f"{self._endpoint}/{approval_id}/consume", {"retry": retry})
+            if response.status_code in (404, 409):
+                logger.info(
+                    "mcp_approval_not_consumed",
+                    approval_id=approval_id,
+                    status=response.status_code,
+                )
+                return None
+            response.raise_for_status()
+            body: dict[str, Any] = response.json()
+        except Exception as exc:  # noqa: BLE001 - reported as a refusal, never a pass
+            raise ApprovalLedgerUnavailableError(
+                approval_id, str(exc) or type(exc).__name__
+            ) from exc
+        return _resolution_from(body, approval_id)
 
     async def read_hold(self, approval_id: str) -> ApprovalResolution | None:
         """The decision on a hold, or ``None`` while it awaits one (FORGE-741).
@@ -466,3 +529,23 @@ class RemoteApprovalLedger:
             "mcp_inline_ledger_closed", run_id=approval_id, outcome=outcome.value, route=route
         )
         return recorded or outcome
+
+
+def _resolution_from(body: dict[str, Any], approval_id: str) -> ApprovalResolution | None:
+    """A ledger entry's decision, or ``None`` while it is pending."""
+    status = str(body.get("status") or "")
+    if status == _PENDING:
+        return None
+    approver = (
+        Approver(
+            actor_id=str(body["approved_by"]),
+            verified=bool(body.get("approver_verified")),
+        )
+        if body.get("approved_by")
+        else None
+    )
+    return ApprovalResolution(
+        outcome=_STATUS_OUTCOMES.get(status, ApprovalOutcome.REJECTED),
+        approver=approver,
+        approval_id=approval_id,
+    )

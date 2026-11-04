@@ -208,13 +208,16 @@ class TestTheAcceptanceCriterion:
         assert approval["route"] == "elicitation"
         assert "held for human approval" in result["content"][1]["text"]
 
-    async def test_a_refusal_inside_the_client_stops_the_write(self, base_url: str) -> None:
+    async def test_accept_with_an_unticked_box_is_not_a_refusal(self, base_url: str) -> None:
+        # FORGE-780: the form has no checkbox; Accept approves whatever an older
+        # form sent with it. A refusal is a Decline (the next test).
         body, listener = await _with_listener(
             base_url, {"action": "accept", "content": {"approve": False}}
         )
         assert listener.asked is not None
-        assert "error" in body, body
-        assert "rejected" in json.dumps(body["error"])
+        assert "approve" not in listener.asked["params"]["requestedSchema"]["properties"]
+        assert "error" not in body, body
+        assert body["result"]["_meta"]["approval"]["outcome"] == "approved"
 
     async def test_declining_the_prompt_also_stops_it(self, base_url: str) -> None:
         # A person reads the prompt before saying no.

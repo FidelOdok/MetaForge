@@ -274,6 +274,8 @@ class StdioElicitor:
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         #: Questions withdrawn (FORGE-472), so a late answer is ignored.
         self._ended: set[str] = set()
+        #: FORGE-780: a durable hold's question keeps where its late answer goes.
+        self._late_sinks: dict[str, Any] = {}
         self._next = 0
 
     def resolve(self, message_id: str, payload: dict[str, Any]) -> bool:
@@ -286,9 +288,16 @@ class StdioElicitor:
         future = self._pending.pop(message_id, None)
         if future is None or future.done():
             if message_id in self._ended:
+                sink = self._late_sinks.pop(message_id, None)
+                if sink is not None:
+                    # FORGE-780: the answer decides the durable approval record.
+                    logger.info("mcp_elicitation_late_answer_to_record", message_id=message_id)
+                    sink(result_from_payload(payload))
+                    return True
                 logger.warning("mcp_elicitation_late_response_ignored", message_id=message_id)
                 return True
             return False
+        self._late_sinks.pop(message_id, None)
         future.set_result(payload)
         return True
 
@@ -297,6 +306,13 @@ class StdioElicitor:
         message_id = f"elicit-{self._next}"
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[message_id] = future
+        from mcp_core.elicitation import current_late_answer_sink
+
+        sink = current_late_answer_sink()
+        if sink is not None:
+            if len(self._late_sinks) > 256:
+                self._late_sinks.clear()
+            self._late_sinks[message_id] = sink
         self._write(
             json.dumps(
                 {

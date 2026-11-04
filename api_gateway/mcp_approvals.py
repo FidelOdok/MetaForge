@@ -22,6 +22,9 @@ import structlog
 
 from api_gateway.chat.tool_approvals import (
     HOLD_DEADLINE_GRACE_SECONDS,
+    consume_hold,
+    create_hold,
+    find_live_hold,
     get_approval_store,
     project_for_hold,
     record_inline_answer,
@@ -33,6 +36,7 @@ from mcp_core.guardrails import (
     ApprovalOutcome,
     ApprovalResolution,
     Approver,
+    HeldApproval,
     effective_hold_window,
     notify_held,
 )
@@ -167,12 +171,17 @@ class InProcessApprovalLedger:
                     session_id=ask.session_id,
                     project=ask.project,
                     client=ask.client,
+                    approval_key=ask.approval_key,
+                    arguments_hash=ask.arguments_hash,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - no answer means a person decides
             logger.info("mcp_policy_approval_unavailable", tool_id=ask.tool_id, error=str(exc))
             return None
         if not answer.approved:
+            if answer.cap_held:
+                # FORGE-780: not an approval; the note goes on the hold.
+                return ApprovalResolution(outcome=ApprovalOutcome.REJECTED, note=answer.reason)
             return None
         return ApprovalResolution(
             outcome=ApprovalOutcome.APPROVED,
@@ -181,32 +190,59 @@ class InProcessApprovalLedger:
         )
 
     async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
-        store = get_approval_store()
         try:
-            run = store.create(
-                {
-                    "tool": ask.tool_id,
-                    "arguments": ask.arguments,
-                    "caller": ask.caller.value,
-                    "source": "mcp",
-                    "session_id": ask.session_id,
-                    "project": project_for_hold(ask.project, ask.arguments),
-                    "route": route,
-                    "client": ask.client,
-                }
-            )
-            store.start(run.id)
-            window = ask.timeout_seconds or DEFAULT_TIMEOUT_SECONDS
-            store.request_approval(
-                run.id,
+            run = create_hold(
+                tool=ask.tool_id,
+                arguments=ask.arguments,
                 reason=ask.reason,
-                deadline=store.now() + window + HOLD_DEADLINE_GRACE_SECONDS,
+                caller=ask.caller.value,
+                source="mcp",
+                session_id=ask.session_id,
+                project=ask.project,
+                route=route,
+                client=ask.client,
+                timeout_seconds=ask.timeout_seconds or DEFAULT_TIMEOUT_SECONDS,
+                approval_key=ask.approval_key,
+                arguments_hash=ask.arguments_hash,
             )
         except Exception as exc:  # noqa: BLE001 - reported as a refusal
             raise ApprovalLedgerUnavailableError(
                 ask.tool_id, str(exc) or type(exc).__name__
             ) from exc
         return run.id
+
+    async def find_hold(self, approval_key: str) -> HeldApproval | None:
+        """The live durable hold for ``approval_key`` (FORGE-780)."""
+        try:
+            run = find_live_hold(approval_key)
+        except Exception as exc:  # noqa: BLE001 - reported as a refusal, never a pass
+            raise ApprovalLedgerUnavailableError(
+                approval_key, str(exc) or type(exc).__name__
+            ) from exc
+        if run is None:
+            return None
+        expires = run.request.get("expires_at")
+        return HeldApproval(
+            approval_id=run.id,
+            resolution=await self.read_hold(run.id),
+            tool_id=str(run.request.get("tool") or ""),
+            expires_at=float(expires) if isinstance(expires, (int, float)) else None,
+        )
+
+    async def consume_hold(
+        self, approval_id: str, *, retry: bool = False
+    ) -> ApprovalResolution | None:
+        """Use a decided durable hold once (FORGE-780). ``None`` when it cannot be."""
+        from fastapi import HTTPException
+
+        try:
+            consume_hold(approval_id, retry=retry)
+        except HTTPException as exc:
+            logger.info(
+                "mcp_approval_not_consumed", approval_id=approval_id, detail=str(exc.detail)
+            )
+            return None
+        return await self.read_hold(approval_id)
 
     async def read_hold(self, approval_id: str) -> ApprovalResolution | None:
         """The decision on a hold, or ``None`` while it awaits one (FORGE-741)."""

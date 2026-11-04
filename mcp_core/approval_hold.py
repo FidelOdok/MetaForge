@@ -26,6 +26,8 @@ through :class:`HoldNotifier` and the server decides everything else.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from collections.abc import Mapping
 from typing import Any, Protocol
@@ -35,17 +37,23 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "DEFAULT_ELICITATION_WAIT_SECONDS",
     "DEFAULT_HOLD_SECONDS",
+    "DEFAULT_TOOL_APPROVAL_TTL_SECONDS",
+    "ENV_TOOL_APPROVAL_TTL",
     "DEFAULT_HOLD_WITH_PROGRESS_SECONDS",
     "DEFAULT_PROGRESS_INTERVAL_SECONDS",
     "ENV_HOLD_SECONDS",
     "ENV_HOLD_WITH_PROGRESS_SECONDS",
     "ENV_PROGRESS_INTERVAL_SECONDS",
     "HoldNotifier",
+    "approval_key",
+    "arguments_hash",
     "hold_notice_text",
     "hold_window_seconds",
     "progress_interval_seconds",
     "progress_notification",
+    "tool_approval_ttl_seconds",
 ]
 
 #: Window for a held call whose client cannot be sent progress.
@@ -146,3 +154,73 @@ def progress_notification(
             "message": message,
         },
     }
+
+
+# -- Durable approvals (FORGE-780) -------------------------------------------
+#
+# A held call used to wait for its answer inside the tool call, and the client
+# (Claude Code: 120 s) gave up first. An approval that came later was recorded
+# and never applied, and the retry opened a new hold. Now the hold is a record
+# that outlives the call: the call returns at once, and the identical retry
+# (same session, tool, arguments and project) runs once the record is approved.
+
+#: How long a durable approval stays usable, pending or approved and unused.
+ENV_TOOL_APPROVAL_TTL = "METAFORGE_TOOL_APPROVAL_TTL_S"
+DEFAULT_TOOL_APPROVAL_TTL_SECONDS = 1800.0
+#: How long a held call still waits on the client's own prompt before it
+#: returns. Well inside Claude Code's 120 s tool timeout; an answer after this
+#: still lands on the record.
+DEFAULT_ELICITATION_WAIT_SECONDS = 20.0
+
+#: Argument names that are not part of what was approved: the transport's
+#: ``_meta`` and the server's reserved ``__name__`` arguments.
+_VOLATILE_ARGUMENTS = frozenset({"_meta"})
+
+
+def tool_approval_ttl_seconds(environ: Mapping[str, str] | None = None) -> float:
+    """How long a held tool call's approval lasts (``METAFORGE_TOOL_APPROVAL_TTL_S``)."""
+    return _seconds_from_env(ENV_TOOL_APPROVAL_TTL, DEFAULT_TOOL_APPROVAL_TTL_SECONDS, environ)
+
+
+def arguments_hash(arguments: Mapping[str, Any]) -> str:
+    """A canonical hash of a call's arguments: sorted JSON, volatile fields left out.
+
+    Two calls with the same arguments in a different key order hash the same;
+    any changed value hashes differently, so a changed argument needs a new
+    approval.
+    """
+    stable = {
+        k: v
+        for k, v in arguments.items()
+        if k not in _VOLATILE_ARGUMENTS and not str(k).startswith("__")
+    }
+    canonical = json.dumps(stable, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def approval_key(
+    tool_id: str,
+    arguments: Mapping[str, Any],
+    *,
+    session: str | None,
+    project: str | None,
+) -> tuple[str, str]:
+    """The durable approval key for one call, and its arguments hash.
+
+    Keyed by tool, arguments hash, caller session and project, so an approval
+    given to one session's call is not a pass for another session, another
+    project, or other arguments.
+    """
+    args = arguments_hash(arguments)
+    key = hashlib.sha256(
+        json.dumps(
+            {
+                "tool": tool_id,
+                "arguments": args,
+                "session": session or "",
+                "project": project or "",
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    return key, args

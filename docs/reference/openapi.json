@@ -3145,6 +3145,18 @@
         "title": "ConstraintSuggestion",
         "type": "object"
       },
+      "ConsumeHoldRequest": {
+        "description": "Use a decided durable hold.",
+        "properties": {
+          "retry": {
+            "default": false,
+            "title": "Retry",
+            "type": "boolean"
+          }
+        },
+        "title": "ConsumeHoldRequest",
+        "type": "object"
+      },
       "ConversionResult": {
         "description": "Response payload for a completed conversion.",
         "properties": {
@@ -7308,10 +7320,34 @@
       "HoldToolCallRequest": {
         "description": "Park a tool call from another process in this ledger.",
         "properties": {
+          "approval_key": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Key"
+          },
           "arguments": {
             "additionalProperties": true,
             "title": "Arguments",
             "type": "object"
+          },
+          "arguments_hash": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments Hash"
           },
           "caller": {
             "default": "untrusted",
@@ -11009,10 +11045,34 @@
       "PolicyApprovalRequest": {
         "description": "A held call the project's approval policy may already cover.",
         "properties": {
+          "approval_key": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Key"
+          },
           "arguments": {
             "additionalProperties": true,
             "title": "Arguments",
             "type": "object"
+          },
+          "arguments_hash": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments Hash"
           },
           "caller": {
             "default": "untrusted",
@@ -11080,6 +11140,11 @@
             ],
             "title": "Approved By"
           },
+          "cap_held": {
+            "default": false,
+            "title": "Cap Held",
+            "type": "boolean"
+          },
           "id": {
             "anyOf": [
               {
@@ -11090,6 +11155,28 @@
               }
             ],
             "title": "Id"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "required": [
@@ -17595,7 +17682,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.3.658"
+    "version": "0.3.678"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -17812,7 +17899,7 @@
     },
     "/v1/approvals/{approval_id}/inline-decision": {
       "post": {
-        "description": "Record a decision a person gave in the MCP client's chat.\n\nGates from ``flow.await_gate``, and any pending item from\n``approvals.decide``. The decision goes through the same\n``service.decide`` as a dashboard click, so a gate that is not ready\nstill cannot be approved, retry and rework caps still apply, and a hold\nalready being asked in another client's prompt is not decidable here.",
+        "description": "Record a decision a person gave in the MCP client's chat.\n\nGates from ``flow.await_gate``, and any pending item from\n``approvals.decide``. The decision goes through the same\n``service.decide`` as a dashboard click, so a gate that is not ready\nstill cannot be approved, and retry and rework caps still apply. A held\ntool call is decidable here whichever route asked it; the first decision\non it wins.",
         "operationId": "decide_inline_v1_approvals__approval_id__inline_decision_post",
         "parameters": [
           {
@@ -19425,7 +19512,7 @@
         ]
       },
       "post": {
-        "description": "Create a held approval and return it.\n\nThis exists because the approval store is process-level (an\n``InMemoryRunStore`` in *this* process), and the MCP sidecar is a\ndifferent process. A sidecar used to hold calls only in\nits own memory, where the dashboard \u2014 served from here \u2014 would never see\nthem. So the sidecar parks them here instead, and there is exactly one\nledger rather than one per process.\n\nA second store would have been the more obvious fix and the wrong one:\ntwo queues means a reviewer clearing one while the other fills, and no\npage that shows both.",
+        "description": "Create a held approval and return it.\n\nThis exists because the approval store is process-level (an\n``InMemoryRunStore`` in *this* process), and the MCP sidecar is a\ndifferent process. A sidecar used to hold calls only in\nits own memory, where the dashboard \u2014 served from here \u2014 would never see\nthem. So the sidecar parks them here instead, and there is exactly one\nledger rather than one per process.\n\nA second store would have been the more obvious fix and the wrong one:\ntwo queues means a reviewer clearing one while the other fills, and no\npage that shows both.\n\nWith an ``approval_key`` the hold is a durable approval: a\nlive one with the same key is returned rather than a second opened.",
         "operationId": "hold_tool_call_v1_chat_tool_approvals_post",
         "requestBody": {
           "content": {
@@ -19465,9 +19552,52 @@
         ]
       }
     },
+    "/v1/chat/tool_approvals/by-key/{approval_key}": {
+      "get": {
+        "description": "The live durable hold for a key: pending, or decided and not yet used.",
+        "operationId": "get_live_hold_v1_chat_tool_approvals_by_key__approval_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_key",
+            "required": true,
+            "schema": {
+              "title": "Approval Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Live Hold",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
     "/v1/chat/tool_approvals/policy": {
       "post": {
-        "description": "Approve a held call the project's policy covers, or say it does not.\n\nOnly a ``phase.claim`` on an open task of the project's own client-mode run\nunder an ``auto`` policy is covered (see\n:mod:`api_gateway.approvals.claim_policy`). A covered call is written to the\nledger like any other, approved by ``policy:auto:<who set it>`` on route\n``policy``; anything else records nothing and the caller holds it for a\nperson as before.",
+        "description": "Approve a held call the project's policy covers, or say it does not.\n\nA ``phase.claim`` on an open task of the project's own client-mode run\nunder an ``auto`` policy is covered (see\n:mod:`api_gateway.approvals.claim_policy`), approved by\n``policy:auto:<who set it>``. Any other held write is decided by\n:mod:`api_gateway.approvals.tool_write_policy`, approved by\n``policy:<mode>:<project>``. A covered call is written to the ledger like\nany other, on route ``policy``; anything else records nothing and the\ncaller holds it for a person as before.",
         "operationId": "approve_by_policy_v1_chat_tool_approvals_policy_post",
         "requestBody": {
           "content": {
@@ -19595,6 +19725,59 @@
           }
         },
         "summary": "Submit Tool Approval",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
+    "/v1/chat/tool_approvals/{run_id}/consume": {
+      "post": {
+        "description": "Mark a decided durable hold used: one approval runs one call.",
+        "operationId": "consume_tool_approval_v1_chat_tool_approvals__run_id__consume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumeHoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consume Tool Approval",
         "tags": [
           "chat-tool-approvals"
         ]

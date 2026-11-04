@@ -696,6 +696,17 @@ class MetricsRegistry:
         labels=["outcome", "trigger", "result"],
     )
 
+    # FORGE-780: one durable tool approval reaching an outcome: ``held``,
+    # ``approved_late_honoured`` (an identical retry ran on an approval),
+    # ``auto_approved`` (a project policy approved it), ``cap_held`` (a
+    # policy would have, but the spend cap was reached), ``expired``.
+    TOOL_APPROVAL_TOTAL = MetricDefinition(
+        name="metaforge_tool_approval_total",
+        type="counter",
+        description="Durable tool approvals by outcome",
+        labels=["outcome"],
+    )
+
     # FORGE-490: an approval hold created where nothing can answer it (an
     # in-process store in a non-gateway process). It can only time out and
     # deny, so any non-zero count is a wiring bug.
@@ -1016,6 +1027,7 @@ class MetricsRegistry:
             cls.TOOL_APPROVAL_RESOLUTION_TOTAL,
             cls.UNREACHABLE_APPROVAL_HOLD_TOTAL,
             cls.APPROVAL_DECISION_TOTAL,
+            cls.TOOL_APPROVAL_TOTAL,
         ]
 
     @classmethod
@@ -1853,6 +1865,12 @@ class MetricsCollector:
                     "outcome": outcome,
                 },
             )
+
+    def record_tool_approval(self, outcome: str) -> None:
+        """Record one durable tool approval outcome (FORGE-780)."""
+        counter = self._instruments.get(MetricsRegistry.TOOL_APPROVAL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
 
     def record_unreachable_approval_hold(self, tool: str) -> None:
         """Record one approval hold with no reachable approver (FORGE-490)."""

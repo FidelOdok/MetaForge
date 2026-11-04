@@ -230,7 +230,8 @@ class TestTheCallCarriesItsOwnQuestion:
         ("answer", "named"),
         [
             ({"action": "decline"}, "a reviewer rejected it"),
-            ({"action": "accept", "content": {"approve": False}}, "a reviewer rejected it"),
+            # FORGE-780: an accept, even with an unticked ``approve: false``
+            # from an older form, approves; it is no longer a refusal case.
             ({"action": "cancel"}, "no one answered"),
         ],
     )

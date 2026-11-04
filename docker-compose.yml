@@ -42,6 +42,12 @@ services:
       # (off, advise, auto_clean or auto). Default advise: the reviewer only
       # recommends until an operator raises it.
       - METAFORGE_AUTO_APPROVE_MAX=${METAFORGE_AUTO_APPROVE_MAX:-advise}
+      # FORGE-780: a held tool write's approval lasts this long (s) for the
+      # identical retry; paid tools auto-approved by a project policy are
+      # capped per project per hour.
+      - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-1800}
+      - METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR=${METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR:-20}
+      - METAFORGE_AUTO_APPROVE_MESH_PER_HOUR=${METAFORGE_AUTO_APPROVE_MESH_PER_HOUR:-3}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - TEMPORAL_HOST=temporal:7233
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -540,6 +546,12 @@ services:
       # Unset, the sidecar falls back to that in-process queue and says so on
       # every start-up rather than only when somebody tries to write.
       - METAFORGE_GATEWAY_URL=http://gateway:8000
+      # FORGE-780: a held tool write's approval lasts this long (s) for the
+      # identical retry; paid tools auto-approved by a project policy are
+      # capped per project per hour.
+      - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-1800}
+      - METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR=${METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR:-20}
+      - METAFORGE_AUTO_APPROVE_MESH_PER_HOUR=${METAFORGE_AUTO_APPROVE_MESH_PER_HOUR:-3}
       # FORGE-647: the key the sidecar presents when it posts a live assembly
       # placement to the gateway. Empty on a gateway with no key, as for the worker.
       - METAFORGE_GATEWAY_API_KEY=${METAFORGE_GATEWAY_API_KEY:-}
