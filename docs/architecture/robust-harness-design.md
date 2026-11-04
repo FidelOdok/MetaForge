@@ -444,7 +444,8 @@ deletes whole adapters alphabetically — `twin.*` and `web.*` go first, which
 is exactly backwards. Instead:
 
 - every **native** tool is kept (few, curated, session-critical — e.g.
-  `chat.set_project_scope` and the skill layer);
+  `chat.set_project_scope`, `chat.render_ui` (see
+  [generative UI](../generative-ui.md)) and the skill layer);
 - three more classes are protected the same way, before the
   round-robin runs: any tool `search_tools` has **pinned**
   (`ToolRegistry.pin`/`pinned_names`); any tool whose name ends

@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     graph_ref_node TEXT,
     graph_ref_type TEXT,
     graph_ref_label TEXT,
+    blocks JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

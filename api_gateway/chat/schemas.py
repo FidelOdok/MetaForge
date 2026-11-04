@@ -11,6 +11,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from api_gateway.chat.ui_blocks import UiBlock
+
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
@@ -73,6 +75,10 @@ class MessageResponse(BaseModel):
     graph_ref_node: str | None = None
     graph_ref_type: str | None = None
     graph_ref_label: str | None = None
+    blocks: list[UiBlock] = Field(
+        default_factory=list,
+        description="Typed UI blocks rendered with an agent reply (generative UI)",
+    )
     created_at: datetime
     updated_at: datetime
 

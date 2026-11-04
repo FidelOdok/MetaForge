@@ -91,6 +91,8 @@ interface CreateStore {
   attach: (projectId: string, files: File[]) => void;
   removeAttachment: (projectId: string, id: string) => void;
   submit: (projectId: string, tools: Record<Intent, string[]>) => boolean;
+  /** Send an answer given through a reply component (a choice, a measurement), leaving the draft alone. */
+  reply: (projectId: string, text: string, tools: Record<Intent, string[]>) => boolean;
   retry: (projectId: string, id: string, tools: Record<Intent, string[]>) => void;
   restore: (projectId: string, id: string) => void;
   discard: (projectId: string, id: string) => void;
@@ -250,6 +252,21 @@ export const useCreateStore = create<CreateStore>()(
                 state: 'queued',
                 createdAt: new Date().toISOString(),
               },
+            ],
+          }));
+          void pump(projectId);
+          return true;
+        },
+
+        reply: (projectId, text, tools) => {
+          const answer = text.trim();
+          if (!answer) return false;
+          const id = nextId('ins');
+          turnTools.set(id, tools.ask ?? []);
+          patch(projectId, (cur) => ({
+            queue: [
+              ...cur.queue,
+              { id, text: answer, intent: 'ask', references: [], state: 'queued', createdAt: new Date().toISOString() },
             ],
           }));
           void pump(projectId);

@@ -1723,6 +1723,7 @@ export function TwinViewerPage() {
             clearModel();
           }}
           onEngage={() => setChatMin(false)}
+          onShowPart={selectNode}
           headerActions={
             <>
               <button

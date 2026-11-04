@@ -11,6 +11,7 @@ should guard with ``api_gateway.db.HAS_SQLALCHEMY`` before importing.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, func
@@ -62,6 +63,14 @@ class ChatThreadRow(Base):
     )
 
 
+# Columns added after a table first shipped. ``create_all`` creates missing
+# tables but never alters an existing one, so startup runs these (Postgres,
+# idempotent) after it.
+ADDITIVE_COLUMNS: tuple[str, ...] = (
+    "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS blocks JSON",
+)
+
+
 class ChatMessageRow(Base):
     """``chat_messages`` table."""
 
@@ -76,6 +85,9 @@ class ChatMessageRow(Base):
     graph_ref_node: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     graph_ref_type: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     graph_ref_label: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    # Generative UI blocks on an agent reply. Added to existing databases by
+    # ADDITIVE_COLUMNS, since create_all never alters a table that exists.
+    blocks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

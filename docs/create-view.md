@@ -69,6 +69,11 @@ sent keeps running while the person is elsewhere. The draft survives a
 reload; an instruction caught mid-send by a reload comes back as *not sent*,
 with a note to check the conversation before retrying.
 
+Replies are rendered with [generative UI](generative-ui.md): the agent can
+answer with a comparison of options, a question to click an answer to, a
+request for a measurement, figures against their limits or a proposed change
+to approve in place, and the text itself is Markdown.
+
 References (photos, sketches, documents, design files) upload the moment they
 are attached, through `/v1/uploads` with the dashboard's own approval, and
 each shows *Uploading*, *Added*, *Not supported* (with the reason) or

@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { useHarnessModels, useHarnessProviders, useHarnessTools } from '../../hooks/use-harness';
+import { MessageBody } from '../chat/MessageBody';
 import { assistantKeys, useDecideProposal, useProposals } from '../../hooks/use-assistant';
 import { twinKeys } from '../../hooks/use-twin';
 import { twinChatKeys, useCapturedSessions, useTwinChatThread, useTwinChatThreads } from '../../hooks/use-twin-chat';
@@ -82,13 +83,23 @@ export interface TwinAgentChatProps {
   onApplied: () => void;
   onEngage?: () => void;
   headerActions?: ReactNode;
+  /** Select a work product the agent pointed to (a part block). */
+  onShowPart?: (nodeId: string) => void;
 }
 
 /**
  * Twin agent drawer: project-scoped conversation threads plus the pending
  * change proposals for the project, docked over the digital-twin canvas.
  */
-export function TwinAgentChat({ projectId, projectName, node, onApplied, onEngage, headerActions }: TwinAgentChatProps) {
+export function TwinAgentChat({
+  projectId,
+  projectName,
+  node,
+  onApplied,
+  onEngage,
+  headerActions,
+  onShowPart,
+}: TwinAgentChatProps) {
   const queryClient = useQueryClient();
   const providers = useHarnessProviders();
   const tools = useHarnessTools();
@@ -221,17 +232,20 @@ export function TwinAgentChat({ projectId, projectName, node, onApplied, onEngag
     textareaRef.current?.focus();
   }
 
-  async function send() {
-    if (busy || !projectId || !draft.trim() || !canSend || (interaction === 'propose' && !proposeTool)) return;
+  /** Sends the draft, or `answer` given through a reply block (the draft is then kept). */
+  async function send(answer?: string) {
+    const fromBlock = answer !== undefined;
+    if (busy || !projectId || !(answer ?? draft).trim() || (!fromBlock && !canSend)) return;
+    if (!fromBlock && interaction === 'propose' && !proposeTool) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setBusy(true);
     setNotice('');
-    const refNode = contextNode;
-    const text = draft.trim();
+    const refNode = fromBlock ? undefined : contextNode;
+    const text = (answer ?? draft).trim();
     try {
       const refs: { id: string; name: string }[] = [];
-      for (const att of attachments) {
+      for (const att of fromBlock ? [] : attachments) {
         if (att.nodeId) {
           refs.push({ id: att.nodeId, name: att.file.name });
           continue;
@@ -275,8 +289,9 @@ export function TwinAgentChat({ projectId, projectName, node, onApplied, onEngag
             updated_at: refNode.updatedAt,
           })}`
         : '';
-      const instruction =
-        interaction === 'propose'
+      const instruction = fromBlock
+        ? '\nDiscuss using the supplied context. No tools are enabled for this turn. Do not claim to have changed or simulated the design.'
+        : interaction === 'propose'
           ? '\nPropose a reviewable change using twin.propose_change; do not apply it. Include rationale and affected work products.'
           : interaction === 'tools'
             ? '\nUse only the explicitly selected tools for this request. Report actions and results accurately.'
@@ -291,15 +306,17 @@ export function TwinAgentChat({ projectId, projectName, node, onApplied, onEngag
               ? '\n\nAttached twin work products (references, not inline image content): ' + JSON.stringify(refs)
               : '') +
             instruction,
-          tools: turnTools,
+          tools: fromBlock ? [] : turnTools,
           ...(provider ? { provider } : {}),
           ...(model.trim() ? { model: model.trim() } : {}),
           ...(refNode ? { graph_ref_node: refNode.id, graph_ref_type: refNode.type, graph_ref_label: refNode.name } : {}),
         },
         controller.signal,
       );
-      setDraft('');
-      setAttachments([]);
+      if (!fromBlock) {
+        setDraft('');
+        setAttachments([]);
+      }
       await queryClient.invalidateQueries({ queryKey: twinChatKeys.all });
       await queryClient.invalidateQueries({ queryKey: assistantKeys.all });
       setNotice('Turn finished. Review the gateway response below.');
@@ -403,7 +420,7 @@ export function TwinAgentChat({ projectId, projectName, node, onApplied, onEngag
           ) : thread.isLoading && activeThreadId ? (
             <p role="status">Loading conversation…</p>
           ) : messages.length ? (
-            messages.map((m) => (
+            messages.map((m, index) => (
               <article key={m.id} className={`sc-turn ${m.actor_kind === 'user' ? 'sc-user' : 'sc-agent'}`}>
                 <header>
                   <strong>
@@ -411,7 +428,19 @@ export function TwinAgentChat({ projectId, projectName, node, onApplied, onEngag
                   </strong>
                   <time>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                 </header>
-                <p>{m.content.split(CONTEXT_SUFFIX)[0]}</p>
+                <MessageBody
+                  text={m.content.split(CONTEXT_SUFFIX)[0] ?? ''}
+                  blocks={m.blocks}
+                  plain={m.actor_kind === 'user'}
+                  projectId={projectId}
+                  interactive={!busy && index === messages.length - 1}
+                  onReply={(answer) => void send(answer)}
+                  onShowPart={onShowPart}
+                  onDecided={(decision) => {
+                    void queryClient.invalidateQueries({ queryKey: twinKeys.all });
+                    if (decision === 'approve') onApplied();
+                  }}
+                />
                 {m.graph_ref_label && (
                   <span className="sc-reference">
                     <Box size={12} />

@@ -2493,6 +2493,52 @@
         "title": "CallerOperation",
         "type": "object"
       },
+      "CalloutBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "tone": {
+            "default": "info",
+            "enum": [
+              "info",
+              "warning",
+              "risk",
+              "success"
+            ],
+            "title": "Tone",
+            "type": "string"
+          },
+          "type": {
+            "const": "callout",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title"
+        ],
+        "title": "CalloutBlock",
+        "type": "object"
+      },
       "CancelRequest": {
         "properties": {
           "reason": {
@@ -2744,6 +2790,85 @@
         "title": "ChecklistResponse",
         "type": "object"
       },
+      "ChoiceBlock": {
+        "additionalProperties": false,
+        "description": "A question the person answers by clicking; the answer is sent as their reply.",
+        "properties": {
+          "multiple": {
+            "default": false,
+            "title": "Multiple",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ChoiceOption"
+            },
+            "maxItems": 8,
+            "minItems": 2,
+            "title": "Options",
+            "type": "array"
+          },
+          "prompt": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "type": {
+            "const": "choice",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "prompt",
+          "options"
+        ],
+        "title": "ChoiceBlock",
+        "type": "object"
+      },
+      "ChoiceOption": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "ChoiceOption",
+        "type": "object"
+      },
       "ClaimRequest": {
         "properties": {
           "client": {
@@ -2765,6 +2890,140 @@
           }
         },
         "title": "ClaimReviewTask",
+        "type": "object"
+      },
+      "ComparisonBlock": {
+        "additionalProperties": false,
+        "description": "Options side by side, with the trade-offs and an optional recommendation.",
+        "properties": {
+          "basis": {
+            "anyOf": [
+              {
+                "enum": [
+                  "illustrative",
+                  "estimate",
+                  "calculated",
+                  "measured",
+                  "verified"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
+          "criteria": {
+            "default": [],
+            "items": {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonOption"
+            },
+            "maxItems": 5,
+            "minItems": 2,
+            "title": "Options",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "type": {
+            "const": "comparison",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "options"
+        ],
+        "title": "ComparisonBlock",
+        "type": "object"
+      },
+      "ComparisonOption": {
+        "additionalProperties": false,
+        "properties": {
+          "cons": {
+            "default": [],
+            "items": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Cons",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "pros": {
+            "default": [],
+            "items": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Pros",
+            "type": "array"
+          },
+          "recommended": {
+            "default": false,
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "values": {
+            "additionalProperties": {
+              "maxLength": 120,
+              "type": "string"
+            },
+            "default": {},
+            "maxProperties": 10,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ComparisonOption",
         "type": "object"
       },
       "CompileRequest": {
@@ -9698,6 +9957,65 @@
         "title": "Measurement",
         "type": "object"
       },
+      "MeasurementRequestBlock": {
+        "additionalProperties": false,
+        "description": "Asks the person for a dimension, with its unit and why it matters.",
+        "properties": {
+          "critical": {
+            "default": false,
+            "title": "Critical",
+            "type": "boolean"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
+          },
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "type": {
+            "const": "measurement_request",
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          }
+        },
+        "required": [
+          "type",
+          "label",
+          "unit"
+        ],
+        "title": "MeasurementRequestBlock",
+        "type": "object"
+      },
       "MemoryHitResponse": {
         "description": "Wire shape of a single hit in the response payload.",
         "properties": {
@@ -9984,6 +10302,52 @@
             "title": "Actor Kind",
             "type": "string"
           },
+          "blocks": {
+            "description": "Typed UI blocks rendered with an agent reply (generative UI)",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "callout": "#/components/schemas/CalloutBlock",
+                  "choice": "#/components/schemas/ChoiceBlock",
+                  "comparison": "#/components/schemas/ComparisonBlock",
+                  "measurement_request": "#/components/schemas/MeasurementRequestBlock",
+                  "metrics": "#/components/schemas/MetricsBlock",
+                  "part": "#/components/schemas/PartBlock",
+                  "proposal": "#/components/schemas/ProposalBlock",
+                  "table": "#/components/schemas/TableBlock"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ChoiceBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/ComparisonBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/MeasurementRequestBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/TableBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/MetricsBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/CalloutBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/ProposalBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/PartBlock"
+                }
+              ]
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
           "content": {
             "title": "Content",
             "type": "string"
@@ -10055,6 +10419,116 @@
           "updated_at"
         ],
         "title": "MessageResponse",
+        "type": "object"
+      },
+      "MetricItem": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "limit_kind": {
+            "default": "max",
+            "enum": [
+              "max",
+              "min"
+            ],
+            "title": "Limit Kind",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "MetricItem",
+        "type": "object"
+      },
+      "MetricsBlock": {
+        "additionalProperties": false,
+        "description": "Figures, each optionally against its limit.",
+        "properties": {
+          "basis": {
+            "anyOf": [
+              {
+                "enum": [
+                  "illustrative",
+                  "estimate",
+                  "calculated",
+                  "measured",
+                  "verified"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MetricItem"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "type": {
+            "const": "metrics",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "items"
+        ],
+        "title": "MetricsBlock",
         "type": "object"
       },
       "MigrationApplyRequest": {
@@ -10728,6 +11202,55 @@
         "title": "OverhangFace",
         "type": "object"
       },
+      "PartBlock": {
+        "additionalProperties": false,
+        "description": "A work product in the digital twin the reply is about.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "node_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "type": {
+            "const": "part",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "node_id"
+        ],
+        "title": "PartBlock",
+        "type": "object"
+      },
       "PartRef": {
         "description": "One part of an assembly, referencing a Twin STEP work product.",
         "properties": {
@@ -11351,6 +11874,55 @@
           "gates"
         ],
         "title": "PromotionHistoryResponse",
+        "type": "object"
+      },
+      "ProposalBlock": {
+        "additionalProperties": false,
+        "description": "A proposed design change, approved or rejected where it is shown.",
+        "properties": {
+          "change_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Change Id",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "type": {
+            "const": "proposal",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "change_id"
+        ],
+        "title": "ProposalBlock",
         "type": "object"
       },
       "ProposalListResponse": {
@@ -15878,6 +16450,90 @@
           "suggestion"
         ],
         "title": "SynthesizeResponse",
+        "type": "object"
+      },
+      "TableBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "anyOf": [
+              {
+                "enum": [
+                  "illustrative",
+                  "estimate",
+                  "calculated",
+                  "measured",
+                  "verified"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
+          "columns": {
+            "items": {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Columns",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "maxItems": 50,
+            "title": "Rows",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "type": {
+            "const": "table",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "columns",
+          "rows"
+        ],
+        "title": "TableBlock",
         "type": "object"
       },
       "TargetMaturity": {
