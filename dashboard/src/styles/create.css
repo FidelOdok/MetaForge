@@ -386,6 +386,10 @@
   font-size: 14px;
   line-height: 1.5;
 }
+/* The composer's border shows focus; a ring on the field inside it doubles up. */
+.cv-composer .cv-textarea:focus-visible {
+  outline: none !important;
+}
 .cv-send {
   display: grid;
   place-items: center;
