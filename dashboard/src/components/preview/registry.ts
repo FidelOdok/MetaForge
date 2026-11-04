@@ -188,7 +188,10 @@ export function previewEngineFor(subject: PreviewSubject): PreviewResolution {
   if (subject.designFiles && MESH_FORMATS.has(fmt)) return { engine: 'mesh3d', format: fmt };
   if (subject.designFiles) return { engine: 'design', format: fmt };
   if (wpType === 'robot_description') return { engine: 'robot', format: fmt };
-  if (wpType === 'sketch_strokes') return { engine: 'sketch', format: fmt };
+  // FORGE-791: the compiler's proposal and the promoted sketch preview the same way.
+  if (wpType === 'sketch_strokes' || wpType === 'sketch_interpretation' || wpType === 'parametric_sketch') {
+    return { engine: 'sketch', format: fmt };
+  }
   if (wpType === 'simulation_result') return { engine: 'sim', format: fmt };
   if (wpType === 'design_decision' && isTextualOrUnknown(fmt)) return { engine: 'decision', format: fmt };
   if (wpType === 'constraint_set' && isTextualOrUnknown(fmt)) return { engine: 'requirements', format: fmt };

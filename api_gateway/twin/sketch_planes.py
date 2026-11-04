@@ -372,6 +372,10 @@ async def plane_summary_for_sketch(
         "state": plane.state.value,
         "plane_ref": _ref(node.metadata or {}),
         "principal": plane.principal.value if plane.principal else None,
+        # Read by the sketch compiler, which carries a placed plane's ref and
+        # unit into an interpretation and its promotion.
+        "unit": plane.unit.value,
+        "placed": plane.placed,
     }
 
 

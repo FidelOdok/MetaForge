@@ -44,6 +44,9 @@ def test_definitions_are_the_versioned_types() -> None:
         "sketch_strokes",
         # The plane a sketch is placed on.
         "sketch_plane",
+        # The sketch compiler's proposal and its promoted result.
+        "sketch_interpretation",
+        "parametric_sketch",
     }
 
 

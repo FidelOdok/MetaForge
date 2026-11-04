@@ -979,6 +979,26 @@ groups:
             saved, but they cannot be placed on a plane or moved, so they do not
             appear in 3D. Check the gateway logs (sketch_plane_change_failed).
 
+  # FORGE-791 -- sketch compiler (api_gateway/twin/sketch_compiler_recorder.py).
+  - name: metaforge_sketch_compile
+    rules:
+      - alert: SketchCompilerFailing
+        expr: >-
+          sum(increase(metaforge_sketch_compile_total{outcome="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_sketch_compile_total{outcome=~"proposed|promoted|approved|failed"}[30m])), 1) > 0.2
+          and sum(increase(metaforge_sketch_compile_total{outcome=~"proposed|promoted|approved|failed"}[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sketches cannot be made editable"
+          description: >-
+            More than a fifth of the last half hour's sketch interpretations or
+            promotions failed on the gateway (refusals of accepted rules that do
+            not hold are not counted). The fitted shapes stay in each person's
+            browser, but they are not reaching the digital twin. Check the
+            gateway logs (sketch_interpretation_failed, sketch_promotion_failed).
+
   # FORGE-734 -- run supervisor (api_gateway/runs/supervisor.py).
   - name: metaforge_run_supervisor
     rules:
