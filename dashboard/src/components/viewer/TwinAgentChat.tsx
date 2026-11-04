@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { useHarnessModels, useHarnessProviders, useHarnessTools } from '../../hooks/use-harness';
+import { ActivitySteps } from '../chat/ActivitySteps';
 import { MessageBody } from '../chat/MessageBody';
 import { assistantKeys, useDecideProposal, useProposals } from '../../hooks/use-assistant';
 import { twinKeys } from '../../hooks/use-twin';
@@ -468,30 +469,7 @@ export function TwinAgentChat({
             </div>
           )}
           {verbosity !== 'concise' && activity.length > 0 && (
-            <details className="sc-activity" open={verbosity === 'verbose'}>
-              <summary>Agent activity · {activity.length} events</summary>
-              {activity.map((evt, i) => (
-                <div key={i}>
-                  <strong>{evt.kind}</strong>
-                  <time>{new Date(evt.at).toLocaleTimeString()}</time>
-                  {verbosity === 'verbose' ? (
-                    <pre>{JSON.stringify(evt.data, null, 2)}</pre>
-                  ) : (
-                    <p>
-                      {typeof evt.data === 'string'
-                        ? evt.data
-                        : typeof evt.data === 'object' && evt.data !== null
-                          ? String(
-                              (evt.data as { message?: unknown; tool?: unknown }).message ||
-                                (evt.data as { tool?: unknown }).tool ||
-                                'Event received',
-                            )
-                          : ''}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </details>
+            <ActivitySteps events={activity} open={busy || verbosity === 'verbose'} showRaw={verbosity === 'verbose'} />
           )}
           {busy && <p role="status">Agent turn in progress…</p>}
         </div>

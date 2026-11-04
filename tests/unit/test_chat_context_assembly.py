@@ -159,6 +159,23 @@ def test_layered_prompt_without_brief_has_no_project_section() -> None:
     assert "[project context]" not in prompt
 
 
+def test_layered_prompt_asks_for_short_plain_answers() -> None:
+    """Replies were long walk-throughs full of Markdown symbols; the prompt
+    now asks for the answer first, briefly, without tables or tool narration."""
+    prompt = build_system_prompt(_runtime())
+    assert "lead with the answer" in prompt
+    assert "under 120 words" in prompt
+    assert "no Markdown tables" in prompt
+    # Without the render tool there is nothing to point the model at.
+    assert "chat.render_ui" not in prompt
+
+
+def test_layered_prompt_points_at_blocks_when_render_ui_is_registered() -> None:
+    prompt = build_system_prompt(_runtime(["chat.render_ui"]))
+    assert "show it with chat.render_ui instead of describing it in prose" in prompt
+    assert "do not repeat in your text what the blocks show" in prompt
+
+
 def test_layered_prompt_nudges_design_flow_when_run_tool_present() -> None:
     """FORGE-90: run.start_design_flow (family 'run') is reachable but was
     never surfaced proactively — only when the user's own phrasing matched

@@ -509,3 +509,88 @@ label.mb-option > span {
   color: var(--mb-muted);
   font-size: 12px;
 }
+
+/* Agent activity: plain steps instead of raw stream events */
+.mb-activity {
+  --mb-line: var(--mf-c-3c3e49);
+  --mb-muted: var(--mf-c-9a9aaa);
+  --mb-ok: var(--mf-c-3dd68c);
+  --mb-warn: var(--mf-c-f59e0b);
+  --mb-bad: var(--mf-c-ffb4ab);
+  --mb-info: var(--mf-c-86cfff);
+  margin: 4px 0 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--mb-line);
+  font-size: 12px;
+}
+.mb-activity > summary {
+  cursor: pointer;
+  color: var(--mb-muted);
+}
+.mb-activity ol {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.mb-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.mb-step > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.mb-step > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.mb-step small {
+  color: var(--mb-muted);
+  overflow-wrap: anywhere;
+}
+.mb-step.is-done > svg {
+  color: var(--mb-ok);
+}
+.mb-step.is-failed > svg {
+  color: var(--mb-bad);
+}
+.mb-step.is-waiting > svg {
+  color: var(--mb-warn);
+}
+.mb-step.is-info > svg,
+.mb-step.is-running > svg {
+  color: var(--mb-info);
+}
+.mb-spin {
+  animation: mb-spin 1s linear infinite;
+}
+@keyframes mb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb-spin {
+    animation: none;
+  }
+}
+.mb-raw {
+  margin-top: 8px;
+}
+.mb-raw summary {
+  cursor: pointer;
+  color: var(--mb-muted);
+}
+.mb-raw pre {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--mf-c-111319);
+}
