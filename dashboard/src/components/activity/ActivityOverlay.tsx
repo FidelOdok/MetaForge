@@ -5,13 +5,15 @@ import { ChevronDown, ChevronUp, Pause, Play, X } from 'lucide-react';
 
 import { cancelOperation, retryOperation } from '../../api/endpoints/operations';
 import { refusalOf } from '../../api/endpoints/create';
-import { useApproval } from '../../hooks/use-approvals';
+import { useImpact, useInterfaces } from '../../hooks/use-impact';
 import { useTwinNode } from '../../hooks/use-twin';
 import { sortedOperations, type OperationView } from '../../lib/operations-reducer';
 import { useOperationsStore, useProjectOperations } from '../../store/operations-store';
+import { impactIdOf } from '../../types/impact';
 import { isTerminal, type ActionRef, type ArtifactRef, type OperationDomain } from '../../types/operations';
-import { ApprovalCard } from '../approvals/ApprovalCard';
 import { PreviewHost } from '../preview/PreviewHost';
+import { ImpactPanel } from './ImpactPanel';
+import { InlineApproval } from './InlineApproval';
 import {
   authorityLabel,
   currentStep,
@@ -26,8 +28,9 @@ import {
   statusTone,
 } from './labels';
 import { useNow, useOnScreen, usePrefersReducedMotion, useThrottledAnnouncement } from './motion';
+import { sceneGraphFrom } from './scenes/graph';
 import { sceneFor } from './scenes/registry';
-import { sceneStateOf } from './scenes/types';
+import { sceneDomainOf, sceneStateOf } from './scenes/types';
 import '../../styles/activity.css';
 
 export interface ActivityOverlayProps {
@@ -152,6 +155,8 @@ function PrimaryOperation({
   const urgent = op.state === 'failed' || op.state === 'waiting_for_user' || op.state === 'blocked';
   // ASVG-015: the stage whose detail is open, '' for the operation itself.
   const [openStage, setOpenStage] = useState<string | null>(null);
+  // FORGE-793: a cross-domain impact operation names its recorded impact.
+  const impactId = impactIdOf(op.operation_id);
   const announcement = useThrottledAnnouncement(
     connected ? `${op.title}: ${label}. ${step}` : `${op.title}: ${CONNECTION_LOST}`,
     urgent || !connected,
@@ -204,11 +209,22 @@ function PrimaryOperation({
         {announcement}
       </div>
 
-      <Actions projectId={projectId} op={op} onAction={onAction} onApproval={onApproval} />
+      {impactId && <ImpactPanel projectId={projectId} impactId={impactId} detail={detail} />}
+
+      <Actions
+        projectId={projectId}
+        op={op}
+        onAction={onAction}
+        onApproval={onApproval}
+        // Create shows one next action for an impact (UXS-015): the summary's.
+        hideApprovals={!!impactId && !detail}
+      />
 
       {expanded && (
         <div className="act-body">
           <Visual
+            projectId={projectId}
+            impactId={impactId}
             op={op}
             connected={connected}
             motionPaused={motionPaused}
@@ -240,12 +256,16 @@ function currentStageId(op: OperationView): string {
 }
 
 function Visual({
+  projectId,
+  impactId,
   op,
   connected,
   motionPaused,
   onTogglePause,
   onInspectStage,
 }: {
+  projectId: string;
+  impactId: string | null;
   op: OperationView;
   connected: boolean;
   motionPaused: boolean;
@@ -257,7 +277,14 @@ function Visual({
   const ref = useRef<HTMLDivElement>(null);
   const onScreen = useOnScreen(ref);
   const reducedMotion = usePrefersReducedMotion();
-  const artifact = realArtifact(op);
+  // FORGE-793: the cross-domain scene draws the real dependency graph: the
+  // project's interface edges, and the impact's own graph when it is one.
+  const crossDomain = sceneDomainOf(op.domain) === 'cross_domain';
+  const interfaces = useInterfaces(projectId, crossDomain);
+  const impact = useImpact(projectId, impactId);
+  const graph = crossDomain ? sceneGraphFrom(interfaces.data, impact.data) : null;
+  // An impact's artifact refs point at what it affects, not at a preview of it.
+  const artifact = impactId ? null : realArtifact(op);
   const Scene = sceneFor(op.domain);
   const stageIndex = Math.max(
     op.stages.filter((s) => s.state === 'completed').length,
@@ -280,7 +307,9 @@ function Visual({
         </figure>
       ) : (
         <figure className="act-scene-wrap">
-          <figcaption className="act-visual-label">Illustrative activity</figcaption>
+          <figcaption className="act-visual-label" data-testid="activity-visual-label">
+            {graph ? 'Design dependencies' : 'Illustrative activity'}
+          </figcaption>
           {/* ASVG-015: the drawing opens what it depicts, or the stage's detail. */}
           <button
             type="button"
@@ -299,6 +328,7 @@ function Visual({
               reducedMotion={reducedMotion}
               paused={paused}
               staleRevision={op.target_revision}
+              graph={graph}
             />
           </button>
           {!reducedMotion && op.state === 'running' && (
@@ -508,11 +538,14 @@ function Actions({
   op,
   onAction,
   onApproval,
+  hideApprovals = false,
 }: {
   projectId: string;
   op: OperationView;
   onAction?: (op: OperationView, action: ActionRef) => void | Promise<unknown>;
   onApproval?: (op: OperationView, action: ActionRef) => void;
+  /** The approvals are offered elsewhere in the card (an impact's summary). */
+  hideApprovals?: boolean;
 }) {
   const [openApproval, setOpenApproval] = useState<string | null>(null);
   // Cancel and retry go to the gateway: through the host when it handles
@@ -525,13 +558,14 @@ function Actions({
       return undefined;
     },
   });
-  if (op.action_refs.length === 0) return null;
+  const actions = hideApprovals ? op.action_refs.filter((a) => a.kind !== 'approval') : op.action_refs;
+  if (actions.length === 0) return null;
   const runHref = op.run_id ? `/runs/${encodeURIComponent(op.run_id)}` : null;
 
   return (
     <div className="act-actions-wrap">
       <div className="act-actions">
-        {op.action_refs.map((action) => {
+        {actions.map((action) => {
           const key = `${action.kind}:${action.id}`;
           if (action.kind === 'approval') {
             if (onApproval) {
@@ -572,11 +606,4 @@ function Actions({
       {openApproval && <InlineApproval id={openApproval} />}
     </div>
   );
-}
-
-/** The existing approval card, unchanged: no second approval UI. */
-function InlineApproval({ id }: { id: string }) {
-  const approval = useApproval(id);
-  if (approval.data) return <ApprovalCard item={approval.data} />;
-  return <p className="act-muted">{approval.isError ? 'This review could not be loaded.' : 'Loading the review…'}</p>;
 }

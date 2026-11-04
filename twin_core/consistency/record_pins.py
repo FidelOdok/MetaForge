@@ -575,7 +575,20 @@ async def on_head_moved(
                 )
         except Exception as exc:  # noqa: BLE001 - never undo the head move
             logger.warning("record_supersede_on_approval_failed", item_key=item.key, error=str(exc))
-    return await mark_dependents_stale(twin, item, head_revision)
+    if str(getattr(item, "item_type", "") or "") in ("cad_model", "assembly"):
+        # CDE slice 6: a STEP exported from an older revision is now stale.
+        # It stays on its revision; only its state changes. Never raises.
+        from twin_core.geometry_state import mark_step_exports_stale
+
+        await mark_step_exports_stale(twin, item, head_revision)
+    marked = await mark_dependents_stale(twin, item, head_revision)
+    # FORGE-793: follow the item's interface edges to other domains, mark the
+    # results that read it across an interface stale, and record the impact.
+    # on_item_head_moved never raises.
+    from twin_core.impact.cross_domain import on_item_head_moved
+
+    await on_item_head_moved(twin, item, head_revision, head_node_id)
+    return marked
 
 
 async def mark_dependents_stale(twin: Any, item: Any, head_revision: int) -> list[StaleRecord]:
@@ -684,6 +697,58 @@ async def invalidate_closed_draft(
             records=[f"{m.record_type}:{m.record_id}" for m in marked],
         )
     return marked
+
+
+async def pinned_records(twin: Any, revision_node_id: UUID) -> list[tuple[Any, Any]]:
+    """``(pin edge, record node)`` for every record pinned to one revision node."""
+    return await _pinned_records(twin, revision_node_id)
+
+
+async def mark_stale_for_input(
+    twin: Any,
+    node: Any,
+    *,
+    input_key: str,
+    pinned: int,
+    current: int,
+    reason: str,
+) -> StaleRecord | None:
+    """Mark one still-valid record ``STALE`` because an input it relied on moved.
+
+    FORGE-793: the cross-domain walk uses this for a record that is pinned to
+    its own item's head, but whose check also read another item across an
+    interface (a firmware build reads the pin map; a DRC reads the enclosure's
+    keep-outs). The record keeps its pins and stays browsable; ``stale_for``
+    names the input and the revision it was valid against. Returns ``None``
+    when the record was already not valid, so nothing is marked twice.
+    """
+    meta = _node_metadata(node)
+    if record_staleness(meta) not in VALID_STATUSES:
+        return None
+    stale_for = dict(meta.get("stale_for") or {})
+    stale_for[input_key] = {"pinned": pinned, "current": current}
+    await _set_status(
+        twin, node, StalenessStatus.STALE, staleness_reason=reason, stale_for=stale_for
+    )
+    record_type = _node_record_type(node)
+    _count(record_type, StalenessStatus.STALE.value)
+    logger.info(
+        "record_marked_stale_for_input",
+        record_id=str(node.id),
+        record_type=record_type,
+        input_key=input_key,
+        pinned=pinned,
+        current=current,
+    )
+    return StaleRecord(
+        record_id=node.id,
+        record_type=record_type,
+        name=_node_name(node),
+        status=StalenessStatus.STALE.value,
+        reason=reason,
+        pinned=f"{input_key}@{pinned}",
+        current=f"{input_key}@{current}",
+    )
 
 
 async def set_record_status(

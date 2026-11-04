@@ -42,6 +42,7 @@ The id is `<prefix>:<native id>`. The prefix says which store holds the item;
 | `sketch:` | `sketch` | A design sketch work product | `POST /v1/twin/nodes/{id}/approve-sketch` |
 | `drawing:` | `drawing` | A technical drawing work product | `POST /v1/twin/nodes/{id}/approve-technical-drawing` |
 | `parametric_sketch:` | `parametric_sketch` | A sketch promoted from its interpretation on the Create stage, with only the accepted rules. A human-authority kind. See [the sketch compiler](twin_schema.md#sketch-compiler) | `POST /v1/twin/nodes/{id}/approve-parametric-sketch` |
+| `rerun:` | `rerun` | A re-check a cross-domain change proposed (a firmware build, a DRC, an FEA) that waits for a person. A human-authority kind. Id `rerun:<impact id>:<rerun id>`. See [re-checks after a cross-domain change](#re-checks-after-a-cross-domain-change) | `/v1/approvals` only |
 | `upload:` | `upload` | Files staged from outside: a plugin tool call, a signed upload link, the local plugin, or the API. A human-authority kind. See [Files in and out](file-transfer.md) | approve imports the files, reject deletes them |
 
 ## The item
@@ -135,6 +136,7 @@ restart:
 | `change` | `reviewer`, `reviewer_verified`, `decision_surface`, `decision_on_behalf_of`, `decision_agent` on the proposal. |
 | `sketch`, `drawing`, `parametric_sketch` | `approved_by`, `approver_verified`, `approval_surface`, `approval_on_behalf_of`, `approval_agent` in the work product metadata. |
 | `design_loop` | The same fields on the winning iteration node. |
+| `rerun` | `decided_by`, `decided_at` and `decision_reason` on the rerun, inside its `change_impact` record. |
 
 A decision made on an older route reports `surface: "unknown"`, because no
 surface was sent. A refused decision leaves no entry behind. A gate that was
@@ -394,6 +396,34 @@ In every mode:
   arguments hash, and marked used at once (it runs that call, not a retry). It
   is listed on the Approvals page as approved.
 
+## Re-checks after a cross-domain change
+
+When a design item's head moves, the twin walks its interface edges and
+records what the change affects (see
+[interface edges and cross-domain impact](twin_schema.md#interface-edges-and-cross-domain-impact)).
+Each result the change made stale, and each directly affected item, gets a
+proposed re-check: `kicad.run_drc` or `kicad.run_erc` on a board,
+`firmware.build` or `firmware.static_check` on firmware, `calculix.run_fea` on
+the geometry a simulation used. A re-check is proposed, never started by the
+walk. Its disposition comes from the rules that already decide held writes:
+
+| Re-check | Disposition |
+|----------|-------------|
+| Consequential: a firmware build or test, any write to a firmware or PCB item, or a target in a baseline (release-bound) | `requires_approval`, always, whatever the policy (XDM-007) |
+| A tool no policy may approve (`never_auto_approved`) | `requires_approval` |
+| A read-only check (`kicad.run_drc`, `kicad.run_erc`, `firmware.static_check`): the guardrails never hold it | `may_run_unattended`, status `queued` |
+| A producing analysis (`calculix.run_fea`) | `may_run_unattended` only when the project's policy approves that tool (`policy_may_approve`, so `auto`), else `requires_approval` |
+
+A re-check that requires approval is a `rerun` item here, a human-authority
+kind: an agent cannot decide it unless the gateway owner delegates human
+authority. Approve or reject it like any other item; nothing else holds. Its
+`base_revision` is the change it is about (`KEY@n`). Approving records the
+decision on the impact; the agent or person then runs the tool, and its new
+result supersedes the stale one through its revision pins. When no re-check of
+a change is left waiting, the change's operation completes. A queued
+(unattended) re-check is not started by MetaForge either: it is listed so the
+agent or person may run it without asking.
+
 ## Approval policy and the gate reviewer
 
 Each project has an **approval policy** that says who decides its design-flow
@@ -535,8 +565,8 @@ An agent decision without `X-MetaForge-On-Behalf-Of` is a 422.
 
 **Human-authority approvals stay human.** Items of kind `human_authority`
 (`twin.attempt_promotion`, `twin.approve_design_loop`,
-`twin.approve_engineering_change`), `design_loop`, `upload` and `parametric_sketch`
-cannot be decided by an agent. For an agent caller they show `decidable: false` with an explanation,
+`twin.approve_engineering_change`), `design_loop`, `upload`, `parametric_sketch` and
+`rerun` cannot be decided by an agent. For an agent caller they show `decidable: false` with an explanation,
 and a decision attempt is a 403. The gateway owner can delegate them by setting
 `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true` on the gateway (default off).
 

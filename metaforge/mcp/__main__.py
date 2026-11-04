@@ -1946,6 +1946,11 @@ async def _bootstrap(
     from metaforge.mcp.live_publisher import http_operation_publisher
 
     set_operation_event_publisher(http_operation_publisher())
+    # FORGE-793: a head this process moves walks its interface edges with the
+    # same approval policy, pin map diff and operation event as the gateway.
+    from api_gateway.twin.impact_service import install_impact_hooks
+
+    install_impact_hooks()
     # FORGE-788: a job whose target item moved on while it ran ends stale here
     # too, against the same twin the sidecar's tools write to.
     from api_gateway.operations.heads import make_item_head_resolver
@@ -2120,6 +2125,21 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         return make_sketch_generator(twin, project_backend)
 
     _try("sketch_generator", _sketch_generator)
+    # CDE slice 6: twin.build_exact_cad and twin.export_cad_step, whose
+    # cadquery.* calls go through this server's own registry once it exists.
+    try:
+        from api_gateway.twin.exact_cad import ExactCadService
+        from api_gateway.twin.geometry_recorder import make_geometry_recorder
+
+        exact_bridge = _LateBridge()
+        exact_cad = ExactCadService(
+            twin, bridge=exact_bridge, recorder=make_geometry_recorder(twin, project_backend)
+        )
+        exact_cad.register_retries()
+        bindings["exact_cad_service"] = exact_cad
+        bridges.append(exact_bridge)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="exact_cad", error=str(exc))
 
     # FORGE-630: twin.render_work_product, whose blender.render call goes
     # through this server's own registry once it exists.

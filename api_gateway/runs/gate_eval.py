@@ -345,6 +345,22 @@ class ProjectGateEvaluator:
                     names.append(member)
         return [n for n in names if n]
 
+    async def exact_cad_readiness(self, project_id: str | None) -> list[Any]:
+        """CDE slice 6: each CAD item's head, validated and STEP round-tripped or not.
+
+        Empty when there is no twin, no project, or no CAD item: nothing to hold
+        to the rule. Read from the twin, the same answer the G8 release check
+        gives.
+        """
+        if not project_id or self._twin is None:
+            return []
+        from twin_core.geometry_state import exact_cad_readiness
+
+        try:
+            return await exact_cad_readiness(self._twin, project_id)
+        except ValueError:
+            return []
+
     async def dfm_review(self, project_id: str | None) -> Any:
         """The project's latest DFM review (FORGE-611), or ``None``."""
         from orchestrator.design_flow.context import parse_dfm_review

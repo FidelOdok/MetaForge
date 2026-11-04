@@ -23,6 +23,7 @@ import { JOURNEY, journeyStep } from '../components/create/copy';
 import { ActivityOverlay } from '../components/activity/ActivityOverlay';
 import { useOperations } from '../hooks/use-operations';
 import { useOperationActions } from '../hooks/use-operation-actions';
+import { exactChecksState } from '../lib/exact-checks';
 import '../styles/create.css';
 
 const PANELS = ['brief', 'decisions', 'make', 'inspect', 'history'] as const;
@@ -94,6 +95,8 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   const working = operations.known
     ? operations.active.length > 0 || session.queue.some((i) => i.state === 'sending')
     : queueWorking;
+  // CDE slice 6: exact geometry checks behind the preview, said in plain words.
+  const engineeringChecks = exactChecksState(operations.operations.byId);
 
   // Opening a creation makes it the workspace's project, so Engineering shows the same one.
   useEffect(() => {
@@ -253,6 +256,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
             }}
             working={working}
             presenting={presenting}
+            engineeringChecks={engineeringChecks}
           />
           {!presenting && (
             <ActivityOverlay

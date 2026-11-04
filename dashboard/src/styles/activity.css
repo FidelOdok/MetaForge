@@ -489,3 +489,49 @@
   margin: 4px 0;
   padding-left: 16px;
 }
+
+/* FORGE-793: a change's cross-domain impact in its activity card, and the
+   scene drawn from the real dependency graph. */
+.act-impact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.act-impact-line {
+  margin: 0;
+  font-weight: 600;
+}
+.act-impact-next {
+  margin: 0;
+}
+.act-impact-domain h4 {
+  margin: 6px 0 2px;
+  color: var(--act-muted);
+  font-size: 12px;
+}
+.act-impact ul {
+  margin: 2px 0;
+  padding-left: 16px;
+}
+.act-impact-why {
+  padding-left: 0;
+  list-style: none;
+}
+.act-badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px dashed var(--act-warn);
+  border-radius: 8px;
+  font-size: 11px;
+}
+.act-scene .act-trace.is-proposed {
+  stroke-dasharray: 2 3;
+}
+.act-scene .act-node.role-changed {
+  fill: var(--act-accent);
+  stroke: var(--act-accent);
+}
+.act-scene .act-node.role-possible {
+  stroke: var(--act-warn);
+  stroke-dasharray: 2 2;
+}

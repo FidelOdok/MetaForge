@@ -28,6 +28,20 @@ class RecordStalenessResponse(BaseModel):
     supersededBy: str | None = None  # noqa: N815
 
 
+class GeometryStateResponse(BaseModel):
+    """Where a geometry artifact stands (CDE slice 6)."""
+
+    #: concept | preview | exact_ready | validation_pending | validated |
+    #: failed | stale | released
+    state: str
+    #: Concept | Preview | Exact | Validated
+    badge: str | None = None
+    #: illustrative | preview | exact | validated
+    authority: str | None = None
+    itemKey: str | None = None  # noqa: N815
+    sourceRevision: int | None = None  # noqa: N815
+
+
 class TwinNodeResponse(BaseModel):
     """Single node in the Digital Twin graph, shaped for the dashboard."""
 
@@ -89,6 +103,10 @@ class TwinNodeResponse(BaseModel):
     # revision pins and staleness. None for definitions and other nodes.
     dependsOn: list[RecordPinResponse] | None = None  # noqa: N815
     staleness: RecordStalenessResponse | None = None
+    # CDE slice 6 (UI-004, DEF-009): the geometry state of a CAD revision or
+    # concept artifact: {state, badge, authority, itemKey, sourceRevision}.
+    # None for nodes that are not geometry.
+    geometryState: GeometryStateResponse | None = None  # noqa: N815
 
 
 class AssemblyJoint(BaseModel):

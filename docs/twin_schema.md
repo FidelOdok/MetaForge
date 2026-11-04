@@ -1223,6 +1223,8 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
+| `interface_edge` | record | | `WorkProduct` `interface_edge`: a typed coupling between two items in different domains, pinned to their revisions. Its status (`proposed`, `confirmed`, `removed`) changes in place; it is never deleted. See [interface edges](#interface-edges-and-cross-domain-impact) |
+| `change_impact` | record | | `WorkProduct` `change_impact`: what one change did across domains, the stale results it left and the reruns it proposes, each rerun's approval decision recorded in place |
 | `approval` | record | | approvals service |
 | `session` | record | | `agent_sessions` (Postgres) |
 | `run` | record | | runs / design-flow workflow |
@@ -1538,8 +1540,12 @@ following, all optional, so existing IR reads and lowers unchanged:
   `residual` and `construction` (helper geometry such as a symmetry axis,
   skipped by both Lowering Passes);
 - `SketchEllipse` (`center`, `major_radius`, `minor_radius`, `rotation` in
-  degrees) and `SketchSpline` (through-`points`, `closed`). Neither lowers
-  yet: both Lowering Passes refuse them with a clear error, as they do arcs;
+  degrees) and `SketchSpline` (through-`points`, `closed`). The CadQuery
+  Lowering Pass draws an arc as a `threePointArc` through its start, middle
+  and end (in increasing angle) and a spline as an interpolating `spline`
+  through its points (periodic when closed), so a profile of lines, arcs and
+  splines extrudes to a solid. Ellipses are refused there with a clear error;
+  the FreeCAD Lowering Pass refuses arcs, ellipses and splines;
 - `SketchConstraint`: `id`, `type` (`coincident`, `horizontal`, `vertical`,
   `parallel`, `perpendicular`, `tangent`, `equal`, `concentric`,
   `symmetric`, `radius`, `length`), `refs` (an element id, or
@@ -1683,7 +1689,90 @@ WebAssembly.
 
 ---
 
-### 2.34 Generated concept sketches {#generated-sketch}
+### 2.34 Interface edges and cross-domain impact {#interface-edges-and-cross-domain-impact}
+
+A change to one item can matter to items in other domains: moving an enclosure's standoffs moves where the board's mounting holes must be; changing a pin map changes what the firmware drivers address. Interface edges record those couplings explicitly, and the impact walker follows them when a head moves. This is product dependency between items. It is not the workflow-step DAG in `orchestrator/dependency_engine.py`, which orders agent steps and is unchanged (see [cross-domain impact](architecture.md#cross-domain-impact)).
+
+#### Interface edges
+
+An `InterfaceEdge` (`twin_core/models/interface.py`) is typed and revision-aware:
+
+| Field | Meaning |
+|-------|---------|
+| `type` | `mounts_to` (a part carries a board's mounting holes), `clearance_to` (an enclosure must clear a board outline or component envelope), `connects_via` (a connector meets a cable or cut-out), `pin_maps_to` (an MCU pin or net is used by a firmware module, driver or config), `simulation_input_of` (geometry, material or load feeds a simulation), `feature_of` (a sketch or sketch plane feeds what is built from it) |
+| `source`, `target` | each an item key pinned to the revision the coupling was stated against (`ref`, `revision`, `domain`, `item_type`, `node_id`), or a result record as `record:<uuid>` |
+| `domain_pair` | the two ends' domains, from the item type (`cad_model` is mechanical, `pcb_layout` and `pinmap` electronics, `firmware_source` firmware) |
+| `declared_by` | `human`, `tool` (recorded as a fact by the tool that ran) or `inferred` (MetaForge read it from data) |
+| `confidence` | 1.0 for a person's edge; an inference says how sure it is |
+| `status` | `proposed`, `confirmed` or `removed`. An inferred edge is `proposed` until a person confirms it; a person's edge is confirmed at once. A removed edge is kept, never deleted, and never proposed again |
+| `coupled_parameters` | what crosses the interface, when known (`mounting_holes`, pin `PA5`, peripheral `SPI1`) |
+| `evidence` | what an inferred or tool edge was read from (the names it matched, the files, the counts it compared) |
+
+`mounts_to`, `clearance_to` and `connects_via` are symmetric: a change on either end reaches the other. A stored edge is an `interface_edge` work product. Two types are derived on read rather than stored twice: `simulation_input_of` from a `simulation_result`'s own revision pins, and `feature_of` from the sketch layer's `DEPENDS_ON` edges (kinds `sketch_plane` and `sketch_compiler`). Both are `declared_by: tool`, `confirmed` and `derived: true`. Confirming an edge re-pins both ends to their current heads; the list route reports an edge whose pinned revision is behind the head (`source_behind`, `target_behind`).
+
+Proposals come only from data the tools already recorded (`api_gateway/twin/interface_proposals.py`). With no data behind a pair there is no edge.
+
+| Edge | Proposed from |
+|------|---------------|
+| `mounts_to` | the board revision's `mounting_holes` and the enclosure revision's `mounting_standoffs` (or `mounting_holes`), the fields the cross-domain mounting check reads. Confidence grows with the holes that sit on a standoff |
+| `clearance_to` | the board's `dimensions` or `board_outline` and the enclosure's `dimensions` |
+| `connects_via` | the board's `connectors` and the enclosure's `cutouts` |
+| `pin_maps_to` | the pin map's recorded file (JSON or CSV) against the firmware item's source files: a firmware that names a pin (`PA5`), a peripheral (`SPI1`, or its `hspi1` handle) or a net from the pin map. The matched names become `coupled_parameters`; the files are in `evidence.modules` |
+
+An enclosure is a `cad_model` or `assembly` item whose head carries `subtype: enclosure` or one of the enclosure fields. Proposals run on `POST .../interfaces/propose` and after each head move of a board, enclosure, pin map or firmware item; `simulation_input_of` and `feature_of` need none.
+
+#### The impact walker
+
+`twin_core/impact/cross_domain.py` takes a change (`item_key`, old and new revision, and the changed parameters when known) and walks the edges breadth first, bounded by `max_depth` (default 4, at most 8), recording any cycle it meets. For each affected item or result it reports the domain, whether it is direct (one edge away) or indirect, every edge (coupling) that reaches it with a plain rationale ("Enclosure: mounting hole positions changed; Main board mounting depends on them"), and a proposed action. An edge whose `coupled_parameters` the change does not touch is not followed, and the item is listed in `not_affected` with the reason; with `include_unaffected`, every other item is listed too (XDM-006). Changed parameters are unknown (never narrowing) unless they can be read: a pin map's pins are diffed from its files, and otherwise metadata is compared only when the content itself did not change.
+
+Only a confirmed edge marks results stale or proposes reruns. A proposed edge is reported as a possible impact with the action "Confirm or remove the suggested link", so an unconfirmed guess never invalidates anything.
+
+The walk reuses what exists: [record pins](#records-pinned-to-revisions) for what a revision's results are, and `StalenessEngine.preview_impact` for constraints and engineering entities pinned through `metadata.depends_on` (reported as review actions).
+
+#### Revision-scoped invalidation
+
+When a head moves (a write outside a run, or a gate approving a change set), `record_pins.on_head_moved` marks records pinned to older revisions of that item `stale` as before, then runs the walk. A directly affected item's results whose check read the changed item across the interface are marked `stale` too: a firmware build or static check across `pin_maps_to`, a DRC or clearance check across `mounts_to`, `clearance_to` or `connects_via`, an FEA across `simulation_input_of`. Each keeps its own pins, and `stale_for` names the input it was valid against (`{"PIN-MAIN": {"pinned": 1, "current": 2}}`). Nothing is deleted or relabelled as a pass: an old result stays browsable as history with the revision it was for. Indirect impacts are reported, not invalidated, since the item between has not changed yet.
+
+The outcome is recorded as a `change_impact` work product: the impact graph, the affected items by domain, the stale results (with what each said before, `previous_status`), the proposed reruns and review actions, the plain summary and next action, the approval policy it was judged under, and its operation id. It is the change transaction view of CHG-001: operation, source and target revision, targets, proposed effects, impact graph and approval policy (`transaction` in the API).
+
+#### Validation statuses {#validation-statuses}
+
+Every check result maps onto one vocabulary (`twin_core/consistency/validation_status.py`): `PASS`, `WARN`, `FAIL`, `INCOMPLETE`, `NOT_EVALUATED` and `STALE`. The existing status fields are mapped, not replaced:
+
+| Existing field | Mapping |
+|----------------|---------|
+| `GateCheckStatus` | `pass`, `fail`, `not_evaluated`: same names |
+| cross-domain `CheckStatus` | `no_data` is `NOT_EVALUATED` |
+| requirement matrix status | `uncertain` is `WARN`, `no_data` is `NOT_EVALUATED`, `unverified` is `INCOMPLETE`, `stale` is `STALE` |
+| `ConstraintStatus` | `unevaluated` is `NOT_EVALUATED` |
+| a record's `staleness` | anything but `current` or `revalidated` is `STALE`, whatever the result said |
+
+`NOT_EVALUATED` means no result exists; `INCOMPLETE` means a result exists but carries no verdict (a `passed` flag, a `status` word, or violation and error counts). A `CheckResult` binds the check to its input revisions (`KEY@n`) and the record holding the tool's actual output; a `PASS` or `WARN` without both is downgraded to `NOT_EVALUATED`. Lack of evidence is never a pass.
+
+#### API
+
+| Route | Purpose |
+|-------|---------|
+| `GET /v1/twin/projects/{id}/interfaces` | every edge (stored and derived) and the items they join; `include_removed`, `include_derived` |
+| `POST /v1/twin/projects/{id}/interfaces` | a person declares an edge (`type`, `source`, `target`, `coupled_parameters`, `rationale`); declaring a proposed link confirms it |
+| `POST /v1/twin/projects/{id}/interfaces/propose` | propose edges from recorded data, optionally for one `item_key` |
+| `POST /v1/twin/projects/{id}/interfaces/{edge_id}/confirm` | confirm, re-pinned to the current heads |
+| `DELETE /v1/twin/projects/{id}/interfaces/{edge_id}` | remove (kept as `removed`) |
+| `POST /v1/twin/projects/{id}/impact/preview` | the impact of a proposed change; writes nothing, results it would stale are `marked: false` |
+| `GET /v1/twin/projects/{id}/impact` | recorded impacts, newest first |
+| `GET /v1/twin/projects/{id}/impact/{change_or_revision}` | one recorded impact by id, by `KEY@n`, or the latest for a bare `KEY` |
+
+The proposed reruns, their dispositions and approvals are described in [approvals](approvals.md#re-checks-after-a-cross-domain-change); the operation event in [operations](operations.md#cross-domain-impact).
+
+Observability: `metaforge_cross_domain_impact_total{event, kind}` (`previewed`, `recorded`, `failed`, `result_invalidated` by check kind, `rerun_proposed` by disposition, `rerun_decided`) and `metaforge_interface_edge_total{type, provenance, action}`; the `CrossDomainImpactFailing` alert; log events `cross_domain_impact_recorded`, `cross_domain_impact_failed`, `cross_domain_impact_previewed`, `record_marked_stale_for_input`, `interface_edge_declared`, `interface_edge_proposed`, `interface_edge_confirmed`, `interface_edge_removed`, `interface_edges_proposed`, `impact_rerun_decided`; spans `twin.impact.analyse`, `twin.interfaces.*`, `twin.impact.publish` and `twin.impact_routes.*`. A failed walk after a head move is logged and counted, never raised: the head move stands.
+
+Limits: rerun approval records the decision; the tool is then run by the agent or person, and its new result supersedes the stale one through its pins. Board and enclosure proposals read the recorded metadata fields, not the KiCad or STEP files themselves.
+
+*Source: `twin_core/models/interface.py`, `twin_core/impact/`, `twin_core/consistency/validation_status.py`, `api_gateway/twin/interface_proposals.py`, `api_gateway/twin/impact_service.py`, `api_gateway/twin/impact_routes.py`*
+
+---
+
+### 2.35 Generated concept sketches {#generated-sketch}
 
 `GENERATED_SKETCH = "generated_sketch"` is a concept sketch an image model
 drew from a description, the project's references or a saved sketch (the
@@ -1758,7 +1847,7 @@ an hour are flagged.
 
 ---
 
-### 2.35 Migrating legacy nodes into items {#migrating-legacy-nodes}
+### 2.36 Migrating legacy nodes into items {#migrating-legacy-nodes}
 
 A project written before items existed holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
 
@@ -2470,6 +2559,124 @@ class ConstraintEvaluationResult(BaseModel):
 *Source: `twin_core/constraint_engine/models.py`*
 
 ---
+
+### Exact CAD, validity and STEP
+
+The fast preview is drawn on the client from the design IR and never reaches
+the twin as engineering geometry. Exact geometry is built only on an explicit
+commit or on demand, never per pointer event, and only a validated exact
+revision becomes the item's head. Code: `twin_core/geometry_state.py` (the
+state model and the gate readiness), `api_gateway/twin/exact_cad.py` (the
+service), `api_gateway/twin/exact_cad_routes.py` and
+`tool_registry/tools/cadquery/validity.py` (the adapter checks).
+
+**Geometry state.** Every geometry artifact has one of eight states. A CAD
+revision carries its state in `metadata.geometry_state`, and node responses
+(`GET /v1/twin/nodes`, `GET /v1/twin/nodes/{id}`) return it as
+`geometryState: {state, badge, authority, itemKey, sourceRevision}`.
+
+| State | Badge | Meaning |
+|-------|-------|---------|
+| `concept` | Concept | Illustrative (a render, image, sketch, or anything labelled `authority: illustrative`). Never validated or released. |
+| `preview` | Preview | A client procedural preview; never stored as engineering geometry. |
+| `exact_ready` | Exact | A STEP exists but no validity check has passed on it. Every `cad_model` committed without a state reads so. |
+| `validation_pending` | Exact | An exact build or check is running. |
+| `validated` | Validated | The exact B-Rep passed the validity check. |
+| `failed` | Exact | An attempt failed. Only an attempt is ever failed; the head keeps the last valid revision. |
+| `stale` | Exact | Derived from a revision that is no longer the head (an older STEP export). |
+| `released` | Validated | Set only by the release path, when a release package is created with G8 passed. |
+
+`check_transition` enforces the rules: `released` only through the release
+path and only from `validated`; `validated` only with a `pass` verdict;
+concept and illustrative artifacts never exact, validated or released.
+
+**Exact build** (`twin.build_exact_cad`, `POST /v1/twin/items/{key}/exact-build`
+with `project_id`, optional `base_revision`, and `design_ir` or `script`):
+
+1. The design IR is lowered by the CadQuery Lowering Pass (or the CadQuery
+   script runs) in the CadQuery adapter, through MCP.
+2. `cadquery.validate_shape` checks the B-Rep: OCCT `BRepCheck_Analyzer`
+   validity, at least one solid where one is expected, every solid closed,
+   every solid's volume above zero, and no free edges on a solid. The
+   verdict is `pass`, `warn`, `fail` or `not_evaluated`; a check that could
+   not run is never a pass.
+3. Only a `pass` commits the result as the item's next revision, pinned to
+   `KEY@base`, born with `geometry_state: validated`, `validity` (outcome,
+   findings, measures, the base revision checked) and `exact_source` (the IR
+   or script it was built from). A pinned commit whose base moved is refused
+   by the twin and the job ends `stale`.
+4. A `fail` or `not_evaluated` appends the attempt to
+   `metadata.exact_attempts` (the last five, with state, outcome, findings,
+   content hash and job) on the revision it started from, and the job fails
+   with a retry action. A `warn` is recorded the same way and not validated.
+
+With neither `design_ir` nor `script`, the current head is validated in
+place (its own STEP is checked and, on a pass, its state becomes
+`validated`). A head already validated answers at once with no adapter work.
+
+From a parametric sketch: `item_key` may name an approved
+`parametric_sketch` (`PSK-*`). Its chosen feature (`feature_id`, default the
+first) is turned into a design IR (`create_body`, the sketch on its
+confirmed principal plane, then `pad` by depth or `revolve` by angle) and
+built into the item `CAD-<name>`, linked `generated_from` the sketch. Every
+`required_input` of that feature (depth or angle, and material) must be
+`provided` on the plan or supplied by the person in `inputs`; a missing one
+is refused at once (422 on the route) and nothing is assumed. The sketch
+must be approved and in millimetres.
+
+**STEP export** (`twin.export_cad_step`, `POST /v1/twin/nodes/{id}/exports/step`
+with optional `critical`): only from a `validated` or `released` revision
+(409 otherwise). `cadquery.export_step` writes the STEP with the adapter's
+configured schema (`CADQUERY_STEP_SCHEMA`: `AP214` by default, or `AP242`)
+and the schema recorded is the one the written file's header declares. The
+file is re-imported with `cadquery.validate_shape` and compared with the
+shape before export: same solid count, volume within a relative 1e-3, and
+bounding box corners within 0.01 mm or 1e-4 of the diagonal. The export is
+kept on its revision as `metadata.step_export`: `state` (`queued`, `ready`,
+`failed`, `stale`), `item_ref`, `content_hash` of the revision's geometry,
+`file_sha256`, `filename`, `object_key`, `schema`, `schema_requested`,
+`round_trip` (outcome, findings, both sets of measures, the tolerances) and
+`critical`. A repeat request for the same revision and geometry returns it
+with no adapter work. A critical export (a gate or release) fails unless the
+round trip passes. When the item's head moves, every ready export of an
+older revision is marked `stale` (on the revision, so it stays downloadable
+from `GET /v1/twin/nodes/{id}/exports/step/file`).
+
+The file is stored in the blob store, and every STEP the service handles is
+also kept in a local cache by content hash (`METAFORGE_CAD_CACHE_DIR`,
+default `~/.metaforge/cad_cache`) for when the blob store is unavailable.
+
+`GET /v1/twin/nodes/{id}/exports` returns one revision's view: its geometry
+state and badge, whether it is the head, its validity, its latest attempt,
+the last validated revision of the item, whether a STEP can be exported, and
+the GLB, native CAD and STEP states (`READY`, `STALE`, `QUEUED`, `FAILED`,
+or `NONE` when not made).
+
+**Gates.** G8 (`evaluate_g8_release`) adds the check `exact_cad_validated`
+when the project has CAD items (`cad_model` and `assembly` items, analysis
+models left out): each head must be validated, with a ready STEP of that very
+revision whose round trip passed. Otherwise the check is `incomplete`, with
+the reason per item, and the gate is `not_ready`. The design-flow gate of a
+G8 phase lists the same reasons as missing. A project with no CAD items gets
+no such check. Creating a release package marks each validated CAD head
+`released`.
+
+**Observability.** `metaforge_exact_cad_build_total{outcome}`,
+`metaforge_geometry_validity_total{outcome}`,
+`metaforge_step_export_total{event}` (`cache_hit`, `cache_miss`, `ready`,
+`failed`, `stale`), `metaforge_step_round_trip_total{outcome}` and
+`metaforge_cad_artifact_duration_seconds{stage}` (`exact_build`, `validate`,
+`exact_total`, `step_export`, `round_trip`). Alerts
+`GeometryValidityFailureSpike` and `StepRoundTripFailing`. Spans
+`twin.exact_cad.build`, `twin.exact_cad.export_step`,
+`cadquery.validate_shape`, `cadquery.export_step` and
+`twin.geometry.readiness`. Operation events: see
+[Operations](operations.md#exact-cad-and-step-events).
+
+Measured on one workstation with a warm kernel (CadQuery 2.x, OCCT): a
+simple exact build through `cadquery.execute_script` about 60 ms, a
+validity check 30 to 110 ms, and a STEP export about 80 ms for a small
+part.
 
 ## 6. Twin API
 
