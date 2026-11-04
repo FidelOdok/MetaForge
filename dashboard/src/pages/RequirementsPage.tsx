@@ -342,6 +342,22 @@ const STATUS_VARIANT: Record<RequirementMatrixStatus, 'success' | 'warning' | 'e
   unverified: 'warning',
 };
 
+// What each status means, in the words a reader uses.
+export const STATUS_LABEL: Record<RequirementMatrixStatus, string> = {
+  pass: 'Met',
+  fail: 'Not met',
+  uncertain: 'Uncertain',
+  no_data: 'No evidence yet',
+  stale: 'Out of date',
+  unverified: 'Not comparable',
+};
+
+// Order of the status filter chips: what needs action first.
+const STATUS_ORDER: RequirementMatrixStatus[] = ['fail', 'no_data', 'uncertain', 'unverified', 'stale', 'pass'];
+
+/** Rows shown before "Show more"; the full matrix is one click away. */
+export const MATRIX_PREVIEW = 15;
+
 function formatNumber(n: number | null): string {
   return n === null ? '—' : n.toFixed(3).replace(/\.?0+$/, '') || '0';
 }
@@ -411,7 +427,9 @@ function MatrixRow({
           )}
         </td>
         <td className="px-2 text-center">
-          <Badge variant={STATUS_VARIANT[row.status]}>{row.status}</Badge>
+          <span title={row.status} style={{ whiteSpace: 'nowrap' }}>
+            <Badge variant={STATUS_VARIANT[row.status]}>{STATUS_LABEL[row.status]}</Badge>
+          </span>
           {!row.verificationMethod && !row.expectedEvidence && (
             <div
               data-testid="unverified-badge"
@@ -422,20 +440,30 @@ function MatrixRow({
             </div>
           )}
         </td>
-        <td className="px-3 py-2 text-xs text-on-surface-variant">{row.detail}</td>
+        <td className="px-3 py-2 text-xs text-on-surface-variant" title={row.detail}>
+          {/* The detail is often a long, repeated explanation; one line here, all of it when opened. */}
+          <span
+            data-testid="requirement-detail"
+            style={{
+              display: '-webkit-box',
+              WebkitLineClamp: expanded ? 'unset' : 1,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+          >
+            {row.detail}
+          </span>
+        </td>
         <td className="px-2 text-center">
-          {row.evidence.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setExpanded((e) => !e)}
-              className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
-            >
-              {row.evidence.length} evidence {expanded ? '▲' : '▼'}
-            </button>
-          ) : (
-            <span className="text-on-surface-variant text-xs">—</span>
-          )}
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            aria-expanded={expanded}
+            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)', whiteSpace: 'nowrap' }}
+          >
+            {row.evidence.length > 0 ? `${row.evidence.length} evidence` : 'Details'} {expanded ? '▲' : '▼'}
+          </button>
         </td>
         <td className="px-3 text-right">
           <Link to="/twin" className="text-xs text-tertiary hover:underline">
@@ -443,7 +471,7 @@ function MatrixRow({
           </Link>
         </td>
       </tr>
-      {expanded && (
+      {expanded && row.evidence.length > 0 && (
         <tr style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p1)' }}>
           <td colSpan={5} className="px-3 pb-2">
             <div className="flex flex-col gap-1">
@@ -491,6 +519,20 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
   // home for requirement values; say which.
   const revisionRefs = matrix?.revisionRefs ?? [];
   const [showForm, setShowForm] = useState(false);
+  const [status, setStatus] = useState<RequirementMatrixStatus | 'all'>('all');
+  const [query, setQuery] = useState('');
+  const [showAll, setShowAll] = useState(false);
+  const q = query.trim().toLowerCase();
+  const filtered = rows.filter(
+    (r) =>
+      (status === 'all' || r.status === status) &&
+      (!q || r.requirementName.toLowerCase().includes(q) || r.limitText.toLowerCase().includes(q)),
+  );
+  const filtering = status !== 'all' || q !== '';
+  const visibleRows = showAll || filtering ? filtered : filtered.slice(0, MATRIX_PREVIEW);
+  const counts = STATUS_ORDER.map((s) => [s, rows.filter((r) => r.status === s).length] as const).filter(
+    ([, n]) => n > 0,
+  );
 
   if (!isLoading && rows.length === 0 && !showForm && !projectId) return null;
 
@@ -504,9 +546,9 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
               data-testid="requirements-revision"
               className="font-mono text-on-surface-variant"
               style={{ fontSize: '11px', fontWeight: 400, marginLeft: '8px' }}
-              title="The current constraint set revision these requirements are read from"
+              title={`Read from the current constraint set revision${revisionRefs.length > 1 ? 's' : ''}: ${revisionRefs.join(', ')}`}
             >
-              current: {revisionRefs.join(', ')}
+              {revisionRefs.length === 1 ? `from ${revisionRefs[0]}` : `from ${revisionRefs.length} constraint sets`}
             </span>
           )}
         </h2>
@@ -554,6 +596,42 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
         />
       )}
       {!isLoading && rows.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2" role="group" aria-label="Filter requirements">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search requirements"
+            aria-label="Search requirements"
+            className="rounded px-2 py-1 text-xs"
+            style={{ flex: '1 1 180px', maxWidth: 280, background: 'var(--mf-c-111319)', border: '1px solid var(--mf-r-65-72-90-0p3)', color: 'var(--mf-c-e2e2eb)' }}
+          />
+          {(['all', ...counts.map(([s]) => s)] as const).map((s) => {
+            const on = status === s;
+            const n = s === 'all' ? rows.length : (counts.find(([k]) => k === s)?.[1] ?? 0);
+            return (
+              <button
+                key={s}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setStatus(s)}
+                className="rounded-full px-2.5 py-0.5 text-xs"
+                style={{
+                  border: `1px solid ${on ? '#ff5a0a' : 'var(--mf-r-65-72-90-0p3)'}`,
+                  background: on ? 'rgba(255,90,10,0.12)' : 'transparent',
+                  color: on ? 'var(--mf-c-e2e2eb)' : 'var(--mf-c-9a9aaa)',
+                }}
+              >
+                {s === 'all' ? 'All' : STATUS_LABEL[s]} {n}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {!isLoading && rows.length > 0 && filtered.length === 0 && (
+        <EmptyState title="Nothing matches" description="Try another search or show all requirements." />
+      )}
+      {!isLoading && filtered.length > 0 && (
         <div
           className="rounded-lg overflow-hidden overflow-x-auto"
           style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
@@ -577,7 +655,7 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <MatrixRow
                   key={row.requirementId}
                   row={row}
@@ -587,6 +665,16 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
               ))}
             </tbody>
           </table>
+          {visibleRows.length < filtered.length && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="w-full px-3 py-2 text-left text-xs hover:underline"
+              style={{ color: 'var(--mf-c-86cfff)', background: 'none', border: 'none', borderTop: '1px solid var(--mf-r-65-72-90-0p1)' }}
+            >
+              Show {filtered.length - visibleRows.length} more
+            </button>
+          )}
         </div>
       )}
     </div>
