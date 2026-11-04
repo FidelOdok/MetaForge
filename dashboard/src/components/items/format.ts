@@ -12,7 +12,8 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export function itemTypeLabel(itemType: string): string {
-  return TYPE_LABELS[itemType] ?? itemType.replace(/_/g, ' ');
+  const words = itemType.replace(/_/g, ' ');
+  return TYPE_LABELS[itemType] ?? words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 export const GEOMETRY_TYPES = new Set(['cad_model', 'assembly']);
