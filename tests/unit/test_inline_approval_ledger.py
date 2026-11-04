@@ -18,12 +18,26 @@ from typing import Any
 import httpx
 import pytest
 
+from mcp_core import elicitation
 from mcp_core.elicitation import ElicitAction, ElicitResult
 from mcp_core.guardrails import Caller
 from metaforge.mcp.remote_approvals import RemoteApprovalLedger
 from metaforge.mcp.server import UnifiedMcpServer
 from tool_registry.mcp_server.handlers import ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
+
+
+@pytest.fixture
+def answered_by_a_person(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simulate an answer somebody actually read.
+
+    The gate reads a decline or a cancel that came back faster than
+    ``UNATTENDED_ANSWER_SECONDS`` as a client answering for the person, which
+    is not what these tests are simulating -- and they are not going to sleep
+    a second each to prove it, so the floor is lowered instead.
+    """
+    monkeypatch.setattr(elicitation, "UNATTENDED_ANSWER_SECONDS", 0.0)
+
 
 ELICIT_VERSION = "2025-06-18"
 LIST = "/v1/chat/tool_approvals"
@@ -137,7 +151,9 @@ class TestAnInlineAnswerIsInTheLedger:
         assert entry["approved_by"] == "local:elicitation"
         assert entry["approver_verified"] is False
 
-    async def test_an_inline_decline_resolves_as_rejected(self, gateway: httpx.AsyncClient) -> None:
+    async def test_an_inline_decline_resolves_as_rejected(
+        self, gateway: httpx.AsyncClient, answered_by_a_person: None
+    ) -> None:
         ran: list[str] = []
         async with gateway as http:
             server = await _server(http, ran, action=ElicitAction.DECLINE)
@@ -150,7 +166,9 @@ class TestAnInlineAnswerIsInTheLedger:
         assert entries[0]["request"]["route"] == "elicitation"
         assert entries[0]["id"] in _text(response)
 
-    async def test_a_dismissed_prompt_is_not_a_rejection(self, gateway: httpx.AsyncClient) -> None:
+    async def test_a_dismissed_prompt_is_not_a_rejection(
+        self, gateway: httpx.AsyncClient, answered_by_a_person: None
+    ) -> None:
         ran: list[str] = []
         async with gateway as http:
             server = await _server(http, ran, action=ElicitAction.CANCEL)
