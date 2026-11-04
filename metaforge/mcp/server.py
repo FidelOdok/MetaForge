@@ -152,6 +152,9 @@ from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.registry import ToolRegistry
 
 logger = structlog.get_logger(__name__)
+
+#: Sessions remembered as answering prompts for the person (see ``_unattended_key``).
+_MAX_UNATTENDED_SESSIONS = 4096
 tracer = get_tracer("metaforge.mcp.server")
 
 
@@ -386,10 +389,13 @@ class UnifiedMcpServer:
         # one. Held rather than used -- whether we may actually ask depends
         # on what the client said at initialize.
         self._elicitor = elicitor
-        # Set once this client has answered a prompt for the person instead
-        # of showing it to them. From then on it is treated as a client that
-        # cannot be asked, so held writes queue where someone can see them.
-        self._elicitation_unattended = False
+        # The sessions whose client answered a prompt for the person instead
+        # of showing it to them. Such a session is from then on treated as one
+        # that cannot be asked, so its held writes queue where someone can see
+        # them. Per session, not per server: one HTTP sidecar serves many
+        # clients from this one object, and a flag on the server let one
+        # client's auto-decline stop every other client being asked.
+        self._elicitation_unattended: set[str] = set()
         # FORGE-465: the transport's way to send a notification for the call
         # being handled (progress on a held write). None: nothing can be
         # sent, so a held write gets the window that fits a client's own
@@ -807,7 +813,7 @@ class UnifiedMcpServer:
         # again, and asking only burns another hold. Deliberately after the
         # branch above: a returned question (MRTR) is answered by the next
         # request, so it never fails this way.
-        if self._elicitation_unattended:
+        if self._unattended_key() in self._elicitation_unattended:
             return False
         # A live question needs a channel back to the client; a returned one
         # (above) does not.
@@ -820,6 +826,22 @@ class UnifiedMcpServer:
             declares_form_elicitation(self._client_capabilities)
             and self._negotiated_protocol >= ELICITATION_PROTOCOL_VERSION
         )
+
+    @staticmethod
+    def _unattended_key() -> str:
+        """The session a fallback to the dashboard is remembered against.
+
+        The transport's session id when it supplied one. Without one (stdio,
+        a single client per process) every call shares the empty key, which
+        is the same thing as the whole connection.
+        """
+        from mcp_core.context import current_context
+
+        try:
+            ctx = current_context()
+        except Exception:  # noqa: BLE001 -- no context is not an error here
+            return ""
+        return str(ctx.session_id) if ctx.session_is_stable else ""
 
     @property
     def adapters(self) -> list[McpToolServer]:
@@ -2551,7 +2573,10 @@ class UnifiedMcpServer:
             # rest of the session -- down the dashboard route, FORGE-741's
             # handoff included. The gate closed its own ledger entry before
             # raising, so nothing is left in the queue unanswered.
-            self._elicitation_unattended = True
+            self._elicitation_unattended.add(self._unattended_key())
+            # Bounded: a long-lived sidecar sees many sessions come and go.
+            while len(self._elicitation_unattended) > _MAX_UNATTENDED_SESSIONS:
+                self._elicitation_unattended.pop()
             logger.warning(
                 "mcp_elicitation_unattended_fallback",
                 tool_id=tool_id,
