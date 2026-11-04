@@ -28,6 +28,7 @@ const KINDS: { value: ApprovalKind; label: string }[] = [
   { value: 'design_change', label: 'Design change' },
   { value: 'design_loop', label: 'Design loop' },
   { value: 'sketch', label: 'Sketch' },
+  { value: 'parametric_sketch', label: 'Parametric sketch' },
   { value: 'drawing', label: 'Drawing' },
   { value: 'upload', label: 'Upload' },
 ];

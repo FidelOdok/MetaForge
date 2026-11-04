@@ -1,0 +1,240 @@
+/* Make editable: the sketch compiler over the Create stage's sketch layer. */
+.skc-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  --skc-shape: #38bdf8;
+  --skc-accept: #22c55e;
+  --skc-propose: #f59e0b;
+  --skc-bad: #f87171;
+  --skc-panel: rgba(17, 19, 25, 0.92);
+  --skc-text: #e2e2eb;
+  --skc-muted: #9ca3af;
+}
+.skc-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.skc-shape {
+  fill: none;
+  stroke: var(--skc-shape);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.skc-shape.is-unsure {
+  stroke-dasharray: 6 4;
+  opacity: 0.85;
+}
+.skc-shape.is-construction {
+  stroke: var(--skc-muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 5;
+}
+.skc-ghost {
+  fill: none;
+  stroke: #f472b6;
+  stroke-width: 1.5;
+  opacity: 0.6;
+}
+.skc-badge {
+  position: absolute;
+  pointer-events: all;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  border: 1px solid var(--skc-propose);
+  background: rgba(17, 19, 25, 0.85);
+  color: var(--skc-propose);
+  font-size: 10px;
+  line-height: 14px;
+  cursor: pointer;
+}
+.skc-badge.is-unsure {
+  border-style: dashed;
+}
+.skc-badge.is-accepted {
+  border-color: var(--skc-accept);
+  color: #0b1a10;
+  background: var(--skc-accept);
+}
+.skc-launch {
+  position: absolute;
+  right: 12px;
+  bottom: 56px;
+  pointer-events: all;
+}
+.skc-panel {
+  position: absolute;
+  top: 52px;
+  right: 12px;
+  width: min(320px, calc(100% - 24px));
+  max-height: calc(100% - 120px);
+  overflow: auto;
+  pointer-events: all;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(17, 19, 25, 0.92);
+  color: #e2e2eb;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skc-head,
+.skc-row,
+.skc-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.skc-row {
+  justify-content: space-between;
+}
+.skc-head strong {
+  flex: 1;
+}
+.skc-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: #f59e0b;
+  border: 1px solid currentColor;
+}
+.skc-tag.is-confirmed {
+  color: #22c55e;
+}
+.skc-muted {
+  color: #9ca3af;
+  font-size: 11px;
+}
+.skc-saved {
+  margin-left: auto;
+}
+.skc-status,
+.skc-note {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.12);
+}
+.skc-status.is-good {
+  background: rgba(34, 197, 94, 0.15);
+}
+.skc-status.is-bad,
+.skc-note.is-bad {
+  background: rgba(248, 113, 113, 0.18);
+}
+.skc-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.skc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skc-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.skc-list li > span:first-child,
+.skc-list label {
+  flex: 1;
+}
+.skc-list li.is-unsure > span:first-child {
+  color: #9ca3af;
+}
+.skc-list label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.skc-list input {
+  width: 76px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid #374151;
+  background: #0b0d12;
+  color: inherit;
+  font: inherit;
+}
+.skc-btn,
+.skc-icon,
+.skc-link {
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+.skc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #374151;
+  background: #1f2430;
+}
+.skc-btn.skc-primary {
+  border-color: #ff5a0a;
+  background: #ff5a0a;
+  color: #fff;
+}
+.skc-btn:disabled,
+.skc-icon:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.skc-icon {
+  display: inline-flex;
+  padding: 3px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+}
+.skc-icon.is-on {
+  background: #374151;
+}
+.skc-link {
+  border: none;
+  background: none;
+  padding: 0;
+  text-decoration: underline;
+  align-self: flex-start;
+}
+.skc-detail dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0;
+}
+.skc-detail dt {
+  color: #9ca3af;
+}
+.skc-detail dd {
+  margin: 0;
+}
+.skc-detail table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.skc-detail th,
+.skc-detail td {
+  text-align: left;
+  padding: 1px 4px;
+  border-bottom: 1px solid #262b36;
+}

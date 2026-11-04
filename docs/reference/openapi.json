@@ -314,7 +314,8 @@
               "design_loop",
               "sketch",
               "drawing",
-              "upload"
+              "upload",
+              "parametric_sketch"
             ],
             "title": "Kind",
             "type": "string"
@@ -661,6 +662,53 @@
           "approvedBy"
         ],
         "title": "ApproveDesignLoopRequest",
+        "type": "object"
+      },
+      "ApproveParametricRequest": {
+        "properties": {
+          "approved_by": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          }
+        },
+        "title": "ApproveParametricRequest",
+        "type": "object"
+      },
+      "ApproveParametricResponse": {
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "approved"
+        ],
+        "title": "ApproveParametricResponse",
         "type": "object"
       },
       "ApproveSketchRequest": {
@@ -3009,6 +3057,24 @@
           }
         },
         "title": "ClaimReviewTask",
+        "type": "object"
+      },
+      "ClosedProfile": {
+        "properties": {
+          "primitive_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Primitive Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "primitive_ids"
+        ],
+        "title": "ClosedProfile",
         "type": "object"
       },
       "ComparisonBlock": {
@@ -5769,6 +5835,107 @@
         "title": "FeatureDiffResponse",
         "type": "object"
       },
+      "FeatureParameter": {
+        "description": "A feature parameter. Missing ones are ``required_input``, never guessed.",
+        "properties": {
+          "question": {
+            "default": "",
+            "title": "Question",
+            "type": "string"
+          },
+          "status": {
+            "default": "required_input",
+            "enum": [
+              "required_input",
+              "provided"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "title": "FeatureParameter",
+        "type": "object"
+      },
+      "FeaturePlanItem": {
+        "description": "A candidate CAD feature from a closed profile (SKP-005).",
+        "properties": {
+          "axis_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Axis Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "op": {
+            "enum": [
+              "extrude",
+              "revolve"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FeatureParameter"
+            },
+            "title": "Parameters",
+            "type": "object"
+          },
+          "profile_primitive_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Profile Primitive Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "op",
+          "profile_primitive_ids",
+          "parameters"
+        ],
+        "title": "FeaturePlanItem",
+        "type": "object"
+      },
       "FieldDelta": {
         "description": "Change for a single metadata field.",
         "properties": {
@@ -5897,6 +6064,53 @@
           "can_id"
         ],
         "title": "FirmwareJointEntry",
+        "type": "object"
+      },
+      "FitSummary": {
+        "description": "What the browser's fit reported (SKP-001: the screen-to-sketch mapping it used).",
+        "properties": {
+          "duration_ms": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "number"
+          },
+          "extent": {
+            "minimum": 0.0,
+            "title": "Extent",
+            "type": "number"
+          },
+          "skipped_stroke_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 2000,
+            "title": "Skipped Stroke Ids",
+            "type": "array"
+          },
+          "stroke_count": {
+            "minimum": 0.0,
+            "title": "Stroke Count",
+            "type": "integer"
+          },
+          "tolerance": {
+            "exclusiveMinimum": 0.0,
+            "title": "Tolerance",
+            "type": "number"
+          },
+          "unit_px": {
+            "exclusiveMinimum": 0.0,
+            "title": "Unit Px",
+            "type": "number"
+          }
+        },
+        "required": [
+          "extent",
+          "tolerance",
+          "unit_px",
+          "stroke_count"
+        ],
+        "title": "FitSummary",
         "type": "object"
       },
       "FixRequirementResponse": {
@@ -8593,6 +8807,153 @@
           "interference_area_mm2"
         ],
         "title": "InterferenceCheckResponse",
+        "type": "object"
+      },
+      "InterpretationSaveRequest": {
+        "description": "Store the browser's interpretation of a sketch as a proposal revision.",
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "interpretation": {
+            "$ref": "#/components/schemas/SketchInterpretation"
+          },
+          "name": {
+            "default": "Sketch interpretation",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interpretation"
+        ],
+        "title": "InterpretationSaveRequest",
+        "type": "object"
+      },
+      "InterpretationSaveResponse": {
+        "properties": {
+          "accepted_count": {
+            "title": "Accepted Count",
+            "type": "integer"
+          },
+          "authority": {
+            "default": "proposal",
+            "title": "Authority",
+            "type": "string"
+          },
+          "constraint_count": {
+            "title": "Constraint Count",
+            "type": "integer"
+          },
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "interpretation_id": {
+            "title": "Interpretation Id",
+            "type": "string"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plane_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plane Id"
+          },
+          "primitive_count": {
+            "title": "Primitive Count",
+            "type": "integer"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "sketch_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Ref"
+          },
+          "unit": {
+            "default": "unknown",
+            "title": "Unit",
+            "type": "string"
+          },
+          "unsatisfied": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unsatisfied",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "interpretation_id",
+          "operation_id",
+          "primitive_count",
+          "constraint_count",
+          "accepted_count"
+        ],
+        "title": "InterpretationSaveResponse",
         "type": "object"
       },
       "ItemCurrentResponse": {
@@ -13166,6 +13527,155 @@
         "title": "ProjectWorkProductResponse",
         "type": "object"
       },
+      "PromoteRequest": {
+        "description": "Promote an interpretation revision to a parametric sketch.",
+        "properties": {
+          "name": {
+            "default": "Parametric sketch",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "promote_id": {
+            "maxLength": 100,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Promote Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "promote_id"
+        ],
+        "title": "PromoteRequest",
+        "type": "object"
+      },
+      "PromoteResponse": {
+        "properties": {
+          "accepted_count": {
+            "title": "Accepted Count",
+            "type": "integer"
+          },
+          "approval_id": {
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "approved": {
+            "default": false,
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "authority": {
+            "default": "human_accepted",
+            "title": "Authority",
+            "type": "string"
+          },
+          "dropped_count": {
+            "title": "Dropped Count",
+            "type": "integer"
+          },
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "feature_plan": {
+            "items": {
+              "$ref": "#/components/schemas/FeaturePlanItem"
+            },
+            "title": "Feature Plan",
+            "type": "array"
+          },
+          "interpretation_ref": {
+            "title": "Interpretation Ref",
+            "type": "string"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plane_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plane Id"
+          },
+          "promote_id": {
+            "title": "Promote Id",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "sketch_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Ref"
+          },
+          "unit": {
+            "default": "unknown",
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "interpretation_ref",
+          "promote_id",
+          "operation_id",
+          "approval_id",
+          "accepted_count",
+          "dropped_count"
+        ],
+        "title": "PromoteResponse",
+        "type": "object"
+      },
       "PromotionHistoryResponse": {
         "properties": {
           "gates": {
@@ -17172,6 +17682,718 @@
         "title": "SimulationResultResponse",
         "type": "object"
       },
+      "SketchArc": {
+        "description": "An arc, from ``start_angle`` to ``end_angle`` (degrees) in increasing angle.",
+        "properties": {
+          "center": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Center",
+            "type": "array"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "construction": {
+            "default": false,
+            "title": "Construction",
+            "type": "boolean"
+          },
+          "end_angle": {
+            "title": "End Angle",
+            "type": "number"
+          },
+          "estimated": {
+            "default": false,
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^.]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "radius": {
+            "exclusiveMinimum": 0.0,
+            "title": "Radius",
+            "type": "number"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "source_ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SketchStrokeRange"
+            },
+            "maxItems": 50,
+            "title": "Source Ranges",
+            "type": "array"
+          },
+          "source_stroke_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Source Stroke Ids",
+            "type": "array"
+          },
+          "start_angle": {
+            "title": "Start Angle",
+            "type": "number"
+          },
+          "type": {
+            "const": "arc",
+            "default": "arc",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "center",
+          "radius",
+          "start_angle",
+          "end_angle"
+        ],
+        "title": "SketchArc",
+        "type": "object"
+      },
+      "SketchCircle": {
+        "properties": {
+          "center": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Center",
+            "type": "array"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "construction": {
+            "default": false,
+            "title": "Construction",
+            "type": "boolean"
+          },
+          "estimated": {
+            "default": false,
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^.]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "radius": {
+            "exclusiveMinimum": 0.0,
+            "title": "Radius",
+            "type": "number"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "source_ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SketchStrokeRange"
+            },
+            "maxItems": 50,
+            "title": "Source Ranges",
+            "type": "array"
+          },
+          "source_stroke_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Source Stroke Ids",
+            "type": "array"
+          },
+          "type": {
+            "const": "circle",
+            "default": "circle",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "center",
+          "radius"
+        ],
+        "title": "SketchCircle",
+        "type": "object"
+      },
+      "SketchConstraint": {
+        "description": "A geometric rule or a dimension over a sketch's elements.\n\n``refs`` name elements by ``id``, or one of their points as\n``<id>.start``, ``<id>.end`` or ``<id>.center``. (They are not ``*_ref``\nfields: they point inside one sketch entity, not at other entities, so\nthe document-level referential-integrity scan does not see them.)\n\n``status`` is ``proposed`` until a person accepts or rejects it; only\n``accepted`` constraints are solved, checked or promoted (SKP-004).\n``source`` says where a value came from: ``estimated`` (read off a\ndrawing), ``inferred`` (a rule guessed from a drawing) or\n``human_confirmed`` (a person stands behind it, PR-004). A dimension's\n``unit`` is ``unknown`` until a person confirms one.",
+        "properties": {
+          "confidence": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "id": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Refs",
+            "type": "array"
+          },
+          "source": {
+            "default": "inferred",
+            "enum": [
+              "estimated",
+              "inferred",
+              "human_confirmed"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "default": "proposed",
+            "enum": [
+              "proposed",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "coincident",
+              "horizontal",
+              "vertical",
+              "parallel",
+              "perpendicular",
+              "tangent",
+              "equal",
+              "concentric",
+              "symmetric",
+              "radius",
+              "length"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unknown",
+                  "mm",
+                  "in",
+                  "deg"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "enum": [
+                  "external",
+                  "internal"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "refs"
+        ],
+        "title": "SketchConstraint",
+        "type": "object"
+      },
+      "SketchEllipse": {
+        "description": "A full ellipse. ``rotation`` is the major axis direction in degrees.",
+        "properties": {
+          "center": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Center",
+            "type": "array"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "construction": {
+            "default": false,
+            "title": "Construction",
+            "type": "boolean"
+          },
+          "estimated": {
+            "default": false,
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^.]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "major_radius": {
+            "exclusiveMinimum": 0.0,
+            "title": "Major Radius",
+            "type": "number"
+          },
+          "minor_radius": {
+            "exclusiveMinimum": 0.0,
+            "title": "Minor Radius",
+            "type": "number"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "rotation": {
+            "default": 0.0,
+            "title": "Rotation",
+            "type": "number"
+          },
+          "source_ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SketchStrokeRange"
+            },
+            "maxItems": 50,
+            "title": "Source Ranges",
+            "type": "array"
+          },
+          "source_stroke_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Source Stroke Ids",
+            "type": "array"
+          },
+          "type": {
+            "const": "ellipse",
+            "default": "ellipse",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "center",
+          "major_radius",
+          "minor_radius"
+        ],
+        "title": "SketchEllipse",
+        "type": "object"
+      },
+      "SketchFrame": {
+        "description": "How model coordinates map back to where they were drawn.\n\n``model = origin + (drawn - origin) * scale``. The scale is 1 until a\nperson confirms a first dimension, which scales the whole sketch.",
+        "properties": {
+          "origin": {
+            "default": [
+              0.0,
+              0.0
+            ],
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Origin",
+            "type": "array"
+          },
+          "scale": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000000.0,
+            "title": "Scale",
+            "type": "number"
+          }
+        },
+        "title": "SketchFrame",
+        "type": "object"
+      },
+      "SketchInterpretation": {
+        "description": "A proposal: fitted primitives and constraints from one sketch revision.",
+        "properties": {
+          "constraints": {
+            "items": {
+              "$ref": "#/components/schemas/SketchConstraint"
+            },
+            "maxItems": 3000,
+            "title": "Constraints",
+            "type": "array"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FitSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "frame": {
+            "$ref": "#/components/schemas/SketchFrame"
+          },
+          "interpretation_id": {
+            "maxLength": 100,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Interpretation Id",
+            "type": "string"
+          },
+          "plane_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plane Id"
+          },
+          "primitives": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "arc": "#/components/schemas/SketchArc",
+                  "circle": "#/components/schemas/SketchCircle",
+                  "ellipse": "#/components/schemas/SketchEllipse",
+                  "line": "#/components/schemas/SketchLine",
+                  "rectangle": "#/components/schemas/SketchRectangle",
+                  "spline": "#/components/schemas/SketchSpline"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/SketchLine"
+                },
+                {
+                  "$ref": "#/components/schemas/SketchCircle"
+                },
+                {
+                  "$ref": "#/components/schemas/SketchRectangle"
+                },
+                {
+                  "$ref": "#/components/schemas/SketchArc"
+                },
+                {
+                  "$ref": "#/components/schemas/SketchEllipse"
+                },
+                {
+                  "$ref": "#/components/schemas/SketchSpline"
+                }
+              ]
+            },
+            "maxItems": 500,
+            "title": "Primitives",
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ClosedProfile"
+            },
+            "maxItems": 500,
+            "title": "Profiles",
+            "type": "array"
+          },
+          "sketch_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Ref"
+          },
+          "solve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SolveSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "space": {
+            "const": "sketch_unit",
+            "default": "sketch_unit",
+            "title": "Space",
+            "type": "string"
+          },
+          "unit": {
+            "default": "unknown",
+            "enum": [
+              "unknown",
+              "mm",
+              "in"
+            ],
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interpretation_id"
+        ],
+        "title": "SketchInterpretation",
+        "type": "object"
+      },
+      "SketchLine": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "construction": {
+            "default": false,
+            "title": "Construction",
+            "type": "boolean"
+          },
+          "end": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "End",
+            "type": "array"
+          },
+          "estimated": {
+            "default": false,
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^.]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "source_ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SketchStrokeRange"
+            },
+            "maxItems": 50,
+            "title": "Source Ranges",
+            "type": "array"
+          },
+          "source_stroke_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Source Stroke Ids",
+            "type": "array"
+          },
+          "start": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Start",
+            "type": "array"
+          },
+          "type": {
+            "const": "line",
+            "default": "line",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SketchLine",
+        "type": "object"
+      },
       "SketchPlane": {
         "additionalProperties": false,
         "description": "One sketch plane. See the module docstring for the conventions.",
@@ -17502,6 +18724,112 @@
         "title": "SketchPlaneView",
         "type": "object"
       },
+      "SketchRectangle": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "construction": {
+            "default": false,
+            "title": "Construction",
+            "type": "boolean"
+          },
+          "estimated": {
+            "default": false,
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "number"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^.]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "origin": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Origin",
+            "type": "array"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "source_ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SketchStrokeRange"
+            },
+            "maxItems": 50,
+            "title": "Source Ranges",
+            "type": "array"
+          },
+          "source_stroke_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Source Stroke Ids",
+            "type": "array"
+          },
+          "type": {
+            "const": "rectangle",
+            "default": "rectangle",
+            "title": "Type",
+            "type": "string"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "number"
+          }
+        },
+        "required": [
+          "origin",
+          "width",
+          "height"
+        ],
+        "title": "SketchRectangle",
+        "type": "object"
+      },
       "SketchRevisionResponse": {
         "description": "The current revision of a project's sketch, with its strokes.",
         "properties": {
@@ -17827,6 +19155,111 @@
         "title": "SketchSaveResponse",
         "type": "object"
       },
+      "SketchSpline": {
+        "description": "A smooth curve through ``points`` in order (Catmull-Rom).\n\n``closed`` joins the last point to the first.",
+        "properties": {
+          "closed": {
+            "default": false,
+            "title": "Closed",
+            "type": "boolean"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "construction": {
+            "default": false,
+            "title": "Construction",
+            "type": "boolean"
+          },
+          "estimated": {
+            "default": false,
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^.]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "points": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 500,
+            "minItems": 2,
+            "title": "Points",
+            "type": "array"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "source_ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SketchStrokeRange"
+            },
+            "maxItems": 50,
+            "title": "Source Ranges",
+            "type": "array"
+          },
+          "source_stroke_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Source Stroke Ids",
+            "type": "array"
+          },
+          "type": {
+            "const": "spline",
+            "default": "spline",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "SketchSpline",
+        "type": "object"
+      },
       "SketchStroke": {
         "description": "One stroke in sketch units. ``points`` are what is drawn, in order.",
         "properties": {
@@ -17918,6 +19351,34 @@
         "title": "SketchStroke",
         "type": "object"
       },
+      "SketchStrokeRange": {
+        "description": "A run of one stroke's points (indices into its ``points``, inclusive).",
+        "properties": {
+          "end": {
+            "minimum": 0.0,
+            "title": "End",
+            "type": "integer"
+          },
+          "start": {
+            "minimum": 0.0,
+            "title": "Start",
+            "type": "integer"
+          },
+          "stroke_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Stroke Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stroke_id",
+          "start",
+          "end"
+        ],
+        "title": "SketchStrokeRange",
+        "type": "object"
+      },
       "SketchViewport": {
         "description": "The drawing viewport in CSS pixels when the sketch was last edited (SKP-001).",
         "properties": {
@@ -17968,6 +19429,83 @@
           "itemKey"
         ],
         "title": "SlotView",
+        "type": "object"
+      },
+      "SolveSummary": {
+        "description": "What the browser's solve reported. Informational: the gateway re-checks.",
+        "properties": {
+          "conflicts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 50,
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "converged": {
+            "title": "Converged",
+            "type": "boolean"
+          },
+          "dof": {
+            "minimum": 0.0,
+            "title": "Dof",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "number"
+          },
+          "iterations": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Iterations",
+            "type": "integer"
+          },
+          "max_residual": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Max Residual",
+            "type": "number"
+          },
+          "message": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Message",
+            "type": "string"
+          },
+          "redundant": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Redundant",
+            "type": "array"
+          },
+          "shape_dof": {
+            "minimum": 0.0,
+            "title": "Shape Dof",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "fully",
+              "under",
+              "over",
+              "not_solved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "dof",
+          "shape_dof",
+          "converged"
+        ],
+        "title": "SolveSummary",
         "type": "object"
       },
       "SourceDeleteResponse": {
@@ -20682,7 +22220,8 @@
                     "design_loop",
                     "sketch",
                     "drawing",
-                    "upload"
+                    "upload",
+                    "parametric_sketch"
                   ],
                   "type": "string"
                 },
@@ -32137,6 +33676,60 @@
         ]
       }
     },
+    "/v1/twin/nodes/{node_id}/approve-parametric-sketch": {
+      "post": {
+        "description": "Human sign-off on a parametric sketch, through the design-sketch approver.",
+        "operationId": "approve_parametric_v1_twin_nodes__node_id__approve_parametric_sketch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveParametricRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveParametricResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Parametric",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/nodes/{node_id}/approve-sketch": {
       "post": {
         "description": "Human sign-off on a design_sketch work product.\n\nThe forge/agent side creates a sketch as unapproved (twin.commit_design_sketch);\nthis is the dashboard's side of the gate \u2014 a human explicitly approving it\nbefore the calling agent is expected to proceed to real CAD/build work.",
@@ -32878,6 +34471,68 @@
         ]
       }
     },
+    "/v1/twin/projects/{project_id}/interpretations/{interpretation_key}/promote": {
+      "post": {
+        "description": "Promote an interpretation (``SKI-...`` for its head, ``SKI-...@n``) to a parametric sketch.\n\nOnly its accepted constraints are kept. The gateway re-checks each of\nthem on the geometry and refuses with 409 if one does not hold, if none\nis accepted, or if the sketch has changed since. Depth, angle and\nmaterial are never invented: the feature plan marks them\n``required_input``. The result waits for approval. A retried\n``promote_id`` returns what it already made.",
+        "operationId": "promote_v1_twin_projects__project_id__interpretations__interpretation_key__promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "interpretation_key",
+            "required": true,
+            "schema": {
+              "title": "Interpretation Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/projects/{project_id}/item-migration/apply": {
       "post": {
         "description": "Apply a reviewed plan. Requires ``approve: true``; refused when the twin changed.",
@@ -33303,6 +34958,68 @@
           }
         },
         "summary": "Get Current Sketch",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{item_key}/interpretations": {
+      "post": {
+        "description": "Store a proposal: primitives fitted to a saved sketch and proposed constraints.\n\nThe browser computes it; the gateway validates its shape, re-checks its\nbasic geometry and records it as the next revision of the sketch's\n``SKI-*`` item, depending on the sketch revision it was made from. Every\nvalue in it is estimated. A retried ``interpretation_id`` returns the\nrevision it already made. 409 when the sketch has moved on since.",
+        "operationId": "store_interpretation_v1_twin_projects__project_id__sketches__item_key__interpretations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "title": "Item Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterpretationSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterpretationSaveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Store Interpretation",
         "tags": [
           "twin"
         ]

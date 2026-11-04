@@ -204,6 +204,55 @@ plane* instead of *no plane yet*. The sketch's scale stays unknown: placing
 it says where it sits, not how big it is. See
 [sketch planes](twin_schema.md#sketch-planes).
 
+### Making a sketch editable
+
+A saved sketch offers **Make editable**. It turns the strokes into shapes a
+person can size and constrain, in the browser, in a few tens of
+milliseconds, without leaving the stage:
+
+- **Shapes over the strokes.** Each stroke is fitted with lines, arcs,
+  circles, ellipses or, when nothing simpler fits, a smooth curve. A shape
+  drawn solid is a confident fit; a dashed one is uncertain. Every shape and
+  size is marked *estimated*: it is read off a drawing, not measured.
+- **Rules as badges.** Small badges on the shapes propose rules: ends that
+  meet, horizontal and vertical, parallel and square, tangent, same size,
+  same centre and mirror symmetry. Clicking a badge accepts it (it turns
+  green); clicking again takes it back. **Accept the likely ones** accepts
+  every confident rule at once, leaving out any rule the others already
+  imply. The panel lists the rest, each with accept and reject.
+- **Sizes.** Every line's length and every circle's and arc's radius is
+  listed with an *estimated* tag. Typing a value confirms it (*confirmed*)
+  and re-solves the sketch from where it is; the strokes are never read
+  again. The first size typed sets the scale of the whole sketch, so its
+  proportions are kept. The unit is unknown until the sketch is placed on a
+  plane with a unit; then it is that plane's unit.
+- **What is left, in plain words.** *2 more dimensions or rules would fix
+  the shape and size*, or *The shape and size are fully fixed*. When accepted
+  rules cannot all hold, the panel names them (*These two rules conflict:
+  Length of Line 2 = 60 and Length of Line 4 = 50*) and offers the fixes:
+  remove one, or change a size to the value the others imply. Conflicting
+  shapes are never moved.
+- **Undo, compare, restore.** Undo and redo walk back through accepts,
+  rejects and typed sizes. Compare draws the first fit beside the current
+  shapes. Restore goes back to the version last saved.
+- **More detail.** The detail toggle shows what the Engineering view
+  shows: the degrees of freedom, every rule with its status, source and
+  residual, and each shape's confidence and fit residual.
+
+Making a sketch editable stores the proposal as the next revision of the
+sketch's `sketch_interpretation` item (`SKI-SKETCH@1`, ...), which depends on
+the sketch revision it was made from, and shows in the activity overlay as
+*Editable sketch proposed*. **Make it a parametric sketch** stores the
+current state and promotes it: the gateway re-checks every accepted rule on
+the shapes and refuses if one does not hold, if nothing is accepted, or if
+the sketch was redrawn since. The result is a `parametric_sketch` item
+(`PSK-SKETCH@1`) holding only the accepted rules, and it waits for sign-off:
+the panel shows *Waiting for your sign-off* with **Approve**, and the same
+approval is in the Approvals list. Its feature plan lists candidate extrude
+and revolve features with depth, angle and material marked as needed input:
+nothing the drawing does not say is invented. See
+[the sketch compiler](twin_schema.md#sketch-compiler).
+
 ## Conversation and instructions
 
 The composer has three intents:
@@ -414,6 +463,9 @@ The sketch layer uses these twin routes:
 | `POST .../plane/confirm` | Place the sketch on the chosen plane (idempotent per `op_id`) |
 | `POST .../plane/reassign/preview`, `POST .../plane/reassign` | Preview, then commit, a move to another plane in one of three modes |
 | `POST .../plane/undo`, `POST .../plane/archive` | Undo the last plane change, or archive the plane, each as a new revision |
+| `POST /v1/twin/projects/{project_id}/sketches/{sketch_key}/interpretations` | Store a proposal made by **Make editable** (idempotent per `interpretation_id`; `409` when the sketch was redrawn since) |
+| `POST /v1/twin/projects/{project_id}/interpretations/{key}/promote` | Promote a proposal's accepted rules to a parametric sketch held for sign-off (idempotent per `promote_id`; `409` when a rule does not hold) |
+| `POST /v1/twin/nodes/{node_id}/approve-parametric-sketch` | Sign off a parametric sketch |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the
@@ -421,9 +473,11 @@ refused with `403`. The full schemas are in the
 
 ## Not yet
 
-- A sketch has no scale and no constraints. Dimensioning and turning strokes
-  into editable geometry are later steps. Planes are Front, Side and Top
-  only: placing a sketch on a model face (and checking that attachment when
+- An editable sketch's shapes are lines, arcs, circles, ellipses and smooth
+  curves; there are no angle or point-to-point distance dimensions yet, and
+  shapes cannot be dragged. A generated (raster) image cannot be made
+  editable yet: only strokes drawn on the stage. Planes are Front, Side and
+  Top only: placing a sketch on a model face (and checking that attachment when
   the model changes), and offset or custom planes, are later steps.
 - Pen pressure is recorded with each point but not yet drawn as varying
   width.

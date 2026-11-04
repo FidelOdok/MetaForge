@@ -40,6 +40,7 @@ import {
   type Viewport,
 } from './geometry';
 import { PlanePrompt } from './PlanePrompt';
+import { SketchCompiler } from './SketchCompiler';
 import { useSketchPlane } from '../../hooks/use-sketch-plane';
 import { isPlaced } from '../../api/endpoints/sketchPlanes';
 import { VIEW_NAMES } from '../../lib/sketch/planeMath';
@@ -530,6 +531,17 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
       {planePrompt && doc.itemKey && (
         <PlanePrompt projectId={projectId} sketchKey={doc.itemKey} onDone={() => setPlanePrompt(false)} />
       )}
+
+      {/* FORGE-791: Make editable (the sketch compiler). */}
+      <SketchCompiler
+        projectId={projectId}
+        strokes={doc.strokes}
+        itemKey={doc.itemKey}
+        savedRevision={doc.savedRevision}
+        unsaved={!!doc.pendingSaveId}
+        view={size}
+        plane={placed && plane ? { plane_id: plane.plane_id, unit: plane.unit } : null}
+      />
     </div>
   );
 }

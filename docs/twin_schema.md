@@ -231,6 +231,12 @@ never set either.
 `SKETCH_PLANE = "sketch_plane"` is the plane a sketch is placed on. See
 [Sketch planes](#sketch-planes) below.
 
+`SKETCH_INTERPRETATION = "sketch_interpretation"` is the sketch compiler's
+proposal for a sketch (fitted primitives and proposed constraints, all
+estimated), and `PARAMETRIC_SKETCH = "parametric_sketch"` is the sketch a
+person promoted from one, held for approval. See
+[The sketch compiler](#sketch-compiler) below.
+
 **Pydantic Model**:
 
 ```python
@@ -1206,6 +1212,8 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `gcode` | definition | `GC` | `WorkProduct` `gcode`: G-code for one printer with the `config.ini` it was sliced with (`twin.record_design_files` after `slicer.slice`), which `library.dispatch_job` sends |
 | `sketch_strokes` | definition | `SKT` | `WorkProduct` `sketch_strokes`: a person's freehand strokes from the Create stage, as JSON in a viewport-independent sketch space plus a generated SVG. Each save is the next revision. A human sketch, not CAD: scale unknown, plane `UNASSIGNED` until one is confirmed |
 | `sketch_plane` | definition | `PLN` | `WorkProduct` `sketch_plane`: the plane one sketch is placed on (frame, unit, lifecycle state, who proposed it). One item per sketch; every confirm, reassign, undo or archive is the next revision, with a `DEPENDS_ON` edge to the sketch revision it is for |
+| `sketch_interpretation` | definition | `SKI` | `WorkProduct` `sketch_interpretation`: the sketch compiler's proposal for a sketch, fitted primitives and proposed, accepted and rejected constraints, all estimated. `DEPENDS_ON` the strokes revision it was made from. A proposal, not CAD |
+| `parametric_sketch` | definition | `PSK` | `WorkProduct` `parametric_sketch`: a sketch a person promoted, with only the accepted constraints (re-checked by the gateway) and a feature plan whose depth, angle and material are required input. `DEPENDS_ON` the interpretation and the strokes. Held for approval |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
@@ -1496,7 +1504,180 @@ of the writes in half an hour fail.
 
 ---
 
-### 2.33 Migrating legacy nodes into items {#migrating-legacy-nodes}
+### 2.33 The sketch compiler {#sketch-compiler}
+
+The sketch compiler turns a person's saved strokes into an editable,
+constrained sketch (the Create stage's **Make editable**, see
+[the Create view](create-view.md#making-a-sketch-editable)). It keeps four
+representations apart, each with its own authority and revisions:
+
+| Representation | Where | Authority |
+|---|---|---|
+| A generated image of a sketch | `image` or `render` | `illustrative` |
+| The person's strokes | `sketch_strokes` (`SKT-*`) | `human_sketch`: not CAD, scale unknown |
+| The interpretation | `sketch_interpretation` (`SKI-*`) | `proposal`: every value `estimated` |
+| The parametric sketch | `parametric_sketch` (`PSK-*`) | `human_accepted`: accepted rules only, held for approval |
+
+Everything is in the sketch's own 2D space, the strokes' sketch units with y
+down the screen. The compiler never reads a plane. When the sketch is
+placed, the interpretation and the parametric sketch carry the plane's ref
+(`plane_id`, the `PLN-*@n` revision) and its unit, read from the plane item
+on the gateway, never from the payload. Otherwise the unit is `unknown`.
+
+**Design IR extensions.** `twin_core/design_ir/models.py` adds the
+following, all optional, so existing IR reads and lowers unchanged:
+
+- on every sketch element: `id`, `source_stroke_ids`, `source_ranges`
+  (stroke id and inclusive point indices), `estimated`, `confidence`,
+  `residual` and `construction` (helper geometry such as a symmetry axis,
+  skipped by both Lowering Passes);
+- `SketchEllipse` (`center`, `major_radius`, `minor_radius`, `rotation` in
+  degrees) and `SketchSpline` (through-`points`, `closed`). Neither lowers
+  yet: both Lowering Passes refuse them with a clear error, as they do arcs;
+- `SketchConstraint`: `id`, `type` (`coincident`, `horizontal`, `vertical`,
+  `parallel`, `perpendicular`, `tangent`, `equal`, `concentric`,
+  `symmetric`, `radius`, `length`), `refs` (an element id, or
+  `<id>.start`, `<id>.end` or `<id>.center`), `value`, `unit` (`unknown`,
+  `mm`, `in`, `deg`), `status` (`proposed`, `accepted`, `rejected`), `source`
+  (`estimated` for a size read off the drawing, `inferred` for a guessed
+  rule, `human_confirmed` for one a person stands behind), `confidence` and,
+  for tangent circles, `variant` (`external`, `internal`). Only a dimension
+  can be `estimated`;
+- on `SketchEntity`: `constraints` and `plane_id`.
+
+`twin_core/design_ir/sketch_compiler.py` holds `SketchInterpretation` (the
+proposal, with its `frame`, fit and solve reports), `ParametricSketch` and
+`feature_plan`. A parametric sketch in millimetres becomes a design IR
+`sketch` entity through `to_sketch_entity`, which mirrors y into the plane's
+v (up), as the plane manager does. One in an unknown unit is refused: a
+sketch of unknown size is not CAD.
+
+**Fitting** (`dashboard/src/lib/sketch/fit/`). Each stroke is resampled
+evenly along its length. A stroke whose ends meet within the tolerance is
+closed: it is tried as a circle (algebraic Kasa fit, then Gauss-Newton on
+the geometric distance) and an ellipse (moments, then refined on the radial
+distance). Otherwise it is cut at corners (local maxima of the turning angle
+over a short window, after light smoothing, kept apart by a minimum gap).
+Each run is fitted greedily over its Douglas-Peucker breakpoints with the
+line (total least squares) or arc that reaches furthest inside the
+tolerance. Neighbouring lines meet at their intersection, and collinear
+lines and co-circular arcs merge. A run that only breaks into slivers
+becomes a smoothing spline, always shown as uncertain. Closed profiles are
+single closed shapes, or open shapes whose ends meet in pairs all round. The
+tolerance is 1% of the sketch's extent, never finer than 3 screen pixels at
+the scale it was drawn. Ids are the stroke id plus a segment number, so the
+same strokes give the same ids (stroke to shape identity).
+
+**Constraint inference** (`lib/sketch/constraints/`) proposes each of
+these with a confidence:
+
+- coincident ends;
+- horizontal and vertical lines;
+- parallel and perpendicular lines, each direction class linked once, so
+  accepting them all adds no redundancy;
+- tangency: a line and an arc or two arcs meeting smoothly, and a line
+  touching a circle;
+- equal lengths and radii;
+- concentric circles;
+- symmetry about the sketch's vertical or horizontal centre line, when two
+  or more point pairs make it obvious (a construction axis is added);
+- a length for every line and a radius for every circle and arc.
+
+Ids derive from the rule and its refs.
+
+**Solver** (`lib/sketch/solver/`). Levenberg-Marquardt over the packed
+primitive parameters (a line is four numbers, a circle three, an arc and an
+ellipse five, a spline two per point). It solves only accepted constraints,
+from the current geometry, so a typed size re-solves without fitting again.
+Angle residuals are scaled by the sketch extent so one tolerance applies.
+
+- *Degrees of freedom* are the parameters less the rank of the constraint
+  Jacobian (central differences, Gram-Schmidt), less the construction
+  geometry's own freedom. The rigid motions still free (move, turn) are
+  taken off to give `shape_dof`.
+- *Status* is `fully` (shape and size fixed), `under` or `over`.
+- *Conflicts.* When accepted constraints cannot all hold, the dependent
+  rows of the Jacobian and the unsatisfied constraints are candidates. Each
+  is tried removed, and the ones whose removal lets the rest hold are the
+  clash. The report names them in words (sizes first) and offers to remove
+  one or, for a size, to change it to the value the others imply.
+  Conflicting geometry is not moved.
+- *Redundancy.* Constraints already implied by others are reported as
+  redundant.
+- *Scale.* The first size a person confirms scales the whole sketch so it
+  has that value. `frame` (`scale`, `origin`) maps the result back over the
+  strokes.
+
+Measured in the test suite on a bracket of 18 fitted primitives and 2
+construction axes (an L-shaped outline with a rounded corner, four holes, a
+slot and a gusset), as the median of five runs: fitting takes about 18 ms,
+solving with every confident rule accepted about 10 ms, and a re-solve
+after a typed size about 1 ms, against the 250 ms targets.
+
+**Gateway.** Storing an interpretation:
+
+- validates its shape: ids unique and resolving, point names valid for the
+  element, fitted elements marked estimated, finite coordinates;
+- refuses degenerate geometry (`422`) and a proposal made from an older
+  strokes revision (`409`);
+- stores it with a generated SVG, a `DEPENDS_ON` edge
+  (`metadata.kind: sketch_compiler`) and a pin to that strokes revision;
+- lists accepted constraints that do not hold as `unsatisfied` without
+  refusing, since a proposal may be stored mid edit.
+
+Promoting re-checks every accepted constraint with
+`twin_core/design_ir/sketch_check.py`, a deterministic mirror of the
+browser's residual equations, at 1e-5 of the sketch extent. It refuses with
+`409` (naming each failing constraint) when one does not hold, when nothing
+is accepted, or when the sketch was redrawn since. The parametric sketch
+depends on both the interpretation and the strokes revision, starts
+`approved: false` and is approved through the same approver as a design
+sketch, listed as `parametric_sketch:<node id>` in
+[approvals](approvals.md), a human-authority kind. Storing is idempotent per
+`interpretation_id`, and promoting per `promote_id`.
+
+Each interpretation is one `sketch` operation, `job:sketch-compile-<id>`:
+
+1. `preview_ready` at stage `interpretation_proposed` when it is stored;
+2. `review_required` with an approval action when it is promoted;
+3. `completed` when the parametric sketch is approved.
+
+Writes are counted in `metaforge_sketch_compile_total` by `stage`
+(`interpretation`, `promotion`, `approval`) and `outcome` (`proposed`,
+`promoted`, `approved`, `duplicate`, `refused`, `failed`).
+`SketchCompilerFailing` fires when more than a fifth of them fail on the
+gateway in half an hour.
+
+**Decision record: where the solver runs.** The fitter and solver run in
+the browser, in TypeScript written for this, with no new dependency and no
+WebAssembly.
+
+- *Context.* The targets are 250 ms for fitting a simple sketch and for a
+  simple solve, and a typed size must re-solve without recognition running
+  again. Sketches here are bounded (tens of primitives).
+- *Chosen.* A small Levenberg-Marquardt solver with Jacobian-rank degrees of
+  freedom in the browser, and a deterministic residual check in Python on
+  the gateway before promotion. It measures well inside the targets, needs
+  no round trip per edit and raises no licence question, and the gateway
+  still decides what is promoted.
+- *Considered: planegcs (FreeCAD's solver compiled to WebAssembly).* More
+  complete (more constraint types, better on large sketches), but a large
+  binary, LGPL terms to manage, and a second numeric engine to keep in step
+  with the gateway check. Worth revisiting if sketches grow past what dense
+  linear algebra handles, or when angle and distance dimensions,
+  point-on-curve and drag solving are needed.
+- *Considered: FreeCAD Sketcher on the gateway.* The same solver CAD export
+  uses, but a container round trip for every accept or typed size would miss
+  the 250 ms target, and editing would depend on the tool adapter being up.
+- *Consequences.* The browser equations (`lib/sketch/solver/equations.ts`)
+  and the gateway mirror (`twin_core/design_ir/sketch_check.py`) must change
+  together. Only the listed constraint types exist.
+
+*Source: `twin_core/design_ir/models.py`, `twin_core/design_ir/sketch_compiler.py`, `twin_core/design_ir/sketch_check.py`, `api_gateway/twin/sketch_compiler_recorder.py`, `api_gateway/twin/sketch_compiler_routes.py`, `dashboard/src/lib/sketch/`*
+
+---
+
+### 2.34 Migrating legacy nodes into items {#migrating-legacy-nodes}
 
 A project written before items existed holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
 

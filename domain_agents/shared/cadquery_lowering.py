@@ -107,9 +107,11 @@ from twin_core.design_ir.models import (
     ShellEntity,
     SketchArc,
     SketchCircle,
+    SketchEllipse,
     SketchEntity,
     SketchLine,
     SketchRectangle,
+    SketchSpline,
     SweepEntity,
     TransformEntity,
 )
@@ -198,6 +200,10 @@ def _lower_sketch_elements(var: str, entity_id: str, elements: list) -> tuple[li
     lines: list[str] = []
     has_line = False
     for el in elements:
+        if el.construction:
+            # Helper geometry (a symmetry axis from the sketch compiler) is
+            # constrained and solved but never part of the profile.
+            continue
         if isinstance(el, SketchRectangle):
             cx = el.origin[0] + el.width / 2.0
             cy = el.origin[1] + el.height / 2.0
@@ -221,6 +227,11 @@ def _lower_sketch_elements(var: str, entity_id: str, elements: list) -> tuple[li
                 f"entity {entity_id!r}: SketchArc is not supported by this Lowering Pass "
                 "yet (same v1 cut as the FreeCAD Lowering Pass -- no arc-to-CadQuery "
                 "translation implemented)"
+            )
+        elif isinstance(el, (SketchEllipse, SketchSpline)):
+            raise LoweringError(
+                f"entity {entity_id!r}: a sketch {el.type} is not supported by this Lowering "
+                "Pass yet (no ellipse- or spline-to-CadQuery translation implemented)"
             )
         else:  # pragma: no cover -- exhaustive per SketchElement's discriminated union
             raise LoweringError(f"entity {entity_id!r}: unsupported sketch element {el!r}")

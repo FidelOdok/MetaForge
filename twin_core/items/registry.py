@@ -241,6 +241,28 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "is the next revision, pinned to the sketch revision it is for."
         ),
     ),
+    TwinTypeSpec(
+        "sketch_interpretation",
+        TwinTypeKind.DEFINITION,
+        "work_product:sketch_interpretation",
+        key_prefix="SKI",
+        description=(
+            "The sketch compiler's proposal for a sketch: fitted primitives and proposed, "
+            "accepted and rejected constraints, all estimated. Depends on the sketch "
+            "revision it was made from. Not CAD and not a measurement."
+        ),
+    ),
+    TwinTypeSpec(
+        "parametric_sketch",
+        TwinTypeKind.DEFINITION,
+        "work_product:parametric_sketch",
+        key_prefix="PSK",
+        description=(
+            "A sketch a person promoted: primitives with only the accepted constraints, "
+            "re-checked by the gateway, and a feature plan whose missing depth, angle and "
+            "material are required input. Depends on the interpretation and the strokes."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",

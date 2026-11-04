@@ -138,7 +138,7 @@ export function PreviewHost({ node, mode, onOpenInViewer }: PreviewHostProps) {
       return frame(
         <figure className="flex flex-1 flex-col items-center justify-center gap-2" style={{ margin: 0, padding: mode === 'modal' ? 32 : 8, minHeight: 0, background: 'var(--mf-c-0a0b0f)' }}>
           <figcaption className="font-mono" data-testid="preview-sketch-label" style={{ fontSize: 11, color: PC.onSurfaceVariant }}>
-            Human sketch · not CAD · scale unknown · plane unassigned
+            {sketchCaption(node.properties?.wp_type, node.properties?.unit)}
             {node.properties?.item_key ? ` · ${String(node.properties.item_key)}@${String(node.properties.item_revision ?? '')}` : ''}
           </figcaption>
           <img src={inlineUrl} alt={`Sketch: ${node.name}`} data-testid="preview-sketch" style={{ maxWidth: '100%', maxHeight: mode === 'modal' ? '100%' : 260, objectFit: 'contain', borderRadius: 4, background: '#fff' }} />
@@ -214,4 +214,16 @@ export function PreviewHost({ node, mode, onOpenInViewer }: PreviewHostProps) {
     default:
       return frame(<PreviewUnavailable engine="none" format={format} downloadUrl={downloadUrl} compact={mode !== 'modal'} />);
   }
+}
+
+/**
+ * The honesty label for a sketch preview: what kind of sketch it is (FSG-007).
+ * FORGE-791 adds the compiler's proposal and the promoted parametric sketch.
+ */
+export function sketchCaption(wpType: unknown, unit: unknown): string {
+  if (wpType === 'sketch_interpretation') return 'Proposed shapes · estimated from a drawing · not CAD';
+  if (wpType === 'parametric_sketch') {
+    return `Parametric sketch · accepted rules · ${unit === 'mm' || unit === 'in' ? `in ${unit}` : 'unit unknown'}`;
+  }
+  return 'Human sketch · not CAD · scale unknown · plane unassigned';
 }

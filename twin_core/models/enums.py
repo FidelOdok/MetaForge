@@ -171,6 +171,16 @@ class WorkProductType(StrEnum):
     # item per sketch; every assignment, reassignment, undo or archive is its
     # next revision, with a DEPENDS_ON edge to the sketch revision it is for.
     SKETCH_PLANE = "sketch_plane"
+    # The sketch compiler's proposal for a sketch: primitives fitted to its
+    # strokes plus proposed, accepted and rejected constraints, all estimated.
+    # DEPENDS_ON the sketch_strokes revision it was made from.
+    SKETCH_INTERPRETATION = "sketch_interpretation"
+    # A sketch a person promoted from an interpretation: its primitives with
+    # only the accepted constraints, re-checked by the gateway, and a feature
+    # plan with every missing parameter marked required. DEPENDS_ON both the
+    # interpretation and the strokes revision. Held for approval like a
+    # design_sketch.
+    PARAMETRIC_SKETCH = "parametric_sketch"
 
 
 class ConstraintSeverity(StrEnum):
