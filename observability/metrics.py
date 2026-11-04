@@ -943,6 +943,20 @@ class MetricsRegistry:
         labels=["outcome"],
     )
 
+    # ── Sketch planes (FORGE-790) ──────────────────────────────────────
+
+    SKETCH_PLANE_TOTAL = MetricDefinition(
+        name="metaforge_sketch_plane_total",
+        type="counter",
+        description=(
+            "Sketch plane manager actions, by action (proposed, proposed_ambiguous, "
+            "confirmed, reassign_previewed, reassigned, undone, archived, failed) and "
+            "proposed_by (user, existing_sketch, view, component_frame, model, none) "
+            "(FORGE-790)"
+        ),
+        labels=["action", "proposed_by"],
+    )
+
     # ── Sketch reading (FORGE-762) ─────────────────────────────────────
 
     SKETCH_READING_TOTAL = MetricDefinition(
@@ -1153,6 +1167,7 @@ class MetricsRegistry:
             cls.CONCEPT_IMAGE_TOTAL,
             cls.SKETCH_READING_TOTAL,
             cls.SKETCH_SAVE_TOTAL,
+            cls.SKETCH_PLANE_TOTAL,
             cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
             cls.CONCEPT_MESH_TOTAL,
         ]
@@ -2072,6 +2087,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.SKETCH_SAVE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
+
+    def record_sketch_plane(self, action: str, proposed_by: str) -> None:
+        """Record one sketch plane manager action (FORGE-790)."""
+        counter = self._instruments.get(MetricsRegistry.SKETCH_PLANE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"action": action, "proposed_by": proposed_by})
 
     def record_supervisor_action(self, action: str, reason: str) -> None:
         """Record one run supervisor action (FORGE-734)."""

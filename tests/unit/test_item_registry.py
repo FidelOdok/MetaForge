@@ -42,6 +42,8 @@ def test_definitions_are_the_versioned_types() -> None:
         "gcode",
         # A person's freehand sketch from the Create stage.
         "sketch_strokes",
+        # The plane a sketch is placed on.
+        "sketch_plane",
     }
 
 

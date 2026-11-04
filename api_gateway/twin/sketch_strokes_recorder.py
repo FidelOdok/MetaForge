@@ -12,9 +12,12 @@ What a save holds:
   centre) and pressure when the pen reported it;
 - an SVG rendering generated **here**, from the validated strokes, so no
   client-supplied markup is ever stored or served;
-- honesty fields that never change in this slice: ``authority:
-  human_sketch`` (a human sketch is not CAD and not evidence), ``scale:
-  unknown`` and ``plane_state: UNASSIGNED`` (FRS PLN-001, PLN-012);
+- honesty fields the payload can never set: ``authority: human_sketch`` (a
+  human sketch is not CAD and not evidence), ``scale: unknown`` and
+  ``plane_state`` (FRS PLN-001, PLN-012). The plane state is
+  ``UNASSIGNED`` until a person places the sketch on a plane
+  (:mod:`api_gateway.twin.sketch_planes`, FORGE-790); a save after that
+  records the plane's state and ``plane_ref`` at the time of the save;
 - ``parent_revision`` (the item head it was drawn on) and ``save_id``, the
   client's id for the save. A retried save id returns the revision it already
   made instead of adding another (idempotent per save id).
@@ -216,8 +219,10 @@ def _bounds(strokes: list[SketchStroke]) -> tuple[float, float, float, float]:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def render_svg(strokes: list[SketchStroke]) -> str:
+def render_svg(strokes: list[SketchStroke], plane_state: str = PLANE_STATE) -> str:
     """A standalone SVG of the strokes. Deterministic; no script, no external refs."""
+    state = plane_state if plane_state.replace("_", "").isalpha() else PLANE_STATE
+    plane_text = "plane unassigned" if state == PLANE_STATE else f"plane {state.lower()}"
     x0, y0, x1, y1 = _bounds(strokes)
     # Always frame at least the unit square around the origin, plus a margin.
     x0, y0, x1, y1 = min(x0, -0.5), min(y0, -0.5), max(x1, 0.5), max(y1, 0.5)
@@ -228,8 +233,8 @@ def render_svg(strokes: list[SketchStroke]) -> str:
         '<svg xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="{_fmt(vx)} {_fmt(vy)} {_fmt(vw)} {_fmt(vh)}" '
         f'width="{round(800 * vw / max(vw, vh))}" height="{round(800 * vh / max(vw, vh))}" '
-        'data-authority="human_sketch" data-scale="unknown" data-plane-state="UNASSIGNED">',
-        "<title>Human sketch: not CAD, scale unknown, plane unassigned</title>",
+        f'data-authority="human_sketch" data-scale="unknown" data-plane-state="{state}">',
+        f"<title>Human sketch: not CAD, scale unknown, {plane_text}</title>",
         f'<rect x="{_fmt(vx)}" y="{_fmt(vy)}" width="{_fmt(vw)}" height="{_fmt(vh)}" '
         'fill="#ffffff"/>',
         '<g fill="none" stroke="#1f2937" stroke-linecap="round" stroke-linejoin="round">',
@@ -303,6 +308,7 @@ def _response_from_node(wp: Any, *, duplicate: bool) -> SketchSaveResponse:
         operation_id=operation_id_for(str(meta.get("save_id") or "")),
         duplicate=duplicate,
         stroke_count=int(meta.get("stroke_count") or 0),
+        plane_state=str(meta.get("plane_state") or PLANE_STATE),
         content_hash=str(wp.content_hash),
     )
 
@@ -365,14 +371,26 @@ def make_sketch_strokes_recorder(twin: Any, project_backend: Any = None) -> Any:
                     parent_revision = f"{plan.key}@{plan.revision - 1}"
                     parent_node_id = str(plan.prior_node_id)
 
+                # The plane is the plane item's, never the payload's (FORGE-790).
+                plane_summary = None
+                if plan is not None:
+                    from api_gateway.twin.sketch_planes import plane_summary_for_sketch
+
+                    plane_summary = await plane_summary_for_sketch(twin, pid, plan.key)
+                plane_state = str((plane_summary or {}).get("state") or PLANE_STATE)
+                plane_meta: dict[str, Any] = {"state": plane_state}
+                if plane_summary and plane_summary.get("plane_ref"):
+                    plane_meta["plane_ref"] = plane_summary["plane_ref"]
+                    plane_meta["principal"] = plane_summary.get("principal")
+
                 wp_id = uuid4()
                 strokes = strokes_json(request)
-                svg = render_svg(request.strokes).encode("utf-8")
+                svg = render_svg(request.strokes, plane_state).encode("utf-8")
                 strokes_blob = json.dumps(
                     {
                         "space": SKETCH_SPACE,
                         "scale": SCALE,
-                        "plane": {"state": PLANE_STATE},
+                        "plane": plane_meta,
                         "strokes": strokes,
                     },
                     separators=(",", ":"),
@@ -405,8 +423,8 @@ def make_sketch_strokes_recorder(twin: Any, project_backend: Any = None) -> Any:
                     # Honesty fields. Never overridable by the payload.
                     "authority": AUTHORITY,
                     "scale": SCALE,
-                    "plane_state": PLANE_STATE,
-                    "plane": {"state": PLANE_STATE},
+                    "plane_state": plane_state,
+                    "plane": plane_meta,
                 }
                 if svg_key:
                     metadata["minio_object_key"] = svg_key
@@ -456,6 +474,7 @@ def make_sketch_strokes_recorder(twin: Any, project_backend: Any = None) -> Any:
                     save_id=request.save_id,
                     operation_id=operation_id_for(request.save_id),
                     stroke_count=len(strokes),
+                    plane_state=plane_state,
                     content_hash=content_hash,
                 )
                 span.set_attribute("sketch.item_ref", response.item_ref or "")
@@ -528,6 +547,11 @@ async def save_sketch_with_operation(
         )
         raise
     label = response.item_ref or "sketch"
+    plane = (
+        "plane unassigned"
+        if response.plane_state == PLANE_STATE
+        else f"plane {response.plane_state.lower()}"
+    )
     _publish(
         project_id,
         request,
@@ -535,7 +559,7 @@ async def save_sketch_with_operation(
         "completed",
         title="Sketch saved",
         message=(
-            f"Sketch saved as {label}. A human sketch, not CAD: scale unknown, plane unassigned."
+            f"Sketch saved as {label}. A human sketch, not CAD: scale unknown, {plane}."
         ),
         target_revision=response.item_ref,
         base_revision=response.parent_revision,
@@ -612,5 +636,6 @@ def _revision_from_node(wp: Any) -> SketchRevisionResponse:
         strokes=_load_strokes(meta),
         viewport=meta.get("viewport"),
         reference_node_id=meta.get("reference_node_id"),
+        plane_state=str(meta.get("plane_state") or PLANE_STATE),
         created_at=wp.created_at.isoformat() if wp.created_at else None,
     )
