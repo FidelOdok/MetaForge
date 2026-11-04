@@ -1,0 +1,134 @@
+/* The plane prompt in Create (FORGE-790): compact, non-modal, beside the status bar. */
+.sk-plane-prompt {
+  position: absolute;
+  left: 12px;
+  bottom: 52px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(420px, calc(100% - 24px));
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(17, 19, 25, 0.92);
+  color: #e2e2eb;
+  font-size: 12px;
+  pointer-events: auto;
+}
+.sk-plane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+.sk-plane-close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #b4b4c2;
+  cursor: pointer;
+}
+.sk-plane-note,
+.sk-plane-error {
+  margin: 0;
+  color: #b4b4c2;
+}
+.sk-plane-error {
+  color: #fca5a5;
+}
+.sk-plane-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sk-plane-choice {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #e2e2eb;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sk-plane-choice.is-suggested {
+  border-color: #ff5a0a;
+}
+.sk-plane-choice.is-quiet {
+  border-style: dashed;
+}
+.sk-plane-choice:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Engineering: contextual plane controls over the 3D viewer. */
+.sk-plane-controls {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(360px, calc(100% - 24px));
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+}
+.sk-plane-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.sk-plane-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+.sk-plane-badge[data-state='CONFIRMED'],
+.sk-plane-badge[data-state='ATTACHED'] {
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.8);
+}
+.sk-plane-badge[data-state='UNASSIGNED'],
+.sk-plane-badge[data-state='ARCHIVED'] {
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.8);
+}
+.sk-plane-gizmo {
+  display: inline-flex;
+  gap: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+.sk-plane-gizmo .u {
+  color: #f87171;
+}
+.sk-plane-gizmo .v {
+  color: #4ade80;
+}
+.sk-plane-gizmo .n {
+  color: #60a5fa;
+}
+.sk-plane-controls select,
+.sk-plane-controls button {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+}
+.sk-plane-controls button:disabled {
+  opacity: 0.45;
+}
+.sk-plane-controls select option {
+  color: #111;
+}

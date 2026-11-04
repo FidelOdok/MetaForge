@@ -419,7 +419,9 @@ async def test_a_sketch_saved_after_confirmation_records_its_plane(
     save = make_sketch_strokes_recorder(twin)
     out = await save(
         PROJECT,
-        SketchSaveRequest(save_id="save-after-plane", item_key=key, strokes=[_stroke("s9", (0, 0))]),
+        SketchSaveRequest(
+            save_id="save-after-plane", item_key=key, strokes=[_stroke("s9", (0, 0))]
+        ),
     )
     assert out.plane_state == "CONFIRMED"
     node = await twin.get_work_product(UUID(out.node_id))

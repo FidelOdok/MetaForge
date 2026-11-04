@@ -5622,6 +5622,54 @@
         "title": "ExportFile",
         "type": "object"
       },
+      "FaceAttachment": {
+        "additionalProperties": false,
+        "description": "Where a face-attached plane sits on a model.\n\n``face_ref`` is opaque (whatever the CAD side names the face). The\n``signature`` is a placeholder for the geometry fingerprint (normal,\ncentroid, area) that will let a topology change be detected; it is not\nchecked yet.",
+        "properties": {
+          "face_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Face Ref",
+            "type": "string"
+          },
+          "item_key": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Item Key",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          }
+        },
+        "required": [
+          "item_key",
+          "face_ref"
+        ],
+        "title": "FaceAttachment",
+        "type": "object"
+      },
       "FallbackInfo": {
         "description": "The most recent time a harness role ran on something other than its primary.",
         "properties": {
@@ -12246,6 +12294,547 @@
         "title": "PlanUpdate",
         "type": "object"
       },
+      "PlaneCandidate": {
+        "description": "One source's guess, in inference order.",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/PrincipalPlane"
+          },
+          "proposed_by": {
+            "$ref": "#/components/schemas/ProposedBy"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "view_name": {
+            "title": "View Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal",
+          "view_name",
+          "proposed_by",
+          "confidence",
+          "reason"
+        ],
+        "title": "PlaneCandidate",
+        "type": "object"
+      },
+      "PlaneChangeResult": {
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "can_undo": {
+            "default": false,
+            "title": "Can Undo",
+            "type": "boolean"
+          },
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "parent_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Revision"
+          },
+          "pinned_sketch_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Sketch Ref"
+          },
+          "plane": {
+            "$ref": "#/components/schemas/SketchPlane"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "sketch_key": {
+            "title": "Sketch Key",
+            "type": "string"
+          },
+          "sketch_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Ref"
+          },
+          "sketch_revision_written": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Revision Written"
+          },
+          "unchanged": {
+            "default": false,
+            "title": "Unchanged",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sketch_key",
+          "sketch_ref",
+          "plane",
+          "operation_id"
+        ],
+        "title": "PlaneChangeResult",
+        "type": "object"
+      },
+      "PlaneConfirmRequest": {
+        "description": "A person's explicit choice of plane (PLN-002).",
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "op_id": {
+            "maxLength": 100,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Op Id",
+            "type": "string"
+          },
+          "origin": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Origin",
+            "type": "array"
+          },
+          "owner_component": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Component"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/PrincipalPlane"
+          },
+          "proposed_by": {
+            "$ref": "#/components/schemas/ProposedBy",
+            "default": "user"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/PlaneUnit",
+            "default": "unknown"
+          }
+        },
+        "required": [
+          "op_id",
+          "principal"
+        ],
+        "title": "PlaneConfirmRequest",
+        "type": "object"
+      },
+      "PlaneKind": {
+        "enum": [
+          "unassigned",
+          "principal",
+          "face",
+          "offset",
+          "custom"
+        ],
+        "title": "PlaneKind",
+        "type": "string"
+      },
+      "PlaneProposal": {
+        "properties": {
+          "ambiguous": {
+            "title": "Ambiguous",
+            "type": "boolean"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/SketchPlane"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/PlaneCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SketchPlane"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "requires_confirmation": {
+            "default": true,
+            "title": "Requires Confirmation",
+            "type": "boolean"
+          },
+          "sketch_key": {
+            "title": "Sketch Key",
+            "type": "string"
+          },
+          "sketch_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Ref"
+          }
+        },
+        "required": [
+          "sketch_key",
+          "sketch_ref",
+          "candidate",
+          "candidates",
+          "ambiguous"
+        ],
+        "title": "PlaneProposal",
+        "type": "object"
+      },
+      "PlaneProposalRequest": {
+        "description": "What the client knows when it asks for a proposal. Nothing is written.",
+        "properties": {
+          "explicit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrincipalPlane"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "face_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Face Ref"
+          },
+          "hint_text": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint Text"
+          },
+          "owner_component": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Component"
+          },
+          "view_hint": {
+            "anyOf": [
+              {
+                "enum": [
+                  "front",
+                  "side",
+                  "top"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View Hint"
+          }
+        },
+        "title": "PlaneProposalRequest",
+        "type": "object"
+      },
+      "PlaneReassignRequest": {
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "mode": {
+            "enum": [
+              "preserve_world",
+              "preserve_local",
+              "project_to_target"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "op_id": {
+            "maxLength": 100,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Op Id",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "target": {
+            "$ref": "#/components/schemas/PrincipalPlane"
+          }
+        },
+        "required": [
+          "op_id",
+          "target",
+          "mode"
+        ],
+        "title": "PlaneReassignRequest",
+        "type": "object"
+      },
+      "PlaneSimpleRequest": {
+        "description": "Undo or archive.",
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "op_id": {
+            "maxLength": 100,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id"
+        ],
+        "title": "PlaneSimpleRequest",
+        "type": "object"
+      },
+      "PlaneState": {
+        "enum": [
+          "UNASSIGNED",
+          "PROPOSED",
+          "CONFIRMED",
+          "ATTACHED",
+          "INVALID",
+          "REATTACHMENT_REQUIRED",
+          "ARCHIVED"
+        ],
+        "title": "PlaneState",
+        "type": "string"
+      },
+      "PlaneUnit": {
+        "enum": [
+          "mm",
+          "in",
+          "unknown"
+        ],
+        "title": "PlaneUnit",
+        "type": "string"
+      },
       "PolicyApprovalRequest": {
         "description": "A held call the project's approval policy may already cover.",
         "properties": {
@@ -12433,6 +13022,15 @@
         ],
         "title": "PrdSource",
         "type": "object"
+      },
+      "PrincipalPlane": {
+        "enum": [
+          "XY",
+          "XZ",
+          "YZ"
+        ],
+        "title": "PrincipalPlane",
+        "type": "string"
       },
       "Progress": {
         "description": "Measured progress. Only sent when the total is known.",
@@ -12818,6 +13416,19 @@
         ],
         "title": "ProposePatchRequest",
         "type": "object"
+      },
+      "ProposedBy": {
+        "description": "Where a plane came from, in the order inference consults them (PLN-002).",
+        "enum": [
+          "user",
+          "face",
+          "existing_sketch",
+          "view",
+          "component_frame",
+          "model"
+        ],
+        "title": "ProposedBy",
+        "type": "string"
       },
       "ProposedItem": {
         "description": "An item the migration creates, or an existing item it extends.",
@@ -13281,6 +13892,121 @@
           "nodeId"
         ],
         "title": "RealizeHierarchyNodeResponse",
+        "type": "object"
+      },
+      "ReassignPreview": {
+        "description": "What a reassign would do. Nothing is written.",
+        "properties": {
+          "committable": {
+            "title": "Committable",
+            "type": "boolean"
+          },
+          "exact": {
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "max_off_plane": {
+            "title": "Max Off Plane",
+            "type": "number"
+          },
+          "mode": {
+            "enum": [
+              "preserve_world",
+              "preserve_local",
+              "project_to_target"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "rewrites_strokes": {
+            "title": "Rewrites Strokes",
+            "type": "boolean"
+          },
+          "sketch_key": {
+            "title": "Sketch Key",
+            "type": "string"
+          },
+          "sketch_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Ref"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SketchPlane"
+          },
+          "strokes": {
+            "items": {
+              "$ref": "#/components/schemas/ReassignedStroke"
+            },
+            "title": "Strokes",
+            "type": "array"
+          },
+          "target": {
+            "$ref": "#/components/schemas/SketchPlane"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sketch_key",
+          "sketch_ref",
+          "mode",
+          "source",
+          "target",
+          "strokes",
+          "max_off_plane",
+          "exact",
+          "rewrites_strokes",
+          "committable"
+        ],
+        "title": "ReassignPreview",
+        "type": "object"
+      },
+      "ReassignedStroke": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "off_plane": {
+            "title": "Off Plane",
+            "type": "number"
+          },
+          "points": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "points",
+          "off_plane"
+        ],
+        "title": "ReassignedStroke",
         "type": "object"
       },
       "RecordAction": {
@@ -16444,6 +17170,336 @@
           "updatedAt"
         ],
         "title": "SimulationResultResponse",
+        "type": "object"
+      },
+      "SketchPlane": {
+        "additionalProperties": false,
+        "description": "One sketch plane. See the module docstring for the conventions.",
+        "properties": {
+          "attachment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FaceAttachment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PlaneKind",
+            "default": "unassigned"
+          },
+          "normal": {
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Normal",
+            "type": "array"
+          },
+          "origin": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Origin",
+            "type": "array"
+          },
+          "owner_component": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Component"
+          },
+          "plane_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Plane Id",
+            "type": "string"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrincipalPlane"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposed_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposedBy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PlaneState",
+            "default": "UNASSIGNED"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transform"
+          },
+          "u_axis": {
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "U Axis",
+            "type": "array"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/PlaneUnit",
+            "default": "unknown"
+          },
+          "v_axis": {
+            "default": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "V Axis",
+            "type": "array"
+          }
+        },
+        "required": [
+          "plane_id"
+        ],
+        "title": "SketchPlane",
+        "type": "object"
+      },
+      "SketchPlaneView": {
+        "description": "A sketch's current plane and the revision that holds it.",
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "can_undo": {
+            "default": false,
+            "title": "Can Undo",
+            "type": "boolean"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "parent_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Revision"
+          },
+          "pinned_sketch_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Sketch Ref"
+          },
+          "plane": {
+            "$ref": "#/components/schemas/SketchPlane"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "sketch_key": {
+            "title": "Sketch Key",
+            "type": "string"
+          },
+          "sketch_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sketch Ref"
+          }
+        },
+        "required": [
+          "sketch_key",
+          "sketch_ref",
+          "plane"
+        ],
+        "title": "SketchPlaneView",
         "type": "object"
       },
       "SketchRevisionResponse": {
@@ -32247,6 +33303,430 @@
           }
         },
         "summary": "Get Current Sketch",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane": {
+      "get": {
+        "description": "The sketch's current plane. An ``UNASSIGNED`` plane when none was ever set.",
+        "operationId": "get_sketch_plane_v1_twin_projects__project_id__sketches__sketch_key__plane_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SketchPlaneView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sketch Plane",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/archive": {
+      "post": {
+        "description": "Archive the sketch's plane as a new revision. Undo brings it back.",
+        "operationId": "archive_sketch_plane_v1_twin_projects__project_id__sketches__sketch_key__plane_archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaneSimpleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaneChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive Sketch Plane",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/confirm": {
+      "post": {
+        "description": "Place the sketch on the plane the person chose, as the plane item's next revision.\n\nThe choice is applied as given; no inference is consulted. A retried\n``op_id`` returns the revision it already made; choosing the plane the\nsketch is already on changes nothing.",
+        "operationId": "confirm_sketch_plane_v1_twin_projects__project_id__sketches__sketch_key__plane_confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaneConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaneChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Sketch Plane",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/propose": {
+      "post": {
+        "description": "A candidate plane for the sketch. Writes nothing.\n\nSources in order: the explicit selection, the plane of another sketch on\nthe same component, the client's orthographic view hint, the component\nframe, then a heuristic (keywords, the drawing's shape). Each candidate\nsays who proposed it and how confident it is; ``ambiguous`` is set when\nthe top two disagree and are close, or the best guess is weak. A plane\nalready confirmed for this sketch is returned as the candidate.",
+        "operationId": "propose_sketch_plane_v1_twin_projects__project_id__sketches__sketch_key__plane_propose_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaneProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaneProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Sketch Plane",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/reassign": {
+      "post": {
+        "description": "Move the sketch to another plane in ``mode``.\n\n``preserve_local`` keeps the stroke coordinates (the sketch moves with\nits plane). ``preserve_world`` keeps every point where it is and is\nrefused when the sketch does not lie in the new plane.\n``project_to_target`` projects the points onto the new plane. A mode that\nmoves the strokes saves them as the sketch's next revision.",
+        "operationId": "reassign_sketch_plane_v1_twin_projects__project_id__sketches__sketch_key__plane_reassign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaneReassignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaneChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reassign Sketch Plane",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/reassign/preview": {
+      "post": {
+        "description": "Where the strokes would land on the new plane in ``mode``. Writes nothing.",
+        "operationId": "preview_sketch_plane_reassign_v1_twin_projects__project_id__sketches__sketch_key__plane_reassign_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaneReassignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReassignPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Sketch Plane Reassign",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/sketches/{sketch_key}/plane/undo": {
+      "post": {
+        "description": "Restore the plane (and the strokes, if the change moved them) from before the\nlast change, as a new revision. History is never rewritten.",
+        "operationId": "undo_sketch_plane_v1_twin_projects__project_id__sketches__sketch_key__plane_undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaneSimpleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaneChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undo Sketch Plane",
         "tags": [
           "twin"
         ]

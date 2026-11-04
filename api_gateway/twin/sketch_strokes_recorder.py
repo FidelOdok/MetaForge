@@ -558,9 +558,7 @@ async def save_sketch_with_operation(
         "completed",
         "completed",
         title="Sketch saved",
-        message=(
-            f"Sketch saved as {label}. A human sketch, not CAD: scale unknown, {plane}."
-        ),
+        message=(f"Sketch saved as {label}. A human sketch, not CAD: scale unknown, {plane}."),
         target_revision=response.item_ref,
         base_revision=response.parent_revision,
         artifact_refs=[

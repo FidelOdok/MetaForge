@@ -403,9 +403,7 @@ def _bbox(strokes: list[dict[str, Any]]) -> tuple[float, float] | None:
     return (max(xs) - min(xs), max(ys) - min(ys))
 
 
-def heuristic_candidates(
-    strokes: list[dict[str, Any]], text: str
-) -> list[PlaneCandidate]:
+def heuristic_candidates(strokes: list[dict[str, Any]], text: str) -> list[PlaneCandidate]:
     """The model/heuristic guesses: keywords first, then the drawing's shape."""
     out: list[PlaneCandidate] = []
     for pattern, principal, label in _KEYWORDS:
@@ -413,7 +411,10 @@ def heuristic_candidates(
         if match:
             out.append(
                 _candidate(
-                    principal, ProposedBy.MODEL, 0.45, f"the words '{match.group(0)}' suggest a {label}"
+                    principal,
+                    ProposedBy.MODEL,
+                    0.45,
+                    f"the words '{match.group(0)}' suggest a {label}",
                 )
             )
             break
@@ -500,9 +501,7 @@ async def propose_plane(
         notes: list[str] = []
         cands: list[PlaneCandidate] = []
         if request.explicit is not None:
-            cands.append(
-                _candidate(request.explicit, ProposedBy.USER, 1.0, "you chose this plane")
-            )
+            cands.append(_candidate(request.explicit, ProposedBy.USER, 1.0, "you chose this plane"))
         if request.face_ref:
             notes.append(
                 "Placing a sketch on a model face is not available yet; choose Front, Side or Top."
@@ -870,7 +869,9 @@ async def _with_operation(
         result: PlaneChangeResult = await run()
     except Exception as exc:
         _count("failed")
-        logger.warning("sketch_plane_change_failed", project_id=project_id, op_id=op_id, error=str(exc))
+        logger.warning(
+            "sketch_plane_change_failed", project_id=project_id, op_id=op_id, error=str(exc)
+        )
         _publish(
             project_id,
             op_id,
@@ -912,7 +913,9 @@ def _plane_title(plane: SketchPlane) -> str:
         return "Sketch plane archived"
     if not plane.placed:
         return "Sketch kept as a concept (no plane)"
-    return f"Sketch placed on {plane.view_name} ({plane.principal.value if plane.principal else ''})"
+    return (
+        f"Sketch placed on {plane.view_name} ({plane.principal.value if plane.principal else ''})"
+    )
 
 
 def _same_place(a: SketchPlane, b: SketchPlane) -> bool:
@@ -1240,7 +1243,11 @@ async def archive_plane(
                 return _result(sk_item.key, sketch_ref, node, request.op_id)
 
     return await _with_operation(
-        project_id, request.op_id, "Archiving the sketch plane", run, lambda r: _plane_title(r.plane)
+        project_id,
+        request.op_id,
+        "Archiving the sketch plane",
+        run,
+        lambda r: _plane_title(r.plane),
     )
 
 

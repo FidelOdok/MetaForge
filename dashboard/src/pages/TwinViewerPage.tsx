@@ -68,6 +68,10 @@ import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 import { resolveGatewayHref } from '../lib/gatewayConfig';
 import apiClient from '../api/client';
 import { installSampleAdapter, isSampleMode, SAMPLE_PROJECT_ID, SAMPLE_PROJECT_NAME } from '../lib/sample-workspace';
+import { SketchOnPlane } from '../components/sketch/SketchOnPlane';
+import { SketchPlaneControls } from '../components/sketch/SketchPlaneControls';
+import { useSketchPlane, useSketchStrokes } from '../hooks/use-sketch-plane';
+import { isPlaced } from '../api/endpoints/sketchPlanes';
 import './TwinViewerPage.css';
 
 // `?demo=1` serves the illustrative sample workspace offline. Idempotent, so
@@ -1169,6 +1173,16 @@ export function TwinViewerPage() {
     dataUpdatedAt,
   } = useTwinNodes(activeProjectId ?? undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
+  // FORGE-790: a selected sketch shows its plane controls and, once placed, sits on its plane in 3D.
+  const sketchKey =
+    selectedNode?.properties?.wp_type === 'sketch_strokes' && selectedNode.properties.item_key
+      ? String(selectedNode.properties.item_key)
+      : null;
+  const sketchProjectId = selectedNode?.projectId ?? activeProjectId ?? null;
+  const sketchPlane = useSketchPlane(sketchProjectId, sketchKey);
+  const sketchStrokes = useSketchStrokes(sketchProjectId, sketchKey);
+  const sketchPlaced = !!sketchKey && isPlaced(sketchPlane.data?.plane);
+  const sketchModelRadius = useViewerStore((s) => s.modelBounds?.radius ?? null);
   const {
     data: relationships = [],
     endpoints = {},
@@ -1590,7 +1604,24 @@ export function TwinViewerPage() {
             </div>
           ) : (
             <>
-              <R3FViewer onPartClick={handlePartClick} onBooleanCutComplete={selectNode} />
+              <R3FViewer
+                onPartClick={handlePartClick}
+                onBooleanCutComplete={selectNode}
+                showEmptyScene={sketchPlaced}
+                sceneExtras={
+                  sketchKey ? (
+                    <SketchOnPlane plane={sketchPlane.data?.plane} strokes={sketchStrokes.data?.strokes ?? []} />
+                  ) : undefined
+                }
+              />
+              {tab === 'model' && sketchKey && sketchProjectId && (
+                <SketchPlaneControls
+                  projectId={sketchProjectId}
+                  sketchKey={sketchKey}
+                  view={sketchPlane.data}
+                  modelRadius={sketchModelRadius}
+                />
+              )}
               {!glbUrl && modelLoadError && (
                 <div className="tw-model-error" role="alert">
                   <strong>Model failed to load</strong> {modelLoadError}
