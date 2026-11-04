@@ -1,9 +1,10 @@
-"""Routes for project operations (FORGE-785, CDE slice 1).
+"""Routes for project operations (FORGE-785, CDE slice 1; FORGE-788, slice 2).
 
 * ``GET  /v1/projects/{project_id}/operations``: the snapshot and its cursor;
 * ``GET  /v1/projects/{project_id}/operations/stream``: SSE, resumable from
   ``Last-Event-ID`` or ``?after=`` (a ``project_seq``);
 * ``POST /v1/projects/{project_id}/operations/{operation_id}/cancel``;
+* ``POST /v1/projects/{project_id}/operations/{operation_id}/retry``;
 * ``POST /v1/projects/{project_id}/operations/events``: ingest from a process
   with no stream of its own (the MCP sidecar, the design-flow worker).
 
@@ -19,17 +20,16 @@ import structlog
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from api_gateway.operations import scheduling
 from api_gateway.operations.hub import SSE_HEADERS
 from api_gateway.operations.publisher import get_operation_publisher
 from api_gateway.operations.schemas import (
     OperationCancelResponse,
     OperationEventIn,
     OperationIngestResponse,
-    OperationKind,
     OperationListResponse,
+    OperationRetryResponse,
     OperationState,
-    is_terminal,
-    kind_of,
 )
 from observability.tracing import get_tracer
 
@@ -42,8 +42,11 @@ __all__ = ["publish_local", "router"]
 
 
 async def publish_local(project_id: str, event: dict[str, Any]) -> None:
-    """The operation event publisher for code inside the gateway process."""
-    get_operation_publisher().publish_payload(project_id, event)
+    """The operation event publisher for code inside the gateway process.
+
+    A completed result is screened for staleness on the way in (FORGE-788).
+    """
+    await get_operation_publisher().publish_payload_screened(project_id, event)
 
 
 @router.get("/{project_id}/operations", response_model=OperationListResponse)
@@ -106,11 +109,12 @@ async def ingest_operation_event(project_id: str, body: OperationEventIn) -> Any
 
     202 with the stored ``project_seq``. A duplicate ``event_id`` is 200 with
     the seq stored the first time. An event out of order, or a non-terminal
-    one after the operation ended, is 409.
+    one after the operation ended, is 409. A ``completed`` event whose
+    ``base_revision`` is no longer its target's head is stored as ``stale``.
     """
     if body.project_id is not None and body.project_id != project_id:
         raise HTTPException(status_code=422, detail="project_id does not match the path")
-    result = get_operation_publisher().ingest(project_id, body)
+    result = await get_operation_publisher().ingest_screened(project_id, body)
     if result.status == "refused" or result.event is None:
         raise HTTPException(status_code=409, detail=result.reason or "event refused")
     out = OperationIngestResponse(
@@ -128,63 +132,45 @@ async def ingest_operation_event(project_id: str, body: OperationEventIn) -> Any
     "/{project_id}/operations/{operation_id}/cancel",
     response_model=OperationCancelResponse,
     status_code=202,
-    responses={404: {"description": "Unknown"}, 409: {"description": "Not cancellable"}},
+    responses={
+        404: {"description": "Unknown"},
+        409: {"description": "Not cancellable"},
+        503: {"description": "The process running it could not be reached"},
+    },
 )
 async def cancel_operation(project_id: str, operation_id: str) -> OperationCancelResponse:
-    """Cancel an operation that supports it: 202, 409 when not cancellable, 404 when unknown."""
-    store = get_operation_publisher().store
-    snapshot = store.get(project_id, operation_id)
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail=f"operation '{operation_id}' not found")
-    if is_terminal(snapshot.state):
-        raise HTTPException(
-            status_code=409, detail=f"operation '{operation_id}' is already {snapshot.state}"
-        )
-    native = operation_id.partition(":")[2]
-    kind = kind_of(operation_id)
-    with tracer.start_as_current_span("operations.cancel") as span:
-        span.set_attribute("operation_id", operation_id)
-        if kind is OperationKind.RUN:
-            _cancel_run(native)
-        elif kind is OperationKind.JOB:
-            _cancel_job(native)
-        else:
-            raise HTTPException(status_code=409, detail="a chat turn cannot be cancelled from here")
-    logger.info("operation_cancelled", project_id=project_id, operation_id=operation_id)
-    return OperationCancelResponse(operation_id=operation_id, state=OperationState.CANCELLED)
+    """Cancel an operation that supports it: 202, 409 when not cancellable, 404 when unknown.
+
+    A design-flow run stops at its next step and is marked cancelled; what it
+    already committed to the twin stays. A job stops in this gateway, or in
+    the MCP sidecar when the sidecar runs it.
+    """
+    state = await scheduling.cancel_operation(project_id, operation_id)
+    return OperationCancelResponse(operation_id=operation_id, state=state)
 
 
-def _cancel_run(run_id: str) -> None:
-    from api_gateway.runs.routes import get_run_store, is_design_flow_run
-    from orchestrator.harness.runs import InvalidTransition, RunNotFoundError
+@router.post(
+    "/{project_id}/operations/{operation_id}/retry",
+    response_model=OperationRetryResponse,
+    status_code=202,
+    responses={
+        404: {"description": "Unknown"},
+        409: {"description": "Not retryable"},
+        503: {"description": "The process that ran it could not be reached"},
+    },
+)
+async def retry_operation(project_id: str, operation_id: str) -> OperationRetryResponse:
+    """Run a failed operation again, as a new operation naming it in ``retry_of``.
 
-    store = get_run_store()
-    try:
-        run = store.get(run_id)
-    except RunNotFoundError as exc:
-        raise HTTPException(status_code=409, detail="the run is not held by this gateway") from exc
-    if is_design_flow_run(run):
-        # Stopping a design flow means stopping its workflow, which has no
-        # supported path yet. Its gates can reject it.
-        raise HTTPException(
-            status_code=409,
-            detail="a design-flow run cannot be cancelled yet; reject it at its next gate",
-        )
-    try:
-        store.cancel(run_id, reason="cancelled from the operations view")
-    except InvalidTransition as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-def _cancel_job(job_id: str) -> None:
-    from tool_registry.jobs import active_job_runner
-
-    runner = active_job_runner()
-    if runner is None or not runner.owns(job_id):
-        raise HTTPException(
-            status_code=409,
-            detail="the job is not running in this gateway (it may run in the MCP sidecar)",
-        )
-    job = runner.cancel(job_id)
-    if job is None or job.status != "cancelled":
-        raise HTTPException(status_code=409, detail="the job could not be cancelled")
+    202 with the new ``operation_id`` (its ``accepted`` event is on the
+    stream); 409 when the operation did not fail or its kind cannot be re-run
+    safely; 404 when unknown. Supported: failed design-flow runs and failed
+    jobs of tools that can be retried.
+    """
+    new_id = await scheduling.retry_operation(project_id, operation_id)
+    snapshot = get_operation_publisher().store.get(project_id, new_id)
+    return OperationRetryResponse(
+        operation_id=new_id,
+        retry_of=operation_id,
+        state=snapshot.state if snapshot is not None else OperationState.QUEUED,
+    )

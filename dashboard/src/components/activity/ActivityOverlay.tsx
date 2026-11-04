@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Pause, Play, X } from 'lucide-react';
 
-import { cancelOperation } from '../../api/endpoints/operations';
+import { cancelOperation, retryOperation } from '../../api/endpoints/operations';
 import { refusalOf } from '../../api/endpoints/create';
 import { useApproval } from '../../hooks/use-approvals';
 import { useTwinNode } from '../../hooks/use-twin';
@@ -38,10 +38,16 @@ export interface ActivityOverlayProps {
    */
   detail?: boolean;
   /**
-   * Handles `retry` and `open` actions when the host has a better path than
-   * the default (which opens the run, where retry lives).
+   * Handles `cancel`, `retry` and `open` (FORGE-788). A returned promise that
+   * rejects shows its refusal beside the actions. Without one, cancel and
+   * retry call the gateway directly and open goes to the run.
    */
-  onAction?: (op: OperationView, action: ActionRef) => void;
+  onAction?: (op: OperationView, action: ActionRef) => void | Promise<unknown>;
+  /**
+   * Handles `approval` when the host has its own approval flow (Create's
+   * Decisions panel). Without one, the existing approval card opens inline.
+   */
+  onApproval?: (op: OperationView, action: ActionRef) => void;
   className?: string;
 }
 
@@ -61,7 +67,7 @@ const CONNECTION_LOST = 'Connection interrupted, reconnecting';
  * labelled "Illustrative activity" until a real artifact arrives; and while
  * the connection is down the scene stops moving and says so.
  */
-export function ActivityOverlay({ projectId, detail = false, onAction, className }: ActivityOverlayProps) {
+export function ActivityOverlay({ projectId, detail = false, onAction, onApproval, className }: ActivityOverlayProps) {
   const project = useProjectOperations(projectId);
   const setSize = useOperationsStore((s) => s.setSize);
   const dismiss = useOperationsStore((s) => s.dismiss);
@@ -100,6 +106,7 @@ export function ActivityOverlay({ projectId, detail = false, onAction, className
           onTogglePause={() => setMotionPaused(projectId, !project.motionPaused)}
           onDismiss={() => dismiss(projectId, primary.operation_id)}
           onAction={onAction}
+          onApproval={onApproval}
         />
     </section>
   );
@@ -116,7 +123,8 @@ interface PrimaryProps {
   onToggleSize: () => void;
   onTogglePause: () => void;
   onDismiss: () => void;
-  onAction?: (op: OperationView, action: ActionRef) => void;
+  onAction?: (op: OperationView, action: ActionRef) => void | Promise<unknown>;
+  onApproval?: (op: OperationView, action: ActionRef) => void;
 }
 
 function PrimaryOperation({
@@ -131,6 +139,7 @@ function PrimaryOperation({
   onTogglePause,
   onDismiss,
   onAction,
+  onApproval,
 }: PrimaryProps) {
   const label = statusLabel(op);
   const tone = statusTone(op.state);
@@ -195,7 +204,7 @@ function PrimaryOperation({
         {announcement}
       </div>
 
-      <Actions projectId={projectId} op={op} onAction={onAction} />
+      <Actions projectId={projectId} op={op} onAction={onAction} onApproval={onApproval} />
 
       {expanded && (
         <div className="act-body">
@@ -498,13 +507,24 @@ function Actions({
   projectId,
   op,
   onAction,
+  onApproval,
 }: {
   projectId: string;
   op: OperationView;
-  onAction?: (op: OperationView, action: ActionRef) => void;
+  onAction?: (op: OperationView, action: ActionRef) => void | Promise<unknown>;
+  onApproval?: (op: OperationView, action: ActionRef) => void;
 }) {
   const [openApproval, setOpenApproval] = useState<string | null>(null);
-  const cancel = useMutation({ mutationFn: () => cancelOperation(projectId, op.operation_id) });
+  // Cancel and retry go to the gateway: through the host when it handles
+  // them, else directly. The gateway's refusal (a 409 says why) is shown.
+  const run = useMutation({
+    mutationFn: async (action: ActionRef) => {
+      if (onAction) return onAction(op, action);
+      if (action.kind === 'cancel') return cancelOperation(projectId, op.operation_id);
+      if (action.kind === 'retry') return retryOperation(projectId, op.operation_id);
+      return undefined;
+    },
+  });
   if (op.action_refs.length === 0) return null;
   const runHref = op.run_id ? `/runs/${encodeURIComponent(op.run_id)}` : null;
 
@@ -514,6 +534,13 @@ function Actions({
         {op.action_refs.map((action) => {
           const key = `${action.kind}:${action.id}`;
           if (action.kind === 'approval') {
+            if (onApproval) {
+              return (
+                <button key={key} type="button" className="act-btn is-primary" onClick={() => onApproval(op, action)}>
+                  {action.label || 'Review'}
+                </button>
+              );
+            }
             return (
               <button
                 key={key}
@@ -526,17 +553,10 @@ function Actions({
               </button>
             );
           }
-          if (action.kind === 'cancel') {
+          if (action.kind === 'cancel' || action.kind === 'retry' || onAction) {
             return (
-              <button key={key} type="button" className="act-btn" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
-                {action.label || 'Cancel'}
-              </button>
-            );
-          }
-          if (onAction) {
-            return (
-              <button key={key} type="button" className="act-btn" onClick={() => onAction(op, action)}>
-                {action.label}
+              <button key={key} type="button" className="act-btn" disabled={run.isPending} onClick={() => run.mutate(action)}>
+                {action.label || (action.kind === 'cancel' ? 'Cancel' : action.kind === 'retry' ? 'Retry' : 'Open')}
               </button>
             );
           }
@@ -548,7 +568,7 @@ function Actions({
           ) : null;
         })}
       </div>
-      {cancel.isError && <p className="act-error">{refusalOf(cancel.error)}</p>}
+      {run.isError && <p className="act-error">{refusalOf(run.error)}</p>}
       {openApproval && <InlineApproval id={openApproval} />}
     </div>
   );

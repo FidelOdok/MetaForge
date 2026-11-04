@@ -73,8 +73,17 @@ Minimising or closing it never cancels anything.
   replaced by that preview, labelled with what it is (*Preview*, *Exact
   result* or *Validated result*).
 - **Actions from the operation only.** Review, cancel, retry and open buttons
-  appear only when the operation lists them. A review opens the existing
-  approval card in place; there is no second approval screen.
+  appear only when the operation lists them, which the gateway does only when
+  it can carry them out. *Cancel* and *Retry* call the gateway's operation
+  routes; a refusal (for example a run that can no longer be retried) is shown
+  under the buttons. A retry starts a new operation that appears like any
+  other. In Create, a review opens the **Decisions** panel; in Engineering it
+  opens the existing approval card in place. There is no second approval
+  screen.
+- **A late result never wins.** When newer work replaces older work on the
+  same item, the older operation shows as superseded; a result that arrives
+  after the design moved on shows as stale and is not applied, and the newer
+  revision stays current.
 - **Connection.** If the live connection drops, the card says *Connection
   interrupted, reconnecting* and the drawing stops moving, so nothing implies
   progress that has not been reported. On reconnect the dashboard refetches
@@ -174,8 +183,11 @@ The composer has three intents:
 | Design | every harness tool | A design pass; writes are still held by the approval policy |
 
 Instructions are sent one at a time. Anything sent while a pass is running is
-shown as *Queued* and goes next; the one being worked on reads *Sent ·
-working on it*, with MetaForge's thinking bubble under it (see
+shown as *Queued* and goes next. Each instruction sent is a chat turn
+operation named after the instruction (`chat:<id>`), so the one being sent
+reads *Sending…* until the gateway's acknowledgement for that operation
+arrives on the project stream, then *Received · working on it*, with
+MetaForge's thinking bubble under it (see
 [generative UI](generative-ui.md#while-the-agent-works)) until the reply
 arrives. A send that fails stays in the conversation with *Retry*, *Edit*
 (back into the composer) and *Discard*, so a failure never loses the text.

@@ -19,6 +19,8 @@ export interface TwinChatMessage {
   /** Generative UI: typed blocks rendered with an agent reply. */
   blocks?: UiBlock[];
   created_at: string;
+  /** The turn's operation on the project stream (`chat:<id>`), for a person's message. */
+  operation_id?: string | null;
 }
 
 export interface TwinChatThreadSummary {
@@ -42,6 +44,8 @@ export interface SendTwinChatMessage {
   graph_ref_node?: string;
   graph_ref_type?: string;
   graph_ref_label?: string;
+  /** Names the turn's operation (`chat:<client_turn_id>`) before the reply returns. */
+  client_turn_id?: string;
 }
 
 /** GET /chat/threads scoped to a project. */

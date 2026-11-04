@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
-import { render, screen, within } from '../../test/test-utils';
+import { act, render, screen, within } from '../../test/test-utils';
+import { opEvent } from '../../test/operation-fixtures';
+import { useOperationsStore } from '../../store/operations-store';
 import { CreatePage } from '../CreatePage';
 import { useProject, useProjects } from '../../hooks/use-projects';
 import { useCreation } from '../../hooks/use-creation';
@@ -88,6 +90,52 @@ describe('CreatePage', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Inspect' }));
     expect(window.location.search).toContain('panel=inspect');
     expect(screen.getByText('Boots and shows up over USB')).toBeInTheDocument();
+  });
+
+  it('opens the Decisions panel when the overlay asks for a review', async () => {
+    useOperationsStore.getState().reset();
+    act(() =>
+      useOperationsStore.getState().applyEvents(P, [
+        opEvent({
+          project_id: P,
+          sequence: 1,
+          type: 'review_required',
+          state: 'waiting_for_user',
+          requires_action: true,
+          action_refs: [{ kind: 'approval', id: 'gate:run_a', label: 'Review and decide' }],
+        }),
+      ]),
+    );
+    renderAt(`/create/${P}`);
+    await userEvent.click(screen.getByRole('button', { name: 'Review and decide' }));
+    expect(window.location.search).toContain('panel=decisions');
+  });
+
+  it('acknowledges a sent instruction once its operation is on the stream', () => {
+    useOperationsStore.getState().reset();
+    useCreateStore.setState({
+      sessions: {
+        [P]: {
+          draft: '',
+          intent: 'ask',
+          attachments: [],
+          threadId: null,
+          selectedNodeId: null,
+          lastOperationId: null,
+          queue: [
+            { id: 'ins-1', text: 'Make it wider', intent: 'ask', references: [], state: 'sending', createdAt: '2026-11-04T10:00:00Z', operationId: 'chat:ins-1' },
+          ],
+        },
+      },
+    });
+    renderAt(`/create/${P}`);
+    expect(screen.getByText('Sending…')).toBeInTheDocument();
+    act(() =>
+      useOperationsStore
+        .getState()
+        .applyEvents(P, [opEvent({ project_id: P, operation_id: 'chat:ins-1', kind: 'chat', run_id: null, type: 'accepted', state: 'queued' })]),
+    );
+    expect(screen.getByText('Received · working on it')).toBeInTheDocument();
   });
 
   it('keeps an unsent draft when the view is left and opened again', async () => {

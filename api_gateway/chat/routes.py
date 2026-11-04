@@ -25,6 +25,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from api_gateway.chat import operation_events as chat_ops
 from api_gateway.chat.agent_router import default_router
 from api_gateway.chat.backend import ChatBackend, InMemoryChatBackend
 from api_gateway.chat.context_adapter import (
@@ -1016,8 +1017,18 @@ async def send_message(
         graph_ref_label=body.graph_ref_label,
     )
 
+    # FORGE-788 (RT-001): a person's turn in a project thread is an operation
+    # on the project stream, acknowledged the moment the message is stored.
+    project_id = thread.scope_entity_id if thread.scope_kind == "project" else None
+    operation_id: str | None = None
+    if body.actor_kind == "user" and project_id:
+        operation_id = chat_ops.chat_operation_id(project_id, str(msg.id), body.client_turn_id)
+        chat_ops.turn_accepted(project_id, operation_id)
+
     # --- Agent invocation (async) ----------------------------------------
     if body.actor_kind == "user":
+        if project_id and operation_id:
+            chat_ops.turn_started(project_id, operation_id)
         try:
             agent_msg = await _run_cancellable_on_disconnect(
                 request.is_disconnected,
@@ -1029,7 +1040,13 @@ async def send_message(
             # The client is gone -- no response will ever be read, so there's
             # nothing left to do but stop the turn and record why.
             logger.warning("chat_turn_cancelled_client_disconnected", thread_id=thread_id)
-            return _make_message_response(msg)
+            if project_id and operation_id:
+                chat_ops.turn_cancelled(project_id, operation_id)
+            return _with_operation(_make_message_response(msg), operation_id)
+        except Exception:
+            if project_id and operation_id:
+                chat_ops.turn_finished(project_id, operation_id, failed=True)
+            raise
         if agent_msg is not None:
             await _backend.add_message(
                 thread_id=thread_id,
@@ -1039,8 +1056,21 @@ async def send_message(
                 status=agent_msg.status,
                 blocks=agent_msg.blocks,
             )
+        if project_id and operation_id:
+            failed = agent_msg is not None and (
+                agent_msg.status == "error" or agent_msg.actor_kind == "system"
+            )
+            chat_ops.turn_finished(
+                project_id, operation_id, failed=failed, replied=agent_msg is not None
+            )
 
-    return _make_message_response(msg)
+    return _with_operation(_make_message_response(msg), operation_id)
+
+
+def _with_operation(response: MessageResponse, operation_id: str | None) -> MessageResponse:
+    if operation_id is None:
+        return response
+    return response.model_copy(update={"operation_id": operation_id})
 
 
 # ---------------------------------------------------------------------------

@@ -258,6 +258,26 @@ class DesignFlowLauncher:
             decided_by=decided_by,
         )
 
+    async def cancel(self, run_id: str, *, reason: str = "") -> None:
+        """Ask the run's workflow to stop (FORGE-788).
+
+        Temporal delivers a cancellation to the workflow, which stops at its
+        next await. What the run already committed stays committed: cancelling
+        stops future work and never rolls back the twin. Raises
+        :class:`WorkflowNotFoundError` when the workflow is gone.
+        """
+        handle = self.client.get_workflow_handle(workflow_id_for(run_id))
+        with tracer.start_as_current_span("design_flow.cancel") as span:
+            span.set_attribute("run.id", run_id)
+            try:
+                await handle.cancel()
+            except Exception as exc:
+                span.record_exception(exc)
+                if _is_not_found(exc):
+                    raise WorkflowNotFoundError(run_id, str(exc)) from exc
+                raise
+        logger.info("design_flow_cancel_requested", run_id=run_id, reason=reason[:200])
+
     async def request_change(
         self,
         run_id: str,

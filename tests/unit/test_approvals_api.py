@@ -819,3 +819,68 @@ def test_base_revision_is_ignored_where_no_revision_is_tracked(client: TestClien
         f"/v1/approvals/{item_id}/decision", json={"decision": "approve", "base_revision": "x"}
     )
     assert resp.status_code == 200, resp.text
+
+
+# ── RT-030 for gates and design changes (FORGE-788) ──────────────────────
+
+
+def test_a_gate_decision_with_a_stale_base_revision_is_refused(client: TestClient) -> None:
+    run_id = _gate()
+    item_id = f"gate:{run_id}"
+    seen = client.get(f"/v1/approvals/{item_id}").json()["base_revision"]
+    assert seen and seen.startswith("gate:")
+    # The run moves on to another gate before the person decides.
+    run_routes.get_gate_coordinator().set_gate_state(
+        run_id, ready=True, retries_left=2, phase="needs", reworks_left=1
+    )
+    stale = client.post(
+        f"/v1/approvals/{item_id}/decision", json={"decision": "approve", "base_revision": seen}
+    )
+    assert stale.status_code == 409, stale.text
+    assert client.get(f"/v1/approvals/{item_id}").json()["status"] == "pending"
+    current = client.get(f"/v1/approvals/{item_id}").json()["base_revision"]
+    assert current != seen
+    ok = client.post(
+        f"/v1/approvals/{item_id}/decision", json={"decision": "approve", "base_revision": current}
+    )
+    assert ok.status_code == 200, ok.text
+    assert client.get(f"/v1/approvals/{item_id}").json()["base_revision"] is None
+
+
+def test_the_runs_route_refuses_a_stale_gate_decision_too(client: TestClient) -> None:
+    app = FastAPI()
+    app.include_router(run_routes.router)
+    runs = TestClient(app)
+    run_id = _gate()
+    seen = client.get(f"/v1/approvals/gate:{run_id}").json()["base_revision"]
+    run_routes.get_gate_coordinator().set_gate_state(
+        run_id, ready=True, retries_left=2, phase="needs", reworks_left=1
+    )
+    stale = runs.post(
+        f"/v1/runs/{run_id}/approval", json={"decision": "approve", "base_revision": seen}
+    )
+    assert stale.status_code == 409, stale.text
+    assert run_routes.get_run_store().get(run_id).status is RunStatus.AWAITING_APPROVAL
+    # A caller that sends none is unaffected.
+    resp = runs.post(f"/v1/runs/{run_id}/approval", json={"decision": "approve"})
+    assert resp.status_code == 200, resp.text
+
+
+def test_a_design_change_on_a_changed_design_is_refused(
+    client: TestClient, twin: InMemoryTwinAPI
+) -> None:
+    node = _wp(twin, WorkProductType.DESIGN_SKETCH)
+    proposal = asyncio.run(
+        assistant_routes.workflow.propose_change(
+            "mech", "thicken the wall", {"wall": 3}, [node], project_id="p1"
+        )
+    )
+    item_id = f"change:{proposal.change_id}"
+    seen = client.get(f"/v1/approvals/{item_id}").json()["base_revision"]
+    assert seen and seen.startswith("wp:")
+    asyncio.run(twin.update_work_product(node, {"content_hash": "h2"}))
+    stale = client.post(
+        f"/v1/approvals/{item_id}/decision", json={"decision": "approve", "base_revision": seen}
+    )
+    assert stale.status_code == 409, stale.text
+    assert client.get(f"/v1/approvals/{item_id}").json()["base_revision"] != seen

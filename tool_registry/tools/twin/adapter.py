@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -30,7 +31,12 @@ from mcp_core.guardrails import (
 )
 from mcp_core.live_events import publish_live_event
 from observability.tracing import get_tracer
-from tool_registry.jobs import caller_waits, default_job_runner, session_of_call
+from tool_registry.jobs import (
+    caller_waits,
+    default_job_runner,
+    register_retry,
+    session_of_call,
+)
 from tool_registry.mcp_server.handlers import (
     ResourceLimits,
     ResourceManifestEntry,
@@ -4108,6 +4114,8 @@ class TwinServer(McpToolServer):
     # ------------------------------------------------------------------
 
     def _register_generate_concept_mesh(self) -> None:
+        # FORGE-788: a failed generation job can be run again from its operation.
+        register_retry("twin.generate_concept_mesh", self._concept_mesh_retry)
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="twin.generate_concept_mesh",
@@ -4185,6 +4193,21 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "Wait for the generated mesh instead of returning a job "
                                 "(def false for a client, true for the design-flow worker)."
+                            ),
+                        },
+                        "target_key": {
+                            "type": "string",
+                            "maxLength": 200,
+                            "description": (
+                                "Item key this job works on; a newer job on it supersedes this one."
+                            ),
+                        },
+                        "base_revision": {
+                            "type": "string",
+                            "maxLength": 200,
+                            "description": (
+                                "target_key's revision this starts from; if the head moves "
+                                "first, the job ends stale and its result is not applied."
                             ),
                         },
                         "face_limit": {
@@ -4265,6 +4288,58 @@ class TwinServer(McpToolServer):
 
     async def generate_concept_mesh(self, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = "twin.generate_concept_mesh"
+        call, mode = self._concept_mesh_call(arguments)
+        wait = arguments.get("wait")
+        if wait is not None and not isinstance(wait, bool):
+            raise ValueError(f"{tool}: 'wait' must be true or false")
+        target_key = arguments.get("target_key")
+        base_revision = arguments.get("base_revision")
+        for field, value in (("target_key", target_key), ("base_revision", base_revision)):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{tool}: '{field}' must be a non-empty string")
+        if wait is None:
+            wait = caller_waits()
+        if wait:
+            return await self._generate_concept_mesh_now(call, mode)
+
+        # FORGE-783: a client's MCP call would time out before the ~150 s
+        # generation ends, so it runs as a job. Everything that would refuse
+        # the call is checked first, so a bad call still fails at once.
+        if _accepts_keyword(self._concept_mesh_generator, "validate_only"):
+            await self._concept_mesh_generator(**call, validate_only=True)
+        runner = self._job_runner or default_job_runner()
+        session_id, ctx_project = session_of_call()
+        job, reused = await runner.start(
+            tool,
+            {k: v for k, v in arguments.items() if k != "wait"},
+            lambda: self._generate_concept_mesh_now(call, mode),
+            session_id=session_id,
+            project_id=call["project_id"] or ctx_project,
+            expected_seconds=CONCEPT_MESH_EXPECTED_SECONDS,
+            # FORGE-788: a newer job on the same target supersedes this one,
+            # and a result whose base moved is reported stale.
+            target_key=target_key.strip() if isinstance(target_key, str) else None,
+            base_revision=base_revision.strip() if isinstance(base_revision, str) else None,
+        )
+        logger.info(
+            "concept_mesh_job_started",
+            job_id=job.job_id,
+            reused=reused,
+            status=job.status,
+            mode=mode,
+        )
+        return runner.reply(job, reused)
+
+    def _concept_mesh_retry(
+        self, arguments: dict[str, Any]
+    ) -> Callable[[], Awaitable[dict[str, Any]]]:
+        """The work of a retried concept mesh job, from its stored arguments (FORGE-788)."""
+        call, mode = self._concept_mesh_call(arguments)
+        return lambda: self._generate_concept_mesh_now(call, mode)
+
+    def _concept_mesh_call(self, arguments: dict[str, Any]) -> tuple[dict[str, Any], str]:
+        """The generator's call and its mode, or ``ValueError`` for a bad request."""
+        tool = "twin.generate_concept_mesh"
         image_node_id = arguments.get("image_node_id")
         prompt = arguments.get("prompt")
         view_images = arguments.get("view_images")
@@ -4297,9 +4372,6 @@ class TwinServer(McpToolServer):
             )
             if arguments.get(k) is not None
         }
-        wait = arguments.get("wait")
-        if wait is not None and not isinstance(wait, bool):
-            raise ValueError(f"{tool}: 'wait' must be true or false")
         if view_images is not None:
             mode = "multiview"
         else:
@@ -4313,34 +4385,7 @@ class TwinServer(McpToolServer):
             "domain": domain if isinstance(domain, str) and domain else "mechanical",
             **options,
         }
-        if wait is None:
-            wait = caller_waits()
-        if wait:
-            return await self._generate_concept_mesh_now(call, mode)
-
-        # FORGE-783: a client's MCP call would time out before the ~150 s
-        # generation ends, so it runs as a job. Everything that would refuse
-        # the call is checked first, so a bad call still fails at once.
-        if _accepts_keyword(self._concept_mesh_generator, "validate_only"):
-            await self._concept_mesh_generator(**call, validate_only=True)
-        runner = self._job_runner or default_job_runner()
-        session_id, ctx_project = session_of_call()
-        job, reused = await runner.start(
-            tool,
-            {k: v for k, v in arguments.items() if k != "wait"},
-            lambda: self._generate_concept_mesh_now(call, mode),
-            session_id=session_id,
-            project_id=call["project_id"] or ctx_project,
-            expected_seconds=CONCEPT_MESH_EXPECTED_SECONDS,
-        )
-        logger.info(
-            "concept_mesh_job_started",
-            job_id=job.job_id,
-            reused=reused,
-            status=job.status,
-            mode=mode,
-        )
-        return runner.reply(job, reused)
+        return call, mode
 
     async def _generate_concept_mesh_now(self, call: dict[str, Any], mode: str) -> dict[str, Any]:
         tool = "twin.generate_concept_mesh"

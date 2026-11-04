@@ -433,9 +433,11 @@ def test_cancel_route_404_409_and_202(client: TestClient) -> None:
     assert snap is not None and snap.state == "cancelled"
     assert client.post(f"{base}/run:{plain.id}/cancel").status_code == 409  # already ended
 
+    # FORGE-788: a design flow is cancellable too (the in-process engine here).
     flow = run_routes.get_run_store().create({"project_id": PROJECT, "flow": "design_v1"})
     resp = client.post(f"{base}/run:{flow.id}/cancel")
-    assert resp.status_code == 409 and "design-flow" in resp.json()["detail"]
+    assert resp.status_code == 202, resp.text
+    assert run_routes.get_run_store().get(flow.id).status.value == "canceled"
 
     ops.publish(PROJECT, "chat:t1", "started", "running")
     assert client.post(f"{base}/chat:t1/cancel").status_code == 409

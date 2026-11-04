@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef } from 'react';
 import { Loader2, RotateCcw, Pencil, X } from 'lucide-react';
 import { useTwinChatThread, useTwinChatThreads } from '../../hooks/use-twin-chat';
 import { displayText, intentOf, useCreateStore, type Intent } from '../../store/create-store';
+import { useProjectOperations } from '../../store/operations-store';
 import { MessageBody } from '../chat/MessageBody';
 import { TurnInProgress } from '../chat/TurnInProgress';
 import { useTurnStream } from '../chat/useTurnStream';
@@ -34,6 +35,9 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
   const reply = useCreateStore((s) => s.reply);
   const selectNode = useCreateStore((s) => s.selectNode);
   const busy = session.queue.some((i) => i.state === 'sending');
+  // RT-001: a turn is acknowledged when the gateway's `accepted` event for its
+  // operation arrives, before the reply does (FORGE-788).
+  const operations = useProjectOperations(projectId);
 
   const threads = useTwinChatThreads(projectId);
   // The creation's conversation is the one it last used, else the project's latest.
@@ -127,7 +131,10 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
               <span className={`cv-state cv-state-${ins.state}`}>
                 {ins.state === 'sending' ? (
                   <>
-                    <Loader2 size={12} className="cv-spin" aria-hidden="true" /> Sent · working on it
+                    <Loader2 size={12} className="cv-spin" aria-hidden="true" />{' '}
+                    {ins.operationId && operations.ops.byId[ins.operationId]
+                      ? 'Received · working on it'
+                      : 'Sending…'}
                   </>
                 ) : ins.state === 'queued' ? (
                   'Queued · sent when the current pass ends'

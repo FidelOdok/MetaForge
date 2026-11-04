@@ -504,6 +504,9 @@ async def test_the_tool_is_registered_with_its_schema() -> None:
         "smart_low_poly",
         "fit_to_envelope",
         "wait",
+        # FORGE-788: the job's target, for supersede and stale results.
+        "target_key",
+        "base_revision",
     }
     assert props["view_images"]["required"] == ["front"]
     assert set(props["view_images"]["properties"]) == {"front", "left", "back", "right"}

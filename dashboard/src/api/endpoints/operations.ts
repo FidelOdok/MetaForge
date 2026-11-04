@@ -1,6 +1,10 @@
 import apiClient from '../client';
 import { apiUrl } from '../../lib/gatewayConfig';
-import type { OperationCancelResponse, OperationsSnapshotResponse } from '../../types/operations';
+import type {
+  OperationCancelResponse,
+  OperationRetryResponse,
+  OperationsSnapshotResponse,
+} from '../../types/operations';
 
 /**
  * Project operations (FORGE-785 contract, consumed by FORGE-786).
@@ -40,6 +44,18 @@ export function operationsStreamUrl(projectId: string): string {
 export async function cancelOperation(projectId: string, operationId: string): Promise<OperationCancelResponse> {
   const { data } = await apiClient.post<OperationCancelResponse>(
     `/projects/${enc(projectId)}/operations/${enc(operationId)}/cancel`,
+  );
+  return data;
+}
+
+/**
+ * `POST /v1/projects/{id}/operations/{op}/retry` (FORGE-788). Runs a failed
+ * operation again as a new one, which names the original in `retry_of`.
+ * 409 when the operation did not fail or cannot be re-run safely.
+ */
+export async function retryOperation(projectId: string, operationId: string): Promise<OperationRetryResponse> {
+  const { data } = await apiClient.post<OperationRetryResponse>(
+    `/projects/${enc(projectId)}/operations/${enc(operationId)}/retry`,
   );
   return data;
 }

@@ -93,7 +93,17 @@ function DecisionCard({ item }: { item: ApprovalItem }) {
                 type="button"
                 className={d === 'approve' ? 'cv-btn cv-btn-primary' : 'cv-btn'}
                 disabled={decide.isPending || (needsReason(d) && !reason.trim())}
-                onClick={() => decide.mutate({ id: item.id, body: { decision: d, ...(reason.trim() ? { reason: reason.trim() } : {}) } })}
+                onClick={() =>
+                  decide.mutate({
+                    id: item.id,
+                    body: {
+                      decision: d,
+                      ...(reason.trim() ? { reason: reason.trim() } : {}),
+                      // RT-030: a proposal that changed since it was shown is refused.
+                      ...(item.base_revision ? { base_revision: item.base_revision } : {}),
+                    },
+                  })
+                }
               >
                 {DECISION_LABEL[d]}
               </button>

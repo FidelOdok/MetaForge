@@ -22,6 +22,7 @@ import { InspectPanel } from '../components/create/InspectPanel';
 import { JOURNEY, journeyStep } from '../components/create/copy';
 import { ActivityOverlay } from '../components/activity/ActivityOverlay';
 import { useOperations } from '../hooks/use-operations';
+import { useOperationActions } from '../hooks/use-operation-actions';
 import '../styles/create.css';
 
 const PANELS = ['brief', 'decisions', 'make', 'inspect', 'history'] as const;
@@ -86,6 +87,9 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   // plus an instruction still on its way out (acknowledged before its
   // operation exists). Without any, the local queue is the fallback.
   const operations = useOperations(projectId);
+  // FORGE-788: the overlay's cancel and retry call the gateway; a review
+  // opens the Decisions panel, Create's own approval flow.
+  const operationAction = useOperationActions(projectId);
   const queueWorking = session.queue.some((i) => i.state === 'sending' || i.state === 'queued');
   const working = operations.known
     ? operations.active.length > 0 || session.queue.some((i) => i.state === 'sending')
@@ -250,7 +254,14 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
             working={working}
             presenting={presenting}
           />
-          {!presenting && <ActivityOverlay projectId={projectId} className="act-dock-create" />}
+          {!presenting && (
+            <ActivityOverlay
+              projectId={projectId}
+              className="act-dock-create"
+              onAction={operationAction}
+              onApproval={() => openPanel('decisions')}
+            />
+          )}
         </main>
 
         <aside className="cv-side" aria-label="Details">

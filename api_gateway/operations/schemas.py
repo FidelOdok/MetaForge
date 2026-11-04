@@ -1,4 +1,4 @@
-"""The operation event contract (FORGE-785, CDE slice 1).
+"""The operation event contract (FORGE-785, CDE slice 1; FORGE-788 slice 2).
 
 One operation is one unit of work a person started and may watch: a
 design-flow run (``run:<run_id>``), a slow tool job (``job:<job_id>``) or a
@@ -156,6 +156,11 @@ class _EventFields(BaseModel):
     occurred_at: datetime | None = None
     base_revision: str | None = Field(default=None, max_length=200)
     target_revision: str | None = Field(default=None, max_length=200)
+    #: FORGE-788: what the operation works on (an item key, for example). A
+    #: newer operation on the same target supersedes an older one still open.
+    target_key: str | None = Field(default=None, max_length=200)
+    #: FORGE-788: the operation this one retries, when it is a retry.
+    retry_of: str | None = Field(default=None, max_length=200)
     #: Server-authored plain text. Never a prompt, tool arguments or a result.
     message: str = Field(default="", max_length=MESSAGE_MAX_CHARS)
     severity: Severity = Severity.INFO
@@ -238,6 +243,8 @@ class OperationSnapshot(BaseModel):
     last_sequence: int
     base_revision: str | None = None
     target_revision: str | None = None
+    target_key: str | None = None
+    retry_of: str | None = None
     message: str = ""
     severity: Severity = Severity.INFO
     artifact_refs: list[ArtifactRef] = Field(default_factory=list)
@@ -258,6 +265,16 @@ class OperationListResponse(BaseModel):
 
 class OperationCancelResponse(BaseModel):
     operation_id: str
+    state: OperationState
+
+
+class OperationRetryResponse(BaseModel):
+    """``POST .../operations/{operation_id}/retry`` (FORGE-788)."""
+
+    #: The new operation, which runs the same request again.
+    operation_id: str
+    #: The failed operation it retries.
+    retry_of: str
     state: OperationState
 
 
