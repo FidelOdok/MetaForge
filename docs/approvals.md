@@ -339,7 +339,9 @@ principal.
 The [approval policy](#approval-policy-and-the-gate-reviewer) that decides a
 project's gates also decides its held tool writes. Before holding a call the
 sidecar asks `POST /v1/chat/tool_approvals/policy`, and the gateway applies the
-policy of the project the call lands in:
+policy of the project the call lands in. It asks on every hold path: a durable
+hold, and the multi-round request flow that clients such as Claude Code use,
+where the question is answered inside the call:
 
 | Mode in force | Held tool writes |
 |---------------|------------------|
