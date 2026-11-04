@@ -13,7 +13,9 @@ export type ApprovalKind =
   | 'drawing'
   | 'upload'
   /** A sketch promoted from its interpretation (FORGE-791). */
-  | 'parametric_sketch';
+  | 'parametric_sketch'
+  /** A re-check a cross-domain change calls for (FORGE-793). */
+  | 'rerun';
 
 export type ApprovalStatus =
   | 'pending'

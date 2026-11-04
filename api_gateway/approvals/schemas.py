@@ -19,6 +19,7 @@ ApprovalKind = Literal[
     "drawing",
     "upload",  # files from outside, staged until a person approves them
     "parametric_sketch",  # a sketch promoted from its interpretation
+    "rerun",  # a re-check a cross-domain change calls for (FORGE-793)
 ]
 DecisionName = Literal["approve", "reject", "retry", "rework"]
 #: ``chat``: a person answered in the MCP client's own prompt (elicitation),
@@ -37,6 +38,7 @@ ID_PREFIXES: tuple[str, ...] = (
     "drawing",
     "upload",
     "parametric_sketch",
+    "rerun",
 )
 
 #: Decisions that must carry a reason (422 otherwise).

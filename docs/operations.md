@@ -27,6 +27,7 @@ sidecar) and `routes.py`.
 | A sketch save from the Create stage | `job:sketch-<save_id>` | `job` (domain `sketch`) | none |
 | A sketch plane change (confirm, reassign, undo, archive) | `job:sketch-plane-<op_id>` | `job` (domain `sketch`) | none |
 | Making a sketch editable: the stored proposal, its promotion and sign-off | `job:sketch-compile-<interpretation_id>` | `job` (domain `sketch`) | `interpretation_proposed`, `parametric_review` |
+| What a design change affects across domains | `job:impact-<impact_id>` | `job` (domain `cross_domain`) | `dependencies_invalidated` |
 
 Approvals are not operations. A run waiting at a gate emits a
 `review_required` event whose `action_refs` name the approval to decide
@@ -284,6 +285,30 @@ the item has moved on since (the run re-drafted, retried or reached another
 gate; an affected work product changed), the decision is refused with 409 and
 nothing is recorded. A decision without one, or on an item that tracks none,
 is unaffected. The dashboard's approval cards send the revision they show.
+
+## Cross-domain impact {#cross-domain-impact}
+
+When an item's head moves and the change reaches
+other items through their interface edges, the twin records the impact (see
+[interface edges and cross-domain impact](twin_schema.md#interface-edges-and-cross-domain-impact))
+and publishes it as one operation, `job:impact-<impact_id>`, domain
+`cross_domain`. It is published through the same process seam as tool jobs, so
+a head moved in the MCP sidecar reports here too.
+
+| Moment | Event |
+|--------|-------|
+| The impact is recorded | `accepted` |
+| Dependencies invalidated | `milestone` with `stage_id: dependencies_invalidated`; `artifact_refs` name the affected items and the results now out of date; `severity: warning` when any result went stale |
+| A re-check waits for a person | `review_required`, `requires_action`, one `approval` action per waiting re-check (`rerun:<impact_id>:<rerun_id>`) |
+| Nothing waits, or the last waiting re-check is decided | `completed` |
+
+`dependencies_invalidated` is not a contract type of its own: it is a
+`milestone` with that stage, so every client already renders it. Each step has
+a fixed `sequence` and a deterministic `event_id`, so a retried publish is one
+event. The operation carries `base_revision` and `target_revision` (`KEY@1`,
+`KEY@2`) but no `target_key`, so it never supersedes or stale-screens a real
+job on that item. The messages are fixed phrases plus the impact's own plain
+summary.
 
 ## Scheduling
 

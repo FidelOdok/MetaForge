@@ -283,6 +283,24 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
         description="Evidence pinned to the revisions it was produced against.",
     ),
     TwinTypeSpec(
+        "interface_edge",
+        TwinTypeKind.RECORD,
+        "work_product:interface_edge",
+        description=(
+            "A typed coupling between two items (mounts_to, clearance_to, connects_via, "
+            "pin_maps_to) pinned to their revisions; proposed, confirmed or removed in place."
+        ),
+    ),
+    TwinTypeSpec(
+        "change_impact",
+        TwinTypeKind.RECORD,
+        "work_product:change_impact",
+        description=(
+            "One change's cross-domain impact: affected items, stale results and the "
+            "proposed reruns with their approval decisions."
+        ),
+    ),
+    TwinTypeSpec(
         "approval",
         TwinTypeKind.RECORD,
         "approvals service",
