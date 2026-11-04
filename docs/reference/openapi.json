@@ -1,6 +1,52 @@
 {
   "components": {
     "schemas": {
+      "AcceptRequest": {
+        "properties": {
+          "decision": {
+            "pattern": "^(accept|reject)$",
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "AcceptRequest",
+        "type": "object"
+      },
       "AddConceptOptionRequest": {
         "properties": {
           "criteriaScores": {
@@ -956,6 +1002,38 @@
         "title": "AssistantResponse",
         "type": "object"
       },
+      "Assumption": {
+        "properties": {
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "default": "open",
+            "enum": [
+              "open",
+              "confirmed",
+              "revised"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "Assumption",
+        "type": "object"
+      },
       "AttemptPromotionRequest": {
         "properties": {
           "comment": {
@@ -1449,6 +1527,29 @@
         "title": "BaselineSummary",
         "type": "object"
       },
+      "Blocker": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "message",
+          "action"
+        ],
+        "title": "Blocker",
+        "type": "object"
+      },
       "Body_create_upload_v1_uploads_post": {
         "properties": {
           "approve": {
@@ -1824,6 +1925,106 @@
         "title": "BooleanCutResponse",
         "type": "object"
       },
+      "Brief": {
+        "properties": {
+          "assumptions": {
+            "items": {
+              "$ref": "#/components/schemas/Assumption"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BriefItem"
+            },
+            "title": "Items",
+            "type": "object"
+          },
+          "measurements": {
+            "items": {
+              "$ref": "#/components/schemas/Measurement"
+            },
+            "title": "Measurements",
+            "type": "array"
+          },
+          "references": {
+            "items": {
+              "type": "string"
+            },
+            "title": "References",
+            "type": "array"
+          }
+        },
+        "title": "Brief",
+        "type": "object"
+      },
+      "BriefItem": {
+        "properties": {
+          "source": {
+            "default": "user",
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "default": "missing",
+            "enum": [
+              "confirmed",
+              "assumed",
+              "missing"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "title": "BriefItem",
+        "type": "object"
+      },
+      "BriefUpdate": {
+        "properties": {
+          "brief": {
+            "$ref": "#/components/schemas/Brief"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "brief"
+        ],
+        "title": "BriefUpdate",
+        "type": "object"
+      },
       "BringupChecklistListEntry": {
         "properties": {
           "created_at": {
@@ -1919,6 +2120,315 @@
           "instruction"
         ],
         "title": "BringupStep",
+        "type": "object"
+      },
+      "Build": {
+        "description": "One manufacturing attempt of one revision, with its inspection.",
+        "properties": {
+          "acceptance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/InspectionCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "estimates": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Estimate"
+            },
+            "title": "Estimates",
+            "type": "object"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "machine_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Id"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "process": {
+            "default": "",
+            "title": "Process",
+            "type": "string"
+          },
+          "release": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Release"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "results": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CheckResult"
+            },
+            "title": "Results",
+            "type": "object"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "route": {
+            "enum": [
+              "home",
+              "workshop",
+              "external"
+            ],
+            "title": "Route",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Settings",
+            "type": "object"
+          },
+          "status": {
+            "default": "preparing",
+            "enum": [
+              "preparing",
+              "released",
+              "making",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_note": {
+            "default": "",
+            "title": "Status Note",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "revision",
+          "route"
+        ],
+        "title": "Build",
+        "type": "object"
+      },
+      "BuildCreate": {
+        "properties": {
+          "estimates": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Estimate"
+            },
+            "title": "Estimates",
+            "type": "object"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "machine_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Id"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "process": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "settings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Settings",
+            "type": "object"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "BuildCreate",
+        "type": "object"
+      },
+      "BuildEdit": {
+        "properties": {
+          "estimates": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/Estimate"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimates"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "machine_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Id"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "process": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "title": "BuildEdit",
         "type": "object"
       },
       "CallerBody": {
@@ -2130,6 +2640,62 @@
           "created_at"
         ],
         "title": "ChannelResponse",
+        "type": "object"
+      },
+      "CheckResult": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "decided_by": {
+            "default": "",
+            "title": "Decided By",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "default": "awaiting_review",
+            "enum": [
+              "passed",
+              "failed",
+              "inconclusive",
+              "awaiting_review"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "surface": {
+            "default": "unknown",
+            "title": "Surface",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "title": "CheckResult",
         "type": "object"
       },
       "ChecklistResponse": {
@@ -3134,6 +3700,78 @@
         "title": "CreateThreadRequest",
         "type": "object"
       },
+      "Creation": {
+        "properties": {
+          "brief": {
+            "$ref": "#/components/schemas/Brief"
+          },
+          "builds": {
+            "items": {
+              "$ref": "#/components/schemas/Build"
+            },
+            "title": "Builds",
+            "type": "array"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryEntry"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "inspection_plan": {
+            "items": {
+              "$ref": "#/components/schemas/InspectionCheck"
+            },
+            "title": "Inspection Plan",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "route": {
+            "$ref": "#/components/schemas/RouteChoice"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "default": 0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "Creation",
+        "type": "object"
+      },
+      "CreationView": {
+        "properties": {
+          "brief_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Brief Keys",
+            "type": "array"
+          },
+          "creation": {
+            "$ref": "#/components/schemas/Creation"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/Readiness"
+          }
+        },
+        "required": [
+          "creation",
+          "readiness"
+        ],
+        "title": "CreationView",
+        "type": "object"
+      },
       "CurrentItemRow": {
         "properties": {
           "author": {
@@ -3347,6 +3985,54 @@
           "readiness"
         ],
         "title": "CurrentViewResponse",
+        "type": "object"
+      },
+      "Decision": {
+        "properties": {
+          "approver": {
+            "default": "",
+            "title": "Approver",
+            "type": "string"
+          },
+          "approver_verified": {
+            "default": false,
+            "title": "Approver Verified",
+            "type": "boolean"
+          },
+          "decided_at": {
+            "title": "Decided At",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "accept",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "surface": {
+            "default": "unknown",
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "Decision",
         "type": "object"
       },
       "DecisionRecord": {
@@ -3876,6 +4562,39 @@
         "title": "DispatchJobRequest",
         "type": "object"
       },
+      "DuplicateRequest": {
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "DuplicateRequest",
+        "type": "object"
+      },
+      "DuplicateResponse": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "name"
+        ],
+        "title": "DuplicateResponse",
+        "type": "object"
+      },
       "EditFlowRequest": {
         "description": "A whole edited flow, plus the template it descends from.\n\nThe editor sends the full flow rather than a patch. A patch would need the\nclient and server to agree on how to apply it, and a disagreement there is\na flow that is not what the person on the canvas was looking at when they\npressed save.",
         "properties": {
@@ -4152,6 +4871,223 @@
           "upper"
         ],
         "title": "EmittedJointLimits",
+        "type": "object"
+      },
+      "Estimate": {
+        "properties": {
+          "basis": {
+            "default": "",
+            "description": "How the number was reached",
+            "maxLength": 300,
+            "title": "Basis",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "title": "Estimate",
+        "type": "object"
+      },
+      "Evidence": {
+        "properties": {
+          "check_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "photo",
+              "measurement",
+              "telemetry",
+              "note"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "recorded_by": {
+            "default": "",
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "surface": {
+            "default": "unknown",
+            "title": "Surface",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "upload_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Id"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "work_product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Product Id"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "EvidenceCreate": {
+        "properties": {
+          "check_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Id"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "kind": {
+            "enum": [
+              "photo",
+              "measurement",
+              "telemetry",
+              "note"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "upload_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Id"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "work_product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Product Id"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "EvidenceCreate",
         "type": "object"
       },
       "EvidenceResponse": {
@@ -6349,6 +7285,38 @@
         "title": "HierarchyTreeResponse",
         "type": "object"
       },
+      "HistoryEntry": {
+        "properties": {
+          "actor": {
+            "default": "",
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "change": {
+            "title": "Change",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "surface": {
+            "default": "unknown",
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "change"
+        ],
+        "title": "HistoryEntry",
+        "type": "object"
+      },
       "HoldToolCallRequest": {
         "description": "Park a tool call from another process in this ledger.",
         "properties": {
@@ -6993,6 +7961,68 @@
         ],
         "title": "InsightStatus",
         "type": "string"
+      },
+      "InspectionCheck": {
+        "properties": {
+          "blocking": {
+            "default": true,
+            "title": "Blocking",
+            "type": "boolean"
+          },
+          "condition": {
+            "default": "",
+            "description": "Acceptance condition or tolerance",
+            "maxLength": 500,
+            "title": "Condition",
+            "type": "string"
+          },
+          "evidence": {
+            "default": "",
+            "description": "What evidence is required",
+            "maxLength": 300,
+            "title": "Evidence",
+            "type": "string"
+          },
+          "feature": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Feature",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "method": {
+            "default": "operator",
+            "enum": [
+              "camera",
+              "measurement",
+              "telemetry",
+              "operator",
+              "instrument"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "reviewer": {
+            "default": "person",
+            "enum": [
+              "person",
+              "agent"
+            ],
+            "title": "Reviewer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "feature"
+        ],
+        "title": "InspectionCheck",
+        "type": "object"
       },
       "IntentModelView": {
         "description": "The structured intent (see ``orchestrator.design_flow.intent``).",
@@ -8572,6 +9602,102 @@
         "title": "MaturityGateSummary",
         "type": "object"
       },
+      "Measurement": {
+        "properties": {
+          "critical": {
+            "default": false,
+            "title": "Critical",
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Note",
+            "type": "string"
+          },
+          "reference_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Work product the mark was made on",
+            "title": "Reference Id"
+          },
+          "scale_reference": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale Reference"
+          },
+          "source": {
+            "default": "typed",
+            "enum": [
+              "typed",
+              "photo",
+              "sketch",
+              "model",
+              "camera"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "default": "unconfirmed",
+            "enum": [
+              "user_confirmed",
+              "estimated",
+              "unconfirmed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "unit": {
+            "default": "mm",
+            "enum": [
+              "mm",
+              "cm",
+              "m",
+              "in",
+              "ft"
+            ],
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "value"
+        ],
+        "title": "Measurement",
+        "type": "object"
+      },
       "MemoryHitResponse": {
         "description": "Wire shape of a single hit in the response payload.",
         "properties": {
@@ -9883,6 +11009,39 @@
         "title": "PhaseView",
         "type": "object"
       },
+      "PlanUpdate": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/InspectionCheck"
+            },
+            "maxItems": 100,
+            "title": "Checks",
+            "type": "array"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "title": "PlanUpdate",
+        "type": "object"
+      },
       "PolicyApprovalRequest": {
         "description": "A held call the project's approval policy may already cover.",
         "properties": {
@@ -10731,6 +11890,56 @@
         "title": "QuoteRequest",
         "type": "object"
       },
+      "Readiness": {
+        "properties": {
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/Blocker"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "has_concept": {
+            "title": "Has Concept",
+            "type": "boolean"
+          },
+          "has_engineering_model": {
+            "title": "Has Engineering Model",
+            "type": "boolean"
+          },
+          "next_action": {
+            "title": "Next Action",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "concept",
+              "design_in_development",
+              "checked_design",
+              "ready_for_making",
+              "released_for_making",
+              "build_completed",
+              "accepted_product"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "stage_index": {
+            "title": "Stage Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stage",
+          "stage_index",
+          "blockers",
+          "next_action",
+          "has_concept",
+          "has_engineering_model"
+        ],
+        "title": "Readiness",
+        "type": "object"
+      },
       "RealizeHierarchyNodeRequest": {
         "properties": {
           "bomItemId": {
@@ -11026,6 +12235,33 @@
           "status"
         ],
         "title": "RecordStalenessResponse",
+        "type": "object"
+      },
+      "Release": {
+        "properties": {
+          "approver": {
+            "title": "Approver",
+            "type": "string"
+          },
+          "approver_verified": {
+            "default": false,
+            "title": "Approver Verified",
+            "type": "boolean"
+          },
+          "released_at": {
+            "title": "Released At",
+            "type": "string"
+          },
+          "surface": {
+            "default": "unknown",
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approver"
+        ],
+        "title": "Release",
         "type": "object"
       },
       "ReleaseDiff": {
@@ -11581,6 +12817,70 @@
         "title": "ResolveHoldRequest",
         "type": "object"
       },
+      "ResultUpdate": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "inconclusive",
+              "awaiting_review"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ResultUpdate",
+        "type": "object"
+      },
       "ReviewTask": {
         "properties": {
           "attempt": {
@@ -11699,6 +12999,39 @@
           "created_at"
         ],
         "title": "ReviewTask",
+        "type": "object"
+      },
+      "Revision": {
+        "description": "The exact design a build makes: a work product and, when known, its version.",
+        "properties": {
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "work_product_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id"
+        ],
+        "title": "Revision",
         "type": "object"
       },
       "RevisionDiff": {
@@ -11985,6 +13318,64 @@
         "title": "RotationDelta",
         "type": "object"
       },
+      "RouteChoice": {
+        "properties": {
+          "machine_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Id"
+          },
+          "material": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Material",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Note",
+            "type": "string"
+          },
+          "process": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Process",
+            "type": "string"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "workshop",
+                  "external"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "supplier": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Supplier",
+            "type": "string"
+          }
+        },
+        "title": "RouteChoice",
+        "type": "object"
+      },
       "RouteInfo": {
         "properties": {
           "configured": {
@@ -12006,6 +13397,37 @@
           "model"
         ],
         "title": "RouteInfo",
+        "type": "object"
+      },
+      "RouteUpdate": {
+        "properties": {
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "route": {
+            "$ref": "#/components/schemas/RouteChoice"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "route"
+        ],
+        "title": "RouteUpdate",
         "type": "object"
       },
       "RoutingResponse": {
@@ -14130,6 +15552,52 @@
         "title": "StartDesignLoopRequest",
         "type": "object"
       },
+      "StatusUpdate": {
+        "properties": {
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "preparing",
+              "released",
+              "making",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StatusUpdate",
+        "type": "object"
+      },
       "StopSupervisionRequest": {
         "properties": {
           "reason": {
@@ -16120,6 +17588,31 @@
           "valid"
         ],
         "title": "ValidationView",
+        "type": "object"
+      },
+      "VersionedWrite": {
+        "properties": {
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version this edit was made against; 409 if it has moved on",
+            "title": "Expected Version"
+          },
+          "summary": {
+            "default": "",
+            "description": "One line for the history",
+            "maxLength": 500,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "title": "VersionedWrite",
         "type": "object"
       },
       "WorkProductRevision": {
@@ -19253,6 +20746,729 @@
         "summary": "Get Metadata",
         "tags": [
           "convert"
+        ]
+      }
+    },
+    "/v1/create/{project_id}": {
+      "delete": {
+        "description": "Remove the Create records. Refused while a build is released or being made.",
+        "operationId": "delete_creation_v1_create__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Creation",
+        "tags": [
+          "create"
+        ]
+      },
+      "get": {
+        "description": "The creation's records and where it stands.",
+        "operationId": "get_creation_v1_create__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Creation",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/brief": {
+      "put": {
+        "description": "Replace the brief: items, measurements, assumptions and references.",
+        "operationId": "put_brief_v1_create__project_id__brief_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BriefUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Brief",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/builds": {
+      "post": {
+        "description": "Prepare a manufacturing attempt of one exact revision.",
+        "operationId": "create_build_v1_create__project_id__builds_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Build",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/builds/{build_id}": {
+      "patch": {
+        "description": "Change a prepared build. A released one keeps its instructions: prepare a new one.",
+        "operationId": "edit_build_v1_create__project_id__builds__build_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Build",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/builds/{build_id}/accept": {
+      "post": {
+        "description": "A person accepts or rejects a finished build. Completion is not acceptance.",
+        "operationId": "decide_build_v1_create__project_id__builds__build_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Build",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/builds/{build_id}/evidence": {
+      "post": {
+        "description": "Attach a photo, measurement, telemetry reading or note to a build.",
+        "operationId": "add_evidence_v1_create__project_id__builds__build_id__evidence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Evidence",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/builds/{build_id}/release": {
+      "post": {
+        "description": "A person releases this exact revision for making; starting a machine is separate.",
+        "operationId": "release_build_v1_create__project_id__builds__build_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionedWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Build",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/builds/{build_id}/results/{check_id}": {
+      "put": {
+        "description": "Record one check's outcome. A check a person reviews cannot be passed by an agent.",
+        "operationId": "set_result_v1_create__project_id__builds__build_id__results__check_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "title": "Check Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResultUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Result",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/builds/{build_id}/status": {
+      "post": {
+        "description": "Record that a released build started, finished, failed or was cancelled.",
+        "operationId": "set_build_status_v1_create__project_id__builds__build_id__status_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Build Status",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/duplicate": {
+      "post": {
+        "description": "A new project with this creation's brief, route and inspection plan; no builds.",
+        "operationId": "duplicate_creation_v1_create__project_id__duplicate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DuplicateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DuplicateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Duplicate Creation",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/inspection-plan": {
+      "put": {
+        "description": "Replace the inspection plan. A released build keeps the checks it was released with.",
+        "operationId": "put_inspection_plan_v1_create__project_id__inspection_plan_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Inspection Plan",
+        "tags": [
+          "create"
+        ]
+      }
+    },
+    "/v1/create/{project_id}/route": {
+      "put": {
+        "description": "Choose how it will be made: at home, in a workshop or by a manufacturer.",
+        "operationId": "put_route_v1_create__project_id__route_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Route",
+        "tags": [
+          "create"
         ]
       }
     },

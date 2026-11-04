@@ -10,6 +10,7 @@ import {
   Package,
   Play,
   ShieldCheck,
+  Sparkles,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
@@ -29,6 +30,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'WORKSPACE',
     items: [
+      { to: '/create', label: 'Create', icon: Sparkles },
       { to: '/projects', label: 'Projects', icon: Boxes },
       { to: '/sessions', label: 'Agent sessions', icon: Workflow },
       { to: '/runs', label: 'Runs', icon: Play },
@@ -52,6 +54,7 @@ export const NAV_GROUPS: NavGroup[] = [
 
 /** Top-level route segment -> section label (breadcrumb + document title). */
 export const SECTION_LABELS: Record<string, string> = {
+  create: 'Create',
   projects: 'Projects',
   sessions: 'Agent sessions',
   runs: 'Runs',

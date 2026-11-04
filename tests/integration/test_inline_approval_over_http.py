@@ -26,7 +26,7 @@ import httpx
 import pytest
 import uvicorn
 
-from mcp_core.elicitation import ELICITATION_PROTOCOL_VERSION
+from mcp_core.elicitation import ELICITATION_PROTOCOL_VERSION, UNATTENDED_ANSWER_SECONDS
 from mcp_core.guardrails import Caller
 from metaforge.mcp.__main__ import build_http_app
 from metaforge.mcp.server import UnifiedMcpServer
@@ -107,10 +107,13 @@ async def _initialize(client: httpx.AsyncClient, url: str) -> str:
 class _Client:
     """A client that reads the stream and answers whatever is asked."""
 
-    def __init__(self, url: str, session: str, answer: dict[str, Any]) -> None:
+    def __init__(self, url: str, session: str, answer: dict[str, Any], delay: float = 0.0) -> None:
         self._url = url
         self._session = session
         self._answer = answer
+        # How long the "person" takes to answer. Under UNATTENDED_ANSWER_SECONDS
+        # a decline reads as the client answering for them (FORGE #1286).
+        self._delay = delay
         self.asked: dict[str, Any] | None = None
         self.answered = asyncio.Event()
 
@@ -125,6 +128,7 @@ class _Client:
                     if message.get("method") != "elicitation/create":
                         continue
                     self.asked = message
+                    await asyncio.sleep(self._delay)
                     await client.post(
                         f"{self._url}/mcp",
                         headers=headers,
@@ -149,11 +153,11 @@ async def _call(client: httpx.AsyncClient, url: str, session: str, tool: str) ->
 
 
 async def _with_listener(
-    url: str, answer: dict[str, Any], tool: str = "twin.record_decision"
+    url: str, answer: dict[str, Any], tool: str = "twin.record_decision", delay: float = 0.0
 ) -> tuple[dict[str, Any], _Client]:
     async with httpx.AsyncClient(timeout=30) as client:
         session = await _initialize(client, url)
-        listener = _Client(url, session, answer)
+        listener = _Client(url, session, answer, delay)
         task = asyncio.create_task(listener.run())
         await asyncio.sleep(0.4)  # let the stream register
         body = await _call(client, url, session, tool)
@@ -213,9 +217,37 @@ class TestTheAcceptanceCriterion:
         assert "rejected" in json.dumps(body["error"])
 
     async def test_declining_the_prompt_also_stops_it(self, base_url: str) -> None:
-        body, _ = await _with_listener(base_url, {"action": "decline"})
+        # A person reads the prompt before saying no.
+        body, _ = await _with_listener(
+            base_url, {"action": "decline"}, delay=UNATTENDED_ANSWER_SECONDS + 0.3
+        )
         assert "error" in body
         assert "rejected" in json.dumps(body["error"])
+
+    async def test_an_instant_decline_is_not_a_rejection(self, base_url: str) -> None:
+        """#1286: a client that declines before anyone could have read the
+        prompt answered for the person. The call falls back to the dashboard
+        route, which this server has not configured, so it is refused as
+        such and never reported as a reviewer's rejection."""
+        body, listener = await _with_listener(base_url, {"action": "decline"})
+        assert listener.asked is not None
+        assert "error" in body
+        error = json.dumps(body["error"])
+        assert "rejected" not in error
+        assert "not_configured" in error
+
+    async def test_one_session_answering_for_the_person_does_not_silence_others(
+        self, base_url: str
+    ) -> None:
+        """The fallback is remembered per session. The sidecar serves every
+        client from one server object, and a flag on it once let one client's
+        auto-decline stop every other client from being asked."""
+        await _with_listener(base_url, {"action": "decline"})
+        body, listener = await _with_listener(
+            base_url, {"action": "accept", "content": {"approve": True}}
+        )
+        assert listener.asked is not None, "the second session was never asked"
+        assert body["result"]["_meta"]["approval"]["route"] == "elicitation"
 
 
 class TestWhatInlineApprovalCannotDo:
@@ -243,7 +275,7 @@ class TestWithoutTheStandaloneStream:
     on the tools/call POST's own SSE response, over a real connection."""
 
     async def _call_on_its_own_stream(
-        self, url: str, answer: dict[str, Any]
+        self, url: str, answer: dict[str, Any], delay: float = 0.0
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         async with httpx.AsyncClient(timeout=30) as client:
             session = await _initialize(client, url)
@@ -267,6 +299,7 @@ class TestWithoutTheStandaloneStream:
                     message = json.loads(line[6:])
                     if message.get("method") == "elicitation/create":
                         asked = message
+                        await asyncio.sleep(delay)
                         reply = await client.post(
                             f"{url}/mcp",
                             headers=headers,
@@ -286,6 +319,8 @@ class TestWithoutTheStandaloneStream:
         assert body["result"]["_meta"]["approval"]["route"] == "elicitation"
 
     async def test_declined_on_the_call_stream(self, base_url: str) -> None:
-        asked, body = await self._call_on_its_own_stream(base_url, {"action": "decline"})
+        asked, body = await self._call_on_its_own_stream(
+            base_url, {"action": "decline"}, delay=UNATTENDED_ANSWER_SECONDS + 0.3
+        )
         assert asked
         assert "rejected" in json.dumps(body["error"])

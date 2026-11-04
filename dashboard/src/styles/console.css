@@ -3661,3 +3661,31 @@ button:disabled {
   margin:0 0 8px;
   color:var(--mf-c-9898aa)
 }
+
+/* Create / Engineering switch (topbar): two views of the same project. */
+.view-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--mf-c-3c3e49);
+  background: var(--mf-c-191b22);
+}
+.view-switch-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  color: var(--mf-c-9a9aaa);
+  font-size: 12px;
+  text-decoration: none;
+}
+.view-switch-option.is-on {
+  background: #ff5a0a;
+  color: #fff;
+}
+@media (max-width: 760px) {
+  .view-switch-option span {
+    display: none;
+  }
+}

@@ -37,6 +37,7 @@ from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.component_selection.routes import router as component_selection_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
+from api_gateway.create.routes import router as create_router
 from api_gateway.design_flows.mcp_bindings import (
     make_approvals_lister,
     make_capability_reader,
@@ -1681,6 +1682,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from api_gateway.uploads.store import SqliteUploadStore, default_upload_store_path
 
         init_upload_store(SqliteUploadStore(str(default_upload_store_path())))
+        # Create view records (brief, route, inspection plan, builds).
+        from api_gateway.create.routes import init_create_store
+        from api_gateway.create.store import SqliteCreationStore, default_create_store_path
+
+        init_create_store(SqliteCreationStore(str(default_create_store_path())))
     # FORGE-482: flow versions (proposed, approved, rejected) were process
     # memory, so a routine reload lost every human approval while the
     # Temporal run using it survived. Same disable flag as the ledgers.
@@ -2251,6 +2257,7 @@ def create_app(
     # Upload links before /v1/uploads/{id}, so POST /v1/uploads/link is not an id.
     app.include_router(upload_links_router)
     app.include_router(uploads_router)
+    app.include_router(create_router)
     app.include_router(files_router)
     app.include_router(links_router)
     # FORGE-726: who decides a project's gates (policy) and the reviewer's notes.
