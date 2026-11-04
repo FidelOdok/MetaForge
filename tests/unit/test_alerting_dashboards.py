@@ -121,7 +121,8 @@ class TestAlertingRules:
         # + 1 sketch readings unavailable (FORGE-762).
         # + 1 concept images unchecked (FORGE-772, severity: info).
         # + 1 concept meshes unavailable (FORGE-778).
-        assert len(rules) == 65  # + 1 tool jobs failing (FORGE-783)
+        # + 1 tool jobs failing (FORGE-783).
+        assert len(rules) == 67  # + 2 operation events (FORGE-785)
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -186,7 +187,8 @@ class TestAlertingRules:
         # + 1 concept images unavailable (FORGE-761).
         # + 1 sketch readings unavailable (FORGE-762).
         # + 1 concept meshes unavailable (FORGE-778).
-        assert len(warnings) == 50  # + ToolJobsFailingOrInterrupted (FORGE-783)
+        # + ToolJobsFailingOrInterrupted (FORGE-783).
+        assert len(warnings) == 52  # + 2 operation events (FORGE-785)
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -265,6 +267,9 @@ class TestAlertingRules:
                 # FORGE-577: the object store is SeaweedFS; no bucket-size rule.
                 "ObjectStoreAccessErrorsRising",
                 "ObjectStoreWriteLatencyHigh",
+                # FORGE-785: operation events not stored; operations gone quiet.
+                "OperationEventPublishFailing",
+                "OperationsStalled",
                 "OscillationDetected",
                 "RetrievalPrecisionRegression",
                 "SensorOutOfRange",

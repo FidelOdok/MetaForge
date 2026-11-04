@@ -28,6 +28,14 @@ Pieces, reusable by any slow tool:
 
 Each state change is a ``tool_job_state`` log event and one count of
 ``metaforge_tool_job_total{tool, status}``.
+
+FORGE-785: each state change of a job that belongs to a project is also an
+operation event (``operation_id = "job:<job_id>"``) handed to an injected
+publisher. The default publisher is
+:func:`mcp_core.operation_events.publish_operation_event`: inside the gateway
+it writes to the durable operation log, in the MCP sidecar it posts to the
+gateway. A job can be cancelled (:meth:`JobRunner.cancel`) or superseded by a
+newer one (:meth:`JobRunner.supersede`); both end it at once and stop its task.
 """
 
 from __future__ import annotations
@@ -55,10 +63,36 @@ JOBS_PATH_ENV = "METAFORGE_TOOL_JOBS_PATH"
 POLL_TOOL = "twin.job_status"
 #: Seconds after success during which an identical call returns the same job.
 REUSE_WINDOW_S = 600.0
-STATUSES = ("queued", "running", "succeeded", "failed", "interrupted")
+STATUSES = ("queued", "running", "succeeded", "failed", "interrupted", "cancelled", "superseded")
 ACTIVE = frozenset({"queued", "running"})
-TERMINAL = frozenset({"succeeded", "failed", "interrupted"})
+TERMINAL = frozenset({"succeeded", "failed", "interrupted", "cancelled", "superseded"})
 INTERRUPTED_ERROR = "the server restarted before the job finished; call the tool again"
+CANCELLED_ERROR = "the job was cancelled before it finished"
+SUPERSEDED_ERROR = "a newer request replaced this job before it finished"
+
+#: Takes ``(project_id, event)`` and delivers an operation event (FORGE-785).
+JobEventPublisher = Callable[[str, dict[str, Any]], Awaitable[Any]]
+
+#: Each step of a job's life has a fixed operation ``sequence``, so its events
+#: stay ordered however they travel (an HTTP post from the sidecar can arrive
+#: late) and a restart that ends a job continues where it left off. The gaps
+#: leave room for milestones in between.
+_JOB_EVENTS: dict[str, tuple[int, str, str, str, str]] = {
+    # status: (sequence, type, state, severity, message)
+    "queued": (10, "queued", "queued", "info", "Queued"),
+    "running": (20, "started", "running", "info", "Working"),
+    "succeeded": (90, "completed", "completed", "info", "Finished"),
+    "failed": (90, "failed", "failed", "error", "The job failed"),
+    "interrupted": (
+        90,
+        "failed",
+        "failed",
+        "error",
+        "The job stopped when its server restarted; ask for it again",
+    ),
+    "cancelled": (90, "cancelled", "cancelled", "info", "Cancelled"),
+    "superseded": (90, "superseded", "superseded", "info", "Replaced by a newer request"),
+}
 _MAX_ERROR_CHARS = 2000
 _SENTINEL_SESSION = "00000000-0000-0000-0000-000000000000"
 
@@ -154,6 +188,8 @@ class JobStore:
         self.path = str(path)
         self._clock = clock
         self._lock = threading.Lock()
+        #: The records of the jobs this store interrupted when it opened.
+        self.interrupted_records: list[JobRecord] = []
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
@@ -176,6 +212,10 @@ class JobStore:
             stale = self._db.execute(
                 "SELECT job_id, tool_id FROM tool_jobs WHERE status IN ('queued', 'running')"
             ).fetchall()
+            stale_rows = self._db.execute(
+                f"SELECT {_COLUMNS} FROM tool_jobs"  # noqa: S608
+                " WHERE status IN ('queued', 'running')"
+            ).fetchall()
             if stale:
                 self._db.execute(
                     "UPDATE tool_jobs SET status = 'interrupted', finished_at = ?, error = ?"
@@ -184,6 +224,7 @@ class JobStore:
                 )
         #: Jobs this store marked interrupted when it opened.
         self.interrupted_on_open = [str(job_id) for job_id, _tool in stale]
+        self.interrupted_records = [self._row(r) for r in stale_rows]
         for job_id, tool_id in stale:
             logger.warning(
                 "tool_job_state",
@@ -286,7 +327,7 @@ class JobStore:
             rows = self._db.execute(
                 f"SELECT {_COLUMNS} FROM tool_jobs"  # noqa: S608
                 " WHERE session_id = ? AND notified = 0"
-                " AND status IN ('succeeded', 'failed', 'interrupted')"
+                " AND status IN ('succeeded', 'failed', 'interrupted', 'cancelled', 'superseded')"
                 " ORDER BY finished_at",
                 (session_id,),
             ).fetchall()
@@ -311,11 +352,78 @@ class JobRunner:
         *,
         reuse_window_s: float = REUSE_WINDOW_S,
         clock: Callable[[], float] = time.time,
+        publisher: JobEventPublisher | None = None,
     ) -> None:
         self.store = store if store is not None else JobStore(":memory:", clock=clock)
         self._reuse_window_s = reuse_window_s
         self._clock = clock
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        #: Jobs ended by cancel or supersede; their task must not record again.
+        self._ended: set[str] = set()
+        self._publisher = publisher
+        self._pending_events: set[asyncio.Task[Any]] = set()
+        # A job the store interrupted on opening ended for real: say so.
+        for record in self.store.interrupted_records:
+            self._emit(record, "interrupted")
+
+    def _emit(self, job: JobRecord, status: str) -> None:
+        """Hand the job's operation event to the publisher. Never raises."""
+        if self._publisher is None or not job.project_id or status not in _JOB_EVENTS:
+            return
+        sequence, event_type, state, severity, message = _JOB_EVENTS[status]
+        event: dict[str, Any] = {
+            # Deterministic, so a retried post is a duplicate, not a second event.
+            "event_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"metaforge:job:{job.job_id}:{status}")),
+            "operation_id": f"job:{job.job_id}",
+            "kind": "job",
+            "sequence": sequence,
+            "type": event_type,
+            "state": state,
+            "title": _job_title(job.tool_id),
+            "domain": _job_domain(job.tool_id),
+            "occurred_at": _iso(self._clock()),
+            "severity": severity,
+            "message": message,
+        }
+        if status in ACTIVE:
+            event["action_refs"] = [
+                {"kind": "cancel", "id": f"job:{job.job_id}", "label": "Cancel"}
+            ]
+        if status == "succeeded" and job.result:
+            node_id = job.result.get("node_id")
+            if node_id:
+                event["artifact_refs"] = [
+                    {"kind": "work_product", "id": str(node_id), "label": _job_title(job.tool_id)}
+                ]
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.info(
+                "tool_job_event_not_published", job_id=job.job_id, status=status, reason="no loop"
+            )
+            return
+        publisher = self._publisher
+        project_id = job.project_id
+
+        async def deliver() -> None:
+            try:
+                await publisher(project_id, event)
+            except Exception as exc:  # noqa: BLE001 - a status line never fails a job
+                logger.info(
+                    "tool_job_event_dropped", job_id=job.job_id, status=status, error=str(exc)
+                )
+
+        task = loop.create_task(deliver())
+        self._pending_events.add(task)
+        task.add_done_callback(self._pending_events.discard)
+
+    async def flush_events(self) -> None:
+        """Wait for the operation events handed on so far (tests, shutdown)."""
+        while True:
+            pending = [t for t in self._pending_events if not t.done()]
+            if not pending:
+                return
+            await asyncio.gather(*pending, return_exceptions=True)
 
     def _changed(self, job: JobRecord, status: str, **extra: Any) -> None:
         log = logger.warning if status in {"failed", "interrupted"} else logger.info
@@ -329,6 +437,7 @@ class JobRunner:
             **extra,
         )
         _count(job.tool_id, status)
+        self._emit(job, status)
 
     async def start(
         self,
@@ -383,12 +492,16 @@ class JobRunner:
         return job, False
 
     async def _run(self, job: JobRecord, work: Callable[[], Awaitable[dict[str, Any]]]) -> None:
+        if job.job_id in self._ended:
+            return
         started = self._clock()
         self.store.update(job.job_id, status="running", started_at=started)
         self._changed(job, "running")
         try:
             result = await work()
         except asyncio.CancelledError:
+            if job.job_id in self._ended:
+                raise  # cancel() or supersede() already recorded how it ended
             self.store.update(
                 job.job_id,
                 status="interrupted",
@@ -402,17 +515,48 @@ class JobRunner:
             self.store.update(job.job_id, status="failed", finished_at=self._clock(), error=error)
             self._changed(job, "failed", error=error, duration_s=round(self._clock() - started, 1))
         else:
+            stored = result if isinstance(result, dict) else {"value": result}
             self.store.update(
-                job.job_id,
-                status="succeeded",
-                finished_at=self._clock(),
-                result=result if isinstance(result, dict) else {"value": result},
+                job.job_id, status="succeeded", finished_at=self._clock(), result=stored
             )
+            job.result = stored
             self._changed(job, "succeeded", duration_s=round(self._clock() - started, 1))
         finally:
             self._tasks.pop(job.job_id, None)
 
     def get(self, job_id: str) -> JobRecord | None:
+        return self.store.get(job_id)
+
+    def owns(self, job_id: str) -> bool:
+        """Whether this runner is running ``job_id`` now (so it can stop it)."""
+        return job_id in self._tasks
+
+    def cancel(self, job_id: str, *, reason: str | None = None) -> JobRecord | None:
+        """Stop an active job of this runner and record it ``cancelled``.
+
+        Returns the job as it now stands, ``None`` when it is unknown. A job
+        that already ended, or one another process runs, is returned
+        unchanged: the caller reads ``status`` to tell.
+        """
+        return self._end(job_id, "cancelled", reason or CANCELLED_ERROR)
+
+    def supersede(self, job_id: str, *, by: str | None = None) -> JobRecord | None:
+        """Stop an active job a newer request replaces; record it ``superseded``."""
+        error = f"{SUPERSEDED_ERROR} ({by})" if by else SUPERSEDED_ERROR
+        return self._end(job_id, "superseded", error)
+
+    def _end(self, job_id: str, status: str, error: str) -> JobRecord | None:
+        job = self.store.get(job_id)
+        if job is None or job.done or job_id not in self._tasks:
+            return job
+        self._ended.add(job_id)
+        self.store.update(
+            job_id, status=status, finished_at=self._clock(), error=error[:_MAX_ERROR_CHARS]
+        )
+        task = self._tasks.pop(job_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+        self._changed(job, status, reason=status)
         return self.store.get(job_id)
 
     def mark_notified(self, job_id: str) -> None:
@@ -426,7 +570,11 @@ class JobRunner:
         """Wait for a job of this runner to finish (tests and service callers)."""
         task = self._tasks.get(job_id)
         if task is not None:
-            await asyncio.wait_for(asyncio.shield(task), timeout)
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout)
+            except asyncio.CancelledError:
+                if not task.cancelled():
+                    raise
         return self.get(job_id)
 
     @staticmethod
@@ -452,6 +600,28 @@ _default: JobRunner | None = None
 _default_lock = threading.Lock()
 
 
+async def _publish_via_process_seam(project_id: str, event: dict[str, Any]) -> None:
+    """The default job publisher: this process's operation event seam (FORGE-785)."""
+    from mcp_core.operation_events import publish_operation_event
+
+    await publish_operation_event(project_id, event)
+
+
+def _job_domain(tool_id: str) -> str:
+    try:
+        from mcp_core.operation_events import domain_for_tool
+
+        return domain_for_tool(tool_id)
+    except Exception:  # noqa: BLE001
+        return "general"
+
+
+def _job_title(tool_id: str) -> str:
+    """A title from the tool id: ``twin.generate_concept_mesh`` is "Generate concept mesh"."""
+    name = tool_id.rpartition(".")[2].replace("_", " ").strip()
+    return name[:1].upper() + name[1:] if name else tool_id
+
+
 def default_job_runner() -> JobRunner:
     """This process's runner, opened on first use (which interrupts stale jobs)."""
     global _default  # noqa: PLW0603
@@ -463,7 +633,7 @@ def default_job_runner() -> JobRunner:
             except (OSError, sqlite3.Error) as exc:
                 logger.warning("tool_job_store_unavailable", path=path, error=str(exc))
                 store = JobStore(":memory:")
-            _default = JobRunner(store)
+            _default = JobRunner(store, publisher=_publish_via_process_seam)
             logger.info("tool_job_store_opened", path=store.path)
         return _default
 

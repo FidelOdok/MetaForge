@@ -80,7 +80,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 concept image (FORGE-761), + 1 sketch reading (FORGE-762).
         # + 1 concept image critique (FORGE-772).
         # + 1 tool jobs (FORGE-783).
-        assert len(all_metrics) == 99  # + 1 concept mesh (FORGE-778), + 1 FORGE-780
+        # + 1 concept mesh (FORGE-778), + 1 FORGE-780.
+        assert len(all_metrics) == 106  # + 7 operation events (FORGE-785)
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -123,6 +124,7 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.watchdog_metrics())
             + len(MetricsRegistry.gate_review_metrics())
             + len(MetricsRegistry.supervisor_metrics())
+            + len(MetricsRegistry.operation_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 
@@ -152,6 +154,7 @@ class TestMetricsRegistryGroupedAccess:
             MetricsRegistry.watchdog_metrics(),
             MetricsRegistry.gate_review_metrics(),
             MetricsRegistry.supervisor_metrics(),
+            MetricsRegistry.operation_metrics(),
         ]
         grouped = {m.name for group in groups for m in group}
         registered = {m.name for m in MetricsRegistry.all_metrics()}

@@ -177,6 +177,7 @@ async def decide_approval(
             surface=surface,
             on_behalf_of=on_behalf_of,
             agent=agent,
+            base_revision=body.base_revision,
         )
     except HTTPException as exc:
         outcome = "refused" if exc.status_code < 500 else "error"
@@ -238,6 +239,7 @@ async def decide_inline(
             approver=approver,
             surface="chat",
             on_behalf_of=None,
+            base_revision=body.base_revision,
         )
     except HTTPException as exc:
         outcome = "refused" if exc.status_code < 500 else "error"

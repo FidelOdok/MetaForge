@@ -437,6 +437,8 @@ def _wp_item(kind: str, wp: Any) -> ApprovalItem:
         not_decidable_reason=why,
         detail={"node_id": str(wp.id), "name": wp.name, "file_path": wp.file_path},
         decision=_record(item_id, fallback),
+        # RT-030: the content the person reviewed. A changed file is a new hash.
+        base_revision=str(wp.content_hash) if wp.content_hash else None,
     )
 
 
@@ -723,8 +725,16 @@ async def decide(
     surface: Surface,
     on_behalf_of: str | None,
     agent: str | None = None,
+    base_revision: str | None = None,
 ) -> ApprovalItem:
-    """Apply a decision through the same function the kind's old route uses."""
+    """Apply a decision through the same function the kind's old route uses.
+
+    ``base_revision`` (FORGE-785, RT-030) is the item's revision as the
+    decider saw it. When the item tracks one and it has moved on since, the
+    decision is refused with 409: approving a proposal about a design that
+    has changed would approve something nobody looked at. Callers that send
+    none are unaffected.
+    """
     kind, raw = split_id(item_id)
     current = await get_item(app, item_id)  # 404 first, and the not-decidable check
     if (
@@ -740,6 +750,24 @@ async def decide(
         )
     if current.not_decidable_reason and not current.decidable:
         raise HTTPException(status_code=409, detail=current.not_decidable_reason)
+    if (
+        base_revision is not None
+        and current.base_revision is not None
+        and base_revision != current.base_revision
+    ):
+        logger.info(
+            "approval_decision_stale",
+            approval_id=item_id,
+            seen_revision=base_revision,
+            current_revision=current.base_revision,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"approval '{item_id}' has moved on since it was reviewed (reviewed revision "
+                f"{base_revision}, current {current.base_revision}); review it again"
+            ),
+        )
     if decision in REASON_REQUIRED_FOR and not reason.strip():
         raise HTTPException(status_code=422, detail=f"'{decision}' needs a reason")
     offered = set(current.allowed_decisions)

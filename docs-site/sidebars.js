@@ -45,6 +45,7 @@ const sidebars = {
       collapsed: false,
       items: [
         'architecture',
+        'operations',
         'twin_schema',
         'skill_spec',
         'mcp_spec',

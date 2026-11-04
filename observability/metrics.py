@@ -871,6 +871,66 @@ class MetricsRegistry:
         labels=["recommendation", "decision", "agreed"],
     )
 
+    # ── Operation events (FORGE-785, CDE slice 1) ──────────────────────
+
+    OPERATION_EVENT_TOTAL = MetricDefinition(
+        name="metaforge_operation_event_total",
+        type="counter",
+        description=(
+            "Operation events stored in the durable operation log and streamed to "
+            "the project, by operation kind and event type (FORGE-785)"
+        ),
+        labels=["kind", "type"],
+    )
+    OPERATION_EVENT_PUBLISH_FAILURE_TOTAL = MetricDefinition(
+        name="metaforge_operation_event_publish_failure_total",
+        type="counter",
+        description=(
+            "Operation events not stored, by kind and reason: error (the store "
+            "failed), out_of_order or after_terminal (refused by the contract's "
+            "ordering rules) (FORGE-785)"
+        ),
+        labels=["kind", "reason"],
+    )
+    OPERATION_STREAM_REPLAY_TOTAL = MetricDefinition(
+        name="metaforge_operation_stream_replay_total",
+        type="counter",
+        description="Project operation stream reconnects served from the durable log (FORGE-785)",
+        labels=[],
+    )
+    OPERATION_STREAM_RESYNC_TOTAL = MetricDefinition(
+        name="metaforge_operation_stream_resync_total",
+        type="counter",
+        description=(
+            "Project operation streams told to refetch the snapshot, by reason: "
+            "unknown_cursor or cursor_expired (FORGE-785)"
+        ),
+        labels=["reason"],
+    )
+    OPERATION_STREAM_ACTIVE = MetricDefinition(
+        name="metaforge_operation_stream_active",
+        type="gauge",
+        description="Project operation streams currently connected (FORGE-785)",
+        labels=[],
+    )
+    OPERATION_ACTIVE = MetricDefinition(
+        name="metaforge_operation_active",
+        type="gauge",
+        description="Operations not yet in a terminal state, by kind (FORGE-785)",
+        labels=["kind"],
+    )
+    OPERATION_EVENT_PUBLISH_LAG = MetricDefinition(
+        name="metaforge_operation_event_publish_lag_seconds",
+        type="histogram",
+        description=(
+            "Seconds from an operation event's occurred_at to its being stored and "
+            "streamed by the gateway (FORGE-785)"
+        ),
+        labels=["kind"],
+        unit="s",
+        buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    )
+
     # ── Sketch reading (FORGE-762) ─────────────────────────────────────
 
     SKETCH_READING_TOTAL = MetricDefinition(
@@ -961,7 +1021,21 @@ class MetricsRegistry:
             + cls.watchdog_metrics()
             + cls.gate_review_metrics()
             + cls.supervisor_metrics()
+            + cls.operation_metrics()
         )
+
+    @classmethod
+    def operation_metrics(cls) -> list[MetricDefinition]:
+        """Operation event log and project stream metrics (FORGE-785)."""
+        return [
+            cls.OPERATION_EVENT_TOTAL,
+            cls.OPERATION_EVENT_PUBLISH_FAILURE_TOTAL,
+            cls.OPERATION_STREAM_REPLAY_TOTAL,
+            cls.OPERATION_STREAM_RESYNC_TOTAL,
+            cls.OPERATION_STREAM_ACTIVE,
+            cls.OPERATION_ACTIVE,
+            cls.OPERATION_EVENT_PUBLISH_LAG,
+        ]
 
     @classmethod
     def supervisor_metrics(cls) -> list[MetricDefinition]:
@@ -1985,6 +2059,45 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.SUPERVISOR_ACTION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"action": action, "reason": reason})
+
+    def record_operation_event(self, kind: str, event_type: str, lag_seconds: float) -> None:
+        """Record one stored operation event and its publish lag (FORGE-785)."""
+        counter = self._instruments.get(MetricsRegistry.OPERATION_EVENT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind, "type": event_type})
+        histogram = self._instruments.get(MetricsRegistry.OPERATION_EVENT_PUBLISH_LAG.name)
+        if histogram is not None:
+            histogram.record(max(lag_seconds, 0.0), attributes={"kind": kind})
+
+    def record_operation_publish_failure(self, kind: str, reason: str) -> None:
+        """Record an operation event that was not stored (FORGE-785)."""
+        counter = self._instruments.get(MetricsRegistry.OPERATION_EVENT_PUBLISH_FAILURE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind, "reason": reason})
+
+    def record_operation_stream_replay(self) -> None:
+        """Record a project stream reconnect served from the log (FORGE-785)."""
+        counter = self._instruments.get(MetricsRegistry.OPERATION_STREAM_REPLAY_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={})
+
+    def record_operation_stream_resync(self, reason: str) -> None:
+        """Record a project stream told to refetch its snapshot (FORGE-785)."""
+        counter = self._instruments.get(MetricsRegistry.OPERATION_STREAM_RESYNC_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"reason": reason})
+
+    def record_operation_stream_active(self, delta: int) -> None:
+        """Add ``delta`` (+1 or -1) to the connected project streams (FORGE-785)."""
+        gauge = self._instruments.get(MetricsRegistry.OPERATION_STREAM_ACTIVE.name)
+        if gauge is not None:
+            gauge.add(delta, attributes={})
+
+    def record_operation_active(self, kind: str, delta: int) -> None:
+        """Add ``delta`` to the operations not yet terminal (FORGE-785)."""
+        gauge = self._instruments.get(MetricsRegistry.OPERATION_ACTIVE.name)
+        if gauge is not None:
+            gauge.add(delta, attributes={"kind": kind})
 
     def record_watchdog_restart(self, service: str, reason: str, outcome: str) -> None:
         """Record a restart the watchdog made, suppressed, or failed to make."""

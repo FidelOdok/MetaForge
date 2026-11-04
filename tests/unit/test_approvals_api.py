@@ -778,3 +778,44 @@ async def test_launcher_turns_rpc_not_found_into_workflow_not_found() -> None:
         await launcher.state("r1")
     with pytest.raises(RPCError):  # a non-NOT_FOUND failure is not swallowed
         await launcher.answer_gate("r1", approved=True, decided_by="x")
+
+
+# ── RT-030: a decision on a design that has moved on (FORGE-785) ─────────
+
+
+def test_stale_base_revision_is_409_and_current_one_decides(
+    client: TestClient, twin: InMemoryTwinAPI
+) -> None:
+    node = _wp(twin, WorkProductType.DESIGN_SKETCH)
+    item_id = f"sketch:{node}"
+    assert client.get(f"/v1/approvals/{item_id}").json()["base_revision"] == "h"
+    asyncio.run(twin.update_work_product(node, {"content_hash": "h2"}))
+    stale = client.post(
+        f"/v1/approvals/{item_id}/decision", json={"decision": "approve", "base_revision": "h"}
+    )
+    assert stale.status_code == 409
+    assert "moved on" in stale.json()["detail"]
+    assert client.get(f"/v1/approvals/{item_id}").json()["status"] == "pending"
+    current = client.post(
+        f"/v1/approvals/{item_id}/decision", json={"decision": "approve", "base_revision": "h2"}
+    )
+    assert current.status_code == 200, current.text
+    assert current.json()["status"] == "approved"
+
+
+def test_decision_without_base_revision_is_unchanged(
+    client: TestClient, twin: InMemoryTwinAPI
+) -> None:
+    node = _wp(twin, WorkProductType.TECHNICAL_DRAWING)
+    asyncio.run(twin.update_work_product(node, {"content_hash": "h2"}))
+    resp = client.post(f"/v1/approvals/drawing:{node}/decision", json={"decision": "approve"})
+    assert resp.status_code == 200, resp.text
+
+
+def test_base_revision_is_ignored_where_no_revision_is_tracked(client: TestClient) -> None:
+    item_id = f"tool:{_tool()}"
+    assert client.get(f"/v1/approvals/{item_id}").json()["base_revision"] is None
+    resp = client.post(
+        f"/v1/approvals/{item_id}/decision", json={"decision": "approve", "base_revision": "x"}
+    )
+    assert resp.status_code == 200, resp.text

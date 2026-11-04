@@ -68,6 +68,8 @@ from api_gateway.library.catalog_routes import router as library_catalog_router
 from api_gateway.library.routes import router as library_router
 from api_gateway.manufacture.routes import router as manufacture_router
 from api_gateway.memory import router as memory_router
+from api_gateway.operations.routes import publish_local as _publish_operation_local
+from api_gateway.operations.routes import router as operations_router
 from api_gateway.projects.routes import router as projects_router
 from api_gateway.promotion.routes import router as promotion_router
 from api_gateway.releases.routes import router as releases_router
@@ -96,6 +98,7 @@ from api_gateway.version import gateway_version
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from mcp_core.live_events import set_live_event_publisher
+from mcp_core.operation_events import set_operation_event_publisher
 from observability.bootstrap import init_observability, shutdown_observability
 from observability.config import ObservabilityConfig, OtlpExporterConfig
 from observability.logging import configure_logging
@@ -1594,6 +1597,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Production-harness audit follow-up: give the chat harness loop the
     # gateway's real MetricsCollector (was previously never wired at all).
     init_metrics(_collector)
+    # FORGE-785: the operation log counts what it stores and streams.
+    from api_gateway.operations.publisher import set_metrics_collector as _ops_metrics
+
+    _ops_metrics(_collector)
     # Production-harness audit follow-up: the /v1/runs store was always
     # process-local despite a real SQLite ledger existing for exactly this
     # ("persistence lands in Phase 4" — never actually connected). Disabled
@@ -1609,6 +1616,17 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from orchestrator.harness.ledger import SqliteRunLedger, default_ledger_path
 
         init_run_ledger(SqliteRunLedger(str(default_ledger_path())))
+        # FORGE-785: the durable operation event log behind the project
+        # stream, beside the run ledger (METAFORGE_OPERATIONS_PATH).
+        from api_gateway.operations.publisher import init_operations
+        from api_gateway.operations.store import OperationStore, default_operations_path
+
+        _ops_path = default_operations_path()
+        try:
+            init_operations(OperationStore(_ops_path))
+        except Exception as exc:  # noqa: BLE001 - the stream degrades to process-local
+            logger.warning("operation_store_unavailable", path=_ops_path, error=str(exc))
+            init_operations(None)
         # FORGE-476: token and cost accounting shares the ledger's directory.
         from orchestrator.harness.providers.usage import ensure_usage_store
 
@@ -2292,6 +2310,10 @@ def create_app(
     # FORGE-647: tools running inside the gateway publish placements straight
     # to the live stream; the sidecar installs an HTTP publisher instead.
     set_live_event_publisher(_publish_live_local)
+    # FORGE-785: project operations. Jobs inside the gateway publish straight
+    # to the operation log; the sidecar installs an HTTP publisher instead.
+    app.include_router(operations_router)
+    set_operation_event_publisher(_publish_operation_local)
     app.include_router(twin_items_router)
     app.include_router(twin_item_migration_router)
     app.include_router(twin_prd_router)
