@@ -1,0 +1,448 @@
+/* ── Activity overlay (FORGE-786) ────────────────────────────────────────────
+   Colours come from the theme variables in console.css, so light and dark
+   follow the toggle. Motion is stroke-dash, transform and opacity only, with
+   no filters, and it runs only while a scene carries `is-animated`.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.act-overlay {
+  --act-panel: var(--mf-c-191b22);
+  --act-high: var(--mf-c-282a30);
+  --act-line: var(--mf-c-3c3e49);
+  --act-text: var(--mf-c-e2e2eb);
+  --act-muted: var(--mf-c-9a9aaa);
+  --act-accent: #ff5a0a;
+  --act-ok: var(--mf-c-3dd68c);
+  --act-warn: var(--mf-c-f59e0b);
+  --act-bad: var(--mf-c-ffb4ab);
+  --act-info: var(--mf-c-86cfff);
+
+  position: absolute;
+  z-index: 17;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(340px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--act-line);
+  border-radius: 12px;
+  /* Slightly translucent so the canvas reads through; no backdrop filter. */
+  background: color-mix(in srgb, var(--act-panel) 90%, transparent);
+  color: var(--act-text);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+}
+.act-overlay.is-expanded {
+  width: min(420px, calc(100% - 24px));
+}
+
+/* Where each view docks it: never over the composer or the conversation. */
+.act-dock-create {
+  top: 12px;
+  right: 12px;
+}
+.act-dock-engineering {
+  top: 12px;
+  left: calc(var(--tw-rail, 0px) + 12px);
+}
+
+.act-connection {
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--act-warn) 18%, transparent);
+  color: var(--act-text);
+  font-size: 12px;
+}
+
+.act-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.act-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.act-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--act-high);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.act-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.tone-active .act-status-dot,
+.act-status.tone-active {
+  color: var(--act-info);
+}
+.act-status.tone-attention {
+  color: var(--act-warn);
+}
+.act-status.tone-ok {
+  color: var(--act-ok);
+}
+.act-status.tone-bad {
+  color: var(--act-bad);
+}
+.act-status.tone-muted,
+.act-status.tone-neutral {
+  color: var(--act-muted);
+}
+.act-elapsed,
+.act-muted {
+  color: var(--act-muted);
+  font-size: 12px;
+}
+.act-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+.act-queue {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--act-high);
+  color: var(--act-text);
+  font-size: 11px;
+}
+.act-head-actions {
+  display: flex;
+  gap: 2px;
+}
+.act-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--act-muted);
+  cursor: pointer;
+}
+.act-icon:hover,
+.act-icon:focus-visible {
+  background: var(--act-high);
+  color: var(--act-text);
+}
+.act-overlay :focus-visible {
+  outline: 2px solid var(--act-accent);
+  outline-offset: 1px;
+}
+
+.act-step,
+.act-next {
+  margin: 0;
+  line-height: 1.4;
+}
+.act-label {
+  margin: 0 6px 0 0;
+  color: var(--act-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.act-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.act-progress progress {
+  flex: 1;
+  height: 6px;
+  accent-color: var(--act-accent);
+}
+.act-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.act-actions-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.act-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.act-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--act-line);
+  border-radius: 6px;
+  background: var(--act-high);
+  color: var(--act-text);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.act-btn.is-primary {
+  border-color: var(--act-accent);
+  background: var(--act-accent);
+  color: #fff;
+}
+.act-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.act-error {
+  margin: 0;
+  color: var(--act-bad);
+  font-size: 12px;
+}
+
+.act-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.act-section h3 {
+  display: block;
+  margin-bottom: 4px;
+}
+.act-milestones,
+.act-lanes,
+.act-stages,
+.act-log {
+  margin: 0;
+  padding-left: 18px;
+}
+.act-lanes {
+  padding-left: 0;
+  list-style: none;
+}
+.act-lane {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 3px 0;
+  border-top: 1px solid var(--act-line);
+}
+.act-lane-name {
+  font-weight: 600;
+}
+.act-detail summary {
+  cursor: pointer;
+  color: var(--act-muted);
+}
+.act-detail dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 6px 0;
+}
+.act-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.act-log {
+  max-height: 160px;
+  overflow: auto;
+  font-size: 12px;
+}
+.act-log .sev-error {
+  color: var(--act-bad);
+}
+.act-log .sev-warning {
+  color: var(--act-warn);
+}
+
+/* ── Visual: the real artifact, or the illustrative scene ────────────────── */
+.act-visual figure {
+  position: relative;
+  margin: 0;
+}
+.act-visual-label {
+  margin-bottom: 4px;
+  color: var(--act-muted);
+  font-size: 11px;
+}
+.act-image {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 6px;
+}
+.act-pause {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+}
+
+.act-scene {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 160px;
+  fill: none;
+  stroke: var(--act-muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+.act-scene .act-trace {
+  stroke-dasharray: 4 4;
+  opacity: 0.55;
+}
+.act-scene .act-trace.is-reached {
+  stroke: var(--act-text);
+  stroke-dasharray: none;
+  opacity: 1;
+}
+.act-scene .act-board {
+  fill: color-mix(in srgb, var(--act-ok) 8%, transparent);
+  stroke: var(--act-line);
+}
+.act-scene .act-chip,
+.act-scene .act-bus {
+  stroke: var(--act-line);
+}
+.act-scene .act-pad,
+.act-scene .act-node,
+.act-scene .act-packet,
+.act-scene .act-tick,
+.act-scene .act-target {
+  fill: var(--act-high);
+  stroke: var(--act-muted);
+}
+.act-scene .act-node.is-reached,
+.act-scene .act-tick.is-reached,
+.act-scene .act-target.is-reached {
+  fill: var(--act-info);
+  stroke: var(--act-info);
+}
+.act-scene .act-contour {
+  stroke: var(--act-info);
+  opacity: 0;
+}
+.act-scene .act-contour.is-reached {
+  opacity: 0.8;
+}
+.act-scene .act-packet {
+  opacity: 0;
+}
+
+/* States */
+.act-scene.is-queued .act-trace {
+  opacity: 0.35;
+}
+.act-scene.is-waiting .act-trace.is-reached,
+.act-scene.is-waiting .act-node.is-reached {
+  stroke: var(--act-warn);
+}
+.act-scene.is-completed .act-trace {
+  stroke: var(--act-text);
+  stroke-dasharray: none;
+  opacity: 1;
+}
+.act-scene.is-failed .act-scene-body {
+  opacity: 0.45;
+}
+.act-scene.is-stale .act-scene-body {
+  opacity: 0.3;
+}
+.act-scene-fail circle {
+  fill: var(--act-bad);
+  stroke: none;
+}
+.act-scene-fail path,
+.act-scene-done path {
+  stroke: var(--act-panel);
+  stroke-width: 2;
+}
+.act-scene-done circle {
+  fill: var(--act-ok);
+  stroke: none;
+}
+.act-scene-stale {
+  fill: var(--act-muted);
+  stroke: none;
+  font-size: 8px;
+}
+
+/* Motion: running, visible, not paused, not reduced. */
+.act-scene.is-animated .act-trace:not(.is-reached) {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  stroke: var(--act-info);
+  opacity: 1;
+  animation: act-draw 2.8s ease-in-out infinite;
+}
+.act-scene.is-animated .act-node:not(.is-reached),
+.act-scene.is-animated .act-contour:not(.is-reached) {
+  animation: act-breathe 2.4s ease-in-out infinite;
+}
+.act-scene.is-animated .act-packet {
+  animation: act-packet 2s linear infinite;
+}
+@keyframes act-draw {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  60%,
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes act-breathe {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+@keyframes act-packet {
+  0% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(56px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .act-scene * {
+    animation: none !important;
+  }
+}
+
+@media (max-width: 600px) {
+  .act-overlay,
+  .act-overlay.is-expanded {
+    width: calc(100% - 24px);
+    max-height: 50%;
+  }
+}

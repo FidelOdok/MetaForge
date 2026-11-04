@@ -155,6 +155,7 @@
   flex-shrink: 0;
 }
 .cv-main {
+  position: relative;
   min-width: 0;
   display: flex;
 }
