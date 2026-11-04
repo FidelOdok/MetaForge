@@ -6,7 +6,7 @@ a project reports its progress as a sequence of **operation events**. The
 gateway keeps those events in a durable log and streams them to the Create and
 Engineering views over one Server-Sent Events stream per project, so a browser
 that refreshes, navigates away and back, or reconnects after a gateway restart
-is sent what it missed instead of losing it (FORGE-785, the backend of CDE
+is sent what it missed instead of losing it (the backend of CDE
 slice 1; FRS sections 11B and 14).
 
 The code lives in `api_gateway/operations/`: `schemas.py` (the contract),
@@ -147,7 +147,7 @@ operation. A `project_id` in the body must match the path.
 | Out of order, or after the operation ended | 409 | the reason |
 
 All four routes sit behind the gateway's authentication middleware like every
-other route. Per-project access control is FORGE-787.
+other route. Per-project access control is planned separately.
 
 ## Producers
 
@@ -245,7 +245,7 @@ open and none has reported anything for an hour). Log events:
 - **Source of truth.** Gateway transitions are the source of operation events
   for design flows, not Temporal history.
 - **Access.** Existing principal authentication only; per-project access
-  control is FORGE-787.
+  control is planned separately.
 - **No ETA.** `progress` only when a measurable total exists (for example
   checks done of total). A tool's static `expected_seconds` is never shown as
   an ETA.
