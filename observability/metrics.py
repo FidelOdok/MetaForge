@@ -1010,6 +1010,36 @@ class MetricsRegistry:
         labels=["action", "proposed_by"],
     )
 
+    # ── Face-attached sketch planes (CDE slice 9) ──────────────────────
+
+    FACE_ATTACHMENT_TOTAL = MetricDefinition(
+        name="metaforge_face_attachment_total",
+        type="counter",
+        description=(
+            "Sketch planes put on a model face, by action (attached, resolved_pick_face, "
+            "resolved_detach_principal, resolved_detach_unassigned) (CDE slice 9)"
+        ),
+        labels=["action"],
+    )
+    FACE_REMAP_TOTAL = MetricDefinition(
+        name="metaforge_face_remap_total",
+        type="counter",
+        description=(
+            "Face remaps after a CAD head move, by outcome (unique, ambiguous, missing, "
+            "unavailable, error). Ambiguous and missing ask a person (CDE slice 9)"
+        ),
+        labels=["outcome"],
+    )
+    PLANE_BLOCKED_COMMIT_TOTAL = MetricDefinition(
+        name="metaforge_plane_blocked_commit_total",
+        type="counter",
+        description=(
+            "Authoritative commits refused because the sketch plane they depend on needs "
+            "reattaching, by commit (exact_build, promotion) (CDE slice 9)"
+        ),
+        labels=["commit"],
+    )
+
     # ── Sketch compiler (FORGE-791) ────────────────────────────────────
 
     SKETCH_COMPILE_TOTAL = MetricDefinition(
@@ -1236,6 +1266,9 @@ class MetricsRegistry:
             cls.SKETCH_READING_TOTAL,
             cls.SKETCH_SAVE_TOTAL,
             cls.SKETCH_PLANE_TOTAL,
+            cls.FACE_ATTACHMENT_TOTAL,
+            cls.FACE_REMAP_TOTAL,
+            cls.PLANE_BLOCKED_COMMIT_TOTAL,
             cls.SKETCH_COMPILE_TOTAL,
             cls.EXACT_CAD_BUILD_TOTAL,
             cls.GEOMETRY_VALIDITY_TOTAL,
@@ -2197,6 +2230,24 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.SKETCH_PLANE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"action": action, "proposed_by": proposed_by})
+
+    def record_face_attachment(self, action: str) -> None:
+        """Record one face attachment or reattachment answer (CDE slice 9)."""
+        counter = self._instruments.get(MetricsRegistry.FACE_ATTACHMENT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"action": action})
+
+    def record_face_remap(self, outcome: str) -> None:
+        """Record one face remap after a CAD head move (CDE slice 9)."""
+        counter = self._instruments.get(MetricsRegistry.FACE_REMAP_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_plane_blocked_commit(self, commit: str) -> None:
+        """Record one commit refused while its sketch plane needs reattaching (CDE slice 9)."""
+        counter = self._instruments.get(MetricsRegistry.PLANE_BLOCKED_COMMIT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"commit": commit})
 
     def record_sketch_compile(self, stage: str, outcome: str) -> None:
         """Record one sketch compiler write (FORGE-791)."""

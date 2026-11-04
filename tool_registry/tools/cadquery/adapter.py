@@ -26,6 +26,7 @@ class CadqueryServer(McpToolServer):
     - cadquery.generate_enclosure: PCB enclosure generation (Phase 2)
     - cadquery.validate_shape: B-Rep validity of a STEP (CDE slice 6)
     - cadquery.export_step: STEP with the configured schema (CDE slice 6)
+    - cadquery.describe_faces: planar faces, signatures and a GLB mesh map (CDE slice 9)
     """
 
     def __init__(self, config: CadqueryConfig | None = None) -> None:
@@ -1263,6 +1264,74 @@ class CadqueryServer(McpToolServer):
                 ),
             ),
             handler=self.export_step,
+        )
+        # CDE slice 9: planar faces of a validated revision, for face-attached planes.
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.describe_faces",
+                adapter_id="cadquery",
+                name="Describe Faces",
+                description=(
+                    "List the planar faces of a STEP's exact B-Rep, for placing a sketch "
+                    "plane on a face and finding that face again on a later revision. Per "
+                    "face: an id stable within this revision (s<solid>f<face>), the outward "
+                    "unit normal and plane offset, area, centroid, bounding box, outer-loop "
+                    "edge count and longest straight edge, the adjacent faces (surface "
+                    "type and normal), and where its triangles sit in the GLB the OCCT "
+                    "converter makes from the same STEP (mesh_map: part, face, triangle "
+                    "start and count). Read-only."
+                ),
+                capability="cad_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "step_base64": {"type": "string", "description": "The STEP file, base64."},
+                        "deflection": {
+                            "type": "number",
+                            "default": 0.1,
+                            "description": (
+                                "Tessellation deflection for the mesh map; the OCCT "
+                                "converter's standard quality is 0.1."
+                            ),
+                        },
+                    },
+                    "required": ["step_base64"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "faces": {"type": "array", "items": {"type": "object"}},
+                        "mesh_map": {"type": "object"},
+                        "solid_count": {"type": "integer"},
+                        "face_count": {"type": "integer"},
+                        "planar_face_count": {"type": "integer"},
+                        "truncated": {"type": "boolean"},
+                        "bounding_box": {"type": ["object", "null"]},
+                        "deflection": {"type": "number"},
+                        "kernel": {"type": "string"},
+                        "duration_s": {"type": "number"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=120, max_disk_mb=256
+                ),
+            ),
+            handler=self.describe_faces,
+        )
+
+    async def describe_faces(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Planar faces of a STEP with signatures and a GLB mesh map (CDE slice 9)."""
+        import asyncio
+
+        from tool_registry.tools.cadquery.faces import DEFAULT_DEFLECTION, describe_faces
+
+        step_base64 = arguments.get("step_base64") or ""
+        if not isinstance(step_base64, str) or not step_base64:
+            raise ValueError("step_base64 is required")
+        deflection = float(arguments.get("deflection") or DEFAULT_DEFLECTION)
+        return await asyncio.to_thread(
+            describe_faces, step_base64, work_dir=self.config.work_dir, deflection=deflection
         )
 
     async def validate_shape(self, arguments: dict[str, Any]) -> dict[str, Any]:

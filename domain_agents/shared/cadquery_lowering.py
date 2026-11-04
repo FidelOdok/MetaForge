@@ -290,7 +290,15 @@ def _lower_sketch_profile(var: str, entity: SketchEntity, *, is_path: bool = Fal
     all need a closed wire) turned a straight-line sweep path into a
     degenerate loop and made ``cadquery.execute_script`` fail outright.
     """
-    lines = [f"{var} = cq.Workplane({entity.plane!r}).workplane(offset={_fmt(entity.offset)})"]
+    if entity.frame is not None:
+        # CDE slice 9: a sketch on a model face sits on an explicit plane.
+        f = entity.frame
+        o = ", ".join(_fmt(c) for c in f.origin)
+        x = ", ".join(_fmt(c) for c in f.x_dir)
+        n = ", ".join(_fmt(c) for c in f.normal)
+        lines = [f"{var} = cq.Workplane(cq.Plane(origin=({o}), xDir=({x}), normal=({n})))"]
+    else:
+        lines = [f"{var} = cq.Workplane({entity.plane!r}).workplane(offset={_fmt(entity.offset)})"]
     element_lines, has_line = _lower_sketch_elements(var, entity.id, entity.elements)
     lines.extend(element_lines)
     if has_line and not is_path:
@@ -514,6 +522,11 @@ def _lower_one(
                     f"entity {entity.id!r}: loft section {sid!r} must be a sketch entity"
                 )
             sections.append(section_entity)
+        if any(s.frame is not None for s in sections):
+            raise LoweringError(
+                f"entity {entity.id!r}: a loft section on a model face (an explicit sketch "
+                "frame) is not supported by this Lowering Pass yet"
+            )
         planes = {s.plane for s in sections}
         if len(planes) != 1:
             raise LoweringError(

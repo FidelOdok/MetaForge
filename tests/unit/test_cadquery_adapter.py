@@ -66,6 +66,7 @@ class TestCadqueryServer:
             "cadquery.validate_physics_stability",
             "cadquery.validate_shape",
             "cadquery.export_step",
+            "cadquery.describe_faces",
         }
         assert set(server.tool_ids) == expected
 

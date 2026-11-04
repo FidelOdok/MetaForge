@@ -274,13 +274,37 @@ class CreateBodyEntity(IREntityBase):
     name: str = ""
 
 
+class SketchFrame(BaseModel):
+    """An explicit sketch plane: ``origin``, the in-plane X direction and the normal.
+
+    Set for a sketch on a model face (CDE slice 9). It replaces ``plane`` and
+    ``offset``; the in-plane Y is ``normal x x_dir`` (right-handed), and a pad
+    grows along ``normal``.
+    """
+
+    origin: Vec3
+    x_dir: Vec3
+    normal: Vec3
+
+    @model_validator(mode="after")
+    def _orthonormal(self) -> SketchFrame:
+        for name, v in (("x_dir", self.x_dir), ("normal", self.normal)):
+            if abs(sum(c * c for c in v) ** 0.5 - 1.0) > 1e-6:
+                raise ValueError(f"a sketch frame's {name} must be a unit vector")
+        if abs(sum(a * b for a, b in zip(self.x_dir, self.normal, strict=True))) > 1e-6:
+            raise ValueError("a sketch frame's x_dir must be perpendicular to its normal")
+        return self
+
+
 class SketchEntity(IREntityBase):
     """A 2D profile on a plane of a body.
 
     ``constraints`` (accepted ones, from a promoted parametric sketch) and
     ``plane_id`` (a sketch plane the plane manager assigned) are optional and
     carried through as data: no Lowering Pass reads them yet, so a sketch
-    without them is unchanged.
+    without them is unchanged. ``frame`` (a face-attached plane) overrides
+    ``plane`` and ``offset``; only the CadQuery Lowering Pass reads it, and
+    the FreeCAD one refuses it.
     """
 
     op: Literal["sketch"] = "sketch"
@@ -290,6 +314,7 @@ class SketchEntity(IREntityBase):
     elements: list[SketchElement] = Field(default_factory=list)
     constraints: list[SketchConstraint] = Field(default_factory=list)
     plane_id: str | None = Field(default=None, max_length=200)
+    frame: SketchFrame | None = None
 
 
 class PadEntity(IREntityBase):

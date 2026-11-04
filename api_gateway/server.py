@@ -84,6 +84,7 @@ from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.baseline_routes import router as twin_baselines_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
+from api_gateway.twin.face_attachment_routes import router as twin_face_attachment_router
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
 from api_gateway.twin.item_migration_routes import router as twin_item_migration_router
@@ -919,6 +920,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin, bridge=exact_cad_bridge, recorder=geometry_recorder_fn
     )
     set_exact_cad_service(exact_cad_service)
+    # CDE slice 9: a CAD head move re-finds the faces sketch planes sit on.
+    from api_gateway.twin.face_attachment import register as register_face_attachment
+
+    register_face_attachment()
     # FORGE-233: empty until the real MCP bridge exists (below, after
     # bootstrap_tool_registry returns) -- see _LazyBridgeMeasure's own
     # docstring for why this can't just be constructed with the bridge
@@ -2357,6 +2362,8 @@ def create_app(
     app.include_router(twin_sketch_compiler_router)
     # CDE slice 6: exact CAD builds and revision-linked STEP exports.
     app.include_router(twin_exact_cad_router)
+    # CDE slice 9: sketches on model faces and their reattachment.
+    app.include_router(twin_face_attachment_router)
     app.include_router(hierarchy_router)
     app.include_router(bom_router)
     app.include_router(bom_risk_router)

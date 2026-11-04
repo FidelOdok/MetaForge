@@ -548,6 +548,40 @@ def _pins_from_metadata(metadata: dict[str, Any]) -> list[ItemPin]:
     return out
 
 
+#: ``async (twin, item, head_revision, head_node_id) -> None`` callbacks run
+#: after a head move's staleness work. Layers above the twin (the gateway's
+#: face-attachment remap, CDE slice 9) register here, so the twin never
+#: imports them.
+HeadMovedListener = Any
+_head_moved_listeners: list[HeadMovedListener] = []
+
+
+def register_head_moved_listener(listener: HeadMovedListener) -> None:
+    """Run ``listener`` after every head move (idempotent per listener)."""
+    if listener not in _head_moved_listeners:
+        _head_moved_listeners.append(listener)
+
+
+def unregister_head_moved_listener(listener: HeadMovedListener) -> None:
+    if listener in _head_moved_listeners:
+        _head_moved_listeners.remove(listener)
+
+
+async def _notify_head_moved(
+    twin: Any, item: Any, head_revision: int, head_node_id: UUID | None
+) -> None:
+    for listener in list(_head_moved_listeners):
+        try:
+            await listener(twin, item, head_revision, head_node_id)
+        except Exception as exc:  # noqa: BLE001 - never undo the head move
+            logger.warning(
+                "head_moved_listener_failed",
+                item_key=getattr(item, "key", None),
+                listener=getattr(listener, "__qualname__", repr(listener)),
+                error=str(exc),
+            )
+
+
 async def on_head_moved(
     twin: Any, item: Any, head_revision: int, head_node_id: UUID | None
 ) -> list[StaleRecord]:
@@ -581,7 +615,9 @@ async def on_head_moved(
         from twin_core.geometry_state import mark_step_exports_stale
 
         await mark_step_exports_stale(twin, item, head_revision)
-    return await mark_dependents_stale(twin, item, head_revision)
+    marked = await mark_dependents_stale(twin, item, head_revision)
+    await _notify_head_moved(twin, item, head_revision, head_node_id)
+    return marked
 
 
 async def mark_dependents_stale(twin: Any, item: Any, head_revision: int) -> list[StaleRecord]:
