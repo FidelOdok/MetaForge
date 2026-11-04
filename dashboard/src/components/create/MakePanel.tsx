@@ -110,7 +110,8 @@ export function MakePanel({ projectId, view, model, modelRevision }: MakePanelPr
           </label>
           {recommendation && route.process !== recommendation.process && (
             <p className="cv-recommend">
-              Suggested: <strong>{recommendation.process}</strong>. {recommendation.why}{' '}
+              {model ? `Suggested for ${model.name}: ` : 'Suggested: '}
+              <strong>{recommendation.process}</strong>. {recommendation.why}{' '}
               <button type="button" className="cv-link" onClick={() => choose({ process: recommendation.process })}>
                 Use it
               </button>

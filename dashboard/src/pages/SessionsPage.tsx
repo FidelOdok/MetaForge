@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { formatRelativeTime } from '../utils/format-time';
 import { useSessions } from '../hooks/use-sessions';
@@ -754,12 +755,18 @@ function SessionRow({ session }: { session: AgentSession }) {
             color: KC.onSurfaceVariant,
             padding: '2px 6px',
             borderRadius: 3,
-            flexShrink: 0,
+            // A long agent name truncates rather than pushing the row off a phone.
+            minWidth: 0,
+            maxWidth: '45%',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
           }}
+          title={session.agentCode}
         >
           {session.agentCode}
         </span>
-        <span style={{ flex: 1, fontSize: 13, color: KC.onSurface, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: KC.onSurface, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {session.taskType.replace(/_/g, ' ')}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -892,14 +899,7 @@ export function SessionsPage() {
         </div>
 
         {/* Two-column layout */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 300px',
-            gap: 12,
-            alignItems: 'start',
-          }}
-        >
+        <div className="page-split" style={{ '--aside': '300px', alignItems: 'start' } as CSSProperties}>
           {/* Left column */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <DagPanel sessions={items} />

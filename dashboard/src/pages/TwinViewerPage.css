@@ -1042,7 +1042,10 @@
   .tw-segment {
     order: 3;
     flex-basis: 100%;
-    justify-content: center;
+    min-width: 0;
+    /* Seven tabs do not fit a phone: scroll the strip, not the page. */
+    overflow-x: auto;
+    scrollbar-width: none;
   }
   .tw-explorer {
     width: 210px;

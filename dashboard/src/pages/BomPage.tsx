@@ -773,7 +773,7 @@ export function BomPage() {
 
       {/* Toolbar (flat view only -- the hierarchical view is already structured) */}
       {view === 'flat' && (
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative flex items-center">
           <span
             className="material-symbols-outlined absolute left-2 pointer-events-none"
@@ -791,6 +791,7 @@ export function BomPage() {
               background: 'var(--mf-c-282a30)',
               border: '1px solid var(--mf-r-65-72-90-0p3)',
               width: '220px',
+              maxWidth: '100%',
             }}
           />
         </div>

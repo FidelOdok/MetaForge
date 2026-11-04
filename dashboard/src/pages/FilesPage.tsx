@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useState } from 'react';
 import { useAllLinks, useDeleteLink, useSyncNode } from '../hooks/use-links';
 import { useActiveProject } from '../hooks/use-active-project';
@@ -371,7 +372,7 @@ export function FilesPage() {
       </div>
 
       {/* ── Two-column grid ─────────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12 }}>
+      <div className="page-split" style={{ '--aside': '280px' } as CSSProperties}>
 
         {/* ── Left column ───────────────────────────────────────────────────── */}
         <div>
