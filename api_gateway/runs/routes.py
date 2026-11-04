@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from api_gateway.auth.approver import approver_from_request
 from api_gateway.runs import change_sets as run_change_sets
+from api_gateway.runs import operation_events as run_operations
 from api_gateway.runs.engine import FlowEngine, resolve_flow_engine, temporal_target
 from api_gateway.runs.schemas import (
     ApprovalRequest,
@@ -99,6 +100,8 @@ _ledger: SqliteRunLedger | None = None
 def _on_transition(run: Run) -> None:
     _stream_manager.publish(run)
     _gate_coordinator.on_transition(run)
+    # FORGE-785: the run as an operation on its project's stream. Never raises.
+    run_operations.on_run_transition(run)
     try:
         # FORGE-525: a run that ended outside a gate decision settles its drafts.
         run_change_sets.on_run_transition(run)
@@ -366,6 +369,17 @@ def reset_run_store() -> None:
     _store = InMemoryRunStore(on_transition=_on_transition)
     _ledger = None
     run_change_sets.reset()
+    run_operations.reset()
+
+
+def _discard_run(run_id: str, reason: str = "") -> None:
+    """Delete a run that could not be started, and say so on its operation."""
+    try:
+        run = _store.get(run_id)
+    except RunNotFoundError:
+        return
+    _store.delete(run_id)
+    run_operations.on_run_discarded(run, reason)
 
 
 def _is_design_flow(request: dict) -> bool:
@@ -1043,11 +1057,11 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
             try:
                 version = get_version_store().get(str(version_id))
             except VersionNotFoundError as exc:
-                _store.delete(run.id)
+                _discard_run(run.id)
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             if not version.startable:
                 refused = FlowVersionNotApprovedError(str(version_id), version.status.value)
-                _store.delete(run.id)
+                _discard_run(run.id)
                 logger.warning(
                     "design_flow_version_not_approved", run_id=run.id, error=str(refused)
                 )
@@ -1056,7 +1070,7 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
         try:
             run.request["intelligence"] = resolve_run_intelligence(body.request).value
         except ValueError as exc:
-            _store.delete(run.id)
+            _discard_run(run.id)
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         engine = resolve_flow_engine()
         # Run status says which engine is driving it (FORGE-474).
@@ -1069,23 +1083,23 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
                 # get refused ("run is queued, not running").
                 _store.start(run.id)
             except FlowVersionNotApprovedError as exc:
-                _store.delete(run.id)
+                _discard_run(run.id)
                 logger.warning("design_flow_version_not_approved", run_id=run.id, error=str(exc))
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             except VersionNotFoundError as exc:
-                _store.delete(run.id)
+                _discard_run(run.id)
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             except FlowInvariantError as exc:
                 # The flow itself is wrong. Distinct from the engine being
                 # down: retrying will never help, and the message already
                 # names each rule and phase.
-                _store.delete(run.id)
+                _discard_run(run.id)
                 logger.warning("design_flow_invalid", run_id=run.id, error=str(exc))
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except DesignFlowWorkerUnavailableError as exc:
                 # FORGE-475: Temporal answers but nothing polls the queue, so
                 # the run would be accepted and never advance. Refuse it.
-                _store.delete(run.id)
+                _discard_run(run.id)
                 logger.error(
                     "design_flow_worker_unavailable", queue=exc.task_queue, reason=exc.reason
                 )
@@ -1095,7 +1109,7 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
                 # nothing will ever pick up is worse than no record: it reads
                 # as "starting" to everyone looking at the list, and there is
                 # nothing to notice that it never moves.
-                _store.delete(run.id)
+                _discard_run(run.id)
                 _metrics().record_design_flow_engine_unavailable(temporal_target())
                 logger.error("design_flow_engine_unavailable", error=str(exc))
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1107,18 +1121,18 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
             try:
                 await _launch_flow(run.id)
             except VersionNotFoundError as exc:
-                _store.delete(run.id)
+                _discard_run(run.id)
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             except FlowVersionNotApprovedError as exc:
-                _store.delete(run.id)
+                _discard_run(run.id)
                 logger.warning("design_flow_version_not_approved", run_id=run.id, error=str(exc))
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             except FlowVersionUnrunnableError as exc:
-                _store.delete(run.id)
+                _discard_run(run.id)
                 logger.error("design_flow_version_unrunnable", run_id=run.id, error=str(exc))
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             except KeyError as exc:
-                _store.delete(run.id)
+                _discard_run(run.id)
                 raise HTTPException(status_code=400, detail=str(exc.args[0])) from exc
         await _activate_run_project(run)
         logger.info(
@@ -1426,6 +1440,11 @@ def publish_tool_event(
     duration_ms: int | None = None,
 ) -> None:
     """Put a tool event on a run's stream. For callers inside the gateway process."""
+    try:
+        # FORGE-785: a phase's first tool call is its stage starting.
+        run_operations.on_run_tool_event(_store.get(run_id), phase=phase, tool=tool)
+    except RunNotFoundError:
+        pass
     _stream_manager.publish_tool(
         run_id,
         call_id=call_id,

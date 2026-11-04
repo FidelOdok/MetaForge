@@ -13,8 +13,9 @@ from typing import Any
 import httpx
 
 from mcp_core.live_events import LiveEventPublisher
+from mcp_core.operation_events import OperationEventPublisher
 
-__all__ = ["http_live_publisher"]
+__all__ = ["http_live_publisher", "http_operation_publisher"]
 
 _TIMEOUT_SECONDS = 5.0
 
@@ -45,5 +46,37 @@ def http_live_publisher(client: httpx.AsyncClient | None = None) -> LiveEventPub
             async with httpx.AsyncClient() as c:
                 resp = await c.post(url, json=event, headers=headers, timeout=_TIMEOUT_SECONDS)
         resp.raise_for_status()
+
+    return publish
+
+
+def http_operation_publisher(
+    client: httpx.AsyncClient | None = None,
+) -> OperationEventPublisher | None:
+    """Operation events (FORGE-785) posted to the gateway's ingest route.
+
+    ``POST /v1/projects/{id}/operations/events``. The event carries its own
+    ``event_id``, so a retried post is answered as a duplicate. None when no
+    gateway is set: nobody could see the event.
+    """
+    base = _gateway_url()
+    if not base:
+        return None
+
+    async def publish(project_id: str, event: dict[str, Any]) -> None:
+        headers = {}
+        key = (os.environ.get("METAFORGE_GATEWAY_API_KEY") or "").strip()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        url = f"{base}/v1/projects/{project_id}/operations/events"
+        if client is not None:
+            resp = await client.post(url, json=event, headers=headers, timeout=_TIMEOUT_SECONDS)
+        else:
+            async with httpx.AsyncClient() as c:
+                resp = await c.post(url, json=event, headers=headers, timeout=_TIMEOUT_SECONDS)
+        # 409 is the gateway refusing an event that is out of order or after
+        # the operation ended: not a delivery failure.
+        if resp.status_code != 409:
+            resp.raise_for_status()
 
     return publish

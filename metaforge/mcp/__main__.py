@@ -1893,6 +1893,12 @@ async def _bootstrap(
     from metaforge.mcp.live_publisher import http_live_publisher
 
     set_live_event_publisher(http_live_publisher())
+    # FORGE-785: tool jobs this process runs report their state on the
+    # project's operation stream, which also lives in the gateway.
+    from mcp_core.operation_events import set_operation_event_publisher
+    from metaforge.mcp.live_publisher import http_operation_publisher
+
+    set_operation_event_publisher(http_operation_publisher())
 
     # FORGE-462: flow.* and run.* registered in the gateway and never here, so
     # no harness plugin could list, propose or start a design flow.

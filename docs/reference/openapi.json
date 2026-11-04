@@ -47,6 +47,39 @@
         "title": "AcceptRequest",
         "type": "object"
       },
+      "ActionRef": {
+        "description": "Something a person can do about an operation.",
+        "properties": {
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "approval",
+              "retry",
+              "cancel",
+              "open"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "ActionRef",
+        "type": "object"
+      },
       "AddConceptOptionRequest": {
         "properties": {
           "criteriaScores": {
@@ -204,6 +237,17 @@
             },
             "title": "Allowed Decisions",
             "type": "array"
+          },
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
           },
           "created_at": {
             "anyOf": [
@@ -691,6 +735,69 @@
           "approved_at"
         ],
         "title": "ApproveTechnicalDrawingResponse",
+        "type": "object"
+      },
+      "ArtifactRef": {
+        "description": "Something an operation produced or points at.",
+        "properties": {
+          "authority": {
+            "anyOf": [
+              {
+                "enum": [
+                  "illustrative",
+                  "preview",
+                  "exact",
+                  "validated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authority"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "work_product",
+              "file",
+              "glb",
+              "image",
+              "step"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "ArtifactRef",
         "type": "object"
       },
       "AssemblyJoint": {
@@ -4379,6 +4486,18 @@
         "additionalProperties": true,
         "description": "Body for ``POST /v1/approvals/{id}/decision``.\n\n``reviewer`` and ``approved_by`` are accepted (older clients send them) and\nignored: the deciding human is the authenticated principal.",
         "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
           "decision": {
             "enum": [
               "approve",
@@ -7985,6 +8104,18 @@
             "title": "Approver Verified",
             "type": "boolean"
           },
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
           "decision": {
             "enum": [
               "approve",
@@ -10994,6 +11125,464 @@
         "title": "OpenTaskRequest",
         "type": "object"
       },
+      "OperationCancelResponse": {
+        "properties": {
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          }
+        },
+        "required": [
+          "operation_id",
+          "state"
+        ],
+        "title": "OperationCancelResponse",
+        "type": "object"
+      },
+      "OperationDomain": {
+        "enum": [
+          "concept",
+          "sketch",
+          "mechanical",
+          "electronics",
+          "firmware",
+          "simulation",
+          "manufacturing",
+          "cross_domain",
+          "general"
+        ],
+        "title": "OperationDomain",
+        "type": "string"
+      },
+      "OperationEventIn": {
+        "additionalProperties": false,
+        "description": "An event as a producer hands it over: no ``project_seq`` yet.\n\n``event_id`` makes a retried post idempotent. ``sequence`` may be left\nout, and the store then gives the event the next one for its operation.",
+        "properties": {
+          "action_refs": {
+            "items": {
+              "$ref": "#/components/schemas/ActionRef"
+            },
+            "maxItems": 10,
+            "title": "Action Refs",
+            "type": "array"
+          },
+          "artifact_refs": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactRef"
+            },
+            "maxItems": 50,
+            "title": "Artifact Refs",
+            "type": "array"
+          },
+          "base_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "domain": {
+            "$ref": "#/components/schemas/OperationDomain",
+            "default": "general"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Message",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "operation_id": {
+            "maxLength": 200,
+            "minLength": 3,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Progress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "requires_action": {
+            "default": false,
+            "title": "Requires Action",
+            "type": "boolean"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "sequence": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity",
+            "default": "info"
+          },
+          "stage_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Id"
+          },
+          "stage_title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Title"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          },
+          "target_revision": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Revision"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/OperationEventType"
+          }
+        },
+        "required": [
+          "operation_id",
+          "type",
+          "state"
+        ],
+        "title": "OperationEventIn",
+        "type": "object"
+      },
+      "OperationEventType": {
+        "enum": [
+          "accepted",
+          "queued",
+          "started",
+          "milestone",
+          "partial_result",
+          "preview_ready",
+          "review_required",
+          "blocked",
+          "resumed",
+          "completed",
+          "failed",
+          "cancelled",
+          "superseded",
+          "stale"
+        ],
+        "title": "OperationEventType",
+        "type": "string"
+      },
+      "OperationIngestResponse": {
+        "properties": {
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "project_seq": {
+            "title": "Project Seq",
+            "type": "integer"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event_id",
+          "project_seq",
+          "sequence"
+        ],
+        "title": "OperationIngestResponse",
+        "type": "object"
+      },
+      "OperationKind": {
+        "enum": [
+          "run",
+          "job",
+          "chat"
+        ],
+        "title": "OperationKind",
+        "type": "string"
+      },
+      "OperationListResponse": {
+        "description": "``GET /v1/projects/{project_id}/operations``.",
+        "properties": {
+          "cursor": {
+            "title": "Cursor",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/OperationSnapshot"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "cursor",
+          "operations"
+        ],
+        "title": "OperationListResponse",
+        "type": "object"
+      },
+      "OperationSnapshot": {
+        "description": "The latest state of one operation, folded from its events.",
+        "properties": {
+          "action_refs": {
+            "items": {
+              "$ref": "#/components/schemas/ActionRef"
+            },
+            "title": "Action Refs",
+            "type": "array"
+          },
+          "artifact_refs": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactRef"
+            },
+            "title": "Artifact Refs",
+            "type": "array"
+          },
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "domain": {
+            "$ref": "#/components/schemas/OperationDomain"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OperationKind"
+          },
+          "last_sequence": {
+            "title": "Last Sequence",
+            "type": "integer"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Progress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requires_action": {
+            "default": false,
+            "title": "Requires Action",
+            "type": "boolean"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity",
+            "default": "info"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/StageSnapshot"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          },
+          "target_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Revision"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "kind",
+          "domain",
+          "state",
+          "updated_at",
+          "last_sequence"
+        ],
+        "title": "OperationSnapshot",
+        "type": "object"
+      },
+      "OperationState": {
+        "enum": [
+          "queued",
+          "running",
+          "waiting_for_user",
+          "blocked",
+          "completed",
+          "failed",
+          "cancelled",
+          "superseded",
+          "stale"
+        ],
+        "title": "OperationState",
+        "type": "string"
+      },
       "OrderRequest": {
         "properties": {
           "by": {
@@ -11751,6 +12340,33 @@
           "node_id"
         ],
         "title": "PrdSource",
+        "type": "object"
+      },
+      "Progress": {
+        "description": "Measured progress. Only sent when the total is known.",
+        "properties": {
+          "done": {
+            "minimum": 0.0,
+            "title": "Done",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 1.0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "unit": {
+            "default": "steps",
+            "maxLength": 40,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "done",
+          "total"
+        ],
+        "title": "Progress",
         "type": "object"
       },
       "ProjectListResponse": {
@@ -15493,6 +16109,15 @@
         "title": "SetSelectionRequest",
         "type": "object"
       },
+      "Severity": {
+        "enum": [
+          "info",
+          "warning",
+          "error"
+        ],
+        "title": "Severity",
+        "type": "string"
+      },
       "SimulationResultListResponse": {
         "properties": {
           "results": {
@@ -15874,6 +16499,45 @@
           "indexedAt"
         ],
         "title": "SourceSummaryResponse",
+        "type": "object"
+      },
+      "StageSnapshot": {
+        "description": "The latest state of one stage of an operation.",
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/OperationDomain",
+            "default": "general"
+          },
+          "stage_id": {
+            "title": "Stage Id",
+            "type": "string"
+          },
+          "stage_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Title"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_id",
+          "state",
+          "updated_at"
+        ],
+        "title": "StageSnapshot",
         "type": "object"
       },
       "StagedFile": {
@@ -26265,6 +26929,273 @@
         "summary": "Put Approval Policy",
         "tags": [
           "approvals"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/operations": {
+      "get": {
+        "description": "The project's operations, most recently updated first, and the cursor.\n\nOpen the stream with ``?after=<cursor>`` to receive every event after\nthis snapshot.",
+        "operationId": "list_operations_v1_projects__project_id__operations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only operations not yet terminal",
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only operations not yet terminal",
+              "title": "Active",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Operations",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/operations/events": {
+      "post": {
+        "description": "Accept an operation event from a process that has no stream of its own.\n\n202 with the stored ``project_seq``. A duplicate ``event_id`` is 200 with\nthe seq stored the first time. An event out of order, or a non-terminal\none after the operation ended, is 409.",
+        "operationId": "ingest_operation_event_v1_projects__project_id__operations_events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationEventIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationIngestResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationIngestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Refused"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Operation Event",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/operations/stream": {
+      "get": {
+        "description": "SSE of the project's operation events.\n\nFrames: ``operation`` (``id:`` is the ``project_seq``), ``heartbeat``\nevery 15 s with the cursor, and ``resync`` when the resume point is\nunknown or older than the log keeps (refetch the snapshot).",
+        "operationId": "stream_operations_v1_projects__project_id__operations_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Resume after this project_seq",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Resume after this project_seq",
+              "title": "After"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Operations",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/operations/{operation_id}/cancel": {
+      "post": {
+        "description": "Cancel an operation that supports it: 202, 409 when not cancellable, 404 when unknown.",
+        "operationId": "cancel_operation_v1_projects__project_id__operations__operation_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationCancelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown"
+          },
+          "409": {
+            "description": "Not cancellable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Operation",
+        "tags": [
+          "operations"
         ]
       }
     },

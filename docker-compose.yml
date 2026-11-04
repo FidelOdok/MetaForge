@@ -113,6 +113,10 @@ services:
       # process-local-only behavior (e.g. ephemeral CI containers).
       - METAFORGE_RUNS_LEDGER_PATH=${METAFORGE_RUNS_LEDGER_PATH:-}
       - METAFORGE_RUNS_LEDGER_DISABLE=${METAFORGE_RUNS_LEDGER_DISABLE:-off}
+      # FORGE-785: the durable operation event log behind the project stream.
+      # Unset means ~/.metaforge/operations.db, on the metaforge-home volume below.
+      - METAFORGE_OPERATIONS_PATH=${METAFORGE_OPERATIONS_PATH:-}
+      - METAFORGE_OPERATIONS_RETENTION_DAYS=${METAFORGE_OPERATIONS_RETENTION_DAYS:-14}
       # FORGE-783: the gateway's store of slow tool jobs. Unset means
       # ~/.metaforge/tool_jobs.db, on the metaforge-home volume below.
       - METAFORGE_TOOL_JOBS_PATH=${METAFORGE_TOOL_JOBS_PATH:-}

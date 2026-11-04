@@ -310,6 +310,12 @@ reopened, and in-process runs are not reconciled.
 
 ### Watching a run
 
+Every run, slow tool job and Create chat turn in a project is also an
+*operation* on the project's durable operation stream
+(`GET /v1/projects/{id}/operations/stream`), which the Create and Engineering
+progress views share and which replays what a client missed even across a
+gateway restart. See [Operations and the project stream](operations.md).
+
 `GET /v1/runs/{id}/flow-state` returns phase-by-phase state, queried from the
 Temporal workflow rather than from a projection of it. A cache that can be
 stale is a live view that is sometimes wrong, with nothing on the page saying

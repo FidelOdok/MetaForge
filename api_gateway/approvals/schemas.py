@@ -136,6 +136,10 @@ class ApprovalItem(BaseModel):
     #: FORGE-726: the reviewer agent's note on this gate, when the project's
     #: approval policy asks for one.
     review: GateReview | None = None
+    #: FORGE-785 (RT-030): the revision of the thing this approval is about,
+    #: where one is known (a sketch's or drawing's content hash). A decision
+    #: that names an older one is refused with 409. ``None``: not tracked.
+    base_revision: str | None = None
 
 
 class ApprovalListResponse(BaseModel):
@@ -156,6 +160,9 @@ class DecisionRequest(BaseModel):
     decision: DecisionName
     reason: str = Field(default="", max_length=2000)
     to_phase: str = Field(default="", max_length=200)
+    #: FORGE-785 (RT-030): the item's ``base_revision`` as the decider saw it.
+    #: Optional; when given and the item has moved on, the decision is 409.
+    base_revision: str | None = Field(default=None, max_length=200)
 
 
 class InlineDecisionRequest(BaseModel):
@@ -173,3 +180,5 @@ class InlineDecisionRequest(BaseModel):
     to_phase: str = Field(default="", max_length=200)
     approver: str | None = Field(default=None, max_length=200)
     approver_verified: bool = False
+    #: FORGE-785 (RT-030): as on :class:`DecisionRequest`.
+    base_revision: str | None = Field(default=None, max_length=200)

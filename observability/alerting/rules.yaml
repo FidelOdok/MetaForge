@@ -1040,3 +1040,37 @@ groups:
             illustrative, but nobody is told when one drifts from the concept. Check
             the configured provider supports images and the gateway logs
             (concept_image_critique_unavailable, concept_image_critique_refused_output).
+
+  # FORGE-785 -- the durable operation event log and project stream
+  # (api_gateway/operations/).
+  - name: metaforge_operations
+    rules:
+      - alert: OperationEventPublishFailing
+        expr: >-
+          sum(increase(metaforge_operation_event_publish_failure_total{reason="error"}[15m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Operation events are not being stored"
+          description: >-
+            The gateway could not write operation events to its operation log in
+            the last fifteen minutes. Runs and jobs carry on, but the Create and
+            Engineering progress views stop updating and a reconnecting client
+            cannot replay what it missed. Check the operation_event_publish_failed
+            log events and the disk behind METAFORGE_OPERATIONS_PATH.
+      - alert: OperationsStalled
+        expr: >-
+          sum(metaforge_operation_active) > 0
+          and sum(increase(metaforge_operation_event_total[30m])) == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Operations are active but none has reported anything for an hour"
+          description: >-
+            Operations are open (not completed, failed or cancelled) and no
+            operation event has been stored for an hour. A run or job may be stuck,
+            or its process may have stopped without ending it. Read the active
+            operations with GET /v1/projects/{id}/operations?active=true and check
+            the run supervisor and the tool_job_state log events.

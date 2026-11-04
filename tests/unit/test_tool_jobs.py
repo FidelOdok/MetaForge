@@ -380,3 +380,63 @@ async def test_a_client_can_ask_for_a_job_explicitly_without_a_context(
     gen.gate.set()
     job = await runner.wait(out["job_id"], timeout=5)
     assert isinstance(job, JobRecord) and job.status == "succeeded"
+
+
+# ── FORGE-785: cancel, supersede and operation events ────────────────────
+
+
+async def test_cancel_stops_the_task_and_a_new_identical_call_starts_afresh(
+    runner: JobRunner,
+) -> None:
+    gate = asyncio.Event()
+
+    async def work() -> dict[str, Any]:
+        await gate.wait()
+        return {"node_id": "n"}
+
+    job, _ = await runner.start(TOOL, {"p": 1}, work, session_id=str(SESSION))
+    await asyncio.sleep(0)
+    ended = runner.cancel(job.job_id)
+    assert ended is not None and ended.status == "cancelled" and ended.finished_at is not None
+    assert JobRunner.reply(ended)["status"] == "cancelled"
+    # A cancelled job is never reused: the same call starts a new one.
+    fresh, reused = await runner.start(TOOL, {"p": 1}, work, session_id=str(SESSION))
+    assert not reused and fresh.job_id != job.job_id
+    gate.set()
+    done = await runner.wait(fresh.job_id, timeout=5)
+    assert done is not None and done.status == "succeeded"
+    assert runner.get(job.job_id).status == "cancelled"  # type: ignore[union-attr]
+
+
+async def test_supersede_a_queued_job_before_it_runs(runner: JobRunner) -> None:
+    ran: list[int] = []
+
+    async def work() -> dict[str, Any]:
+        ran.append(1)
+        return {}
+
+    job, _ = await runner.start(TOOL, {"p": 2}, work, session_id=str(SESSION))
+    ended = runner.supersede(job.job_id, by="newer")  # before the task got to run
+    assert ended is not None and ended.status == "superseded" and "newer" in (ended.error or "")
+    await asyncio.sleep(0.01)
+    assert ran == []
+    assert runner.cancel(job.job_id).status == "superseded"  # type: ignore[union-attr]
+
+
+async def test_job_events_go_to_the_injected_publisher() -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def sink(project_id: str, event: dict[str, Any]) -> None:
+        events.append((project_id, event))
+
+    runner = JobRunner(JobStore(":memory:"), publisher=sink)
+
+    async def work() -> dict[str, Any]:
+        return {"node_id": "wp-9"}
+
+    job, _ = await runner.start(TOOL, {}, work, session_id=str(SESSION), project_id="p1")
+    await runner.wait(job.job_id, timeout=5)
+    await runner.flush_events()
+    assert [e["type"] for _, e in events] == ["queued", "started", "completed"]
+    assert {p for p, _ in events} == {"p1"}
+    assert events[-1][1]["artifact_refs"][0]["id"] == "wp-9"
