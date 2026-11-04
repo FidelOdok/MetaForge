@@ -36,9 +36,10 @@ means unknown, which is the case for every freehand sketch until a person
 calibrates it (PLN-013).
 
 Offset and custom planes are named in :class:`PlaneKind` so stored data can
-carry them later, but a plane of either kind is refused today. A face
-attachment is stored as an opaque reference plus a signature placeholder;
-validating it against topology changes is later work.
+carry them later, but a plane of either kind is refused today. A face plane
+carries a :class:`FaceAttachment` with the face's geometry signature, which
+:mod:`twin_core.geometry.face_signature` uses to find the face again when
+the CAD item moves on (CDE slice 9).
 
 This module is pure (Pydantic and the standard library), so the gateway, the
 twin and tests share one definition of a valid frame.
@@ -182,12 +183,18 @@ def _vec(value: Any, name: str) -> Vec3:
 
 
 class FaceAttachment(BaseModel):
-    """Where a face-attached plane sits on a model.
+    """Where a face-attached plane sits on a model (CDE slice 9).
 
-    ``face_ref`` is opaque (whatever the CAD side names the face). The
-    ``signature`` is a placeholder for the geometry fingerprint (normal,
-    centroid, area) that will let a topology change be detected; it is not
-    checked yet.
+    ``item_key`` and ``revision`` name the CAD revision; ``face_ref`` is the
+    face id ``cadquery.describe_faces`` gave on that revision (meaningful on
+    that revision only). ``signature`` is the face's geometry signature
+    (:class:`twin_core.geometry.face_signature.FaceSignature`): the semantic
+    tag, normal, offset, area, centroid, loop edge count and adjacent normals
+    that find the face again when the CAD item moves on (PLN-009).
+    ``remapped_from`` is the attachment this one was found from by a remap,
+    as ``KEY@n#face``. While the plane is ``REATTACHMENT_REQUIRED`` the
+    attachment and frame are the last valid ones, and ``pending`` says what
+    the remap saw (outcome, candidate faces, the revision it looked at).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -196,6 +203,8 @@ class FaceAttachment(BaseModel):
     revision: int | None = Field(default=None, ge=1)
     face_ref: str = Field(min_length=1, max_length=200)
     signature: dict[str, Any] | None = None
+    remapped_from: str | None = Field(default=None, max_length=300)
+    pending: dict[str, Any] | None = None
 
 
 class SketchPlane(BaseModel):
@@ -330,13 +339,23 @@ class SketchPlane(BaseModel):
         return value * _MM_PER[self.unit] / _MM_PER[to]
 
     def design_ir_fields(self) -> dict[str, Any]:
-        """``{"plane", "offset"}`` for a design-IR ``SketchEntity`` on this plane.
+        """``{"plane", "offset"}`` (and ``frame``) for a design-IR ``SketchEntity``.
 
-        Only a confirmed principal plane maps: the design IR has the three
-        principal planes and an offset along the normal, nothing else.
+        A confirmed principal plane maps to its principal and the offset along
+        its normal. An attached face plane maps to an explicit ``frame``
+        (origin, U as the in-plane X, and the normal). Nothing else maps.
         """
+        if self.kind is PlaneKind.FACE and self.state is PlaneState.ATTACHED:
+            return {
+                "plane": "XY",
+                "offset": 0.0,
+                "frame": {"origin": self.origin, "x_dir": self.u_axis, "normal": self.normal},
+            }
         if self.kind is not PlaneKind.PRINCIPAL or self.principal is None or not self.placed:
-            raise ValueError("only a confirmed principal plane maps to a design-IR sketch")
+            raise ValueError(
+                "only a confirmed principal plane or an attached face plane maps to a "
+                f"design-IR sketch (this one is {self.kind.value}, {self.state.value})"
+            )
         return {"plane": self.principal.value, "offset": dot(self.origin, self.normal)}
 
 

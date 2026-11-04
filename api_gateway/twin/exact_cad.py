@@ -118,6 +118,10 @@ def cad_key_for_sketch(sketch_key: str) -> str:
     return f"CAD-{stem}"[:80]
 
 
+class PlaneReattachmentRequiredError(ExactCadError):
+    """The sketch's plane must be reattached first (PLN-010): a 409 at the route."""
+
+
 class StepExportRefusedError(ExactCadError):
     """A STEP was asked of a revision that is not validated."""
 
@@ -375,6 +379,16 @@ class ExactCadService:
         self._write_blob = blob_writer or _default_blob_writer
         self._publish = publisher or _publish_via_seam
         self._runner = job_runner
+
+    # -- shared with face attachment (CDE slice 9) ------------------------
+
+    async def invoke_tool(self, tool_id: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Call an adapter tool over this service's bridge; the unwrapped result."""
+        return _data(await self._bridge.invoke(tool_id, params), tool_id)
+
+    def read_step(self, wp: Any) -> bytes | None:
+        """A revision's stored STEP (blob store, then the local cache)."""
+        return self._read_blob(wp)
 
     # -- lookups ---------------------------------------------------------
 
@@ -635,7 +649,11 @@ class ExactCadService:
                 source = {**_source_extra, **source}
             stored = (head.metadata or {}).get(EXACT_SOURCE_KEY)
             if source is None and isinstance(stored, dict) and stored.get("kind"):
-                source = dict(stored)
+                # CDE slice 9: a rebuild uses where the sketch's plane is now,
+                # and is refused while that plane needs reattaching.
+                source = await self._refresh_plane(dict(stored), project_id)
+            elif source is not None:
+                await self._check_plane_block(self._source_plane_ref(source), project_id)
             ref = f"{item.key}@{base}"
             current = geometry_state_of(head.type.value, head.metadata)
             if source is None and current in validated_states():
@@ -818,10 +836,12 @@ class ExactCadService:
         )
         if result.get("already_committed"):
             # The same geometry is already the head: validate it there.
+            await self._pin_plane(result["node_id"], source, project_id)
             head = await self._wp(result["node_id"])
             return await self._validate_in_place(head, validity=validity, ref=f"{item.key}@{base}")
         node_id = str(result["node_id"])
         ref = str(result.get("item_ref") or f"{item.key}@{base + 1}")
+        await self._pin_plane(node_id, source, project_id)
         wp = await self._wp(node_id)
         artifact = self._wp_ref(wp, ref, GeometryState.VALIDATED)
         await self._emit(
@@ -850,12 +870,26 @@ class ExactCadService:
     async def _validate_in_place(
         self, head: Any, *, validity: dict[str, Any], ref: str
     ) -> dict[str, Any]:
-        current = geometry_state_of(head.type.value, head.metadata)
+        meta = dict(head.metadata or {})
+        current = geometry_state_of(head.type.value, meta)
+        extra: dict[str, Any] = {}
+        if current is GeometryState.STALE and str(meta.get("staleness") or "") in (
+            "stale",
+            "invalid",
+        ):
+            # Stale through a pin (its sketch plane moved), and re-checked now
+            # against where the plane is: revalidated, from its own state.
+            extra = {"staleness": "revalidated"}
+            raw = meta.get(GEOMETRY_STATE_KEY)
+            current = GeometryState(str(raw)) if raw else GeometryState.EXACT_READY
+            if current is GeometryState.STALE:
+                current = GeometryState.EXACT_READY
+            meta = {**meta, **extra}
         state = check_transition(current, GeometryState.VALIDATED, validity=validity["outcome"])
         await set_node_metadata(
             self._twin,
             head,
-            **{GEOMETRY_STATE_KEY: state.value, VALIDITY_KEY: validity},
+            **{GEOMETRY_STATE_KEY: state.value, VALIDITY_KEY: validity, **extra},
         )
         artifact = self._wp_ref(head, ref, state)
         return {
@@ -1202,7 +1236,7 @@ class ExactCadService:
             )
         if not sketch.plane_id:
             raise ExactCadError("the sketch is not placed on a plane yet")
-        placement = await self._plane_fields(str(sketch.plane_id), psk_node.project_id)
+        placement, plane_used = await self._plane_fields(str(sketch.plane_id), psk_node.project_id)
         numeric = "depth" if chosen.op == "extrude" else "angle"
         try:
             amount = float(values[numeric])
@@ -1245,22 +1279,78 @@ class ExactCadService:
         assert source is not None
         source["feature_id"] = chosen.id
         source["inputs"] = values
+        source["plane_ref"] = plane_used
         return source
 
-    async def _plane_fields(self, plane_ref: str, project_id: Any) -> dict[str, Any]:
-        from twin_core.items import ItemError, resolve_item_ref
-        from twin_core.models.sketch_plane import SketchPlane
+    async def _check_plane_block(self, plane_ref: str | None, project_id: Any) -> None:
+        """Refuse (409) while the sketch's plane needs reattaching (PLN-010)."""
+        from api_gateway.twin.face_attachment import plane_block_reason, record_blocked
 
+        reason = await plane_block_reason(self._twin, project_id, plane_ref)
+        if reason:
+            record_blocked("exact_build")
+            logger.warning("exact_build_blocked_by_plane", plane_ref=plane_ref, reason=reason)
+            raise PlaneReattachmentRequiredError(f"exact CAD refused: {reason}")
+
+    async def _plane_fields(self, plane_ref: str, project_id: Any) -> tuple[dict[str, Any], str]:
+        """``(design-IR placement, plane ref used)``; a face plane follows its head."""
+        from api_gateway.twin.face_attachment import resolve_build_plane
+        from twin_core.items import ItemError
+
+        await self._check_plane_block(plane_ref, project_id)
         try:
-            _item, rev = await resolve_item_ref(self._twin, plane_ref, project_id)
-            node = await self._twin.graph.get_node(rev.node_id)
-            plane = SketchPlane.model_validate((node.metadata or {})["plane"])
-            fields: dict[str, Any] = plane.design_ir_fields()
+            return await resolve_build_plane(self._twin, plane_ref, project_id)
         except (ItemError, KeyError, ValueError) as exc:
             raise ExactCadError(
                 f"the sketch's plane {plane_ref} cannot be used for CAD: {exc}"
             ) from exc
-        return fields
+
+    @staticmethod
+    def _source_plane_ref(source: dict[str, Any] | None) -> str | None:
+        """The sketch plane a build source depends on, if any."""
+        if not isinstance(source, dict):
+            return None
+        if source.get("plane_ref"):
+            return str(source["plane_ref"])
+        for entity in (source.get("design_ir") or {}).get("entities") or []:
+            if isinstance(entity, dict) and entity.get("op") == "sketch" and entity.get("plane_id"):
+                return str(entity["plane_id"])
+        return None
+
+    async def _refresh_plane(self, source: dict[str, Any], project_id: Any) -> dict[str, Any]:
+        """A stored source with the current frame of its (face) plane; refuses when blocked.
+
+        A face plane moves with its face (a remap); rebuilding from the stored
+        design IR must use where the plane is now, not where it was.
+        """
+        plane_ref = self._source_plane_ref(source)
+        if not plane_ref:
+            return source
+        await self._check_plane_block(plane_ref, project_id)
+        if source.get("kind") != "design_ir":
+            return source
+        fields, used = await self._plane_fields(plane_ref, project_id)
+        if used == source.get("plane_ref") or "frame" not in fields:
+            return source
+        doc = dict(source.get("design_ir") or {})
+        entities = []
+        for entity in doc.get("entities") or []:
+            if isinstance(entity, dict) and entity.get("op") == "sketch" and entity.get("plane_id"):
+                entity = {**entity, **fields}
+            entities.append(entity)
+        doc["entities"] = entities
+        logger.info(
+            "exact_build_plane_refreshed", plane_from=source.get("plane_ref"), plane_to=used
+        )
+        return {**source, "design_ir": doc, "plane_ref": used}
+
+    async def _pin_plane(self, node_id: Any, source: dict[str, Any], project_id: Any) -> None:
+        plane_ref = self._source_plane_ref(source)
+        if not plane_ref:
+            return
+        from api_gateway.twin.face_attachment import pin_build_to_plane
+
+        await pin_build_to_plane(self._twin, node_id, plane_ref, project_id)
 
     async def build_from_parametric_sketch(
         self,
@@ -1387,6 +1477,7 @@ class ExactCadService:
         )
         _record("record_exact_build", "validated")
         ref = str(result.get("item_ref") or f"{cad_key}@1")
+        await self._pin_plane(result["node_id"], source, project_id)
         wp = await self._wp(result["node_id"])
         artifact = self._wp_ref(wp, ref, GeometryState.VALIDATED)
         return {
@@ -1440,7 +1531,12 @@ class ExactCadService:
                 wait=wait,
             )
         item = await self._item(project_id, item_key)
-        self.parse_source(design_ir, script)
+        parsed = self.parse_source(design_ir, script)
+        if parsed is None:
+            head = await self._wp(item.head_node_id)
+            parsed = (head.metadata or {}).get(EXACT_SOURCE_KEY)
+        # CDE slice 9: refused at once while the sketch's plane needs reattaching.
+        await self._check_plane_block(self._source_plane_ref(parsed), project_id)
         base = str(base_revision) if base_revision not in (None, "") else str(item.head_revision)
         if base != str(item.head_revision):
             # Already behind: say so now instead of paying for a stale job.
@@ -1719,6 +1815,7 @@ __all__ = [
     "ExactCadService",
     "GeometryCheckUnavailableError",
     "GeometryValidityError",
+    "PlaneReattachmentRequiredError",
     "StepExportError",
     "StepExportRefusedError",
     "compare_round_trip",

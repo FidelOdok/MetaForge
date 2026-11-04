@@ -64,11 +64,11 @@ class TestRegistryMcpBridge:
         FORGE-687 adds kicad.export_svg for 113. FORGE-711 adds the four simready.*
         tools for 117. The PrusaSlicer adapter adds slicer.slice and
         slicer.list_profiles for 119. cadquery.validate_shape and
-        cadquery.export_step make 121.
+        cadquery.export_step make 121. cadquery.describe_faces makes 122.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 121
+        assert len(tools) == 122
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

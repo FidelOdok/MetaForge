@@ -1,11 +1,19 @@
 import { useState } from 'react';
 import { Compass, Undo2 } from 'lucide-react';
-import { isPlaced, previewReassign, type SketchPlaneView, type ViewHint } from '../../api/endpoints/sketchPlanes';
+import {
+  isPlaced,
+  needsReattachment,
+  previewReassign,
+  type FaceSignature,
+  type SketchPlaneView,
+  type ViewHint,
+} from '../../api/endpoints/sketchPlanes';
 import { refusalOf } from '../../api/endpoints/create';
 import { useSketchPlaneActions, useSketchPlaneUi } from '../../hooks/use-sketch-plane';
 import { displayScale, VIEW_NAMES, type Principal, type ReassignMode } from '../../lib/sketch/planeMath';
 import { generateId } from '../../utils/id';
 import { PlanePrompt } from './PlanePrompt';
+import { ReattachChoices } from './ReattachChoices';
 import '../../styles/sketch-plane.css';
 
 export const MODE_LABELS: Record<ReassignMode, string> = {
@@ -14,7 +22,15 @@ export const MODE_LABELS: Record<ReassignMode, string> = {
   project_to_target: 'Project onto the new plane',
 };
 
-const fmtAxis = (v: readonly number[]) => v.map((c) => (c === 0 ? '0' : c > 0 ? `+${c}` : `${c}`)).join(',');
+/** A one-line summary of a face signature: what made it, which way it faces, its size. */
+export function signatureSummary(sig: FaceSignature): string {
+  const n = sig.normal.map((c) => (Math.abs(c) < 1e-9 ? 0 : Number(c.toFixed(3)))).join(', ');
+  const parts = [`normal (${n})`, `area ${sig.area.toPrecision(4)} mm²`, `${sig.loop_edges} edges`];
+  if (sig.semantic_tag) parts.unshift(`made by ${sig.semantic_tag}`);
+  return parts.join(' · ');
+}
+
+const fmtAxis =(v: readonly number[]) => v.map((c) => (c === 0 ? '0' : c > 0 ? `+${c}` : `${c}`)).join(',');
 
 export interface SketchPlaneControlsProps {
   projectId: string;
@@ -71,13 +87,36 @@ export function SketchPlaneControls({ projectId, sketchKey, view, modelRadius }:
     <div className="sk-plane-controls" role="group" aria-label="Sketch plane" data-testid="sketch-plane-controls">
       <div className="sk-plane-row">
         <strong data-testid="sketch-plane-name">
-          {placed && plane?.principal ? `${VIEW_NAMES[plane.principal]} (${plane.principal})` : 'No plane'}
+          {placed && plane?.principal
+            ? `${VIEW_NAMES[plane.principal]} (${plane.principal})`
+            : plane?.kind === 'face' && plane.attachment
+              ? `Surface of ${plane.attachment.item_key}`
+              : 'No plane'}
         </strong>
         <span className="sk-plane-badge" data-state={state} data-testid="sketch-plane-state">
           {state}
         </span>
         {view?.item_ref && <span className="font-mono">{view.item_ref}</span>}
       </div>
+      {plane?.kind === 'face' && plane.attachment && (
+        <div className="sk-plane-row" data-testid="sketch-plane-attachment">
+          <span>
+            On {plane.attachment.item_key}@{plane.attachment.revision ?? '?'}, face{' '}
+            <span className="font-mono">{plane.attachment.face_ref}</span>
+          </span>
+          {plane.attachment.signature && (
+            <span className="sk-plane-note" title="The face's geometry signature, used to find it again when the part changes">
+              {signatureSummary(plane.attachment.signature)}
+            </span>
+          )}
+          {plane.attachment.remapped_from && (
+            <span className="sk-plane-note">found again from {plane.attachment.remapped_from}</span>
+          )}
+        </div>
+      )}
+      {plane && needsReattachment(plane) && sketchKey && (
+        <ReattachChoices projectId={projectId} sketchKey={sketchKey} plane={plane} detailed />
+      )}
       {placed && plane && (
         <>
           <div className="sk-plane-row sk-plane-gizmo" aria-label="Plane axes" data-testid="sketch-plane-axes">
@@ -141,7 +180,7 @@ export function SketchPlaneControls({ projectId, sketchKey, view, modelRadius }:
         </>
       )}
       <div className="sk-plane-row">
-        {!placed && (
+        {!placed && !needsReattachment(plane) && (
           <button
             type="button"
             onClick={() => {

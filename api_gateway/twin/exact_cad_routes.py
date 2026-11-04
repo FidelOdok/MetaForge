@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from api_gateway.twin.exact_cad import (
     ExactCadError,
     ExactCadService,
+    PlaneReattachmentRequiredError,
     RequiredInputMissingError,
     StepExportError,
     StepExportRefusedError,
@@ -138,6 +139,9 @@ async def start_exact_build(key: str, body: ExactBuildRequest) -> Any:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except RequiredInputMissingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except PlaneReattachmentRequiredError as exc:
+            # CDE slice 9: the sketch's plane needs reattaching first.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ExactCadError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return reply

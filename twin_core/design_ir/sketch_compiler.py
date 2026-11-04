@@ -38,6 +38,7 @@ from twin_core.design_ir.models import (
     SketchLine,
     SketchSpline,
 )
+from twin_core.design_ir.models import SketchFrame as _IRSketchFrame  # noqa: E402
 
 MAX_PRIMITIVES = 500
 MAX_CONSTRAINTS = 3000
@@ -282,6 +283,7 @@ class ParametricSketch(BaseModel):
         *,
         plane: Literal["XY", "XZ", "YZ"] = "XY",
         offset: float = 0.0,
+        frame: dict[str, Any] | None = None,
     ) -> SketchEntity:
         """This sketch as a Design IR ``sketch`` entity on ``body_ref``.
 
@@ -305,6 +307,7 @@ class ParametricSketch(BaseModel):
             elements=[_to_plane(el) for el in self.elements],
             constraints=list(self.constraints),
             plane_id=self.plane_id,
+            frame=_IRSketchFrame.model_validate(frame) if frame is not None else None,
         )
 
 

@@ -9,6 +9,7 @@ vi.mock('../../../api/endpoints/sketchPlanes', async (orig) => ({
   proposeSketchPlane: (...a: unknown[]) => proposeSketchPlane(...a),
   confirmSketchPlane: (...a: unknown[]) => confirmSketchPlane(...a),
   getSketchPlane: (...a: unknown[]) => getSketchPlane(...a),
+  getAttachableGeometry: vi.fn().mockResolvedValue({ project_id: 'p1', items: [], reason: null }),
 }));
 
 import { PlanePrompt } from '../PlanePrompt';
@@ -68,13 +69,13 @@ beforeEach(() => {
 });
 
 describe('PlanePrompt', () => {
-  it('offers exactly the five choices, with Select surface disabled until face picking exists', async () => {
+  it('offers exactly the five choices, with Select surface disabled without validated exact geometry', async () => {
     render(<PlanePrompt projectId="p1" sketchKey="SKT-SKETCH" onDone={() => undefined} />);
     for (const name of ['Front', 'Side', 'Top', 'Select surface', 'Keep as concept']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument();
     }
     expect(screen.getByRole('button', { name: 'Select surface' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Select surface' }).getAttribute('title')).toMatch(/not available yet/);
+    expect(screen.getByRole('button', { name: 'Select surface' }).getAttribute('title')).toMatch(/validated exact geometry/);
     await screen.findByTestId('plane-proposal-note');
   });
 

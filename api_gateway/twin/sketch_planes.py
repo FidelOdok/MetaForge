@@ -508,7 +508,8 @@ async def propose_plane(
             cands.append(_candidate(request.explicit, ProposedBy.USER, 1.0, "you chose this plane"))
         if request.face_ref:
             notes.append(
-                "Placing a sketch on a model face is not available yet; choose Front, Side or Top."
+                "To place the sketch on a model face, use Select surface and pick the face; "
+                "a proposal never attaches to a face on its own."
             )
         existing = await _existing_sketch_plane(twin, pid, key, owner)
         if existing is not None:
@@ -915,8 +916,12 @@ async def _with_operation(
 def _plane_title(plane: SketchPlane) -> str:
     if plane.state is PlaneState.ARCHIVED:
         return "Sketch plane archived"
+    if plane.state is PlaneState.REATTACHMENT_REQUIRED:
+        return "The surface this sketch was on changed; choose where it goes"
     if not plane.placed:
         return "Sketch kept as a concept (no plane)"
+    if plane.kind is PlaneKind.FACE and plane.attachment is not None:
+        return f"Sketch placed on a surface of {plane.attachment.item_key}"
     return (
         f"Sketch placed on {plane.view_name} ({plane.principal.value if plane.principal else ''})"
     )

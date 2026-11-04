@@ -755,6 +755,17 @@ async def promote_interpretation(
                         ],
                     },
                 )
+            # CDE slice 9: a plane that needs reattaching blocks the promotion
+            # (an authoritative commit on it); interpretations stay allowed.
+            from api_gateway.twin.face_attachment import plane_block_reason, record_blocked
+            from api_gateway.twin.sketch_planes import plane_item_key
+
+            blocked = await plane_block_reason(twin, pid, plane_item_key(sk_item.key))
+            if blocked:
+                _count("promotion", "refused")
+                record_blocked("promotion")
+                span.set_attribute("sketch.blocked_by_plane", True)
+                raise SketchCompileError(f"promotion refused: {blocked}")
             # The plane may have been confirmed since the interpretation was stored.
             plane_ref, plane_unit = await _plane(twin, pid, sk_item.key)
             if plane_ref:

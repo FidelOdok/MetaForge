@@ -13,6 +13,7 @@ vi.mock('../../../api/endpoints/sketchPlanes', async (orig) => ({
   undoSketchPlane: (...a: unknown[]) => undoSketchPlane(...a),
   confirmSketchPlane: (...a: unknown[]) => confirmSketchPlane(...a),
   proposeSketchPlane: vi.fn().mockResolvedValue(null),
+  getAttachableGeometry: vi.fn().mockResolvedValue({ project_id: 'p1', items: [], reason: null }),
 }));
 
 import { SketchPlaneControls } from '../SketchPlaneControls';

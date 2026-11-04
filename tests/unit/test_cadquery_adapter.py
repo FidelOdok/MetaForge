@@ -44,7 +44,7 @@ class TestCadqueryServer:
 
     def test_registers_seventeen_tools(self):
         server = CadqueryServer()
-        assert len(server.tool_ids) == 17
+        assert len(server.tool_ids) == 18
 
     def test_tool_ids_correct(self):
         server = CadqueryServer()
@@ -66,6 +66,7 @@ class TestCadqueryServer:
             "cadquery.validate_physics_stability",
             "cadquery.validate_shape",
             "cadquery.export_step",
+            "cadquery.describe_faces",
         }
         assert set(server.tool_ids) == expected
 
@@ -342,7 +343,7 @@ class TestJsonRpcIntegration:
         assert response["jsonrpc"] == "2.0"
         assert response["id"] == "1"
         tools = response["result"]["tools"]
-        assert len(tools) == 17
+        assert len(tools) == 18
 
     async def test_tool_list_filter_by_capability(self):
         server = CadqueryServer()
@@ -377,7 +378,7 @@ class TestJsonRpcIntegration:
         result = response["result"]
         assert result["adapter_id"] == "cadquery"
         assert result["status"] == "healthy"
-        assert result["tools_available"] == 17
+        assert result["tools_available"] == 18
 
     async def test_unknown_method(self):
         server = CadqueryServer()

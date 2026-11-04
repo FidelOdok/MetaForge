@@ -291,6 +291,11 @@ async def _lower_one(
         return str(result["obj_id"])
 
     if isinstance(entity, SketchEntity):
+        if entity.frame is not None:
+            raise LoweringError(
+                f"entity {entity.id!r}: a sketch on a model face (an explicit sketch frame) "
+                "is not supported by the FreeCAD Lowering Pass yet; use the CadQuery one"
+            )
         result = await mcp.invoke(
             "freecad.create_sketch",
             {

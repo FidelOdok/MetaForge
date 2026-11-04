@@ -1035,6 +1035,29 @@ groups:
             checked. Such exports cannot back a release. Check the gateway logs
             (step_export_recorded) and the CadQuery adapter.
 
+  # CDE slice 9 -- face-attached sketch planes (api_gateway/twin/face_attachment.py).
+  - name: metaforge_face_attachment
+    rules:
+      - alert: FaceRemapAmbiguitySpike
+        expr: >-
+          sum(increase(metaforge_face_remap_total{outcome=~"ambiguous|missing|unavailable|error"}[1h]))
+          / clamp_min(sum(increase(metaforge_face_remap_total[1h])), 1) > 0.5
+          and sum(increase(metaforge_face_remap_total[1h])) >= 4
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sketches keep losing the surface they sit on"
+          description: >-
+            More than half of the last hour's face remaps after a CAD change
+            could not pick one face (ambiguous, missing or unreadable). Each
+            affected sketch is held as REATTACHMENT_REQUIRED with its last valid
+            place, and its exact builds are refused until a person picks a
+            surface, so nothing is wrong silently, but people are being asked
+            often. Check the gateway logs (sketch_plane_reattachment_required,
+            face_remap_failed): a spike of "unavailable" means the CadQuery
+            adapter image does not serve cadquery.describe_faces yet.
+
   # FORGE-793 -- cross-domain impact (twin_core/impact/cross_domain.py).
   - name: metaforge_cross_domain_impact
     rules:

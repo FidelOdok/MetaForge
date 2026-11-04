@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { proposeSketchPlane, type PlaneProposal, type ViewHint } from '../../api/endpoints/sketchPlanes';
 import { refusalOf } from '../../api/endpoints/create';
-import { useSketchPlaneActions } from '../../hooks/use-sketch-plane';
+import { useAttachableGeometry, useSketchPlaneActions } from '../../hooks/use-sketch-plane';
 import { VIEW_NAMES, type Principal } from '../../lib/sketch/planeMath';
+import { FaceSurfacePicker } from './FaceSurfacePicker';
 import '../../styles/sketch-plane.css';
 
 /** The three principal choices, in the order the prompt shows them. */
@@ -13,8 +14,9 @@ export const PLANE_CHOICES: { principal: Principal; label: string; hint: string 
   { principal: 'XY', label: 'Top', hint: 'Seen from above (the XY plane)' },
 ];
 
+/** Why "Select surface" is off when the project has no validated exact geometry. */
 export const FACE_PICK_UNAVAILABLE =
-  'Placing a sketch on a model face is not available yet. Choose Front, Side or Top, or keep it as a concept.';
+  'There is no validated exact geometry to put the sketch on yet. Build and validate a part first, or choose Front, Side or Top.';
 
 export interface PlanePromptProps {
   projectId: string;
@@ -39,6 +41,13 @@ export function PlanePrompt({ projectId, sketchKey, viewHint, ownerComponent, on
   const [proposal, setProposal] = useState<PlaneProposal | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { confirm } = useSketchPlaneActions(projectId, sketchKey);
+  // CDE slice 9: a face can be picked only on validated exact geometry.
+  const attachable = useAttachableGeometry(projectId);
+  const canPickSurface = (attachable.data?.items.length ?? 0) > 0;
+  const surfaceReason = canPickSurface
+    ? 'Pick a flat surface of the model to sketch on'
+    : (attachable.data?.reason ?? FACE_PICK_UNAVAILABLE);
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -99,13 +108,37 @@ export function PlanePrompt({ projectId, sketchKey, viewHint, ownerComponent, on
             {c.label}
           </button>
         ))}
-        <button type="button" className="sk-plane-choice" disabled aria-disabled="true" title={FACE_PICK_UNAVAILABLE}>
+        <button
+          type="button"
+          className="sk-plane-choice"
+          disabled={!canPickSurface}
+          aria-disabled={!canPickSurface}
+          aria-expanded={picking}
+          title={surfaceReason}
+          data-testid="select-surface"
+          onClick={() => setPicking((p) => !p)}
+        >
           Select surface
         </button>
         <button type="button" className="sk-plane-choice is-quiet" onClick={() => onDone('concept')}>
           Keep as concept
         </button>
       </div>
+      {!canPickSurface && attachable.data && (
+        <p className="sk-plane-note" data-testid="select-surface-reason">
+          Select surface: {surfaceReason}
+        </p>
+      )}
+      {picking && canPickSurface && (
+        <FaceSurfacePicker
+          projectId={projectId}
+          sketchKey={sketchKey}
+          onDone={(picked) => {
+            setPicking(false);
+            if (picked) onDone('confirmed');
+          }}
+        />
+      )}
       {error && (
         <p className="sk-plane-error" role="alert">
           {error}

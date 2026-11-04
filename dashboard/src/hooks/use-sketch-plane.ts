@@ -2,8 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import {
   archiveSketchPlane,
+  attachSketchToFace,
   confirmSketchPlane,
+  getAttachableGeometry,
+  getCandidateFaces,
   getSketchPlane,
+  resolveReattachment,
+  type AttachFaceBody,
+  type ResolveBody,
   undoSketchPlane,
   reassignSketchPlane,
   type ConfirmBody,
@@ -20,6 +26,9 @@ import { generateId } from '../utils/id';
 /** Query keys for sketch planes (FORGE-790). */
 export const sketchPlaneKeys = {
   plane: (projectId: string, sketchKey: string) => ['sketch-plane', projectId, sketchKey] as const,
+  attachable: (projectId: string) => ['sketch-plane', projectId, 'attachable'] as const,
+  faces: (projectId: string, itemKey: string, revision: number | null) =>
+    ['sketch-plane', projectId, 'faces', itemKey, revision ?? 'head'] as const,
   strokes: (projectId: string, sketchKey: string) => ['sketch-plane', projectId, sketchKey, 'strokes'] as const,
 };
 
@@ -41,6 +50,32 @@ export function useSketchStrokes(projectId: string | null | undefined, sketchKey
     queryFn: ({ signal }) => getCurrentSketch(projectId!, signal, sketchKey),
     enabled: !!projectId && !!sketchKey,
     staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/** CAD revisions a sketch can sit on (validated exact heads), and why not when none. */
+export function useAttachableGeometry(projectId: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: sketchPlaneKeys.attachable(projectId ?? ''),
+    queryFn: ({ signal }) => getAttachableGeometry(projectId!, signal),
+    enabled: !!projectId && enabled,
+    staleTime: 15_000,
+    retry: false,
+  });
+}
+
+/** The planar faces of one validated revision, with the GLB triangle map. */
+export function useCandidateFaces(
+  projectId: string | null | undefined,
+  itemKey: string | null | undefined,
+  revision: number | null = null,
+) {
+  return useQuery({
+    queryKey: sketchPlaneKeys.faces(projectId ?? '', itemKey ?? '', revision),
+    queryFn: ({ signal }) => getCandidateFaces(projectId!, itemKey!, revision, signal),
+    enabled: !!projectId && !!itemKey,
+    staleTime: 60_000,
     retry: false,
   });
 }
@@ -78,7 +113,15 @@ export function useSketchPlaneActions(projectId: string, sketchKey: string | nul
     mutationFn: (base?: string | null) => archiveSketchPlane(projectId, need(), { op_id: generateId(), base_revision: base ?? null }),
     onSuccess: settle,
   });
-  return { confirm, reassign, undo, archive };
+  const attachFace = useMutation({
+    mutationFn: (body: Omit<AttachFaceBody, 'op_id'>) => attachSketchToFace(projectId, need(), { op_id: generateId(), ...body }),
+    onSuccess: settle,
+  });
+  const resolve = useMutation({
+    mutationFn: (body: Omit<ResolveBody, 'op_id'>) => resolveReattachment(projectId, need(), { op_id: generateId(), ...body }),
+    onSuccess: settle,
+  });
+  return { confirm, reassign, undo, archive, attachFace, resolve };
 }
 
 /** View-only plane controls in Engineering: never stored, never sent. */

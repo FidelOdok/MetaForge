@@ -1449,7 +1449,7 @@ is `twin_core/models/sketch_plane.py`.
 | `unit` | `mm`, `in` or `unknown`. An unknown unit is kept as it is and never converted |
 | `scale` | Model units per sketch unit; `null` is an unknown scale, which every freehand sketch has. A known scale needs a known unit |
 | `source_revision` | The sketch revision (`SKT-...@n`) the plane was set against |
-| `attachment` | For a face plane: `item_key`, `revision`, an opaque `face_ref` and a `signature` placeholder. Checking it against topology changes is later work |
+| `attachment` | For a face plane: `item_key` and `revision` of the CAD revision, `face_ref` (the face id on that revision), the face's geometry `signature`, `remapped_from` (`KEY@n#face`, when a remap found it again) and, while `REATTACHMENT_REQUIRED`, `pending` (what the remap saw). See [Face attachment](#face-attachment) |
 | `state` | `UNASSIGNED`, `PROPOSED`, `CONFIRMED`, `ATTACHED`, `INVALID`, `REATTACHMENT_REQUIRED` or `ARCHIVED` |
 | `proposed_by`, `confidence` | Where the plane came from (`user`, `face`, `existing_sketch`, `view`, `component_frame`, `model`) and how sure that source was |
 
@@ -1469,7 +1469,7 @@ design IR sketch as `{"plane": principal, "offset": origin . normal}`.
 
 **Lifecycle.** A sketch with no plane item reads as `UNASSIGNED`. A proposal
 is returned as `PROPOSED` and never stored. Confirming stores `CONFIRMED`
-(a face plane would be `ATTACHED`). Archiving stores `ARCHIVED`. `INVALID`
+(a face plane is `ATTACHED`). Archiving stores `ARCHIVED`. `INVALID`
 and `REATTACHMENT_REQUIRED` are for face attachments that no longer hold.
 Every change is the plane item's next revision; undo is a new revision with
 the content from before the last change (`restored_from`), so history is
@@ -1509,6 +1509,100 @@ calls. Actions are counted in `metaforge_sketch_plane_total` by `action` and
 of the writes in half an hour fail.
 
 *Source: `twin_core/models/sketch_plane.py`, `api_gateway/twin/sketch_planes.py`, `api_gateway/twin/sketch_plane_routes.py`*
+
+#### Face attachment {#face-attachment}
+
+A sketch can sit on a planar face of a CAD revision whose geometry is
+`validated` exact geometry. The faces come from `cadquery.describe_faces`
+over the revision's own STEP and are kept on the revision as `face_index`,
+keyed by its geometry hash, so a second read does no adapter work.
+
+**Face ids are per revision.** A face id (`s<solid>f<face>`, the OCCT
+explorer order) means something on its own revision only. A face is never
+found again on another revision by its id.
+
+**The frame from a face.** The origin is the face centroid projected onto
+its plane, U lies along the longest straight edge of the face's outer loop
+(signed so the same edge always gives the same U), the normal is the face's
+outward normal, and `V = N x U`, so the frame is right-handed. The unit is
+millimetres. On a design IR sketch the plane maps to an explicit `frame`
+(`origin`, `x_dir` = U, `normal`) in place of `plane` and `offset`; the
+CadQuery Lowering Pass builds it with `cq.Plane`, a pad grows along the
+normal, and the FreeCAD Lowering Pass refuses it.
+
+**The signature** (`twin_core/geometry/face_signature.py`) is what was true
+of the face when the plane was put on it:
+
+| Field | Meaning |
+|---|---|
+| `semantic_tag` | Which feature made the face, when the revision's recorded build source says: the extrude of a parametric sketch tags its end faces `<PSK>:<feature>:top` and `:bottom`, and each straight side `<PSK>:<feature>:side:<primitive id>`. `null` otherwise |
+| `normal`, `offset` | The unit outward normal and `normal . p` for any point on the plane |
+| `area`, `centroid` | In millimetres |
+| `loop_edges` | Edges in the outer loop |
+| `adjacent_normals`, `adjacent_curved` | The normals of the neighbouring planar faces, and how many neighbours are curved |
+| `part_size` | The part's bounding-box diagonal, which scales the position tolerances |
+
+**Remapping.** When a CAD item's head moves, every plane attached to it is
+looked for on the new head by signature. A candidate's score is in `[0, 1]`:
+a matching tag scores at least 0.7 (the tag dominates; geometry decides
+between faces with the same tag), a different tag at most 0.3 of its
+geometry score, and with no tag the geometry score alone. Geometry is the
+product of a normal term and an area term with a weighted sum of centroid,
+offset, loop edge and neighbour terms; position terms halve at 0.3 of the
+part size, a normal that turned by more than 20 degrees scores 0. A face is
+picked only when the best score is at least 0.6 and beats the runner-up by
+at least 0.1 (`unique`). Otherwise the outcome is `ambiguous` (two faces too
+close to call) or `missing` (nothing good enough, or the new head is not
+validated, or its faces could not be read).
+
+| Outcome | What is written |
+|---|---|
+| `unique`, face moved | The plane's next revision, `ATTACHED`, with the new frame and attachment and `remapped_from`. The local sketch coordinates are unchanged, so the sketch moves with its face |
+| `unique`, face did not move | No new revision: the attachment's revision and face id are carried forward in place (`plane_remap`), so nothing built on the plane goes stale |
+| `ambiguous` or `missing` | The plane's next revision, `REATTACHMENT_REQUIRED`, keeping the last valid frame and attachment, with `attachment.pending`: the outcome, the revision looked at, the candidate faces and the reason. A person is asked |
+
+A plane held as `REATTACHMENT_REQUIRED` is looked at again on the item's
+next head, so a revision where the face is back resolves it with no person
+needed. Each remap is a `sketch` operation `job:sketch-plane-remap-...`:
+`completed`, or `review_required` (waiting for the person) with an `open`
+action to the sketch in the Engineering viewer and the plain words *The
+surface this sketch was on changed; choose where it goes*.
+
+**Blocking and staleness.** While a plane is `REATTACHMENT_REQUIRED` or
+`INVALID`, the authoritative commits that depend on it are refused with
+`409` and the reason: the exact build from a parametric sketch on it (or a
+rebuild of the CAD item made from one) and the sketch's promotion to a
+parametric sketch. Reads and previews (the plane, a proposal, the faces,
+an interpretation) are not refused. An exact revision built from a sketch on
+a plane carries a `revision_pin` to the plane revision it used, so the
+plane's next revision marks it `stale` through the ordinary record
+staleness; a stale exact revision reads geometry state `stale`, never
+validated, and its STEP export reads `stale` with the reason. A rebuild
+uses where the plane is now (a face plane follows its item's head), and a
+same-geometry rebuild marks the revision `revalidated`.
+
+**Resolving.** The person picks a face on the attached item's current
+revision (`pick_face`), moves the sketch onto a principal plane keeping its
+local coordinates (`detach_principal`), or keeps it as a concept with no
+plane (`detach_unassigned`). Each is the plane's next revision.
+
+Routes, under `/v1/twin/projects/{project_id}`:
+
+| Route | Does |
+|---|---|
+| `GET attachable-geometry` | The CAD items whose head is validated exact geometry, with `reason` when there are none |
+| `GET items/{item_key}/faces?revision=n` | The planar faces of a validated revision (the head by default), each with its signature summary and semantic tag, and `mesh_map`: face id to `{part_index, face_index, triangle_start, triangle_count}` in the revision's converted GLB |
+| `POST sketches/{sketch_key}/plane/attach-face` | Attach to `face_id` on `item_key` (and `revision`), idempotent per `op_id` |
+| `POST sketches/{sketch_key}/plane/resolve-reattachment` | `pick_face`, `detach_principal` or `detach_unassigned`, idempotent per `op_id`; `409` when the plane does not need it |
+
+Counted in `metaforge_face_attachment_total` (by `action`),
+`metaforge_face_remap_total` (by `outcome`: `unique`, `ambiguous`,
+`missing`, `unavailable`, `error`) and `metaforge_plane_blocked_commit_total`
+(by `commit`: `exact_build`, `promotion`). `FaceRemapAmbiguitySpike` fires
+when more than half of an hour's remaps (at least four) could not pick one
+face.
+
+*Source: `twin_core/geometry/face_signature.py`, `api_gateway/twin/face_attachment.py`, `api_gateway/twin/face_attachment_routes.py`, `tool_registry/tools/cadquery/faces.py`*
 
 ---
 

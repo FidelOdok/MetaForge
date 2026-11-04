@@ -234,6 +234,11 @@ def geometry_state_of(wp_type: str | None, metadata: dict[str, Any] | None) -> G
     raw = meta.get(GEOMETRY_STATE_KEY)
     if is_illustrative(wp_type, meta):
         return GeometryState.CONCEPT
+    if str(wp_type or "") in EXACT_TYPES and _pinned_stale(meta):
+        # CDE slice 9: a revision built on something that changed since (its
+        # sketch plane's face moved, or needs reattaching) is stale through
+        # the record-pin staleness every record uses; never validated.
+        return GeometryState.STALE
     if raw:
         try:
             return GeometryState(str(raw))
@@ -242,6 +247,15 @@ def geometry_state_of(wp_type: str | None, metadata: dict[str, Any] | None) -> G
     if str(wp_type or "") in EXACT_TYPES:
         return GeometryState.EXACT_READY
     return None
+
+
+#: Record-pin staleness values (``metadata.staleness``) that make geometry stale.
+_STALE_PIN_STATES = frozenset({"stale", "invalid"})
+
+
+def _pinned_stale(metadata: dict[str, Any]) -> bool:
+    """True when the revision's own pins went stale (``metadata.staleness``)."""
+    return str(metadata.get("staleness") or "").lower() in _STALE_PIN_STATES
 
 
 def validated_states() -> frozenset[GeometryState]:
@@ -271,12 +285,19 @@ def step_export_view(
         and bool(out.get("content_hash"))
         and (out.get("content_hash") != content_hash)
     )
-    if state == StepExportState.READY.value and (moved or changed):
+    pinned = _pinned_stale(metadata or {})
+    if state == StepExportState.READY.value and (moved or changed or pinned):
         out["state"] = StepExportState.STALE.value
-        out.setdefault(
-            "stale_reason",
-            "the item moved on to a newer revision" if moved else "the geometry changed",
-        )
+        if moved:
+            reason = "the item moved on to a newer revision"
+        elif changed:
+            reason = "the geometry changed"
+        else:
+            reason = str(
+                (metadata or {}).get("staleness_reason")
+                or "something this revision was built from changed"
+            )
+        out.setdefault("stale_reason", reason)
     return out
 
 
