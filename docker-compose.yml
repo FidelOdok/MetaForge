@@ -113,6 +113,9 @@ services:
       # process-local-only behavior (e.g. ephemeral CI containers).
       - METAFORGE_RUNS_LEDGER_PATH=${METAFORGE_RUNS_LEDGER_PATH:-}
       - METAFORGE_RUNS_LEDGER_DISABLE=${METAFORGE_RUNS_LEDGER_DISABLE:-off}
+      # FORGE-783: the gateway's store of slow tool jobs. Unset means
+      # ~/.metaforge/tool_jobs.db, on the metaforge-home volume below.
+      - METAFORGE_TOOL_JOBS_PATH=${METAFORGE_TOOL_JOBS_PATH:-}
       # Gates the credential-write endpoints (POST/DELETE /v1/harness/credentials,
       # PUT /v1/harness/selection — see api_gateway/harness/routes.py::_require_admin).
       # Unset, they accept only a direct loopback caller, which the dashboard
@@ -578,6 +581,11 @@ services:
       - TRIPO_API_KEY=${TRIPO_API_KEY:-}
       - METAFORGE_MESH_TIMEOUT_S=${METAFORGE_MESH_TIMEOUT_S:-}
       - METAFORGE_MESH_MODEL_VERSION=${METAFORGE_MESH_MODEL_VERSION:-}
+      # FORGE-783: this sidecar's own store of slow tool jobs (a concept mesh
+      # returns a job its client polls). One file per process: opening it marks
+      # the jobs a previous run left running as interrupted. On its own volume
+      # so a recreate does not lose them.
+      - METAFORGE_TOOL_JOBS_PATH=${METAFORGE_MCP_TOOL_JOBS_PATH:-/var/lib/metaforge/jobs/tool_jobs.db}
       # Per-step models: the gate reviewer when the project policy names none,
       # and vision calls (reading sketches). Unset, both use the chat model.
       - METAFORGE_REVIEWER_MODEL=${METAFORGE_REVIEWER_MODEL:-}
@@ -683,6 +691,8 @@ services:
       # standalone sidecar (used by external MCP clients) failed with
       # "Read-only file system" no matter which work product it targeted.
       - adapter-workspace:/workspace
+      # FORGE-783: its tool jobs (METAFORGE_TOOL_JOBS_PATH above).
+      - mcp-tool-jobs:/var/lib/metaforge/jobs
     # Override the gateway image's baked-in HEALTHCHECK (it probes :8000,
     # the gateway's port) — this sidecar serves on :8765, so without this
     # the container reports "unhealthy" forever while working fine.
@@ -1397,6 +1407,7 @@ volumes:
   adapter-workspace:
   codex-home:
   metaforge-home:
+  mcp-tool-jobs:
   prometheus-data:
   grafana-data:
   tempo-data:

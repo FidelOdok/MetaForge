@@ -1134,6 +1134,23 @@ compares it with the envelope: absolute with `auto_size`, and of proportions
 only without it, the model then being scaled to the envelope's largest axis
 for the comparison (`deviation_basis`).
 
+A generation takes about 150 seconds, longer than a client waits for one MCP
+call (Claude Code gives up at 120 and showed an error for a mesh the server
+went on to store). So a client's call returns at once with a job:
+`{"job_id", "status": "running", "poll": "twin.job_status",
+"expected_seconds": 150}`. The paid generation runs as a background task, and
+its result (the `node_id` and the rest) is stored on the job, which the
+read-only `twin.job_status` returns; the next reply to the same session after
+the job finishes also says so, once. Everything that would refuse the call is
+still checked before it returns, so a bad call fails at once and pays nothing.
+An identical call (same arguments, session and project) while the job runs,
+or within 10 minutes of its success, returns the same job rather than paying
+for a second mesh. The design-flow worker, a call claiming a run and an
+in-process caller still wait for the mesh itself, and `wait` chooses
+explicitly. Jobs are stored in SQLite per process; a restart marks the jobs it
+left running as `interrupted`. See [MCP specification](../mcp_spec.md) for the
+job protocol.
+
 The concept decision carries what it selects as data, not prose.
 `twin.record_decision` takes an `assembly` (each part with its source, made,
 bought or standard, plus material, process, quantity and a provenance tag,

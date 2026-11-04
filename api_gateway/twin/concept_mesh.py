@@ -316,6 +316,12 @@ def make_concept_mesh_recorder(
     call and never the gateway. ``blob_reader(wp) -> (bytes, filename)`` and
     ``blob_writer(node_id, filename, content, content_type=...) -> key`` are
     injectable for tests and default to the twin's blob store.
+
+    ``generate(..., validate_only=True)`` runs every check that refuses a
+    call before the paid one (inputs, source images, a configured provider)
+    and returns without generating: a caller that runs the generation as a
+    background job (``twin.generate_concept_mesh``, FORGE-783) refuses a
+    bad call at once instead of on the job.
     """
 
     def _default_reader(wp: Any) -> tuple[bytes, str]:
@@ -439,6 +445,7 @@ def make_concept_mesh_recorder(
         generate_parts: bool = False,
         smart_low_poly: bool = False,
         fit_to_envelope: bool | None = None,
+        validate_only: bool = False,
     ) -> dict[str, Any]:
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -506,6 +513,17 @@ def make_concept_mesh_recorder(
         # no envelope, auto_size is the only way to real units.
         options["auto_size"] = (not has_envelope) if auto_size is None else auto_size
         fit = has_envelope if fit_to_envelope is None else (fit_to_envelope and has_envelope)
+        if validate_only:
+            # Everything a paid call could be refused for, checked so a caller
+            # starting a background job hears of it now and not on the job.
+            if generator is None:
+                try:
+                    resolve_mesh_generator()
+                except MeshGenerationUnavailableError as exc:
+                    _record("unavailable", label)
+                    logger.warning("concept_mesh_unavailable", reason=str(exc), mode=label)
+                    raise
+            return {"validated": True, "mode": mode, "fit_to_envelope": fit}
 
         with tracer.start_as_current_span(TOOL) as span:
             span.set_attribute("concept_mesh.mode", mode)

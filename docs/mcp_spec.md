@@ -536,6 +536,54 @@ For long-running tools, the server can send progress updates:
 }
 ```
 
+#### 4.3.1 Slow tools return a job
+
+A client gives up on a call after a fixed time (Claude Code after 120 s),
+and some tools take longer: a paid concept mesh (`twin.generate_concept_mesh`)
+takes about 150 s. Such a tool starts its work as a job and replies at once:
+
+```json
+{
+  "job_id": "5f0c...",
+  "status": "running",
+  "poll": "twin.job_status",
+  "expected_seconds": 150,
+  "tool_id": "twin.generate_concept_mesh",
+  "reused": false
+}
+```
+
+The work runs as a background task in the server that took the call, and its
+result (or error) is stored on the job. `twin.job_status` (`job_id`, read-only,
+never held) returns the job record: `status` (`queued`, `running`,
+`succeeded`, `failed` or `interrupted`), `started_at`, `finished_at`,
+`elapsed_seconds`, `expected_seconds`, and `result` or `error`. The next reply
+to the same session after a job of its own finishes carries one more text
+block saying so, and `_meta.finishedJobs` lists `{jobId, tool, status}`; each
+job is said once, and one already read with `twin.job_status` is not repeated.
+
+The default depends on the caller. A client gets a job. A service caller (the
+design-flow worker, a call claiming a run, or an in-process call with no MCP
+context) waits for the result as before. `wait: true` or `wait: false` on the
+call chooses explicitly. A call that would be refused (bad arguments, a source
+image that cannot be read, no provider configured) is refused at once and
+starts no job.
+
+An identical call (same tool, same arguments, same session and project) while
+its job runs, or up to 10 minutes after it succeeded, returns that job with
+`reused: true` (and, once succeeded, its `result`) instead of starting a
+second paid run. A failed or interrupted job is not reused.
+
+Jobs are kept in SQLite, one store per process: the gateway's at
+`~/.metaforge/tool_jobs.db` and the sidecar's on its own volume (both set by
+`METAFORGE_TOOL_JOBS_PATH`). Opening a store marks every job it holds as still
+queued or running `interrupted`, since its task died with the process; a
+client then calls the tool again. A job is read back through the server that
+started it. Each state change is a `tool_job_state` log event and a count of
+`metaforge_tool_job_total{tool, status}`. The runner (`tool_registry/jobs.py`)
+is generic: another slow tool adopts it by returning
+`JobRunner.reply(...)` from `JobRunner.start(...)`.
+
 ### 4.4 `tool/error` — Error Response
 
 > **On the MCP dialect (`tools/call`), a tool that ran and refused is not an

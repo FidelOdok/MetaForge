@@ -286,7 +286,8 @@ class TestAllMetricsCombined:
         # + 1 sketch reading (FORGE-762).
         # + 1 concept mesh (FORGE-778).
         # + 1 durable tool approvals (FORGE-780).
-        assert len(MetricsRegistry.all_metrics()) == 98  # + 5 watchdog, + 2 gate reviewer
+        # + 1 tool jobs (FORGE-783).
+        assert len(MetricsRegistry.all_metrics()) == 99  # + 5 watchdog, + 2 gate reviewer
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

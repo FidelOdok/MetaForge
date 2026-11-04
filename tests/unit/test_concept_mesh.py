@@ -503,6 +503,7 @@ async def test_the_tool_is_registered_with_its_schema() -> None:
         "generate_parts",
         "smart_low_poly",
         "fit_to_envelope",
+        "wait",
     }
     assert props["view_images"]["required"] == ["front"]
     assert set(props["view_images"]["properties"]) == {"front", "left", "back", "right"}

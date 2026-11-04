@@ -30,6 +30,7 @@ from mcp_core.guardrails import (
 )
 from mcp_core.live_events import publish_live_event
 from observability.tracing import get_tracer
+from tool_registry.jobs import caller_waits, default_job_runner, session_of_call
 from tool_registry.mcp_server.handlers import (
     ResourceLimits,
     ResourceManifestEntry,
@@ -177,6 +178,19 @@ def _depends_on_kwarg(arguments: dict[str, Any], tool: str) -> dict[str, Any]:
 _CONCEPT_IMAGE_SIZES: tuple[str, ...] = ("1024x1024", "1536x1024", "1024x1536")
 #: The straight-on views a multiview reference mesh is made from.
 _MESH_VIEWS: tuple[str, ...] = ("front", "left", "back", "right")
+#: How long a concept mesh usually takes, said on its job (FORGE-783).
+CONCEPT_MESH_EXPECTED_SECONDS = 150
+
+
+def _accepts_keyword(fn: Any, name: str) -> bool:
+    """Whether ``fn`` takes the keyword ``name`` (or any keyword)."""
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
 def _concept_layout_properties() -> dict[str, Any]:
@@ -341,6 +355,7 @@ class TwinServer(McpToolServer):
         concept_image_renderer: Any = None,
         concept_image_critic: Any = None,
         concept_mesh_generator: Any = None,
+        job_runner: Any = None,
         sketch_interpreter: Any = None,
         sketch_reading_decider: Any = None,
         hazard_analysis_recorder: Any = None,
@@ -478,6 +493,9 @@ class TwinServer(McpToolServer):
         # recorder) that has an image-to-3D model turn a concept image into an
         # illustrative GLB render. Never a cad_model, never evidence.
         self._concept_mesh_generator = concept_mesh_generator
+        # FORGE-783: where slow tools run as polled jobs. ``None`` means this
+        # process's default runner (tool_registry.jobs), opened on first use.
+        self._job_runner = job_runner
         # FORGE-762: an injected async ``interpret(...)`` (make_sketch_interpreter)
         # that has a vision model read an uploaded sketch into a *proposed*
         # concept reading, and ``decide(...)`` (make_sketch_reading_decider)
@@ -721,6 +739,8 @@ class TwinServer(McpToolServer):
             self._register_critique_concept_image()
         if concept_mesh_generator is not None:
             self._register_generate_concept_mesh()
+            # FORGE-783: its jobs are read back with twin.job_status.
+            self._register_job_status()
         if sketch_interpreter is not None:
             self._register_interpret_sketch()
         if sketch_reading_decider is not None:
@@ -4110,8 +4130,12 @@ class TwinServer(McpToolServer):
                     "records the provider, task id, model version and options, is linked "
                     "generated_from every image it used, and is never a cad_model: its "
                     "dimensions are a guess and it can never back a requirement claim. "
-                    "Costs a paid generation that can take several minutes; fails clearly "
-                    "when no mesh provider is configured."
+                    "Costs a paid generation of about 150 s; fails clearly when no mesh "
+                    "provider is configured. A client call returns at once with job_id, "
+                    "status 'running' and poll 'twin.job_status': poll that tool with the "
+                    "job_id (or wait for the notice on a later reply) for the node_id. An "
+                    "identical call while it runs, or up to 10 min after it succeeded, "
+                    "returns the same job. wait: true waits for the result instead."
                 ),
                 capability="twin_design_sketch",
                 input_schema={
@@ -4154,6 +4178,13 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "Scale the stored model uniformly to best fit the layout "
                                 "envelope (def true when there is one)."
+                            ),
+                        },
+                        "wait": {
+                            "type": "boolean",
+                            "description": (
+                                "Wait for the generated mesh instead of returning a job "
+                                "(def false for a client, true for the design-flow worker)."
                             ),
                         },
                         "face_limit": {
@@ -4214,6 +4245,11 @@ class TwinServer(McpToolServer):
                         "bbox_m_before": {"type": "array", "items": {"type": "number"}},
                         "proportion_error_pct": {"type": "object"},
                         "provider_glb_object_key": {"type": ["string", "null"]},
+                        "job_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "poll": {"type": "string"},
+                        "expected_seconds": {"type": ["number", "null"]},
+                        "reused": {"type": "boolean"},
                         "authority": {"type": "string"},
                         "label": {"type": "string"},
                         "content_hash": {"type": "string"},
@@ -4261,21 +4297,56 @@ class TwinServer(McpToolServer):
             )
             if arguments.get(k) is not None
         }
+        wait = arguments.get("wait")
+        if wait is not None and not isinstance(wait, bool):
+            raise ValueError(f"{tool}: 'wait' must be true or false")
         if view_images is not None:
             mode = "multiview"
         else:
             mode = "image" if image_node_id else "text"
+        call: dict[str, Any] = {
+            "image_node_id": image_node_id.strip() if isinstance(image_node_id, str) else None,
+            "prompt": prompt.strip() if isinstance(prompt, str) else None,
+            "view_images": view_images,
+            "name": name.strip() if isinstance(name, str) else None,
+            "project_id": project_id if isinstance(project_id, str) and project_id else None,
+            "domain": domain if isinstance(domain, str) and domain else "mechanical",
+            **options,
+        }
+        if wait is None:
+            wait = caller_waits()
+        if wait:
+            return await self._generate_concept_mesh_now(call, mode)
+
+        # FORGE-783: a client's MCP call would time out before the ~150 s
+        # generation ends, so it runs as a job. Everything that would refuse
+        # the call is checked first, so a bad call still fails at once.
+        if _accepts_keyword(self._concept_mesh_generator, "validate_only"):
+            await self._concept_mesh_generator(**call, validate_only=True)
+        runner = self._job_runner or default_job_runner()
+        session_id, ctx_project = session_of_call()
+        job, reused = await runner.start(
+            tool,
+            {k: v for k, v in arguments.items() if k != "wait"},
+            lambda: self._generate_concept_mesh_now(call, mode),
+            session_id=session_id,
+            project_id=call["project_id"] or ctx_project,
+            expected_seconds=CONCEPT_MESH_EXPECTED_SECONDS,
+        )
+        logger.info(
+            "concept_mesh_job_started",
+            job_id=job.job_id,
+            reused=reused,
+            status=job.status,
+            mode=mode,
+        )
+        return runner.reply(job, reused)
+
+    async def _generate_concept_mesh_now(self, call: dict[str, Any], mode: str) -> dict[str, Any]:
+        tool = "twin.generate_concept_mesh"
         with tracer.start_as_current_span(tool) as span:
             span.set_attribute("concept_mesh.mode", mode)
-            result: dict[str, Any] = await self._concept_mesh_generator(
-                image_node_id=image_node_id.strip() if isinstance(image_node_id, str) else None,
-                prompt=prompt.strip() if isinstance(prompt, str) else None,
-                view_images=view_images,
-                name=name.strip() if isinstance(name, str) else None,
-                project_id=project_id if isinstance(project_id, str) and project_id else None,
-                domain=domain if isinstance(domain, str) and domain else "mechanical",
-                **options,
-            )
+            result: dict[str, Any] = await self._concept_mesh_generator(**call)
         logger.info(
             "concept_mesh_tool_done",
             node_id=result.get("node_id"),
@@ -4283,6 +4354,82 @@ class TwinServer(McpToolServer):
             mode=mode,
         )
         return result
+
+    # ------------------------------------------------------------------
+    # twin.job_status (FORGE-783)
+    # ------------------------------------------------------------------
+
+    def _register_job_status(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.job_status",
+                adapter_id="twin",
+                name="Job Status",
+                description=(
+                    "Read a job a slow tool started (twin.generate_concept_mesh returns "
+                    "one): its status (queued, running, succeeded, failed or "
+                    "interrupted), when it started and finished, the tool's result once "
+                    "it succeeded (the mesh's node_id and the rest) or its error. "
+                    "Read-only. Poll every 15 to 30 s; expected_seconds says how long "
+                    "the job usually takes. An interrupted job was running when the "
+                    "server restarted: call the tool again."
+                ),
+                capability="twin_inspect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The job_id a slow tool returned.",
+                        },
+                    },
+                    "required": ["job_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {"type": "string"},
+                        "tool_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "arguments_hash": {"type": "string"},
+                        "session_id": {"type": "string"},
+                        "project_id": {"type": ["string", "null"]},
+                        "created_at": {"type": ["string", "null"]},
+                        "started_at": {"type": ["string", "null"]},
+                        "finished_at": {"type": ["string", "null"]},
+                        "elapsed_seconds": {"type": "number"},
+                        "expected_seconds": {"type": ["number", "null"]},
+                        "result": {"type": ["object", "null"]},
+                        "error": {"type": ["string", "null"]},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=5),
+            ),
+            handler=self.job_status,
+        )
+
+    async def job_status(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        job_id = arguments.get("job_id")
+        if not isinstance(job_id, str) or not job_id.strip():
+            raise ValueError("twin.job_status: 'job_id' must be a non-empty string")
+        runner = self._job_runner or default_job_runner()
+        job = runner.get(job_id.strip())
+        if job is None:
+            raise ValueError(
+                f"twin.job_status: no job {job_id.strip()!r} on this server (jobs are kept "
+                "by the server that started them; one started before a restart reads "
+                "as interrupted)"
+            )
+        if job.done and not job.notified:
+            # Read here, so the reply notice need not repeat it.
+            runner.mark_notified(job.job_id)
+        with tracer.start_as_current_span("twin.job_status") as span:
+            span.set_attribute("job.tool_id", job.tool_id)
+            span.set_attribute("job.status", job.status)
+        logger.info("tool_job_status_read", job_id=job.job_id, status=job.status)
+        return job.as_dict()
 
     # ------------------------------------------------------------------
     # Structured-document work products (MET-747 lifecycle-mapping follow-up)

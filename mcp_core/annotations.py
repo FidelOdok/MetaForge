@@ -224,6 +224,9 @@ READ_ONLY: frozenset[str] = frozenset(
         # assembly.joints metadata -- reads only, writes nothing.
         "twin.get_harness_estimate",
         "twin.get_node",
+        # FORGE-783: a slow tool's job record. Reading it changes nothing (a
+        # client polls it, so holding it would hold every poll for a human).
+        "twin.job_status",
         # FORGE-523: an item's revision history, read from REVISION_OF edges.
         "twin.item_history",
         "twin.rank_sensitivity",
