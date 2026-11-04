@@ -57,6 +57,11 @@ READ_ONLY: frozenset[str] = frozenset(
         # Geometry and model inspection
         "cadquery.get_properties",
         "cadquery.validate_physics_stability",
+        # CDE slice 6: both take STEP bytes and return results; the only file
+        # they write is a temporary one in the adapter's own work directory,
+        # removed before they return.
+        "cadquery.validate_shape",
+        "cadquery.export_step",
         "freecad.describe_step_file",
         "freecad.get_properties",
         "freecad.list_named_faces",
@@ -386,6 +391,11 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-778: adds an illustrative GLB render node linked to its concept
         # image; the image is never touched.
         "twin.generate_concept_mesh",
+        # CDE slice 6: a validated exact revision is the item's next revision
+        # (the older ones stay); a failed attempt is recorded beside it. A STEP
+        # export is kept on its revision as a status tag; nothing is removed.
+        "twin.build_exact_cad",
+        "twin.export_cad_step",
         # FORGE-687: a new design-files node (or the next revision of its
         # item); the files it reads on the workspace are not touched.
         "twin.record_design_files",

@@ -186,6 +186,18 @@ def _find_terminal_entity(doc: DesignIR) -> IREntity:
     )
 
 
+def _arc_point(center: tuple[float, float], radius: float, degrees: float) -> tuple[float, float]:
+    """The point at ``degrees`` on a circle (for the arc lowering)."""
+    import math
+
+    a = math.radians(degrees)
+    # Rounded so a quarter turn lands on 0.0, not 1e-15 of floating-point noise.
+    return (
+        round(center[0] + radius * math.cos(a), 9) + 0.0,
+        round(center[1] + radius * math.sin(a), 9) + 0.0,
+    )
+
+
 def _lower_sketch_elements(var: str, entity_id: str, elements: list) -> tuple[list[str], bool]:
     """Script lines for one sketch's profile elements (moveTo/rect/circle/
     lineTo), NOT including the workplane-establishing prefix or the final
@@ -223,15 +235,45 @@ def _lower_sketch_elements(var: str, entity_id: str, elements: list) -> tuple[li
                 f".lineTo({_fmt(el.end[0])}, {_fmt(el.end[1])})"
             )
         elif isinstance(el, SketchArc):
-            raise LoweringError(
-                f"entity {entity_id!r}: SketchArc is not supported by this Lowering Pass "
-                "yet (same v1 cut as the FreeCAD Lowering Pass -- no arc-to-CadQuery "
-                "translation implemented)"
+            # CDE slice 6: an arc is three points on its circle (start, middle,
+            # end) in increasing angle, drawn with threePointArc. A sweep of 0
+            # (start == end) is a whole turn, which a circle draws instead.
+            has_line = True
+            sweep = (el.end_angle - el.start_angle) % 360.0
+            if sweep == 0.0:
+                raise LoweringError(
+                    f"entity {entity_id!r}: arc {el.id!r} starts and ends at the same angle; "
+                    "draw a whole turn as a circle"
+                )
+            start = _arc_point(el.center, el.radius, el.start_angle)
+            mid = _arc_point(el.center, el.radius, el.start_angle + sweep / 2.0)
+            end = _arc_point(el.center, el.radius, el.start_angle + sweep)
+            lines.append(
+                f"{var} = {var}.moveTo({_fmt(start[0])}, {_fmt(start[1])})"
+                f".threePointArc(({_fmt(mid[0])}, {_fmt(mid[1])}), "
+                f"({_fmt(end[0])}, {_fmt(end[1])}))"
             )
-        elif isinstance(el, (SketchEllipse, SketchSpline)):
+        elif isinstance(el, SketchSpline):
+            # CDE slice 6: an interpolating spline through the points. An open
+            # one is an edge of the profile (closed with the others); a closed
+            # one is a whole profile on its own.
+            points = [(float(x), float(y)) for x, y in el.points]
+            pts = ", ".join(f"({_fmt(x)}, {_fmt(y)})" for x, y in points[1:])
+            if el.closed:
+                lines.append(
+                    f"{var} = {var}.moveTo({_fmt(points[0][0])}, {_fmt(points[0][1])})"
+                    f".spline([{pts}], includeCurrent=True, periodic=True).close()"
+                )
+            else:
+                has_line = True
+                lines.append(
+                    f"{var} = {var}.moveTo({_fmt(points[0][0])}, {_fmt(points[0][1])})"
+                    f".spline([{pts}], includeCurrent=True)"
+                )
+        elif isinstance(el, SketchEllipse):
             raise LoweringError(
-                f"entity {entity_id!r}: a sketch {el.type} is not supported by this Lowering "
-                "Pass yet (no ellipse- or spline-to-CadQuery translation implemented)"
+                f"entity {entity_id!r}: a sketch ellipse is not supported by this Lowering "
+                "Pass yet (no ellipse-to-CadQuery translation implemented)"
             )
         else:  # pragma: no cover -- exhaustive per SketchElement's discriminated union
             raise LoweringError(f"entity {entity_id!r}: unsupported sketch element {el!r}")

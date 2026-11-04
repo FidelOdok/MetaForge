@@ -96,9 +96,7 @@ def classify(
     elif is_valid:
         findings.append(_finding("brep_check", PASS, "BRepCheck_Analyzer reports a valid shape"))
     else:
-        findings.append(
-            _finding("brep_check", FAIL, "BRepCheck_Analyzer reports an invalid shape")
-        )
+        findings.append(_finding("brep_check", FAIL, "BRepCheck_Analyzer reports an invalid shape"))
 
     solids = int(measures.get("solid_count") or 0)
     closed = int(measures.get("closed_solid_count") or 0)
@@ -131,7 +129,9 @@ def classify(
     free = measures.get("free_edge_count")
     if solids:
         if free is None:
-            findings.append(_finding("free_edges", NOT_EVALUATED, "free edges could not be counted"))
+            findings.append(
+                _finding("free_edges", NOT_EVALUATED, "free edges could not be counted")
+            )
         elif int(free) > 0:
             findings.append(
                 _finding("free_edges", FAIL, f"{int(free)} free edge(s) on a solid (open boundary)")
@@ -303,9 +303,7 @@ def validate_step(
         }
 
 
-def export_step(
-    step_base64: str, *, work_dir: str, schema: str | None = None
-) -> dict[str, Any]:
+def export_step(step_base64: str, *, work_dir: str, schema: str | None = None) -> dict[str, Any]:
     """Write ``step_base64``'s shape back out as STEP with the configured schema.
 
     Returns the new file, the schema asked for, the schema the written file

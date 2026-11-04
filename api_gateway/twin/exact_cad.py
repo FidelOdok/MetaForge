@@ -108,6 +108,16 @@ class ExactCadError(ValueError):
     """A request that cannot be honoured. The message is caller-facing."""
 
 
+class RequiredInputMissingError(ExactCadError):
+    """A parametric sketch's feature still needs a value only a person can give."""
+
+
+def cad_key_for_sketch(sketch_key: str) -> str:
+    """The CAD item an approved parametric sketch builds into: ``PSK-X`` -> ``CAD-X``."""
+    stem = sketch_key.split("-", 1)[1] if "-" in sketch_key else sketch_key
+    return f"CAD-{stem}"[:80]
+
+
 class StepExportRefusedError(ExactCadError):
     """A STEP was asked of a revision that is not validated."""
 
@@ -205,10 +215,16 @@ def compare_round_trip(
     findings: list[dict[str, str]] = []
     s_solids, r_solids = source.get("solid_count"), reimported.get("solid_count")
     if s_solids is None or r_solids is None:
-        findings.append({"check": "solids", "outcome": "not_evaluated", "detail": "solid count missing"})
+        findings.append(
+            {"check": "solids", "outcome": "not_evaluated", "detail": "solid count missing"}
+        )
     elif int(s_solids) != int(r_solids):
         findings.append(
-            {"check": "solids", "outcome": "fail", "detail": f"{s_solids} solid(s) became {r_solids}"}
+            {
+                "check": "solids",
+                "outcome": "fail",
+                "detail": f"{s_solids} solid(s) became {r_solids}",
+            }
         )
     else:
         findings.append({"check": "solids", "outcome": "pass", "detail": f"{r_solids} solid(s)"})
@@ -230,7 +246,9 @@ def compare_round_trip(
 
     s_box, r_box = _bbox(source.get("bounding_box")), _bbox(reimported.get("bounding_box"))
     if s_box is None or r_box is None:
-        findings.append({"check": "bounding_box", "outcome": "not_evaluated", "detail": "box missing"})
+        findings.append(
+            {"check": "bounding_box", "outcome": "not_evaluated", "detail": "box missing"}
+        )
     else:
         diag = sum((s_box[i + 3] - s_box[i]) ** 2 for i in range(3)) ** 0.5
         tol = max(ROUND_TRIP_BBOX_ABS_MM, diag * ROUND_TRIP_BBOX_REL)
@@ -299,9 +317,7 @@ def _default_blob_writer(node_id: str, filename: str, content: bytes) -> str | N
     try:
         from digital_twin.storage.work_product_blobs import store_work_product_blob
 
-        return store_work_product_blob(
-            node_id, filename, content, content_type="application/step"
-        )
+        return store_work_product_blob(node_id, filename, content, content_type="application/step")
     except Exception as exc:  # noqa: BLE001 - the local cache still holds it
         logger.info("step_export_blob_store_skipped", node_id=node_id, error=str(exc))
         return None
@@ -507,15 +523,12 @@ class ExactCadService:
     # -- source ----------------------------------------------------------
 
     @staticmethod
-    def parse_source(
-        design_ir: Any = None, script: Any = None
-    ) -> dict[str, Any] | None:
+    def parse_source(design_ir: Any = None, script: Any = None) -> dict[str, Any] | None:
         """``{kind, design_ir | script}`` for an explicit source; ``ExactCadError`` if bad."""
         if design_ir is not None and script is not None:
             raise ExactCadError("give design_ir or script, not both")
         if design_ir is not None:
             from twin_core.design_ir.models import DesignIR
-
             from twin_core.design_ir.validation import validate_design_ir
 
             try:
@@ -565,7 +578,12 @@ class ExactCadService:
     # -- attempts --------------------------------------------------------
 
     async def _record_attempt(
-        self, node: Any, *, state: GeometryState, validity: dict[str, Any], job_id: str | None,
+        self,
+        node: Any,
+        *,
+        state: GeometryState,
+        validity: dict[str, Any],
+        job_id: str | None,
         content_hash: str | None,
     ) -> dict[str, Any]:
         attempts = list((node.metadata or {}).get(EXACT_ATTEMPTS_KEY) or [])
@@ -579,9 +597,7 @@ class ExactCadService:
             "attempted_at": _now(),
         }
         attempts.append(attempt)
-        await set_node_metadata(
-            self._twin, node, **{EXACT_ATTEMPTS_KEY: attempts[-MAX_ATTEMPTS:]}
-        )
+        await set_node_metadata(self._twin, node, **{EXACT_ATTEMPTS_KEY: attempts[-MAX_ATTEMPTS:]})
         return attempt
 
     # -- the exact build -------------------------------------------------
@@ -594,6 +610,8 @@ class ExactCadService:
         base_revision: str | int | None = None,
         design_ir: Any = None,
         script: Any = None,
+        _source_extra: dict[str, Any] | None = None,
+        _generated_from: list[str] | None = None,
     ) -> dict[str, Any]:
         """Build (or re-validate) exact geometry for ``item_key``. See the module docstring."""
         from tool_registry.jobs import current_job_id
@@ -613,6 +631,8 @@ class ExactCadService:
                 )
             head = await self._wp(item.head_node_id)
             source = self.parse_source(design_ir, script)
+            if source is not None and _source_extra:
+                source = {**_source_extra, **source}
             stored = (head.metadata or {}).get(EXACT_SOURCE_KEY)
             if source is None and isinstance(stored, dict) and stored.get("kind"):
                 source = dict(stored)
@@ -683,7 +703,9 @@ class ExactCadService:
                     item_key=item.key,
                     base=ref,
                     outcome=outcome,
-                    findings=[f.get("check") for f in validity["findings"] if f.get("outcome") != "pass"],
+                    findings=[
+                        f.get("check") for f in validity["findings"] if f.get("outcome") != "pass"
+                    ],
                 )
                 if outcome == ValidityOutcome.WARN.value:
                     _record("record_exact_build", "not_validated")
@@ -722,6 +744,7 @@ class ExactCadService:
                     validity=validity,
                     project_id=project_id,
                     job_id=job_id,
+                    generated_from=_generated_from,
                 )
             else:
                 out = await self._validate_in_place(head, validity=validity, ref=ref)
@@ -762,6 +785,7 @@ class ExactCadService:
         validity: dict[str, Any],
         project_id: str,
         job_id: str | None,
+        generated_from: list[str] | None = None,
     ) -> dict[str, Any]:
         check_transition(None, GeometryState.VALIDATED, validity=validity["outcome"])
         stored_source = dict(source)
@@ -779,6 +803,7 @@ class ExactCadService:
             item_key=f"{item.key}@{base}",
             change_reason="exact geometry built and validated",
             properties=properties or None,
+            source_node_ids=generated_from or None,
             extra_metadata={
                 GEOMETRY_STATE_KEY: GeometryState.VALIDATED.value,
                 VALIDITY_KEY: validity,
@@ -794,9 +819,7 @@ class ExactCadService:
         if result.get("already_committed"):
             # The same geometry is already the head: validate it there.
             head = await self._wp(result["node_id"])
-            return await self._validate_in_place(
-                head, validity=validity, ref=f"{item.key}@{base}"
-            )
+            return await self._validate_in_place(head, validity=validity, ref=f"{item.key}@{base}")
         node_id = str(result["node_id"])
         ref = str(result.get("item_ref") or f"{item.key}@{base + 1}")
         wp = await self._wp(node_id)
@@ -828,9 +851,7 @@ class ExactCadService:
         self, head: Any, *, validity: dict[str, Any], ref: str
     ) -> dict[str, Any]:
         current = geometry_state_of(head.type.value, head.metadata)
-        state = check_transition(
-            current, GeometryState.VALIDATED, validity=validity["outcome"]
-        )
+        state = check_transition(current, GeometryState.VALIDATED, validity=validity["outcome"])
         await set_node_metadata(
             self._twin,
             head,
@@ -1124,6 +1145,262 @@ class ExactCadService:
             },
         )
 
+    # -- from a parametric sketch ----------------------------------------
+
+    async def parametric_source(
+        self,
+        psk_node: Any,
+        *,
+        feature_id: str | None = None,
+        inputs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """A buildable design IR from an approved parametric sketch, or ``ExactCadError``.
+
+        The feature plan's ``required_input`` parameters (depth, angle,
+        material) are never invented: each must be ``provided`` on the plan
+        or supplied in ``inputs`` by the person asking. The sketch must be
+        approved, in millimetres and on a confirmed principal plane.
+        """
+        from twin_core.design_ir.sketch_compiler import ParametricSketch
+
+        meta = dict(psk_node.metadata or {})
+        if not meta.get("approved"):
+            raise ExactCadError(
+                "this parametric sketch has not been approved yet; approve it before exact CAD"
+            )
+        try:
+            sketch = ParametricSketch.model_validate(meta.get("parametric_sketch") or {})
+        except Exception as exc:  # noqa: BLE001 - a stored sketch that does not parse
+            raise ExactCadError(f"the parametric sketch could not be read: {exc}") from exc
+        plan = list(sketch.feature_plan)
+        if not plan:
+            raise ExactCadError("the parametric sketch has no feature plan (no closed profile)")
+        chosen = next((f for f in plan if f.id == feature_id), None) if feature_id else plan[0]
+        if chosen is None:
+            raise ExactCadError(
+                f"no feature {feature_id!r} in the plan; choose one of {[f.id for f in plan]}"
+            )
+        supplied = dict(inputs or {})
+        values: dict[str, Any] = {}
+        missing: list[str] = []
+        for name, param in chosen.parameters.items():
+            if name in supplied and supplied[name] not in (None, ""):
+                values[name] = supplied[name]
+            elif param.status == "provided" and param.value not in (None, ""):
+                values[name] = param.value
+            else:
+                missing.append(f"{name} ({param.question})" if param.question else name)
+        if missing:
+            raise RequiredInputMissingError(
+                f"{chosen.id} needs input before exact CAD: "
+                + "; ".join(missing)
+                + ". Nothing is assumed for these."
+            )
+        if sketch.unit != "mm":
+            raise ExactCadError(
+                f"the sketch's unit is {sketch.unit}; place it on a plane in millimetres first"
+            )
+        if not sketch.plane_id:
+            raise ExactCadError("the sketch is not placed on a plane yet")
+        placement = await self._plane_fields(str(sketch.plane_id), psk_node.project_id)
+        numeric = "depth" if chosen.op == "extrude" else "angle"
+        try:
+            amount = float(values[numeric])
+        except (TypeError, ValueError) as exc:
+            raise ExactCadError(f"{numeric} must be a number, not {values[numeric]!r}") from exc
+        if amount <= 0:
+            raise ExactCadError(f"{numeric} must be above zero")
+        profile = set(chosen.profile_primitive_ids)
+        entity = sketch.to_sketch_entity("sketch1", "body1", **placement)
+        elements = [
+            el
+            for el in entity.elements
+            if el.construction or not profile or getattr(el, "id", None) in profile
+        ]
+        entities: list[dict[str, Any]] = [
+            {"id": "body1", "op": "create_body"},
+            entity.model_copy(update={"elements": elements}).model_dump(mode="json"),
+        ]
+        if chosen.op == "extrude":
+            entities.append(
+                {
+                    "id": "feature1",
+                    "op": "pad",
+                    "body_ref": "body1",
+                    "sketch_ref": "sketch1",
+                    "depth": amount,
+                }
+            )
+        else:
+            entities.append(
+                {
+                    "id": "feature1",
+                    "op": "revolve",
+                    "body_ref": "body1",
+                    "sketch_ref": "sketch1",
+                    "angle": min(amount, 360.0),
+                }
+            )
+        source = self.parse_source({"entities": entities}, None)
+        assert source is not None
+        source["feature_id"] = chosen.id
+        source["inputs"] = values
+        return source
+
+    async def _plane_fields(self, plane_ref: str, project_id: Any) -> dict[str, Any]:
+        from twin_core.items import ItemError, resolve_item_ref
+        from twin_core.models.sketch_plane import SketchPlane
+
+        try:
+            _item, rev = await resolve_item_ref(self._twin, plane_ref, project_id)
+            node = await self._twin.graph.get_node(rev.node_id)
+            plane = SketchPlane.model_validate((node.metadata or {})["plane"])
+            fields: dict[str, Any] = plane.design_ir_fields()
+        except (ItemError, KeyError, ValueError) as exc:
+            raise ExactCadError(
+                f"the sketch's plane {plane_ref} cannot be used for CAD: {exc}"
+            ) from exc
+        return fields
+
+    async def build_from_parametric_sketch(
+        self,
+        *,
+        project_id: str,
+        sketch_key: str,
+        feature_id: str | None = None,
+        inputs: dict[str, Any] | None = None,
+        base_revision: str | int | None = None,
+    ) -> dict[str, Any]:
+        """Exact CAD from an approved parametric sketch, committed to ``CAD-<sketch>``."""
+        from twin_core.items import ItemRevisionConflictError, find_item
+
+        psk_item = await self._parametric_item(project_id, sketch_key)
+        psk = await self._wp(psk_item.head_node_id)
+        source = await self.parametric_source(psk, feature_id=feature_id, inputs=inputs)
+        source["parametric_sketch_ref"] = f"{psk_item.key}@{psk_item.head_revision}"
+        cad_key = cad_key_for_sketch(psk_item.key)
+        cad = await find_item(self._twin, cad_key, project_id)
+        if cad is not None and cad.head_node_id is not None:
+            head = str(cad.head_revision)
+            if base_revision not in (None, "") and str(base_revision) != head:
+                raise ItemRevisionConflictError(f"{cad_key} is at @{head}, not @{base_revision}")
+            return await self.build(
+                project_id=project_id,
+                item_key=cad_key,
+                base_revision=head,
+                design_ir=source["design_ir"],
+                _source_extra=source,
+                _generated_from=[str(psk.id)],
+            )
+        return await self._build_new_item(
+            project_id=project_id,
+            cad_key=cad_key,
+            name=psk.name.removeprefix("Parametric sketch: ") or psk.name,
+            source=source,
+            psk=psk,
+        )
+
+    async def _parametric_item(self, project_id: str, sketch_key: str) -> Any:
+        from twin_core.items import find_item, parse_item_ref
+
+        try:
+            key, _pin = parse_item_ref(sketch_key)
+        except ValueError as exc:
+            raise ExactCadError(str(exc)) from exc
+        item = await find_item(self._twin, key, project_id)
+        if item is None or item.head_node_id is None or item.item_type != "parametric_sketch":
+            raise ExactCadError(f"no parametric sketch {key} with a current revision")
+        return item
+
+    async def _build_new_item(
+        self, *, project_id: str, cad_key: str, name: str, source: dict[str, Any], psk: Any
+    ) -> dict[str, Any]:
+        """The first exact revision of a sketch's CAD item: born validated, or nothing."""
+        from tool_registry.jobs import current_job_id
+
+        job_id = current_job_id()
+        step, properties, script_text = await self._run_source(source)
+        content_hash = hashlib.sha256(step).hexdigest()
+        _cache_put(step)
+        await self._emit(
+            project_id,
+            name="exact_geometry_ready",
+            event_type="milestone",
+            sequence=30,
+            message=MSG_EXACT_READY,
+            target_key=cad_key,
+            artifact_refs=[
+                {
+                    "kind": "step",
+                    "id": content_hash,
+                    "label": f"{name} exact geometry",
+                    "authority": "exact",
+                }
+            ],
+        )
+        validity = self._validity_record(await self._validate(step), base=None)
+        if validity["outcome"] != ValidityOutcome.PASS.value:
+            await self._record_attempt(
+                psk,
+                state=GeometryState.EXACT_READY
+                if validity["outcome"] == ValidityOutcome.WARN.value
+                else GeometryState.FAILED,
+                validity=validity,
+                job_id=job_id,
+                content_hash=content_hash,
+            )
+            _record(
+                "record_exact_build", "failed" if validity["outcome"] == "fail" else "not_validated"
+            )
+            if validity["outcome"] == ValidityOutcome.FAIL.value:
+                raise GeometryValidityError(
+                    f"{cad_key}: the exact geometry failed its validity check"
+                )
+            if validity["outcome"] == ValidityOutcome.NOT_EVALUATED.value:
+                raise GeometryCheckUnavailableError(f"{cad_key}: the validity check could not run")
+            return {
+                "item_key": cad_key,
+                "validated": False,
+                "validity": validity,
+                "operation_event": {"message": MSG_NOT_VALIDATED, "artifact_refs": []},
+            }
+        result: dict[str, Any] = await self._recorder(
+            step_base64=base64.b64encode(step).decode("ascii"),
+            name=name,
+            project_id=project_id,
+            source_tool=EXACT_BUILD_TOOL,
+            item_key=cad_key,
+            change_reason="exact geometry built from an approved parametric sketch",
+            properties=properties or None,
+            source_node_ids=[str(psk.id)],
+            extra_metadata={
+                GEOMETRY_STATE_KEY: GeometryState.VALIDATED.value,
+                VALIDITY_KEY: validity,
+                EXACT_SOURCE_KEY: source,
+                "exact_build": {
+                    "job_id": job_id,
+                    "base_revision": 0,
+                    "built_at": _now(),
+                    "tool": EXACT_BUILD_TOOL,
+                },
+            },
+        )
+        _record("record_exact_build", "validated")
+        ref = str(result.get("item_ref") or f"{cad_key}@1")
+        wp = await self._wp(result["node_id"])
+        artifact = self._wp_ref(wp, ref, GeometryState.VALIDATED)
+        return {
+            "item_key": cad_key,
+            "node_id": str(result["node_id"]),
+            "item_ref": ref,
+            "revision": result.get("revision"),
+            "target_revision": str(result.get("revision")),
+            "geometry_state": GeometryState.VALIDATED.value,
+            "validated": True,
+            "validity": validity,
+            "operation_event": {"message": MSG_VALIDATED, "artifact_refs": [artifact]},
+        }
+
     # -- jobs ------------------------------------------------------------
 
     async def start_build(
@@ -1136,14 +1413,32 @@ class ExactCadService:
         script: Any = None,
         session_id: str,
         wait: bool = False,
+        feature_id: str | None = None,
+        inputs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Start the exact build as a job (or run it now with ``wait``).
+
+        ``item_key`` may name an approved parametric sketch (``PSK-*``): its
+        chosen feature is built into ``CAD-*`` once every ``required_input``
+        is supplied (on the plan or in ``inputs``); otherwise it is refused at
+        once, and nothing is assumed.
 
         Everything that would refuse the request is checked first, so a bad
         call fails at once rather than on the job.
         """
         from twin_core.items import ItemRevisionConflictError
 
+        psk_item = await self._maybe_parametric(project_id, item_key)
+        if psk_item is not None:
+            return await self._start_parametric_build(
+                project_id=project_id,
+                psk_item=psk_item,
+                feature_id=feature_id,
+                inputs=inputs,
+                base_revision=base_revision,
+                session_id=session_id,
+                wait=wait,
+            )
         item = await self._item(project_id, item_key)
         self.parse_source(design_ir, script)
         base = str(base_revision) if base_revision not in (None, "") else str(item.head_revision)
@@ -1184,6 +1479,61 @@ class ExactCadService:
         )
         return dict(runner.reply(job, reused))
 
+    async def _maybe_parametric(self, project_id: str, item_key: str) -> Any:
+        from twin_core.items import find_item, parse_item_ref
+
+        try:
+            key, _pin = parse_item_ref(item_key)
+            UUID(str(project_id))
+        except ValueError:
+            return None
+        item = await find_item(self._twin, key, project_id)
+        return item if item is not None and item.item_type == "parametric_sketch" else None
+
+    async def _start_parametric_build(
+        self,
+        *,
+        project_id: str,
+        psk_item: Any,
+        feature_id: str | None,
+        inputs: dict[str, Any] | None,
+        base_revision: str | int | None,
+        session_id: str,
+        wait: bool,
+    ) -> dict[str, Any]:
+        from twin_core.items import find_item
+
+        if psk_item.head_node_id is None:
+            raise ExactCadError(f"{psk_item.key} has no current revision")
+        # Refuses now when a required input is missing: nothing is invented.
+        await self.parametric_source(
+            await self._wp(psk_item.head_node_id), feature_id=feature_id, inputs=inputs
+        )
+        arguments: dict[str, Any] = {"project_id": project_id, "sketch_key": psk_item.key}
+        if feature_id:
+            arguments["feature_id"] = feature_id
+        if inputs:
+            arguments["inputs"] = dict(inputs)
+        cad_key = cad_key_for_sketch(psk_item.key)
+        cad = await find_item(self._twin, cad_key, project_id)
+        base = str(cad.head_revision) if cad is not None and cad.head_node_id else None
+        if base is not None:
+            arguments["base_revision"] = str(base_revision) if base_revision else base
+        if wait:
+            return await self.build_from_parametric_sketch(**arguments)
+        runner = self._job_runner()
+        job, reused = await runner.start(
+            EXACT_BUILD_TOOL,
+            arguments,
+            lambda: self.build_from_parametric_sketch(**arguments),
+            session_id=session_id,
+            project_id=project_id,
+            expected_seconds=EXACT_BUILD_EXPECTED_SECONDS,
+            target_key=cad_key,
+            base_revision=base,
+        )
+        return dict(runner.reply(job, reused))
+
     async def start_export(
         self, *, node_id: str, critical: bool = False, session_id: str, wait: bool = False
     ) -> dict[str, Any]:
@@ -1216,6 +1566,13 @@ class ExactCadService:
 
     def build_retry(self, arguments: dict[str, Any]) -> Callable[[], Awaitable[dict[str, Any]]]:
         """The work of a retried build job, from its stored arguments."""
+        if arguments.get("sketch_key"):
+            psk_args = {
+                k: arguments[k]
+                for k in ("project_id", "sketch_key", "feature_id", "inputs", "base_revision")
+                if k in arguments
+            }
+            return lambda: self.build_from_parametric_sketch(**psk_args)
         args = {
             k: arguments[k]
             for k in ("project_id", "item_key", "base_revision", "design_ir", "script")
@@ -1245,7 +1602,7 @@ class ExactCadService:
         wp = await self._wp(node_id)
         meta = dict(wp.metadata or {})
         found = await self._revision_of(wp.id)
-        item, revision = (found if found is not None else (None, None))
+        item, revision = found if found is not None else (None, None)
         head_revision = item.head_revision if item is not None else None
         state = geometry_state_of(wp.type.value, meta)
         has_blob = bool(meta.get("minio_object_key") or wp.file_path or wp.content_hash)

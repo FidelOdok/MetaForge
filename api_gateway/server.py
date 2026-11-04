@@ -83,6 +83,7 @@ from api_gateway.testplans.routes import router as testplans_router
 from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.baseline_routes import router as twin_baselines_router
 from api_gateway.twin.decision_routes import router as decisions_router
+from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
 from api_gateway.twin.item_migration_routes import router as twin_item_migration_router
@@ -94,7 +95,6 @@ from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
 from api_gateway.twin.sketch_compiler_routes import router as twin_sketch_compiler_router
 from api_gateway.twin.sketch_plane_routes import router as twin_sketch_plane_router
-from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
 from api_gateway.twin.sketch_routes import router as twin_sketch_router
 from api_gateway.uploads.routes import router as uploads_router
 from api_gateway.vendors.routes import router as vendors_router

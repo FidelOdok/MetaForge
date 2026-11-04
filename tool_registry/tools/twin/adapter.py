@@ -4143,7 +4143,10 @@ class TwinServer(McpToolServer):
                     "B-Rep with cadquery.validate_shape (BRepCheck, closed solids, volume > 0, "
                     "no free edges), and only when that passes commit it as the item's next "
                     "revision, born validated. With neither design_ir nor script it validates "
-                    "the current head in place. A failed check records the attempt and keeps "
+                    "the current head in place. item_key may name an approved parametric "
+                    "sketch (PSK-*): its feature is built into CAD-* only once every "
+                    "required_input (depth, angle, material) is on the plan or in inputs. "
+                    "A failed check records the attempt and keeps "
                     "the last valid revision as the head. base_revision (def the current head) "
                     "pins the start: if the head moves first the job ends stale. Runs as a "
                     "job: poll twin.job_status with the job_id. wait: true waits instead."
@@ -4160,6 +4163,17 @@ class TwinServer(McpToolServer):
                         },
                         "design_ir": {"type": "object", "description": "A design IR document."},
                         "script": {"type": "string", "description": "A CadQuery script."},
+                        "feature_id": {
+                            "type": "string",
+                            "description": "For a parametric sketch (PSK-*): the plan feature.",
+                        },
+                        "inputs": {
+                            "type": "object",
+                            "description": (
+                                "For a parametric sketch: the required inputs a person gave "
+                                "(depth, angle, material). Never guess them."
+                            ),
+                        },
                         "wait": {"type": "boolean"},
                     },
                     "required": ["item_key"],
@@ -4241,6 +4255,8 @@ class TwinServer(McpToolServer):
                 base_revision=str(base) if base not in (None, "") else None,
                 design_ir=arguments.get("design_ir"),
                 script=arguments.get("script"),
+                feature_id=arguments.get("feature_id"),
+                inputs=arguments.get("inputs"),
                 session_id=session_id,
                 wait=caller_waits() if wait is None else wait,
             )

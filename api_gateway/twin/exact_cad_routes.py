@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from api_gateway.twin.exact_cad import (
     ExactCadError,
     ExactCadService,
+    RequiredInputMissingError,
     StepExportError,
     StepExportRefusedError,
     get_exact_cad_service,
@@ -50,6 +51,11 @@ class ExactBuildRequest(BaseModel):
     design_ir: dict[str, Any] | None = None
     #: A CadQuery script to build.
     script: str | None = None
+    #: For a parametric sketch (PSK-*): the feature plan entry to build.
+    feature_id: str | None = None
+    #: For a parametric sketch: the required inputs a person supplies
+    #: (depth, angle, material). Nothing is assumed for a missing one.
+    inputs: dict[str, Any] | None = None
 
 
 class StepExportRequest(BaseModel):
@@ -124,10 +130,14 @@ async def start_exact_build(key: str, body: ExactBuildRequest) -> Any:
                 base_revision=body.base_revision,
                 design_ir=body.design_ir,
                 script=body.script,
+                feature_id=body.feature_id,
+                inputs=body.inputs,
                 session_id=REST_SESSION,
             )
         except ItemRevisionConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RequiredInputMissingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except ExactCadError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return reply

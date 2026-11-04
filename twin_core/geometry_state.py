@@ -266,8 +266,10 @@ def step_export_view(
     out = dict(raw)
     state = str(out.get("state") or "")
     moved = revision is not None and head_revision is not None and revision != head_revision
-    changed = bool(content_hash) and bool(out.get("content_hash")) and (
-        out.get("content_hash") != content_hash
+    changed = (
+        bool(content_hash)
+        and bool(out.get("content_hash"))
+        and (out.get("content_hash") != content_hash)
     )
     if state == StepExportState.READY.value and (moved or changed):
         out["state"] = StepExportState.STALE.value
@@ -306,9 +308,7 @@ class CadReadiness:
         return f"{ref}: " + "; ".join(self.reasons)
 
 
-def readiness_of(
-    *, item_key: str, name: str, head_revision: int, node: Any
-) -> CadReadiness | None:
+def readiness_of(*, item_key: str, name: str, head_revision: int, node: Any) -> CadReadiness | None:
     """One head revision's readiness; ``None`` for an analysis model (not released)."""
     meta = dict(getattr(node, "metadata", None) or {})
     if str(meta.get("model_role") or "") == "analysis":

@@ -24,7 +24,6 @@ from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from api_gateway.operations.heads import make_item_head_resolver
 from api_gateway.twin import exact_cad as exact_cad_module
@@ -69,7 +68,9 @@ BOX_BBOX = {"min_x": 0.0, "min_y": 0.0, "min_z": 0.0, "max_x": 20.0, "max_y": 10
 
 
 def _step(body: str) -> bytes:
-    return f"ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\n{body}\nENDSEC;\n".encode()
+    return (
+        f"ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\n{body}\nENDSEC;\n".encode()
+    )
 
 
 def _b64(content: bytes) -> str:
@@ -287,7 +288,9 @@ def _measures(**over: Any) -> dict[str, Any]:
 def test_classify_pass_fail_warn_and_not_evaluated() -> None:
     assert classify(_measures())[0] == "pass"
     assert classify(_measures(is_valid=False))[0] == "fail"
-    assert classify(_measures(solid_count=0, closed_solid_count=0, solid_volumes_mm3=[]))[0] == "fail"
+    assert (
+        classify(_measures(solid_count=0, closed_solid_count=0, solid_volumes_mm3=[]))[0] == "fail"
+    )
     assert classify(_measures(closed_solid_count=0))[0] == "fail"
     assert classify(_measures(solid_volumes_mm3=[0.0]))[0] == "fail"
     assert classify(_measures(free_edge_count=3))[0] == "fail"
@@ -308,7 +311,9 @@ def test_classify_pass_fail_warn_and_not_evaluated() -> None:
 
 def test_the_written_schema_is_read_from_the_file() -> None:
     ap214 = "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 3 1 1 }'));"
-    ap242 = "FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }'));"
+    ap242 = (
+        "FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }'));"
+    )
     assert schema_from_step_text(ap214) == "AP214"
     assert schema_from_step_text(ap242) == "AP242"
     assert schema_from_step_text("FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));") == "AP203"
@@ -431,7 +436,9 @@ async def test_a_build_behind_the_head_ends_stale_before_any_work(h: Harness) ->
     await h.part("v2")
     # Asked for directly, it is refused at once.
     with pytest.raises(ItemRevisionConflictError):
-        await h.service.start_build(project_id=PROJECT, item_key=key, base_revision="1", session_id="s")
+        await h.service.start_build(
+            project_id=PROJECT, item_key=key, base_revision="1", session_id="s"
+        )
     # A queued job whose base moved before it ran ends stale and pays for nothing.
     args = {"project_id": PROJECT, "item_key": key, "base_revision": "1", "script": "x"}
     job, _ = await h.runner.start(
@@ -641,9 +648,10 @@ def test_an_incomplete_check_leaves_the_gate_not_ready() -> None:
     assert _status_from_checks([chk(GateCheckStatus.FAIL), chk(GateCheckStatus.INCOMPLETE)]) is (
         GateStatus.FAILED
     )
-    assert _status_from_checks(
-        [chk(GateCheckStatus.INCOMPLETE), chk(GateCheckStatus.NOT_EVALUATED)]
-    ) is GateStatus.NOT_READY
+    assert (
+        _status_from_checks([chk(GateCheckStatus.INCOMPLETE), chk(GateCheckStatus.NOT_EVALUATED)])
+        is GateStatus.NOT_READY
+    )
 
 
 async def test_the_flow_release_gate_reports_incomplete_cad(h: Harness) -> None:
@@ -708,11 +716,15 @@ async def test_the_runner_names_the_running_job_and_uses_result_phrases() -> Non
         return {
             "operation_event": {
                 "message": "Geometry validated",
-                "artifact_refs": [{"kind": "step", "id": "e1", "label": "STEP", "authority": "validated"}],
+                "artifact_refs": [
+                    {"kind": "step", "id": "e1", "label": "STEP", "authority": "validated"}
+                ],
             }
         }
 
-    job, _ = await runner.start("twin.build_exact_cad", {"a": 1}, work, session_id="s", project_id=PROJECT)
+    job, _ = await runner.start(
+        "twin.build_exact_cad", {"a": 1}, work, session_id="s", project_id=PROJECT
+    )
     await runner.wait(job.job_id, 2.0)
     await runner.flush_events()
     assert seen["job"] == job.job_id
@@ -758,7 +770,9 @@ async def test_routes_map_the_service(h: Harness, monkeypatch: pytest.MonkeyPatc
     assert r.status_code == 409
 
     r = await call(
-        "POST", f"/v1/twin/items/{key}/exact-build", json={"project_id": PROJECT, "base_revision": "7"}
+        "POST",
+        f"/v1/twin/items/{key}/exact-build",
+        json={"project_id": PROJECT, "base_revision": "7"},
     )
     assert r.status_code == 409
 
@@ -886,3 +900,161 @@ def test_errors_carry_fixed_operation_phrases() -> None:
     assert StepExportError.operation_message == "STEP export failed"
     assert issubclass(ItemRevisionConflictError, ValueError)
     assert StepExportState.STALE.value == "stale"
+
+
+# -- exact CAD from a parametric sketch (slice 5 -> slice 6) -----------------
+
+
+async def _definition(
+    h: Harness, *, item_type: str, wp_type: Any, name: str, key: str, metadata: dict[str, Any]
+) -> Any:
+    from api_gateway.twin.item_revisions import (
+        finish_definition_revision,
+        plan_definition_revision,
+    )
+    from twin_core.models.work_product import WorkProduct
+
+    plan = await plan_definition_revision(
+        h.twin,
+        item_type=item_type,
+        name=name,
+        project_id=PROJECT,
+        default_author="test",
+        item_key=key,
+    )
+    assert plan is not None
+    wp = WorkProduct(
+        name=name,
+        type=wp_type,
+        domain="mechanical",
+        file_path="",
+        content_hash=hashlib.sha256(name.encode()).hexdigest(),
+        format="json",
+        metadata={**metadata, **plan.stamp()},
+        created_by="test",
+        project_id=UUID(PROJECT),
+    )
+    created = await h.twin.create_work_product(wp)
+    await finish_definition_revision(h.twin, plan, created.id, name=name, result={})
+    return created
+
+
+def _slot_sketch(*, depth: Any = None) -> dict[str, Any]:
+    """A rounded slot in sketch space (y down), and its plan's open questions."""
+    depth_param: dict[str, Any] = {"unit": "mm", "question": "How thick should this be?"}
+    if depth is not None:
+        depth_param.update(status="provided", value=depth)
+    return {
+        "unit": "mm",
+        "plane_id": "PLN-SLOT@1",
+        "elements": [
+            {"id": "l1", "type": "line", "start": (0.0, 0.0), "end": (40.0, 0.0)},
+            {
+                "id": "a1",
+                "type": "arc",
+                "center": (40.0, 10.0),
+                "radius": 10.0,
+                "start_angle": 270.0,
+                "end_angle": 90.0,
+            },
+            {"id": "l2", "type": "line", "start": (40.0, 20.0), "end": (0.0, 20.0)},
+            {
+                "id": "a2",
+                "type": "arc",
+                "center": (0.0, 10.0),
+                "radius": 10.0,
+                "start_angle": 90.0,
+                "end_angle": 270.0,
+            },
+        ],
+        "constraints": [],
+        "profiles": [{"primitive_ids": ["l1", "a1", "l2", "a2"]}],
+        "feature_plan": [
+            {
+                "id": "feat-extrude-1",
+                "op": "extrude",
+                "profile_primitive_ids": ["l1", "a1", "l2", "a2"],
+                "parameters": {
+                    "depth": depth_param,
+                    "material": {"question": "What material is it made of?"},
+                },
+            }
+        ],
+    }
+
+
+async def _parametric(h: Harness, *, approved: bool = True, depth: Any = None) -> Any:
+    from twin_core.models.enums import WorkProductType
+    from twin_core.models.sketch_plane import PlaneUnit, principal_plane
+
+    plane = principal_plane("XY", plane_id="PLN-SLOT", unit=PlaneUnit.MM)
+    await _definition(
+        h,
+        item_type="sketch_plane",
+        wp_type=WorkProductType.SKETCH_PLANE,
+        name="Plane: slot",
+        key="PLN-SLOT",
+        metadata={"plane": plane.model_dump(mode="json")},
+    )
+    return await _definition(
+        h,
+        item_type="parametric_sketch",
+        wp_type=WorkProductType.PARAMETRIC_SKETCH,
+        name="Parametric sketch: Slot",
+        key="PSK-SLOT",
+        metadata={"parametric_sketch": _slot_sketch(depth=depth), "approved": approved},
+    )
+
+
+async def test_a_parametric_sketch_never_builds_with_inputs_missing(h: Harness) -> None:
+    from api_gateway.twin.exact_cad import RequiredInputMissingError
+
+    await _parametric(h)
+    with pytest.raises(RequiredInputMissingError) as caught:
+        await h.service.start_build(project_id=PROJECT, item_key="PSK-SLOT", session_id="s")
+    assert "depth" in str(caught.value) and "material" in str(caught.value)
+    # Supplying only one of them is still not enough.
+    with pytest.raises(RequiredInputMissingError, match="material"):
+        await h.service.start_build(
+            project_id=PROJECT, item_key="PSK-SLOT", inputs={"depth": 5}, session_id="s"
+        )
+    assert h.cad.calls == []
+    assert await find_item(h.twin, "CAD-SLOT", PROJECT) is None
+
+
+async def test_an_unapproved_parametric_sketch_is_refused(h: Harness) -> None:
+    await _parametric(h, approved=False)
+    with pytest.raises(ExactCadError, match="approved"):
+        await h.service.start_build(
+            project_id=PROJECT,
+            item_key="PSK-SLOT",
+            inputs={"depth": 5, "material": "PLA"},
+            session_id="s",
+        )
+
+
+async def test_a_parametric_sketch_with_its_inputs_builds_validated_cad(h: Harness) -> None:
+    await _parametric(h, depth=5)  # depth on the plan; material from the person
+    reply = await h.service.start_build(
+        project_id=PROJECT, item_key="PSK-SLOT", inputs={"material": "PLA"}, session_id="s"
+    )
+    job = await h.runner.wait(reply["job_id"], 5.0)
+    assert job.status == "succeeded", job.error
+    cad = await find_item(h.twin, "CAD-SLOT", PROJECT)
+    assert cad is not None and cad.head_revision == 1
+    head = await h.node(str(cad.head_node_id))
+    assert head.metadata["geometry_state"] == "validated"
+    source = head.metadata["exact_source"]
+    assert source["parametric_sketch_ref"] == "PSK-SLOT@1"
+    assert source["inputs"] == {"depth": 5, "material": "PLA"}
+    kinds = [e["op"] for e in source["design_ir"]["entities"]]
+    assert kinds == ["create_body", "sketch", "pad"]
+    assert source["design_ir"]["entities"][2]["depth"] == 5.0
+
+    # The person changes nothing in the sketch and asks again: the CAD item's next revision.
+    again = await h.service.start_build(
+        project_id=PROJECT, item_key="PSK-SLOT", inputs={"material": "PLA"}, session_id="t"
+    )
+    if again.get("job_id") and again["job_id"] != reply["job_id"]:
+        done = await h.runner.wait(again["job_id"], 5.0)
+        assert done.status == "succeeded", done.error
