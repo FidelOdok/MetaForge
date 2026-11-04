@@ -43,6 +43,11 @@ const RECORD_LABEL: Record<RecordRow['record_type'], string> = {
   evidence: 'Evidence',
 };
 
+/** Gate labels can arrive with the code already appended twice ("Review (G6) (G6)"). */
+export function gateLabel(gate: string): string {
+  return gate.replace(/(\([^()]+\))(\s*\1)+/g, '$1');
+}
+
 function Dot({ status }: { status: string }) {
   return (
     <span
@@ -88,7 +93,7 @@ function ItemRow({
           <span className="font-mono flex-shrink-0" style={{ fontSize: 10, color: 'var(--mf-c-9a9aaa)' }}>{row.ref}</span>
           {(row.gate_id || row.run_id) && (
             <span className="font-mono flex-shrink-0" style={{ fontSize: 10, color: 'var(--mf-c-ffb783)' }}>
-              {row.gate_id ? `gate ${row.gate_id}` : ''}
+              {row.gate_id ? `gate ${gateLabel(row.gate_id)}` : ''}
               {row.gate_id && row.run_id ? ' · ' : ''}
               {row.run_id ? `run ${shortId(row.run_id)}` : ''}
             </span>
@@ -224,7 +229,7 @@ export function CurrentItemsPanel({ view, projectId }: { view: CurrentView; proj
 
       {empty ? (
         <div className="px-4 py-8">
-          <EmptyState title="No work products" description="Run an agent to create work products." />
+          <EmptyState title="No work products" description="Start a design run or add files to see the parts, documents and results here." />
         </div>
       ) : (
         <>

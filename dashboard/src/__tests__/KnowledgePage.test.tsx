@@ -80,7 +80,7 @@ describe('KnowledgePage', () => {
     render(<KnowledgePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('No sources ingested yet')).toBeInTheDocument();
+      expect(screen.getByText('No knowledge sources yet')).toBeInTheDocument();
     });
     // Empty-state hint points engineers at the ingestion CLI.
     expect(screen.getByText(/forge ingest/)).toBeInTheDocument();

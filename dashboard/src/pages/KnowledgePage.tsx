@@ -445,21 +445,12 @@ function EmptySourcesState() {
         psychology
       </span>
       <span style={{ fontSize: 13, color: 'var(--mf-c-e2e2eb)' }}>
-        No sources ingested yet
+        No knowledge sources yet
       </span>
-      <code
-        style={{
-          fontFamily: 'monospace',
-          fontSize: 11,
-          color: 'var(--mf-c-86cfff)',
-          background: 'var(--mf-r-20-21-26-0p9)',
-          border: '1px solid var(--mf-r-65-72-90-0p3)',
-          borderRadius: 3,
-          padding: '4px 10px',
-        }}
-      >
-        forge ingest &lt;path&gt;
-      </code>
+      <span style={{ fontSize: 12, color: 'var(--mf-c-9a9aaa)', maxWidth: 420, textAlign: 'center' }}>
+        Datasheets, specifications and notes added here are searched and cited by the agent. Add them from the
+        command line with <code>forge ingest &lt;path&gt;</code>.
+      </span>
     </div>
   );
 }

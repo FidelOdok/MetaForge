@@ -3,10 +3,10 @@ import type { MeshConvergence, MeshConvergencePoint } from '../../types/simulati
 
 const INK = 'var(--mf-c-e2e2eb)';
 const MUTED = 'var(--mf-c-9a9aaa)';
-const GRID = 'rgba(65,72,90,0.35)';
-const SERIES = '#86cfff'; // Kinetic Console tertiary
-const SUCCESS = '#3dd68c';
-const WARNING = '#f59e0b';
+const GRID = 'var(--mf-r-65-72-90-0p35)';
+const SERIES = 'var(--mf-c-86cfff)'; // Kinetic Console tertiary
+const SUCCESS = 'var(--mf-c-3dd68c)';
+const WARNING = 'var(--mf-c-f59e0b)';
 
 const W = 420;
 const H = 200;
@@ -80,7 +80,7 @@ export function MeshConvergenceChart({ convergence }: { convergence: MeshConverg
     <div
       data-testid="mesh-convergence-chart"
       className="rounded-lg p-4"
-      style={{ background: 'rgba(30,31,38,0.85)', border: '1px solid rgba(65,72,90,0.2)' }}
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
     >
       <div className="mb-2 flex items-center justify-between gap-3">
         <h3 className="font-mono text-xs" style={{ margin: 0, color: INK }}>
@@ -147,7 +147,7 @@ export function MeshConvergenceChart({ convergence }: { convergence: MeshConverg
               cy={sy(p.y)}
               r={4}
               fill={SERIES}
-              stroke="#1e1f26"
+              stroke="var(--mf-c-1e1f26)"
               strokeWidth={2}
             />
           </g>
@@ -160,7 +160,7 @@ export function MeshConvergenceChart({ convergence }: { convergence: MeshConverg
               width={140}
               height={30}
               rx={4}
-              fill="#1e1f26"
+              fill="var(--mf-c-1e1f26)"
               stroke={GRID}
             />
             <text

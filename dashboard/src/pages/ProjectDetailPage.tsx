@@ -422,7 +422,7 @@ export function ProjectDetailPage() {
 
           {project.work_products.length === 0 ? (
             <div className="px-4 py-8">
-              <EmptyState title="No work products" description="Run an agent to create work products." />
+              <EmptyState title="No work products" description="Start a design run or add files to see the parts, documents and results here." />
             </div>
           ) : (
             project.work_products.map((wp) => (

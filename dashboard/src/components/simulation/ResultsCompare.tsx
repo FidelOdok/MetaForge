@@ -67,7 +67,7 @@ export function ResultsCompare({ a, b }: ResultsCompareProps) {
     <div
       data-testid="results-compare"
       className="mt-3 rounded-lg p-4"
-      style={{ background: 'rgba(30,31,38,0.85)', border: '1px solid rgba(65,72,90,0.2)' }}
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
     >
       <div className="mb-3 flex items-center justify-between">
         <h3 className="font-mono text-xs text-on-surface" style={{ margin: 0 }}>
