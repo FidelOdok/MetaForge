@@ -575,6 +575,12 @@ async def on_head_moved(
                 )
         except Exception as exc:  # noqa: BLE001 - never undo the head move
             logger.warning("record_supersede_on_approval_failed", item_key=item.key, error=str(exc))
+    if str(getattr(item, "item_type", "") or "") in ("cad_model", "assembly"):
+        # CDE slice 6: a STEP exported from an older revision is now stale.
+        # It stays on its revision; only its state changes. Never raises.
+        from twin_core.geometry_state import mark_step_exports_stale
+
+        await mark_step_exports_stale(twin, item, head_revision)
     return await mark_dependents_stale(twin, item, head_revision)
 
 

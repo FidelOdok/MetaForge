@@ -45,6 +45,7 @@ import { ManufacturingView } from '../components/viewer/ManufacturingView';
 import { ElectronicsThreadView } from '../components/viewer/ElectronicsThreadView';
 import { StructureView } from '../components/viewer/StructureView';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
+import { RevisionExportControls } from '../components/viewer/RevisionExportControls';
 import { AssemblyJointsEditor } from '../components/viewer/AssemblyJointsEditor';
 import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
 import { ActivityOverlay } from '../components/activity/ActivityOverlay';
@@ -570,6 +571,11 @@ function NodeDetail({
         {/* Export for robotics sim (MET-720) */}
         {isCAD && exportOpen && (
           <ExportForSimSection node={node} onClose={() => setExportOpen(false)} />
+        )}
+
+        {/* CDE slice 6: geometry state and GLB / native CAD / STEP of this revision */}
+        {node.properties.wp_type === 'cad_model' && (
+          <RevisionExportControls node={node} projectId={node.projectId ?? itemProjectId ?? null} />
         )}
 
         {/* FORGE-511: an assembly's part tree with per-part material/size */}

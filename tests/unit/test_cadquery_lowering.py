@@ -194,7 +194,7 @@ class TestRejections:
             await lower_design_ir_cadquery(mcp, doc)
         assert mcp.calls == []
 
-    async def test_sketch_arc_rejected(self):
+    async def test_a_zero_sweep_arc_is_rejected(self):
         mcp = _bridge()
         doc = DesignIR(
             entities=[
@@ -208,15 +208,15 @@ class TestRejections:
                             "type": "arc",
                             "center": (0.0, 0.0),
                             "radius": 3.0,
-                            "start_angle": 0.0,
-                            "end_angle": 90.0,
+                            "start_angle": 90.0,
+                            "end_angle": 450.0,
                         }
                     ],
                 },
                 {"id": "pad1", "op": "pad", "body_ref": "body1", "sketch_ref": "sk1", "depth": 5.0},
             ]
         )
-        with pytest.raises(LoweringError, match="SketchArc"):
+        with pytest.raises(LoweringError, match="circle"):
             await lower_design_ir_cadquery(mcp, doc)
         assert mcp.calls == []
 
@@ -994,3 +994,155 @@ class TestLoft:
         with pytest.raises(LoweringError, match="must be a sketch entity"):
             await lower_design_ir_cadquery(mcp, doc)
         assert mcp.calls == []
+
+
+# -- CDE slice 6: arcs and splines in the CadQuery path ----------------------
+
+
+def _slot_doc(*, spline: bool = False) -> DesignIR:
+    """A 40 x 20 slot: two straight sides and two rounded ends (or a spline end)."""
+    end = (
+        {
+            "type": "spline",
+            "points": [(40.0, 0.0), (48.0, 5.0), (50.0, 10.0), (48.0, 15.0), (40.0, 20.0)],
+        }
+        if spline
+        else {
+            "type": "arc",
+            "center": (40.0, 10.0),
+            "radius": 10.0,
+            "start_angle": 270.0,
+            "end_angle": 90.0,
+        }
+    )
+    return DesignIR(
+        entities=[
+            {"id": "body1", "op": "create_body"},
+            {
+                "id": "sk1",
+                "op": "sketch",
+                "body_ref": "body1",
+                "elements": [
+                    {"type": "line", "start": (0.0, 0.0), "end": (40.0, 0.0)},
+                    end,
+                    {"type": "line", "start": (40.0, 20.0), "end": (0.0, 20.0)},
+                    {
+                        "type": "arc",
+                        "center": (0.0, 10.0),
+                        "radius": 10.0,
+                        "start_angle": 90.0,
+                        "end_angle": 270.0,
+                    },
+                    {
+                        "type": "line",
+                        "start": (99.0, 99.0),
+                        "end": (0.0, 0.0),
+                        "construction": True,
+                    },
+                ],
+            },
+            {"id": "pad1", "op": "pad", "body_ref": "body1", "sketch_ref": "sk1", "depth": 5.0},
+        ]
+    )
+
+
+class TestArcsAndSplines:
+    async def test_arcs_lower_to_three_point_arcs(self):
+        result = await lower_design_ir_cadquery(_bridge(), _slot_doc())
+        script = result.script_text
+        assert script.count(".threePointArc(") == 2
+        # 270 to 90 in increasing angle passes through 0: the middle is (50, 10).
+        assert ".threePointArc((50.0, 10.0" in script
+        assert "99.0" not in script  # construction geometry is skipped
+        assert script.count(".close()") == 1
+
+    async def test_open_and_closed_splines_lower(self):
+        result = await lower_design_ir_cadquery(_bridge(), _slot_doc(spline=True))
+        assert ".spline([(48.0, 5.0)" in result.script_text
+        closed = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "elements": [
+                        {
+                            "type": "spline",
+                            "points": [(0, 0), (10, 0), (10, 10), (0, 10)],
+                            "closed": True,
+                        }
+                    ],
+                },
+                {"id": "pad1", "op": "pad", "body_ref": "body1", "sketch_ref": "sk1", "depth": 2.0},
+            ]
+        )
+        out = await lower_design_ir_cadquery(_bridge(), closed)
+        assert "periodic=True" in out.script_text
+
+
+class _RealCadquery:
+    """The CadQuery adapter's script tool, run for real in this process."""
+
+    def __init__(self, work_dir: str) -> None:
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        self.work_dir = work_dir
+        self.ops = CadqueryOperations(work_dir=work_dir)
+
+    async def invoke(self, tool_id: str, params: dict, timeout: int | None = None) -> dict:
+        assert tool_id == "cadquery.execute_script"
+        return self.ops.execute_script(params["script"], f"{self.work_dir}/out.step")
+
+
+class TestArcProfilesWithTheKernel:
+    """Lines plus arcs extrude to a solid that passes the validity check."""
+
+    @pytest.fixture(autouse=True)
+    def _kernel(self) -> None:
+        pytest.importorskip("cadquery")
+
+    @pytest.mark.parametrize("spline", [False, True])
+    async def test_a_rounded_profile_extrudes_to_a_valid_solid(self, tmp_path, spline):
+        import math
+
+        from tool_registry.tools.cadquery.validity import validate_step
+
+        bridge = _RealCadquery(str(tmp_path))
+        result = await lower_design_ir_cadquery(bridge, _slot_doc(spline=spline))
+        verdict = validate_step(
+            base64.b64encode(result.step_bytes).decode("ascii"), work_dir=str(tmp_path)
+        )
+        assert verdict["outcome"] == "pass", verdict["findings"]
+        assert verdict["solid_count"] == 1
+        if not spline:
+            # A 40 x 20 rectangle and two half discs of radius 10, 5 deep.
+            expected = (40 * 20 + math.pi * 10**2) * 5
+            assert verdict["volume_mm3"] == pytest.approx(expected, rel=1e-6)
+
+    async def test_a_closed_spline_extrudes_to_a_valid_solid(self, tmp_path):
+        from tool_registry.tools.cadquery.validity import validate_step
+
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "elements": [
+                        {
+                            "type": "spline",
+                            "points": [(0, 0), (10, 0), (12, 6), (5, 12), (-2, 6)],
+                            "closed": True,
+                        }
+                    ],
+                },
+                {"id": "pad1", "op": "pad", "body_ref": "body1", "sketch_ref": "sk1", "depth": 2.0},
+            ]
+        )
+        result = await lower_design_ir_cadquery(_RealCadquery(str(tmp_path)), doc)
+        verdict = validate_step(
+            base64.b64encode(result.step_bytes).decode("ascii"), work_dir=str(tmp_path)
+        )
+        assert verdict["outcome"] == "pass", verdict["findings"]

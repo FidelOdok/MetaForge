@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic import BaseModel, Field
+
+
+def _step_schema_default() -> str:
+    raw = (os.environ.get("CADQUERY_STEP_SCHEMA") or "").strip().upper()
+    return raw if raw in ("AP214", "AP242") else "AP214"
 
 
 class CadqueryConfig(BaseModel):
@@ -24,6 +31,13 @@ class CadqueryConfig(BaseModel):
     supported_export_formats: list[str] = Field(
         default=["step", "stl", "obj", "brep", "amf", "svg"],
         description="Supported CAD export formats",
+    )
+    step_schema: str = Field(
+        default_factory=_step_schema_default,
+        description=(
+            "STEP schema cadquery.export_step writes: AP214 (default) or AP242 "
+            "(CADQUERY_STEP_SCHEMA)"
+        ),
     )
     supported_import_formats: list[str] = Field(
         default=["step", "stp", "brep"],

@@ -114,7 +114,8 @@ class TestTelemetryMetricsGroupAccess:
         # + 1 tool jobs (FORGE-783).
         # + durable tool approvals (FORGE-780).
         # + 1 sketch saves (FORGE-789), + 1 scheduling (FORGE-788), + 1 sketch planes (FORGE-790).
-        assert len(MetricsRegistry.all_metrics()) == 110
+        # + 1 sketch compiler, + 5 exact CAD, validity and STEP (CDE slice 6).
+        assert len(MetricsRegistry.all_metrics()) == 115
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

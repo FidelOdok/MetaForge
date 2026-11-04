@@ -362,6 +362,7 @@ class TwinServer(McpToolServer):
         concept_image_critic: Any = None,
         concept_mesh_generator: Any = None,
         job_runner: Any = None,
+        exact_cad_service: Any = None,
         sketch_interpreter: Any = None,
         sketch_reading_decider: Any = None,
         hazard_analysis_recorder: Any = None,
@@ -502,6 +503,10 @@ class TwinServer(McpToolServer):
         # FORGE-783: where slow tools run as polled jobs. ``None`` means this
         # process's default runner (tool_registry.jobs), opened on first use.
         self._job_runner = job_runner
+        # CDE slice 6: exact builds, validity and revision-linked STEP
+        # (api_gateway.twin.exact_cad.ExactCadService). Injected, so this
+        # adapter stays free of api_gateway imports.
+        self._exact_cad = exact_cad_service
         # FORGE-762: an injected async ``interpret(...)`` (make_sketch_interpreter)
         # that has a vision model read an uploaded sketch into a *proposed*
         # concept reading, and ``decide(...)`` (make_sketch_reading_decider)
@@ -747,6 +752,10 @@ class TwinServer(McpToolServer):
             self._register_generate_concept_mesh()
             # FORGE-783: its jobs are read back with twin.job_status.
             self._register_job_status()
+        if exact_cad_service is not None:
+            self._register_exact_cad()
+            if concept_mesh_generator is None:
+                self._register_job_status()
         if sketch_interpreter is not None:
             self._register_interpret_sketch()
         if sketch_reading_decider is not None:
@@ -4107,6 +4116,174 @@ class TwinServer(McpToolServer):
             node_id=result.get("node_id"),
             verdict=(result.get("critique") or {}).get("verdict"),
         )
+        return result
+
+    # ------------------------------------------------------------------
+    # twin.build_exact_cad / twin.export_cad_step (CDE slice 6)
+    # ------------------------------------------------------------------
+
+    def _register_exact_cad(self) -> None:
+        job_fields: dict[str, Any] = {
+            "job_id": {"type": "string"},
+            "status": {"type": "string"},
+            "poll": {"type": "string"},
+            "expected_seconds": {"type": ["number", "null"]},
+            "reused": {"type": "boolean"},
+            "result": {"type": "object"},
+            "error": {"type": "string"},
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.build_exact_cad",
+                adapter_id="twin",
+                name="Build Exact CAD",
+                description=(
+                    "Build a CAD item's exact geometry after a commit, never per edit: lower "
+                    "design_ir (or run a CadQuery script) in the CadQuery adapter, check the "
+                    "B-Rep with cadquery.validate_shape (BRepCheck, closed solids, volume > 0, "
+                    "no free edges), and only when that passes commit it as the item's next "
+                    "revision, born validated. With neither design_ir nor script it validates "
+                    "the current head in place. item_key may name an approved parametric "
+                    "sketch (PSK-*): its feature is built into CAD-* only once every "
+                    "required_input (depth, angle, material) is on the plan or in inputs. "
+                    "A failed check records the attempt and keeps "
+                    "the last valid revision as the head. base_revision (def the current head) "
+                    "pins the start: if the head moves first the job ends stale. Runs as a "
+                    "job: poll twin.job_status with the job_id. wait: true waits instead."
+                ),
+                capability="cad_generation",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "item_key": {"type": "string", "description": "The CAD item (CAD-...)."},
+                        "project_id": {"type": "string", "description": "The item's project."},
+                        "base_revision": {
+                            "type": "string",
+                            "description": "The head revision this starts from (def current).",
+                        },
+                        "design_ir": {"type": "object", "description": "A design IR document."},
+                        "script": {"type": "string", "description": "A CadQuery script."},
+                        "feature_id": {
+                            "type": "string",
+                            "description": "For a parametric sketch (PSK-*): the plan feature.",
+                        },
+                        "inputs": {
+                            "type": "object",
+                            "description": (
+                                "For a parametric sketch: the required inputs a person gave "
+                                "(depth, angle, material). Never guess them."
+                            ),
+                        },
+                        "wait": {"type": "boolean"},
+                    },
+                    "required": ["item_key"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        **job_fields,
+                        "node_id": {"type": "string"},
+                        "item_ref": {"type": "string"},
+                        "geometry_state": {"type": "string"},
+                        "validated": {"type": "boolean"},
+                        "validity": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=300),
+            ),
+            handler=self.build_exact_cad,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.export_cad_step",
+                adapter_id="twin",
+                name="Export CAD STEP",
+                description=(
+                    "Export a validated CAD revision as STEP with the CadQuery adapter's "
+                    "configured schema (AP214 unless set to AP242; the result says which the "
+                    "file declares), re-import it and compare volume, bounding box and solid "
+                    "count. The export is kept on its revision and a repeat request returns "
+                    "it; once the item moves on it reads stale. critical: true (a gate or "
+                    "release export) fails unless the round trip passes. A revision that is "
+                    "not validated is refused. Runs as a job unless cached; wait: true waits."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string", "description": "The CAD revision node."},
+                        "critical": {"type": "boolean"},
+                        "wait": {"type": "boolean"},
+                    },
+                    "required": ["node_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        **job_fields,
+                        "node_id": {"type": "string"},
+                        "item_ref": {"type": "string"},
+                        "step_export": {"type": "object"},
+                        "url": {"type": "string"},
+                        "cache_hit": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=120),
+            ),
+            handler=self.export_cad_step,
+        )
+
+    async def build_exact_cad(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.build_exact_cad"
+        item_key = arguments.get("item_key")
+        if not isinstance(item_key, str) or not item_key.strip():
+            raise ValueError(f"{tool}: 'item_key' is required")
+        wait = arguments.get("wait")
+        if wait is not None and not isinstance(wait, bool):
+            raise ValueError(f"{tool}: 'wait' must be true or false")
+        session_id, ctx_project = session_of_call()
+        project_id = arguments.get("project_id") or ctx_project
+        if not project_id:
+            raise ValueError(f"{tool}: 'project_id' is required (no project in this session)")
+        base = arguments.get("base_revision")
+        try:
+            result: dict[str, Any] = await self._exact_cad.start_build(
+                project_id=str(project_id),
+                item_key=item_key.strip(),
+                base_revision=str(base) if base not in (None, "") else None,
+                design_ir=arguments.get("design_ir"),
+                script=arguments.get("script"),
+                feature_id=arguments.get("feature_id"),
+                inputs=arguments.get("inputs"),
+                session_id=session_id,
+                wait=caller_waits() if wait is None else wait,
+            )
+        except ValueError as exc:
+            raise ValueError(f"{tool}: {exc}") from exc
+        logger.info("exact_cad_tool_called", item_key=item_key, status=result.get("status"))
+        return result
+
+    async def export_cad_step(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.export_cad_step"
+        node_id = arguments.get("node_id")
+        if not isinstance(node_id, str) or not node_id.strip():
+            raise ValueError(f"{tool}: 'node_id' is required")
+        wait = arguments.get("wait")
+        if wait is not None and not isinstance(wait, bool):
+            raise ValueError(f"{tool}: 'wait' must be true or false")
+        session_id, _project = session_of_call()
+        try:
+            result: dict[str, Any] = await self._exact_cad.start_export(
+                node_id=node_id.strip(),
+                critical=bool(arguments.get("critical")),
+                session_id=session_id,
+                wait=caller_waits() if wait is None else wait,
+            )
+        except ValueError as exc:
+            raise ValueError(f"{tool}: {exc}") from exc
+        logger.info("step_export_tool_called", node_id=node_id, status=result.get("status"))
         return result
 
     # ------------------------------------------------------------------

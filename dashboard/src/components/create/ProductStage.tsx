@@ -4,6 +4,7 @@ import { PreviewHost } from '../preview/PreviewHost';
 import { previewEngineFor, is3dEngine } from '../preview/registry';
 import { useNodeVersionHistory } from '../../hooks/use-twin';
 import { SketchLayer } from '../sketch/SketchLayer';
+import { geometryBadgeText } from '../geometry/GeometryStatusBadge';
 import type { TwinNode } from '../../types/twin';
 
 /** Dimensionally defined outputs. Everything else visual is a concept. */
@@ -46,9 +47,30 @@ interface ProductStageProps {
   /** A pass is running: keep showing the last valid result, and say so. */
   working: boolean;
   presenting?: boolean;
+  /**
+   * CDE slice 6: the exact geometry checks behind the preview. Said in plain
+   * words only; no kernel or solver names.
+   */
+  engineeringChecks?: 'running' | 'failed' | null;
 }
 
-export function ProductStage({ projectId, nodes, selectedId, onSelect, onDiscuss, working, presenting }: ProductStageProps) {
+/** The plain-language line for the engineering checks behind a preview (DEF-UI-001). */
+export function engineeringChecksText(checks: 'running' | 'failed' | null | undefined): string | null {
+  if (checks === 'running') return 'Preview updated · Engineering checks running';
+  if (checks === 'failed') return 'Engineering checks found a problem · the last checked version is kept';
+  return null;
+}
+
+export function ProductStage({
+  projectId,
+  nodes,
+  selectedId,
+  onSelect,
+  onDiscuss,
+  working,
+  presenting,
+  engineeringChecks,
+}: ProductStageProps) {
   const visual = useMemo(
     () => nodes.filter(isVisual).sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')),
     [nodes],
@@ -59,6 +81,12 @@ export function ProductStage({ projectId, nodes, selectedId, onSelect, onDiscuss
   const engineering = node ? isEngineering(node) : false;
   const references = useMemo(() => visual.filter((n) => previewEngineFor(n).engine === 'image'), [visual]);
   const sketch = projectId ? <SketchLayer projectId={projectId} referenceNodes={references} /> : null;
+  // The badge says Concept / Preview / Exact / Validated, so a newer, unchecked
+  // revision is never mistaken for the last validated one (DEF-UI-003).
+  const geometryText = engineering
+    ? geometryBadgeText(node?.geometryState?.state, node?.geometryState?.sourceRevision ?? revision)
+    : null;
+  const checksText = engineeringChecksText(engineeringChecks);
 
   return (
     <section className={`cv-stage ${presenting ? 'is-presenting' : ''}`} aria-label="Product">
@@ -69,6 +97,11 @@ export function ProductStage({ projectId, nodes, selectedId, onSelect, onDiscuss
               {engineering ? <Box size={13} aria-hidden="true" /> : <ImageIcon size={13} aria-hidden="true" />}
               {engineering ? 'Engineering model · dimensioned' : 'Concept · illustrative, not a manufacturable model'}
             </span>
+            {geometryText && (
+              <span className="cv-revision" data-testid="stage-geometry" title="Where this geometry stands">
+                {geometryText}
+              </span>
+            )}
             <span className="cv-revision" title="The revision on screen">
               {node.name}
               {revision !== null ? ` · revision ${revision}` : ''}
@@ -78,11 +111,18 @@ export function ProductStage({ projectId, nodes, selectedId, onSelect, onDiscuss
             <PreviewHost key={node.id} node={node} mode="modal" />
             {sketch}
           </div>
-          {working && (
+          {checksText ? (
             <div className="cv-stage-working" role="status">
-              <Loader2 size={14} className="cv-spin" aria-hidden="true" />
-              Working on the next version. This is the latest finished one.
+              {engineeringChecks === 'running' && <Loader2 size={14} className="cv-spin" aria-hidden="true" />}
+              {checksText}
             </div>
+          ) : (
+            working && (
+              <div className="cv-stage-working" role="status">
+                <Loader2 size={14} className="cv-spin" aria-hidden="true" />
+                Working on the next version. This is the latest finished one.
+              </div>
+            )
           )}
           <div className="cv-stage-actions">
             <button type="button" className="cv-chip-btn" onClick={() => onDiscuss(node)}>

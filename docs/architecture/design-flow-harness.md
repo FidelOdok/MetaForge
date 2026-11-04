@@ -572,6 +572,26 @@ work products, so two runs on one project at the same time can each count the
 other's drafts as present; the check at approval still refuses a commit whose
 base moved.
 
+## Exact CAD at the release gate
+
+Exact geometry is built on commit, not per edit. `twin.build_exact_cad`
+(or `POST /v1/twin/items/{key}/exact-build`) runs as a job on an explicit
+commit or on demand: it lowers the design IR in the CadQuery adapter, checks
+the B-Rep, and moves the item head only when the check passes; a failure is
+recorded on the revision it started from and the last valid revision stays
+the head. While it runs, the last valid exact revision stays current, and a
+result whose base moved ends `stale` and is not applied. A parametric
+sketch is built only once its required inputs (depth or angle, and material)
+are supplied; nothing is assumed for them.
+
+A phase whose gate is `G8` (the spine flow's manufacturing gate) requires
+every CAD item in the project to be at a validated exact revision with a STEP
+exported from that revision whose re-import round trip passed. Until then the
+gate lists `exact CAD incomplete: <item>@<n>: <reason>` as missing, and the
+G8 consistency check `exact_cad_validated` is `incomplete` (the gate is
+`not_ready`). A project with no CAD items is not held to this rule. No other
+gate changes. See [the twin schema](../twin_schema.md#exact-cad-validity-and-step).
+
 ## Stale evidence at the gate
 
 A `simulation_result`, a `design_decision` and an `evidence` entity are pinned,

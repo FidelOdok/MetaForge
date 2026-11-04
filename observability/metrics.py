@@ -955,6 +955,49 @@ class MetricsRegistry:
 
     # ── Sketch planes (FORGE-790) ──────────────────────────────────────
 
+    # ── Exact CAD, validity and STEP (CDE slice 6) ─────────────────────
+
+    EXACT_CAD_BUILD_TOTAL = MetricDefinition(
+        name="metaforge_exact_cad_build_total",
+        type="counter",
+        description=(
+            "Exact CAD builds by outcome (validated, already_validated, not_validated, "
+            "failed, not_evaluated) (CDE slice 6)"
+        ),
+        labels=["outcome"],
+    )
+    GEOMETRY_VALIDITY_TOTAL = MetricDefinition(
+        name="metaforge_geometry_validity_total",
+        type="counter",
+        description="B-Rep validity verdicts (pass, warn, fail, not_evaluated) (CDE slice 6)",
+        labels=["outcome"],
+    )
+    STEP_EXPORT_TOTAL = MetricDefinition(
+        name="metaforge_step_export_total",
+        type="counter",
+        description=(
+            "STEP export events (cache_hit, cache_miss, ready, failed, stale) (CDE slice 6)"
+        ),
+        labels=["event"],
+    )
+    STEP_ROUND_TRIP_TOTAL = MetricDefinition(
+        name="metaforge_step_round_trip_total",
+        type="counter",
+        description="STEP re-import round-trip verdicts (pass, fail, not_evaluated) (CDE slice 6)",
+        labels=["outcome"],
+    )
+    CAD_ARTIFACT_DURATION = MetricDefinition(
+        name="metaforge_cad_artifact_duration_seconds",
+        type="histogram",
+        description=(
+            "Exact CAD stage durations: exact_build, validate, exact_total, step_export, "
+            "round_trip (CDE slice 6)"
+        ),
+        labels=["stage"],
+        unit="s",
+        buckets=[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120],
+    )
+
     SKETCH_PLANE_TOTAL = MetricDefinition(
         name="metaforge_sketch_plane_total",
         type="counter",
@@ -1194,6 +1237,11 @@ class MetricsRegistry:
             cls.SKETCH_SAVE_TOTAL,
             cls.SKETCH_PLANE_TOTAL,
             cls.SKETCH_COMPILE_TOTAL,
+            cls.EXACT_CAD_BUILD_TOTAL,
+            cls.GEOMETRY_VALIDITY_TOTAL,
+            cls.STEP_EXPORT_TOTAL,
+            cls.STEP_ROUND_TRIP_TOTAL,
+            cls.CAD_ARTIFACT_DURATION,
             cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
             cls.CONCEPT_MESH_TOTAL,
         ]
@@ -2113,6 +2161,36 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.SKETCH_SAVE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
+
+    def record_exact_build(self, outcome: str) -> None:
+        """Record one exact CAD build's outcome (CDE slice 6)."""
+        counter = self._instruments.get(MetricsRegistry.EXACT_CAD_BUILD_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_geometry_validity(self, outcome: str) -> None:
+        """Record one B-Rep validity verdict (CDE slice 6)."""
+        counter = self._instruments.get(MetricsRegistry.GEOMETRY_VALIDITY_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_step_export(self, event: str) -> None:
+        """Record a STEP export cache hit or miss, or its ending (CDE slice 6)."""
+        counter = self._instruments.get(MetricsRegistry.STEP_EXPORT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"event": event})
+
+    def record_step_round_trip(self, outcome: str) -> None:
+        """Record one STEP re-import round-trip verdict (CDE slice 6)."""
+        counter = self._instruments.get(MetricsRegistry.STEP_ROUND_TRIP_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_cad_artifact_duration(self, stage: str, seconds: float) -> None:
+        """Record how long one exact CAD stage took (CDE slice 6)."""
+        hist = self._instruments.get(MetricsRegistry.CAD_ARTIFACT_DURATION.name)
+        if hist is not None:
+            hist.record(max(0.0, float(seconds)), attributes={"stage": stage})
 
     def record_sketch_plane(self, action: str, proposed_by: str) -> None:
         """Record one sketch plane manager action (FORGE-790)."""
