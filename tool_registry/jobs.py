@@ -36,6 +36,26 @@ publisher. The default publisher is
 it writes to the durable operation log, in the MCP sidecar it posts to the
 gateway. A job can be cancelled (:meth:`JobRunner.cancel`) or superseded by a
 newer one (:meth:`JobRunner.supersede`); both end it at once and stop its task.
+
+FORGE-788 (scheduling):
+
+* A job may name a ``target_key`` (what it works on, an item key for
+  example) and the ``base_revision`` of that target it starts from. Starting
+  a job on a target supersedes this runner's older jobs still open on the
+  same target in the same project.
+* **Stale results.** With a head resolver installed
+  (:func:`set_job_head_resolver`), a job whose target's head is no longer its
+  ``base_revision`` ends ``stale``: before its work starts (nothing is paid
+  for), or when its result arrives (the result is kept on the record, never
+  adopted). Work that raises the twin's own revision conflict (a pinned
+  ``KEY@n`` write refused because the head moved) ends ``stale`` too, so the
+  head is protected by the twin itself and reported here.
+* **Coalescing.** An identical call (same tool, arguments hash, project and
+  target) from any session within :data:`COALESCE_WINDOW_S` returns the job
+  already covering it, on top of the per-session reuse above.
+* **Retry.** A tool that registers a retry factory (:func:`register_retry`)
+  can have a failed or interrupted job run again with the same arguments, as
+  a new job that names the old one in ``retry_of``.
 """
 
 from __future__ import annotations
@@ -63,15 +83,82 @@ JOBS_PATH_ENV = "METAFORGE_TOOL_JOBS_PATH"
 POLL_TOOL = "twin.job_status"
 #: Seconds after success during which an identical call returns the same job.
 REUSE_WINDOW_S = 600.0
-STATUSES = ("queued", "running", "succeeded", "failed", "interrupted", "cancelled", "superseded")
+#: Seconds during which an identical call from any session joins the job
+#: already covering it (FORGE-788). ``METAFORGE_JOB_COALESCE_WINDOW_S``.
+COALESCE_WINDOW_S = 30.0
+COALESCE_WINDOW_ENV = "METAFORGE_JOB_COALESCE_WINDOW_S"
+STATUSES = (
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "interrupted",
+    "cancelled",
+    "superseded",
+    "stale",
+)
 ACTIVE = frozenset({"queued", "running"})
-TERMINAL = frozenset({"succeeded", "failed", "interrupted", "cancelled", "superseded"})
+TERMINAL = frozenset({"succeeded", "failed", "interrupted", "cancelled", "superseded", "stale"})
+#: The endings a retry can follow.
+RETRYABLE = frozenset({"failed", "interrupted"})
 INTERRUPTED_ERROR = "the server restarted before the job finished; call the tool again"
 CANCELLED_ERROR = "the job was cancelled before it finished"
 SUPERSEDED_ERROR = "a newer request replaced this job before it finished"
+#: The exception names a twin write raises when its pinned base moved.
+_REVISION_CONFLICTS = frozenset({"ItemRevisionConflictError", "ChangeSetConflictError"})
 
 #: Takes ``(project_id, event)`` and delivers an operation event (FORGE-785).
 JobEventPublisher = Callable[[str, dict[str, Any]], Awaitable[Any]]
+#: ``(project_id, target_key) -> the target's head revision`` or ``None``.
+JobHeadResolver = Callable[[str, str], Awaitable[str | None]]
+#: Builds the work of a retried job from its stored arguments.
+RetryFactory = Callable[[dict[str, Any]], Callable[[], Awaitable[dict[str, Any]]]]
+
+_head_resolver: JobHeadResolver | None = None
+_retry_factories: dict[str, RetryFactory] = {}
+
+
+class JobNotRetryableError(ValueError):
+    """A job cannot be run again (unknown, not failed, or its tool cannot)."""
+
+
+def set_job_head_resolver(resolver: JobHeadResolver | None) -> None:
+    """Install (or remove) what reads a target's head for stale checks."""
+    global _head_resolver  # noqa: PLW0603
+    _head_resolver = resolver
+
+
+def register_retry(tool_id: str, factory: RetryFactory) -> None:
+    """Let failed jobs of ``tool_id`` be retried with ``factory(arguments)``."""
+    _retry_factories[tool_id] = factory
+
+
+def retryable_tool(tool_id: str) -> bool:
+    return tool_id in _retry_factories
+
+
+def stale_error(target_key: str | None, base: str | None, head: str | None) -> str:
+    """Why a job ended stale (stored on the job and said on its event)."""
+    target = target_key or "the target"
+    if head is None:
+        return (
+            f"{target} changed while this ran from revision {base}; the newer revision was "
+            "kept and this result was not applied"
+        )
+    return (
+        f"{target} moved on to revision {head} while this ran from revision {base}; the "
+        "newer revision was kept and this result was not applied"
+    )
+
+
+def coalesce_window_s(env: Mapping[str, str] | None = None) -> float:
+    env = os.environ if env is None else env
+    raw = (env.get(COALESCE_WINDOW_ENV) or "").strip()
+    try:
+        return max(float(raw), 0.0) if raw else COALESCE_WINDOW_S
+    except ValueError:
+        return COALESCE_WINDOW_S
+
 
 #: Each step of a job's life has a fixed operation ``sequence``, so its events
 #: stay ordered however they travel (an HTTP post from the sidecar can arrive
@@ -92,6 +179,13 @@ _JOB_EVENTS: dict[str, tuple[int, str, str, str, str]] = {
     ),
     "cancelled": (90, "cancelled", "cancelled", "info", "Cancelled"),
     "superseded": (90, "superseded", "superseded", "info", "Replaced by a newer request"),
+    "stale": (
+        90,
+        "stale",
+        "stale",
+        "warning",
+        "The design moved on while this ran; the newer revision was kept",
+    ),
 }
 _MAX_ERROR_CHARS = 2000
 _SENTINEL_SESSION = "00000000-0000-0000-0000-000000000000"
@@ -107,6 +201,18 @@ def _count(tool_id: str, status: str) -> None:
 
             _metrics = collector_for("metaforge-gateway")
         _metrics.record_tool_job(tool_id, status)
+    except Exception:  # noqa: BLE001 - a metric never fails a job
+        pass
+
+
+def _count_scheduling(action: str, outcome: str = "ok") -> None:
+    global _metrics  # noqa: PLW0603
+    try:
+        if _metrics is None:
+            from observability.metrics import collector_for
+
+            _metrics = collector_for("metaforge-gateway")
+        _metrics.record_operation_scheduling("job", action, outcome)
     except Exception:  # noqa: BLE001 - a metric never fails a job
         pass
 
@@ -149,6 +255,11 @@ class JobRecord:
     error: str | None = None
     expected_seconds: float | None = None
     notified: bool = False
+    #: FORGE-788: the call's arguments, kept so a failed job can be retried.
+    arguments: dict[str, Any] | None = None
+    target_key: str | None = None
+    base_revision: str | None = None
+    retry_of: str | None = None
 
     @property
     def done(self) -> bool:
@@ -168,6 +279,9 @@ class JobRecord:
             "expected_seconds": self.expected_seconds,
             "result": self.result,
             "error": self.error,
+            "target_key": self.target_key,
+            "base_revision": self.base_revision,
+            "retry_of": self.retry_of,
         }
         if self.started_at is not None:
             end = self.finished_at if self.finished_at is not None else time.time()
@@ -177,8 +291,11 @@ class JobRecord:
 
 _COLUMNS = (
     "job_id, tool_id, arguments_hash, session_id, project_id, status, created_at, "
-    "started_at, finished_at, result, error, expected_seconds, notified"
+    "started_at, finished_at, result, error, expected_seconds, notified, "
+    "arguments, target_key, base_revision, retry_of"
 )
+#: Columns added after the first release (FORGE-788); an older file gains them.
+_ADDED_COLUMNS = ("arguments", "target_key", "base_revision", "retry_of")
 
 
 class JobStore:
@@ -209,6 +326,14 @@ class JobStore:
             self._db.execute(
                 "CREATE INDEX IF NOT EXISTS tool_jobs_session ON tool_jobs (session_id, notified)"
             )
+            have = {r[1] for r in self._db.execute("PRAGMA table_info(tool_jobs)")}
+            for column in _ADDED_COLUMNS:
+                if column not in have:
+                    self._db.execute(f"ALTER TABLE tool_jobs ADD COLUMN {column} TEXT")
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS tool_jobs_target ON tool_jobs"
+                " (project_id, target_key, status)"
+            )
             stale = self._db.execute(
                 "SELECT job_id, tool_id FROM tool_jobs WHERE status IN ('queued', 'running')"
             ).fetchall()
@@ -238,6 +363,7 @@ class JobStore:
     @staticmethod
     def _row(row: tuple[Any, ...]) -> JobRecord:
         result = json.loads(row[9]) if row[9] else None
+        arguments = json.loads(row[13]) if row[13] else None
         return JobRecord(
             job_id=row[0],
             tool_id=row[1],
@@ -252,12 +378,17 @@ class JobStore:
             error=row[10],
             expected_seconds=row[11],
             notified=bool(row[12]),
+            arguments=arguments if isinstance(arguments, dict) else None,
+            target_key=row[14],
+            base_revision=row[15],
+            retry_of=row[16],
         )
 
     def insert(self, job: JobRecord) -> None:
         with self._lock:
             self._db.execute(
-                f"INSERT INTO tool_jobs ({_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",  # noqa: S608
+                f"INSERT INTO tool_jobs ({_COLUMNS})"  # noqa: S608
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     job.job_id,
                     job.tool_id,
@@ -272,6 +403,10 @@ class JobStore:
                     job.error,
                     job.expected_seconds,
                     int(job.notified),
+                    json.dumps(job.arguments, default=str) if job.arguments is not None else None,
+                    job.target_key,
+                    job.base_revision,
+                    job.retry_of,
                 ),
             )
 
@@ -307,19 +442,58 @@ class JobStore:
         project_id: str | None,
         *,
         since: float,
+        target_key: str | None = None,
+        base_revision: str | None = None,
     ) -> JobRecord | None:
-        """A job covering the same call: still running, or succeeded at or after ``since``."""
+        """A job covering the same call: still running, or succeeded at or after ``since``.
+
+        The same call means the same target and base revision too (FORGE-788).
+        """
         with self._lock:
             row = self._db.execute(
                 f"SELECT {_COLUMNS} FROM tool_jobs"  # noqa: S608
                 " WHERE tool_id = ? AND arguments_hash = ? AND session_id = ?"
-                " AND project_id IS ?"
+                " AND project_id IS ? AND target_key IS ? AND base_revision IS ?"
                 " AND (status IN ('queued', 'running')"
                 "      OR (status = 'succeeded' AND finished_at >= ?))"
                 " ORDER BY created_at DESC LIMIT 1",
-                (tool_id, args_hash, session_id, project_id, since),
+                (tool_id, args_hash, session_id, project_id, target_key, base_revision, since),
             ).fetchone()
         return self._row(row) if row else None
+
+    def find_coalescible(
+        self,
+        tool_id: str,
+        args_hash: str,
+        project_id: str,
+        target_key: str | None,
+        *,
+        since: float,
+        base_revision: str | None = None,
+    ) -> JobRecord | None:
+        """A job of any session covering the same call (same project, target and
+        base), open or created at or after ``since``, and not failed (FORGE-788)."""
+        with self._lock:
+            row = self._db.execute(
+                f"SELECT {_COLUMNS} FROM tool_jobs"  # noqa: S608
+                " WHERE tool_id = ? AND arguments_hash = ? AND project_id = ?"
+                " AND target_key IS ? AND base_revision IS ? AND created_at >= ?"
+                " AND status IN ('queued', 'running', 'succeeded')"
+                " ORDER BY created_at DESC LIMIT 1",
+                (tool_id, args_hash, project_id, target_key, base_revision, since),
+            ).fetchone()
+        return self._row(row) if row else None
+
+    def active_for_target(self, project_id: str, target_key: str) -> list[JobRecord]:
+        """Jobs still open on ``target_key`` in ``project_id``, oldest first."""
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT {_COLUMNS} FROM tool_jobs"  # noqa: S608
+                " WHERE project_id = ? AND target_key = ? AND status IN ('queued', 'running')"
+                " ORDER BY created_at",
+                (project_id, target_key),
+            ).fetchall()
+        return [self._row(r) for r in rows]
 
     def take_unnotified(self, session_id: str) -> list[JobRecord]:
         """This session's finished jobs it has not been told of, now marked told."""
@@ -327,7 +501,8 @@ class JobStore:
             rows = self._db.execute(
                 f"SELECT {_COLUMNS} FROM tool_jobs"  # noqa: S608
                 " WHERE session_id = ? AND notified = 0"
-                " AND status IN ('succeeded', 'failed', 'interrupted', 'cancelled', 'superseded')"
+                " AND status IN"
+                " ('succeeded', 'failed', 'interrupted', 'cancelled', 'superseded', 'stale')"
                 " ORDER BY finished_at",
                 (session_id,),
             ).fetchall()
@@ -385,10 +560,20 @@ class JobRunner:
             "severity": severity,
             "message": message,
         }
+        if job.target_key:
+            event["target_key"] = job.target_key[:200]
+        if job.base_revision:
+            event["base_revision"] = job.base_revision[:200]
+        if job.retry_of:
+            event["retry_of"] = f"job:{job.retry_of}"
+        if status == "stale" and job.error:
+            event["message"] = job.error[:500]
         if status in ACTIVE:
             event["action_refs"] = [
                 {"kind": "cancel", "id": f"job:{job.job_id}", "label": "Cancel"}
             ]
+        elif status in RETRYABLE and job.arguments is not None and retryable_tool(job.tool_id):
+            event["action_refs"] = [{"kind": "retry", "id": f"job:{job.job_id}", "label": "Retry"}]
         if status == "succeeded" and job.result:
             node_id = job.result.get("node_id")
             if node_id:
@@ -448,12 +633,20 @@ class JobRunner:
         session_id: str,
         project_id: str | None = None,
         expected_seconds: float | None = None,
+        target_key: str | None = None,
+        base_revision: str | None = None,
+        retry_of: str | None = None,
     ) -> tuple[JobRecord, bool]:
         """Start ``work`` as a job; ``(job, reused)``.
 
         An identical call (same tool, arguments hash, session and project)
         that is still running, or that succeeded within the reuse window,
-        returns that job instead and ``work`` is never called.
+        returns that job instead and ``work`` is never called. So does one
+        from any session in the same project and target within the coalesce
+        window (FORGE-788).
+
+        A new job on a ``target_key`` supersedes this runner's older jobs
+        still open on the same target in the same project.
         """
         args_hash = arguments_hash(arguments)
         # No await from the lookup to the task's creation, so two identical
@@ -465,7 +658,25 @@ class JobRunner:
             session_id,
             project_id,
             since=now - self._reuse_window_s,
+            target_key=target_key or None,
+            base_revision=base_revision or None,
         )
+        if (existing is None or not (existing.done or existing.job_id in self._tasks)) and (
+            project_id and retry_of is None
+        ):
+            window = coalesce_window_s()
+            existing = (
+                self.store.find_coalescible(
+                    tool_id,
+                    args_hash,
+                    project_id,
+                    target_key or None,
+                    since=now - window,
+                    base_revision=base_revision or None,
+                )
+                if window > 0
+                else None
+            )
         if existing is not None and (existing.done or existing.job_id in self._tasks):
             logger.info(
                 "tool_job_reused",
@@ -473,7 +684,9 @@ class JobRunner:
                 tool=tool_id,
                 status=existing.status,
                 session_id=session_id,
+                coalesced=existing.session_id != session_id,
             )
+            _count_scheduling("coalesced")
             return existing, True
         job = JobRecord(
             job_id=str(uuid.uuid4()),
@@ -484,21 +697,103 @@ class JobRunner:
             status="queued",
             created_at=now,
             expected_seconds=expected_seconds,
+            arguments=dict(arguments),
+            target_key=target_key or None,
+            base_revision=base_revision or None,
+            retry_of=retry_of,
         )
         self.store.insert(job)
+        if project_id and job.target_key:
+            for older in self.store.active_for_target(project_id, job.target_key):
+                if older.job_id != job.job_id:
+                    self.supersede(older.job_id, by=job.job_id)
         self._changed(job, "queued")
         task = asyncio.get_running_loop().create_task(self._run(job, work))
         self._tasks[job.job_id] = task
         return job, False
 
+    async def retry(self, job_id: str) -> JobRecord:
+        """Run a failed or interrupted job again, as a new job naming it in ``retry_of``.
+
+        Raises :class:`JobNotRetryableError` when the job is unknown, did not
+        fail, or its tool registered no retry. The new job takes the same
+        arguments, session, project, target and base revision.
+        """
+        job = self.store.get(job_id)
+        if job is None:
+            raise JobNotRetryableError(f"job '{job_id}' is not known here")
+        if job.status not in RETRYABLE:
+            raise JobNotRetryableError(
+                f"job '{job_id}' is {job.status}; only a failed job can be retried"
+            )
+        factory = _retry_factories.get(job.tool_id)
+        if factory is None or job.arguments is None:
+            raise JobNotRetryableError(f"{job.tool_id} jobs cannot be retried from here")
+        try:
+            work = factory(dict(job.arguments))
+        except ValueError as exc:
+            raise JobNotRetryableError(str(exc)) from exc
+        new, _reused = await self.start(
+            job.tool_id,
+            job.arguments,
+            work,
+            session_id=job.session_id,
+            project_id=job.project_id,
+            expected_seconds=job.expected_seconds,
+            target_key=job.target_key,
+            base_revision=job.base_revision,
+            retry_of=job.job_id,
+        )
+        logger.info("tool_job_retried", job_id=new.job_id, retry_of=job.job_id, tool=job.tool_id)
+        _count_scheduling("retry")
+        return new
+
+    async def _head_moved(self, job: JobRecord) -> tuple[bool, str | None]:
+        """``(moved, head)``: whether the job's target left its base revision."""
+        resolver = _head_resolver
+        if resolver is None or not job.project_id or not job.target_key or not job.base_revision:
+            return False, None
+        try:
+            head = await resolver(job.project_id, job.target_key)
+        except Exception as exc:  # noqa: BLE001 - no answer is not a stale result
+            logger.info("tool_job_head_unavailable", job_id=job.job_id, error=str(exc))
+            return False, None
+        return head is not None and head != job.base_revision, head
+
+    def _end_stale(
+        self, job: JobRecord, head: str | None, result: dict[str, Any] | None = None
+    ) -> None:
+        error = stale_error(job.target_key, job.base_revision, head)
+        job.error = error
+        fields: dict[str, Any] = {"status": "stale", "finished_at": self._clock(), "error": error}
+        if result is not None:
+            fields["result"] = result
+            job.result = result
+        self.store.update(job.job_id, **fields)
+        self._changed(job, "stale", head=head, base_revision=job.base_revision)
+
     async def _run(self, job: JobRecord, work: Callable[[], Awaitable[dict[str, Any]]]) -> None:
         if job.job_id in self._ended:
+            return
+        try:
+            moved, head = await self._head_moved(job)
+        except asyncio.CancelledError:
+            self._tasks.pop(job.job_id, None)
+            raise
+        if job.job_id in self._ended:
+            return  # cancelled or superseded while the head was read
+        if moved:
+            # Nothing is paid for: the target moved before the work began.
+            self._tasks.pop(job.job_id, None)
+            self._end_stale(job, head)
             return
         started = self._clock()
         self.store.update(job.job_id, status="running", started_at=started)
         self._changed(job, "running")
         try:
             result = await work()
+            stored = result if isinstance(result, dict) else {"value": result}
+            moved, head = await self._head_moved(job)
         except asyncio.CancelledError:
             if job.job_id in self._ended:
                 raise  # cancel() or supersede() already recorded how it ended
@@ -511,11 +806,21 @@ class JobRunner:
             self._changed(job, "interrupted", reason="cancelled")
             raise
         except Exception as exc:  # noqa: BLE001 - recorded on the job, never lost
+            if {c.__name__ for c in type(exc).__mro__} & _REVISION_CONFLICTS:
+                # The twin refused a write pinned to a base that moved: the
+                # head was protected; this job's result is stale, not failed.
+                self._end_stale(job, None)
+                return
             error = f"{type(exc).__name__}: {exc}"[:_MAX_ERROR_CHARS]
             self.store.update(job.job_id, status="failed", finished_at=self._clock(), error=error)
+            job.error = error
             self._changed(job, "failed", error=error, duration_s=round(self._clock() - started, 1))
         else:
-            stored = result if isinstance(result, dict) else {"value": result}
+            if job.job_id in self._ended:
+                return
+            if moved:
+                self._end_stale(job, head, stored)
+                return
             self.store.update(
                 job.job_id, status="succeeded", finished_at=self._clock(), result=stored
             )

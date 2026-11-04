@@ -71,6 +71,45 @@ describe('create store', () => {
     expect(intentOf(send.mock.calls[1]![1].content)).toBe('change');
   });
 
+  it('names the turn operation before sending and keeps the operation id the gateway returns', async () => {
+    let release: () => void = () => undefined;
+    const send = vi
+      .spyOn(chat, 'sendTwinChatMessage')
+      .mockImplementation(() => new Promise((r) => (release = () => r({ operation_id: 'chat:from-gateway' } as never))));
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());
+    const s = useCreateStore.getState();
+    s.setDraft(P, 'A desk hook');
+    s.submit(P, TOOLS);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const sending = useCreateStore.getState().session(P).queue[0]!;
+    // The acknowledgement can be matched to the stream before the reply returns.
+    expect(send.mock.calls[0]![1].client_turn_id).toBe(sending.id);
+    expect(sending.operationId).toBe(`chat:${sending.id}`);
+    release();
+    await waitFor(() => expect(useCreateStore.getState().session(P).queue).toHaveLength(0));
+    expect(useCreateStore.getState().session(P).lastOperationId).toBe('chat:from-gateway');
+  });
+
+  it('sends a retried instruction as a new turn', async () => {
+    const send = vi
+      .spyOn(chat, 'sendTwinChatMessage')
+      .mockRejectedValueOnce(new Error('gateway down'))
+      .mockResolvedValue({} as never);
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());
+    const s = useCreateStore.getState();
+    s.setDraft(P, 'again');
+    s.submit(P, TOOLS);
+    await waitFor(() => expect(useCreateStore.getState().session(P).queue[0]?.state).toBe('failed'));
+    const failed = useCreateStore.getState().session(P).queue[0]!;
+    s.retry(P, failed.id, TOOLS);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    const first = send.mock.calls[0]![1].client_turn_id;
+    const second = send.mock.calls[1]![1].client_turn_id;
+    expect(first).toBe(failed.id);
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+
   it('keeps a failed instruction to retry or edit', async () => {
     vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());
     vi.spyOn(chat, 'sendTwinChatMessage').mockRejectedValue(new Error('gateway down'));

@@ -49,6 +49,7 @@ import { AssemblyJointsEditor } from '../components/viewer/AssemblyJointsEditor'
 import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
 import { ActivityOverlay } from '../components/activity/ActivityOverlay';
 import { useOperations } from '../hooks/use-operations';
+import { useOperationActions } from '../hooks/use-operation-actions';
 import { useViewerStore } from '../store/viewer-store';
 import { useLayoutStore } from '../store/layout-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
@@ -1155,6 +1156,9 @@ export function TwinViewerPage() {
   const projectName = sampleMode ? SAMPLE_PROJECT_NAME : activeProject?.name;
   // FORGE-786: the project's live operations, shared with the Create view.
   useOperations(sampleMode ? null : activeProjectId);
+  // FORGE-788: cancel and retry from the overlay call the gateway; a review
+  // opens the existing approval card inline.
+  const operationAction = useOperationActions(activeProjectId ?? '');
 
   // ── data ──
   const {
@@ -1479,7 +1483,12 @@ export function TwinViewerPage() {
 
       <section className="tw-view" aria-label="Twin model and graph">
         {activeProjectId && !sampleMode && (
-          <ActivityOverlay projectId={activeProjectId} detail className="act-dock-engineering" />
+          <ActivityOverlay
+            projectId={activeProjectId}
+            detail
+            className="act-dock-engineering"
+            onAction={operationAction}
+          />
         )}
         <div className="tw-render-area">
           {tab === 'graph' ? (

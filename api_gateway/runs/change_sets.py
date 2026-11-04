@@ -116,6 +116,40 @@ def _project(run: Run) -> str | None:
         return None
 
 
+async def gate_revision(run: Run, snapshot: dict[str, Any] | None) -> str | None:
+    """The revision of what a person reviews at ``run``'s open gate (FORGE-788, RT-030).
+
+    A digest of the gate's phase and attempt and of the run's open drafts
+    (each item's key, draft revision and the base revision it was drafted
+    on), from the same change set an approval commits. It changes when the
+    run re-drafts, retries, moves to another gate or rebases, so a decision
+    sent with the revision the person saw is refused once the proposal under
+    it has changed. ``None`` when the run is not parked at a gate.
+    """
+    import hashlib
+
+    if run.status is not RunStatus.AWAITING_APPROVAL:
+        return None
+    parts = [
+        f"phase={(snapshot or {}).get('phase') or ''}",
+        f"attempt={(snapshot or {}).get('attempt') or ''}",
+    ]
+    twin = _twin()
+    if _enabled(twin):
+        from twin_core.items import open_drafts
+
+        try:
+            for item in await open_drafts(twin, run.id, _project(run)):
+                entry = item.drafts.get(run.id) or {}
+                parts.append(
+                    f"{item.key}@{entry.get('revision') or 0}<-{entry.get('base_revision') or 0}"
+                )
+        except Exception as exc:  # noqa: BLE001 - the gate stays decidable without it
+            logger.info("run_gate_revision_unavailable", run_id=run.id, error=str(exc))
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+    return f"gate:{digest}"
+
+
 async def commit_for_approval(
     run: Run, *, gate: str | None, decided_by: str, reason: str
 ) -> dict[str, Any] | None:

@@ -56,6 +56,14 @@ class SendMessageRequest(BaseModel):
     tools: list[str] | None = Field(
         default=None, description="Enabled MCP tool ids for this turn (None = all available)"
     )
+    #: FORGE-788 (RT-001): an id the client chose for this turn, so it knows
+    #: the turn's operation (``chat:<id>``) before the reply returns. Ignored
+    #: when malformed or already used in the project.
+    client_turn_id: str | None = Field(
+        default=None,
+        max_length=96,
+        description="Client-chosen turn id; the turn's operation is chat:<client_turn_id>",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +89,9 @@ class MessageResponse(BaseModel):
     )
     created_at: datetime
     updated_at: datetime
+    #: FORGE-788 (RT-001): the turn's operation on the project stream
+    #: (``chat:<id>``), for a person's message in a project thread.
+    operation_id: str | None = None
 
 
 class ThreadResponse(BaseModel):

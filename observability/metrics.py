@@ -930,6 +930,16 @@ class MetricsRegistry:
         unit="s",
         buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
     )
+    OPERATION_SCHEDULING_TOTAL = MetricDefinition(
+        name="metaforge_operation_scheduling_total",
+        type="counter",
+        description=(
+            "Operation scheduling decisions, by kind, action (superseded, "
+            "stale_rejected, coalesced, cancel, retry) and outcome (ok, refused, "
+            "error) (FORGE-788)"
+        ),
+        labels=["kind", "action", "outcome"],
+    )
 
     # ── Sketch saves from the Create stage (FORGE-789) ─────────────────
 
@@ -1047,6 +1057,7 @@ class MetricsRegistry:
             cls.OPERATION_STREAM_ACTIVE,
             cls.OPERATION_ACTIVE,
             cls.OPERATION_EVENT_PUBLISH_LAG,
+            cls.OPERATION_SCHEDULING_TOTAL,
         ]
 
     @classmethod
@@ -2117,6 +2128,12 @@ class MetricsCollector:
         gauge = self._instruments.get(MetricsRegistry.OPERATION_ACTIVE.name)
         if gauge is not None:
             gauge.add(delta, attributes={"kind": kind})
+
+    def record_operation_scheduling(self, kind: str, action: str, outcome: str = "ok") -> None:
+        """Record a supersede, stale rejection, coalesce, cancel or retry (FORGE-788)."""
+        counter = self._instruments.get(MetricsRegistry.OPERATION_SCHEDULING_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind, "action": action, "outcome": outcome})
 
     def record_watchdog_restart(self, service: str, reason: str, outcome: str) -> None:
         """Record a restart the watchdog made, suppressed, or failed to make."""

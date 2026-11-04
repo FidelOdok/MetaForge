@@ -7,6 +7,7 @@ import { formatRelativeTime } from '../../utils/format-time';
 import type {
   ApprovalDecision,
   ApprovalDecisionRecord,
+  ApprovalDecisionRequest,
   ApprovalFinding,
   ApprovalItem,
   GateReview,
@@ -338,11 +339,11 @@ export function ApprovalCard({ item, onDecided }: ApprovalCardProps) {
 
   function submit() {
     if (!choice || missingReason || missingPhase) return;
-    const body: { decision: ApprovalDecision; reason?: string; to_phase?: string } = {
-      decision: choice,
-    };
+    const body: ApprovalDecisionRequest = { decision: choice };
     if (reason.trim()) body.reason = reason.trim();
     if (needsPhase) body.to_phase = toPhase;
+    // RT-030: bind the decision to what was reviewed; a changed proposal is a 409.
+    if (item.base_revision) body.base_revision = item.base_revision;
     decide.mutate(
       { id: item.id, body },
       {

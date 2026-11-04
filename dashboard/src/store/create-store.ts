@@ -38,6 +38,12 @@ export interface Instruction {
   state: InstructionState;
   error?: string;
   createdAt: string;
+  /**
+   * The turn's operation on the project stream (FORGE-788, RT-001). Set when
+   * the instruction is sent (the gateway names it after this instruction), so
+   * the server's acknowledgement shows before the reply returns.
+   */
+  operationId?: string;
 }
 
 export interface CreateSession {
@@ -47,6 +53,8 @@ export interface CreateSession {
   queue: Instruction[];
   threadId: string | null;
   selectedNodeId: string | null;
+  /** The operation id the gateway returned for the last turn it answered. */
+  lastOperationId: string | null;
 }
 
 const EMPTY: CreateSession = {
@@ -56,6 +64,7 @@ const EMPTY: CreateSession = {
   queue: [],
   threadId: null,
   selectedNodeId: null,
+  lastOperationId: null,
 };
 
 /** The same instructions the Engineering chat drawer appends, so both strip them for display. */
@@ -140,19 +149,26 @@ export const useCreateStore = create<CreateStore>()(
         if (s.queue.some((i) => i.state === 'sending')) return;
         const next = s.queue.find((i) => i.state === 'queued');
         if (!next) return;
-        updateInstruction(projectId, next.id, { state: 'sending', error: undefined });
+        // A retried instruction is a new turn: a fresh id, so its operation is new too.
+        const turnId = next.operationId ? nextId('turn') : next.id;
+        updateInstruction(projectId, next.id, { state: 'sending', error: undefined, operationId: `chat:${turnId}` });
         try {
           const threadId = await ensureThread(projectId);
           const refs = next.references.length
             ? '\n\nAttached twin work products (references, not inline image content): ' +
               JSON.stringify(next.references.map((id) => ({ id })))
             : '';
-          await sendTwinChatMessage(threadId, {
+          const sent = await sendTwinChatMessage(threadId, {
             content: next.text + refs + INTENT_INSTRUCTION[next.intent],
             tools: turnTools.get(next.id) ?? [],
+            client_turn_id: turnId,
           });
           turnTools.delete(next.id);
-          patch(projectId, (cur) => ({ queue: cur.queue.filter((i) => i.id !== next.id) }));
+          // The gateway's operation id is the acknowledgement of record.
+          patch(projectId, (cur) => ({
+            queue: cur.queue.filter((i) => i.id !== next.id),
+            lastOperationId: sent.operation_id ?? cur.lastOperationId,
+          }));
         } catch (error) {
           updateInstruction(projectId, next.id, { state: 'failed', error: refusalOf(error) });
         }

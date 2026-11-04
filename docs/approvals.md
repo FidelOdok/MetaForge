@@ -50,7 +50,13 @@ The id is `<prefix>:<native id>`. The prefix says which store holds the item;
 `created_at`, `deadline` (ISO-8601), `route` (`dashboard`, `elicitation` or
 null), `requested_by`, `reason_held`, `findings`, `allowed_decisions`,
 `rework_targets`, `reason_required_for`, `decidable`, `not_decidable_reason`,
-`detail` and `decision`.
+`detail`, `decision` and `base_revision`.
+
+`base_revision` is the revision of what the item asks about, where one is
+known: a sketch's or drawing's content hash, a pending gate's `gate:<digest>`
+(its phase, attempt and the run's open drafts), or a pending design change's
+`wp:<digest>` (the content of the work products it affects). Otherwise it is
+null. See [stale decisions](#stale-decisions).
 
 ### Gate findings
 
@@ -85,6 +91,18 @@ later, finds the hold already decided. See
 | 422 | Decision not offered for this kind, invalid `to_phase`, or no `reason` for `reject`, `retry` or `rework`. |
 | 200 | `reject` on a gate whose workflow no longer exists: the decision is saved and there is no run left to signal. |
 | 503 | A gate decision was recorded but could not be delivered to the workflow; or committing a gate's drafts failed part-way (heads restored, approve again). |
+
+### Stale decisions
+
+A decision may carry the item's `base_revision` as the person saw it. When the
+item has moved on since (a gate's run re-drafted, retried or reached another
+gate; a design change's work products changed; a sketch was redrawn), the
+decision is refused with **409**, nothing is recorded and the item stays
+pending: approving a proposal nobody looked at is never possible. Read the
+item again and decide on what it now shows. `POST /v1/runs/{id}/approval`
+takes the same optional `base_revision` for a gate. A decision that sends
+none, or an item that tracks none, is unaffected. The dashboard's approval
+cards always send the revision they display.
 
 ### Identity and surface
 

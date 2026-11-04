@@ -94,14 +94,36 @@ def _title_and_domain(run: Run) -> tuple[str, str]:
 
 def _common(run: Run) -> dict[str, Any]:
     title, domain = _title_and_domain(run)
-    return {"run_id": run.id, "kind": "run", "title": title[:200], "domain": domain}
+    common: dict[str, Any] = {
+        "run_id": run.id,
+        "kind": "run",
+        "title": title[:200],
+        "domain": domain,
+    }
+    retry_of = run.request.get("retry_of")
+    if retry_of:
+        # FORGE-788: a run started by retrying a failed one names it.
+        common["retry_of"] = _operation_id(str(retry_of))[:200]
+    return common
 
 
 def _cancel_action(run: Run) -> list[dict[str, str]]:
-    # Only a plain run can be cancelled from the operations API (see routes).
-    if _is_design_flow(run) or run.is_terminal:
+    # FORGE-788: a design flow is cancellable too (its workflow is stopped).
+    if run.is_terminal:
         return []
     return [{"kind": "cancel", "id": _operation_id(run.id), "label": "Cancel"}]
+
+
+def _retry_action(run: Run) -> list[dict[str, str]]:
+    """``retry`` only where re-running is safe: a failed design flow (FORGE-788)."""
+    try:
+        from api_gateway.operations.scheduling import run_retryable
+
+        if run_retryable(run):
+            return [{"kind": "retry", "id": _operation_id(run.id), "label": "Retry"}]
+    except Exception:  # noqa: BLE001 - an action is never worth failing a transition
+        pass
+    return []
 
 
 def _approval_action(run: Run) -> list[dict[str, str]]:
@@ -183,7 +205,14 @@ def _report(run: Run) -> None:
     elif status in _TERMINAL:
         event_type, state, severity, message = _TERMINAL[status]
         operations.publish(
-            project_id, op, event_type, state, message=message, severity=severity, **common
+            project_id,
+            op,
+            event_type,
+            state,
+            message=message,
+            severity=severity,
+            action_refs=_retry_action(run),
+            **common,
         )
     if run.is_terminal:
         _stages.pop(run.id, None)

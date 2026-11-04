@@ -16,7 +16,9 @@ Append rules, all enforced in the transaction:
   event (an idempotent retry);
 * a ``sequence`` at or below the operation's last one is refused (out of
   order, or a replay of something older);
-* a non-terminal event after a terminal one is refused.
+* a non-terminal event after a terminal one is refused, and so is any
+  terminal one bar ``stale`` after ``completed`` (FORGE-788: a late result
+  of a cancelled or superseded operation never becomes its outcome).
 
 The path is ``METAFORGE_OPERATIONS_PATH``, else ``~/.metaforge/operations.db``
 (on the ``metaforge-home`` volume in compose). ``:memory:`` keeps nothing
@@ -107,6 +109,10 @@ _SCHEMA = (
     "CREATE INDEX IF NOT EXISTS operations_active ON operations (project_id, terminal, updated_at)",
 )
 
+#: Columns added after the first release, with their type (FORGE-788). A
+#: database written before them gains them on open.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (("operations", "target_key", "TEXT"),)
+
 
 class OperationStore:
     """The operation event log and snapshots in SQLite. Thread-safe."""
@@ -131,6 +137,14 @@ class OperationStore:
                 self._db.execute("PRAGMA journal_mode=WAL")
             for statement in _SCHEMA:
                 self._db.execute(statement)
+            for table, column, sql_type in _ADDED_COLUMNS:
+                have = {r[1] for r in self._db.execute(f"PRAGMA table_info({table})")}
+                if column not in have:
+                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS operations_target ON operations"
+                " (project_id, target_key, terminal)"
+            )
         self.prune()
 
     # ── append ──────────────────────────────────────────────────────────
@@ -173,7 +187,7 @@ class OperationStore:
                 "refused",
                 reason=f"sequence {incoming.sequence} is not after {last_sequence}",
             )
-        if op_row and is_terminal(op_row[0]) and not is_terminal(incoming.state):
+        if op_row and is_terminal(op_row[0]) and not _may_follow_terminal(op_row[0], incoming):
             return AppendResult(
                 "refused",
                 reason=f"operation is already {op_row[0]}; a '{incoming.type}' event cannot follow",
@@ -215,12 +229,13 @@ class OperationStore:
         snapshot = fold(previous, event)
         self._db.execute(
             "INSERT INTO operations"
-            " (project_id, operation_id, kind, state, terminal, last_sequence, updated_at, body)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            " (project_id, operation_id, kind, state, terminal, last_sequence, updated_at,"
+            " body, target_key)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(project_id, operation_id) DO UPDATE SET"
             " kind = excluded.kind, state = excluded.state, terminal = excluded.terminal,"
             " last_sequence = excluded.last_sequence, updated_at = excluded.updated_at,"
-            " body = excluded.body",
+            " body = excluded.body, target_key = excluded.target_key",
             (
                 project_id,
                 snapshot.operation_id,
@@ -230,6 +245,7 @@ class OperationStore:
                 snapshot.last_sequence,
                 now,
                 snapshot.model_dump_json(),
+                snapshot.target_key,
             ),
         )
         return AppendResult("stored", event)
@@ -307,6 +323,23 @@ class OperationStore:
             rows = self._db.execute(sql, (project_id, int(limit))).fetchall()
         return [OperationSnapshot.model_validate_json(r[0]) for r in rows]
 
+    def active_for_target(
+        self, project_id: str, target_key: str, *, exclude: str | None = None
+    ) -> list[OperationSnapshot]:
+        """Operations of a project still open on ``target_key``, oldest first (FORGE-788)."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT operation_id, body FROM operations"
+                " WHERE project_id = ? AND target_key = ? AND terminal = 0"
+                " ORDER BY updated_at",
+                (project_id, target_key),
+            ).fetchall()
+        return [
+            OperationSnapshot.model_validate_json(body)
+            for operation_id, body in rows
+            if operation_id != exclude
+        ]
+
     def count_active(self) -> dict[str, int]:
         """Operations not yet terminal, by kind, across every project."""
         with self._lock:
@@ -340,6 +373,20 @@ class OperationStore:
     def close(self) -> None:
         with self._lock:
             self._db.close()
+
+
+def _may_follow_terminal(current: str, incoming: OperationEventIn) -> bool:
+    """Whether ``incoming`` may follow an operation that already ended.
+
+    Only one change is real after an ending: a completed result going stale
+    because its target moved on. Anything else (a late result of a job that
+    was cancelled or superseded, say) is refused, so it can never be reported
+    as the current outcome (FORGE-788, DEF-008).
+    """
+    return (
+        OperationState(current) is OperationState.COMPLETED
+        and incoming.state is OperationState.STALE
+    )
 
 
 # ── folding events into a snapshot ──────────────────────────────────────
@@ -396,6 +443,8 @@ def fold(previous: OperationSnapshot | None, event: OperationEvent) -> Operation
         last_sequence=event.sequence,
         base_revision=event.base_revision or (previous.base_revision if previous else None),
         target_revision=event.target_revision or (previous.target_revision if previous else None),
+        target_key=event.target_key or (previous.target_key if previous else None),
+        retry_of=event.retry_of or (previous.retry_of if previous else None),
         message=event.message,
         severity=event.severity,
         artifact_refs=artifacts,

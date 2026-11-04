@@ -1693,7 +1693,12 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
     the run list, the SSE stream and the ledger all read from it.
 
     The deciding human comes from the request, never the body (FORGE-393).
+
+    FORGE-788 (RT-030): a ``base_revision`` that is no longer the gate's
+    (the run re-drafted, retried or moved on since the person looked) is 409.
     """
+    if body.base_revision is not None:
+        await _refuse_stale_gate_decision(run_id, body.base_revision)
     run = await decide_run_gate(
         run_id,
         ApprovalDecision(body.decision),
@@ -1702,6 +1707,27 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
         to_phase=body.to_phase,
     )
     return RunResponse.from_run(run)
+
+
+async def _refuse_stale_gate_decision(run_id: str, seen: str) -> None:
+    """409 when the gate's revision is no longer the one the decider saw."""
+    try:
+        run = await _reconcile_run(_store.get(run_id))
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    snapshot = await gate_snapshot(run) if run.status is RunStatus.AWAITING_APPROVAL else None
+    current = await run_change_sets.gate_revision(run, snapshot)
+    if current is not None and current != seen:
+        logger.info(
+            "run_gate_decision_stale", run_id=run_id, seen_revision=seen, current_revision=current
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"the gate of run '{run_id}' has changed since it was reviewed (reviewed "
+                f"revision {seen}, current {current}); review it again"
+            ),
+        )
 
 
 async def _open_gate_name(run: Run) -> str | None:

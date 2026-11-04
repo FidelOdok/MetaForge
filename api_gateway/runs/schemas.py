@@ -32,6 +32,10 @@ class ApprovalRequest(BaseModel):
     #: For a ``rework`` (FORGE-500): the id of an earlier phase of this run to
     #: go back to. The phase and every later one re-run and re-open their gates.
     to_phase: str = Field(default="", max_length=200)
+    #: FORGE-788 (RT-030): the gate's ``base_revision`` as the decider saw it
+    #: (``GET /v1/approvals/gate:<run id>``). Optional; when given and the
+    #: gate's proposal has changed since, the decision is refused with 409.
+    base_revision: str | None = Field(default=None, max_length=200)
 
 
 def _optional_str(value: Any) -> str | None:
