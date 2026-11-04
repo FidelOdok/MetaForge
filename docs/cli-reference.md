@@ -186,11 +186,23 @@ Two consequences worth knowing:
 ```bash
 forge tunnel up --check-only   # pre-flight, change nothing
 forge tunnel up                # pre-flight, then run the tunnel
+forge tunnel up --port 9000 --provider ngrok   # forward another port, pick the client
 ```
 
 ChatGPT and claude.ai cannot reach `localhost`. This runs `cloudflared`
 or `ngrok` (whichever is installed — neither is bundled) and gives you the
 public URL to put in the harness.
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--url <url>` | `http://localhost:8765/mcp` | The local MCP endpoint the pre-flight probes |
+| `--port <n>` | `8765` | Local port the tunnel client forwards |
+| `--provider {cloudflared,ngrok}` | whichever is installed | Force one client instead of taking the first one found |
+| `--check-only` | off | Run the pre-flight and stop, without opening anything |
+
+`--url` and `--port` are separate on purpose: the pre-flight checks a URL
+(path included), while the tunnel forwards a bare port. Point them at the
+same service — if you move the sidecar off `8765`, pass both.
 
 It refuses to open one over a gateway that is not fit to be public:
 nothing listening, something that is not a MetaForge gateway, or a
