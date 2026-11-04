@@ -128,6 +128,8 @@ class Harness:
         self.clock = Clock()
         self.twin = InMemoryTwinAPI.create()
         self.blobs: dict[str, tuple[str, bytes, str]] = {}
+        #: Every blob written, by object key (a node may hold more than one).
+        self.files: dict[str, bytes] = {}
         self.image_bytes: dict[str, bytes] = {}
         self.outcomes: list[str] = []
         self.generator = kw.pop("generator", _generator(self.fake, self.clock))
@@ -137,7 +139,9 @@ class Harness:
 
         def write(node_id: str, filename: str, content: bytes, *, content_type: str) -> str:
             self.blobs[node_id] = (filename, content, content_type)
-            return f"work-products/{node_id}/{filename}"
+            key = f"work-products/{node_id}/{filename}"
+            self.files[key] = content
+            return key
 
         self.server = TwinServer(
             twin=self.twin,
@@ -498,6 +502,7 @@ async def test_the_tool_is_registered_with_its_schema() -> None:
         "texture",
         "generate_parts",
         "smart_low_poly",
+        "fit_to_envelope",
     }
     assert props["view_images"]["required"] == ["front"]
     assert set(props["view_images"]["properties"]) == {"front", "left", "back", "right"}

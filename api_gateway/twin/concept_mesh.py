@@ -28,9 +28,20 @@ record says whether it was.
 
 After download the GLB's bounding box is read from its glTF JSON (no paid
 call, no mesh library) and stored as ``bbox_m``. When the images came from a
-block layout, its overall envelope is stored beside it as ``envelope_mm``
-with a per-axis ``deviation_pct``, so a reviewer sees at a glance that a
-model came out, say, 14% too deep. The file itself is never rescaled.
+block layout, its overall envelope is stored beside it as ``envelope_mm``.
+
+With an envelope the model is then fitted to it (``fit_to_envelope``, on by
+default then): one uniform factor, the one that minimises the summed squared
+log ratio of the three axes, is applied by giving the scene a parent node
+with that ``scale`` (no vertex is rewritten). The stored file is the scaled
+one; the provider's own file is kept beside it as a second blob. The record
+carries ``scale_factor``, the box before and after (``bbox_m_before``,
+``bbox_m``) and the ``proportion_error_pct`` a uniform scale cannot remove,
+so a reviewer sees at a glance that a model came out, say, 14% too deep for
+its width. Because this scaling replaces the provider's own, ``auto_size``
+defaults to false when there is an envelope and to true when there is none.
+Without an envelope, or with ``fit_to_envelope`` false, the file is stored as
+the provider made it and ``deviation_pct`` compares it with the envelope.
 """
 
 from __future__ import annotations
@@ -46,7 +57,13 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from api_gateway.twin.glb_bounds import GlbBoundsError, envelope_deviation, glb_bounds
+from api_gateway.twin.glb_bounds import (
+    GlbBoundsError,
+    envelope_deviation,
+    envelope_fit,
+    glb_bounds,
+    scale_glb,
+)
 from api_gateway.twin.mesh_generation import (
     MAX_PROMPT_CHARS,
     MULTIVIEW_VIEWS,
@@ -209,6 +226,80 @@ def _envelope_from_layout(layout: Any) -> list[float] | None:
     return [hi[i] - lo[i] for i in range(3)]
 
 
+def _bbox(size: tuple[float, float, float]) -> list[float]:
+    return [round(v, 4) for v in size]
+
+
+def _size_and_fit(
+    glb: bytes,
+    envelope: list[float] | None,
+    *,
+    metres: bool,
+    fit: bool,
+) -> tuple[dict[str, Any], bytes]:
+    """The size record of a downloaded model, and the file to store.
+
+    ``metres`` says the provider scaled it to real units (``auto_size``).
+    With an ``envelope`` and ``fit``, the file returned is scaled uniformly
+    to fit the envelope; otherwise it is ``glb`` itself, unchanged.
+    """
+    record: dict[str, Any] = {}
+    try:
+        bounds = glb_bounds(glb)
+    except GlbBoundsError as exc:
+        record["bbox_note"] = f"the model's bounds could not be read: {exc}"
+        if envelope is not None:
+            record["envelope_mm"] = envelope
+            if fit:
+                record["fit_to_envelope"] = False
+                record["fit_note"] = "not fitted: the model's bounds could not be read"
+        return record, glb
+    record["bbox_m"] = _bbox(bounds.size)
+    record["bbox_axes"] = "glTF x, y (up), z"
+    record["bbox_units"] = "m" if metres else "model units (auto_size off)"
+    record["bbox_approximate"] = bounds.approximate
+    record["bbox_method"] = bounds.method
+    if envelope is None:
+        return record, glb
+    env = (envelope[0], envelope[1], envelope[2])
+    record["envelope_mm"] = envelope
+    if fit:
+        try:
+            fitted = envelope_fit(bounds.size, env)
+            scaled = scale_glb(glb, fitted["scale_factor"])
+            after = glb_bounds(scaled)
+        except (ValueError, GlbBoundsError) as exc:
+            record["fit_to_envelope"] = False
+            record["fit_note"] = f"not fitted: {exc}"
+        else:
+            error = fitted["proportion_error_pct"]
+            record.update(
+                {
+                    "fit_to_envelope": True,
+                    "scale_factor": round(fitted["scale_factor"], 6),
+                    "scale_method": "uniform, least squares of the log ratio per axis",
+                    "bbox_m_before": record["bbox_m"],
+                    "bbox_units_before": record["bbox_units"],
+                    "bbox_m": _bbox(after.size),
+                    "bbox_units": "m",
+                    "axis_mapping": fitted["axis_mapping"],
+                    "proportion_error_pct": error,
+                    # After the fit the stored model is in metres, so its
+                    # deviation from the envelope is its proportion error.
+                    "deviation_pct": dict(error),
+                    "deviation_basis": "fitted",
+                }
+            )
+            return record, scaled
+    else:
+        record["fit_to_envelope"] = False
+    dev = envelope_deviation(bounds.size, env, scaled_to_metres=metres)
+    record["deviation_pct"] = dev["deviation_pct"]
+    record["deviation_basis"] = dev["basis"]
+    record["axis_mapping"] = dev["axis_mapping"]
+    return record, glb
+
+
 def make_concept_mesh_recorder(
     twin: Any,
     project_backend: Any = None,
@@ -342,11 +433,12 @@ def make_concept_mesh_recorder(
         name: str | None = None,
         project_id: str | None = None,
         domain: str = "mechanical",
-        auto_size: bool = True,
+        auto_size: bool | None = None,
         face_limit: int | None = None,
         texture: bool | None = None,
         generate_parts: bool = False,
         smart_low_poly: bool = False,
+        fit_to_envelope: bool | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -357,8 +449,11 @@ def make_concept_mesh_recorder(
             raise ValueError(
                 f"{TOOL}: give exactly one of 'image_node_id', 'view_images' or 'prompt'"
             )
+        if fit_to_envelope is not None and not isinstance(fit_to_envelope, bool):
+            raise ValueError(f"{TOOL}: 'fit_to_envelope' must be true or false")
+        # auto_size is checked here and settled once the envelope is known.
         options, options_note = generation_options(
-            auto_size=auto_size,
+            auto_size=True if auto_size is None else auto_size,
             face_limit=face_limit,
             texture=texture,
             generate_parts=generate_parts,
@@ -406,6 +501,11 @@ def make_concept_mesh_recorder(
         else:
             mode, label = "text_to_model", "text"
         envelope = await _envelope_of(source) if source is not None else None
+        has_envelope = envelope is not None and all(v > 0 for v in envelope)
+        # Our own fit to the envelope replaces the provider's auto_size; with
+        # no envelope, auto_size is the only way to real units.
+        options["auto_size"] = (not has_envelope) if auto_size is None else auto_size
+        fit = has_envelope if fit_to_envelope is None else (fit_to_envelope and has_envelope)
 
         with tracer.start_as_current_span(TOOL) as span:
             span.set_attribute("concept_mesh.mode", mode)
@@ -452,41 +552,45 @@ def make_concept_mesh_recorder(
             span.set_attribute("concept_mesh.task_id", mesh.task_id)
             span.set_attribute("concept_mesh.size_bytes", len(mesh.glb_bytes))
 
-            # The model's size against the concept's envelope: read, never rescaled.
             sent_options = dict(mesh.options) if mesh.options else {}
-            scaled = bool(sent_options.get("auto_size"))
-            size_check: dict[str, Any] = {}
-            try:
-                bounds = glb_bounds(mesh.glb_bytes)
-                size_check["bbox_m"] = [round(v, 4) for v in bounds.size]
-                size_check["bbox_axes"] = "glTF x, y (up), z"
-                size_check["bbox_units"] = "m" if scaled else "model units (auto_size off)"
-                size_check["bbox_approximate"] = bounds.approximate
-                size_check["bbox_method"] = bounds.method
-                if envelope is not None and all(v > 0 for v in envelope):
-                    dev = envelope_deviation(
-                        bounds.size,
-                        (envelope[0], envelope[1], envelope[2]),
-                        scaled_to_metres=scaled,
-                    )
-                    size_check["envelope_mm"] = envelope
-                    size_check["deviation_pct"] = dev["deviation_pct"]
-                    size_check["deviation_basis"] = dev["basis"]
-                    size_check["axis_mapping"] = dev["axis_mapping"]
-            except GlbBoundsError as exc:
-                size_check["bbox_note"] = f"the model's bounds could not be read: {exc}"
+            size_check, stored_glb = _size_and_fit(
+                mesh.glb_bytes,
+                envelope if has_envelope else None,
+                metres=bool(sent_options.get("auto_size")),
+                fit=fit,
+            )
             if "deviation_pct" in size_check:
                 span.set_attribute(
                     "concept_mesh.max_deviation_pct",
                     max(abs(v) for v in size_check["deviation_pct"].values() if v is not None),
                 )
+            if "scale_factor" in size_check:
+                span.set_attribute("concept_mesh.scale_factor", size_check["scale_factor"])
 
-            content_hash = hashlib.sha256(mesh.glb_bytes).hexdigest()
+            content_hash = hashlib.sha256(stored_glb).hexdigest()
             wp_id = uuid4()
-            filename = f"{_slug(concept or 'concept')}-reference-mesh.glb"
+            stem = f"{_slug(concept or 'concept')}-reference-mesh"
+            filename = f"{stem}.glb"
+            raw_record: dict[str, Any] = {}
+            if stored_glb is not mesh.glb_bytes:
+                # The provider's own file, kept beside the scaled one.
+                raw_name = f"{stem}.provider.glb"
+                try:
+                    raw_key = await asyncio.to_thread(
+                        write_blob, str(wp_id), raw_name, mesh.glb_bytes, content_type=GLB_MIME
+                    )
+                    raw_record = {
+                        "provider_glb_object_key": raw_key,
+                        "provider_glb_filename": raw_name,
+                        "provider_glb_sha256": hashlib.sha256(mesh.glb_bytes).hexdigest(),
+                        "provider_glb_size_bytes": len(mesh.glb_bytes),
+                    }
+                except Exception as exc:  # noqa: BLE001 - the scaled mesh is what is stored
+                    logger.warning("concept_mesh_provider_glb_store_failed", error=str(exc))
+                    raw_record = {"provider_glb_note": f"the provider's file was not kept ({exc})"}
             try:
                 key = await asyncio.to_thread(
-                    write_blob, str(wp_id), filename, mesh.glb_bytes, content_type=GLB_MIME
+                    write_blob, str(wp_id), filename, stored_glb, content_type=GLB_MIME
                 )
             except Exception as exc:  # noqa: BLE001 - refuse rather than store a node with no mesh
                 span.record_exception(exc)
@@ -494,6 +598,7 @@ def make_concept_mesh_recorder(
                 raise MeshGenerationError(
                     f"the mesh was generated (task {mesh.task_id}) but could not be stored ({exc})"
                 ) from exc
+            size_check.update(raw_record)
 
             source_id = str(source.id) if source is not None else None
             view_ids = {v: str(wp.id) for v, (wp, _b, _m) in views.items()}
@@ -509,7 +614,7 @@ def make_concept_mesh_recorder(
                 "task_id": mesh.task_id,
                 "mode": mesh.mode,
                 "generated_by": TOOL,
-                "size_bytes": len(mesh.glb_bytes),
+                "size_bytes": len(stored_glb),
                 "generation_options": sent_options,
                 **size_check,
             }
@@ -568,11 +673,13 @@ def make_concept_mesh_recorder(
                 model_version=mesh.model_version,
                 task_id=mesh.task_id,
                 mode=mesh.mode,
-                size_bytes=len(mesh.glb_bytes),
+                size_bytes=len(stored_glb),
                 source_image_node_id=source_id,
                 view_image_node_ids=view_ids or None,
                 bbox_m=size_check.get("bbox_m"),
                 deviation_pct=size_check.get("deviation_pct"),
+                scale_factor=size_check.get("scale_factor"),
+                proportion_error_pct=size_check.get("proportion_error_pct"),
                 project_id=project_id,
             )
             out: dict[str, Any] = {
@@ -582,7 +689,7 @@ def make_concept_mesh_recorder(
                 "provider": mesh.provider,
                 "model_version": mesh.model_version,
                 "task_id": mesh.task_id,
-                "size_bytes": len(mesh.glb_bytes),
+                "size_bytes": len(stored_glb),
                 "source_image_node_id": source_id,
                 "authority": "illustrative",
                 "label": LABEL,

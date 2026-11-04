@@ -4100,10 +4100,12 @@ class TwinServer(McpToolServer):
                     "twin.render_concept_image), view_images (front plus at least one of "
                     "left, back, right, each a concept image rendered with that view, so "
                     "the model sees the sides instead of guessing them), or a text prompt. "
-                    "auto_size (def true) scales the model to metres; face_limit (def "
-                    "100000) caps its triangles. The model's bounding box is read back as "
-                    "bbox_m and, when the images came from a block layout, compared with "
-                    "its envelope as deviation_pct per axis; the file is never rescaled. "
+                    "face_limit (def 100000) caps its triangles. When the images came from "
+                    "a block layout the model is scaled uniformly to best fit its envelope "
+                    "(fit_to_envelope, def true then), recording scale_factor, bbox_m "
+                    "before and after and the proportion_error_pct no uniform scale can "
+                    "remove; the provider's own file is kept too. auto_size (provider "
+                    "scaling to metres) defaults to false with an envelope, true without. "
                     "The mesh is labelled 'AI 3D reference model, illustrative only', "
                     "records the provider, task id, model version and options, is linked "
                     "generated_from every image it used, and is never a cad_model: its "
@@ -4142,7 +4144,17 @@ class TwinServer(McpToolServer):
                         },
                         "auto_size": {
                             "type": "boolean",
-                            "description": "Scale the model to real size in metres (def true).",
+                            "description": (
+                                "The provider scales the model to metres (def false when "
+                                "the images have a layout envelope, true otherwise)."
+                            ),
+                        },
+                        "fit_to_envelope": {
+                            "type": "boolean",
+                            "description": (
+                                "Scale the stored model uniformly to best fit the layout "
+                                "envelope (def true when there is one)."
+                            ),
                         },
                         "face_limit": {
                             "type": "integer",
@@ -4197,6 +4209,11 @@ class TwinServer(McpToolServer):
                         "bbox_m": {"type": "array", "items": {"type": "number"}},
                         "envelope_mm": {"type": "array", "items": {"type": "number"}},
                         "deviation_pct": {"type": "object"},
+                        "fit_to_envelope": {"type": "boolean"},
+                        "scale_factor": {"type": "number"},
+                        "bbox_m_before": {"type": "array", "items": {"type": "number"}},
+                        "proportion_error_pct": {"type": "object"},
+                        "provider_glb_object_key": {"type": ["string", "null"]},
                         "authority": {"type": "string"},
                         "label": {"type": "string"},
                         "content_hash": {"type": "string"},
@@ -4234,7 +4251,14 @@ class TwinServer(McpToolServer):
         # paid call; only what the caller gave is passed, so its defaults hold.
         options = {
             k: arguments[k]
-            for k in ("auto_size", "face_limit", "texture", "generate_parts", "smart_low_poly")
+            for k in (
+                "auto_size",
+                "face_limit",
+                "texture",
+                "generate_parts",
+                "smart_low_poly",
+                "fit_to_envelope",
+            )
             if arguments.get(k) is not None
         }
         if view_images is not None:

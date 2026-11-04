@@ -10,6 +10,7 @@ or a fake image model; nothing here calls a paid API.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -53,6 +54,8 @@ DEFAULT_OPTIONS = {
     "smart_low_poly": False,
     "generate_parts": False,
 }
+#: With a layout envelope our own fit replaces the provider's auto_size.
+ENVELOPE_OPTIONS = {**DEFAULT_OPTIONS, "auto_size": False}
 
 
 # -- the orthographic views of a layout ------------------------------------------
@@ -294,7 +297,7 @@ async def test_a_multiview_model_uploads_each_view_and_sends_view_keys(
             {"right": "file_abc123_3"},
         ],
         "model": DEFAULT_TRIPO_MODEL,
-        **DEFAULT_OPTIONS,
+        **ENVELOPE_OPTIONS,
     }
     assert out["mode"] == "multiview_to_model"
     assert out["view_image_node_ids"] == views
@@ -314,22 +317,29 @@ async def test_a_multiview_model_records_its_views_edges_and_size() -> None:
     assert meta["source_image_node_id"] == views["front"]
     assert meta["label_band_removed"] is True
     assert meta["label_band_removed_views"] == {"front": True, "back": True}
-    assert meta["generation_options"] == DEFAULT_OPTIONS
+    assert meta["generation_options"] == ENVELOPE_OPTIONS
     assert str(wp.project_id) == PROJECT
     edges = await h.twin.get_edges(wp.id, direction="outgoing")
     targets = {str(e.target_id) for e in edges if e.edge_type == EdgeType.GENERATED_FROM}
     assert targets == set(views.values())
-    # The size check: read from the GLB, against the layout's envelope.
-    assert meta["bbox_m"] == [0.49, 0.29, 0.45]
+    # The size check: read from the GLB, then fitted to the layout's envelope.
+    assert meta["bbox_m_before"] == [0.49, 0.29, 0.45]
+    assert meta["bbox_units_before"] == "model units (auto_size off)"
+    assert meta["bbox_m"] == [0.4692, 0.2777, 0.4309]
     assert meta["bbox_units"] == "m"
     assert meta["bbox_approximate"] is False
     assert meta["envelope_mm"] == ENVELOPE
     assert meta["axis_mapping"] == "x=width, z=depth"
-    assert meta["deviation_basis"] == "absolute"
-    assert meta["deviation_pct"] == {"width": 0.0, "depth": 13.9, "height": 0.0}
-    assert out["deviation_pct"] == meta["deviation_pct"]
-    # Never rescaled: the stored file is the one Tripo returned.
-    assert h.blobs[out["node_id"]][1] == DEEP_GLB
+    assert meta["fit_to_envelope"] is True
+    assert meta["scale_factor"] == pytest.approx(0.957477, abs=1e-5)
+    assert meta["proportion_error_pct"] == {"width": -4.3, "depth": 9.1, "height": -4.3}
+    assert meta["deviation_basis"] == "fitted"
+    assert out["proportion_error_pct"] == meta["proportion_error_pct"]
+    # The stored file is the scaled one; the provider's own is kept beside it.
+    assert h.blobs[out["node_id"]][1] != DEEP_GLB
+    raw_key = meta["provider_glb_object_key"]
+    assert h.files[raw_key] == DEEP_GLB
+    assert meta["provider_glb_sha256"] == hashlib.sha256(DEEP_GLB).hexdigest()
 
 
 def _args(views: dict[str, str], iso: str, case: str) -> dict[str, Any]:
@@ -528,7 +538,7 @@ async def test_a_single_image_finds_its_envelope_on_its_sketch() -> None:
     image_id = await h.concept_image(layout_node_id=str(sketch_id))
     out = await h.server.generate_concept_mesh({"image_node_id": image_id})
     assert out["envelope_mm"] == ENVELOPE
-    assert out["deviation_pct"]["depth"] == 13.9
+    assert out["proportion_error_pct"]["depth"] == 9.1
 
 
 async def test_the_provider_drops_options_its_endpoint_does_not_take() -> None:
