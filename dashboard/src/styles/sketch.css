@@ -1,0 +1,202 @@
+/* The freehand sketch layer over the Create product stage. */
+.sk-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  --sk-ink: #f8fafc;
+  --sk-select: #ff5a0a;
+}
+.sk-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+}
+.sk-layer.is-active .sk-svg {
+  pointer-events: all;
+}
+.sk-layer.is-passive .sk-svg {
+  pointer-events: none;
+}
+.sk-stroke,
+.sk-live {
+  fill: none;
+  stroke: var(--sk-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7));
+}
+.sk-live {
+  stroke-width: 2.5;
+}
+/* In Select mode a stroke can be picked; everywhere else passes through to the stage. */
+.sk-layer.is-passive .sk-stroke {
+  pointer-events: visibleStroke;
+  cursor: pointer;
+}
+.sk-stroke.is-selected {
+  stroke: var(--sk-select);
+}
+.sk-stroke.is-erasing {
+  opacity: 0.25;
+}
+.sk-region {
+  fill: rgba(255, 90, 10, 0.08);
+  stroke: var(--sk-select);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.sk-reference {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sk-reference img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.sk-reference-label {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #e2e2eb;
+  background: rgba(17, 19, 25, 0.72);
+}
+.sk-toolbar {
+  position: absolute;
+  top: 52px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(17, 19, 25, 0.8);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+.sk-shapes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.sk-tool {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #e2e2eb;
+  cursor: pointer;
+}
+.sk-tool:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+.sk-tool:focus-visible {
+  outline: 2px solid var(--sk-select);
+  outline-offset: 1px;
+}
+.sk-tool.is-on {
+  border-color: var(--sk-select);
+  color: #fff;
+}
+.sk-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.sk-ref {
+  position: relative;
+}
+.sk-ref-panel {
+  position: absolute;
+  left: 40px;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 200px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(17, 19, 25, 0.92);
+  color: #e2e2eb;
+  font-size: 12px;
+}
+.sk-ref-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sk-status {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  background: rgba(17, 19, 25, 0.8);
+  color: #e2e2eb;
+  font-size: 12px;
+  pointer-events: auto;
+}
+.sk-honesty {
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.7);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.sk-save-state {
+  color: #b4b4c2;
+}
+.sk-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #e2e2eb;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sk-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+@media (max-width: 640px) {
+  .sk-toolbar {
+    top: auto;
+    bottom: 56px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-width: calc(100% - 24px);
+  }
+  .sk-shapes {
+    flex-direction: row;
+    border-top: none;
+    padding-top: 0;
+  }
+}
+
+/* The stage areas the layer sits over. */
+.cv-stage-canvas,
+.cv-stage-empty {
+  position: relative;
+}

@@ -5,7 +5,7 @@ import { commitmentOf, journeyStep } from '../copy';
 import { checksFromCriteria } from '../InspectPanel';
 import { recommendProcess } from '../MakePanel';
 import { nameFromPrompt } from '../CreationsHome';
-import { defaultStageNode, isEngineering } from '../ProductStage';
+import { defaultStageNode, isEngineering, isVisual } from '../ProductStage';
 
 function view(over: Partial<CreationView['readiness']> = {}, items: CreationView['creation']['brief']['items'] = {}): CreationView {
   return {
@@ -64,6 +64,12 @@ describe('the stage', () => {
     const nodes = [node('img', 'image', '2026-11-04T10:00:00Z'), node('cad', 'cad_model', '2026-11-03T10:00:00Z')];
     expect(defaultStageNode(nodes)?.id).toBe('cad');
     expect(isEngineering(nodes[0]!)).toBe(false);
+  });
+
+  it('never puts a saved freehand sketch on stage as a result (it lives on the sketch layer)', () => {
+    const sketch = node('skt', 'sketch_strokes', '2026-11-05T10:00:00Z');
+    expect(isVisual(sketch)).toBe(false);
+    expect(defaultStageNode([sketch, node('img', 'image', '2026-11-04T10:00:00Z')])?.id).toBe('img');
   });
 });
 

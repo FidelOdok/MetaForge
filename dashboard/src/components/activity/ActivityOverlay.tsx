@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Pause, Play, X } from 'lucide-react';
 
@@ -17,8 +17,10 @@ import {
   currentStep,
   domainLabel,
   formatElapsed,
+  type InspectTarget,
   nextAction,
   progressText,
+  inspectTarget,
   realArtifact,
   statusLabel,
   statusTone,
@@ -139,6 +141,8 @@ function PrimaryOperation({
   const step = currentStep(op);
   const progress = progressText(op);
   const urgent = op.state === 'failed' || op.state === 'waiting_for_user' || op.state === 'blocked';
+  // ASVG-015: the stage whose detail is open, '' for the operation itself.
+  const [openStage, setOpenStage] = useState<string | null>(null);
   const announcement = useThrottledAnnouncement(
     connected ? `${op.title}: ${label}. ${step}` : `${op.title}: ${CONNECTION_LOST}`,
     urgent || !connected,
@@ -195,12 +199,24 @@ function PrimaryOperation({
 
       {expanded && (
         <div className="act-body">
-          <Visual op={op} connected={connected} motionPaused={motionPaused} onTogglePause={onTogglePause} />
+          <Visual
+            op={op}
+            connected={connected}
+            motionPaused={motionPaused}
+            onTogglePause={onTogglePause}
+            onInspectStage={() => setOpenStage(currentStageId(op))}
+          />
           <p className="act-next">
             <span className="act-label">Next</span> {nextAction(op)}
           </p>
           <Milestones op={op} />
-          <Lanes op={op} detail={detail} />
+          <Lanes
+            op={op}
+            detail={detail}
+            openStage={openStage}
+            onToggleStage={(id) => setOpenStage((cur) => (cur === id ? null : id))}
+          />
+          {openStage !== null && <StageDetail op={op} stageId={openStage} onClose={() => setOpenStage(null)} />}
           {detail && <Detail op={op} />}
         </div>
       )}
@@ -208,17 +224,27 @@ function PrimaryOperation({
   );
 }
 
+/** The stage being worked on, else the latest one, else '' (the operation itself). */
+function currentStageId(op: OperationView): string {
+  const live = [...op.stages].reverse().find((s) => !isTerminal(s.state));
+  return (live ?? op.stages[op.stages.length - 1])?.stage_id ?? '';
+}
+
 function Visual({
   op,
   connected,
   motionPaused,
   onTogglePause,
+  onInspectStage,
 }: {
   op: OperationView;
   connected: boolean;
   motionPaused: boolean;
   onTogglePause: () => void;
+  onInspectStage: () => void;
 }) {
+  const navigate = useNavigate();
+  const target = inspectTarget(op);
   const ref = useRef<HTMLDivElement>(null);
   const onScreen = useOnScreen(ref);
   const reducedMotion = usePrefersReducedMotion();
@@ -237,19 +263,35 @@ function Visual({
     <div className="act-visual" ref={ref}>
       {artifact ? (
         <figure className="act-artifact">
-          <figcaption className="act-visual-label">{`${authorityLabel(artifact)}: ${artifact.label}`}</figcaption>
+          <figcaption className="act-visual-label">
+            {`${authorityLabel(artifact)}: ${artifact.label}`}
+            {target && <InspectLink target={target} />}
+          </figcaption>
           <ArtifactPreview artifact={artifact} />
         </figure>
       ) : (
         <figure className="act-scene-wrap">
           <figcaption className="act-visual-label">Illustrative activity</figcaption>
-          <Scene
-            state={sceneStateOf(op.state)}
-            stageIndex={stageIndex}
-            reducedMotion={reducedMotion}
-            paused={paused}
-            staleRevision={op.target_revision}
-          />
+          {/* ASVG-015: the drawing opens what it depicts, or the stage's detail. */}
+          <button
+            type="button"
+            className="act-scene-btn"
+            data-testid="activity-inspect"
+            aria-label={target ? `Inspect ${target.label}` : 'Show the details of this step'}
+            onClick={() => {
+              if (!target) onInspectStage();
+              else if (target.external) window.open(target.href, '_blank', 'noopener,noreferrer');
+              else navigate(target.href);
+            }}
+          >
+            <Scene
+              state={sceneStateOf(op.state)}
+              stageIndex={stageIndex}
+              reducedMotion={reducedMotion}
+              paused={paused}
+              staleRevision={op.target_revision}
+            />
+          </button>
           {!reducedMotion && op.state === 'running' && (
             <button
               type="button"
@@ -302,8 +344,69 @@ function Milestones({ op }: { op: OperationView }) {
   );
 }
 
-/** Parallel work, one lane per domain (ASVG-007, RT-025). */
-function Lanes({ op, detail }: { op: OperationView; detail: boolean }) {
+/** A link to an artifact the operation produced (ASVG-015). */
+function InspectLink({ target }: { target: InspectTarget }) {
+  return target.external ? (
+    <a className="act-inspect-link" href={target.href} target="_blank" rel="noreferrer">
+      Open
+    </a>
+  ) : (
+    <Link className="act-inspect-link" to={target.href}>
+      Open
+    </Link>
+  );
+}
+
+/** One stage's state, its artifacts and the next action (ASVG-015). */
+function StageDetail({ op, stageId, onClose }: { op: OperationView; stageId: string; onClose: () => void }) {
+  const stage = op.stages.find((s) => s.stage_id === stageId);
+  const title = stage?.stage_title || stage?.stage_id || op.title;
+  const state = stage?.state ?? op.state;
+  return (
+    <section className="act-section act-stage-detail" aria-label={`Details: ${title}`} data-testid="activity-stage-detail">
+      <div className="act-stage-detail-head">
+        <h3 className="act-label">{title}</h3>
+        <button type="button" className="act-icon" onClick={onClose} aria-label="Close the details">
+          <X size={12} />
+        </button>
+      </div>
+      <p>
+        <span className="act-muted">Status</span> {statusLabel({ ...op, state })}
+      </p>
+      {op.artifact_refs.length > 0 ? (
+        <ul className="act-stage-artifacts">
+          {op.artifact_refs.map((a) => {
+            const t = inspectTarget({ ...op, artifact_refs: [a] });
+            return (
+              <li key={`${a.kind}:${a.id}`}>
+                {a.label || a.id}
+                {t ? <InspectLink target={t} /> : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="act-muted">Nothing produced yet.</p>
+      )}
+      <p>
+        <span className="act-muted">Next</span> {nextAction({ ...op, state })}
+      </p>
+    </section>
+  );
+}
+
+/** Parallel work, one lane per domain (ASVG-007, RT-025). Each stage opens its detail. */
+function Lanes({
+  op,
+  detail,
+  openStage,
+  onToggleStage,
+}: {
+  op: OperationView;
+  detail: boolean;
+  openStage: string | null;
+  onToggleStage: (stageId: string) => void;
+}) {
   const lanes = useMemo(() => {
     const by = new Map<OperationDomain, OperationView['stages']>();
     for (const stage of op.stages) by.set(stage.domain, [...(by.get(stage.domain) ?? []), stage]);
@@ -323,13 +426,27 @@ function Lanes({ op, detail }: { op: OperationView; detail: boolean }) {
                 <ul className="act-stages">
                   {stages.map((s) => (
                     <li key={s.stage_id}>
-                      <code>{s.stage_id}</code> {s.stage_title ?? ''} <span className="act-muted">{s.state}</span>
+                      <button
+                        type="button"
+                        className="act-stage-btn"
+                        aria-expanded={openStage === s.stage_id}
+                        onClick={() => onToggleStage(s.stage_id)}
+                      >
+                        <code>{s.stage_id}</code> {s.stage_title ?? ''} <span className="act-muted">{s.state}</span>
+                      </button>
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <span className="act-muted">{latest?.stage_title ?? ''}</span>
-              )}
+              ) : latest ? (
+                <button
+                  type="button"
+                  className="act-stage-btn act-muted"
+                  aria-expanded={openStage === latest.stage_id}
+                  onClick={() => onToggleStage(latest.stage_id)}
+                >
+                  {latest.stage_title ?? latest.stage_id}
+                </button>
+              ) : null}
             </li>
           );
         })}

@@ -238,6 +238,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
 
         <main className="cv-main">
           <ProductStage
+            projectId={projectId}
             nodes={projectNodes}
             selectedId={session.selectedNodeId}
             onSelect={(id) => selectNode(projectId, id)}

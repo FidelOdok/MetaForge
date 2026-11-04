@@ -83,6 +83,12 @@ Minimising or closing it never cancels anything.
   can be paused, and pauses itself offscreen or in a hidden tab. Status is
   always written out as text, and changes are announced through a polite,
   throttled live region rather than on every update.
+- **Inspect what it shows.** Expanded, the drawing is a button: it opens the
+  newest artifact the operation produced (a twin work product opens in the
+  twin viewer), or the run, and when nothing has been produced yet it opens
+  the current step's detail (status, what it produced, what happens next).
+  Each step named under *Working on* opens its own detail the same way. All of
+  it works from the keyboard.
 
 The operations live in a store shared with the Engineering view
 (`store/operations-store.ts`), so switching views keeps the same operation,
@@ -92,6 +98,70 @@ snapshot and stream (`/v1/projects/{project_id}/operations` and
 While the project has operations, the journey rail's *working* state is
 taken from them; before any exist it falls back to the local instruction
 queue.
+
+## Sketching on the stage
+
+The product stage carries a freehand sketch layer. It is part of the stage,
+not a separate workspace: drawing over the current concept or model, or over
+the empty stage before anything exists, needs no setup and never asks for a
+plane first.
+
+| Tool | Does |
+|---|---|
+| Select (V) | The default. Clicks pass through to the stage (orbit the model, pick a result); clicking a stroke selects it |
+| Draw (P) | A freehand pen stroke |
+| Erase (E) | Removes every stroke the eraser passes over, as one step |
+| Undo, Redo | Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y) |
+
+Line, arc, circle, rectangle, smooth curve and region select appear only while
+drawing is active, so the default toolbar stays at four tools. An arc runs from
+where the drag starts to where it ends, through the drag's farthest point; a
+smooth curve is a spline through a thinned copy of the drag. Region select
+selects the strokes inside a dragged rectangle, and Delete removes a
+selection. Esc cancels a stroke being drawn, then clears the selection, then
+returns to Select. None of the shortcuts act while typing in the composer.
+
+**Reference.** The image button shows a chosen project image or render under
+the strokes, with adjustable opacity. It is labelled *Reference ·
+illustrative*: it is something to trace over, not a measurement.
+
+**Responsive.** Strokes render in the browser as the pointer moves, with
+pointer capture and the browser's coalesced pointer events; the stroke being
+drawn is one SVG path updated in place, and nothing on that path waits for
+the network. The target is a visible stroke within 50 ms of the input.
+
+**What a sketch is.** A human sketch, not CAD. The layer says *Your sketch ·
+not CAD · scale unknown · no plane yet*, and the saved record says the same:
+`authority: human_sketch`, `scale: unknown` and `plane_state: UNASSIGNED`.
+Nothing reads a measurement from it. Points are kept in sketch units (the
+shorter side of the drawing area spans one unit, origin at its centre), so a
+sketch looks the same on any screen size and is not stretched by a resize.
+Proposing and confirming a plane for a sketch is a later step.
+
+**Saving.** The sketch saves itself 1.5 seconds after the last stroke is
+finished, and on *Save sketch*. Each save is the whole sketch and becomes the
+next revision of the project's `sketch_strokes` item (`SKT-SKETCH@1`, `@2`,
+...), with the revision it was drawn on as its parent, a generated SVG and
+the strokes as JSON (see [the twin schema](twin_schema.md)). A save carries an
+id made in the browser; retrying it, after a failure or a lost reply, returns
+the revision it already made instead of adding another. Each save appears in
+the activity overlay as *Saving sketch*, then *Sketch saved* with the
+revision. A failed save says so, keeps the strokes and offers *Retry save*.
+Saves are counted in `metaforge_sketch_save_total` by outcome (`saved`,
+`duplicate`, `failed`), and the `SketchSavesFailing` alert fires when more
+than a fifth of them fail.
+
+Saving is separate from the conversation: a sketch is never sent through the
+instruction queue. Until it is saved, the sketch is kept as a draft in the
+browser (per project), so a reload does not lose it; a browser with no draft
+picks up the project's saved sketch. The undo history is not kept across a
+reload.
+
+**In Engineering.** A saved sketch is a work product of the project, so the
+Engineering view and the twin viewer list it and preview it read-only, with
+the same *Human sketch · not CAD · scale unknown · plane unassigned* label. It
+is never chosen as the result shown on the Create stage; the sketch layer is
+where it is drawn and shown.
 
 ## Conversation and instructions
 
@@ -289,11 +359,23 @@ creation and its readiness.
 | `POST /duplicate` | Copy into a new project |
 | `DELETE /` | Remove the Create records (refused while a build is active) |
 
+The sketch layer uses two twin routes:
+
+| Method and path | Does |
+|---|---|
+| `POST /v1/twin/projects/{project_id}/sketches` | Save the sketch as the next revision (idempotent per `save_id`) |
+| `GET /v1/twin/projects/{project_id}/sketches/current` | The current revision with its strokes (`404` when none is saved) |
+
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the
 [gateway API reference](reference/gateway-api.md).
 
 ## Not yet
+
+- A sketch has no plane, no scale and no constraints. Assigning a plane,
+  dimensioning and turning strokes into editable geometry are later steps.
+- Pen pressure is recorded with each point but not yet drawn as varying
+  width.
 
 - Readiness is read by polling every five seconds, not pushed.
 - Marking a dimension directly on a photo or the model, and calibrated camera

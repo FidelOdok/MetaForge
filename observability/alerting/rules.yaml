@@ -940,6 +940,26 @@ groups:
             into concept input. Check the configured provider supports images and
             the gateway logs (sketch_reading_unavailable, sketch_reading_refused_output).
 
+  # FORGE-789 -- sketch saves from the Create stage
+  # (api_gateway/twin/sketch_strokes_recorder.py).
+  - name: metaforge_sketch_save
+    rules:
+      - alert: SketchSavesFailing
+        expr: >-
+          sum(increase(metaforge_sketch_save_total{outcome="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_sketch_save_total[30m])), 1) > 0.2
+          and sum(increase(metaforge_sketch_save_total[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sketches drawn in Create are not being saved"
+          description: >-
+            More than a fifth of the last half hour's sketch saves failed. The
+            strokes stay in each person's browser draft, so nothing is lost yet,
+            but they are not reaching the digital twin and the Engineering view
+            cannot show them. Check the gateway logs (sketch_save_failed).
+
   # FORGE-734 -- run supervisor (api_gateway/runs/supervisor.py).
   - name: metaforge_run_supervisor
     rules:

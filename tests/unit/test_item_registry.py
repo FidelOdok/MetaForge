@@ -40,6 +40,8 @@ def test_definitions_are_the_versioned_types() -> None:
         "purchased_model",
         # G-code a printer runs, from slicer.slice or an upload.
         "gcode",
+        # A person's freehand sketch from the Create stage.
+        "sketch_strokes",
     }
 
 

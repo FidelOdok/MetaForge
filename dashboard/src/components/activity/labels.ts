@@ -177,3 +177,26 @@ export function authorityLabel(ref: ArtifactRef): string {
       return 'Generated result';
   }
 }
+
+export interface InspectTarget {
+  href: string;
+  label: string;
+  external: boolean;
+}
+
+/**
+ * Where clicking a depicted element goes (ASVG-015): the newest artifact the
+ * operation produced (a twin work product opens in the twin viewer, anything
+ * else at its own url), else the run. `null` means: show the stage's detail.
+ */
+export function inspectTarget(op: Pick<OperationView, 'artifact_refs' | 'run_id' | 'title'>): InspectTarget | null {
+  for (let i = op.artifact_refs.length - 1; i >= 0; i -= 1) {
+    const ref = op.artifact_refs[i];
+    if (!ref) continue;
+    const label = ref.label || op.title;
+    if (ref.kind === 'work_product') return { href: `/twin?node=${encodeURIComponent(ref.id)}`, label, external: false };
+    if (ref.url) return { href: ref.url, label, external: /^https?:/i.test(ref.url) };
+  }
+  if (op.run_id) return { href: `/runs/${encodeURIComponent(op.run_id)}`, label: op.title, external: false };
+  return null;
+}

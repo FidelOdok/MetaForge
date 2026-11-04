@@ -219,6 +219,17 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "(twin.record_design_files after slicer.slice)."
         ),
     ),
+    TwinTypeSpec(
+        "sketch_strokes",
+        TwinTypeKind.DEFINITION,
+        "work_product:sketch_strokes",
+        key_prefix="SKT",
+        description=(
+            "A person's freehand sketch on the Create stage (strokes JSON plus an "
+            "SVG); each save is the next revision. Not CAD: scale unknown, plane "
+            "unassigned."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",
