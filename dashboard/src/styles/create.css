@@ -149,6 +149,11 @@
 .cv-side {
   overflow-y: auto;
 }
+/* The side panel scrolls as a whole; its sections keep their height rather
+   than being squeezed, which clipped the tab labels. */
+.cv-side > * {
+  flex-shrink: 0;
+}
 .cv-main {
   min-width: 0;
   display: flex;
@@ -1135,6 +1140,11 @@ p.cv-muted {
   .cv-body {
     display: flex;
     flex-direction: column;
+  }
+  /* The name gets the full width; the buttons sit on the next row. */
+  .cv-head {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
   .cv-main {
     order: 1;

@@ -1488,6 +1488,12 @@ function route(
     if (path === '/health') {
       return { status: 'healthy', version: 'sample', uptime_seconds: 0, timestamp: now, components: [] };
     }
+    // Pages the sample has no records for answer empty, so they show their
+    // own "nothing yet" state rather than "check your gateway connection".
+    if (path === '/runs') return { runs: [], unscoped_count: 0 };
+    if (path === '/uploads' || path === '/twin/links') return [];
+    if (path === '/twin/revision-index') return { nodes: {} };
+    if (path === '/bom/hierarchical') return { lines: [], total: 0 };
     if (path === '/projects') return { projects: [s.project], total: 1 };
     if (path === `/projects/${s.project.id}`) return s.project;
     if (path === '/twin/nodes') return { nodes: s.nodes, total: s.nodes.length };

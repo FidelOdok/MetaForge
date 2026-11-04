@@ -42,14 +42,17 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
 
   const thread = useTwinChatThread(projectId, threadId, busy);
   const messages = thread.data?.messages ?? [];
-  const end = useRef<HTMLDivElement>(null);
+  // Scroll the conversation itself, never the page: scrollIntoView also moves
+  // the window, which on a phone skipped past the product to the chat.
+  const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    end.current?.scrollIntoView?.({ block: 'end' });
+    const el = list.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length, session.queue.length]);
 
   let lastIntent: Intent = 'ask';
   return (
-    <div className="cv-conversation" aria-live="polite">
+    <div ref={list} className="cv-conversation" aria-live="polite">
       {messages.length === 0 && session.queue.length === 0 && (
         <p className="cv-muted cv-conversation-empty">
           Your conversation appears here. Describe the product in your own words; questions come when they matter.
@@ -104,7 +107,6 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
           )}
         </article>
       ))}
-      <div ref={end} />
     </div>
   );
 }

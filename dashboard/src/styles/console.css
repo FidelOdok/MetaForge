@@ -3689,3 +3689,27 @@ button:disabled {
     display: none;
   }
 }
+/* On a phone the page heading already names the page; the breadcrumb only
+   crowded the project switcher, wrapping beside it and truncating its name. */
+@media (max-width: 480px) {
+  .workspace-topbar nav[aria-label="Breadcrumb"] {
+    display: none;
+  }
+  .topbar-actions > div {
+    max-width: 150px;
+  }
+  .topbar-actions select[aria-label="active project"] {
+    max-width: 140px;
+  }
+}
+/* A page body with a fixed-width aside; the aside drops below on a phone. */
+.page-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--aside, 280px);
+  gap: 12px;
+}
+@media (max-width: 760px) {
+  .page-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
