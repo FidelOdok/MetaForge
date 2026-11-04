@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -55,6 +56,7 @@ logger = structlog.get_logger(__name__)
 __all__ = [
     "ELICITATION_PROTOCOL_VERSION",
     "ELICITATION_ROUTE",
+    "UNATTENDED_ANSWER_SECONDS",
     "ElicitAction",
     "ElicitResult",
     "Elicitor",
@@ -73,6 +75,22 @@ __all__ = [
 #: that declared the capability but negotiated an older revision is not
 #: expecting the request, so the server checks both.
 ELICITATION_PROTOCOL_VERSION = "2025-06-18"
+
+#: Below this, an answer nobody could have read is not an answer.
+#:
+#: A client may declare elicitation and then refuse the request itself
+#: without rendering anything -- Claude Code 2.1.x answers ``decline`` in
+#: about 20 ms, with no dialog on screen. Read as a refusal, that made
+#: every held write on such a connection unanswerable: never shown inline,
+#: never queued anywhere a person could find it, and reported to the agent
+#: as "a reviewer rejected it" when no reviewer had seen it.
+#:
+#: It is a heuristic, and it fails safe. A genuine refusal this fast is
+#: read as "the client could not ask", which leaves the hold for the
+#: dashboard instead of closing it; either way nothing runs that a person
+#: did not approve. Only ``decline`` and ``cancel`` are judged this way --
+#: an ``accept`` carries a real answer however fast it arrives.
+UNATTENDED_ANSWER_SECONDS = 1.0
 
 
 def declares_form_elicitation(capabilities: Any) -> bool:
@@ -299,6 +317,12 @@ def elicitation_gate(elicitor: Elicitor, ledger: ApprovalLedger | None = None) -
       outcome F1 created precisely so an agent is not told "a reviewer
       rejected it" when no reviewer looked.
 
+    A ``decline`` or ``cancel`` that came back too fast for anyone to have
+    read the prompt (:data:`UNATTENDED_ANSWER_SECONDS`) is not an outcome at
+    all: :class:`ElicitationUnavailableError` is raised, the ledger entry is
+    closed as cancelled, and the caller holds the call somewhere a person
+    will actually see it.
+
     ``ask.timeout_seconds`` bounds the wait (FORGE-472), so the server
     resolves inside the client's own tool timeout. The elicitor sees the
     deadline as a cancellation, which is where it withdraws the question.
@@ -306,6 +330,7 @@ def elicitation_gate(elicitor: Elicitor, ledger: ApprovalLedger | None = None) -
 
     async def ask_client(ask: ApprovalAsk) -> ApprovalOutcome:
         message, schema = approval_request(ask)
+        started = time.monotonic()
         try:
             result = await asyncio.wait_for(elicitor(message, schema), timeout=ask.timeout_seconds)
         except TimeoutError:
@@ -313,6 +338,21 @@ def elicitation_gate(elicitor: Elicitor, ledger: ApprovalLedger | None = None) -
                 "elicitation_window_ended", tool_id=ask.tool_id, window_seconds=ask.timeout_seconds
             )
             return ApprovalOutcome.TIMED_OUT
+        waited = time.monotonic() - started
+        if result.action is not ElicitAction.ACCEPT and waited < UNATTENDED_ANSWER_SECONDS:
+            # Nobody read a prompt in this long, so the client answered for
+            # the person. This connection cannot be asked after all, and
+            # saying so lets the caller fall back to a route that can.
+            logger.warning(
+                "elicitation_unattended",
+                tool_id=ask.tool_id,
+                action=result.action.value,
+                waited_seconds=round(waited, 3),
+            )
+            raise ElicitationUnavailableError(
+                f"{ask.tool_id}: the client answered '{result.action.value}' in "
+                f"{waited * 1000:.0f} ms without putting the question to anyone"
+            )
         if result.action is ElicitAction.CANCEL:
             return ApprovalOutcome.TIMED_OUT
         if result.action is ElicitAction.DECLINE:
@@ -334,6 +374,26 @@ def elicitation_gate(elicitor: Elicitor, ledger: ApprovalLedger | None = None) -
         approval_id = await ledger.open_hold(ask, route=ELICITATION_ROUTE)
         try:
             outcome = await ask_client(ask)
+        except ElicitationUnavailableError:
+            # The question reached nobody, so this entry must not sit in the
+            # queue looking as though it had been asked. Closed here, and the
+            # caller falls back to a route that can actually be answered.
+            try:
+                await ledger.close_hold(
+                    approval_id,
+                    ApprovalOutcome.CANCELLED,
+                    route=ELICITATION_ROUTE,
+                    approver=None,
+                    reason="the client did not put the question to anyone",
+                )
+            except Exception as exc:  # noqa: BLE001 - the fallback matters more
+                logger.warning(
+                    "elicitation_ledger_close_failed",
+                    approval_id=approval_id,
+                    tool_id=ask.tool_id,
+                    error=str(exc) or type(exc).__name__,
+                )
+            raise
         except asyncio.CancelledError:
             # The call is being torn down. Close the entry in a task of its
             # own, because a cancelled scope may refuse further awaits.

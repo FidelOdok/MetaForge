@@ -49,6 +49,7 @@ from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
 from mcp_core.deeplinks import DeepLinkBuilder, links_for
 from mcp_core.elicitation import (
     ELICITATION_PROTOCOL_VERSION,
+    ElicitationUnavailableError,
     Elicitor,
     declares_form_elicitation,
     elicitation_gate,
@@ -385,6 +386,10 @@ class UnifiedMcpServer:
         # one. Held rather than used -- whether we may actually ask depends
         # on what the client said at initialize.
         self._elicitor = elicitor
+        # Set once this client has answered a prompt for the person instead
+        # of showing it to them. From then on it is treated as a client that
+        # cannot be asked, so held writes queue where someone can see them.
+        self._elicitation_unattended = False
         # FORGE-465: the transport's way to send a notification for the call
         # being handled (progress on a held write). None: nothing can be
         # sent, so a held write gets the window that fits a client's own
@@ -798,6 +803,12 @@ class UnifiedMcpServer:
         if current_modern_request() is not None:
             mrtr = current_mrtr()
             return bool(mrtr and mrtr.can_ask and self._approval_ledger is not None)
+        # A client that already answered a prompt for the person will do it
+        # again, and asking only burns another hold. Deliberately after the
+        # branch above: a returned question (MRTR) is answered by the next
+        # request, so it never fails this way.
+        if self._elicitation_unattended:
+            return False
         # A live question needs a channel back to the client; a returned one
         # (above) does not.
         if self._elicitor is None:
@@ -2509,6 +2520,7 @@ class UnifiedMcpServer:
                 self._hold_heartbeat(progress_token, window, text, approval_id, held_from)
             )
 
+        unattended: ElicitationUnavailableError | None = None
         try:
             resolution = resolve_approval(
                 await gate(
@@ -2524,9 +2536,29 @@ class UnifiedMcpServer:
                     )
                 )
             )
+        except ElicitationUnavailableError as exc:
+            # The client declared elicitation and then answered the prompt
+            # for the person, who never saw it. Handled after the heartbeat
+            # is cancelled, below.
+            unattended = exc
         finally:
             if heartbeat is not None:
                 heartbeat.cancel()
+        if unattended is not None:
+            # Falling back is not asking twice: there was no first answer to
+            # discard. The connection now counts as one that cannot be asked,
+            # so asking again sends this call -- and every held call for the
+            # rest of the session -- down the dashboard route, FORGE-741's
+            # handoff included. The gate closed its own ledger entry before
+            # raising, so nothing is left in the queue unanswered.
+            self._elicitation_unattended = True
+            logger.warning(
+                "mcp_elicitation_unattended_fallback",
+                tool_id=tool_id,
+                client=self._client_label(),
+                detail=str(unattended),
+            )
+            return await self._authorise(tool_id, arguments, call_id, progress_token)
         return await self._approved(
             tool_id,
             caller,

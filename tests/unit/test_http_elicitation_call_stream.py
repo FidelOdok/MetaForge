@@ -18,12 +18,26 @@ from typing import Any
 
 import pytest
 
+from mcp_core import elicitation
 from mcp_core.elicitation import ELICITATION_PROTOCOL_VERSION
 from mcp_core.guardrails import Caller
 from metaforge.mcp.__main__ import _accepts_event_stream, build_http_app
 from metaforge.mcp.server import UnifiedMcpServer
 from tool_registry.mcp_server.handlers import ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
+
+
+@pytest.fixture
+def answered_by_a_person(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simulate an answer somebody actually read.
+
+    The gate reads a decline or a cancel that came back faster than
+    ``UNATTENDED_ANSWER_SECONDS`` as a client answering for the person, which
+    is not what these tests are simulating -- and they are not going to sleep
+    a second each to prove it, so the floor is lowered instead.
+    """
+    monkeypatch.setattr(elicitation, "UNATTENDED_ANSWER_SECONDS", 0.0)
+
 
 _BOTH = "application/json, text/event-stream"
 
@@ -221,7 +235,7 @@ class TestTheCallCarriesItsOwnQuestion:
         ],
     )
     async def test_a_refusal_is_named_and_the_tool_does_not_run(
-        self, answer: dict[str, Any], named: str
+        self, answer: dict[str, Any], named: str, answered_by_a_person: None
     ) -> None:
         client, projects = _app()
         session = await _initialize(client)
