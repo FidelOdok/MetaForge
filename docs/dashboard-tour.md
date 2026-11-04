@@ -388,6 +388,23 @@ sketch revision when the strokes move); *Undo* restores the state before
 the last change as a further revision. See
 [sketch planes](twin_schema.md#sketch-planes).
 
+**A sketch on a model surface.** *Choose a plane* also offers *Select
+surface* when a part has validated exact geometry: a small picker shows the
+part's converted model, lights up the flat surface under the pointer (from
+the surface-to-triangle map the faces route returns, checked against the
+surface's plane before it is trusted) and lists the same surfaces as
+buttons; a click attaches. The controls then name the surface (*Surface of
+CAD-BASE*) and show the attachment: the part and revision, the face id, a
+summary of the face's signature (the feature that made it, its normal,
+area and edge count) and, after a remap, where it was found again from. When
+a part change leaves the surface ambiguous or gone, the badge reads
+`REATTACHMENT_REQUIRED`, the controls say how many surfaces of which
+revision could be it and why, and offer *Pick the surface* (the candidate
+surfaces are marked in the picker), *Front*, *Side* or *Top* (detach onto a
+principal plane, keeping the sketch's local coordinates), *Keep as concept*
+and *Decide later* (keep the last valid place; exact builds from the sketch
+stay refused). See [face attachment](twin_schema.md#face-attachment).
+
 Selecting a `simulation_result` node adds an **FEA result** panel to the
 inspector: max von Mises and max displacement with their units, the
 load case that produced them, the mesh statistics and, when the run

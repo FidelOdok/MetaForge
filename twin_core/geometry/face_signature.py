@@ -315,14 +315,14 @@ def remap(
     by_id = {f.face_id: f for f in faces}
     shown = [c for c in scored if c.score >= confidence * 0.5][:6]
     if not scored or scored[0].score < confidence:
-        best = scored[0].score if scored else 0.0
+        top = scored[0].score if scored else 0.0
         return RemapResult(
             RemapOutcome.MISSING,
             None,
-            best,
+            top,
             scored[1].score if len(scored) > 1 else None,
             shown,
-            f"no face matches well enough (best {best:.2f}, needs {confidence:.2f})",
+            f"no face matches well enough (best {top:.2f}, needs {confidence:.2f})",
         )
     best, runner = scored[0], (scored[1] if len(scored) > 1 else None)
     if runner is not None and best.score - runner.score < margin:

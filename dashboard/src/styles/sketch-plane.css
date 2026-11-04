@@ -132,3 +132,59 @@
 .sk-plane-controls select option {
   color: #111;
 }
+
+/* CDE slice 9: picking a model surface, and a plane that lost its surface. */
+.sk-face-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.sk-face-view {
+  width: 100%;
+  height: 200px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.25);
+}
+.sk-face-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.sk-face-option {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+}
+.sk-face-option.is-candidate {
+  border-color: #3b82f6;
+}
+.sk-face-option.is-hovered {
+  border-color: #ff5a0a;
+  background: rgba(255, 90, 10, 0.15);
+}
+.sk-face-area {
+  opacity: 0.6;
+}
+.sk-plane-reattach {
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sk-plane-badge[data-state='REATTACHMENT_REQUIRED'],
+.sk-plane-badge[data-state='INVALID'] {
+  color: #fbbf24;
+}

@@ -185,7 +185,7 @@ covering the stage:
 | Front | Places the sketch on the XZ plane (seen from the front) |
 | Side | Places it on the YZ plane (seen from the side) |
 | Top | Places it on the XY plane (seen from above) |
-| Select surface | Placing a sketch on a model face. Shown but disabled: it is not available yet |
+| Select surface | Places the sketch on a flat surface of a part (see below). Enabled only when the project has validated exact geometry; otherwise disabled, and the choice says why |
 | Keep as concept | Closes the choice. The sketch stays without a plane and nothing is written |
 
 When the choice opens, MetaForge proposes a plane: another sketch of the
@@ -203,6 +203,31 @@ and appears in the activity overlay as *Placing sketch on Front*, then
 plane* instead of *no plane yet*. The sketch's scale stays unknown: placing
 it says where it sits, not how big it is. See
 [sketch planes](twin_schema.md#sketch-planes).
+
+**Select surface.** When a part in the project has validated exact
+geometry, *Select surface* opens a small picker: the part's model, with its
+flat surfaces lit up under the pointer, and the same surfaces listed beside
+it (named by the feature that made them, such as *top of PSK-BRACKET*, or by
+the way they face). A click places the sketch on that surface: the plane's
+origin is the surface's centre, its U axis runs along the surface's longest
+straight edge, and its normal points out of the part. The plane item's next
+revision is `ATTACHED`, and the surface's geometry signature is kept so the
+surface can be found again. With several parts, a list chooses the part.
+Without validated exact geometry the button stays disabled and the line
+under the choice says why.
+
+**When the surface changes.** When the part gets a new revision, MetaForge
+looks for the surface again by its signature, never by a face number. If it
+finds exactly one match, the sketch moves with it and nothing is asked. If
+two surfaces could be it, or it is gone, the sketch keeps its last place and
+Create says, in plain words, *The surface this sketch was on changed; choose
+where it goes*, with **Pick the surface** (the surfaces that could be it are
+marked), **Front**, **Side**, **Top**, **Keep as concept** and **Decide
+later**. Until a choice is made, making the sketch editable for real and
+building it as exact CAD wait (they are refused with the reason); drawing,
+proposals and previews do not. The activity overlay shows the same question
+as a card waiting for the person, with a link to the sketch in Engineering.
+See [face attachment](twin_schema.md#face-attachment).
 
 ### Making a sketch editable
 
@@ -463,6 +488,9 @@ The sketch layer uses these twin routes:
 | `POST .../plane/confirm` | Place the sketch on the chosen plane (idempotent per `op_id`) |
 | `POST .../plane/reassign/preview`, `POST .../plane/reassign` | Preview, then commit, a move to another plane in one of three modes |
 | `POST .../plane/undo`, `POST .../plane/archive` | Undo the last plane change, or archive the plane, each as a new revision |
+| `GET /v1/twin/projects/{project_id}/attachable-geometry` | The parts whose head is validated exact geometry, with the reason when there are none |
+| `GET /v1/twin/projects/{project_id}/items/{item_key}/faces` | A validated revision's flat surfaces, with the GLB triangle map the picker highlights |
+| `POST .../plane/attach-face`, `POST .../plane/resolve-reattachment` | Place the sketch on a surface, or answer *choose where it goes* (pick a surface or detach), idempotent per `op_id` |
 | `POST /v1/twin/projects/{project_id}/sketches/{sketch_key}/interpretations` | Store a proposal made by **Make editable** (idempotent per `interpretation_id`; `409` when the sketch was redrawn since) |
 | `POST /v1/twin/projects/{project_id}/interpretations/{key}/promote` | Promote a proposal's accepted rules to a parametric sketch held for sign-off (idempotent per `promote_id`; `409` when a rule does not hold) |
 | `POST /v1/twin/nodes/{node_id}/approve-parametric-sketch` | Sign off a parametric sketch |
@@ -477,8 +505,8 @@ refused with `403`. The full schemas are in the
   curves; there are no angle or point-to-point distance dimensions yet, and
   shapes cannot be dragged. A generated (raster) image cannot be made
   editable yet: only strokes drawn on the stage. Planes are Front, Side and
-  Top only: placing a sketch on a model face (and checking that attachment when
-  the model changes), and offset or custom planes, are later steps.
+  Top, or a flat surface of a validated part; curved surfaces, and offset or
+  custom planes, are later steps.
 - Pen pressure is recorded with each point but not yet drawn as varying
   width.
 

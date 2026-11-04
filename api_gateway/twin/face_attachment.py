@@ -225,10 +225,15 @@ def _pid(project_id: str | UUID) -> UUID:
         raise FaceAttachmentError(f"project id {project_id!r} is not a UUID") from exc
 
 
+#: The exact CAD service face reads go through when this process has no
+#: global one (the MCP sidecar passes its own to :func:`register`).
+_service_override: Any = None
+
+
 def _exact_service() -> Any:
     from api_gateway.twin.exact_cad import get_exact_cad_service
 
-    service = get_exact_cad_service()
+    service = get_exact_cad_service() or _service_override
     if service is None:
         raise FaceCatalogUnavailableError("exact CAD is not configured on this gateway")
     return service
@@ -946,8 +951,10 @@ async def _remap_one(
             requires_action=True,
             action_refs=[
                 {
+                    # Opens the Engineering viewer on the sketch, where its
+                    # plane controls offer the choices.
                     "kind": "open",
-                    "id": f"sketch-plane:{sketch_key}",
+                    "id": f"/twin?node={sk_node.id}&tab=model",
                     "label": "Choose where the sketch goes",
                 }
             ],
@@ -1062,10 +1069,14 @@ async def pin_build_to_plane(twin: Any, node_id: Any, plane_ref: str, project_id
         )
 
 
-def register() -> None:
-    """Listen for CAD head moves (idempotent)."""
+def register(service: Any = None) -> None:
+    """Listen for CAD head moves (idempotent); ``service`` reads faces where no
+    global exact CAD service is set (the MCP sidecar)."""
+    global _service_override  # noqa: PLW0603
     from twin_core.consistency.record_pins import register_head_moved_listener
 
+    if service is not None:
+        _service_override = service
     register_head_moved_listener(remap_on_head_moved)
 
 

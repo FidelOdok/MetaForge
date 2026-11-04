@@ -278,7 +278,7 @@ class TestBootstrapToolRegistry:
 
         health = await registry.check_health("cadquery")
         assert health.status == "healthy"
-        assert health.tools_available == 17
+        assert health.tools_available == 18
 
     async def test_bootstrap_forwards_every_twin_injection_kwarg_without_raising(self):
         """Regression test for the exact class of bug FORGE-405's own fix

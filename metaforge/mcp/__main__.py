@@ -2129,6 +2129,11 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         )
         exact_cad.register_retries()
         bindings["exact_cad_service"] = exact_cad
+        # CDE slice 9: a CAD head this process moves re-finds the faces sketch
+        # planes sit on, reading them through this service.
+        from api_gateway.twin.face_attachment import register as register_face_attachment
+
+        register_face_attachment(exact_cad)
         bridges.append(exact_bridge)
     except Exception as exc:  # noqa: BLE001
         logger.warning("mcp_collaborator_init_failed", collaborator="exact_cad", error=str(exc))

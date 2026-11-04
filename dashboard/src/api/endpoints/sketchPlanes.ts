@@ -37,10 +37,44 @@ export interface SketchPlane {
   scale: number | null;
   transform: number[][] | null;
   source_revision: string | null;
-  attachment: { item_key: string; revision: number | null; face_ref: string; signature: unknown } | null;
+  attachment: FaceAttachment | null;
   state: PlaneState;
   proposed_by: ProposedBy | null;
   confidence: number;
+}
+
+/** A face's geometry signature, kept so the face can be found again (PLN-009). */
+export interface FaceSignature {
+  semantic_tag: string | null;
+  normal: Vec3;
+  offset: number;
+  area: number;
+  centroid: Vec3;
+  loop_edges: number;
+  adjacent_normals: Vec3[];
+  adjacent_curved: number;
+  part_size: number;
+  face_id: string | null;
+}
+
+/** What a remap saw when it could not pick one face (REATTACHMENT_REQUIRED). */
+export interface PendingReattachment {
+  outcome: 'ambiguous' | 'missing' | 'unavailable' | string;
+  revision: number;
+  item_ref: string;
+  node_id: string | null;
+  candidates: { face_id: string; score: number; tag: string }[];
+  reason: string;
+  at: string;
+}
+
+export interface FaceAttachment {
+  item_key: string;
+  revision: number | null;
+  face_ref: string;
+  signature: FaceSignature | null;
+  remapped_from?: string | null;
+  pending?: PendingReattachment | null;
 }
 
 export interface SketchPlaneView {
@@ -159,6 +193,117 @@ export async function undoSketchPlane(projectId: string, sketchKey: string, body
 export async function archiveSketchPlane(projectId: string, sketchKey: string, body: { op_id: string; base_revision?: string | null }): Promise<PlaneChangeResult> {
   const { data } = await apiClient.post<PlaneChangeResult>(`${base(projectId, sketchKey)}/archive`, body);
   return data;
+}
+
+// ── face attachment (CDE slice 9) ─────────────────────────────────────
+
+/** Where one face's triangles sit in the revision's converted GLB. */
+export interface FaceMeshRange {
+  part_index: number;
+  face_index: number;
+  triangle_start: number;
+  triangle_count: number;
+}
+
+export interface CandidateFace {
+  face_id: string;
+  normal: Vec3;
+  offset: number;
+  area: number;
+  centroid: Vec3;
+  bounding_box: Record<string, number> | null;
+  outer_loop_edges: number;
+  longest_edge: { direction?: Vec3; length?: number } | null;
+  adjacent: { face_id: string; surface: string; normal: Vec3 | null }[];
+  mesh: FaceMeshRange | null;
+  semantic_tag: string | null;
+  signature_summary: string;
+}
+
+export interface FaceList {
+  project_id: string;
+  item_key: string;
+  revision: number;
+  item_ref: string;
+  node_id: string;
+  geometry_state: string | null;
+  part_size: number;
+  solid_count: number;
+  face_count: number;
+  faces: CandidateFace[];
+  mesh_map: Record<string, FaceMeshRange>;
+  mesh_source: string;
+  cached: boolean;
+}
+
+export interface AttachableRevision {
+  item_key: string;
+  name: string;
+  revision: number;
+  item_ref: string;
+  node_id: string;
+  geometry_state: string | null;
+}
+
+export interface AttachableGeometry {
+  project_id: string;
+  items: AttachableRevision[];
+  /** Why there is nothing to attach to, in plain words. */
+  reason: string | null;
+}
+
+export interface AttachFaceBody {
+  op_id: string;
+  item_key: string;
+  revision?: number | null;
+  face_id: string;
+  base_revision?: string | null;
+}
+
+export type ResolveAction = 'pick_face' | 'detach_unassigned' | 'detach_principal';
+
+export interface ResolveBody {
+  op_id: string;
+  action: ResolveAction;
+  face_id?: string | null;
+  revision?: number | null;
+  principal?: Principal | null;
+  base_revision?: string | null;
+}
+
+const projectBase = (projectId: string) => `/twin/projects/${enc(projectId)}`;
+
+export async function getAttachableGeometry(projectId: string, signal?: AbortSignal): Promise<AttachableGeometry> {
+  const { data } = await apiClient.get<AttachableGeometry>(`${projectBase(projectId)}/attachable-geometry`, { signal });
+  return data;
+}
+
+export async function getCandidateFaces(
+  projectId: string,
+  itemKey: string,
+  revision?: number | null,
+  signal?: AbortSignal,
+): Promise<FaceList> {
+  const { data } = await apiClient.get<FaceList>(`${projectBase(projectId)}/items/${enc(itemKey)}/faces`, {
+    params: revision ? { revision } : undefined,
+    signal,
+  });
+  return data;
+}
+
+export async function attachSketchToFace(projectId: string, sketchKey: string, body: AttachFaceBody): Promise<PlaneChangeResult> {
+  const { data } = await apiClient.post<PlaneChangeResult>(`${base(projectId, sketchKey)}/attach-face`, body);
+  return data;
+}
+
+export async function resolveReattachment(projectId: string, sketchKey: string, body: ResolveBody): Promise<PlaneChangeResult> {
+  const { data } = await apiClient.post<PlaneChangeResult>(`${base(projectId, sketchKey)}/resolve-reattachment`, body);
+  return data;
+}
+
+/** A plane that has lost its surface: dependent commits wait on a person. */
+export function needsReattachment(plane: SketchPlane | null | undefined): boolean {
+  return !!plane && (plane.state === 'REATTACHMENT_REQUIRED' || plane.state === 'INVALID');
 }
 
 /** A plane that places the sketch in 3D. */

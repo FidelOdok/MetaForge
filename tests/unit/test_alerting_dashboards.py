@@ -322,6 +322,7 @@ class TestAlertingRules:
                 "GeometryValidityFailureSpike",
                 "StepRoundTripFailing",
                 "CrossDomainImpactFailing",
+                "FaceRemapAmbiguitySpike",
                 # FORGE-778: concept reference meshes cannot be generated.
                 "ConceptMeshGenerationUnavailable",
                 "ToolJobsFailingOrInterrupted",

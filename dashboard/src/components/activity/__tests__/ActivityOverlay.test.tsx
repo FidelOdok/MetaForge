@@ -339,6 +339,27 @@ describe('ActivityOverlay', () => {
     expect(window.location.search).toBe('?node=node-7');
   });
 
+  it('surfaces a sketch that lost its surface as a review with a link to choose where it goes', async () => {
+    seed([
+      opEvent({
+        sequence: 1,
+        operation_id: 'job:sketch-plane-remap-PLN-RIB-CAD-BASE-r3',
+        kind: 'job',
+        run_id: null,
+        domain: 'sketch',
+        title: 'The surface this sketch was on changed; choose where it goes',
+        type: 'review_required',
+        state: 'waiting_for_user',
+        requires_action: true,
+        action_refs: [{ kind: 'open', id: '/twin?node=node-sk&tab=model', label: 'Choose where the sketch goes' }],
+      }),
+    ]);
+    render(<ActivityOverlay projectId="p1" />);
+    expect(screen.getByRole('heading', { name: 'The surface this sketch was on changed; choose where it goes' })).toBeInTheDocument();
+    const link = await screen.findByRole('link', { name: 'Choose where the sketch goes' });
+    expect(link.getAttribute('href')).toBe('/twin?node=node-sk&tab=model');
+  });
+
   it('shows the stage detail when a stage is activated and nothing was produced yet', async () => {
     const user = userEvent.setup();
     seed([

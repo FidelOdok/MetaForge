@@ -42,7 +42,8 @@ import {
 import { PlanePrompt } from './PlanePrompt';
 import { SketchCompiler } from './SketchCompiler';
 import { useSketchPlane } from '../../hooks/use-sketch-plane';
-import { isPlaced } from '../../api/endpoints/sketchPlanes';
+import { isPlaced, needsReattachment } from '../../api/endpoints/sketchPlanes';
+import { ReattachChoices } from './ReattachChoices';
 import { VIEW_NAMES } from '../../lib/sketch/planeMath';
 import '../../styles/sketch.css';
 
@@ -153,6 +154,11 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
   const planeQuery = useSketchPlane(projectId, doc.itemKey);
   const plane = planeQuery.data?.plane ?? null;
   const placed = isPlaced(plane);
+  // "Decide later" hides the reattach choice until the plane changes again.
+  const [reattachLater, setReattachLater] = useState(false);
+  useEffect(() => {
+    setReattachLater(false);
+  }, [planeQuery.data?.item_ref]);
 
   // Materialise the project's doc (and its restored draft) in the store once.
   useEffect(() => {
@@ -520,7 +526,7 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
               className="sk-save"
               title="Choose the plane this sketch sits on, so it can be shown in 3D"
               aria-expanded={planePrompt}
-              onClick={() => setPlanePrompt((open) => !open)}
+              onClick={() => (needsReattachment(plane) ? setReattachLater(false) : setPlanePrompt((open) => !open))}
             >
               <Box size={14} aria-hidden="true" /> Use in 3D
             </button>
@@ -528,8 +534,15 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
         </div>
       )}
 
-      {planePrompt && doc.itemKey && (
+      {planePrompt && doc.itemKey && !needsReattachment(plane) && (
         <PlanePrompt projectId={projectId} sketchKey={doc.itemKey} onDone={() => setPlanePrompt(false)} />
+      )}
+
+      {/* CDE slice 9: the surface the sketch was on changed; plain words in Create. */}
+      {doc.itemKey && plane && needsReattachment(plane) && !reattachLater && (
+        <div className="sk-plane-prompt">
+          <ReattachChoices projectId={projectId} sketchKey={doc.itemKey} plane={plane} onClose={() => setReattachLater(true)} />
+        </div>
       )}
 
       {/* FORGE-791: Make editable (the sketch compiler). */}
