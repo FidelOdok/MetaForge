@@ -5,7 +5,10 @@ import { Fragment, type ReactNode } from 'react';
 // It builds React elements and never sets HTML, so reply text cannot inject
 // markup; links are limited to http(s) and open in a new tab.
 
-const INLINE = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\)|\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g;
+const INLINE =
+  /(\[(?:work_product|node):\/\/[0-9A-Za-z-]+\]|\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\)|\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g;
+// A citation of a twin record, as the agent writes it: [work_product://<id>].
+const CITATION = /^\[(?:work_product|node):\/\/([0-9A-Za-z-]+)\]$/;
 
 const BULLET = /^\s*[-*•]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
@@ -22,7 +25,15 @@ export function renderInline(text: string): ReactNode[] {
     const at = match.index ?? 0;
     if (at > last) out.push(text.slice(last, at));
     const key = `${at}`;
-    if (token.startsWith('**')) out.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    const cited = CITATION.exec(token);
+    if (cited) {
+      // A raw id means nothing to a reader; a small "source" link opens the record in the twin.
+      out.push(
+        <a key={key} className="mb-cite" href={`/twin?node=${encodeURIComponent(cited[1]!)}`} title={`Twin record ${cited[1]}`}>
+          source
+        </a>,
+      );
+    } else if (token.startsWith('**')) out.push(<strong key={key}>{token.slice(2, -2)}</strong>);
     else if (token.startsWith('`')) out.push(<code key={key}>{token.slice(1, -1)}</code>);
     else if (token.startsWith('[')) {
       const [, label, href] = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token) ?? [];

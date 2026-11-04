@@ -61,6 +61,21 @@ figures, questions, measurements and warnings as blocks rather than prose.
 This is guidance to the model, not a hard limit: a long reply is still shown
 in full.
 
+## While the agent works
+
+A turn never leaves the conversation blank. As soon as a message is sent it
+shows in the conversation (the composer is cleared for the next one, and the
+text comes back if the send fails), followed by a thinking bubble
+(`dashboard/src/components/chat/TurnInProgress.tsx`) with a moving
+indicator, what the agent is doing now in the present tense ("Reading the
+design record…", or "Thinking…" before any step), the seconds elapsed, and
+the steps finished so far, read live from the thread's stream. The bubble
+stays until the reply has been fetched, which happens the moment the agent
+reports the turn over rather than at the next poll. Both chats use it.
+
+Twin citations the agent writes as `[work_product://<id>]` show as a small
+*source* link that opens the record in the twin, not as a raw id.
+
 ## What the agent did
 
 The Engineering chat shows a turn's progress as a few plain steps ("Read the
