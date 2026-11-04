@@ -274,7 +274,13 @@ and a row of switches above the graph, *Show links to* (its own row, not
 floating over the nodes), turns each kind on
 or off with how many links go to it. Links to baselines start off, because
 baseline membership is one link per member and drowns the rest; the row
-says how many links are hidden. Links that point *into* a work product (an
+says how many links are hidden. The same row starts with *Show*: switches
+for the kinds of work product on the graph (Designs, Requirements,
+Decisions, Analysis, Other), each with its count. On a large twin (more
+than 30 nodes) the graph opens with decisions hidden and only part links
+drawn, since a real project's decision records and linked constraints
+outnumber its designs; the row says how many nodes and links that hides,
+and a node you select stays on screen whatever its kind. Links that point *into* a work product (an
 intent that depends on a CAD model) are drawn too. If the relationships
 request fails the graph says so and shows only the work products, never
 stand-in links, and if some work products' links could not be read it
