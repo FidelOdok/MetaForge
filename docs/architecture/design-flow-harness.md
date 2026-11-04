@@ -1063,9 +1063,57 @@ concept image, a missing or oversized prompt, or an unreadable image is
 refused before any paid call. A failed, cancelled, banned or expired task is
 an error naming its status, a task still running at the deadline is a
 timeout, a rejected key is reported without the key, and none of them writes
-anything. Outcomes are counted in `metaforge_concept_mesh_total{outcome}`,
-and `ConceptMeshGenerationUnavailable` warns when most requests in six hours
-fail.
+anything. Outcomes are counted in
+`metaforge_concept_mesh_total{outcome, mode}` (`mode` is `image`,
+`multiview` or `text`), and `ConceptMeshGenerationUnavailable` warns when
+most requests in six hours fail.
+
+A single image leaves the model to guess the sides it cannot see, so a
+reference model can instead be made from the concept's own straight-on
+views. `twin.render_concept_image` takes an optional `view`: `isometric` (the
+default) or `front`, `left`, `back` or `right`, which draws the block layout
+as a flat-shaded orthographic view from that side (boxes, and cylinders seen
+side-on, as rectangles; cylinders seen end-on as ellipses; farthest parts
+first). The front view stands at y < 0 looking along +y with x to the right;
+the back view looks along -y, so x is mirrored; the left view stands at
+x < 0 looking along +x, with the product's front on the right; the right view
+looks along -x, with the front on the left. All four share one scale, so the
+product is the same height in each. The prompt asks for a straight-on
+orthographic view of that side with no perspective, and the view is recorded
+in `conditioned_on.view` and in the result; the label banner and the vision
+critique are unchanged. `twin.generate_concept_mesh` then takes
+`view_images`, an object mapping `front`, `left`, `back` and `right` to such
+renders (`front` required, at least two in all), as the alternative to
+`image_node_id` and `prompt`. Each image has its banner cropped and is
+uploaded, and one `POST /generation/multiview-to-model` task is created with
+`inputs` in Tripo's view-key form (`[{"front": token}, {"left": token}]`).
+A missing front, a single view, an unknown view, the same image twice, a node
+that is not a concept image, an image drawn for a different view than its key,
+or images drawn from different layouts are refused before any paid call. The
+mesh records `view_image_node_ids` and is linked `generated_from` every view.
+
+Every mode takes the generation options `auto_size` (default true, so the
+model comes back in metres), `face_limit` (default 100000; 500 to 20000, with
+a default of 20000, under `smart_low_poly`), `texture` (default true),
+`generate_parts` (default false) and `smart_low_poly` (default false). They
+are sent to Tripo, which documents them on all three endpoints, and stored as
+`metadata.generation_options`. `generate_parts` needs an untextured model, so
+it sends `texture` and `pbr` false and says so in
+`generation_options_note`; combined with `texture: true` or `smart_low_poly`
+it is refused before any call. After download the GLB's bounding box is read
+from its glTF JSON, without a paid call or a mesh library: each mesh's
+`POSITION` accessor min and max, carried through its node transforms. That is
+exact without rotation and a superset with one (`bbox_approximate`), and a
+file with no scene graph falls back to the union of the accessors' boxes. It
+is stored as `bbox_m` in glTF axes (x, y up, z). When the images came from a
+block layout, its overall size is stored as `envelope_mm` (width, depth,
+height) with `deviation_pct` per axis: height is glTF y, and the two
+horizontal axes are paired whichever way fits better, reported as
+`axis_mapping`. With `auto_size` the deviation is absolute; without it the
+model is in its own units, so it is scaled to the envelope's largest axis and
+the deviation is of proportions only (`deviation_basis`). A model that came
+out 14% too deep reads `deviation_pct.depth: 14.0`. The file is never
+rescaled.
 
 The concept decision carries what it selects as data, not prose.
 `twin.record_decision` takes an `assembly` (each part with its source, made,

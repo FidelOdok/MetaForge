@@ -77,7 +77,9 @@ class FakeTripo:
         self.requests.append(request)
         url = str(request.url)
         if url == f"{BASE}/files" and request.method == "POST":
-            body = self.upload_body or {"code": 0, "data": {"file_token": "file_abc123"}}
+            uploads = sum(1 for r in self.requests if r.url.path.endswith("/files"))
+            token = "file_abc123" if uploads == 1 else f"file_abc123_{uploads}"
+            body = self.upload_body or {"code": 0, "data": {"file_token": token}}
             return httpx.Response(self.upload_status, json=body)
         if url.startswith(f"{BASE}/generation/") and request.method == "POST":
             return httpx.Response(200, json={"code": 0, "data": {"task_id": "task-1"}})
@@ -150,9 +152,30 @@ class Harness:
         )
 
     async def concept_image(
-        self, *, generated_by: str = "twin.render_concept_image", wp_type: Any = None
+        self,
+        *,
+        generated_by: str = "twin.render_concept_image",
+        wp_type: Any = None,
+        view: str | None = None,
+        layout_hash: str = "layout-1",
+        overall_mm: list[float] | None = None,
+        layout_node_id: str | None = None,
     ) -> str:
         wp_id = uuid4()
+        metadata: dict[str, Any] = {
+            "generated_by": generated_by,
+            "concept_name": "Concept A",
+            "authority": "illustrative",
+        }
+        if view is not None or overall_mm is not None or layout_node_id is not None:
+            cond: dict[str, Any] = {"layout_content_hash": layout_hash}
+            if view is not None:
+                cond["view"] = view
+            if overall_mm is not None:
+                cond["layout_overall_mm"] = overall_mm
+            if layout_node_id is not None:
+                cond["layout_node_id"] = layout_node_id
+            metadata["conditioned_on"] = cond
         await self.twin.create_work_product(
             WorkProduct(
                 id=wp_id,
@@ -162,11 +185,7 @@ class Harness:
                 file_path="",
                 content_hash="abc123",
                 format="png",
-                metadata={
-                    "generated_by": generated_by,
-                    "concept_name": "Concept A",
-                    "authority": "illustrative",
-                },
+                metadata=metadata,
                 created_by=generated_by,
                 project_id=PROJECT,
             )
@@ -180,10 +199,23 @@ class Harness:
         return [wp for wp in renders if (wp.metadata or {}).get("generated_by") == made_here]
 
 
+class Outcomes(list[str]):
+    """The outcomes counted, in order; ``modes`` holds each one's mode label."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.modes: list[str] = []
+
+
 @pytest.fixture(autouse=True)
-def _outcomes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    seen: list[str] = []
-    monkeypatch.setattr(concept_mesh, "_record", seen.append)
+def _outcomes(monkeypatch: pytest.MonkeyPatch) -> Outcomes:
+    seen = Outcomes()
+
+    def record(outcome: str, mode: str = "image") -> None:
+        seen.append(outcome)
+        seen.modes.append(mode)
+
+    monkeypatch.setattr(concept_mesh, "_record", record)
     return seen
 
 
@@ -454,7 +486,21 @@ async def test_the_tool_is_registered_with_its_schema() -> None:
     h = Harness()
     manifest = h.server._tools["twin.generate_concept_mesh"].manifest
     props = manifest.input_schema["properties"]
-    assert set(props) == {"image_node_id", "prompt", "name", "project_id", "domain"}
+    assert set(props) == {
+        "image_node_id",
+        "view_images",
+        "prompt",
+        "name",
+        "project_id",
+        "domain",
+        "auto_size",
+        "face_limit",
+        "texture",
+        "generate_parts",
+        "smart_low_poly",
+    }
+    assert props["view_images"]["required"] == ["front"]
+    assert set(props["view_images"]["properties"]) == {"front", "left", "back", "right"}
     assert {"node_id", "format", "provider", "task_id", "size_bytes", "source_image_node_id"} <= (
         set(manifest.output_schema["properties"])
     )

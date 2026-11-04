@@ -185,8 +185,11 @@ async def test_an_image_from_a_sketch_records_what_conditioned_it(
         "layout_source": "design_sketch",
         "layout_node_id": sketch["node_id"],
         "layout_content_hash": sketch["content_hash"],
+        "layout_overall_mm": [420, 400, 850],
+        "view": "isometric",
         "image_conditioning": "layout_png",
     }
+    assert out["view"] == "isometric"
     assert meta["visual_brief"] == BRIEF
     assert meta["provider"] == "fake" and meta["model"] == "fake-image-1"
     assert meta["illustrative_label"] == LABEL

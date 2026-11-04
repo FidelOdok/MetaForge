@@ -39,10 +39,12 @@ from tool_registry.mcp_server.handlers import (
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.twin.concept_sketch import (
     EXPLODE_DIRECTIONS,
+    IMAGE_VIEWS,
     PROVENANCE_TAGS,
     VIEWS,
     iso_faces,
     layout_to_dict,
+    ortho_faces,
     parse_layout,
     render_concept_sketch,
 )
@@ -173,6 +175,8 @@ def _depends_on_kwarg(arguments: dict[str, Any], tool: str) -> dict[str, Any]:
 
 #: The sizes the image provider accepts (FORGE-761).
 _CONCEPT_IMAGE_SIZES: tuple[str, ...] = ("1024x1024", "1536x1024", "1024x1536")
+#: The straight-on views a multiview reference mesh is made from.
+_MESH_VIEWS: tuple[str, ...] = ("front", "left", "back", "right")
 
 
 def _concept_layout_properties() -> dict[str, Any]:
@@ -3820,7 +3824,9 @@ class TwinServer(McpToolServer):
                     "commit it as an illustrative RENDER work product. Give either "
                     "layout_node_id (a sketch made by twin.render_concept_sketch) or an "
                     "inline layout in the same schema, plus visual_brief. The layout is "
-                    "drawn as an isometric block image the model must follow, so the "
+                    "drawn as a block image the model must follow (isometric by default; "
+                    "view front, left, back or right draws a straight-on orthographic "
+                    "view, for twin.generate_concept_mesh view_images), so the "
                     "picture keeps the concept's proportions. The image is stamped 'AI "
                     "concept image, illustrative only', records what conditioned it (layout "
                     "hash and node, brief, prompt, provider, model), is linked to its "
@@ -3866,6 +3872,16 @@ class TwinServer(McpToolServer):
                             "enum": list(_CONCEPT_IMAGE_SIZES),
                             "description": "Image size in pixels (def 1024x1024).",
                         },
+                        "view": {
+                            "type": "string",
+                            "enum": list(IMAGE_VIEWS),
+                            "description": (
+                                "Which view of the layout conditions the image (def "
+                                "isometric). front, left, back or right draws a "
+                                "straight-on orthographic view from that side, for the "
+                                "views of a multiview reference model."
+                            ),
+                        },
                         "name": {
                             "type": "string",
                             "description": "Work product name (def 'Concept image: <concept>').",
@@ -3886,6 +3902,7 @@ class TwinServer(McpToolServer):
                         "content_hash": {"type": "string"},
                         "minio_object_key": {"type": ["string", "null"]},
                         "conditioned_on": {"type": "object"},
+                        "view": {"type": "string"},
                         "provider": {"type": "string"},
                         "model": {"type": "string"},
                         "linked_to_layout": {"type": "boolean"},
@@ -3944,6 +3961,9 @@ class TwinServer(McpToolServer):
         name = arguments.get("name")
         if name is not None and (not isinstance(name, str) or not name.strip()):
             raise ValueError(f"{tool}: 'name' must be a non-empty string")
+        view = arguments.get("view") or "isometric"
+        if view not in IMAGE_VIEWS:
+            raise ValueError(f"{tool}: 'view' must be one of {', '.join(IMAGE_VIEWS)}")
 
         # Validate the layout before any paid call: a bad one names its fault.
         if node_ref is not None:
@@ -3962,16 +3982,25 @@ class TwinServer(McpToolServer):
                 "layout_content_hash": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
             }
         width, height = (int(v) for v in size.split("x"))
+        # The layout's overall envelope, so a reference model made from this
+        # image can be checked against it.
+        conditioned_on["layout_overall_mm"] = list(layout.overall())
+        if view == "isometric":
+            faces = iso_faces(layout, width, height)
+        else:
+            faces = ortho_faces(layout, view, width, height)
         project_id = arguments.get("project_id")
         domain = arguments.get("domain")
         with tracer.start_as_current_span("twin.render_concept_image") as span:
             span.set_attribute("concept_image.layout_source", conditioned_on["layout_source"])
             span.set_attribute("concept_image.part_count", len(layout.parts))
+            span.set_attribute("concept_image.view", view)
             result: dict[str, Any] = await self._concept_image_renderer(
                 visual_brief=brief,
                 concept_name=layout.concept_name,
                 part_names=[p.name for p in layout.parts],
-                layout_faces=iso_faces(layout, width, height),
+                layout_faces=faces,
+                view=view,
                 conditioned_on=conditioned_on,
                 layout_node_id=conditioned_on.get("layout_node_id"),
                 name=name.strip() if isinstance(name, str) else None,
@@ -3984,6 +4013,7 @@ class TwinServer(McpToolServer):
         logger.info(
             "concept_image_tool_done",
             layout_source=conditioned_on["layout_source"],
+            view=view,
             node_id=result.get("node_id"),
         )
         return result
@@ -4064,15 +4094,22 @@ class TwinServer(McpToolServer):
                 adapter_id="twin",
                 name="Generate Concept Mesh",
                 description=(
-                    "Have an image-to-3D model turn a concept image into a 3D reference "
+                    "Have an image-to-3D model turn a concept's images into a 3D reference "
                     "mesh for concept review, committed as an illustrative RENDER work "
-                    "product in GLB. Give image_node_id (a render made by "
-                    "twin.render_concept_image) or a text prompt, not both. The mesh is "
-                    "labelled 'AI 3D reference model, illustrative only', records the "
-                    "provider, task id and model version, is linked generated_from its "
-                    "image, and is never a cad_model: its dimensions are a guess and it can "
-                    "never back a requirement claim. Costs a paid generation that can take "
-                    "several minutes; fails clearly when no mesh provider is configured."
+                    "product in GLB. Give exactly one of image_node_id (one render made by "
+                    "twin.render_concept_image), view_images (front plus at least one of "
+                    "left, back, right, each a concept image rendered with that view, so "
+                    "the model sees the sides instead of guessing them), or a text prompt. "
+                    "auto_size (def true) scales the model to metres; face_limit (def "
+                    "100000) caps its triangles. The model's bounding box is read back as "
+                    "bbox_m and, when the images came from a block layout, compared with "
+                    "its envelope as deviation_pct per axis; the file is never rescaled. "
+                    "The mesh is labelled 'AI 3D reference model, illustrative only', "
+                    "records the provider, task id, model version and options, is linked "
+                    "generated_from every image it used, and is never a cad_model: its "
+                    "dimensions are a guess and it can never back a requirement claim. "
+                    "Costs a paid generation that can take several minutes; fails clearly "
+                    "when no mesh provider is configured."
                 ),
                 capability="twin_design_sketch",
                 input_schema={
@@ -4082,14 +4119,56 @@ class TwinServer(McpToolServer):
                             "type": "string",
                             "description": (
                                 "A render node made by twin.render_concept_image. Give "
-                                "this or prompt, not both."
+                                "exactly one of this, view_images or prompt."
                             ),
+                        },
+                        "view_images": {
+                            "type": "object",
+                            "description": (
+                                "The concept's straight-on views, view -> render node id "
+                                "made by twin.render_concept_image with that view. front "
+                                "is required, with at least 2 views in all."
+                            ),
+                            "properties": {view: {"type": "string"} for view in _MESH_VIEWS},
+                            "required": ["front"],
+                            "minProperties": 2,
+                            "additionalProperties": False,
                         },
                         "prompt": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 1024,
                             "description": "Text to model from, when there is no image.",
+                        },
+                        "auto_size": {
+                            "type": "boolean",
+                            "description": "Scale the model to real size in metres (def true).",
+                        },
+                        "face_limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2000000,
+                            "description": (
+                                "Most triangles in the model (def 100000; 500 to 20000 "
+                                "with smart_low_poly, def 20000 then)."
+                            ),
+                        },
+                        "texture": {
+                            "type": "boolean",
+                            "description": (
+                                "Texture the model (def true; false with generate_parts)."
+                            ),
+                        },
+                        "generate_parts": {
+                            "type": "boolean",
+                            "description": (
+                                "Split the model into editable parts (def false). Needs "
+                                "an untextured model: texture and pbr are sent false."
+                            ),
+                        },
+                        "smart_low_poly": {
+                            "type": "boolean",
+                            "description": "Clean low-poly topology (def false).",
                         },
                         "name": {
                             "type": "string",
@@ -4107,11 +4186,17 @@ class TwinServer(McpToolServer):
                     "properties": {
                         "node_id": {"type": "string"},
                         "format": {"type": "string"},
+                        "mode": {"type": "string"},
                         "provider": {"type": "string"},
                         "model_version": {"type": "string"},
                         "task_id": {"type": "string"},
                         "size_bytes": {"type": "integer"},
                         "source_image_node_id": {"type": ["string", "null"]},
+                        "view_image_node_ids": {"type": "object"},
+                        "generation_options": {"type": "object"},
+                        "bbox_m": {"type": "array", "items": {"type": "number"}},
+                        "envelope_mm": {"type": "array", "items": {"type": "number"}},
+                        "deviation_pct": {"type": "object"},
                         "authority": {"type": "string"},
                         "label": {"type": "string"},
                         "content_hash": {"type": "string"},
@@ -4129,29 +4214,49 @@ class TwinServer(McpToolServer):
         tool = "twin.generate_concept_mesh"
         image_node_id = arguments.get("image_node_id")
         prompt = arguments.get("prompt")
-        if (image_node_id is None) == (prompt is None):
-            raise ValueError(f"{tool}: give exactly one of 'image_node_id' or 'prompt'")
+        view_images = arguments.get("view_images")
+        given = [v for v in (image_node_id, prompt, view_images) if v is not None]
+        if len(given) != 1:
+            raise ValueError(
+                f"{tool}: give exactly one of 'image_node_id', 'view_images' or 'prompt'"
+            )
         for field, value in (("image_node_id", image_node_id), ("prompt", prompt)):
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise ValueError(f"{tool}: '{field}' must be a non-empty string")
+        if view_images is not None and not isinstance(view_images, dict):
+            raise ValueError(f"{tool}: 'view_images' must be an object of view -> node id")
         name = arguments.get("name")
         if name is not None and (not isinstance(name, str) or not name.strip()):
             raise ValueError(f"{tool}: 'name' must be a non-empty string")
         project_id = arguments.get("project_id")
         domain = arguments.get("domain")
+        # The generator validates these (and their combinations) before any
+        # paid call; only what the caller gave is passed, so its defaults hold.
+        options = {
+            k: arguments[k]
+            for k in ("auto_size", "face_limit", "texture", "generate_parts", "smart_low_poly")
+            if arguments.get(k) is not None
+        }
+        if view_images is not None:
+            mode = "multiview"
+        else:
+            mode = "image" if image_node_id else "text"
         with tracer.start_as_current_span(tool) as span:
-            span.set_attribute("concept_mesh.mode", "image" if image_node_id else "text")
+            span.set_attribute("concept_mesh.mode", mode)
             result: dict[str, Any] = await self._concept_mesh_generator(
                 image_node_id=image_node_id.strip() if isinstance(image_node_id, str) else None,
                 prompt=prompt.strip() if isinstance(prompt, str) else None,
+                view_images=view_images,
                 name=name.strip() if isinstance(name, str) else None,
                 project_id=project_id if isinstance(project_id, str) and project_id else None,
                 domain=domain if isinstance(domain, str) and domain else "mechanical",
+                **options,
             )
         logger.info(
             "concept_mesh_tool_done",
             node_id=result.get("node_id"),
             task_id=result.get("task_id"),
+            mode=mode,
         )
         return result
 

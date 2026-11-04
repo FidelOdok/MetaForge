@@ -691,6 +691,85 @@ def iso_faces(
     return out
 
 
+#: The straight-on views an image can be conditioned on, as
+#: ``view -> (horizontal axis, horizontal sign, looking axis, looking sign)``.
+#: The vertical axis is always z (up). The horizontal axis runs to the right
+#: of the page; its sign is the viewer's right-hand direction, so each view is
+#: what a person standing on that side sees, not a mirror image:
+#:
+#: * ``front`` stands at y < 0 and looks along +y: x to the right.
+#: * ``back`` stands past the far side and looks along -y: x mirrored.
+#: * ``left`` stands at x < 0 and looks along +x: the front (y = 0) on the right.
+#: * ``right`` stands past x max and looks along -x: the front on the left.
+ORTHO_IMAGE_VIEWS: dict[str, tuple[int, float, int, float]] = {
+    "front": (0, 1.0, 1, 1.0),
+    "left": (1, -1.0, 0, 1.0),
+    "back": (0, -1.0, 1, -1.0),
+    "right": (1, 1.0, 0, -1.0),
+}
+#: Every view ``twin.render_concept_image`` can draw, isometric first.
+IMAGE_VIEWS: tuple[str, ...] = ("isometric", *ORTHO_IMAGE_VIEWS)
+_ELLIPSE_SEGMENTS = 48
+
+
+def ortho_faces(
+    layout: ConceptLayout, view: str, width: float, height: float, margin: float = 0.08
+) -> list[tuple[str, str, list[Point]]]:
+    """A straight-on orthographic view as filled polygons in a page.
+
+    The same shape as :func:`iso_faces`: ``(part name, face class, outline)``
+    in painter's order (farthest from the viewer first), in pixel
+    coordinates. A box, and a cylinder seen side-on, is its silhouette
+    rectangle (``face-front``); a cylinder seen end-on is an ellipse
+    (``cap``). Every orthographic view shares one scale, fitted so the
+    widest of the four still fits, so the product is the same height in the
+    front and the side view and a multiview model sees consistent sizes.
+    """
+    if view not in ORTHO_IMAGE_VIEWS:
+        raise ValueError(
+            f"unknown orthographic view {view!r}; one of {', '.join(ORTHO_IMAGE_VIEWS)}"
+        )
+    h_axis, h_sign, look_axis, look_sign = ORTHO_IMAGE_VIEWS[view]
+    lo, hi = layout.bounds()
+    overall = layout.overall()
+    area_w, area_h = width * (1 - 2 * margin), height * (1 - 2 * margin)
+    widest = max(overall[0], overall[1], 1e-9)
+    scale = min(area_w / widest, area_h / max(overall[2], 1e-9))
+    # The page position of the horizontal coordinate: u grows to the right.
+    u_lo = min(h_sign * lo[h_axis], h_sign * hi[h_axis])
+    ox = (width - overall[h_axis] * scale) / 2
+    oy = (height - overall[2] * scale) / 2
+
+    def page(u: float, z: float) -> Point:
+        return (ox + (u - u_lo) * scale, oy + (hi[2] - z) * scale)
+
+    order = sorted(
+        range(len(layout.parts)),
+        # Farthest first: the larger the coordinate along the look, the farther.
+        key=lambda i: (-look_sign * layout.parts[i].centre[look_axis], i),
+    )
+    out: list[tuple[str, str, list[Point]]] = []
+    for i in order:
+        part = layout.parts[i]
+        u1, u2 = sorted((h_sign * part.position[h_axis], h_sign * part.upper[h_axis]))
+        z1, z2 = part.position[2], part.upper[2]
+        if part.shape == "cylinder" and _AXIS_INDEX[part.axis] == look_axis:
+            cu, cz = (u1 + u2) / 2, (z1 + z2) / 2
+            ru, rz = (u2 - u1) / 2, (z2 - z1) / 2
+            ring = [
+                page(
+                    cu + ru * math.cos(2 * math.pi * k / _ELLIPSE_SEGMENTS),
+                    cz + rz * math.sin(2 * math.pi * k / _ELLIPSE_SEGMENTS),
+                )
+                for k in range(_ELLIPSE_SEGMENTS)
+            ]
+            out.append((part.name, "cap", ring))
+        else:
+            rect = [page(u1, z1), page(u2, z1), page(u2, z2), page(u1, z2)]
+            out.append((part.name, "face-front", rect))
+    return out
+
+
 def layout_to_dict(layout: ConceptLayout) -> dict[str, Any]:
     """A parsed layout back as tool input, so a stored sketch can be redrawn.
 

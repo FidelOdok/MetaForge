@@ -28,9 +28,13 @@ four small methods on :class:`TripoMeshGenerator` so a change on Tripo's side
 is a change in one place:
 
 1. ``POST /files`` (multipart ``file``) -> ``data.file_token``;
-2. ``POST /generation/image-to-model`` ``{"input": token, "model": ...}`` or
+2. ``POST /generation/image-to-model`` ``{"input": token, "model": ...}``,
+   ``POST /generation/multiview-to-model``
+   ``{"inputs": [{"front": token}, {"left": token}, ...], "model": ...}`` or
    ``POST /generation/text-to-model`` ``{"prompt": ..., "model": ...}``
-   -> ``data.task_id``;
+   -> ``data.task_id``. The generation options (``texture``, ``pbr``,
+   ``auto_size``, ``face_limit``, ``smart_low_poly``, ``generate_parts``) go
+   in the same body; all three endpoints document them;
 3. ``GET /tasks/{task_id}`` until ``data.status`` is terminal;
    ``data.output.model_url`` is the GLB;
 4. ``GET <model_url>``, at once: Tripo's model URLs expire within minutes.
@@ -44,7 +48,8 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from dataclasses import field as dataclass_field
+from typing import Any, Protocol
 
 import structlog
 
@@ -70,6 +75,17 @@ MAX_PROMPT_CHARS = 1024
 FAILED_STATUSES = frozenset({"failed", "cancelled", "banned", "expired"})
 _OFF = {"", "off", "none", "disabled", "false", "0"}
 _GLB_MAGIC = b"glTF"
+#: The views Tripo's multiview endpoint takes, in its positional order.
+MULTIVIEW_VIEWS: tuple[str, ...] = ("front", "left", "back", "right")
+#: The generation options each endpoint documents; anything else is not sent.
+#: Tripo documents the same six on image-to-model, multiview-to-model and
+#: text-to-model.
+ENDPOINT_OPTIONS: dict[str, frozenset[str]] = {
+    mode: frozenset(
+        {"texture", "pbr", "auto_size", "face_limit", "smart_low_poly", "generate_parts"}
+    )
+    for mode in ("image_to_model", "multiview_to_model", "text_to_model")
+}
 
 
 class MeshGenerationError(RuntimeError):
@@ -92,12 +108,30 @@ class GeneratedMesh:
     provider: str
     model_version: str
     task_id: str
-    #: ``image_to_model`` or ``text_to_model``.
+    #: ``image_to_model``, ``multiview_to_model`` or ``text_to_model``.
     mode: str
+    #: The generation options actually sent to the provider.
+    options: dict[str, Any] = dataclass_field(default_factory=dict)
 
 
-#: ``(image | None, image_mime, prompt | None) -> GeneratedMesh``
-MeshGenerator = Callable[[bytes | None, str, str | None], Awaitable[GeneratedMesh]]
+class MeshGenerator(Protocol):
+    """``(image | None, image_mime, prompt | None, *, views, options) -> GeneratedMesh``.
+
+    ``views`` maps ``front`` / ``left`` / ``back`` / ``right`` to ``(bytes,
+    mime)`` for a multiview model, in which case ``image`` and ``prompt`` are
+    ``None``. ``options`` are the generation options; a provider sends only
+    those its endpoint documents and reports them on the result.
+    """
+
+    def __call__(
+        self,
+        image: bytes | None,
+        image_mime: str,
+        prompt: str | None,
+        *,
+        views: Mapping[str, tuple[bytes, str]] | None = None,
+        options: Mapping[str, Any] | None = None,
+    ) -> Awaitable[GeneratedMesh]: ...
 
 
 def timeout_from_env(env: Mapping[str, str] | None = None) -> float:
@@ -181,11 +215,11 @@ class TripoMeshGenerator:
             raise MeshGenerationError(f"tripo answered the {what} with no data")
         return data
 
-    async def _upload(self, client: Any, image: bytes, mime: str) -> str:
+    async def _upload(self, client: Any, image: bytes, mime: str, stem: str = "concept") -> str:
         ext = {"image/jpeg": "jpg", "image/webp": "webp"}.get(mime, "png")
         response = await client.post(
             f"{self._base_url}/files",
-            files={"file": (f"concept.{ext}", image, mime)},
+            files={"file": (f"{stem}.{ext}", image, mime)},
             headers=self._auth(),
         )
         token = self._data(response, "upload").get("file_token")
@@ -193,12 +227,19 @@ class TripoMeshGenerator:
             raise MeshGenerationError("tripo accepted the upload but returned no file_token")
         return str(token)
 
-    async def _create(self, client: Any, mode: str, value: str) -> str:
+    async def _create(
+        self, client: Any, mode: str, value: Any, options: Mapping[str, Any] | None = None
+    ) -> str:
+        body: dict[str, Any]
         if mode == "image_to_model":
             path, body = "generation/image-to-model", {"input": value}
+        elif mode == "multiview_to_model":
+            # The view-key form: one {view: token} object per view.
+            path, body = "generation/multiview-to-model", {"inputs": value}
         else:
             path, body = "generation/text-to-model", {"prompt": value}
         body["model"] = self.model_version
+        body.update(options or {})
         response = await client.post(f"{self._base_url}/{path}", json=body, headers=self._auth())
         task_id = self._data(response, "task").get("task_id")
         if not task_id:
@@ -235,11 +276,29 @@ class TripoMeshGenerator:
         return ""
 
     async def __call__(
-        self, image: bytes | None, image_mime: str, prompt: str | None
+        self,
+        image: bytes | None,
+        image_mime: str,
+        prompt: str | None,
+        *,
+        views: Mapping[str, tuple[bytes, str]] | None = None,
+        options: Mapping[str, Any] | None = None,
     ) -> GeneratedMesh:
         import httpx
 
-        mode = "image_to_model" if image is not None else "text_to_model"
+        if views:
+            mode = "multiview_to_model"
+            unknown = sorted(set(views) - set(MULTIVIEW_VIEWS))
+            if unknown or "front" not in views or len(views) < 2:
+                raise MeshGenerationError(
+                    "a multiview model needs a front view and at least one more of "
+                    f"{', '.join(MULTIVIEW_VIEWS)}"
+                )
+        elif image is not None:
+            mode = "image_to_model"
+        else:
+            mode = "text_to_model"
+        sent = {k: v for k, v in (options or {}).items() if k in ENDPOINT_OPTIONS[mode]}
         deadline = self._clock() + self._timeout_s
         with tracer.start_as_current_span("mesh_generation.tripo") as span:
             span.set_attribute("mesh_generation.mode", mode)
@@ -249,11 +308,19 @@ class TripoMeshGenerator:
                 async with httpx.AsyncClient(
                     timeout=min(REQUEST_TIMEOUT_S, self._timeout_s), transport=self._transport
                 ) as client:
-                    if image is not None:
+                    value: Any
+                    if views:
+                        value = []
+                        for view in MULTIVIEW_VIEWS:
+                            if view in views:
+                                data_bytes, view_mime = views[view]
+                                token = await self._upload(client, data_bytes, view_mime, view)
+                                value.append({view: token})
+                    elif image is not None:
                         value = await self._upload(client, image, image_mime)
                     else:
                         value = prompt or ""
-                    task_id = await self._create(client, mode, value)
+                    task_id = await self._create(client, mode, value, sent)
                     span.set_attribute("mesh_generation.task_id", task_id)
                     while True:
                         data = await self._status(client, task_id)
@@ -305,6 +372,7 @@ class TripoMeshGenerator:
             model_version=self.model_version,
             task_id=task_id,
             mode=mode,
+            options=sent,
         )
 
 

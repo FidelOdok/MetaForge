@@ -909,9 +909,11 @@ class MetricsRegistry:
         description=(
             "AI 3D reference meshes generated from a concept image or a prompt, by "
             "outcome: generated, unavailable (no mesh provider configured), timeout, "
-            "failed (the provider refused or the task failed) or store_failed (FORGE-778)"
+            "failed (the provider refused or the task failed) or store_failed, and by "
+            "mode: image (one concept image), multiview (the concept's straight-on "
+            "views) or text (FORGE-778, FORGE-779)"
         ),
-        labels=["outcome"],
+        labels=["outcome", "mode"],
     )
 
     # ── Class methods for grouped access ───────────────────────────────
@@ -1931,11 +1933,11 @@ class MetricsCollector:
         if counter is not None:
             counter.add(1, attributes={"verdict": verdict})
 
-    def record_concept_mesh(self, outcome: str) -> None:
-        """Record one concept mesh generation outcome (FORGE-778)."""
+    def record_concept_mesh(self, outcome: str, mode: str = "image") -> None:
+        """Record one concept mesh generation outcome by mode (FORGE-778, FORGE-779)."""
         counter = self._instruments.get(MetricsRegistry.CONCEPT_MESH_TOTAL.name)
         if counter is not None:
-            counter.add(1, attributes={"outcome": outcome})
+            counter.add(1, attributes={"outcome": outcome, "mode": mode})
 
     def record_sketch_reading(self, outcome: str) -> None:
         """Record one sketch reading outcome (FORGE-762)."""
