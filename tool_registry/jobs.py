@@ -61,6 +61,7 @@ FORGE-788 (scheduling):
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import os
@@ -116,6 +117,16 @@ RetryFactory = Callable[[dict[str, Any]], Callable[[], Awaitable[dict[str, Any]]
 
 _head_resolver: JobHeadResolver | None = None
 _retry_factories: dict[str, RetryFactory] = {}
+#: The job whose work is running in this task (CDE slice 6), so a tool's work
+#: can report milestones on its own operation without being told its id.
+_current_job: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "metaforge_current_job", default=None
+)
+
+
+def current_job_id() -> str | None:
+    """The id of the job whose work is running in this task, if any."""
+    return _current_job.get()
 
 
 class JobNotRetryableError(ValueError):
@@ -260,6 +271,9 @@ class JobRecord:
     target_key: str | None = None
     base_revision: str | None = None
     retry_of: str | None = None
+    #: CDE slice 6: a fixed phrase the work's own exception offers for the
+    #: failed event (its ``operation_message``). Not stored.
+    event_message: str | None = None
 
     @property
     def done(self) -> bool:
@@ -568,6 +582,13 @@ class JobRunner:
             event["retry_of"] = f"job:{job.retry_of}"
         if status == "stale" and job.error:
             event["message"] = job.error[:500]
+        if status == "failed" and job.event_message:
+            event["message"] = job.event_message[:500]
+        hint = job.result.get("operation_event") if status == "succeeded" and job.result else None
+        if isinstance(hint, dict) and isinstance(hint.get("message"), str):
+            # CDE slice 6: a tool's result may name its own fixed completion
+            # phrase (for example "Geometry validated").
+            event["message"] = hint["message"][:500]
         if status in ACTIVE:
             event["action_refs"] = [
                 {"kind": "cancel", "id": f"job:{job.job_id}", "label": "Cancel"}
@@ -576,7 +597,10 @@ class JobRunner:
             event["action_refs"] = [{"kind": "retry", "id": f"job:{job.job_id}", "label": "Retry"}]
         if status == "succeeded" and job.result:
             node_id = job.result.get("node_id")
-            if node_id:
+            refs = hint.get("artifact_refs") if isinstance(hint, dict) else None
+            if isinstance(refs, list) and refs:
+                event["artifact_refs"] = [r for r in refs if isinstance(r, dict)][:10]
+            elif node_id:
                 event["artifact_refs"] = [
                     {"kind": "work_product", "id": str(node_id), "label": _job_title(job.tool_id)}
                 ]
@@ -790,10 +814,17 @@ class JobRunner:
         started = self._clock()
         self.store.update(job.job_id, status="running", started_at=started)
         self._changed(job, "running")
+        token = _current_job.set(job.job_id)
         try:
             result = await work()
             stored = result if isinstance(result, dict) else {"value": result}
             moved, head = await self._head_moved(job)
+            produced = stored.get("target_revision")
+            if moved and produced is not None and str(produced) == head:
+                # CDE slice 6: the job's own pinned write is the new head (an
+                # exact build committing its revision); the twin already
+                # refused it had the base moved first. Not stale.
+                moved = False
         except asyncio.CancelledError:
             if job.job_id in self._ended:
                 raise  # cancel() or supersede() already recorded how it ended
@@ -814,6 +845,8 @@ class JobRunner:
             error = f"{type(exc).__name__}: {exc}"[:_MAX_ERROR_CHARS]
             self.store.update(job.job_id, status="failed", finished_at=self._clock(), error=error)
             job.error = error
+            phrase = getattr(exc, "operation_message", None)
+            job.event_message = phrase if isinstance(phrase, str) else None
             self._changed(job, "failed", error=error, duration_s=round(self._clock() - started, 1))
         else:
             if job.job_id in self._ended:
@@ -827,6 +860,7 @@ class JobRunner:
             job.result = stored
             self._changed(job, "succeeded", duration_s=round(self._clock() - started, 1))
         finally:
+            _current_job.reset(token)
             self._tasks.pop(job.job_id, None)
 
     def get(self, job_id: str) -> JobRecord | None:

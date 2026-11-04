@@ -2117,6 +2117,22 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("concept_mesh_generator", _concept_mesh)
 
+    # CDE slice 6: twin.build_exact_cad and twin.export_cad_step, whose
+    # cadquery.* calls go through this server's own registry once it exists.
+    try:
+        from api_gateway.twin.exact_cad import ExactCadService
+        from api_gateway.twin.geometry_recorder import make_geometry_recorder
+
+        exact_bridge = _LateBridge()
+        exact_cad = ExactCadService(
+            twin, bridge=exact_bridge, recorder=make_geometry_recorder(twin, project_backend)
+        )
+        exact_cad.register_retries()
+        bindings["exact_cad_service"] = exact_cad
+        bridges.append(exact_bridge)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="exact_cad", error=str(exc))
+
     # FORGE-630: twin.render_work_product, whose blender.render call goes
     # through this server's own registry once it exists.
     try:

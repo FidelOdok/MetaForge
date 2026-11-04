@@ -261,7 +261,8 @@ class TestBootstrapToolRegistry:
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 119
+        # + cadquery.validate_shape and cadquery.export_step (CDE slice 6).
+        assert len(tools) == 121
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
@@ -276,7 +277,7 @@ class TestBootstrapToolRegistry:
 
         health = await registry.check_health("cadquery")
         assert health.status == "healthy"
-        assert health.tools_available == 15
+        assert health.tools_available == 17
 
     async def test_bootstrap_forwards_every_twin_injection_kwarg_without_raising(self):
         """Regression test for the exact class of bug FORGE-405's own fix

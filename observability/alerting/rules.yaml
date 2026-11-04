@@ -999,6 +999,42 @@ groups:
             browser, but they are not reaching the digital twin. Check the
             gateway logs (sketch_interpretation_failed, sketch_promotion_failed).
 
+  # CDE slice 6 -- exact CAD, validity and STEP (api_gateway/twin/exact_cad.py).
+  - name: metaforge_exact_cad
+    rules:
+      - alert: GeometryValidityFailureSpike
+        expr: >-
+          sum(increase(metaforge_geometry_validity_total{outcome=~"fail|not_evaluated"}[30m]))
+          / clamp_min(sum(increase(metaforge_geometry_validity_total[30m])), 1) > 0.3
+          and sum(increase(metaforge_geometry_validity_total[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Exact geometry keeps failing its validity check"
+          description: >-
+            More than three in ten of the last half hour's B-Rep validity checks
+            failed or could not run. Items keep their last valid revision, so
+            nothing is lost, but new exact geometry is not reaching validated
+            and release gates stay incomplete. Check the gateway logs
+            (exact_cad_not_validated, exact_cad_validity_unavailable) and that
+            the CadQuery adapter image serves cadquery.validate_shape.
+      - alert: StepRoundTripFailing
+        expr: >-
+          sum(increase(metaforge_step_round_trip_total{outcome=~"fail|not_evaluated"}[1h]))
+          / clamp_min(sum(increase(metaforge_step_round_trip_total[1h])), 1) > 0.2
+          and sum(increase(metaforge_step_round_trip_total[1h])) >= 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "STEP exports are not round-tripping"
+          description: >-
+            More than a fifth of the last hour's STEP exports did not re-import
+            to the same volume, bounding box and solid count, or could not be
+            checked. Such exports cannot back a release. Check the gateway logs
+            (step_export_recorded) and the CadQuery adapter.
+
   # FORGE-793 -- cross-domain impact (twin_core/impact/cross_domain.py).
   - name: metaforge_cross_domain_impact
     rules:

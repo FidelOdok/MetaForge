@@ -24,6 +24,8 @@ class CadqueryServer(McpToolServer):
     - cadquery.execute_script: Execute sandboxed CadQuery Python script
     - cadquery.create_assembly: Multi-part assemblies with constraints (Phase 2)
     - cadquery.generate_enclosure: PCB enclosure generation (Phase 2)
+    - cadquery.validate_shape: B-Rep validity of a STEP (CDE slice 6)
+    - cadquery.export_step: STEP with the configured schema (CDE slice 6)
     """
 
     def __init__(self, config: CadqueryConfig | None = None) -> None:
@@ -1175,6 +1177,123 @@ class CadqueryServer(McpToolServer):
                 ),
             ),
             handler=self.validate_physics_stability,
+        )
+
+        # CDE slice 6: B-Rep validity and configured STEP export, on STEP bytes.
+        _measures = {
+            "outcome": {"type": "string", "enum": ["pass", "warn", "fail", "not_evaluated"]},
+            "findings": {"type": "array", "items": {"type": "object"}},
+            "is_valid": {"type": ["boolean", "null"]},
+            "solid_count": {"type": "integer"},
+            "closed_solid_count": {"type": "integer"},
+            "solid_volumes_mm3": {"type": "array", "items": {"type": "number"}},
+            "volume_mm3": {"type": "number"},
+            "free_edge_count": {"type": ["integer", "null"]},
+            "bounding_box": {"type": ["object", "null"]},
+            "kernel": {"type": "string"},
+            "duration_s": {"type": "number"},
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.validate_shape",
+                adapter_id="cadquery",
+                name="Validate Shape",
+                description=(
+                    "Check a STEP's exact B-Rep: OCCT BRepCheck validity (isValid), at "
+                    "least one solid when one is expected, every solid closed, every "
+                    "solid's volume above zero, and no free edges on a solid. Returns "
+                    "outcome pass, warn, fail or not_evaluated with one finding per "
+                    "check; a check that could not run is never a pass. Read-only."
+                ),
+                capability="cad_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "step_base64": {"type": "string", "description": "The STEP file, base64."},
+                        "expect_solid": {"type": "boolean", "default": True},
+                        "expect_single_solid": {"type": "boolean", "default": False},
+                    },
+                    "required": ["step_base64"],
+                },
+                output_schema={"type": "object", "properties": _measures},
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=120, max_disk_mb=256
+                ),
+            ),
+            handler=self.validate_shape,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.export_step",
+                adapter_id="cadquery",
+                name="Export STEP",
+                description=(
+                    "Write a STEP's shape back out with the STEP schema this adapter is "
+                    "configured for (CADQUERY_STEP_SCHEMA: AP214 by default, or AP242). "
+                    "Returns the new file as step_base64, the schema asked for, the "
+                    "schema the written file declares in its header, and the source "
+                    "shape's measures for a re-import comparison."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "step_base64": {"type": "string", "description": "The STEP file, base64."},
+                        "schema": {"type": "string", "enum": ["AP214", "AP242"]},
+                    },
+                    "required": ["step_base64"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "step_base64": {"type": "string"},
+                        "size_bytes": {"type": "integer"},
+                        "schema_requested": {"type": "string"},
+                        "schema": {"type": ["string", "null"]},
+                        "occt_schema_value": {"type": "string"},
+                        "source": {"type": "object"},
+                        "kernel": {"type": "string"},
+                        "duration_s": {"type": "number"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=120, max_disk_mb=256
+                ),
+            ),
+            handler=self.export_step,
+        )
+
+    async def validate_shape(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """B-Rep validity of a STEP (CDE slice 6)."""
+        import asyncio
+
+        from tool_registry.tools.cadquery.validity import validate_step
+
+        step_base64 = arguments.get("step_base64") or ""
+        if not isinstance(step_base64, str) or not step_base64:
+            raise ValueError("step_base64 is required")
+        return await asyncio.to_thread(
+            validate_step,
+            step_base64,
+            work_dir=self.config.work_dir,
+            expect_solid=bool(arguments.get("expect_solid", True)),
+            expect_single_solid=bool(arguments.get("expect_single_solid", False)),
+        )
+
+    async def export_step(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """STEP written with the configured schema (CDE slice 6)."""
+        import asyncio
+
+        from tool_registry.tools.cadquery.validity import export_step
+
+        step_base64 = arguments.get("step_base64") or ""
+        if not isinstance(step_base64, str) or not step_base64:
+            raise ValueError("step_base64 is required")
+        schema = arguments.get("schema") or self.config.step_schema
+        return await asyncio.to_thread(
+            export_step, step_base64, work_dir=self.config.work_dir, schema=str(schema)
         )
 
     async def create_parametric(self, arguments: dict[str, Any]) -> dict[str, Any]:

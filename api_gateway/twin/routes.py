@@ -25,6 +25,7 @@ from api_gateway.twin.boolean_ops import (
     perform_boolean_op,
 )
 from api_gateway.twin.edge_endpoints import resolve_endpoints
+from api_gateway.twin.exact_cad import geometry_state_view
 from api_gateway.twin.file_link import (
     FileLink,
     FileLinkCreateRequest,
@@ -254,6 +255,8 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         ),
         # FORGE-527: what a record was for and whether it is still current.
         **record_view(wp.type.value, wp.metadata),
+        # CDE slice 6: Concept / Preview / Exact / Validated and its revision.
+        geometryState=geometry_state_view(wp.type.value, wp.metadata),
     )
 
 

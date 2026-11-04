@@ -60,6 +60,29 @@ export interface TwinNode {
   // FORGE-687: a node kept by twin.record_design_files (schematic, board,
   // gerbers, placement, pin map, firmware). Undefined for every other node.
   designFiles?: DesignFilesView;
+  // CDE slice 6: where a geometry artifact stands (Concept / Preview / Exact /
+  // Validated) and the revision it is. Undefined for nodes that are not geometry.
+  geometryState?: GeometryStateView;
+}
+
+/** CDE slice 6 (UI-004, DEF-009): a geometry artifact's state. */
+export type GeometryStateName =
+  | 'concept'
+  | 'preview'
+  | 'exact_ready'
+  | 'validation_pending'
+  | 'validated'
+  | 'failed'
+  | 'stale'
+  | 'released';
+
+export interface GeometryStateView {
+  state: GeometryStateName;
+  /** Concept | Preview | Exact | Validated */
+  badge: string | null;
+  authority: string | null;
+  itemKey: string | null;
+  sourceRevision: number | null;
 }
 
 /** FORGE-687: what twin.record_design_files kept, as GET /twin/nodes returns it. */

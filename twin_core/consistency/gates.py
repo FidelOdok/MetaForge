@@ -198,6 +198,15 @@ recorded-but-unapproved waiver FAILS. A missing ``release_approval`` FAILS
 (not ``NOT_EVALUATED``) -- release-to-manufacture is an unconditionally
 required sign-off (spec section 63, HITL Level 4 Mandatory Authority), same
 posture as the baseline check's own missing-baseline FAIL above.
+
+**G8 exact geometry (CDE slice 6, FRS DEF-007, GEO-007/008)**: every CAD item
+in the project (``cad_model`` and ``assembly`` items, analysis models left out)
+must be at a ``validated`` exact revision with a STEP exported from that very
+revision whose re-import round trip passed. Anything short of that is
+``INCOMPLETE`` with the reason per item, which leaves the gate ``NOT_READY``
+(the work is not done yet, as opposed to a check that failed). A project with
+no CAD items gets no such check at all, so a board-only release is judged as
+before.
 """
 
 from __future__ import annotations
@@ -222,6 +231,10 @@ class GateCheckStatus(StrEnum):
     PASS = "pass"
     FAIL = "fail"
     NOT_EVALUATED = "not_evaluated"
+    #: CDE slice 6: required work is not finished yet (an exact revision is not
+    #: validated, or its STEP was not exported and round-tripped). The gate
+    #: is then NOT_READY, never passed.
+    INCOMPLETE = "incomplete"
 
 
 class GateStatus(StrEnum):
@@ -256,6 +269,8 @@ def _status_from_checks(checks: list[GateCheck]) -> GateStatus:
     cuts both ways: it also must not be silently marked done."""
     if any(c.status == GateCheckStatus.FAIL for c in checks):
         return GateStatus.FAILED
+    if any(c.status == GateCheckStatus.INCOMPLETE for c in checks):
+        return GateStatus.NOT_READY
     if any(c.status == GateCheckStatus.NOT_EVALUATED for c in checks):
         return GateStatus.READY_FOR_REVIEW
     return GateStatus.PASSED
@@ -1139,6 +1154,30 @@ async def _evaluate_release_approval_check(twin: TwinAPI, project_id: UUID) -> G
     )
 
 
+async def _evaluate_exact_cad_check(twin: TwinAPI, project_id: UUID) -> GateCheck | None:
+    """CDE slice 6: each CAD item validated, with a round-trip-passed STEP of its head.
+
+    ``None`` when the project has no CAD items: nothing to hold to the rule.
+    """
+    from twin_core.geometry_state import exact_cad_readiness
+
+    readiness = await exact_cad_readiness(twin, project_id)
+    if not readiness:
+        return None
+    pending = [r for r in readiness if not r.ready]
+    return GateCheck(
+        id="exact_cad_validated",
+        label="CAD validated, with a round-trip-passed STEP of each revision",
+        status=GateCheckStatus.INCOMPLETE if pending else GateCheckStatus.PASS,
+        detail=(
+            "; ".join(r.summary() for r in pending)
+            if pending
+            else f"{len(readiness)} CAD item(s) validated and exported: "
+            + ", ".join(f"{r.item_key}@{r.head_revision}" for r in readiness)
+        ),
+    )
+
+
 async def evaluate_g8_release(
     twin: TwinAPI,
     project_id: UUID,
@@ -1155,4 +1194,7 @@ async def evaluate_g8_release(
         await _evaluate_waivers_check(twin, project_id),
         await _evaluate_release_approval_check(twin, project_id),
     ]
+    exact_cad = await _evaluate_exact_cad_check(twin, project_id)
+    if exact_cad is not None:
+        checks.append(exact_cad)
     return GateEvaluation(gate_id="G8", status=_status_from_checks(checks), checks=checks)

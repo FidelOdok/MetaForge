@@ -175,7 +175,7 @@ reached.
 |-----------|-----------|
 | A failed design-flow run | yes: the same request starts a new run (its own change set; the failed run's drafts were already closed) |
 | A failed plain run | no (409): a chat turn or a held tool call cannot be started again safely |
-| A failed or interrupted job | yes, when its tool registered a retry (today `twin.generate_concept_mesh`): the same arguments, session, project, target and base revision, as a new job |
+| A failed or interrupted job | yes, when its tool registered a retry (`twin.generate_concept_mesh`, `twin.build_exact_cad`, `twin.export_cad_step`): the same arguments, session, project, target and base revision, as a new job |
 | A failed job in the MCP sidecar | yes, relayed to the sidecar's `POST /v1/jobs/{job_id}/retry` |
 | A chat turn | no (409): send the message again |
 
@@ -241,7 +241,7 @@ a fixed `sequence` (queued 10, running 20, every ending 90), so events stay in
 order however they travel, and a deterministic `event_id`, so a retried post
 is a duplicate. The domain comes from the tool id prefix (`kicad.` is
 electronics, `cadquery.` mechanical, `calculix.` simulation, a concept tool
-concept). When a job's result has a `node_id`, it is an `artifact_ref`. Jobs
+concept, a `twin.*_cad*` tool mechanical). When a job's result has a `node_id`, it is an `artifact_ref`. Jobs
 gained three statuses: `cancelled` (`JobRunner.cancel`), `superseded`
 (`JobRunner.supersede`) and `stale` (see [Scheduling](#scheduling)); each ends
 the job at once and stops its task. A job the store marks `interrupted` on
@@ -359,6 +359,28 @@ same credential as `/mcp`; the gateway calls them at `METAFORGE_MCP_URL` with
 `METAFORGE_MCP_CLIENT_KEY` (else `METAFORGE_MCP_API_KEY`). With no
 `METAFORGE_MCP_URL` such a job is not cancellable from the gateway (409).
 Best effort: an unreachable sidecar is a 503, never retried.
+
+## Exact CAD and STEP events
+
+The exact CAD jobs (`twin.build_exact_cad`, `twin.export_cad_step`, see
+[the twin schema](twin_schema.md#exact-cad-validity-and-step)) report on their
+own `job:<job_id>` operation with `domain: mechanical`. The FRS section 14
+names map onto the contract types:
+
+| FRS name | `type` | `sequence` | When | Artifact authority |
+|----------|--------|------------|------|--------------------|
+| `exact_geometry_ready` | `milestone` (stage `exact_geometry_ready`) | 30 | the exact B-Rep was built | `exact` |
+| `artifact_ready` | `partial_result` (stage `artifact_ready`) | 40 | a validated revision was committed, or a STEP was written | `validated` (a STEP only when its round trip passed; else `exact`) |
+| `validation_completed` | `completed` | 90 | the job ended with a verdict: "Geometry validated", or built with warnings and not validated | `validated` only for a validated revision |
+| `failed` | `failed` | 90 | the validity check failed or could not run ("the last valid revision was kept"), or the STEP export failed; offers `retry` | none |
+| `stale` | `stale` | 95 | the head moved past the revision a completed STEP export belongs to | `exact` |
+
+A preview never claims `validated`. A build job's own commit is its result:
+the job runner does not call it stale because the head moved to the
+revision the job itself wrote (the result names it as `target_revision`). A
+build whose base moved before its pinned commit is refused by the twin and
+ends `stale`, and the newer head is kept. A STEP export job's `target_key`
+is `STEP:<KEY>@<n>`, not the item key, so a later build never supersedes it.
 
 ## Storage and configuration
 
