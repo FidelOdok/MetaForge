@@ -73,7 +73,7 @@ export function EvalsPage() {
       {!isLoading && scenarios.length === 0 && (
         <EmptyState
           title="No eval runs recorded yet"
-          description="Run evals/run_scenarios.py or evals/design_loop_scenarios.py (see evals/README.md) to populate this page."
+          description="Agent quality scores appear here after evaluation runs are recorded."
         />
       )}
 

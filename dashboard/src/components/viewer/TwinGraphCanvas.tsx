@@ -12,7 +12,6 @@ import {
   Background,
   Controls,
   Handle,
-  MiniMap,
   type Node,
   type Edge,
   type NodeMouseHandler,
@@ -491,19 +490,8 @@ export function TwinGraphCanvas({
             left: 16,
           }}
         />
-        <MiniMap
-          nodeColor={(n) =>
-            n.type === 'ref'
-              ? GROUP_COLOR[groupOf((n.data as RefNodeData).kind)]
-              : domainColor((n.data as TwinNodeData).domain)
-          }
-          style={{
-            background: KC.surfaceContainer,
-            border: `1px solid ${KC.border}`,
-            borderRadius: 6,
-          }}
-          maskColor="rgba(0,0,0,0.5)"
-        />
+        {/* No minimap: the chat dock sits over the bottom-right corner, so it
+            showed as a half-covered grey box; zoom and fit cover navigation. */}
       </ReactFlow>
     </div>
   );

@@ -35,8 +35,8 @@ function formatDate(iso: string): string {
 function LoadCaseRow({ loadCase }: { loadCase: LoadCase }) {
   return (
     <tr
-      className="hover:bg-[#282a30] cursor-default"
-      style={{ height: '36px', borderBottom: '1px solid rgba(65,72,90,0.1)' }}
+      className="hover:bg-[var(--mf-c-282a30)] cursor-default"
+      style={{ height: '36px', borderBottom: '1px solid var(--mf-r-65-72-90-0p1)' }}
     >
       <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">{loadCase.name}</td>
       <td className="px-3 text-xs text-on-surface-variant whitespace-nowrap">
@@ -71,12 +71,12 @@ function ResultRow({
 }) {
   return (
     <tr
-      className="hover:bg-[#282a30] cursor-pointer"
+      className="hover:bg-[var(--mf-c-282a30)] cursor-pointer"
       aria-selected={focused}
       onClick={onFocus}
       style={{
         height: '36px',
-        borderBottom: '1px solid rgba(65,72,90,0.1)',
+        borderBottom: '1px solid var(--mf-r-65-72-90-0p1)',
         background: focused ? 'rgba(230,126,34,0.08)' : undefined,
         boxShadow: focused ? 'inset 2px 0 0 #e67e22' : undefined,
       }}
@@ -106,7 +106,7 @@ function ResultRow({
       <td className="px-3 text-xs whitespace-nowrap" title={result.hasField ? '3D field stored' : 'Field not stored'}>
         <span
           className="material-symbols-outlined"
-          style={{ fontSize: '14px', color: result.hasField ? '#86cfff' : 'rgba(154,154,170,0.4)', verticalAlign: 'middle' }}
+          style={{ fontSize: '14px', color: result.hasField ? 'var(--mf-c-86cfff)' : 'var(--mf-r-154-154-170-0p4)', verticalAlign: 'middle' }}
         >
           {result.hasField ? 'view_in_ar' : 'block'}
         </span>
@@ -218,7 +218,7 @@ export function SimPage() {
             type="button"
             onClick={() => dialogRef.current?.open()}
             className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-            style={{ background: '#282a30', border: '1px solid rgba(65,72,90,0.3)' }}
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
               add
@@ -231,7 +231,7 @@ export function SimPage() {
       {isLoading && (
         <div
           className="rounded-lg overflow-hidden"
-          style={{ background: 'rgba(30,31,38,0.85)', border: '1px solid rgba(65,72,90,0.2)' }}
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
         >
           {[...Array(4)].map((_, i) => (
             <div
@@ -239,8 +239,8 @@ export function SimPage() {
               className="animate-pulse"
               style={{
                 height: '36px',
-                borderBottom: '1px solid rgba(65,72,90,0.1)',
-                background: i % 2 === 0 ? 'rgba(40,42,48,0.3)' : 'transparent',
+                borderBottom: '1px solid var(--mf-r-65-72-90-0p1)',
+                background: i % 2 === 0 ? 'var(--mf-r-40-42-48-0p3)' : 'transparent',
               }}
             />
           ))}
@@ -264,11 +264,11 @@ export function SimPage() {
       {!isLoading && items.length > 0 && (
         <div
           className="rounded-lg overflow-hidden overflow-x-auto"
-          style={{ background: 'rgba(30,31,38,0.85)', border: '1px solid rgba(65,72,90,0.2)' }}
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
         >
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr style={{ background: '#191b22' }}>
+              <tr style={{ background: 'var(--mf-c-191b22)' }}>
                 {[
                   { label: 'Name', align: 'left' },
                   { label: 'Material', align: 'left' },
@@ -280,7 +280,7 @@ export function SimPage() {
                   <th
                     key={label}
                     className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
-                    style={{ height: '32px', borderBottom: '1px solid rgba(65,72,90,0.2)', whiteSpace: 'nowrap' }}
+                    style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', whiteSpace: 'nowrap' }}
                   >
                     {label}
                   </th>
@@ -315,18 +315,18 @@ export function SimPage() {
           {!resultsLoading && resultItems.length === 0 && (
             <EmptyState
               title="No results yet"
-              description="Run an analysis (calculix.run_fea + extract_results) and record it as a simulation_result to see it here."
+              description="Run a stress or thermal check from the twin chat or a design run, and its results appear here."
             />
           )}
 
           {!resultsLoading && resultItems.length > 0 && (
             <div
               className="rounded-lg overflow-hidden overflow-x-auto"
-              style={{ background: 'rgba(30,31,38,0.85)', border: '1px solid rgba(65,72,90,0.2)' }}
+              style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
             >
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr style={{ background: '#191b22' }}>
+                  <tr style={{ background: 'var(--mf-c-191b22)' }}>
                     {[
                       { label: '', align: 'left' },
                       { label: 'Name', align: 'left' },
@@ -339,7 +339,7 @@ export function SimPage() {
                       <th
                         key={label || 'select'}
                         className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
-                        style={{ height: '32px', borderBottom: '1px solid rgba(65,72,90,0.2)', whiteSpace: 'nowrap' }}
+                        style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', whiteSpace: 'nowrap' }}
                       >
                         {label}
                       </th>
