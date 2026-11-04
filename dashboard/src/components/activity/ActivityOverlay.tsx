@@ -1,0 +1,445 @@
+import { useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useMutation } from '@tanstack/react-query';
+import { ChevronDown, ChevronUp, Pause, Play, X } from 'lucide-react';
+
+import { cancelOperation } from '../../api/endpoints/operations';
+import { refusalOf } from '../../api/endpoints/create';
+import { useApproval } from '../../hooks/use-approvals';
+import { useTwinNode } from '../../hooks/use-twin';
+import { sortedOperations, type OperationView } from '../../lib/operations-reducer';
+import { useOperationsStore, useProjectOperations } from '../../store/operations-store';
+import { isTerminal, type ActionRef, type ArtifactRef, type OperationDomain } from '../../types/operations';
+import { ApprovalCard } from '../approvals/ApprovalCard';
+import { PreviewHost } from '../preview/PreviewHost';
+import {
+  authorityLabel,
+  currentStep,
+  domainLabel,
+  formatElapsed,
+  nextAction,
+  progressText,
+  realArtifact,
+  statusLabel,
+  statusTone,
+} from './labels';
+import { useNow, useOnScreen, usePrefersReducedMotion, useThrottledAnnouncement } from './motion';
+import { sceneFor } from './scenes/registry';
+import { sceneStateOf } from './scenes/types';
+import '../../styles/activity.css';
+
+export interface ActivityOverlayProps {
+  projectId: string;
+  /**
+   * Engineering density: lanes per domain with stage ids, revisions, severity
+   * and the raw event messages on expand. Create leaves it off.
+   */
+  detail?: boolean;
+  /**
+   * Handles `retry` and `open` actions when the host has a better path than
+   * the default (which opens the run, where retry lives).
+   */
+  onAction?: (op: OperationView, action: ActionRef) => void;
+  className?: string;
+}
+
+const CONNECTION_LOST = 'Connection interrupted, reconnecting';
+
+/**
+ * The activity overlay (FORGE-786, section 11B and 11C of the FRS).
+ *
+ * A compact card that expands into a prominent, slightly translucent overlay
+ * and minimises back. It shows one primary operation at a time; any other
+ * live operations collapse into a queue counter. It reads the shared
+ * operations store, so Create and Engineering show the same operation, stage,
+ * revision and preview. Minimising never cancels anything.
+ *
+ * Honesty rules: status words come from backend state only; a percentage is
+ * shown only for a measured total; there is never an ETA; the scene is
+ * labelled "Illustrative activity" until a real artifact arrives; and while
+ * the connection is down the scene stops moving and says so.
+ */
+export function ActivityOverlay({ projectId, detail = false, onAction, className }: ActivityOverlayProps) {
+  const project = useProjectOperations(projectId);
+  const setSize = useOperationsStore((s) => s.setSize);
+  const dismiss = useOperationsStore((s) => s.dismiss);
+  const setMotionPaused = useOperationsStore((s) => s.setMotionPaused);
+
+  const ordered = useMemo(() => sortedOperations(project.ops, project.dismissed), [project.ops, project.dismissed]);
+  const primary = ordered[0];
+  const queued = ordered.slice(1).filter((op) => !isTerminal(op.state)).length;
+  const connected = project.health === 'live';
+  const expanded = project.size === 'expanded';
+
+  // Nothing to show: no card, and no connection notice for an empty project.
+  if (!primary) return null;
+
+  return (
+    <section
+      className={`act-overlay is-${expanded ? 'expanded' : 'compact'}${detail ? ' is-detail' : ''}${className ? ` ${className}` : ''}`}
+      aria-label="Activity"
+      data-testid="activity-overlay"
+    >
+      {!connected && project.health !== 'connecting' && (
+        <p className="act-connection" role="status">
+          {CONNECTION_LOST}
+        </p>
+      )}
+      <PrimaryOperation
+          key={primary.operation_id}
+          projectId={projectId}
+          op={primary}
+          queued={queued}
+          expanded={expanded}
+          detail={detail}
+          connected={connected}
+          motionPaused={project.motionPaused}
+          onToggleSize={() => setSize(projectId, expanded ? 'compact' : 'expanded')}
+          onTogglePause={() => setMotionPaused(projectId, !project.motionPaused)}
+          onDismiss={() => dismiss(projectId, primary.operation_id)}
+          onAction={onAction}
+        />
+    </section>
+  );
+}
+
+interface PrimaryProps {
+  projectId: string;
+  op: OperationView;
+  queued: number;
+  expanded: boolean;
+  detail: boolean;
+  connected: boolean;
+  motionPaused: boolean;
+  onToggleSize: () => void;
+  onTogglePause: () => void;
+  onDismiss: () => void;
+  onAction?: (op: OperationView, action: ActionRef) => void;
+}
+
+function PrimaryOperation({
+  projectId,
+  op,
+  queued,
+  expanded,
+  detail,
+  connected,
+  motionPaused,
+  onToggleSize,
+  onTogglePause,
+  onDismiss,
+  onAction,
+}: PrimaryProps) {
+  const label = statusLabel(op);
+  const tone = statusTone(op.state);
+  const terminal = isTerminal(op.state);
+  const now = useNow(!terminal && connected);
+  const elapsedEnd = terminal ? Date.parse(op.updated_at) : now;
+  const elapsed = formatElapsed(elapsedEnd - Date.parse(op.started_at));
+  const step = currentStep(op);
+  const progress = progressText(op);
+  const urgent = op.state === 'failed' || op.state === 'waiting_for_user' || op.state === 'blocked';
+  const announcement = useThrottledAnnouncement(
+    connected ? `${op.title}: ${label}. ${step}` : `${op.title}: ${CONNECTION_LOST}`,
+    urgent || !connected,
+  );
+
+  return (
+    <div className={`act-card tone-${tone}`} data-state={op.state} data-operation={op.operation_id}>
+      <div className="act-head">
+        <span className={`act-status tone-${tone}`} data-testid="activity-status">
+          <span className="act-status-dot" aria-hidden="true" />
+          {label}
+        </span>
+        <h2 className="act-title">{op.title}</h2>
+        <span className="act-elapsed" title="Time elapsed">
+          {elapsed}
+        </span>
+        {queued > 0 && (
+          <span className="act-queue" aria-label={`${queued} more ${queued === 1 ? 'operation' : 'operations'} in progress`}>
+            +{queued}
+          </span>
+        )}
+        <div className="act-head-actions">
+          <button
+            type="button"
+            className="act-icon"
+            onClick={onToggleSize}
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Minimise activity' : 'Expand activity'}
+            title={expanded ? 'Minimise (keeps running)' : 'Expand'}
+          >
+            {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </button>
+          {terminal && (
+            <button type="button" className="act-icon" onClick={onDismiss} aria-label="Close this activity" title="Close">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <p className="act-step">{step}</p>
+      {progress && op.progress && (
+        <div className="act-progress">
+          <progress max={op.progress.total} value={Math.min(op.progress.done, op.progress.total)} aria-label="Measured progress" />
+          <span>{progress}</span>
+        </div>
+      )}
+
+      <div className="act-live" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
+
+      <Actions projectId={projectId} op={op} onAction={onAction} />
+
+      {expanded && (
+        <div className="act-body">
+          <Visual op={op} connected={connected} motionPaused={motionPaused} onTogglePause={onTogglePause} />
+          <p className="act-next">
+            <span className="act-label">Next</span> {nextAction(op)}
+          </p>
+          <Milestones op={op} />
+          <Lanes op={op} detail={detail} />
+          {detail && <Detail op={op} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Visual({
+  op,
+  connected,
+  motionPaused,
+  onTogglePause,
+}: {
+  op: OperationView;
+  connected: boolean;
+  motionPaused: boolean;
+  onTogglePause: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onScreen = useOnScreen(ref);
+  const reducedMotion = usePrefersReducedMotion();
+  const artifact = realArtifact(op);
+  const Scene = sceneFor(op.domain);
+  const stageIndex = Math.max(
+    op.stages.filter((s) => s.state === 'completed').length,
+    op.milestones.length,
+    op.state === 'completed' ? 99 : 0,
+  );
+  // Motion that would imply progress stops while the connection is down,
+  // while offscreen, and when the person pauses it.
+  const paused = motionPaused || !onScreen || !connected;
+
+  return (
+    <div className="act-visual" ref={ref}>
+      {artifact ? (
+        <figure className="act-artifact">
+          <figcaption className="act-visual-label">{`${authorityLabel(artifact)}: ${artifact.label}`}</figcaption>
+          <ArtifactPreview artifact={artifact} />
+        </figure>
+      ) : (
+        <figure className="act-scene-wrap">
+          <figcaption className="act-visual-label">Illustrative activity</figcaption>
+          <Scene
+            state={sceneStateOf(op.state)}
+            stageIndex={stageIndex}
+            reducedMotion={reducedMotion}
+            paused={paused}
+            staleRevision={op.target_revision}
+          />
+          {!reducedMotion && op.state === 'running' && (
+            <button
+              type="button"
+              className="act-icon act-pause"
+              onClick={onTogglePause}
+              aria-pressed={motionPaused}
+              aria-label={motionPaused ? 'Play animation' : 'Pause animation'}
+            >
+              {motionPaused ? <Play size={12} /> : <Pause size={12} />}
+            </button>
+          )}
+        </figure>
+      )}
+    </div>
+  );
+}
+
+/** A real artifact: a twin work product through PreviewHost, an image, or a link. */
+function ArtifactPreview({ artifact }: { artifact: ArtifactRef }) {
+  if (artifact.kind === 'work_product') return <WorkProductPreview artifact={artifact} />;
+  if (artifact.kind === 'image' && artifact.url) {
+    return <img className="act-image" src={artifact.url} alt={artifact.label} />;
+  }
+  return artifact.url ? (
+    <a className="act-link" href={artifact.url} target="_blank" rel="noreferrer">
+      Open {artifact.label}
+    </a>
+  ) : (
+    <p className="act-muted">{artifact.label}</p>
+  );
+}
+
+function WorkProductPreview({ artifact }: { artifact: ArtifactRef }) {
+  const node = useTwinNode(artifact.id);
+  if (!node.data) return <p className="act-muted">{node.isError ? 'The preview could not be loaded.' : 'Loading the preview…'}</p>;
+  return <PreviewHost node={node.data} mode="compact" />;
+}
+
+function Milestones({ op }: { op: OperationView }) {
+  if (op.milestones.length === 0) return null;
+  return (
+    <div className="act-section">
+      <h3 className="act-label">Done so far</h3>
+      <ol className="act-milestones">
+        {op.milestones.map((m) => (
+          <li key={m.sequence}>{m.label}</li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** Parallel work, one lane per domain (ASVG-007, RT-025). */
+function Lanes({ op, detail }: { op: OperationView; detail: boolean }) {
+  const lanes = useMemo(() => {
+    const by = new Map<OperationDomain, OperationView['stages']>();
+    for (const stage of op.stages) by.set(stage.domain, [...(by.get(stage.domain) ?? []), stage]);
+    return [...by.entries()];
+  }, [op.stages]);
+  if (lanes.length === 0 || (!detail && lanes.length < 2)) return null;
+  return (
+    <div className="act-section">
+      <h3 className="act-label">{detail ? 'Lanes' : 'Working on'}</h3>
+      <ul className="act-lanes">
+        {lanes.map(([domain, stages]) => {
+          const latest = stages[stages.length - 1];
+          return (
+            <li key={domain} className={`act-lane tone-${statusTone(latest?.state ?? 'queued')}`} data-domain={domain}>
+              <span className="act-lane-name">{domainLabel(domain, detail)}</span>
+              {detail ? (
+                <ul className="act-stages">
+                  {stages.map((s) => (
+                    <li key={s.stage_id}>
+                      <code>{s.stage_id}</code> {s.stage_title ?? ''} <span className="act-muted">{s.state}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="act-muted">{latest?.stage_title ?? ''}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** Engineering only: revisions, severity and the raw event lines, hidden until asked for. */
+function Detail({ op }: { op: OperationView }) {
+  return (
+    <details className="act-detail">
+      <summary>Technical detail</summary>
+      <dl>
+        <dt>Operation</dt>
+        <dd>
+          <code>{op.operation_id}</code>
+        </dd>
+        {op.run_id && (
+          <>
+            <dt>Run</dt>
+            <dd>
+              <Link to={`/runs/${encodeURIComponent(op.run_id)}`}>{op.run_id}</Link>
+            </dd>
+          </>
+        )}
+        <dt>Revision</dt>
+        <dd>
+          {op.base_revision ?? 'none'} to {op.target_revision ?? 'none'}
+        </dd>
+        <dt>Severity</dt>
+        <dd>{op.severity}</dd>
+      </dl>
+      <ol className="act-log">
+        {op.log.map((e) => (
+          <li key={e.sequence} className={`sev-${e.severity}`}>
+            <span className="act-muted">#{e.sequence}</span> <code>{e.type}</code>
+            {e.stageId ? <code> {e.stageId}</code> : null}
+            {e.targetRevision ? <span className="act-muted"> rev {e.targetRevision}</span> : null} {e.message}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+/** Inline actions, exactly the ones the operation lists in `action_refs` (RT-028). */
+function Actions({
+  projectId,
+  op,
+  onAction,
+}: {
+  projectId: string;
+  op: OperationView;
+  onAction?: (op: OperationView, action: ActionRef) => void;
+}) {
+  const [openApproval, setOpenApproval] = useState<string | null>(null);
+  const cancel = useMutation({ mutationFn: () => cancelOperation(projectId, op.operation_id) });
+  if (op.action_refs.length === 0) return null;
+  const runHref = op.run_id ? `/runs/${encodeURIComponent(op.run_id)}` : null;
+
+  return (
+    <div className="act-actions-wrap">
+      <div className="act-actions">
+        {op.action_refs.map((action) => {
+          const key = `${action.kind}:${action.id}`;
+          if (action.kind === 'approval') {
+            return (
+              <button
+                key={key}
+                type="button"
+                className="act-btn is-primary"
+                aria-expanded={openApproval === action.id}
+                onClick={() => setOpenApproval((cur) => (cur === action.id ? null : action.id))}
+              >
+                {action.label || 'Review'}
+              </button>
+            );
+          }
+          if (action.kind === 'cancel') {
+            return (
+              <button key={key} type="button" className="act-btn" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
+                {action.label || 'Cancel'}
+              </button>
+            );
+          }
+          if (onAction) {
+            return (
+              <button key={key} type="button" className="act-btn" onClick={() => onAction(op, action)}>
+                {action.label}
+              </button>
+            );
+          }
+          const href = action.id.startsWith('/') ? action.id : runHref;
+          return href ? (
+            <Link key={key} className="act-btn" to={href}>
+              {action.label}
+            </Link>
+          ) : null;
+        })}
+      </div>
+      {cancel.isError && <p className="act-error">{refusalOf(cancel.error)}</p>}
+      {openApproval && <InlineApproval id={openApproval} />}
+    </div>
+  );
+}
+
+/** The existing approval card, unchanged: no second approval UI. */
+function InlineApproval({ id }: { id: string }) {
+  const approval = useApproval(id);
+  if (approval.data) return <ApprovalCard item={approval.data} />;
+  return <p className="act-muted">{approval.isError ? 'This review could not be loaded.' : 'Loading the review…'}</p>;
+}

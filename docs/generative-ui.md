@@ -86,6 +86,32 @@ are one line; thinking and typing events are not shown. The raw stream
 events are still available under *Raw events* when response detail is set
 to *verbose*, and the list is hidden at *concise*.
 
+## Activity overlay
+
+Longer work is not shown as chat text at all. Each design-flow run, tool job
+and Create chat turn is an operation, and both the Create and Engineering
+views show the primary one in the activity overlay
+(`dashboard/src/components/activity/ActivityOverlay.tsx`). Its rules:
+
+- Status words, stages and milestones come from the gateway's operation
+  events, never from a client timer. An event older than the last one applied
+  to its operation is dropped, a finished operation never returns to running,
+  and an older revision never replaces a newer one.
+- The animated drawing is drawn from a fixed set of typed scenes
+  (`components/activity/scenes/`), one per domain. They use CSS stroke-dash,
+  transform and opacity only, with no filters, scripts or event handlers, and
+  never render SVG produced by a model. A scene is labelled *Illustrative
+  activity* until a real artifact preview replaces it.
+- A percentage needs a measured total; there is no ETA.
+- Decisions use the existing approval card, and cancel or retry appear only
+  when the operation offers them.
+- In Engineering the overlay also lists lanes per domain with stage ids,
+  revisions, severity and the raw event lines, under *Technical detail*.
+
+The Engineering chat's own stream is read with the same fetch-based SSE
+reader as the operations stream (`dashboard/src/lib/sse.ts`), so it carries
+a bearer token to a gateway behind an authentication provider.
+
 ## Storage
 
 `chat_messages.blocks` is a JSON column. The gateway adds it to an existing

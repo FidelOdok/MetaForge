@@ -20,6 +20,8 @@ import { DecisionsPanel } from '../components/create/DecisionsPanel';
 import { MakePanel } from '../components/create/MakePanel';
 import { InspectPanel } from '../components/create/InspectPanel';
 import { JOURNEY, journeyStep } from '../components/create/copy';
+import { ActivityOverlay } from '../components/activity/ActivityOverlay';
+import { useOperations } from '../hooks/use-operations';
 import '../styles/create.css';
 
 const PANELS = ['brief', 'decisions', 'make', 'inspect', 'history'] as const;
@@ -79,7 +81,15 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   const selectNode = useCreateStore((s) => s.selectNode);
   const setDraft = useCreateStore((s) => s.setDraft);
   const submit = useCreateStore((s) => s.submit);
-  const working = session.queue.some((i) => i.state === 'sending' || i.state === 'queued');
+  // Operations come from the gateway (FORGE-786) and are shared with
+  // Engineering. While the project has any, `working` is derived from them,
+  // plus an instruction still on its way out (acknowledged before its
+  // operation exists). Without any, the local queue is the fallback.
+  const operations = useOperations(projectId);
+  const queueWorking = session.queue.some((i) => i.state === 'sending' || i.state === 'queued');
+  const working = operations.known
+    ? operations.active.length > 0 || session.queue.some((i) => i.state === 'sending')
+    : queueWorking;
 
   // Opening a creation makes it the workspace's project, so Engineering shows the same one.
   useEffect(() => {
@@ -239,6 +249,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
             working={working}
             presenting={presenting}
           />
+          {!presenting && <ActivityOverlay projectId={projectId} className="act-dock-create" />}
         </main>
 
         <aside className="cv-side" aria-label="Details">

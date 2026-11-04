@@ -32,6 +32,8 @@ import { importWorkProduct } from '../../api/endpoints/twin';
 import type { Proposal } from '../../api/endpoints/assistant';
 import type { TwinNode } from '../../types/twin';
 import { isSampleMode } from '../../lib/sample-workspace';
+import { getAccessToken } from '../../auth/accessToken';
+import { streamSse, type SseMessage } from '../../lib/sse';
 
 type Interaction = 'discuss' | 'propose' | 'tools';
 type Verbosity = 'concise' | 'normal' | 'verbose';
@@ -190,33 +192,56 @@ export function TwinAgentChat({
   useEffect(() => () => abortRef.current?.abort(), []);
 
   // Live agent events for the open thread (SSE). Not available offline.
+  // Read with the fetch-based `streamSse`, not a native EventSource, so a
+  // gateway behind an authentication provider gets its bearer token (FORGE-786).
   useEffect(() => {
-    if (!activeThreadId || isSampleMode() || typeof EventSource === 'undefined') return;
-    const source = new EventSource(twinChatStreamUrl(activeThreadId));
+    if (!activeThreadId || isSampleMode()) return;
+    const controller = new AbortController();
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let delay = 1_000;
     const refresh = () => {
       void queryClient.invalidateQueries({ queryKey: twinChatKeys.thread(projectId, activeThreadId) });
       void queryClient.invalidateQueries({ queryKey: assistantKeys.all });
     };
-    source.addEventListener('message.created', refresh);
-    source.addEventListener('agent.done', refresh);
-    for (const kind of STREAM_EVENTS) {
-      source.addEventListener(kind, (evt) => {
-        const raw = (evt as MessageEvent).data;
-        let data: unknown;
-        try {
-          data = JSON.parse(raw);
-        } catch {
-          data = raw;
-        }
-        if (kind === 'context.stats' && typeof data === 'object' && data !== null) {
-          setContextStats(data as Record<string, unknown>);
-        } else if (kind !== 'message.delta') {
-          setActivity((prev) => [...prev.slice(-99), { kind, data, at: new Date().toISOString() }]);
-        }
-        if (kind === 'message.delta') refresh();
-      });
-    }
-    return () => source.close();
+    const onMessage = (message: SseMessage) => {
+      const kind = message.event;
+      if (kind === 'message.created' || kind === 'agent.done') refresh();
+      if (!STREAM_EVENTS.includes(kind)) return;
+      let data: unknown;
+      try {
+        data = JSON.parse(message.data);
+      } catch {
+        data = message.data;
+      }
+      if (kind === 'context.stats' && typeof data === 'object' && data !== null) {
+        setContextStats(data as Record<string, unknown>);
+      } else if (kind !== 'message.delta') {
+        setActivity((prev) => [...prev.slice(-99), { kind, data, at: new Date().toISOString() }]);
+      }
+      if (kind === 'message.delta') refresh();
+    };
+    const connect = async (): Promise<void> => {
+      if (controller.signal.aborted) return;
+      try {
+        const token = getAccessToken();
+        await streamSse(twinChatStreamUrl(activeThreadId), {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
+          onMessage,
+        });
+        delay = 1_000;
+      } catch {
+        // A refused or dropped stream is retried below; an abort ends the loop.
+      }
+      if (controller.signal.aborted) return;
+      retry = setTimeout(() => void connect(), delay);
+      delay = Math.min(delay * 2, 15_000);
+    };
+    void connect();
+    return () => {
+      controller.abort();
+      if (retry) clearTimeout(retry);
+    };
   }, [activeThreadId, projectId, queryClient]);
 
   const toggle = (p: Popover) => setPopover((cur) => (cur === p ? null : p));

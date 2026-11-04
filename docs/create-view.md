@@ -47,6 +47,52 @@ acceptance) and a **history** of every change.
   address (`?panel=make`), so back, forward and direct links work.
 - **Journey rail** (top) showing the step the creation is on.
 
+## Activity overlay
+
+Work that takes time (a design-flow run, a tool job, a Create chat turn) is
+shown as an **operation** in a small activity card over the top right of the
+stage. It does not cover the composer or the conversation, and it can be
+expanded into a larger, slightly translucent overlay and minimised again.
+Minimising or closing it never cancels anything.
+
+- **One at a time.** The card shows one primary operation: a decision waiting
+  for the person first, then a failure, then live work. Any other live
+  operations collapse into a counter such as *+2*.
+- **Plain status.** The status is one of *Queued*, *Working*, *Checking*,
+  *Waiting for a decision*, *Ready*, *Needs attention* or *Unable to
+  complete*, with the current step and the elapsed time. Expanded, it also
+  shows what is done so far, parallel work when more than one domain is
+  involved, and one sentence saying what happens next.
+- **Honest progress.** A percentage appears only when the gateway reports a
+  measured total (for example 3 of 8 checks). There is never an ETA.
+- **Illustrative until real.** While nothing has been produced, the overlay
+  shows a small animated drawing for the domain (a sketch tracing a
+  silhouette, a profile extruding, traces joining pads, signal packets, a mesh
+  with contours, print layers, linked nodes), labelled *Illustrative
+  activity*. When the operation reports a real preview, the drawing is
+  replaced by that preview, labelled with what it is (*Preview*, *Exact
+  result* or *Validated result*).
+- **Actions from the operation only.** Review, cancel, retry and open buttons
+  appear only when the operation lists them. A review opens the existing
+  approval card in place; there is no second approval screen.
+- **Connection.** If the live connection drops, the card says *Connection
+  interrupted, reconnecting* and the drawing stops moving, so nothing implies
+  progress that has not been reported. On reconnect the dashboard refetches
+  the gateway's snapshot and carries on from it.
+- **Motion and access.** The drawing is still under *prefers-reduced-motion*,
+  can be paused, and pauses itself offscreen or in a hidden tab. Status is
+  always written out as text, and changes are announced through a polite,
+  throttled live region rather than on every update.
+
+The operations live in a store shared with the Engineering view
+(`store/operations-store.ts`), so switching views keeps the same operation,
+stage, revision and preview. The overlay reads the project's operation
+snapshot and stream (`/v1/projects/{project_id}/operations` and
+`.../operations/stream`, described in the operations page of these docs).
+While the project has operations, the journey rail's *working* state is
+taken from them; before any exist it falls back to the local instruction
+queue.
+
 ## Conversation and instructions
 
 The composer has three intents:

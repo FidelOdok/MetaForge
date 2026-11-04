@@ -47,6 +47,8 @@ import { StructureView } from '../components/viewer/StructureView';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
 import { AssemblyJointsEditor } from '../components/viewer/AssemblyJointsEditor';
 import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
+import { ActivityOverlay } from '../components/activity/ActivityOverlay';
+import { useOperations } from '../hooks/use-operations';
 import { useViewerStore } from '../store/viewer-store';
 import { useLayoutStore } from '../store/layout-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
@@ -1151,6 +1153,8 @@ export function TwinViewerPage() {
   // FORGE-647: watch an agent put an assembly together, part by part.
   const [liveOpen, setLiveOpen] = useState(false);
   const projectName = sampleMode ? SAMPLE_PROJECT_NAME : activeProject?.name;
+  // FORGE-786: the project's live operations, shared with the Create view.
+  useOperations(sampleMode ? null : activeProjectId);
 
   // ── data ──
   const {
@@ -1474,6 +1478,9 @@ export function TwinViewerPage() {
       )}
 
       <section className="tw-view" aria-label="Twin model and graph">
+        {activeProjectId && !sampleMode && (
+          <ActivityOverlay projectId={activeProjectId} detail className="act-dock-engineering" />
+        )}
         <div className="tw-render-area">
           {tab === 'graph' ? (
             isLoading ? (
