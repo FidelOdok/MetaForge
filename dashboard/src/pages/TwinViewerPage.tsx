@@ -60,6 +60,7 @@ import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-expo
 import { useToast } from '../components/ui/Toast';
 import type { TwinNode } from '../types/twin';
 import { DEFAULT_SHOWN, LINK_GROUPS, splitLinks, type LinkGroup } from '../lib/graphLinks';
+import { countKinds, defaultKinds, kindOf, LARGE_TWIN, NODE_KINDS, type NodeKind } from '../lib/graphKinds';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 import { resolveGatewayHref } from '../lib/gatewayConfig';
 import apiClient from '../api/client';
@@ -972,17 +973,50 @@ function GraphLinksBar({
   onToggle,
   failed,
   skippedNodes,
+  kindCounts,
+  shownKinds,
+  onToggleKind,
+  hiddenByKind,
 }: {
   split: ReturnType<typeof splitLinks>;
   shown: ReadonlySet<LinkGroup>;
   onToggle: (group: LinkGroup) => void;
   failed: boolean;
   skippedNodes: number;
+  kindCounts: Record<NodeKind, number>;
+  shownKinds: ReadonlySet<NodeKind>;
+  onToggleKind: (kind: NodeKind) => void;
+  hiddenByKind: number;
 }) {
   const groups = LINK_GROUPS.filter((g) => split.counts[g.id] > 0);
-  if (!failed && !skippedNodes && !groups.length && !split.offscreen) return null;
+  const kinds = NODE_KINDS.filter((k) => kindCounts[k.id] > 0);
+  // One kind alone is not a choice worth a row of buttons.
+  const showKinds = kinds.length > 1;
+  if (!failed && !skippedNodes && !groups.length && !split.offscreen && !showKinds) return null;
   return (
     <div className="tw-links" role="group" aria-label="Linked records">
+      {showKinds && (
+        <>
+          <span className="tw-links-label">Show</span>
+          {kinds.map((k) => (
+            <button
+              key={k.id}
+              type="button"
+              aria-pressed={shownKinds.has(k.id)}
+              onClick={() => onToggleKind(k.id)}
+              title={shownKinds.has(k.id) ? `Hide ${k.label.toLowerCase()}` : `Show ${k.label.toLowerCase()}`}
+            >
+              {k.label} <b>{kindCounts[k.id]}</b>
+            </button>
+          ))}
+          {hiddenByKind > 0 && (
+            <span className="tw-links-note" role="status">
+              {hiddenByKind} hidden
+            </span>
+          )}
+          <span className="tw-links-sep" aria-hidden="true" />
+        </>
+      )}
       {failed && (
         <span className="tw-links-warn" role="alert">
           Links unavailable: the relationships request failed, so only the work products are shown.
@@ -1045,6 +1079,8 @@ const TAB_LABELS: Record<TwinTab, string> = {
 };
 const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history'];
 
+const LARGE_TWIN_LINKS: ReadonlySet<LinkGroup> = new Set<LinkGroup>(['parts']);
+
 /** Status words that put a node in the "need attention" bucket. */
 function needsAttention(node: TwinNode): boolean {
   return /fail|invalid|violation|stale|changed|warning/i.test(node.status);
@@ -1073,7 +1109,10 @@ export function TwinViewerPage() {
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<NodeScope>('all');
   // FORGE-704: which kinds of linked record (constraints, baselines...) the graph draws.
-  const [shownLinks, setShownLinks] = useState<ReadonlySet<LinkGroup>>(DEFAULT_SHOWN);
+  // null follows the size-based default (see shownLinks below).
+  const [linkChoice, setLinkChoice] = useState<ReadonlySet<LinkGroup> | null>(null);
+  // Which kinds of node the graph and list show; null follows the size-based default.
+  const [kindChoice, setKindChoice] = useState<ReadonlySet<NodeKind> | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const railMin = useLayoutStore((s) => s.sidebarCollapsed);
@@ -1278,17 +1317,33 @@ export function TwinViewerPage() {
 
   // ── derived ──
   const query = search.toLowerCase();
+  const shownKinds = kindChoice ?? defaultKinds(items.length);
+  const kindCounts = countKinds(items);
   const visible = items.filter(
     (n) =>
+      // The selected node always stays on screen, whatever its kind.
+      (shownKinds.has(kindOf(n)) || n.id === selectedId) &&
       (scope === 'all' || (scope === 'attention' && needsAttention(n)) || n.domain === scope) &&
       `${n.name} ${n.domain} ${n.id}`.toLowerCase().includes(query),
   );
+  const hiddenByKind = items.filter((n) => !shownKinds.has(kindOf(n)) && n.id !== selectedId).length;
+  const toggleKind = (kind: NodeKind) =>
+    setKindChoice(() => {
+      const next = new Set(shownKinds);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
   const visibleIds = new Set(visible.map((n) => n.id));
   // FORGE-704: every edge is drawn, hidden by a switch, or off screen; none is dropped silently.
+  // A large twin starts with only part links: every linked constraint or
+  // intent record is drawn as its own card, and dozens of them buried the
+  // design. The hidden counts stay in the bar, one click from showing.
+  const shownLinks = linkChoice ?? (items.length > LARGE_TWIN ? LARGE_TWIN_LINKS : DEFAULT_SHOWN);
   const linkSplit = splitLinks({ relationships, endpoints, visibleIds, shown: shownLinks });
   const toggleLinks = (group: LinkGroup) =>
-    setShownLinks((current) => {
-      const next = new Set(current);
+    setLinkChoice(() => {
+      const next = new Set(shownLinks);
       if (next.has(group)) next.delete(group);
       else next.add(group);
       return next;
@@ -1440,6 +1495,10 @@ export function TwinViewerPage() {
                   onToggle={toggleLinks}
                   failed={relationshipsFailed}
                   skippedNodes={skippedNodes}
+                  kindCounts={kindCounts}
+                  shownKinds={shownKinds}
+                  onToggleKind={toggleKind}
+                  hiddenByKind={hiddenByKind}
                 />
                 <TwinGraphCanvas
                   nodes={visible}

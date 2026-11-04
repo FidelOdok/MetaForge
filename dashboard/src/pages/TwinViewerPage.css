@@ -1707,3 +1707,9 @@
   background: var(--tw-raised);
   border-style: solid;
 }
+.tw-links-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--tw-line);
+}
