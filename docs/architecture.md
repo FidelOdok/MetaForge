@@ -1395,6 +1395,45 @@ Human approvals of every kind (design-flow gates, held tool calls, change
 proposals, design-loop winners, sketches and drawings) are listed and decided
 through one API; see [Unified approvals API](approvals.md).
 
+### Cross-domain impact
+
+Two dependency graphs exist and they answer different questions:
+
+| Graph | Nodes | Question | Code |
+|-------|-------|----------|------|
+| Workflow-step DAG | agent steps of one run | in what order do the steps run | `orchestrator/dependency_engine.py`, `orchestrator/workflow_dag.py` |
+| Product dependency | items (an enclosure, a board, a pin map, a firmware module) and their results | when this item changes, what else is out of date | `twin_core/impact/` |
+
+The product graph is made of typed interface edges between items:
+`mounts_to`, `clearance_to`, `connects_via`, `pin_maps_to`,
+`simulation_input_of` and `feature_of`, each pinned to the revisions it was
+stated against and each saying who declared it (a person, a tool, or an
+inference that stays a proposal until a person confirms it). When an item's
+head moves, the twin walks those edges after its own revision pins have been
+checked:
+
+```
+head moves (KEY@1 -> KEY@2)
+  -> record pins: results pinned to KEY@1 become STALE
+  -> impact walk over confirmed interface edges (bounded, cycle-safe)
+       direct impacts: results that read KEY across the interface become STALE,
+                       tied to KEY@1; nothing is deleted or relabelled a pass
+       indirect impacts and unconfirmed links: reported, not invalidated
+  -> change_impact record: affected items by domain, stale results, proposed reruns
+  -> operation job:impact-<id>: dependencies_invalidated, then review_required or completed
+```
+
+Reruns are proposed, never started by the walk. A firmware or PCB rerun, or
+one on a release-bound item, always waits for a person through the
+[approvals API](approvals.md#re-checks-after-a-cross-domain-change); a
+read-only check may run without one, and a producing analysis only when the
+project's approval policy approves its tool. The Create view shows one plain
+sentence ("This may affect the PCB fit") with one next action; Engineering
+expands the affected items, the stale results with the revisions they were
+for, and the proposed re-checks. The activity overlay's cross-domain scene
+draws these real edges. See
+[interface edges and cross-domain impact](twin_schema.md#interface-edges-and-cross-domain-impact).
+
 ---
 
 ## 6. Data Flow

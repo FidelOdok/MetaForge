@@ -315,7 +315,8 @@
               "sketch",
               "drawing",
               "upload",
-              "parametric_sketch"
+              "parametric_sketch",
+              "rerun"
             ],
             "title": "Kind",
             "type": "string"
@@ -7654,6 +7655,45 @@
         "title": "GeometryStateResponse",
         "type": "object"
       },
+      "GraphItem": {
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "head_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Revision"
+          },
+          "item_type": {
+            "default": "",
+            "title": "Item Type",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "label",
+          "domain"
+        ],
+        "title": "GraphItem",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -8317,6 +8357,90 @@
         "title": "Hole",
         "type": "object"
       },
+      "ImpactListResponse": {
+        "properties": {
+          "impacts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Impacts",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "impacts"
+        ],
+        "title": "ImpactListResponse",
+        "type": "object"
+      },
+      "ImpactPreviewRequest": {
+        "properties": {
+          "changed_parameters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed Parameters"
+          },
+          "include_unaffected": {
+            "default": false,
+            "title": "Include Unaffected",
+            "type": "boolean"
+          },
+          "item_key": {
+            "description": "The item that would change (KEY)",
+            "title": "Item Key",
+            "type": "string"
+          },
+          "max_depth": {
+            "default": 4,
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Max Depth",
+            "type": "integer"
+          },
+          "new_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Revision"
+          },
+          "old_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Revision"
+          }
+        },
+        "required": [
+          "item_key"
+        ],
+        "title": "ImpactPreviewRequest",
+        "type": "object"
+      },
       "ImportWorkProductResponse": {
         "description": "Response from a successful work product import.",
         "properties": {
@@ -8903,6 +9027,144 @@
           "intent"
         ],
         "title": "IntentModelView",
+        "type": "object"
+      },
+      "InterfaceDeclareRequest": {
+        "properties": {
+          "coupled_parameters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Coupled Parameters",
+            "type": "array"
+          },
+          "rationale": {
+            "default": "",
+            "title": "Rationale",
+            "type": "string"
+          },
+          "source": {
+            "description": "An item key (KEY or KEY@n) or record:<uuid>",
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "description": "An item key (KEY or KEY@n) or record:<uuid>",
+            "title": "Target",
+            "type": "string"
+          },
+          "type": {
+            "description": "mounts_to, clearance_to, connects_via, pin_maps_to, ...",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "source",
+          "target"
+        ],
+        "title": "InterfaceDeclareRequest",
+        "type": "object"
+      },
+      "InterfaceEdgeResponse": {
+        "properties": {
+          "created": {
+            "default": false,
+            "title": "Created",
+            "type": "boolean"
+          },
+          "edge": {
+            "additionalProperties": true,
+            "title": "Edge",
+            "type": "object"
+          }
+        },
+        "required": [
+          "edge"
+        ],
+        "title": "InterfaceEdgeResponse",
+        "type": "object"
+      },
+      "InterfaceListResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphItem"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "edges",
+          "nodes"
+        ],
+        "title": "InterfaceListResponse",
+        "type": "object"
+      },
+      "InterfaceProposeRequest": {
+        "properties": {
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          }
+        },
+        "title": "InterfaceProposeRequest",
+        "type": "object"
+      },
+      "InterfaceProposeResponse": {
+        "properties": {
+          "already": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Already",
+            "type": "array"
+          },
+          "proposed": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Proposed",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped",
+            "type": "array"
+          }
+        },
+        "required": [
+          "proposed",
+          "already",
+          "skipped"
+        ],
+        "title": "InterfaceProposeResponse",
         "type": "object"
       },
       "InterfaceQuantitySummary": {
@@ -22689,7 +22951,8 @@
                     "sketch",
                     "drawing",
                     "upload",
-                    "parametric_sketch"
+                    "parametric_sketch",
+                    "rerun"
                   ],
                   "type": "string"
                 },
@@ -35131,6 +35394,451 @@
           }
         },
         "summary": "Get Version History",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/impact": {
+      "get": {
+        "description": "Recorded impacts, newest first.",
+        "operationId": "list_project_impacts_v1_twin_projects__project_id__impact_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImpactListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Project Impacts",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/impact/preview": {
+      "post": {
+        "description": "What a proposed change to ``item_key`` would affect. Writes nothing.\n\nThe new revision defaults to the head plus one. ``changed_parameters``\nnarrows the walk to edges whose coupled parameters it touches; leave it\nout when unknown. Reruns carry the disposition the project's approval\npolicy would give them.",
+        "operationId": "preview_project_impact_v1_twin_projects__project_id__impact_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImpactPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview Project Impact V1 Twin Projects  Project Id  Impact Preview Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Project Impact",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/impact/{change_or_revision}": {
+      "get": {
+        "description": "One recorded impact: by its id, by ``KEY@n`` (the change to that\nrevision), or by a bare ``KEY`` (its latest change).",
+        "operationId": "get_project_impact_v1_twin_projects__project_id__impact__change_or_revision__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "change_or_revision",
+            "required": true,
+            "schema": {
+              "title": "Change Or Revision",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Project Impact V1 Twin Projects  Project Id  Impact  Change Or Revision  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Project Impact",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/interfaces": {
+      "get": {
+        "description": "Every interface edge in the project, and the items they join.\n\nDerived edges (``simulation_input_of`` from a simulation's own pins,\n``feature_of`` from the sketch layer) carry ``derived: true``. An edge\nwhose pinned revision is behind the item's head says so in\n``source_behind`` / ``target_behind``.",
+        "operationId": "list_project_interfaces_v1_twin_projects__project_id__interfaces_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_removed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Removed",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_derived",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Derived",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Project Interfaces",
+        "tags": [
+          "twin"
+        ]
+      },
+      "post": {
+        "description": "A person declares an interface edge; it is confirmed at once.\n\nDeclaring a link an inference already proposed confirms that proposal.",
+        "operationId": "declare_project_interface_v1_twin_projects__project_id__interfaces_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterfaceDeclareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceEdgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Declare Project Interface",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/interfaces/propose": {
+      "post": {
+        "description": "Propose edges from recorded data (board and enclosure fields, pin map and\nfirmware sources). Each new one is ``proposed``, never confirmed.",
+        "operationId": "propose_project_interfaces_v1_twin_projects__project_id__interfaces_propose_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterfaceProposeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceProposeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Project Interfaces",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/interfaces/{edge_id}": {
+      "delete": {
+        "description": "A person removes an edge. It is kept as ``removed`` and never re-proposed.",
+        "operationId": "remove_project_interface_v1_twin_projects__project_id__interfaces__edge_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "edge_id",
+            "required": true,
+            "schema": {
+              "title": "Edge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Reason",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceEdgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Project Interface",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/interfaces/{edge_id}/confirm": {
+      "post": {
+        "description": "A person confirms an edge. It is re-pinned to both items' current heads.",
+        "operationId": "confirm_project_interface_v1_twin_projects__project_id__interfaces__edge_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "edge_id",
+            "required": true,
+            "schema": {
+              "title": "Edge Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceEdgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Project Interface",
         "tags": [
           "twin"
         ]

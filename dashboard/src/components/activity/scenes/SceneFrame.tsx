@@ -22,10 +22,13 @@ export function SceneFrame({
   name,
   props,
   children,
+  label,
 }: {
   name: string;
   props: SceneProps;
   children: ReactNode;
+  /** Replaces the "Illustrative" label when the scene draws real data. */
+  label?: string;
 }) {
   const { state, reducedMotion, paused, staleRevision } = props;
   const animated = state === 'running' && !reducedMotion && !paused;
@@ -35,9 +38,10 @@ export function SceneFrame({
       data-scene={name}
       data-state={state}
       data-animated={animated ? 'true' : 'false'}
+      data-grounded={label ? 'true' : 'false'}
       viewBox="0 0 160 100"
       role="img"
-      aria-label={`Illustrative ${name} activity, ${STATE_WORDS[state]}`}
+      aria-label={label ? `${label}, ${STATE_WORDS[state]}` : `Illustrative ${name} activity, ${STATE_WORDS[state]}`}
       focusable="false"
     >
       <g className="act-scene-body">{children}</g>

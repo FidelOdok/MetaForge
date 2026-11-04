@@ -529,6 +529,78 @@ async def _twin_items(app: Any) -> list[ApprovalItem]:
     return items
 
 
+_RERUN_STATUS = {"proposed": "pending", "approved": "approved", "rejected": "rejected"}
+
+
+def rerun_item(impact: Any, rerun: Any) -> ApprovalItem:
+    """A re-check a cross-domain change proposed, waiting for a person (FORGE-793)."""
+    from api_gateway.twin.impact_service import rerun_approval_id
+
+    item_id = rerun_approval_id(str(impact.id), rerun.id)
+    status = _RERUN_STATUS.get(rerun.status, "pending")
+    allowed = ["approve", "reject"] if status == "pending" else []
+    decidable, why = _decidable(status == "pending", allowed)
+    fallback = (
+        DecisionRecord(
+            decision="approve" if rerun.status == "approved" else "reject",
+            reason=rerun.decision_reason or "",
+            approver=rerun.decided_by,
+            decided_at=rerun.decided_at,
+        )
+        if rerun.decided_by
+        else None
+    )
+    stale = next((s for s in impact.stale_results if s.record_id == rerun.record_id), None)
+    return ApprovalItem(
+        id=item_id,
+        kind="rerun",
+        status=status,  # type: ignore[arg-type]
+        title=rerun.label,
+        summary=f"{impact.summary} {rerun.reason}".strip(),
+        project_id=impact.project_id,
+        created_at=impact.created_at,
+        route="dashboard",
+        requested_by="metaforge:impact",
+        reason_held=rerun.disposition_reason or None,
+        allowed_decisions=allowed,  # type: ignore[arg-type]
+        decidable=decidable,
+        not_decidable_reason=why,
+        detail={
+            "impact_id": impact.id,
+            "operation_id": impact.operation_id,
+            "tool": rerun.tool,
+            "target_ref": rerun.target_ref,
+            "check_kind": rerun.check_kind,
+            "consequential": rerun.consequential,
+            "change": f"{impact.change.old_ref} -> {impact.change.new_ref}",
+            "stale_result": stale.model_dump(mode="json") if stale else None,
+        },
+        decision=_record(item_id, fallback),
+        # RT-030: the change the person reviewed. A later change is a new impact.
+        base_revision=impact.change.new_ref,
+    )
+
+
+async def _rerun_items(app: Any) -> list[ApprovalItem]:
+    """Every rerun that waited, or waits, for a person."""
+    from api_gateway.twin.impact_service import all_impacts
+
+    twin = _twin_of(app)
+    if twin is None:
+        return []
+    try:
+        impacts = await all_impacts(twin)
+    except Exception as exc:  # noqa: BLE001 - one unreadable kind must not hide the others
+        logger.warning("approvals_list_failed", kind="rerun", error=str(exc))
+        return []
+    return [
+        rerun_item(impact, rerun)
+        for impact in impacts
+        for rerun in impact.proposed_reruns
+        if rerun.disposition == "requires_approval"
+    ]
+
+
 def upload_item(upload: StagedUpload) -> ApprovalItem:
     """A staged upload as an approval: approve imports its files, reject drops them."""
     item_id = f"upload:{upload.id}"
@@ -646,6 +718,8 @@ HUMAN_AUTHORITY_KINDS: tuple[str, ...] = (
     "upload",
     # A parametric sketch is the sketch a person stands behind (PR-004).
     "parametric_sketch",
+    # A re-check a cross-domain change calls for waits for a person (XDM-007).
+    "rerun",
 )
 ALLOW_AGENT_HUMAN_AUTHORITY_ENV = "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY"
 AGENT_HUMAN_AUTHORITY_REASON = (
@@ -701,6 +775,7 @@ async def list_items(app: Any) -> list[ApprovalItem]:
     for p in assistant_routes.workflow.list_proposals():
         items.append(change_item(p, base_revision=await _change_revision(app, p)))
     items.extend(await _twin_items(app))
+    items.extend(await _rerun_items(app))
     items.extend(_upload_items())
     items.sort(key=lambda i: i.created_at or "", reverse=True)
     return items
@@ -757,6 +832,16 @@ async def get_item(app: Any, item_id: str) -> ApprovalItem:
     twin = _twin_of(app)
     if twin is None:
         raise _not_found(item_id)
+    if kind == "rerun":
+        from api_gateway.twin.impact_service import RerunNotFound, get_rerun
+
+        try:
+            impact, rerun = await get_rerun(twin, raw)
+        except RerunNotFound as exc:
+            raise _not_found(item_id) from exc
+        if rerun.disposition != "requires_approval":
+            raise _not_found(item_id)
+        return rerun_item(impact, rerun)
     _uuid(raw, item_id)
     if kind == "design_loop":
         iterations = await twin.list_design_loop_iterations(UUID(raw))
@@ -886,6 +971,14 @@ async def decide(
             from api_gateway.twin.sketch_compiler_routes import approve_parametric_node
 
             await approve_parametric_node(UUID(raw), label, audit)
+        elif kind == "rerun":
+            from api_gateway.twin.impact_service import decide_rerun
+
+            twin = _twin_of(app)
+            try:
+                await decide_rerun(twin, raw, decision, approver=label, reason=reason)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         else:
             await twin_routes.approve_drawing_node(UUID(raw), label, audit)
     except Exception:

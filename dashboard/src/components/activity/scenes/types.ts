@@ -38,6 +38,35 @@ export interface SceneProps {
   paused: boolean;
   /** The revision a stale scene belongs to, for its label. */
   staleRevision?: string | null;
+  /**
+   * The design dependency graph (FORGE-793), for the cross-domain scene. When
+   * absent or empty the scene stays illustrative and says so.
+   */
+  graph?: SceneGraph | null;
+}
+
+/** One item in the dependency graph a cross-domain scene draws. */
+export interface SceneGraphNode {
+  id: string;
+  label: string;
+  domain: string;
+  /** `changed` is the item that moved; `impacted` and `possible` what it reaches. */
+  role: 'changed' | 'impacted' | 'possible' | 'unaffected' | 'record' | 'idle';
+}
+
+/** One interface edge between two nodes. */
+export interface SceneGraphLink {
+  source: string;
+  target: string;
+  /** The change travels along it. */
+  impacted: boolean;
+  /** An inferred link nobody has confirmed yet. */
+  proposed: boolean;
+}
+
+export interface SceneGraph {
+  nodes: SceneGraphNode[];
+  links: SceneGraphLink[];
 }
 
 export type SceneDomain = 'sketch' | 'cad' | 'eda' | 'firmware' | 'simulation' | 'manufacturing' | 'cross_domain';
