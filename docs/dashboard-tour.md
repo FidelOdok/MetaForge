@@ -39,6 +39,9 @@ here with the rail expanded to show its labels:
   which reads *Connecting*, *Connected* or *Unavailable* from
   `GET /health`.
 - A **Skip to main content** link is the first focusable element.
+- **Create / Engineering switch.** Two views of the active project. Create
+  opens `/create/:id` for it; Engineering opens its project detail. Both
+  read the same records, and Create's unsent draft survives the round trip.
 
 Every route below has a sidebar entry. Two entries run the other way —
 **Requirements** (`/requirements`) and **Evals** (`/evals`) are in the
@@ -46,6 +49,19 @@ rail but have no section here yet. The default landing page is
 `/projects`; unknown paths show a *Page not found* screen.
 
 ![Map of the dashboard's routes in three groups, Work, Design data and Knowledge and checks, plus settings](assets/diagrams/dashboard-routes.png)
+
+## `/create`: the Create view
+
+The nontechnical view of a project: describe a product, see it take shape,
+choose how to make it, inspect what comes out and improve it. A conversation
+on the left, the product on a stage in the middle, and readiness with the
+brief, decisions, making and inspection on the right. Opened from the
+**Create** nav item or the topbar switch. See [The Create view](create-view.md)
+for the whole journey.
+
+- **Backed by:** `/v1/create/{project_id}`, plus `/v1/projects`,
+  `/v1/chat/threads`, `/v1/twin/nodes`, `/v1/approvals`, `/v1/uploads` and
+  `/v1/library/machines`.
 
 ## `/projects`: project workspace
 

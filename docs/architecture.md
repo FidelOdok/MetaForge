@@ -1276,6 +1276,7 @@ The Gateway is the "front door" — the single entry point for all client intera
 | Authentication | API key + JWT token-based auth |
 | Rate Limiting | Per-client request throttling |
 | Request Routing | Dispatches to Temporal workflows or direct Twin queries |
+| Create view records | `/v1/create/{project_id}`: a project's brief, manufacturing route, inspection plan and builds, with readiness derived on read ([The Create view](create-view.md)) |
 
 ### 5.2 Orchestrator (Layer 5)
 

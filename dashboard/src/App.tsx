@@ -17,6 +17,7 @@ function page<K extends string>(
 }
 
 const ProjectsPage = page(() => import('./pages/ProjectsPage'), 'ProjectsPage');
+const CreatePage = page(() => import('./pages/CreatePage'), 'CreatePage');
 const ProjectDetailPage = page(() => import('./pages/ProjectDetailPage'), 'ProjectDetailPage');
 const SessionsPage = page(() => import('./pages/SessionsPage'), 'SessionsPage');
 const SessionDetailPage = page(() => import('./pages/SessionDetailPage'), 'SessionDetailPage');
@@ -42,6 +43,8 @@ const queryClient = new QueryClient({
 });
 
 const ROUTES: Array<[path: string, Page: ComponentType]> = [
+  ['create', CreatePage],
+  ['create/:projectId', CreatePage],
   ['projects', ProjectsPage],
   ['projects/:id', ProjectDetailPage],
   ['sessions', SessionsPage],
