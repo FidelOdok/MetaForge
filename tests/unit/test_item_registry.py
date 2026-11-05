@@ -49,6 +49,8 @@ def test_definitions_are_the_versioned_types() -> None:
         "parametric_sketch",
         # The accepted AI-generated concept sketch (each acceptance a revision).
         "generated_sketch",
+        # The manufacturing context every generator reads.
+        "manufacturing_context",
     }
 
 

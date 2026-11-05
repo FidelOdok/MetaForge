@@ -82,6 +82,8 @@ tracer = get_tracer("api_gateway.twin.concept_mesh")
 
 TOOL = "twin.generate_concept_mesh"
 LABEL = "AI 3D reference model, illustrative only"
+#: DFM-004: what a speculative reference model says it is.
+SPECULATIVE_MESH_LABEL = "Speculative concept · AI 3D reference model, illustrative only"
 GLB_MIME = "model/gltf-binary"
 #: Extra seconds past the provider's own deadline before the call is abandoned.
 _GRACE_S = 30.0
@@ -300,6 +302,21 @@ def _size_and_fit(
     return record, glb
 
 
+def mesh_prompt(text: str, manufacturing: str) -> str:
+    """The text-to-model prompt: the person's prompt, then the context, within the limit.
+
+    The person's words always go first and whole; the manufacturing context
+    is flattened to one line and cut to whatever room is left.
+    """
+    flat = " ".join(manufacturing.split())
+    room = MAX_PROMPT_CHARS - len(text) - 1
+    if not flat or room < 40:
+        return text
+    if len(flat) > room:
+        flat = flat[: room - 1].rstrip() + "…"
+    return f"{text}\n{flat}"
+
+
 def make_concept_mesh_recorder(
     twin: Any,
     project_backend: Any = None,
@@ -446,6 +463,8 @@ def make_concept_mesh_recorder(
         smart_low_poly: bool = False,
         fit_to_envelope: bool | None = None,
         validate_only: bool = False,
+        speculative: bool = False,
+        component: str | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -513,6 +532,8 @@ def make_concept_mesh_recorder(
         # no envelope, auto_size is the only way to real units.
         options["auto_size"] = (not has_envelope) if auto_size is None else auto_size
         fit = has_envelope if fit_to_envelope is None else (fit_to_envelope and has_envelope)
+        if not isinstance(speculative, bool):
+            raise ValueError(f"{TOOL}: 'speculative' must be true or false")
         if validate_only:
             # Everything a paid call could be refused for, checked so a caller
             # starting a background job hears of it now and not on the job.
@@ -524,6 +545,25 @@ def make_concept_mesh_recorder(
                     logger.warning("concept_mesh_unavailable", reason=str(exc), mode=label)
                     raise
             return {"validated": True, "mode": mode, "fit_to_envelope": fit}
+
+        # DFM-001 / 3D-RC-011: text-to-model gets the context in its prompt;
+        # an image-to-model call carries it as metadata only (the image was
+        # already made with it).
+        from api_gateway.twin.manufacturing_context import manufacturing_context_block
+
+        manufacturing = await manufacturing_context_block(
+            project_id,
+            component,
+            twin=twin,
+            generator="concept_mesh",
+            speculative=speculative,
+            hint=text or concept,
+        )
+        # With no project there is no record to read: the prompt goes as given,
+        # and the output still records the unresolved set.
+        sent_text = (
+            mesh_prompt(text, manufacturing.text) if text is not None and project_id else text
+        )
 
         with tracer.start_as_current_span(TOOL) as span:
             span.set_attribute("concept_mesh.mode", mode)
@@ -540,7 +580,7 @@ def make_concept_mesh_recorder(
             view_payload = {v: (b, m) for v, (_wp, b, m) in views.items()} or None
             try:
                 mesh: GeneratedMesh = await asyncio.wait_for(
-                    gen(image, mime, text, views=view_payload, options=options),
+                    gen(image, mime, sent_text, views=view_payload, options=options),
                     timeout=limit + _GRACE_S,
                 )
             except (MeshGenerationTimeoutError, TimeoutError) as exc:
@@ -626,7 +666,7 @@ def make_concept_mesh_recorder(
                 "content_sha256": content_hash,
                 # Never evidence, never CAD: its dimensions are a model's guess.
                 "authority": "illustrative",
-                "illustrative_label": LABEL,
+                "illustrative_label": SPECULATIVE_MESH_LABEL if speculative else LABEL,
                 "provider": mesh.provider,
                 "model_version": mesh.model_version,
                 "task_id": mesh.task_id,
@@ -650,6 +690,9 @@ def make_concept_mesh_recorder(
                 metadata["label_band_removed_views"] = view_cropped
             if text is not None:
                 metadata["prompt"] = text
+                metadata["prompt_sent"] = sent_text
+            # 3D-RC-011 / DFM-013: the context it was made with, its DFM status.
+            metadata.update(manufacturing.provenance())
             now = datetime.now(UTC)
             wp_name = name.strip() if name else f"Reference model: {concept or 'concept'}"
             created = await twin.create_work_product(
@@ -710,13 +753,14 @@ def make_concept_mesh_recorder(
                 "size_bytes": len(stored_glb),
                 "source_image_node_id": source_id,
                 "authority": "illustrative",
-                "label": LABEL,
+                "label": SPECULATIVE_MESH_LABEL if speculative else LABEL,
                 "content_hash": content_hash,
                 "minio_object_key": key,
                 "project_linked": project_linked,
                 "generation_options": sent_options,
                 **size_check,
             }
+            out.update(manufacturing.provenance())
             if views:
                 out["view_image_node_ids"] = view_ids
             if options_note:

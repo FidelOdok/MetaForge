@@ -160,6 +160,28 @@ async def _baseline_lines(
     return lines, len(baseline.entries), len(baseline.drafts)
 
 
+async def _manufacturing_lines(project: Any, twin: Any) -> str:
+    """The manufacturing context block, as every generator gets it. Never raises."""
+    try:
+        from api_gateway.twin.manufacturing_context import manufacturing_context_block
+
+        block = await manufacturing_context_block(
+            str(project.id),
+            twin=twin,
+            generator="project_brief",
+            hint=str(getattr(project, "description", "") or ""),
+        )
+    except Exception as exc:  # noqa: BLE001 -- the brief goes on without it
+        logger.warning("project_brief_manufacturing_failed", error=str(exc))
+        return "\nManufacturing context: unavailable (could not be read)."
+    return (
+        f"\n{block.text}\n"
+        "When the person settles the process and material, record it with "
+        "`twin.record_decision` and its `manufacturing_route`; never present an "
+        "assumption above as their choice."
+    )
+
+
 def _is_item_type(wp: Any) -> bool:
     from twin_core.items import is_definition
 
@@ -195,6 +217,10 @@ async def build_project_brief(
     ]
     if project.description:
         lines.append(f"Project intent: {project.description}")
+    if twin is not None:
+        # DFM-001: the chat agent works from the same manufacturing context as
+        # every generator (the Create route and brief, decisions, flow context).
+        lines.append(await _manufacturing_lines(project, twin))
 
     baseline = None
     if twin is not None:

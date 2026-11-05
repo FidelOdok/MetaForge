@@ -284,7 +284,36 @@ async def _write(
                 },
             ) from exc
         logger.info("create_write", project_id=project_id, change=change, version=saved.version)
+        if change in _CONTEXT_CHANGES:
+            await _sync_manufacturing_context(request, saved)
         return await _view(request, saved)
+
+
+#: Create writes that can change the manufacturing context record.
+_CONTEXT_CHANGES = frozenset({"brief", "route"})
+
+
+async def _sync_manufacturing_context(request: Request, creation: Creation) -> None:
+    """One source (DFM-001): a brief or route save revises the manufacturing context.
+
+    Best effort: the Create save stands whatever happens here, and a failure
+    is logged and counted by the context module.
+    """
+    from api_gateway.twin.manufacturing_context import sync_from_creation
+
+    try:
+        from api_gateway.twin.routes import get_twin
+
+        twin = get_twin()
+    except Exception as exc:  # noqa: BLE001 - no twin, no record to sync
+        logger.info("create_manufacturing_context_no_twin", error=str(exc))
+        return
+    await sync_from_creation(
+        twin,
+        creation,
+        surface=_surface(request),
+        actor=str(approver_from_request(request).actor_id),
+    )
 
 
 def _build_or_404(creation: Creation, build_id: str) -> Build:

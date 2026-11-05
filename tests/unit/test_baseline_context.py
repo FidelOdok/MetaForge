@@ -424,7 +424,11 @@ class TestLegacyBrief:
         )
         legacy = await build_project_brief(project, doc_excerpt=_excerpt)
         with_twin = await build_project_brief(project, doc_excerpt=_excerpt, twin=twin)
-        assert legacy == with_twin
+        # The twin adds the manufacturing context block (DFM-001) and nothing else.
+        head, _, rest = with_twin.partition("\n\nManufacturing context (unresolved)")
+        assert rest, "the brief carries the manufacturing context"
+        tail = rest.split("assumption above as their choice.", 1)[1]
+        assert legacy == head + tail
         assert "Existing work products in this project (5, newest first)" in legacy
         assert "Current design baseline" not in legacy
 

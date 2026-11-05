@@ -110,6 +110,10 @@ class InterfaceType(StrEnum):
     SIMULATION_INPUT_OF = "simulation_input_of"
     #: A sketch or sketch plane feeds what is built from it.
     FEATURE_OF = "feature_of"
+    #: A manufacturing context (its process and material) shaped what was
+    #: generated under it. Derived from the ``manufacturing_context_ref`` an
+    #: output records; a process change walks it (3D-RC-013).
+    MANUFACTURED_BY = "manufactured_by"
 
 
 #: Couplings where a change on either end affects the other: moving the
@@ -156,6 +160,7 @@ ITEM_TYPE_DOMAIN: dict[str, str] = {
     "sketch_plane": "sketch",
     "sketch_interpretation": "sketch",
     "parametric_sketch": "sketch",
+    "manufacturing_context": "manufacturing",
 }
 
 #: Prefix of an edge end that is a result record rather than an item.

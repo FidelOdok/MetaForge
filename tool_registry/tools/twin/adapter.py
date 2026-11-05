@@ -283,6 +283,44 @@ def _concept_layout_properties() -> dict[str, Any]:
     }
 
 
+def _manufacturing_properties() -> dict[str, Any]:
+    """DFM-004 and the context scope, for every concept generator."""
+    return {
+        "speculative": {
+            "type": "boolean",
+            "description": (
+                "A deliberately speculative concept (def false): the project's "
+                "manufacturing context is recorded with the output but does not "
+                "constrain it, and the output is labelled 'Speculative concept'."
+            ),
+        },
+        "component": {
+            "type": "string",
+            "maxLength": 120,
+            "description": (
+                "The component this concept is of, for its manufacturing context "
+                "(def the product's)."
+            ),
+        },
+    }
+
+
+def _manufacturing_args(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """``speculative`` and ``component`` from a tool call, checked; only what was given."""
+    out: dict[str, Any] = {}
+    speculative = arguments.get("speculative")
+    if speculative is not None:
+        if not isinstance(speculative, bool):
+            raise ValueError(f"{tool}: 'speculative' must be true or false")
+        out["speculative"] = speculative
+    component = arguments.get("component")
+    if component is not None:
+        if not isinstance(component, str) or not component.strip():
+            raise ValueError(f"{tool}: 'component' must be a non-empty string")
+        out["component"] = component.strip()
+    return out
+
+
 def _critique_assembly_properties() -> dict[str, Any]:
     """What a concept image is checked against (FORGE-772), for both image tools."""
     return {
@@ -3801,6 +3839,7 @@ class TwinServer(McpToolServer):
                             "items": {"type": "string"},
                             "description": "Existing work-product node ids this sketch reviews.",
                         },
+                        **_manufacturing_properties(),
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                     },
@@ -3845,8 +3884,12 @@ class TwinServer(McpToolServer):
             domain=domain if isinstance(domain, str) and domain else "mechanical",
             source_tool="twin.render_concept_sketch",
             # FORGE-761: the layout itself, so twin.render_concept_image can
-            # start from exactly what this sketch shows.
-            extra_metadata={"concept_layout": layout_to_dict(layout)},
+            # start from exactly what this sketch shows. The recorder adds the
+            # manufacturing context the sketch was drawn under (3D-RC-011).
+            extra_metadata={
+                "concept_layout": layout_to_dict(layout),
+                **_manufacturing_args("twin.render_concept_sketch", arguments),
+            },
         )
         width, depth, height = layout.overall()
         return {
@@ -3936,6 +3979,7 @@ class TwinServer(McpToolServer):
                             "description": "Work product name (def 'Concept image: <concept>').",
                         },
                         **_critique_assembly_properties(),
+                        **_manufacturing_properties(),
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                     },
@@ -4058,6 +4102,7 @@ class TwinServer(McpToolServer):
                 domain=domain if isinstance(domain, str) and domain else "mechanical",
                 layout_assembly=_layout_assembly(layout),
                 **_critique_assembly_args(tool, arguments),
+                **_manufacturing_args(tool, arguments),
             )
         logger.info(
             "concept_image_tool_done",
@@ -4379,6 +4424,7 @@ class TwinServer(McpToolServer):
                                 "envelope (def true when there is one)."
                             ),
                         },
+                        **_manufacturing_properties(),
                         "wait": {
                             "type": "boolean",
                             "description": (
@@ -4560,6 +4606,8 @@ class TwinServer(McpToolServer):
                 "generate_parts",
                 "smart_low_poly",
                 "fit_to_envelope",
+                "speculative",
+                "component",
             )
             if arguments.get(k) is not None
         }
@@ -4698,6 +4746,7 @@ class TwinServer(McpToolServer):
                             "type": "string",
                             "description": "The accepted concept line (GSK-...) to build on.",
                         },
+                        **_manufacturing_properties(),
                         "expected_baseline": {
                             "type": "string",
                             "description": "GSK-...@n the caller saw; refused if it moved.",

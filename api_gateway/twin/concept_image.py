@@ -68,6 +68,8 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.concept_image")
 
 LABEL = "AI concept image, illustrative only"
+#: DFM-004: what a speculative concept image says it is.
+SPECULATIVE_IMAGE_LABEL = "Speculative concept · AI concept image, illustrative only"
 MAX_BRIEF_CHARS = 1500
 _FACE_FILL = {
     "face-top": (236, 236, 236),
@@ -186,7 +188,11 @@ _VIEW_WORDS = {
 
 
 def build_prompt(
-    visual_brief: str, concept_name: str, part_names: list[str], view: str = "isometric"
+    visual_brief: str,
+    concept_name: str,
+    part_names: list[str],
+    view: str = "isometric",
+    manufacturing: str = "",
 ) -> str:
     """The prompt sent to the model: the brief, plus what the layout is.
 
@@ -197,6 +203,9 @@ def build_prompt(
 
     ``view`` other than ``isometric`` asks for a straight-on orthographic
     view from that side, so a set of them can feed a multiview 3D model.
+
+    ``manufacturing`` is the manufacturing context block (DFM-001), appended
+    so the picture is informed by how it might be made.
     """
     parts = ", ".join(part_names[:30])
     if view == "isometric":
@@ -226,6 +235,7 @@ def build_prompt(
         "supports is whole and correctly built, appears once each in the number the "
         "brief gives, and sits on the product the way the product holds it; never "
         "duplicate, merge or detach their parts. Do not add text, dimensions or logos."
+        + (f"\n{manufacturing}" if manufacturing else "")
     )
 
 
@@ -299,6 +309,8 @@ def make_concept_image_recorder(
         assembly: dict[str, Any] | None = None,
         layout_assembly: dict[str, Any] | None = None,
         view: str = "isometric",
+        speculative: bool = False,
+        component: str | None = None,
     ) -> dict[str, Any]:
         from api_gateway.twin.image_critique import (
             KnownAssembly,
@@ -347,6 +359,19 @@ def make_concept_image_recorder(
                     source={"kind": "sketch_layout", "layout_node_id": layout_node_id},
                 )
 
+        # DFM-001 / 3D-RC-011: the manufacturing context goes into the prompt
+        # and the record says which revision it was (or that none was).
+        from api_gateway.twin.manufacturing_context import manufacturing_context_block
+
+        manufacturing = await manufacturing_context_block(
+            project_id,
+            component,
+            twin=twin,
+            generator="concept_image",
+            speculative=speculative,
+            hint=f"{concept_name} {brief}",
+        )
+
         with tracer.start_as_current_span("twin.render_concept_image") as span:
             span.set_attribute("concept_image.concept", concept_name)
             span.set_attribute("concept_image.size", size)
@@ -362,7 +387,7 @@ def make_concept_image_recorder(
             conditioning = rasterise_layout(layout_faces, size)
             mode = "layout_png" if conditioning is not None else "none"
             span.set_attribute("concept_image.conditioning", mode)
-            prompt = build_prompt(brief, concept_name, part_names, view)
+            prompt = build_prompt(brief, concept_name, part_names, view, manufacturing.text)
             limit = timeout_s if timeout_s is not None else timeout_from_env()
             try:
                 image = await generate_with_timeout(
@@ -438,7 +463,7 @@ def make_concept_image_recorder(
                 "image_files": {filename: key},
                 # FORGE-759/761: a generated picture of intent, never evidence.
                 "authority": "illustrative",
-                "illustrative_label": LABEL,
+                "illustrative_label": SPECULATIVE_IMAGE_LABEL if speculative else LABEL,
                 "conditioned_on": conditioning_record,
                 "visual_brief": brief,
                 "prompt": prompt,
@@ -449,6 +474,8 @@ def make_concept_image_recorder(
                 "concept_name": concept_name,
                 # FORGE-772: advisory; the image stays illustrative either way.
                 "critique": critique,
+                # 3D-RC-011 / DFM-013: the context it was made with, its DFM status.
+                **manufacturing.provenance(),
             }
             if layout_node_id:
                 metadata["source_work_product_id"] = layout_node_id
@@ -500,7 +527,7 @@ def make_concept_image_recorder(
             out: dict[str, Any] = {
                 "node_id": node_id,
                 "authority": "illustrative",
-                "label": LABEL,
+                "label": SPECULATIVE_IMAGE_LABEL if speculative else LABEL,
                 "format": fmt,
                 "content_hash": content_hash,
                 "minio_object_key": key,
@@ -511,6 +538,7 @@ def make_concept_image_recorder(
                 "linked_to_layout": linked_to_layout,
                 "project_linked": project_linked,
                 "critique": critique,
+                **manufacturing.provenance(),
             }
             if fmt == "png":
                 # Lifted into an MCP image block by the server, shown in chat.

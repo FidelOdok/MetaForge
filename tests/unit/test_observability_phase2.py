@@ -292,7 +292,8 @@ class TestAllMetricsCombined:
         # + 5 exact CAD, validity and STEP (CDE slice 6).
         # + 2 cross-domain impact and interface edges (FORGE-793).
         # + 3 face attachment, remap and blocked commits (CDE slice 9).
-        assert len(MetricsRegistry.all_metrics()) == 123
+        # + 2 manufacturing context writes and injections (FORGE-801).
+        assert len(MetricsRegistry.all_metrics()) == 125
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

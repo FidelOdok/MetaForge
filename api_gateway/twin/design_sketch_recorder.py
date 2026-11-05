@@ -65,6 +65,26 @@ def make_design_sketch_recorder(twin: Any, project_backend: Any = None) -> Any:
         if not content:
             raise ValueError("design_sketch commit: 'html_content' is empty")
 
+        extra = dict(extra_metadata or {})
+        manufacturing: dict[str, Any] = {}
+        if source_tool == "twin.render_concept_sketch":
+            # 3D-RC-011: a concept sketch records the manufacturing context it
+            # was drawn under. The renderer is deterministic (no prompt), so
+            # the context is metadata only.
+            from api_gateway.twin.manufacturing_context import manufacturing_context_block
+
+            speculative = bool(extra.pop("speculative", False))
+            component = extra.pop("component", None)
+            block = await manufacturing_context_block(
+                project_id,
+                component if isinstance(component, str) else None,
+                twin=twin,
+                generator="concept_sketch",
+                speculative=speculative,
+                hint=name,
+            )
+            manufacturing = block.provenance()
+
         with tracer.start_as_current_span("twin.commit_design_sketch") as span:
             wp_id = uuid4()
             content_hash = hashlib.sha256(content).hexdigest()
@@ -85,7 +105,8 @@ def make_design_sketch_recorder(twin: Any, project_backend: Any = None) -> Any:
             # Extra fields first, so they can never override the ones below
             # (an extra "authority" must not make a sketch into evidence).
             metadata: dict[str, Any] = {
-                **(extra_metadata or {}),
+                **extra,
+                **manufacturing,
                 "original_filename": filename,
                 "content_sha256": content_hash,
                 "authored_by": source_tool,
@@ -153,12 +174,15 @@ def make_design_sketch_recorder(twin: Any, project_backend: Any = None) -> Any:
                 source_count=len(source_node_ids or []),
                 edge_failures=edge_failures,
             )
-            return {
+            out: dict[str, Any] = {
                 "node_id": node_id,
                 "minio_object_key": minio_object_key,
                 "content_hash": content_hash,
                 "project_linked": linked,
             }
+            if manufacturing:
+                out.update(manufacturing)
+            return out
 
     return commit
 

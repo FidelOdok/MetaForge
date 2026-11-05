@@ -332,14 +332,45 @@ def phase_slot_scope(
         yield scoped
 
 
+async def _manufacturing_input(context: FlowContext) -> str:
+    """The project's manufacturing context block, read now rather than frozen (DFM-001).
+
+    The frozen flow context says what the requester stated at proposal; this
+    is the shared record as it stands for this phase, with its revision, so a
+    route the person changed in Create, or a decision approved at an earlier
+    gate, reaches the next phase. Never raises.
+    """
+    if not context.project_id:
+        return ""
+    try:
+        from api_gateway.twin.manufacturing_context import manufacturing_context_block
+
+        block = await manufacturing_context_block(
+            context.project_id, generator="flow_phase", hint=context.goal
+        )
+    except Exception as exc:  # noqa: BLE001 - the phase runs on its brief without it
+        logger.warning("flow_manufacturing_context_unreadable", error=str(exc))
+        return ""
+    return f"{block.text}\nNever present an assumption above as the person's choice.\n"
+
+
 async def _phase_inputs(phase: Phase, context: FlowContext) -> str:
     """Person-confirmed inputs for this phase, as prompt text.
 
-    Only the concept phase has any: the sketch readings a person confirmed.
-    A proposed or rejected reading is never offered. A twin that cannot be
+    Every phase gets the project's manufacturing context (DFM-001). The
+    concept phase also gets the sketch readings a person confirmed; a
+    proposed or rejected reading is never offered. A twin that cannot be
     read leaves the phase to run on its brief, logged, rather than failing it.
     """
+    manufacturing = await _manufacturing_input(context)
     if phase.id != CONCEPT_PHASE_ID or not context.project_id:
+        return manufacturing
+    return manufacturing + await _sketch_inputs(context)
+
+
+async def _sketch_inputs(context: FlowContext) -> str:
+    """The concept phase's confirmed sketch readings, as prompt text."""
+    if not context.project_id:
         return ""
     try:
         from api_gateway.twin.routes import get_twin
