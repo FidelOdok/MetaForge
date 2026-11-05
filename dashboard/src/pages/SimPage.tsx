@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { Panel, PanelLoading } from '../components/ui/Panel';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -143,11 +144,8 @@ function ResultDetail({ result }: { result: SimulationResult }) {
   const geometry = geometryLabel(result);
   const fixtures = (result.fixtures ?? []).map((f) => String(f.label ?? f.kind ?? '')).filter(Boolean);
   return (
-    <div data-testid="result-detail" className="mt-4 flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <h3 className="font-mono text-xs text-on-surface" style={{ margin: 0 }}>
-          {result.name}
-        </h3>
         {geometry && (
           <span className="font-mono text-[10px] text-on-surface-variant">Geometry · {geometry}</span>
         )}
@@ -226,89 +224,69 @@ export function SimPage() {
         }
       />
 
-      {isLoading && (
-        <div
-          className="rounded-lg overflow-hidden"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-        >
-          {[...Array(4)].map((_, i) => (
-            <div
-              key={i}
-              className="animate-pulse"
-              style={{
-                height: '36px',
-                borderBottom: '1px solid var(--mf-r-65-72-90-0p1)',
-                background: i % 2 === 0 ? 'var(--mf-r-40-42-48-0p3)' : 'transparent',
-              }}
-            />
-          ))}
-        </div>
-      )}
+      <Panel title="Load cases" meta={items.length} testId="load-cases">
+        {isLoading && <PanelLoading />}
 
-      {!isLoading && !activeProjectId && (
-        <EmptyState
-          title="No project selected"
-          description="Select a project to view or define its load cases."
-        />
-      )}
+        {!isLoading && !activeProjectId && (
+          <EmptyState
+            title="No project selected"
+            description="Select a project to view or define its load cases."
+          />
+        )}
 
-      {!isLoading && activeProjectId && items.length === 0 && (
-        <EmptyState
-          title="No load cases"
-          description="Define a boundary condition once, and reuse it across design versions."
-        />
-      )}
+        {!isLoading && activeProjectId && items.length === 0 && (
+          <EmptyState
+            title="No load cases"
+            description="Define a boundary condition once, and reuse it across design versions."
+          />
+        )}
 
-      {!isLoading && items.length > 0 && (
-        <div
-          className="rounded-lg overflow-hidden overflow-x-auto"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-        >
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr style={{ background: 'var(--mf-c-191b22)' }}>
-                {[
-                  { label: 'Name', align: 'left' },
-                  { label: 'Material', align: 'left' },
-                  { label: 'Fixed Node Set', align: 'left' },
-                  { label: 'Load Node Set', align: 'left' },
-                  { label: 'Force', align: 'right' },
-                  { label: 'Source of Loads', align: 'left' },
-                ].map(({ label, align }) => (
-                  <th
-                    key={label}
-                    className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
-                    style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', whiteSpace: 'nowrap' }}
-                  >
-                    {label}
-                  </th>
+        {!isLoading && items.length > 0 && (
+          <div
+            className="mf-bleed overflow-x-auto"
+          >
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                  {[
+                    { label: 'Name', align: 'left' },
+                    { label: 'Material', align: 'left' },
+                    { label: 'Fixed Node Set', align: 'left' },
+                    { label: 'Load Node Set', align: 'left' },
+                    { label: 'Force', align: 'right' },
+                    { label: 'Source of Loads', align: 'left' },
+                  ].map(({ label, align }) => (
+                    <th
+                      key={label}
+                      className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
+                      style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', whiteSpace: 'nowrap' }}
+                    >
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((loadCase) => (
+                  <LoadCaseRow key={loadCase.id} loadCase={loadCase} />
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((loadCase) => (
-                <LoadCaseRow key={loadCase.id} loadCase={loadCase} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
 
       {activeProjectId && (
         <LoadCaseDialog ref={dialogRef} projectId={activeProjectId} returnFocusRef={newLoadCaseButtonRef} />
       )}
 
       {activeProjectId && (
-        <div className="mt-8">
-          <div className="mb-3">
-            <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-              Results
-            </h2>
-            <span className="font-mono text-xs text-on-surface-variant">
-              {resultItems.length} result{resultItems.length === 1 ? '' : 's'}
-              {selectedResultIds.length === 2 ? ' · 2 selected for comparison' : ''}
-            </span>
-          </div>
+        <>
+          <Panel
+            title="Results"
+            meta={`${resultItems.length}${selectedResultIds.length === 2 ? ' · 2 selected for comparison' : ''}`}
+            testId="results"
+          >
 
           {!resultsLoading && resultItems.length === 0 && (
             <EmptyState
@@ -318,10 +296,7 @@ export function SimPage() {
           )}
 
           {!resultsLoading && resultItems.length > 0 && (
-            <div
-              className="rounded-lg overflow-hidden overflow-x-auto"
-              style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-            >
+            <div className="mf-bleed overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr style={{ background: 'var(--mf-c-191b22)' }}>
@@ -360,20 +335,24 @@ export function SimPage() {
             </div>
           )}
 
+          </Panel>
+
           {(() => {
             const [first, second] = selectedResults;
             return first && second ? (
-              <>
+              <Panel title="Comparison" testId="results-comparison">
                 <ResultsCompare a={first} b={second} />
                 <FieldCompare a={first} b={second} />
-              </>
+              </Panel>
             ) : null;
           })()}
 
           {focusedResult && selectedResults.length < 2 && (
-            <ResultDetail key={focusedResult.id} result={focusedResult} />
+            <Panel title="Result detail" meta={focusedResult.name} testId="result-detail">
+              <ResultDetail key={focusedResult.id} result={focusedResult} />
+            </Panel>
           )}
-        </div>
+        </>
       )}
     </div>
   );
