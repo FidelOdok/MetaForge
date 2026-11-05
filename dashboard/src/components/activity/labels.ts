@@ -1,5 +1,5 @@
 import type { OperationView } from '../../lib/operations-reducer';
-import type { ArtifactRef, OperationDomain, OperationState } from '../../types/operations';
+import { isTerminal, type ArtifactRef, type OperationDomain, type OperationState } from '../../types/operations';
 
 /**
  * The words the activity overlay uses (RT-022). Every label is derived from
@@ -134,8 +134,9 @@ export function nextAction(op: OperationView): string {
   }
 }
 
-/** "1m 05s", "12s", "2h 03m". */
+/** "1m 05s", "12s", "2h 03m". A non-finite duration reads as "0s", never "NaNs". */
 export function formatElapsed(ms: number): string {
+  if (!Number.isFinite(ms)) ms = 0;
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
@@ -143,6 +144,31 @@ export function formatElapsed(ms: number): string {
   if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
   if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
   return `${s}s`;
+}
+
+/** A timestamp as epoch milliseconds, or null when it is missing or unreadable. */
+function timeOf(at: string | null | undefined): number | null {
+  if (!at) return null;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * The time an operation has taken (ASVG-016), or null when it cannot be told.
+ *
+ * It runs from `started_at` to now, or to `updated_at` once the operation has
+ * ended. The gateway leaves `started_at` empty until the operation leaves the
+ * queue, and a snapshot from an older gateway can lack it for an operation
+ * that never ran; then nothing is shown rather than a made-up figure.
+ */
+export function elapsedText(
+  op: Pick<OperationView, 'started_at' | 'updated_at' | 'state'>,
+  now: number,
+): string | null {
+  const start = timeOf(op.started_at);
+  if (start === null) return null;
+  const end = isTerminal(op.state) ? (timeOf(op.updated_at) ?? now) : now;
+  return formatElapsed(end - start);
 }
 
 /** A measured percentage, only when the backend gave a total (RT-021, ASVG-016). */

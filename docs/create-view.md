@@ -50,17 +50,24 @@ acceptance) and a **history** of every change.
 ## Activity overlay
 
 Work that takes time (a design-flow run, a tool job, a Create chat turn) is
-shown as an **operation** in a small activity card over the top right of the
-stage. It does not cover the composer or the conversation, and it can be
-expanded into a larger, slightly translucent overlay and minimised again.
-Minimising or closing it never cancels anything.
+shown as an **operation** in a small activity card. The card has its own row
+directly above the stage, and the stage starts below it, so the compact card
+never covers the stage's toolbars or panels (the sketch tools, *Generate*, the
+editable sketch), the composer or the conversation. It can be expanded into a
+larger, slightly translucent overlay that lays over the top right of the
+stage, and minimised again with its button or **Escape**. Minimising or
+closing it never cancels anything. The card comes before the conversation and
+the stage in the page, so the keyboard reaches its controls straight after
+the page header.
 
 - **One at a time.** The card shows one primary operation: a decision waiting
   for the person first, then a failure, then live work. Any other live
   operations collapse into a counter such as *+2*.
 - **Plain status.** The status is one of *Queued*, *Working*, *Checking*,
   *Waiting for a decision*, *Ready*, *Needs attention* or *Unable to
-  complete*, with the current step and the elapsed time. Expanded, it also
+  complete*, with the current step and the elapsed time. The time runs from
+  when the operation left the queue, and is left out rather than guessed when
+  that is not known. Expanded, it also
   shows what is done so far, parallel work when more than one domain is
   involved, and one sentence saying what happens next.
 - **Honest progress.** A percentage appears only when the gateway reports a

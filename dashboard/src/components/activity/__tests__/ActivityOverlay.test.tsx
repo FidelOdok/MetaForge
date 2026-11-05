@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { act, render, screen, waitFor } from '../../../test/test-utils';
-import { opEvent } from '../../../test/operation-fixtures';
+import { opEvent, opSnapshot, snapshotResponse } from '../../../test/operation-fixtures';
 import { makeApproval } from '../../../test/approval-fixtures';
 import { useOperationsStore } from '../../../store/operations-store';
-import type { OperationEvent } from '../../../types/operations';
+import type { OperationEvent, OperationSnapshot } from '../../../types/operations';
+import { elapsedText, formatElapsed } from '../labels';
 
 const cancelOperation = vi.fn();
 const retryOperation = vi.fn();
@@ -380,5 +381,121 @@ describe('ActivityOverlay', () => {
     expect(lane).toHaveAttribute('aria-expanded', 'true');
     await user.click(lane);
     expect(screen.queryByTestId('activity-stage-detail')).toBeNull();
+  });
+
+  describe('elapsed time (ASVG-016)', () => {
+    // The shape the twin viewer gets on a fresh load: an operation that opened
+    // at a decision and never ran, from a gateway that only started the clock
+    // on `running`.
+    function decisionSnapshot(over: Partial<OperationSnapshot> = {}): OperationSnapshot {
+      return opSnapshot({
+        operation_id: 'sketch:s1',
+        kind: 'job',
+        domain: 'sketch',
+        title: 'Editable sketch',
+        state: 'waiting_for_user',
+        message: 'Interpretation proposed',
+        requires_action: true,
+        started_at: null,
+        ...over,
+      });
+    }
+
+    function seedSnapshot(snapshot: OperationSnapshot) {
+      act(() => {
+        const store = useOperationsStore.getState();
+        store.mergeSnapshot('p1', snapshotResponse([snapshot]));
+        store.setHealth('p1', 'live');
+      });
+    }
+
+    it.each([
+      ['missing', null],
+      ['unreadable', 'not a time'],
+      ['empty', ''],
+    ])('never renders NaN when started_at is %s', (_label, startedAt) => {
+      seedSnapshot(decisionSnapshot({ started_at: startedAt }));
+      render(<ActivityOverlay projectId="p1" detail />);
+      const overlay = screen.getByTestId('activity-overlay');
+      expect(overlay).toHaveTextContent('Editable sketch');
+      expect(overlay.textContent).not.toMatch(/NaN/);
+      // No start time: no figure rather than a made-up one.
+      expect(screen.queryByTestId('activity-elapsed')).toBeNull();
+    });
+
+    it('keeps the start time the client already has when a snapshot lacks it', () => {
+      seed([
+        opEvent({ operation_id: 'sketch:s1', sequence: 1, state: 'waiting_for_user', occurred_at: '2026-11-04T10:00:00Z' }),
+      ]);
+      seedSnapshot(decisionSnapshot({ last_sequence: 2, updated_at: '2026-11-04T10:00:29Z' }));
+      expect(useOperationsStore.getState().projects.p1?.ops.byId['sketch:s1']?.started_at).toBe('2026-11-04T10:00:00Z');
+    });
+
+    it('measures a finished operation from its start to its last update', () => {
+      seedSnapshot(
+        decisionSnapshot({
+          state: 'completed',
+          requires_action: false,
+          started_at: '2026-11-04T10:00:00Z',
+          updated_at: '2026-11-04T10:00:29Z',
+        }),
+      );
+      render(<ActivityOverlay projectId="p1" detail />);
+      expect(screen.getByTestId('activity-elapsed')).toHaveTextContent('29s');
+    });
+
+    it('reads an unreadable end or duration as nothing, never NaN', () => {
+      expect(formatElapsed(Number.NaN)).toBe('0s');
+      const now = Date.parse('2026-11-04T10:01:05Z');
+      expect(elapsedText({ state: 'running', started_at: null, updated_at: 'x' }, now)).toBeNull();
+      expect(elapsedText({ state: 'running', started_at: '2026-11-04T10:00:00Z', updated_at: 'x' }, now)).toBe('1m 05s');
+      expect(elapsedText({ state: 'completed', started_at: '2026-11-04T10:00:00Z', updated_at: 'x' }, now)).toBe('1m 05s');
+    });
+
+    it('starts the client clock when the operation leaves the queue', () => {
+      seed([opEvent({ sequence: 1, type: 'queued', state: 'queued', occurred_at: '2026-11-04T09:59:00Z' })]);
+      expect(useOperationsStore.getState().projects.p1?.ops.byId['run:a']?.started_at).toBeNull();
+      seed([opEvent({ sequence: 2, occurred_at: '2026-11-04T10:00:00Z' })]);
+      expect(useOperationsStore.getState().projects.p1?.ops.byId['run:a']?.started_at).toBe('2026-11-04T10:00:00Z');
+    });
+  });
+
+  describe('keyboard reach (ASVG-012)', () => {
+    it('puts every control in the tab order, header first', async () => {
+      const user = userEvent.setup();
+      seed([opEvent({ sequence: 1, action_refs: [{ kind: 'cancel', id: 'cancel', label: 'Cancel' }] })]);
+      render(<ActivityOverlay projectId="p1" />);
+
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'Expand activity' })).toHaveFocus();
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+
+      await user.click(screen.getByRole('button', { name: 'Expand activity' }));
+      const overlay = screen.getByTestId('activity-overlay');
+      for (const control of [
+        screen.getByRole('button', { name: 'Minimise activity' }),
+        screen.getByRole('button', { name: 'Pause animation' }),
+        screen.getByTestId('activity-inspect'),
+        screen.getByRole('button', { name: 'Cancel' }),
+      ]) {
+        expect(overlay).toContainElement(control);
+        expect(control).not.toHaveAttribute('tabindex', '-1');
+        expect(control).toBeEnabled();
+        act(() => control.focus());
+        expect(control).toHaveFocus();
+      }
+    });
+
+    it('minimises on Escape and returns focus to the toggle', async () => {
+      const user = userEvent.setup();
+      seed([opEvent({ sequence: 1 })]);
+      render(<ActivityOverlay projectId="p1" />);
+      await user.click(screen.getByRole('button', { name: 'Expand activity' }));
+      act(() => screen.getByTestId('activity-inspect').focus());
+      await user.keyboard('{Escape}');
+      expect(useOperationsStore.getState().projects.p1?.size).toBe('compact');
+      expect(screen.getByRole('button', { name: 'Expand activity' })).toHaveFocus();
+    });
   });
 });

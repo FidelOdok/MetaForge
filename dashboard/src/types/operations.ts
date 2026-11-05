@@ -118,7 +118,8 @@ export interface OperationSnapshot {
   title: string;
   state: OperationState;
   run_id: string | null;
-  started_at: string;
+  /** When the operation left the queue; null until then (the gateway's `started_at`). */
+  started_at: string | null;
   updated_at: string;
   last_sequence: number;
   base_revision: string | null;

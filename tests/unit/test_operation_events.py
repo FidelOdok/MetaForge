@@ -172,6 +172,31 @@ def test_out_of_order_and_post_terminal_events_are_refused() -> None:
     assert snap is not None and snap.state == "stale" and snap.last_sequence == 7
 
 
+def test_started_at_is_set_when_an_operation_leaves_the_queue() -> None:
+    """An operation that opens at a decision still has a start time.
+
+    The overlay's elapsed time reads ``started_at``; one set only on
+    ``running`` left an operation that never ran (an interpretation proposed
+    for review) with none, and the twin viewer showed "NaNs".
+    """
+    store = OperationStore()
+    store.append(PROJECT, _event(op="job:q", type="accepted", state="queued"))
+    queued = store.get(PROJECT, "job:q")
+    assert queued is not None and queued.started_at is None
+
+    store.append(
+        PROJECT,
+        _event(op="job:d", type="review_required", state="waiting_for_user", requires_action=True),
+    )
+    waiting = store.get(PROJECT, "job:d")
+    assert waiting is not None and waiting.started_at is not None
+    first = waiting.started_at
+
+    store.append(PROJECT, _event(op="job:d", type="completed", state="completed"))
+    done = store.get(PROJECT, "job:d")
+    assert done is not None and done.started_at == first  # the start never moves
+
+
 def test_snapshot_reflects_stages_artifacts_and_actions() -> None:
     store = OperationStore()
     store.append(PROJECT, _event(type="accepted", state="queued", title="Concept design"))

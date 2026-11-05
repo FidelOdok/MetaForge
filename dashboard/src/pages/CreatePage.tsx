@@ -238,6 +238,22 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
       )}
 
       <div className="cv-body">
+        {/*
+          The activity card has its own row above the stage, so the stage's
+          toolbars and panels (Generate, the editable sketch) are never under
+          it (ASVG-005). It comes first in the page so a keyboard reaches it
+          straight after the header (ASVG-012); the grid puts it over the stage.
+        */}
+        {!presenting && (
+          <div className="cv-activity-slot" data-testid="create-activity-slot">
+            <ActivityOverlay
+              projectId={projectId}
+              className="act-dock-create"
+              onAction={operationAction}
+              onApproval={() => openPanel('decisions')}
+            />
+          </div>
+        )}
         <aside className="cv-chat" aria-label="Conversation">
           <CreateConversation projectId={projectId} tools={tools} />
           <CreateComposer projectId={projectId} tools={tools} busy={working} />
@@ -258,14 +274,6 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
             presenting={presenting}
             engineeringChecks={engineeringChecks}
           />
-          {!presenting && (
-            <ActivityOverlay
-              projectId={projectId}
-              className="act-dock-create"
-              onAction={operationAction}
-              onApproval={() => openPanel('decisions')}
-            />
-          )}
         </main>
 
         <aside className="cv-side" aria-label="Details">
