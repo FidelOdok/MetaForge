@@ -224,3 +224,209 @@
   background: #ff5a0a;
   color: #000;
 }
+
+/* Panels: the Files page's glass cards, for every section of a page. */
+.mf-panel {
+  margin-bottom: 12px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 4px;
+  background: var(--mf-r-30-31-38-0p85);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.mf-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 36px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--mf-r-65-72-90-0p2);
+}
+.mf-panel-head:last-child {
+  border-bottom: 0;
+}
+.mf-panel-label {
+  margin: 0;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-panel-meta {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-panel-actions {
+  margin-left: auto;
+}
+.mf-panel-body {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--mf-c-e2e2eb);
+}
+/* A table or list that runs to the panel's edges, like the Files rows. */
+.mf-panel-body > .mf-bleed {
+  margin-left: -16px;
+  margin-right: -16px;
+}
+.mf-panel-body > .mf-bleed:first-child {
+  margin-top: -12px;
+}
+.mf-panel-body > .mf-bleed:last-child {
+  margin-bottom: -12px;
+}
+.mf-panel-body > .mf-bleed:not(:first-child) {
+  border-top: 1px solid var(--mf-r-65-72-90-0p2);
+}
+.mf-panel-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 0;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-panel-loading .material-symbols-outlined {
+  font-size: 20px;
+}
+
+/* Tables inside panels: the Files row height and header label. */
+.mf-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+.mf-table th {
+  height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--mf-r-65-72-90-0p2);
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+}
+
+/* Search: the Files page's glass pill. */
+.mf-search {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 9999px;
+  background: var(--mf-r-40-42-48-0p92);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.mf-search .material-symbols-outlined {
+  flex-shrink: 0;
+  font-size: 16px;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--mf-c-e8e8ed);
+}
+/* Search and filters above a list, as on Files. */
+.mf-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Empty state (components/ui/EmptyState.tsx), as in the Files panels. */
+.mf-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 140px;
+  padding: 40px 16px;
+  text-align: center;
+}
+.mf-empty-icon {
+  margin-bottom: 2px;
+  color: var(--mf-c-9a9aaa);
+  opacity: 0.4;
+}
+.mf-empty-icon .material-symbols-outlined {
+  font-size: 32px;
+}
+.mf-empty h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-empty p {
+  max-width: 520px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mf-c-9a9aaa);
+}
+
+/* Figures in a panel: the Files sidebar's label over a value. */
+.mf-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+.mf-stat {
+  padding: 8px 12px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-left-width: 2px;
+  border-radius: 4px;
+}
+.mf-stat-label {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-stat-value {
+  margin-top: 2px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 18px;
+  color: var(--mf-c-e8e8ed);
+}
+/* A record inside a panel: a quiet outlined box, not another glass card. */
+.mf-subcard {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 4px;
+}
+.mf-subcard:last-child {
+  margin-bottom: 0;
+}
+/* A text field at the toolbar height. */
+.mf-input {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--mf-r-65-72-90-0p3);
+  border-radius: 4px;
+  background: var(--mf-c-191b22);
+  color: var(--mf-c-e2e2eb);
+  font-size: 13px;
+}
