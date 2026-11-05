@@ -415,6 +415,11 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-778: adds an illustrative GLB render node linked to its concept
         # image; the image is never touched.
         "twin.generate_concept_mesh",
+        # Concept parts: each adds a new illustrative revision of the 3D concept,
+        # proposed beside the accepted one; nothing existing is replaced.
+        "twin.segment_concept_mesh",
+        "twin.regenerate_concept_part",
+        "twin.complete_concept_part",
         # FORGE-794: adds an illustrative generated_sketch proposal; the sketch,
         # its references and the accepted concept are never touched.
         "twin.generate_sketch",
@@ -662,6 +667,11 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "twin.critique_concept_image",
         # FORGE-778: the concept image (or prompt) goes to the mesh provider's API.
         "twin.generate_concept_mesh",
+        # Concept parts: the model (or its task id), a prompt or an image goes to
+        # the mesh provider's API.
+        "twin.segment_concept_mesh",
+        "twin.regenerate_concept_part",
+        "twin.complete_concept_part",
         # FORGE-794: the prompt, the drawn sketch and active reference images go to
         # the configured image API.
         "twin.generate_sketch",

@@ -136,8 +136,9 @@ class TestAlertingRules:
         # + 1 exact DFM failures (DfmExactEvaluationFailures, C3D slice 6).
         # + 1 slicer cross-check not running (DfmSlicerCrossCheckUnavailable, info).
         # + 1 reconstruction failures (ReconstructionProposalFailures, spec 4B).
+        # + 1 concept parts failing (ConceptPartsFailures).
         # + 1 interface contract checks failing (InterfaceContractChecksFailing).
-        assert len(rules) == 86
+        assert len(rules) == 87
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -215,8 +216,9 @@ class TestAlertingRules:
         # + 1 DFM evaluation errors (C3D slice 4).
         # + 1 exact DFM failures (C3D slice 6).
         # + 1 reconstruction failures (spec 4B).
+        # + 1 concept parts failing.
         # + 1 interface contract checks failing (lamp golden path).
-        assert len(warnings) == 69
+        assert len(warnings) == 70
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -360,6 +362,8 @@ class TestAlertingRules:
                 "PreviewComparisonErrors",
                 # Spec 4B: feature history proposals fail to store.
                 "ReconstructionProposalFailures",
+                # Concept parts: segmentation, part redo or seal failing.
+                "ConceptPartsFailures",
                 # Lamp golden path: interface contract checks raise.
                 "InterfaceContractChecksFailing",
             ]

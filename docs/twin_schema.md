@@ -3669,6 +3669,68 @@ the maturity computation: no acceptance or approval flag raises a component
 above what its geometry and checks show. Counted in
 `metaforge_maturity_query_total{product}`.
 
+### Concept parts {#concept-parts}
+
+The L0 concept mesh can be split into parts, mapped to components and edited
+one part at a time. Code: `api_gateway/twin/concept_parts.py`,
+`api_gateway/twin/glb_parts.py`, `api_gateway/twin/concept_parts_routes.py`.
+
+**Revisions.** Every step writes a new `render` work product (`format: glb`)
+rather than changing the concept it started from:
+
+| Field | Meaning |
+|---|---|
+| `generated_by` | `twin.segment_concept_mesh`, `twin.regenerate_concept_part` or `twin.complete_concept_part` |
+| `concept_root_node_id`, `concept_revision` | the original concept mesh and this revision's number in its family |
+| `concept_status` | `proposed` until a person accepts it; then `accepted`, and the previous accepted revision becomes `superseded` (with a `supersedes` edge); or `rejected`. An original concept mesh with no status reads `accepted` |
+| `concept_lineage` | `{operation: segmented, regenerated_part or completed_part, previous_node_id, previous_revision, root_node_id}`, plus `component_id` and `part` for one part |
+| `authority`, `illustrative_label`, `representation` | always `illustrative`, an illustrative label and an L0 descriptor; dimensions `estimated` |
+
+Each revision is linked `generated_from` the one before it.
+
+**Segmentation.** `metadata.segmentation` records `provider`,
+`model_version`, `granularity`, `split_by_connectivity`, `task_id`,
+`input_kind` (`task_id`, `file_token` or `url`), `input_task_id`,
+`credits` (when the task reports any), `rendered_image_url`, `status`
+(`segmented` or `not_segmented`), `note`, `labelled` and `part_count`.
+`concept_parts` lists each part (`name`, `node_index`, `label`,
+`label_source`, `bbox_min`, `bbox_max` in metres and glTF axes, primitive and
+triangle counts) and `part_face_samples` its triangles binned by normal
+(build axis +Z) for the mesh overhang check.
+
+**Part mapping.** `part_mapping` has a `status` (`proposed`,
+`partially_confirmed`, `confirmed` or `not_segmented`), the layout
+`transform` used, and per part: `proposed_component_id`, `confidence`,
+`basis` (`label`, `geometry`, `order`), up to three `candidates`, and a
+`state`: `proposed`, `question`, `confirmed` (with `confirmed_component_id`,
+`confirmed_by`, `confirmed_at`) or `not_a_component`. `questions` lists the
+parts still asked about and `unmatched_components` the components no part was
+proposed for. Only `confirmed` parts get `extras.component_id` and
+`extras.part_name` on their GLB node, written into our stored copy when the
+person confirms (the copy before that is kept as `unmapped_glb_object_key`);
+`part_component_ids` and the descriptor's `component_ids` name the confirmed
+components.
+
+**Part regeneration and completion.** `regenerated_parts` and
+`completed_parts` are lists of what was done (component, part, source and
+prompt or image node, or completion mode and segmentation task, provider,
+task id, credits, and the `fit`: `scale_factor`, `axis_mapping`,
+`quarter_turn_about_y`, `proportion_error_pct`, `other_nodes_unchanged`).
+The swapped node keeps its name, pose and `extras`, gains
+`extras.metaforge_regenerated` (its original local box and the fit), and
+draws the new part through a child node `metaforge_regenerated_part`.
+
+**Reads.** The accepted revision with confirmed parts feeds the heuristic DFM
+as geometry level `L0` (an estimated envelope and the part's own faces, never
+firmer than `estimated`), and reconstruction reads a part's box as an
+estimated block when the layout has none for that component. Counted in
+`metaforge_concept_segmentation_total{outcome, model}`,
+`metaforge_concept_part_mapping_total{outcome}`,
+`metaforge_concept_part_regeneration_total{outcome, source}` and
+`metaforge_concept_part_completion_total{outcome, mode}`; the
+`ConceptPartsFailures` alert fires on three failed or timed out paid steps in
+an hour.
+
 ### Parametric reconstruction {#parametric-reconstruction}
 
 An accepted concept is turned into a *proposed* editable feature history per

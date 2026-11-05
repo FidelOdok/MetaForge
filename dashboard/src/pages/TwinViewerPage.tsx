@@ -80,6 +80,7 @@ import { DfmFindingsSection } from '../components/viewer/DfmFindingsSection';
 import { InterfaceContractsSection } from '../components/viewer/InterfaceContractsSection';
 import { ParametricPreviewSection } from '../components/viewer/ParametricPreviewSection';
 import { FeatureHistorySection } from '../components/viewer/FeatureHistorySection';
+import { ConceptPartsSection } from '../components/viewer/ConceptPartsSection';
 import { useComponentSelection } from '../store/component-selection-store';
 import './TwinViewerPage.css';
 
@@ -1943,7 +1944,11 @@ export function TwinViewerPage() {
                   <NodeDetail node={node} onClose={() => setSelectedId(null)} onSelectNode={selectNode} />
                   {/* Spec 4B: the proposed feature history, on demand. */}
                   {activeProjectId && !sampleMode && (
-                    <FeatureHistorySection projectId={activeProjectId} componentId={selectedComponent?.componentId ?? null} />
+                    <>
+                      <FeatureHistorySection projectId={activeProjectId} componentId={selectedComponent?.componentId ?? null} />
+                      {/* Concept parts: segmentation provenance and the part mapping. */}
+                      <ConceptPartsSection projectId={activeProjectId} />
+                    </>
                   )}
                 </>
               ) : inspectorTab === 'history' ? (

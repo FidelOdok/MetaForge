@@ -38,6 +38,20 @@ is a change in one place:
 3. ``GET /tasks/{task_id}`` until ``data.status`` is terminal;
    ``data.output.model_url`` is the GLB;
 4. ``GET <model_url>``, at once: Tripo's model URLs expire within minutes.
+
+Two more paid calls work on a model Tripo already made (concept parts):
+
+* ``POST /mesh/segment`` ``{"input": task id | file token | URL, "model": ...}``
+  splits a model into parts (:meth:`TripoMeshGenerator.segment`). Model
+  ``v1.0-20250506`` splits by geometry; ``v2.0-20260430`` (beta) adds
+  semantic labels and takes ``segmentation_granularity`` and
+  ``split_by_connectivity``.
+* ``POST /mesh/complete`` ``{"input": segment task id, "part_names": [...],
+  "completion_mode": "ai_completion" | "quick_cap"}`` seals or completes
+  named parts of a segmented model (:meth:`TripoMeshGenerator.complete`).
+
+Both are polled like a generation and return a GLB; the credits a task
+reports, when it reports any, are kept on the result.
 """
 
 from __future__ import annotations
@@ -112,6 +126,28 @@ class GeneratedMesh:
     mode: str
     #: The generation options actually sent to the provider.
     options: dict[str, Any] = dataclass_field(default_factory=dict)
+    #: Credits the task reported, when it reported any.
+    credits: float | None = None
+    #: Other output the task returned (``rendered_image_url``), kept as given.
+    output: dict[str, Any] = dataclass_field(default_factory=dict)
+
+
+#: Tripo's segmentation models: geometry only (the default), and semantic
+#: labels (beta). Only the second takes the granularity and connectivity options.
+SEGMENT_MODEL_GEOMETRY = "v1.0-20250506"
+SEGMENT_MODEL_SEMANTIC = "v2.0-20260430"
+SEGMENT_MODELS: tuple[str, ...] = (SEGMENT_MODEL_GEOMETRY, SEGMENT_MODEL_SEMANTIC)
+SEGMENT_GRANULARITIES: tuple[str, ...] = ("simple", "balanced", "detailed")
+COMPLETION_MODES: tuple[str, ...] = ("ai_completion", "quick_cap")
+
+
+def credits_of(data: Mapping[str, Any]) -> float | None:
+    """The credits a Tripo task reports, under any of the names seen, else ``None``."""
+    for key in ("credits_consumed", "consumed_credit", "consumed_credits", "credits", "credit"):
+        value = data.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
 
 
 class MeshGenerator(Protocol):
@@ -322,33 +358,7 @@ class TripoMeshGenerator:
                         value = prompt or ""
                     task_id = await self._create(client, mode, value, sent)
                     span.set_attribute("mesh_generation.task_id", task_id)
-                    while True:
-                        data = await self._status(client, task_id)
-                        status = str(data.get("status") or "unknown").lower()
-                        if status == "success":
-                            break
-                        if status in FAILED_STATUSES:
-                            reason = redact(
-                                str(data.get("error_message") or data.get("error_code") or ""),
-                                self._api_key,
-                            )[:300]
-                            raise MeshGenerationError(
-                                f"tripo task {task_id} ended {status}"
-                                + (f": {reason}" if reason else "")
-                            )
-                        # queued, running, or a status Tripo may add: keep waiting.
-                        if self._clock() + self._poll_interval_s > deadline:
-                            raise MeshGenerationTimeoutError(
-                                f"tripo task {task_id} was still {status} after "
-                                f"{self._timeout_s:g}s"
-                            )
-                        await self._sleep(self._poll_interval_s)
-                    url = self._model_url(data)
-                    if not url:
-                        raise MeshGenerationError(
-                            f"tripo task {task_id} succeeded but returned no model URL"
-                        )
-                    glb = await self._download(client, url)
+                    glb, data = await self._finish(client, task_id, deadline)
             except MeshGenerationError as exc:
                 span.record_exception(exc)
                 raise
@@ -373,6 +383,161 @@ class TripoMeshGenerator:
             task_id=task_id,
             mode=mode,
             options=sent,
+            credits=credits_of(data),
+        )
+
+    async def _finish(
+        self, client: Any, task_id: str, deadline: float
+    ) -> tuple[bytes, dict[str, Any]]:
+        """Poll ``task_id`` to success and download its GLB: ``(glb, task data)``."""
+        while True:
+            data = await self._status(client, task_id)
+            status = str(data.get("status") or "unknown").lower()
+            if status == "success":
+                break
+            if status in FAILED_STATUSES:
+                reason = redact(
+                    str(data.get("error_message") or data.get("error_code") or ""),
+                    self._api_key,
+                )[:300]
+                raise MeshGenerationError(
+                    f"tripo task {task_id} ended {status}" + (f": {reason}" if reason else "")
+                )
+            # queued, running, or a status Tripo may add: keep waiting.
+            if self._clock() + self._poll_interval_s > deadline:
+                raise MeshGenerationTimeoutError(
+                    f"tripo task {task_id} was still {status} after {self._timeout_s:g}s"
+                )
+            await self._sleep(self._poll_interval_s)
+        url = self._model_url(data)
+        if not url:
+            raise MeshGenerationError(f"tripo task {task_id} succeeded but returned no model URL")
+        return await self._download(client, url), data
+
+    async def _mesh_task(
+        self,
+        span_name: str,
+        mode: str,
+        path: str,
+        body: dict[str, Any],
+        *,
+        upload: bytes | None = None,
+    ) -> GeneratedMesh:
+        """Create one ``/mesh/*`` task (uploading a GLB first if given), poll it, download it."""
+        import httpx
+
+        deadline = self._clock() + self._timeout_s
+        with tracer.start_as_current_span(span_name) as span:
+            span.set_attribute("mesh_generation.mode", mode)
+            task_id = ""
+            try:
+                async with httpx.AsyncClient(
+                    timeout=min(REQUEST_TIMEOUT_S, self._timeout_s), transport=self._transport
+                ) as client:
+                    if upload is not None:
+                        response = await client.post(
+                            f"{self._base_url}/files",
+                            files={"file": ("concept.glb", upload, "model/gltf-binary")},
+                            headers=self._auth(),
+                        )
+                        token = self._data(response, "upload").get("file_token")
+                        if not token:
+                            raise MeshGenerationError(
+                                "tripo accepted the upload but returned no file_token"
+                            )
+                        body["input"] = str(token)
+                    response = await client.post(
+                        f"{self._base_url}/{path}", json=body, headers=self._auth()
+                    )
+                    task_id = str(self._data(response, "task").get("task_id") or "")
+                    if not task_id:
+                        raise MeshGenerationError("tripo accepted the task but returned no task_id")
+                    span.set_attribute("mesh_generation.task_id", task_id)
+                    glb, data = await self._finish(client, task_id, deadline)
+            except MeshGenerationError as exc:
+                span.record_exception(exc)
+                raise
+            except httpx.TimeoutException as exc:
+                span.record_exception(exc)
+                raise MeshGenerationTimeoutError(
+                    f"tripo did not answer within {REQUEST_TIMEOUT_S:g}s"
+                ) from exc
+            except Exception as exc:
+                span.record_exception(exc)
+                raise MeshGenerationError(
+                    f"tripo failed: {type(exc).__name__}: {redact(str(exc), self._api_key)[:400]}"
+                ) from exc
+        if not glb.startswith(_GLB_MAGIC):
+            raise MeshGenerationError(
+                f"tripo task {task_id} returned a file that is not a GLB ({len(glb)} bytes)"
+            )
+        raw_output = data.get("output")
+        output = dict(raw_output) if isinstance(raw_output, Mapping) else {}
+        kept = {
+            k: v
+            for k, v in output.items()
+            if k in ("rendered_image_url", "part_names", "labels") and v is not None
+        }
+        return GeneratedMesh(
+            glb_bytes=glb,
+            provider=self.provider,
+            model_version=str(body.get("model") or self.model_version),
+            task_id=task_id,
+            mode=mode,
+            options=dict(body),
+            credits=credits_of(data),
+            output=kept,
+        )
+
+    async def segment(
+        self,
+        *,
+        task_id: str | None = None,
+        glb: bytes | None = None,
+        url: str | None = None,
+        model: str = SEGMENT_MODEL_GEOMETRY,
+        granularity: str | None = None,
+        split_by_connectivity: bool | None = None,
+    ) -> GeneratedMesh:
+        """Split a model into parts: one Tripo made (``task_id``), an uploaded GLB or a URL."""
+        given = [v for v in (task_id, glb, url) if v]
+        if len(given) != 1:
+            raise MeshGenerationError("a segmentation needs exactly one task id, GLB or URL")
+        if model not in SEGMENT_MODELS:
+            raise MeshGenerationError(f"unknown segmentation model {model!r}")
+        body: dict[str, Any] = {"model": model}
+        if task_id:
+            body["input"] = task_id
+        elif url:
+            if not url.startswith("https://"):
+                raise MeshGenerationError("a segmentation URL must be https")
+            body["input"] = url
+        if model == SEGMENT_MODEL_SEMANTIC:
+            if granularity is not None:
+                body["segmentation_granularity"] = granularity
+            if split_by_connectivity is not None:
+                body["split_by_connectivity"] = split_by_connectivity
+        return await self._mesh_task(
+            "mesh_generation.tripo.segment", "mesh_segment", "mesh/segment", body, upload=glb
+        )
+
+    async def complete(
+        self,
+        *,
+        segment_task_id: str,
+        part_names: list[str] | None = None,
+        completion_mode: str = "ai_completion",
+    ) -> GeneratedMesh:
+        """Seal (``quick_cap``) or complete (``ai_completion``) parts of a segmented model."""
+        if not segment_task_id:
+            raise MeshGenerationError("a completion needs the segmentation task id")
+        if completion_mode not in COMPLETION_MODES:
+            raise MeshGenerationError(f"unknown completion mode {completion_mode!r}")
+        body: dict[str, Any] = {"input": segment_task_id, "completion_mode": completion_mode}
+        if part_names:
+            body["part_names"] = list(part_names)
+        return await self._mesh_task(
+            "mesh_generation.tripo.complete", "mesh_complete", "mesh/complete", body
         )
 
 

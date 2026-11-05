@@ -94,8 +94,9 @@ class TestMetricsRegistryGroupedAccess:
         # + 4 exact DFM, report and release checklist (C3D slice 6).
         # + 1 slicer cross-check after exact FDM DFM.
         # + 3 reconstruction proposals, accepted features and model passes (4B).
+        # + 4 concept segmentation, part mapping, regeneration and completion.
         # + 2 interface contract checks and violations (lamp golden path).
-        assert len(all_metrics) == 150
+        assert len(all_metrics) == 154
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

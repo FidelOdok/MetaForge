@@ -406,6 +406,7 @@ async def bootstrap_tool_registry(
     concept_image_renderer: Any = None,
     concept_image_critic: Any = None,
     concept_mesh_generator: Any = None,
+    concept_parts_service: Any = None,
     structured_mesh_renderer: Any = None,
     # C3D slice 4: heuristic DFM findings (twin.evaluate_dfm, twin.get_dfm_findings).
     dfm_service: Any = None,
@@ -641,6 +642,11 @@ async def bootstrap_tool_registry(
             ``twin.generate_concept_mesh``: an image-to-3D model turns a
             concept image into an illustrative GLB render. ``None`` skips
             registration.
+        concept_parts_service: Optional concept parts service
+            (make_concept_parts_service). When supplied, registers
+            ``twin.segment_concept_mesh``, ``twin.regenerate_concept_part`` and
+            ``twin.complete_concept_part``: split the 3D concept into parts and
+            redo or seal one part. ``None`` skips registration.
         structured_mesh_renderer: Optional async ``render(...)``
             (make_structured_mesh_recorder, C3D slice 2). When supplied,
             registers ``twin.render_structured_mesh``: the concept's block
@@ -908,6 +914,7 @@ async def bootstrap_tool_registry(
                     concept_image_renderer=concept_image_renderer,
                     concept_image_critic=concept_image_critic,
                     concept_mesh_generator=concept_mesh_generator,
+                    concept_parts_service=concept_parts_service,
                     structured_mesh_renderer=structured_mesh_renderer,
                     dfm_service=dfm_service,
                     sketch_generator=sketch_generator,
