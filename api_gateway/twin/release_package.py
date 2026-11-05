@@ -105,6 +105,28 @@ def _count_diff(prior: dict[str, Any] | None, current: dict[str, Any]) -> dict[s
     }
 
 
+def _record_refusal(gate: Any) -> None:
+    """Count a refused release by what blocked it first (C3D slice 6). Never raises."""
+    blocker = "gate"
+    for check in gate.checks:
+        if check.status.value == "pass":
+            continue
+        if check.id == "manufacturing_release_checklist":
+            blocker = "manufacturing_checklist"
+        elif check.id == "exact_cad_validated":
+            blocker = "step_round_trip"
+        elif check.id == "release_approved":
+            blocker = "approvals"
+        break
+    try:
+        from observability.metrics import collector_for
+
+        collector_for("metaforge-gateway").record_manufacturing_release_refused(blocker)
+    except Exception as exc:  # noqa: BLE001 - a counter never changes the refusal
+        logger.debug("release_refusal_metric_failed", error=str(exc))
+    logger.info("manufacturing_release_refused", blocker=blocker)
+
+
 async def _release_cad_heads(twin: Any, project_id: UUID) -> list[str]:
     """Mark the project's validated CAD heads ``released``. Never raises."""
     from twin_core.geometry_state import exact_cad_readiness, mark_released
@@ -143,6 +165,7 @@ def make_release_package_creator(
             gate = await evaluate_g8_release(twin, pid, traceability_coverage=traceability_coverage)
             span.set_attribute("release.gate_status", gate.status.value)
             if gate.status != GateStatus.PASSED:
+                _record_refusal(gate)
                 failing = "; ".join(
                     f"{c.label}: {c.detail}" for c in gate.checks if c.status.value != "pass"
                 )

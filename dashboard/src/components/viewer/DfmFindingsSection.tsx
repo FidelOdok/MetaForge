@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { dfmKeys, evaluateDfm, getDfm, type DfmComponentFindings, type DfmFinding } from '../../api/endpoints/dfmFindings';
+import { FaceHighlight, ReleaseChecklistPanel, VerificationItems } from './DfmExactPanels';
 
 function measuredText(f: DfmFinding): string {
   const unit = f.unit && f.unit !== 'ratio' ? ` ${f.unit}` : '';
@@ -15,13 +16,47 @@ function anchorText(f: DfmFinding): string {
   return parts.join(' · ');
 }
 
-function ComponentBlock({ c, stale }: { c: DfmComponentFindings; stale?: boolean }) {
+function measurementText(c: DfmComponentFindings): string | null {
+  const e = c.exact_evidence ?? {};
+  if (c.kind !== 'exact' || !e.wall_method) return null;
+  const dir = Array.isArray(e.build_direction) ? (e.build_direction as number[]).join(', ') : '0, 0, 1';
+  return `Measured on the exact model with ${String(e.tool)}: wall thickness by ${String(e.wall_method)} (${String(
+    e.wall_samples ?? 0,
+  )} samples); build direction (${dir}), ${String(e.build_direction_source ?? '')}.`;
+}
+
+function FindingFaces({ projectId, c, f }: { projectId: string; c: DfmComponentFindings; f: DfmFinding }) {
+  const [show, setShow] = useState(false);
+  if (c.kind !== 'exact' || !f.anchor.faces.length || !c.geometry_refs[0]) return null;
+  return (
+    <div>
+      <button type="button" className="tw-dfm-show-faces" onClick={() => setShow((v) => !v)} aria-expanded={show}>
+        {show ? 'Hide faces' : `Show ${f.anchor.faces.length} face${f.anchor.faces.length === 1 ? '' : 's'} on the model`}
+      </button>
+      {show && <FaceHighlight projectId={projectId} geometryRef={c.geometry_refs[0]} faces={f.anchor.faces} />}
+    </div>
+  );
+}
+
+function ComponentBlock({ c, stale, projectId }: { c: DfmComponentFindings; stale?: boolean; projectId: string }) {
+  const measured = measurementText(c);
   return (
     <section className="tw-dfm-component" data-testid={`dfm-component-${c.component_id}`}>
       <header>
         <strong>{c.name}</strong>
+        <span className="tw-dfm-kind" data-testid={`dfm-kind-${c.component_id}`}>
+          {c.kind === 'exact' ? 'Exact checks' : 'Preliminary guidance'}
+        </span>
         <span className={`tw-dfm-status is-${c.status}`}>{c.status_label}</span>
       </header>
+      {c.kind === 'exact' && (
+        <p className="tw-dfm-numbers">
+          {c.complete ? 'Every exact check ran' : 'Incomplete: not every exact check ran'} ({(c.rules_run ?? []).length} of{' '}
+          {(c.checks_required ?? []).length})
+          {c.guidance_only_rules?.length ? `; guidance only: ${c.guidance_only_rules.join(', ')}` : ''}
+        </p>
+      )}
+      {measured && <p className="tw-dfm-numbers">{measured}</p>}
       <dl className="tw-dfm-meta">
         <dt>Rule profile</dt>
         <dd>{c.profile ? `${c.profile.id} ${c.profile.version}` : 'none (process unknown)'}</dd>
@@ -60,6 +95,7 @@ function ComponentBlock({ c, stale }: { c: DfmComponentFindings; stale?: boolean
               {f.evidence_refs.length > 0 && <p className="tw-dfm-numbers">Evidence: {f.evidence_refs.join(', ')}</p>}
               <p className="tw-dfm-fix">Suggested fix: {f.suggested_fix}</p>
               {f.decision && <p className="tw-dfm-numbers">Decision: {f.decision.decision.replace('_', ' ')}</p>}
+              <FindingFaces projectId={projectId} c={c} f={f} />
             </li>
           ))}
         </ul>
@@ -76,12 +112,18 @@ function ComponentBlock({ c, stale }: { c: DfmComponentFindings; stale?: boolean
           </ul>
         </details>
       )}
+      {!stale && <VerificationItems projectId={projectId} items={c.verification_items ?? []} />}
     </section>
   );
 }
 
 /**
  * Engineering's DFM Findings, on demand in the contextual inspector (section 11).
+ *
+ * Exact checks on a validated model (C3D slice 6) show their measured values,
+ * the faces they are anchored to (highlighted on the model on request), the
+ * physical verification items and the manufacturing release checklist with
+ * the DFM report.
  *
  * Per component: the rule profile and its version, measured against limit with
  * units and confidence, the anchor (component, feature, face), the evidence it
@@ -126,7 +168,7 @@ export function DfmFindingsSection({ projectId, componentId }: { projectId: stri
         <p className="tw-dfm-numbers">Profiles: {data.profiles.map((p) => `${p.id} ${p.version}`).join(', ')}</p>
       )}
       {components.length ? (
-        components.map((c) => <ComponentBlock key={c.finding_set_id} c={c} />)
+        components.map((c) => <ComponentBlock key={c.finding_set_id} c={c} projectId={projectId} />)
       ) : (
         <p className="tw-dfm-none">Manufacturing not assessed for this selection yet.</p>
       )}
@@ -134,7 +176,8 @@ export function DfmFindingsSection({ projectId, componentId }: { projectId: stri
         <input type="checkbox" checked={showHistory} onChange={(e) => setShowHistory(e.target.checked)} /> Show stale and earlier findings
       </label>
       {showHistory &&
-        history.map((c) => <ComponentBlock key={c.finding_set_id} c={c} stale />)}
+        history.map((c) => <ComponentBlock key={c.finding_set_id} c={c} stale projectId={projectId} />)}
+      <ReleaseChecklistPanel projectId={projectId} />
     </div>
   );
 }

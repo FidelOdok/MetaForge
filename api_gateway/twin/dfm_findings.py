@@ -762,8 +762,13 @@ async def _store(
     context_ref: str | None,
     trigger: str,
     existing: list[Any],
+    extra: dict[str, Any] | None = None,
 ) -> tuple[Any, bool]:
-    """Store ``finding_set`` (or reuse an identical current one). ``(node, created)``."""
+    """Store ``finding_set`` (or reuse an identical current one). ``(node, created)``.
+
+    ``extra`` overrides metadata keys (an exact set's ``result`` and
+    ``authority``).
+    """
     from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
     from twin_core.consistency.record_pins import set_record_status
     from twin_core.consistency.staleness import StalenessStatus
@@ -814,7 +819,9 @@ async def _store(
         # Heuristic guidance never reads as a pass in the shared status vocabulary.
         "result": {"verdict": "incomplete", "heuristic_only": True},
         "authority": "heuristic",
+        "dfm_kind": finding_set.kind,
     }
+    metadata.update(extra or {})
     metadata.update(pin_metadata(pins))
     now = datetime.now(UTC)
     wp_id = uuid4()
@@ -923,6 +930,12 @@ async def evaluate_project(
                 existing = await _sets(twin, pid)
                 out: list[tuple[Gathered, Any, DfmFindingSet, bool]] = []
                 for g in gathered:
+                    exact = current_exact(existing, g.component_id, g.geometry.geometry_refs)
+                    if exact is not None:
+                        # The exact analysis of this geometry revision stands:
+                        # heuristics never replace it (C3D slice 6).
+                        out.append((g, exact[0], exact[1], False))
+                        continue
                     stored = await _context_for(twin, pid, g)
                     ctx = process_context(stored)
                     fs = evaluate(
@@ -965,6 +978,8 @@ async def evaluate_project(
                         f"Manufacturing guidance checked for {len(out)} part(s): "
                         f"{issues} suggestion(s); {written} updated",
                     )
+                if trigger in ("geometry_changed", "context_changed"):
+                    await _schedule_exact_followups(twin, pid, out)
                 return out
             except Exception as exc:
                 span.record_exception(exc)
@@ -976,6 +991,40 @@ async def evaluate_project(
                     pid, uuid4().hex[:8], "Manufacturing guidance could not be checked", failed=True
                 )
                 raise
+
+
+def current_exact(
+    nodes: list[Any], component_id: str, geometry_refs: list[str]
+) -> tuple[Any, DfmFindingSet] | None:
+    """The valid exact set of ``component_id`` on one of ``geometry_refs``, newest first."""
+    for node in reversed(nodes):
+        meta = node.metadata or {}
+        body = meta.get(META_KEY) or {}
+        if body.get("component_id") != component_id or body.get("kind") != "exact":
+            continue
+        if not _valid(node) or not set(body.get("geometry_refs") or []) & set(geometry_refs):
+            continue
+        fs = set_of(node)
+        if fs is not None:
+            return node, fs
+    return None
+
+
+async def _schedule_exact_followups(
+    twin: Any, pid: UUID, out: list[tuple[Gathered, Any, DfmFindingSet, bool]]
+) -> None:
+    """After a recompute: re-run exact DFM for components on a validated revision."""
+    try:
+        from api_gateway.twin.dfm_exact import schedule_for_component
+    except Exception:  # noqa: BLE001 - no exact DFM in this build
+        return
+    for g, _node, fs, _created in out:
+        if g.geometry.level != "exact" or fs.kind == "exact":
+            continue
+        try:
+            await schedule_for_component(twin, pid, g, trigger="recompute")
+        except Exception as exc:  # noqa: BLE001 - the heuristic set is saved
+            logger.warning("dfm_exact_followup_failed", component_id=g.component_id, error=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -1087,6 +1136,17 @@ def register() -> None:
 # ---------------------------------------------------------------------------
 
 
+HEURISTIC_DISCLAIMER = (
+    "Preliminary manufacturing guidance from heuristic rules. Not an analysis pass, "
+    "not a supplier confirmation and not a manufacturing release."
+)
+EXACT_DISCLAIMER = (
+    "Exact checks run on the validated model for the selected process and rule profile. "
+    "A pass is not a guarantee of build success, not a supplier confirmation and not a "
+    "manufacturing release; physical verification and release approval are separate."
+)
+
+
 class ComponentFindingsView(BaseModel):
     component_id: str
     name: str
@@ -1106,6 +1166,16 @@ class ComponentFindingsView(BaseModel):
     rules_run: list[str]
     evaluated_at: str
     trigger: str = ""
+    #: ``heuristic`` (guidance) or ``exact`` (checks on a validated B-Rep).
+    kind: str = "heuristic"
+    exact_checks_scheduled: bool = False
+    #: Exact sets: the checks the profile names, whether all ran, the rules
+    #: that stay guidance, how the geometry was measured, and verifications.
+    checks_required: list[str] = Field(default_factory=list)
+    complete: bool = False
+    guidance_only_rules: list[str] = Field(default_factory=list)
+    exact_evidence: dict[str, Any] = Field(default_factory=dict)
+    verification_items: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DfmView(BaseModel):
@@ -1121,10 +1191,9 @@ class DfmView(BaseModel):
     history: list[ComponentFindingsView] = Field(default_factory=list)
     profiles: list[dict[str, str]] = Field(default_factory=list)
     heuristic_only: bool = True
-    disclaimer: str = (
-        "Preliminary manufacturing guidance from heuristic rules. Not an analysis pass, "
-        "not a supplier confirmation and not a manufacturing release."
-    )
+    #: Verification items no reviewer approved evidence for yet.
+    verification_open: int = 0
+    disclaimer: str = HEURISTIC_DISCLAIMER
 
 
 def _component_view(node: Any, fs: DfmFindingSet) -> ComponentFindingsView:
@@ -1163,6 +1232,13 @@ def _component_view(node: Any, fs: DfmFindingSet) -> ComponentFindingsView:
         rules_run=list(fs.rules_run),
         evaluated_at=fs.evaluated_at,
         trigger=str(meta.get("trigger") or ""),
+        kind=fs.kind,
+        exact_checks_scheduled=fs.exact_checks_scheduled,
+        checks_required=list(fs.checks_required),
+        complete=fs.complete,
+        guidance_only_rules=list(fs.guidance_only_rules),
+        exact_evidence=dict(fs.exact_evidence),
+        verification_items=[v.model_dump(mode="json") for v in fs.verification_items],
     )
 
 
@@ -1201,6 +1277,10 @@ async def dfm_view(twin: Any, project_id: str | UUID, *, include_history: bool =
             {(c.profile["id"], c.profile["version"]) for c in components if c.profile}
         )
         notes = [c.note for c in components if c.status == status.value]
+        any_exact = any(c.kind == "exact" for c in components)
+        verification_open = sum(
+            1 for c in components for v in c.verification_items if v.get("status") != "satisfied"
+        )
         span.set_attribute("dfm.components", len(components))
         return DfmView(
             project_id=str(pid),
@@ -1216,6 +1296,9 @@ async def dfm_view(twin: Any, project_id: str | UUID, *, include_history: bool =
                 for pid_, ver in profiles
                 if pid_ in PROFILES
             ],
+            heuristic_only=not any_exact,
+            verification_open=verification_open,
+            disclaimer=EXACT_DISCLAIMER if any_exact else HEURISTIC_DISCLAIMER,
         )
 
 
@@ -1475,7 +1558,9 @@ def manufacturability_variant(record: Any) -> tuple[VariantGuidance | None, str]
 
 
 __all__ = [
+    "EXACT_DISCLAIMER",
     "GEOMETRY_ITEM_TYPES",
+    "HEURISTIC_DISCLAIMER",
     "META_KEY",
     "RECORD_TYPE",
     "RELEVANT_CONTEXT_FIELDS",
@@ -1497,4 +1582,5 @@ __all__ = [
     "protected_conflicts",
     "register",
     "set_of",
+    "current_exact",
 ]

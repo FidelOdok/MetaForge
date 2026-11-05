@@ -66,12 +66,27 @@ HEURISTIC_STATUSES: frozenset[DfmStatus] = frozenset(
         DfmStatus.ISSUES_FOUND,
     }
 )
-#: Worst first, for a product made of several components.
+#: The statuses an exact finding set may carry (C3D slice 6). An incomplete
+#: exact run with nothing found reads ``analysis_pending``: the analysis has
+#: not concluded. Verification and release are product level, never a set's.
+EXACT_STATUSES: frozenset[DfmStatus] = frozenset(
+    {
+        DfmStatus.NOT_ASSESSED,
+        DfmStatus.ANALYSIS_PENDING,
+        DfmStatus.ISSUES_FOUND,
+        DfmStatus.ANALYSIS_PASSED,
+    }
+)
+#: Worst first, for a product made of several components. A product is only
+#: as far along as its least assessed component, so a pass ranks last.
 _STATUS_RANK: tuple[DfmStatus, ...] = (
     DfmStatus.ISSUES_FOUND,
     DfmStatus.ANALYSIS_PENDING,
     DfmStatus.PRELIMINARY_GUIDANCE,
     DfmStatus.NOT_ASSESSED,
+    DfmStatus.VERIFICATION_REQUIRED,
+    DfmStatus.ANALYSIS_PASSED,
+    DfmStatus.RELEASED,
 )
 
 #: How a quantity is named in a "not assessed" reason.
@@ -294,8 +309,39 @@ class NotAssessed(BaseModel):
         return f"Not assessed for {self.title.lower()} because {self.reason}"
 
 
+class VerificationItem(BaseModel):
+    """A physical or supplier verification a component needs (DFM-013).
+
+    Never satisfied automatically: a person records evidence (a note or an
+    upload), which waits for a reviewer's approval; only the approval makes
+    it ``satisfied``.
+    """
+
+    id: str
+    rule_id: str
+    component_id: str
+    title: str
+    kind: Literal["physical_test", "supplier_confirmation"]
+    #: What evidence settles it.
+    needed: str
+    #: Why it applies to this component.
+    reason: str
+    source: str = ""
+    status: Literal["open", "awaiting_approval", "satisfied", "rejected"] = "open"
+    #: ``[{id, note, attachment, recorded_by, recorded_at, approval_id, state}]``.
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    #: ``{by, at, approval_id, evidence_id}`` once a reviewer approved evidence.
+    satisfied_by: dict[str, Any] | None = None
+
+
 class DfmFindingSet(BaseModel):
-    """The heuristic findings of one component under one process profile."""
+    """One component's findings under one process profile.
+
+    ``kind`` ``heuristic`` (C3D slice 4): guidance on the best geometry the
+    component has, never a pass. ``kind`` ``exact`` (C3D slice 6): the
+    profile's exact checks on a validated B-Rep revision; ``analysis_passed``
+    only when every check the profile names ran and none found anything.
+    """
 
     component_id: str
     component_name: str = ""
@@ -311,19 +357,47 @@ class DfmFindingSet(BaseModel):
     rules_run: list[str] = Field(default_factory=list)
     status: DfmStatus = DfmStatus.NOT_ASSESSED
     note: str = DFM_STATUS_LABELS[DfmStatus.NOT_ASSESSED]
-    #: Always true here: nothing in this set is an exact check.
-    heuristic_only: Literal[True] = True
+    kind: Literal["heuristic", "exact"] = "heuristic"
+    #: True for a heuristic set: nothing in it is an exact check.
+    heuristic_only: bool = True
     exact_checks_scheduled: bool = False
     evaluated_at: str = Field(default_factory=_now)
     #: What the evaluation read, hashed: the same inputs make the same set.
     inputs_sha256: str = ""
+    # -- exact sets only ---------------------------------------------------
+    #: The rules the profile names for exact analysis.
+    checks_required: list[str] = Field(default_factory=list)
+    #: True when every required check ran.
+    complete: bool = False
+    #: Profile rules that stay guidance (no exact check measures them).
+    guidance_only_rules: list[str] = Field(default_factory=list)
+    #: How the geometry was measured: the tool, method, limits, sample sizes,
+    #: build direction and the planar faces anchors point at.
+    exact_evidence: dict[str, Any] = Field(default_factory=dict)
+    verification_items: list[VerificationItem] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _never_passed(self) -> DfmFindingSet:
-        if self.status not in HEURISTIC_STATUSES:
+        if self.kind == "heuristic":
+            if self.status not in HEURISTIC_STATUSES or not self.heuristic_only:
+                raise ValueError(
+                    f"a heuristic finding set cannot be {self.status.value}: heuristics alone "
+                    "never pass, qualify or release anything"
+                )
+            return self
+        if self.heuristic_only:
+            raise ValueError("an exact finding set is not heuristic only")
+        if self.status not in EXACT_STATUSES:
             raise ValueError(
-                f"a heuristic finding set cannot be {self.status.value}: heuristics alone "
-                "never pass, qualify or release anything"
+                f"an exact finding set cannot be {self.status.value}: verification and "
+                "release belong to the product, not to one analysis"
+            )
+        if self.status is DfmStatus.ANALYSIS_PASSED and (
+            not self.complete or self.findings or not self.checks_required
+        ):
+            raise ValueError(
+                "an exact finding set passes only when every required check ran and none "
+                "found anything"
             )
         return self
 
@@ -941,6 +1015,7 @@ def alternative_profiles(current: DfmProfile | None) -> list[DfmProfile]:
 
 
 __all__ = [
+    "EXACT_STATUSES",
     "FIRM_CONFIDENCE",
     "HEURISTIC_STATUSES",
     "QUANTITY_WORDS",
@@ -956,6 +1031,7 @@ __all__ = [
     "NotAssessed",
     "ProcessContext",
     "VariantGuidance",
+    "VerificationItem",
     "alternative_profiles",
     "evaluate",
     "finding_id",

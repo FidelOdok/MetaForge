@@ -1322,6 +1322,48 @@ class MetricsRegistry:
         labels=["decision", "outcome"],
     )
 
+    # ── Exact DFM, report and release checklist (C3D slice 6) ──────────
+
+    DFM_EXACT_EVALUATION_TOTAL = MetricDefinition(
+        name="metaforge_dfm_exact_evaluation_total",
+        type="counter",
+        description=(
+            "Exact DFM evaluations of a validated B-Rep revision, by outcome "
+            "(analysis_passed, issues_found, incomplete, failed)"
+        ),
+        labels=["outcome"],
+    )
+
+    DFM_EXACT_INCOMPLETE_TOTAL = MetricDefinition(
+        name="metaforge_dfm_exact_incomplete_total",
+        type="counter",
+        description=(
+            "Exact DFM checks that could not run, by rule (fdm.min_wall, fdm.build_volume "
+            "...) and reason (no_machine, not_measured, measure_failed, other)"
+        ),
+        labels=["rule", "reason"],
+    )
+
+    DFM_REPORT_TOTAL = MetricDefinition(
+        name="metaforge_dfm_report_total",
+        type="counter",
+        description=(
+            "Revision-specific DFM report generations, by outcome (generated, reused, failed)"
+        ),
+        labels=["outcome"],
+    )
+
+    MANUFACTURING_RELEASE_REFUSED_TOTAL = MetricDefinition(
+        name="metaforge_manufacturing_release_refused_total",
+        type="counter",
+        description=(
+            "Releases refused while the manufacturing release checklist or the G8 gate "
+            "was unresolved, by the first failing G8 check (manufacturing_checklist, "
+            "step_round_trip, approvals, gate for any other)"
+        ),
+        labels=["blocker"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1496,6 +1538,10 @@ class MetricsRegistry:
             cls.DFM_FINDING_TOTAL,
             cls.DFM_STALE_RECOMPUTE_TOTAL,
             cls.DFM_DECISION_TOTAL,
+            cls.DFM_EXACT_EVALUATION_TOTAL,
+            cls.DFM_EXACT_INCOMPLETE_TOTAL,
+            cls.DFM_REPORT_TOTAL,
+            cls.MANUFACTURING_RELEASE_REFUSED_TOTAL,
         ]
 
     @classmethod
@@ -2470,6 +2516,30 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.DFM_DECISION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"decision": decision, "outcome": outcome})
+
+    def record_dfm_exact_evaluation(self, outcome: str) -> None:
+        """Record one exact DFM evaluation of a validated revision (C3D slice 6)."""
+        counter = self._instruments.get(MetricsRegistry.DFM_EXACT_EVALUATION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_dfm_exact_incomplete(self, rule: str, reason: str) -> None:
+        """Record one exact DFM check that could not run (C3D slice 6)."""
+        counter = self._instruments.get(MetricsRegistry.DFM_EXACT_INCOMPLETE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"rule": rule, "reason": reason})
+
+    def record_dfm_report(self, outcome: str) -> None:
+        """Record one DFM report generation (C3D slice 6)."""
+        counter = self._instruments.get(MetricsRegistry.DFM_REPORT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_manufacturing_release_refused(self, blocker: str) -> None:
+        """Record one release refused while the checklist was unresolved (C3D slice 6)."""
+        counter = self._instruments.get(MetricsRegistry.MANUFACTURING_RELEASE_REFUSED_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"blocker": blocker})
 
     def record_tool_job(self, tool: str, status: str) -> None:
         """Record one state change of a tool job (FORGE-783)."""

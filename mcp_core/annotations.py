@@ -64,6 +64,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "cadquery.export_step",
         # CDE slice 9: reads a STEP and lists its planar faces.
         "cadquery.describe_faces",
+        # C3D slice 6: reads a STEP and returns exact FDM measures.
+        "cadquery.dfm_measure",
         "freecad.describe_step_file",
         "freecad.get_properties",
         "freecad.list_named_faces",

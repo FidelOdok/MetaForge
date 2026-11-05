@@ -1197,4 +1197,33 @@ async def evaluate_g8_release(
     exact_cad = await _evaluate_exact_cad_check(twin, project_id)
     if exact_cad is not None:
         checks.append(exact_cad)
+    manufacturing = await _evaluate_manufacturing_checklist_check(twin, project_id)
+    if manufacturing is not None:
+        checks.append(manufacturing)
     return GateEvaluation(gate_id="G8", status=_status_from_checks(checks), checks=checks)
+
+
+async def _evaluate_manufacturing_checklist_check(
+    twin: TwinAPI, project_id: UUID
+) -> GateCheck | None:
+    """C3D slice 6 (3D-RC-016): the manufacturing release checklist, less approvals.
+
+    ``None`` when the checklist does not apply (no process with exact DFM
+    checks). The release approval is G8's own check above, so it is not
+    counted twice. A failing item FAILs: the blockers are real and named.
+    """
+    from twin_core.dfm.release_checklist import manufacturing_checklist
+
+    checklist = await manufacturing_checklist(twin, project_id)
+    if checklist is None:
+        return None
+    blockers = checklist.gate_blockers()
+    return GateCheck(
+        id="manufacturing_release_checklist",
+        label="Manufacturing release checklist (exact models, DFM, verification, STEP)",
+        status=GateCheckStatus.FAIL if blockers else GateCheckStatus.PASS,
+        detail="; ".join(blockers)[:2000]
+        if blockers
+        else "every required component exact, DFM resolved, verification approved and "
+        "STEP round-tripped",
+    )

@@ -361,6 +361,20 @@ class ProjectGateEvaluator:
         except ValueError:
             return []
 
+    async def manufacturing_checklist(self, project_id: str | None) -> Any:
+        """C3D slice 6: the manufacturing release checklist, or ``None`` when it does not apply.
+
+        The same answer the G8 release check gives (3D-RC-016).
+        """
+        if not project_id or self._twin is None:
+            return None
+        from twin_core.dfm.release_checklist import manufacturing_checklist
+
+        try:
+            return await manufacturing_checklist(self._twin, project_id)
+        except ValueError:
+            return None
+
     async def dfm_review(self, project_id: str | None) -> Any:
         """The project's latest DFM review (FORGE-611), or ``None``."""
         from orchestrator.design_flow.context import parse_dfm_review

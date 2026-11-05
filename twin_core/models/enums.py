@@ -216,13 +216,24 @@ class WorkProductType(StrEnum):
     # the geometry revision and the manufacturing context revision it read,
     # so either moving on marks it stale; a recompute supersedes it.
     DFM_FINDING_SET = "dfm_finding_set"
+    # One revision-specific DFM report (api_gateway/twin/dfm_report.py): the
+    # components and their maturity, the process, material and context
+    # revision, profile versions, every finding with measured against limit,
+    # anchors and evidence, unresolved issues, verification items, the stale
+    # state and the release checklist, as JSON plus rendered Markdown. A
+    # record pinned to the revisions it read, so it reads stale when they move.
+    DFM_REPORT = "dfm_report"
 
 
 #: Work product types that are history about a change, not design work
 #: products. The twin's node and relationship lists leave them out unless
 #: asked (``include_history``); they stay readable through their own routes.
 HISTORY_WORK_PRODUCT_TYPES: frozenset[WorkProductType] = frozenset(
-    {WorkProductType.CHANGE_IMPACT, WorkProductType.DFM_FINDING_SET}
+    {
+        WorkProductType.CHANGE_IMPACT,
+        WorkProductType.DFM_FINDING_SET,
+        WorkProductType.DFM_REPORT,
+    }
 )
 
 

@@ -1252,6 +1252,25 @@ groups:
             old guidance as out of date. Check the gateway logs
             (dfm_evaluation_failed, dfm_recompute_failed).
 
+      # C3D slice 6: exact DFM on a validated B-Rep (cadquery.dfm_measure).
+      - alert: DfmExactEvaluationFailures
+        expr: >-
+          sum(increase(metaforge_dfm_exact_evaluation_total{outcome="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_dfm_exact_evaluation_total[30m])), 1) > 0.2
+          and sum(increase(metaforge_dfm_exact_evaluation_total{outcome="failed"}[30m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Exact manufacturing analysis is failing"
+          description: >-
+            More than a fifth of the last half hour's exact DFM evaluations
+            failed (the CadQuery adapter's cadquery.dfm_measure could not run,
+            or the validated revision's STEP could not be read). Each failure
+            leaves the component's analysis incomplete, so its release stays
+            blocked. Check the CadQuery adapter image and the gateway logs
+            (dfm_exact_failed, dfm_exact_measure_failed).
+
   # FORGE-783 -- slow tool calls run as polled jobs (tool_registry/jobs.py).
   - name: metaforge_tool_jobs
     rules:

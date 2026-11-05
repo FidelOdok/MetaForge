@@ -172,7 +172,7 @@ async def test_a_finding_set_per_component_pinned_to_geometry_and_context(
     current = await _current(twin)
     enclosure = current["CMP-enclosure"]
     assert enclosure.status == "issues_found"
-    assert enclosure.profile == {"id": "fdm", "version": "1.0.0"}
+    assert enclosure.profile == {"id": "fdm", "version": "1.1.0"}
     assert enclosure.geometry_level == "exact"
     assert enclosure.context_ref == "MFC-PROJECT@1"
     [wall] = [f for f in enclosure.findings if f["rule_id"] == "fdm.min_wall"]
@@ -212,7 +212,7 @@ async def test_outputs_carry_the_truthful_status(twin: InMemoryTwinAPI) -> None:
         assert not any(w in fs.note.lower() for w in FORBIDDEN)
     view = await dfm.dfm_view(twin, PROJECT)
     assert view.status == "issues_found" and view.suggestions == 1 and view.blocking == 0
-    assert view.profiles == [{"id": "fdm", "version": "1.0.0", "process": "FDM"}]
+    assert view.profiles == [{"id": "fdm", "version": "1.1.0", "process": "FDM"}]
 
 
 async def test_an_unknown_process_assesses_nothing_and_tags_nothing(twin: InMemoryTwinAPI) -> None:
@@ -598,7 +598,7 @@ async def test_the_manufacturability_variant_records_the_rules_that_shaped_it(
     first, second = out["proposals"]
     assert first["variant_kind"] == "standard" and first["dfm_rules_applied"] == []
     assert second["variant_kind"] == "manufacturability"
-    assert second["dfm_profile"] == "fdm@1.0.0"
+    assert second["dfm_profile"] == "fdm@1.1.0"
     assert "fdm.overhang" in {r["rule_id"] for r in second["dfm_rules_applied"]}
     # A proposal shaped by guidance is still not assessed: nothing checked it.
     assert second["dfm_status"] == "not_assessed"

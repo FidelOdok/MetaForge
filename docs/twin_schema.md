@@ -1090,7 +1090,7 @@ The three other pieces are entirely client-side, reading/writing the existing `r
 
 *Source: `dashboard/src/lib/robot-poses.ts`, `dashboard/src/lib/robot-drag-controls.ts`, `dashboard/src/components/viewer/RobotSceneContents.tsx`, `dashboard/src/components/viewer/RobotControlsOverlay.tsx`, `dashboard/src/components/viewer/R3FViewer.tsx`, `dashboard/src/store/viewer-store.ts`, `dashboard/src/hooks/use-twin.ts`, `dashboard/src/api/endpoints/twin.ts`, `api_gateway/twin/schemas.py`, `api_gateway/twin/routes.py`*
 
-### 2.26 Release packages: versioned snapshot + G8 gating (gap G-I3)
+### 2.26 Release packages: versioned snapshot + G8 gating (gap G-I3) {#release-packages}
 
 `release_package` is a new `EngineeringEntityType` -- a lightweight, versioned snapshot of a project's current hierarchy, BOM, evidence, and decisions, recorded through the same `twin.record_engineering_entity`-backed `engineering_entity_recorder` closure every other entity type already goes through. Its `metadata` carries only node ids (`hierarchy_node_ids`, `bom_item_ids`, `evidence_ids`, `decision_ids`, `drawing_ids`), a `diff_from_previous` count-delta object, and `gate_status` -- never a deep copy of the referenced items' content:
 
@@ -1113,6 +1113,8 @@ metadata: {
 ```
 
 **The real gate this reuses, not duplicates.** `release_approval` and G8's `evaluate_g8_release` (`twin_core.consistency.gates`) already existed -- real, comprehensive (baseline fixed, no stale evidence, verification coverage complete, waivers approved, a `release_approval` entity approved) -- but purely informational: nothing before this ticket ever called it as anything but an advisory display value. `twin.create_release_package` (`api_gateway/twin/release_package.py`) is G8's first real consumer with teeth: it calls `evaluate_g8_release` itself (with a real `TraceabilityAgent`-backed `traceability_coverage` accessor, so the "verification complete" check can actually evaluate) and refuses to create a package -- raising with every failing check named -- unless the result is `GateStatus.PASSED`. This is additive: `api_gateway/runs/gate_eval.py`'s `TwinConsistencyGateChecker` stays purely advisory everywhere else, unchanged.
+
+**The manufacturing release checklist (3D-RC-016).** When a component is made by a process whose DFM profile has exact checks, G8 also carries a `manufacturing_release_checklist` check: it FAILs, naming each blocker, until every required component has a validated exact model, the exact DFM analysis passed or a person accepted its issues, every physical verification item is approved and every CAD head has a round-trip-passed STEP (the release approval stays G8's own check). The flow runner's G8 gate lists the same blockers as missing. So a release package, and with it `geometry_state: released`, is refused while any of them is open; see [the release checklist](#release-checklist).
 
 `GET /v1/releases?project_id=` lists a project's packages (oldest first), `POST /v1/releases` creates one (409 if G8 isn't passed, naming the failing checks). The dashboard's Requirements page ("Release packages" section) lists them with per-metric count deltas.
 
@@ -1231,7 +1233,8 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
 | `interface_edge` | record | | `WorkProduct` `interface_edge`: a typed coupling between two items in different domains, pinned to their revisions. Its status (`proposed`, `confirmed`, `removed`) changes in place; it is never deleted. See [interface edges](#interface-edges-and-cross-domain-impact) |
 | `change_impact` | record | | `WorkProduct` `change_impact`: what one change did across domains, the stale results it left and the reruns it proposes, each rerun's approval decision recorded in place |
-| `dfm_finding_set` | record | | `WorkProduct` `dfm_finding_set`: one component's heuristic DFM findings under one process rule profile, pinned to the geometry and manufacturing context revisions it read. Guidance only, never an analysis pass. See [DFM findings](#dfm-findings) |
+| `dfm_finding_set` | record | | `WorkProduct` `dfm_finding_set`: one component's DFM findings under one process rule profile, pinned to the geometry and manufacturing context revisions it read. Kind `heuristic` is guidance, never an analysis pass; kind `exact` is the profile's exact checks on a validated B-Rep revision. See [DFM findings](#dfm-findings) and [exact DFM](#exact-dfm) |
+| `dfm_report` | record | | `WorkProduct` `dfm_report`: a revision-specific DFM report with its manufacturing release checklist, as JSON and Markdown, pinned to the revisions it read. See [the DFM report](#dfm-report) |
 | `approval` | record | | approvals service |
 | `session` | record | | `agent_sessions` (Postgres) |
 | `run` | record | | runs / design-flow workflow |
@@ -2155,7 +2158,7 @@ an analysis pass.
 #### Rule profiles
 
 One versioned profile per process, in `twin_core/dfm/profiles/`: `fdm`,
-`resin`, `cnc`, `injection_moulding` and `sheet_metal` (each `1.0.0`). A
+`resin`, `cnc`, `injection_moulding` and `sheet_metal` (`fdm` at `1.1.0`, which adds its exact checks and verifications, the others at `1.0.0`). A
 profile is picked from the manufacturing context's process words ("3D
 printing" is `fdm`, "SLA resin" is `resin`). Every rule has an id
 (`fdm.min_wall`), a check, the quantity it reads, a limit (absolute, or a
@@ -2309,6 +2312,133 @@ alert; spans `twin.dfm.evaluate`, `twin.dfm.evaluate_project`,
 in the `manufacturing` domain titled "Manufacturing guidance".
 
 *Source: `twin_core/dfm/`, `api_gateway/twin/dfm_findings.py`, `api_gateway/twin/dfm_routes.py`*
+
+#### Exact DFM on a validated model {#exact-dfm}
+
+When a component has a validated exact revision and its manufacturing
+context selects a process whose rule profile names **exact checks**
+(`DfmProfile.exact_checks`; today only `fdm`, from version `1.1.0`), the
+profile's checks run on the B-Rep itself. They are scheduled as a background
+job (`dfm.evaluate_exact`, domain `manufacturing`) after the exact CAD service
+validates a revision, after a geometry or manufacturing context recompute
+reaches a component whose best geometry is a validated revision, or on
+request (`POST .../dfm/exact`). While the job runs the component's heuristic
+set carries `exact_checks_scheduled`, so it reads `analysis_pending`.
+
+The job reads the revision's STEP and calls the CadQuery adapter's
+`cadquery.dfm_measure` over MCP. The adapter measures and judges nothing:
+
+| Check | What is measured |
+|-------|------------------|
+| `fdm.min_wall` | Wall thickness by ray casting: points sampled on an `n x n` grid over each face (only points inside the trimmed face), a ray from just inside the surface along the inward normal, the first exit through the solid is the local thickness. `n` shrinks so the part stays under 1500 rays |
+| `fdm.overhang` | Every face's outward normal (planar faces) or most downward sampled normal (curved faces) against the profile's angle and the build direction (+Z unless the request states one); a downward face at the lowest extent rests on the build plate and is skipped |
+| `fdm.build_volume` | The extents along and across the build direction against the selected machine's build volume from the machine library; the footprint may turn on the bed, the height may not. No machine selected is a stated gap, not a pass |
+| `fdm.min_hole`, `fdm.min_feature` | Complete cylindrical faces: a hole when the material is outside the cylinder, a pin or boss when inside; their diameters |
+
+The wall method's limits are stored with every result: only sampled points
+are measured, so a region thinner than the grid spacing can be missed; the
+thickness is along the surface normal, not the thinnest section in any
+direction; near an edge a ray can leave through the adjacent face; points
+whose normal does not point out of the solid are skipped. Holes and pins are
+read from complete cylinders only, so slots and polygonal holes are not
+counted. `fdm.bridge` and `fdm.support_access` stay guidance
+(`guidance_only_rules`).
+
+The result is a `dfm_finding_set` of `kind: exact`, pinned to the geometry
+revision and the manufacturing context revision. Findings are anchored to
+the component and to B-Rep faces: `anchor.faces` holds face ids
+(`s<solid>f<face>`, as `cadquery.describe_faces` numbers them) and
+`anchor.face_signature` the geometry signature of the main face (planar
+faces signed as face attachment signs them). `exact_evidence` records the
+tool, kernel, build direction and where it came from, the wall method, its
+limits and sample count, and the measured facts. Status:
+
+- `issues_found` when any check found a blocking or advisory condition;
+- `analysis_pending` when nothing was found but a required check did not
+  run (no machine selected, no wall sample, the measurement failed): the
+  analysis is incomplete and says why in `not_assessed`;
+- `analysis_passed` only when every check the profile names ran and none
+  found anything. The model refuses a pass that is incomplete or has
+  findings. A pass is for the selected process, geometry revision and
+  profile version, never a guarantee of build success.
+
+An exact set supersedes the component's heuristic set (kept in history as
+`superseded`), and a heuristic recompute of the same geometry revision never
+replaces it. A measurement that fails stores an incomplete exact set and ends
+the job `failed`, so the release stays blocked.
+
+#### Physical verification
+
+The profile names what no geometric check can settle, and when it applies:
+for FDM a fit test of a printed sample (when the context states tolerances),
+strength across the layers (a functional prototype, pilot or production
+goal) and a first article on the selected machine (pilot or production).
+Each becomes a `verification_items` entry on the exact set (`open`). It is
+never satisfied automatically: `POST .../dfm/verification/{item_id}/evidence`
+records a person's note or upload (up to 5 MB, hashed) as evidence
+`awaiting_approval` and files a design-change approval
+(`accept_dfm_verification`); only a reviewer's approval makes the item
+`satisfied`, for that geometry revision. Evidence approved for an older
+revision is kept on record and no longer settles the item.
+
+#### The DFM report {#dfm-report}
+
+`POST .../dfm/report` stores one `dfm_report` record for the product
+revision it read (the CAD heads, the finding sets' geometry revisions and the
+manufacturing context revision; `product_revision.key` hashes them), as JSON
+in `metadata.dfm_report` and rendered Markdown in `metadata.markdown`. It
+holds the components with their maturity and evidence; the selected
+process, material and context revision; the profile versions; every finding
+with measured against limit, anchors, evidence and any decision; what was
+not assessed; unresolved issues (open findings and gaps, never dropped);
+verification items; the stale state of each set; the release checklist and
+the readiness it allows. The product status adds the DFM-013 product steps:
+`verification_required` when the analysis passed (or every issue was
+accepted) but verification is open, `released` only when the checklist is
+resolved and every required component is released. The report is pinned to
+the revisions it read, so it reads `stale` when one moves on and stays
+browsable; the same content reuses the current report.
+
+#### The manufacturing release checklist {#release-checklist}
+
+`twin_core.dfm.release_checklist` derives, for the current revision:
+
+| Item | Resolved when |
+|------|---------------|
+| `components_exact` | Every required component is at least `Exact` (per-component maturity) |
+| `dfm` | Every required component made by a process with exact checks has a current exact set that passed, or whose every open finding a person accepted (`keep_design` with who and when). Pending, incomplete or stale analysis is open |
+| `verification` | Every verification item is `satisfied` |
+| `approvals` | An approved `release_approval` is on record |
+| `step_round_trip` | Every CAD item's head is validated with a round-trip-passed STEP |
+
+It applies only when a component is made by a process whose profile has
+exact checks (or has an exact set); otherwise there is no checklist and the
+release gate keeps its earlier checks. Create may say **Ready for
+prototype** when `components_exact`, `dfm` and `step_round_trip` are
+resolved, and **Ready for production** only when every item is; otherwise
+the open items are its next steps. The checklist is part of G8: see
+[release packages](#release-packages).
+
+#### API (exact DFM)
+
+| Route | Purpose |
+|-------|---------|
+| `POST /v1/twin/projects/{id}/dfm/exact` | schedule the exact checks for a validated revision (`item_key` or `node_id`, optional `build_direction`); `wait: true` runs them now. `409` for a revision that is not validated; `scheduled: false` with the reason when the process has no exact checks |
+| `POST /v1/twin/projects/{id}/dfm/verification/{item_id}/evidence` | record a note or upload for a verification item; it waits for a reviewer's approval |
+| `GET /v1/twin/projects/{id}/dfm/checklist` | the release checklist and the readiness Create may claim (`applies: false` when none applies) |
+| `POST /v1/twin/projects/{id}/dfm/report` | generate (or reuse) the report for the current revision |
+| `GET /v1/twin/projects/{id}/dfm/report` | the latest report with its staleness; `?format=markdown` the rendered copy |
+| `GET /v1/twin/projects/{id}/dfm/reports/{report_id}` | one stored report |
+
+Observability: `metaforge_dfm_exact_evaluation_total{outcome}`,
+`metaforge_dfm_exact_incomplete_total{rule, reason}`,
+`metaforge_dfm_report_total{outcome}` and
+`metaforge_manufacturing_release_refused_total{blocker}`; the
+`DfmExactEvaluationFailures` alert; spans `twin.dfm.exact.schedule`,
+`twin.dfm.exact.run`, `twin.dfm.evaluate_exact`, `twin.dfm.report.generate`,
+`twin.dfm.release_checklist` and `cadquery.dfm_measure`.
+
+*Source: `twin_core/dfm/exact.py`, `twin_core/dfm/release_checklist.py`, `api_gateway/twin/dfm_exact.py`, `api_gateway/twin/dfm_report.py`, `tool_registry/tools/cadquery/dfm_measure.py`*
 
 ---
 
@@ -3049,7 +3179,7 @@ revision carries its state in `metadata.geometry_state`, and node responses
 | `validated` | Validated | The exact B-Rep passed the validity check. |
 | `failed` | Exact | An attempt failed. Only an attempt is ever failed; the head keeps the last valid revision. |
 | `stale` | Exact | Derived from a revision that is no longer the head (an older STEP export). |
-| `released` | Validated | Set only by the release path, when a release package is created with G8 passed. |
+| `released` | Validated | Set only by the release path, when a release package is created with G8 passed (including the manufacturing release checklist when it applies). |
 
 `check_transition` enforces the rules: `released` only through the release
 path and only from `validated`; `validated` only with a `pass` verdict;

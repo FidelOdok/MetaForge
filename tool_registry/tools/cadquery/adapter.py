@@ -27,6 +27,7 @@ class CadqueryServer(McpToolServer):
     - cadquery.validate_shape: B-Rep validity of a STEP (CDE slice 6)
     - cadquery.export_step: STEP with the configured schema (CDE slice 6)
     - cadquery.describe_faces: planar faces, signatures and a GLB mesh map (CDE slice 9)
+    - cadquery.dfm_measure: exact FDM measures with face anchors (C3D slice 6)
     """
 
     def __init__(self, config: CadqueryConfig | None = None) -> None:
@@ -1318,6 +1319,105 @@ class CadqueryServer(McpToolServer):
                 ),
             ),
             handler=self.describe_faces,
+        )
+        # C3D slice 6: exact FDM measures of a validated revision, for exact DFM.
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.dfm_measure",
+                adapter_id="cadquery",
+                name="DFM Measure",
+                description=(
+                    "Measure a STEP's exact B-Rep for the exact FDM manufacturability "
+                    "checks and return measured values with face anchors; judges "
+                    "nothing (the limits live in the versioned rule profile). Wall "
+                    "thickness by ray casting along inward normals from points sampled "
+                    "on each face (bounded sample; the method and its limits are in "
+                    "the result), every face's outward or most downward normal, area "
+                    "and whether it rests on the build plate, the extents along and "
+                    "across the build direction, complete cylindrical holes and pins "
+                    "with their diameters, and the planar face records (s<solid>f<face> "
+                    "ids and GLB mesh ranges) for highlighting. Read-only."
+                ),
+                capability="cad_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "step_base64": {"type": "string", "description": "The STEP file, base64."},
+                        "build_direction": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "default": [0, 0, 1],
+                            "description": "The print's up direction in model coordinates.",
+                        },
+                        "samples_per_side": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 12,
+                            "default": 5,
+                        },
+                        "max_wall_samples": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20000,
+                            "default": 1500,
+                        },
+                    },
+                    "required": ["step_base64"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "build_direction": {"type": "array"},
+                        "solid_count": {"type": "integer"},
+                        "face_count": {"type": "integer"},
+                        "bounding_box": {"type": "object"},
+                        "build_frame": {"type": "object"},
+                        "wall_thickness": {"type": "object"},
+                        "faces": {"type": "array", "items": {"type": "object"}},
+                        "planar_faces": {"type": "array", "items": {"type": "object"}},
+                        "cylinders": {"type": "array", "items": {"type": "object"}},
+                        "holes": {"type": "array", "items": {"type": "object"}},
+                        "bosses": {"type": "array", "items": {"type": "object"}},
+                        "min_hole_diameter_mm": {"type": ["number", "null"]},
+                        "min_boss_diameter_mm": {"type": ["number", "null"]},
+                        "kernel": {"type": "string"},
+                        "duration_s": {"type": "number"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=180, max_disk_mb=256
+                ),
+            ),
+            handler=self.dfm_measure,
+        )
+
+    async def dfm_measure(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Exact FDM measures of a STEP with face anchors (C3D slice 6)."""
+        import asyncio
+
+        from tool_registry.tools.cadquery.dfm_measure import (
+            DEFAULT_MAX_WALL_SAMPLES,
+            DEFAULT_SAMPLES_PER_SIDE,
+            dfm_measure,
+        )
+
+        step_base64 = arguments.get("step_base64") or ""
+        if not isinstance(step_base64, str) or not step_base64:
+            raise ValueError("step_base64 is required")
+        raw = arguments.get("build_direction") or [0.0, 0.0, 1.0]
+        if not isinstance(raw, (list, tuple)) or len(raw) != 3:
+            raise ValueError("build_direction is three numbers")
+        build = (float(raw[0]), float(raw[1]), float(raw[2]))
+        return await asyncio.to_thread(
+            dfm_measure,
+            step_base64,
+            work_dir=self.config.work_dir,
+            build_direction=build,
+            samples_per_side=int(arguments.get("samples_per_side") or DEFAULT_SAMPLES_PER_SIDE),
+            max_wall_samples=int(arguments.get("max_wall_samples") or DEFAULT_MAX_WALL_SAMPLES),
         )
 
     async def describe_faces(self, arguments: dict[str, Any]) -> dict[str, Any]:

@@ -122,6 +122,37 @@ class DfmRule(BaseModel):
         return self
 
 
+#: When a physical or supplier verification is required for a component.
+#:
+#: * ``always``: every component made by this process.
+#: * ``tolerances_stated``: the manufacturing context states tolerances.
+#: * ``functional_use``: the production goal is a functional prototype,
+#:   pilot or production.
+#: * ``production_quantity``: the production goal is pilot or production.
+VerificationTrigger = Literal[
+    "always", "tolerances_stated", "functional_use", "production_quantity"
+]
+
+
+class VerificationRule(BaseModel):
+    """A requirement no geometric check can settle (DFM-013).
+
+    A test on a printed sample, an equipment trial or a supplier's
+    confirmation. Never satisfied automatically: a person records the
+    evidence and a reviewer approves it.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    id: str = Field(min_length=3, max_length=80, pattern=r"^[a-z0-9_]+\.[a-z0-9_]+$")
+    title: str = Field(min_length=3, max_length=120)
+    kind: Literal["physical_test", "supplier_confirmation"]
+    when: VerificationTrigger
+    #: What evidence settles it, in plain words.
+    needed: str = Field(min_length=10, max_length=400)
+    source: str = Field(min_length=10, max_length=400)
+
+
 class DfmProfile(BaseModel):
     """One process's rules at one version."""
 
@@ -136,6 +167,12 @@ class DfmProfile(BaseModel):
     aliases: list[str] = Field(min_length=1)
     rules: list[DfmRule] = Field(min_length=1)
     notes: str = Field("", max_length=600)
+    #: The rules exact analysis on a validated B-Rep runs (DFM-007). An
+    #: exact set is ``analysis_passed`` only when every one of these ran and
+    #: none found anything. Empty: this process has no exact checks yet.
+    exact_checks: list[str] = Field(default_factory=list)
+    #: What needs physical or supplier verification, and when.
+    verifications: list[VerificationRule] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _rules_belong(self) -> DfmProfile:
@@ -143,8 +180,12 @@ class DfmProfile(BaseModel):
         if len(set(ids)) != len(ids):
             raise ValueError(f"{self.id}: rule ids repeat")
         stray = [r.id for r in self.rules if not r.id.startswith(self.id + ".")]
+        stray += [v.id for v in self.verifications if not v.id.startswith(self.id + ".")]
         if stray:
             raise ValueError(f"{self.id}: rules {', '.join(stray)} belong to another profile")
+        unknown = [c for c in self.exact_checks if c not in ids]
+        if unknown:
+            raise ValueError(f"{self.id}: exact checks {', '.join(unknown)} are not rules")
         return self
 
     def rule(self, rule_id: str) -> DfmRule:
@@ -159,4 +200,12 @@ class DfmProfile(BaseModel):
         return f"{self.id}@{self.version}"
 
 
-__all__ = ["LIMIT_KINDS", "CheckKind", "DfmProfile", "DfmRule", "RuleKind"]
+__all__ = [
+    "LIMIT_KINDS",
+    "CheckKind",
+    "DfmProfile",
+    "DfmRule",
+    "RuleKind",
+    "VerificationRule",
+    "VerificationTrigger",
+]

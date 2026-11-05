@@ -373,7 +373,7 @@ def test_findings_are_anchored_with_measured_limit_units_and_evidence() -> None:
     assert f.anchor.component_id == "CMP-enclosure" and f.anchor.feature == "feat-extrude-1"
     assert (f.measured, f.limit, f.unit, f.comparison) == (0.5, 0.8, "mm", ">=")
     assert f.confidence == "human_confirmed" and f.evidence_refs == ["PSK-LID@2"]
-    assert f.profile_id == "fdm" and f.profile_version == "1.0.0"
+    assert f.profile_id == "fdm" and f.profile_version == "1.1.0"
     # Guidance never blocks, however firm the measure.
     assert f.severity == "advisory" and f.rule_kind is RuleKind.GENERAL_GUIDANCE
     assert "0.8 mm" in f.suggested_fix and f.fix_changes == ["wall_thickness"]

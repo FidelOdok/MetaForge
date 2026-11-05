@@ -1807,3 +1807,78 @@
   gap: 6px;
   align-items: center;
 }
+/* C3D slice 6: exact checks, face highlight, verification and the release checklist. */
+.tw-dfm-kind {
+  margin-left: auto;
+  color: var(--tw-muted);
+  font-size: 11px;
+}
+.tw-dfm-status.is-analysis_passed,
+.tw-dfm-status.is-production,
+.tw-dfm-status.is-prototype {
+  border-color: #3a9d5d;
+}
+.tw-dfm-show-faces {
+  margin-top: 4px;
+  font-size: 11px;
+}
+.tw-dfm-face-view {
+  height: 220px;
+  margin-top: 6px;
+  border: 1px solid var(--tw-line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tw-dfm-verifications {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tw-dfm-findings li.tw-dfm-verification.is-satisfied {
+  border-left-color: #3a9d5d;
+}
+.tw-dfm-findings li.tw-dfm-verification.is-open,
+.tw-dfm-findings li.tw-dfm-verification.is-awaiting_approval {
+  border-left-color: #d9822b;
+}
+.tw-dfm-evidence-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.tw-dfm-evidence-form textarea {
+  width: 100%;
+  font: inherit;
+}
+.tw-dfm-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--tw-line);
+  padding-top: 8px;
+}
+.tw-dfm-checklist header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tw-dfm-checklist-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tw-dfm-checklist-items li {
+  padding: 4px 8px;
+  border-left: 3px solid var(--tw-line);
+}
+.tw-dfm-checklist-items li.is-pass {
+  border-left-color: #3a9d5d;
+}
+.tw-dfm-checklist-items li.is-fail {
+  border-left-color: #d64545;
+}

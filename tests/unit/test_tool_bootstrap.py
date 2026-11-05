@@ -262,8 +262,9 @@ class TestBootstrapToolRegistry:
 
         tools = registry.list_tools()
         # + cadquery.validate_shape and cadquery.export_step (CDE slice 6),
-        # + cadquery.describe_faces (CDE slice 9).
-        assert len(tools) == 122
+        # + cadquery.describe_faces (CDE slice 9),
+        # + cadquery.dfm_measure (C3D slice 6).
+        assert len(tools) == 123
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

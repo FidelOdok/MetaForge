@@ -339,9 +339,18 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
         TwinTypeKind.RECORD,
         "work_product:dfm_finding_set",
         description=(
-            "One component's heuristic DFM findings under one process rule profile, "
-            "pinned to the geometry and manufacturing context revisions it read. "
-            "Guidance only: never an analysis pass."
+            "One component's DFM findings under one process rule profile, pinned to the "
+            "geometry and manufacturing context revisions it read: heuristic guidance "
+            "(never a pass), or exact checks on a validated B-Rep revision."
+        ),
+    ),
+    TwinTypeSpec(
+        "dfm_report",
+        TwinTypeKind.RECORD,
+        "work_product:dfm_report",
+        description=(
+            "A revision-specific DFM report with its manufacturing release checklist, "
+            "pinned to the revisions it read."
         ),
     ),
     TwinTypeSpec(
