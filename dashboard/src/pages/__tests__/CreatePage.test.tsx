@@ -111,6 +111,27 @@ describe('CreatePage', () => {
     expect(window.location.search).toContain('panel=decisions');
   });
 
+  it('docks the activity card in its own slot ahead of the stage, never inside it', () => {
+    useOperationsStore.getState().reset();
+    act(() => useOperationsStore.getState().applyEvents(P, [opEvent({ project_id: P, sequence: 1 })]));
+    renderAt(`/create/${P}`);
+    const overlay = screen.getByTestId('activity-overlay');
+    const slot = screen.getByTestId('create-activity-slot');
+    const stage = screen.getByRole('region', { name: 'Product' });
+    // ASVG-005: the card lives in the reserved slot, not over the stage, so
+    // the stage's toolbars and panels (Generate, the editable sketch) are free.
+    expect(slot).toContainElement(overlay);
+    expect(overlay).toHaveClass('act-dock-create', 'is-compact');
+    expect(stage.contains(overlay)).toBe(false);
+    expect(slot.contains(stage)).toBe(false);
+    expect(slot.closest('main')).toBeNull();
+    // ASVG-012: the card comes before the conversation and the stage in the
+    // page, so the keyboard reaches it straight after the header.
+    const conversation = screen.getByRole('complementary', { name: 'Conversation' });
+    expect(slot.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(slot.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('acknowledges a sent instruction once its operation is on the stream', () => {
     useOperationsStore.getState().reset();
     useCreateStore.setState({

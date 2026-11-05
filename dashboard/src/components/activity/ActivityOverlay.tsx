@@ -18,7 +18,7 @@ import {
   authorityLabel,
   currentStep,
   domainLabel,
-  formatElapsed,
+  elapsedText,
   type InspectTarget,
   nextAction,
   progressText,
@@ -148,8 +148,8 @@ function PrimaryOperation({
   const tone = statusTone(op.state);
   const terminal = isTerminal(op.state);
   const now = useNow(!terminal && connected);
-  const elapsedEnd = terminal ? Date.parse(op.updated_at) : now;
-  const elapsed = formatElapsed(elapsedEnd - Date.parse(op.started_at));
+  // ASVG-016: no figure at all rather than "NaNs" when the start is unknown.
+  const elapsed = elapsedText(op, now);
   const step = currentStep(op);
   const progress = progressText(op);
   const urgent = op.state === 'failed' || op.state === 'waiting_for_user' || op.state === 'blocked';
@@ -157,22 +157,36 @@ function PrimaryOperation({
   const [openStage, setOpenStage] = useState<string | null>(null);
   // FORGE-793: a cross-domain impact operation names its recorded impact.
   const impactId = impactIdOf(op.operation_id);
+  const toggleRef = useRef<HTMLButtonElement>(null);
   const announcement = useThrottledAnnouncement(
     connected ? `${op.title}: ${label}. ${step}` : `${op.title}: ${CONNECTION_LOST}`,
     urgent || !connected,
   );
 
   return (
-    <div className={`act-card tone-${tone}`} data-state={op.state} data-operation={op.operation_id}>
+    <div
+      className={`act-card tone-${tone}`}
+      data-state={op.state}
+      data-operation={op.operation_id}
+      // Escape minimises the expanded overlay and hands focus back to its toggle.
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape' || !expanded) return;
+        e.stopPropagation();
+        onToggleSize();
+        toggleRef.current?.focus();
+      }}
+    >
       <div className="act-head">
         <span className={`act-status tone-${tone}`} data-testid="activity-status">
           <span className="act-status-dot" aria-hidden="true" />
           {label}
         </span>
         <h2 className="act-title">{op.title}</h2>
-        <span className="act-elapsed" title="Time elapsed">
-          {elapsed}
-        </span>
+        {elapsed !== null && (
+          <span className="act-elapsed" title="Time elapsed" data-testid="activity-elapsed">
+            {elapsed}
+          </span>
+        )}
         {queued > 0 && (
           <span className="act-queue" aria-label={`${queued} more ${queued === 1 ? 'operation' : 'operations'} in progress`}>
             +{queued}
@@ -180,12 +194,14 @@ function PrimaryOperation({
         )}
         <div className="act-head-actions">
           <button
+            ref={toggleRef}
             type="button"
             className="act-icon"
+            data-testid="activity-toggle"
             onClick={onToggleSize}
             aria-expanded={expanded}
             aria-label={expanded ? 'Minimise activity' : 'Expand activity'}
-            title={expanded ? 'Minimise (keeps running)' : 'Expand'}
+            title={expanded ? 'Minimise (keeps running, or press Escape)' : 'Expand'}
           >
             {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
           </button>

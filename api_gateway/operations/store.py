@@ -402,8 +402,12 @@ def fold(previous: OperationSnapshot | None, event: OperationEvent) -> Operation
     """
     assert event.occurred_at is not None and event.kind is not None
     at: datetime = event.occurred_at
+    # The clock starts when the operation leaves the queue, whatever state it
+    # leaves in: an operation that opens straight at a decision
+    # (``waiting_for_user``) has been going since then too. Starting it only
+    # on ``running`` left such an operation with no start time at all.
     started_at = previous.started_at if previous else None
-    if started_at is None and event.state is OperationState.RUNNING:
+    if started_at is None and event.state is not OperationState.QUEUED:
         started_at = at
     artifacts = list(event.artifact_refs)
     seen = {(a.kind, a.id) for a in artifacts}

@@ -37,10 +37,20 @@
   width: min(420px, calc(100% - 24px));
 }
 
-/* Where each view docks it: never over the composer or the conversation. */
-.act-dock-create {
-  top: 12px;
-  right: 12px;
+/* Where each view docks it: never over the composer or the conversation.
+   Create gives the card its own slot above the stage (`.cv-activity-slot`):
+   compact, it sits in that slot and covers nothing; expanded, it lays over
+   the stage's top right, translucent, until it is minimised. */
+.act-dock-create.is-compact {
+  position: relative;
+  width: 100%;
+  max-height: none;
+}
+.act-dock-create.is-expanded {
+  top: 0;
+  right: 0;
+  width: min(460px, 100%);
+  max-height: min(70vh, 640px);
 }
 .act-dock-engineering {
   top: 12px;

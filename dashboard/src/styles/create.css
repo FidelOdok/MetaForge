@@ -125,8 +125,40 @@
   flex: 1;
   display: grid;
   grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(300px, 380px);
-  gap: 12px;
+  /* Row 1 is the activity card's own slot above the stage; row 2 the stage. */
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 0;
   min-height: 0;
+}
+.cv-chat {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+.cv-side {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+.cv-main {
+  grid-column: 2;
+  grid-row: 2;
+}
+/* The activity card's reserved slot (ASVG-005): the stage starts below it, so
+   the card never covers the stage's toolbars or panels. Expanded, the card
+   lays over the stage from here, translucent, until it is minimised. */
+.cv-activity-slot {
+  position: relative;
+  z-index: 30;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+.cv-activity-slot:not(:empty) {
+  margin-bottom: 8px;
+}
+.cv-activity-slot:has(.act-overlay.is-expanded) {
+  /* Keep the compact card's row while expanded, so the stage does not jump. */
+  min-height: 52px;
 }
 .cv-chat,
 .cv-side {
@@ -1175,7 +1207,9 @@ p.cv-muted {
   }
   .cv-side {
     grid-column: 1 / -1;
+    grid-row: 3;
     max-height: none;
+    margin-top: 12px;
   }
   .cv-head {
     grid-template-columns: 1fr auto;
@@ -1196,11 +1230,15 @@ p.cv-muted {
     grid-template-columns: 1fr;
     gap: 10px;
   }
+  .cv-activity-slot {
+    order: 0;
+  }
   .cv-main {
     order: 1;
   }
   .cv-side {
     order: 2;
+    margin-top: 0;
   }
   .cv-chat {
     order: 3;

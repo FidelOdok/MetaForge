@@ -129,7 +129,7 @@ function viewFromEvent(event: OperationEvent): OperationView {
     title: event.title,
     state: event.state,
     run_id: event.run_id,
-    started_at: event.occurred_at,
+    started_at: null,
     updated_at: event.occurred_at,
     last_sequence: 0,
     base_revision: null,
@@ -185,6 +185,8 @@ export function applyToOperation(current: OperationView | undefined, event: Oper
     title: event.title || base.title,
     state: event.state,
     run_id: event.run_id ?? base.run_id,
+    // The clock starts when the operation leaves the queue, as the gateway's does.
+    started_at: base.started_at ?? (event.state === 'queued' ? null : event.occurred_at),
     updated_at: event.occurred_at,
     last_sequence: event.sequence,
     base_revision: olderRevision ? base.base_revision : (event.base_revision ?? base.base_revision),
@@ -218,6 +220,9 @@ export function applyEvents(state: OperationsState, events: readonly OperationEv
 function viewFromSnapshot(snapshot: OperationSnapshot, previous?: OperationView): OperationView {
   return {
     ...snapshot,
+    // A snapshot of an operation that has not run yet carries no start time;
+    // keep the one the client already knows instead of losing it.
+    started_at: snapshot.started_at ?? previous?.started_at ?? null,
     progress: snapshot.progress && snapshot.progress.total > 0 ? snapshot.progress : null,
     artifact_refs: snapshot.artifact_refs ?? [],
     action_refs: snapshot.action_refs ?? [],

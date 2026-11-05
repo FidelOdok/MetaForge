@@ -112,7 +112,9 @@ from the operation's events as they are stored: the latest event sets state,
 message, severity, progress and the actions on offer; artifacts accumulate;
 stages are upserted by `stage_id`; when the operation ends, any stage still in
 flight ends with it. A stage's `domain` is its lane; the operation keeps the
-domain of its own events.
+domain of its own events. `started_at` is the time of the first event that is
+not `queued`, so an operation that opens straight at a decision has one too;
+it is `null` only while the operation is still queued.
 
 ### `GET /v1/projects/{project_id}/operations/stream`
 
