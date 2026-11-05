@@ -696,6 +696,22 @@ describe('TwinViewerPage', () => {
       expect(within(explorer).getByRole('button', { name: /power-budget/ })).toBeInTheDocument();
     });
 
+    it('minimises and reopens a domain section, and a search opens it', () => {
+      render(<TwinViewerPage />);
+      const explorer = screen.getByRole('complementary', { name: 'Explorer' });
+      const mechanical = within(explorer).getByRole('button', { name: /^mechanical\s*2$/ });
+      expect(mechanical).toHaveAttribute('aria-expanded', 'true');
+      fireEvent.click(mechanical);
+      expect(mechanical).toHaveAttribute('aria-expanded', 'false');
+      expect(within(explorer).queryByRole('button', { name: /bracket-v1\.step/ })).not.toBeInTheDocument();
+      expect(within(explorer).getByRole('button', { name: /power-budget/ })).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search the twin' }), { target: { value: 'bracket' } });
+      expect(within(explorer).getByRole('button', { name: /bracket-v1\.step/ })).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search the twin' }), { target: { value: '' } });
+      fireEvent.click(mechanical);
+      expect(within(explorer).getByRole('button', { name: /bracket-v1\.step/ })).toBeInTheDocument();
+    });
+
     it('shows the domain rail when the explorer is minimised', () => {
       useLayoutStore.setState({ sidebarCollapsed: true });
       render(<TwinViewerPage />);

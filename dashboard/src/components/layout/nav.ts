@@ -3,7 +3,6 @@ import {
   BookOpen,
   Box,
   Boxes,
-  ClipboardCheck,
   Files,
   FlaskConical,
   ListChecks,
@@ -47,7 +46,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/files', label: 'Files & artifacts', icon: Files },
       { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
       { to: '/compliance', label: 'Compliance', icon: BadgeCheck },
-      { to: '/evals', label: 'Evals', icon: ClipboardCheck },
     ],
   },
 ];

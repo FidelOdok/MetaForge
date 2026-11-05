@@ -73,9 +73,9 @@ the Files empty state (`EmptyState`, used everywhere): a faint icon, a short
 line and one plain sentence. Figures, such as Requirements' traceability
 coverage, are small labelled tiles inside their panel.
 
-Every route below has a sidebar entry. Two entries run the other way —
-**Requirements** (`/requirements`) and **Evals** (`/evals`) are in the
-rail but have no section here yet. The default landing page is
+Every route below has a sidebar entry. **Requirements** (`/requirements`)
+is in the rail but has no section here yet. **Evals** (`/evals`) has no
+sidebar entry; the page still opens from its address. The default landing page is
 `/projects`; unknown paths show a *Page not found* screen.
 
 ![Map of the dashboard's routes in three groups, Work, Design data and Knowledge and checks, plus settings](assets/diagrams/dashboard-routes.png)
@@ -398,6 +398,10 @@ Selecting a part highlights it in the tree and in the 3D viewer. The
 Explorer rail pins a **Latest assembly** shortcut for the project above the
 node list. The node's `assemblyParts` field in `GET /v1/twin/nodes` carries
 the list.
+
+The Explorer groups nodes by domain, and each domain heading shows its count
+and minimises or opens its section. A search opens every section so no match
+stays hidden.
 
 ![The same tab on a table assembly: a plywood top on four steel legs, with the inspector listing each part against the library material it was assigned](assets/dashboard/table.png)
 

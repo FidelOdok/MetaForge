@@ -293,6 +293,37 @@
   color: var(--tw-muted);
   font-weight: 500;
 }
+/* A domain heading is the button that minimises its section. */
+.tw-node-list h3 {
+  padding: 0;
+}
+.tw-domain-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 14px 6px 10px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: left;
+}
+.tw-domain-toggle:hover {
+  color: var(--tw-ink);
+}
+.tw-domain-toggle svg {
+  transition: transform 0.15s;
+}
+.tw-domain-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.tw-domain-toggle small {
+  margin-left: auto;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+}
 .tw-node-list section > button {
   display: flex;
   align-items: center;

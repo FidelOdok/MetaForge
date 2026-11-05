@@ -5,6 +5,7 @@ import {
   Box,
   Camera,
   ChevronDown,
+  ChevronRight,
   Clock3,
   Columns2,
   Layers,
@@ -1144,6 +1145,8 @@ export function TwinViewerPage() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('overview');
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<NodeScope>('all');
+  // Explorer domain sections the user has minimised.
+  const [collapsedDomains, setCollapsedDomains] = useState<Set<string>>(() => new Set());
   // FORGE-704: which kinds of linked record (constraints, baselines...) the graph draws.
   // null follows the size-based default (see shownLinks below).
   const [linkChoice, setLinkChoice] = useState<ReadonlySet<LinkGroup> | null>(null);
@@ -1419,6 +1422,13 @@ export function TwinViewerPage() {
       return next;
     });
   const domains = [...new Set(items.map((n) => n.domain))];
+  const toggleDomain = (domain: string) =>
+    setCollapsedDomains((prev) => {
+      const next = new Set(prev);
+      if (next.has(domain)) next.delete(domain);
+      else next.add(domain);
+      return next;
+    });
   const linked = new Set(relationships.flatMap((r) => [r.sourceId, r.targetId]));
   const linkedConstraints = items.filter(
     (n) =>
@@ -1775,25 +1785,42 @@ export function TwinViewerPage() {
               )}
               <div className="tw-node-list">
                 {!visible.length && <p className="tw-muted">{search ? 'No matching work products' : 'No work products'}</p>}
-                {domains.map((d) => (
-                  <section key={d}>
-                    {visible.some((n) => n.domain === d) && <h3>{d}</h3>}
-                    {visible
-                      .filter((n) => n.domain === d)
-                      .map((n) => (
-                        <button
-                          key={n.id}
-                          title={n.name}
-                          aria-current={n.id === selectedId ? 'true' : undefined}
-                          onClick={() => selectNode(n.id)}
-                        >
-                          <span className={`tw-node-state ${needsAttention(n) ? 'needs-attention' : ''}`} />
-                          <span className="material-symbols-outlined">{iconForNode(n)}</span>
-                          <span>{n.name}</span>
-                        </button>
-                      ))}
-                  </section>
-                ))}
+                {domains.map((d) => {
+                  const inDomain = visible.filter((n) => n.domain === d);
+                  // A search shows every match, whatever was collapsed.
+                  const open = !collapsedDomains.has(d) || query !== '';
+                  return (
+                    <section key={d}>
+                      {inDomain.length > 0 && (
+                        <h3>
+                          <button
+                            type="button"
+                            className="tw-domain-toggle"
+                            aria-expanded={open}
+                            onClick={() => toggleDomain(d)}
+                          >
+                            <ChevronRight size={14} aria-hidden="true" />
+                            <span>{d}</span>
+                            <small>{inDomain.length}</small>
+                          </button>
+                        </h3>
+                      )}
+                      {open &&
+                        inDomain.map((n) => (
+                          <button
+                            key={n.id}
+                            title={n.name}
+                            aria-current={n.id === selectedId ? 'true' : undefined}
+                            onClick={() => selectNode(n.id)}
+                          >
+                            <span className={`tw-node-state ${needsAttention(n) ? 'needs-attention' : ''}`} />
+                            <span className="material-symbols-outlined">{iconForNode(n)}</span>
+                            <span>{n.name}</span>
+                          </button>
+                        ))}
+                    </section>
+                  );
+                })}
                 {is3d && manifest && (
                   <section className="tw-component-tree">
                     <ComponentTree />
