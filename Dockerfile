@@ -74,6 +74,9 @@ COPY domain_agents/ ./domain_agents/
 COPY observability/ ./observability/
 COPY metaforge/ ./metaforge/
 COPY pyproject.toml README.md LICENSE NOTICE ./
+# The golden-path example definitions the gateway seeds from (data, not code).
+COPY examples/desk_lamp/definition.json ./examples/desk_lamp/definition.json
+ENV METAFORGE_EXAMPLES_DIR=/app/examples
 
 # Install the package itself (editable not needed in container)
 RUN pip install --no-cache-dir --no-deps .

@@ -309,6 +309,19 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "A proposal, not CAD; accepted features become parametric sketches."
         ),
     ),
+    TwinTypeSpec(
+        "interface_contract",
+        TwinTypeKind.DEFINITION,
+        "work_product:interface_contract",
+        key_prefix="IFC",
+        description=(
+            "A typed agreement between domains (IFC-CAD-EDA, IFC-EDA-FIRMWARE, "
+            "IFC-SIMULATION, IFC-MANUFACTURING): coupled parameters with units, "
+            "tolerances, owner and basis, the items implementing each side and the "
+            "artifacts expected. Every change is the next revision (the interface "
+            "version); proposed until every owning domain agrees by a recorded decision."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",
@@ -354,6 +367,16 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "One component's DFM findings under one process rule profile, pinned to the "
             "geometry and manufacturing context revisions it read: heuristic guidance "
             "(never a pass), or exact checks on a validated B-Rep revision."
+        ),
+    ),
+    TwinTypeSpec(
+        "interface_contract_check",
+        TwinTypeKind.RECORD,
+        "work_product:interface_contract_check",
+        description=(
+            "One evaluation of an interface contract: each check satisfied, violated "
+            "with values, not evaluated with the missing input, or stale, pinned to the "
+            "contract revision and every item revision it read."
         ),
     ),
     TwinTypeSpec(

@@ -5197,6 +5197,142 @@
         "title": "ContextView",
         "type": "object"
       },
+      "ContractAgreeRequest": {
+        "properties": {
+          "domain": {
+            "description": "The owning domain agreeing (mechanical, electronics, ...)",
+            "title": "Domain",
+            "type": "string"
+          },
+          "rationale": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "title": "ContractAgreeRequest",
+        "type": "object"
+      },
+      "ContractAgreeResponse": {
+        "properties": {
+          "contract": {
+            "title": "Contract",
+            "type": "string"
+          },
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          }
+        },
+        "required": [
+          "created",
+          "contract"
+        ],
+        "title": "ContractAgreeResponse",
+        "type": "object"
+      },
+      "ContractCheckRequest": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          }
+        },
+        "title": "ContractCheckRequest",
+        "type": "object"
+      },
+      "ContractCheckResponse": {
+        "properties": {
+          "checks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "checks"
+        ],
+        "title": "ContractCheckResponse",
+        "type": "object"
+      },
+      "ContractLinkRequest": {
+        "properties": {
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The item (KEY); null unlinks",
+            "title": "Item Key"
+          },
+          "role": {
+            "description": "The side: enclosure, pcb, pinmap, firmware, ...",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "ContractLinkRequest",
+        "type": "object"
+      },
+      "ContractListResponse": {
+        "properties": {
+          "contracts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Contracts",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "contracts"
+        ],
+        "title": "ContractListResponse",
+        "type": "object"
+      },
       "ConversionResult": {
         "description": "Response payload for a completed conversion.",
         "properties": {
@@ -31902,6 +32038,99 @@
         ]
       }
     },
+    "/v1/examples": {
+      "get": {
+        "description": "The golden-path examples this gateway can seed.",
+        "operationId": "list_examples_v1_examples_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Examples V1 Examples Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Examples",
+        "tags": [
+          "examples"
+        ]
+      }
+    },
+    "/v1/examples/desk-lamp/projects/{project_id}/manifest": {
+      "get": {
+        "description": "What the golden path has produced so far, and what is still missing.",
+        "operationId": "desk_lamp_manifest_v1_examples_desk_lamp_projects__project_id__manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Desk Lamp Manifest V1 Examples Desk Lamp Projects  Project Id  Manifest Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Desk Lamp Manifest",
+        "tags": [
+          "examples"
+        ]
+      }
+    },
+    "/v1/examples/desk-lamp/seed": {
+      "post": {
+        "description": "Create the desk lamp project, or complete it. Never overwrites.",
+        "operationId": "seed_desk_lamp_route_v1_examples_desk_lamp_seed_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Seed Desk Lamp Route V1 Examples Desk Lamp Seed Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Seed Desk Lamp Route",
+        "tags": [
+          "examples"
+        ]
+      }
+    },
     "/v1/features/generate": {
       "post": {
         "operationId": "generate_feature_v1_features_generate_post",
@@ -40303,6 +40532,228 @@
           }
         },
         "summary": "Start Concept Mesh",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/contracts": {
+      "get": {
+        "description": "Every interface contract, its latest check and its status.",
+        "operationId": "list_project_contracts_v1_twin_projects__project_id__contracts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Project Contracts",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/contracts/check": {
+      "post": {
+        "description": "Evaluate the contracts against the current revisions and record each result.",
+        "operationId": "check_project_contracts_v1_twin_projects__project_id__contracts_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContractCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Project Contracts",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/contracts/{key}/agree": {
+      "post": {
+        "description": "One owning domain agrees to the contract's current interface version.",
+        "operationId": "agree_contract_v1_twin_projects__project_id__contracts__key__agree_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContractAgreeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractAgreeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agree Contract",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/contracts/{key}/links": {
+      "post": {
+        "description": "Name the item that implements one side of a contract (a new revision).",
+        "operationId": "link_contract_item_v1_twin_projects__project_id__contracts__key__links_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContractLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Link Contract Item V1 Twin Projects  Project Id  Contracts  Key  Links Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Link Contract Item",
         "tags": [
           "twin"
         ]

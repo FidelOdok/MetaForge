@@ -27,7 +27,16 @@ second copy could only drift:
   is coupled on the fields the rules read (process, material, quantity,
   machine), so a finish edit does not reach the findings (DFM-012).
 
-All of them are listed with ``derived: true``, ``declared_by: tool`` and status
+* From an **interface contract** (``IFC-<kind>``) whose links name items on
+  both sides: ``clearance_to``, ``mounts_to`` and ``connects_via`` between the
+  enclosure and the board of a CAD to EDA contract, and ``pin_maps_to``
+  between the pin map and the firmware of an EDA to firmware contract, each
+  coupled on the contract's parameters. These follow the contract's
+  agreement: ``proposed`` (``declared_by: inferred``) until every owning
+  domain agreed to its current revision, then ``confirmed`` by the person who
+  agreed last (``declared_by: human``).
+
+The others are listed with ``derived: true``, ``declared_by: tool`` and status
 ``confirmed``. A person may still declare any of them by hand.
 
 Provenance is honest by construction: a person's declaration is confirmed at
@@ -648,6 +657,124 @@ async def _dfm_edges(twin: Any, pid: UUID) -> list[InterfaceEdge]:
     return out
 
 
+#: The edges a CAD to EDA contract implies, each with what crosses it.
+CONTRACT_CAD_EDA_EDGES: tuple[tuple[InterfaceType, str, str, tuple[str, ...]], ...] = (
+    (
+        InterfaceType.CLEARANCE_TO,
+        "enclosure",
+        "pcb",
+        (
+            "dimensions",
+            "board_outline",
+            "internal_envelope",
+            "internal_clearance",
+            "component_max_height",
+            "pcb_outline",
+            "pcb_clearance",
+            "max_component_height",
+            "keep_outs",
+            "led_position",
+            "cable_routing",
+        ),
+    ),
+    (
+        InterfaceType.MOUNTS_TO,
+        "enclosure",
+        "pcb",
+        (
+            "mounting_holes",
+            "mounting_standoffs",
+            "mounting_hole_positions",
+            "mounting_hole_diameter",
+        ),
+    ),
+    (
+        InterfaceType.CONNECTS_VIA,
+        "pcb",
+        "enclosure",
+        ("connectors", "cutouts", "usb_c_position", "usb_c_cutout"),
+    ),
+)
+
+
+def _contract_pins(contract: Any) -> list[str]:
+    names: list[str] = []
+    for param in ("led_pwm_pin", "control_input_pins"):
+        p = contract.parameter(param)
+        if p is None or not p.known:
+            continue
+        rows = p.value if isinstance(p.value, list) else [p.value]
+        for row in rows:
+            if isinstance(row, dict):
+                names += [str(row[k]) for k in ("pin", "net") if row.get(k)]
+    return names
+
+
+async def _contract_edges(twin: Any, pid: UUID) -> list[InterfaceEdge]:
+    """Edges between the items an interface contract links, following its agreement."""
+    from twin_core.contracts.checker import agreed_domains
+    from twin_core.contracts.records import list_contracts, read_agreements
+    from twin_core.items import list_items
+    from twin_core.models.interface_contract import ContractKind
+
+    contracts = await list_contracts(twin, pid)
+    if not contracts:
+        return []
+    items = {i.key: i for i in await list_items(twin, project_id=pid)}
+    agreements = await read_agreements(twin, pid)
+    out: list[InterfaceEdge] = []
+    for stored in contracts:
+        contract = stored.contract
+        mine = agreements.get(stored.key, [])
+        version = stored.interface_version
+        agreed = set(contract.owning_domains) <= agreed_domains(mine, version)
+        last = next((a for a in reversed(mine) if a.interface_version == version), None)
+        if contract.kind is ContractKind.CAD_EDA:
+            specs = [(t, s, d, list(c)) for t, s, d, c in CONTRACT_CAD_EDA_EDGES]
+        elif contract.kind is ContractKind.EDA_FIRMWARE:
+            specs = [(InterfaceType.PIN_MAPS_TO, "pinmap", "firmware", _contract_pins(contract))]
+        else:
+            continue
+        for kind, source_role, target_role, coupled in specs:
+            source_link, target_link = contract.link(source_role), contract.link(target_role)
+            source = items.get(source_link.item_key or "") if source_link else None
+            target = items.get(target_link.item_key or "") if target_link else None
+            if source is None or target is None:
+                continue
+            if source.head_node_id is None or target.head_node_id is None:
+                continue
+            ends = [
+                InterfaceEnd(
+                    ref=i.key,
+                    revision=i.head_revision,
+                    domain=domain_for_item_type(i.item_type),
+                    item_type=i.item_type,
+                    node_id=str(i.head_node_id),
+                    label=i.name,
+                )
+                for i in (source, target)
+            ]
+            out.append(
+                InterfaceEdge(
+                    id=f"derived:contract:{stored.key}:{kind.value}",
+                    project_id=str(pid),
+                    type=kind,
+                    source=ends[0],
+                    target=ends[1],
+                    declared_by=DeclaredBy.HUMAN if agreed else DeclaredBy.INFERRED,
+                    confidence=1.0 if agreed else 0.8,
+                    status=InterfaceStatus.CONFIRMED if agreed else InterfaceStatus.PROPOSED,
+                    coupled_parameters=sorted(set(coupled)),
+                    rationale=f"the interface contract {stored.ref} couples them",
+                    evidence={"contract": stored.ref, "agreed": agreed},
+                    derived=True,
+                    decided_by=last.decided_by if agreed and last else None,
+                    decided_at=last.at if agreed and last else None,
+                )
+            )
+    return out
+
+
 async def list_interfaces(
     twin: Any,
     project_id: UUID | str,
@@ -665,6 +792,7 @@ async def list_interfaces(
                 _feature_edges,
                 _manufacturing_edges,
                 _dfm_edges,
+                _contract_edges,
             ):
                 try:
                     edges.extend(await loader(twin, pid))

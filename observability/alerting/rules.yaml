@@ -1446,3 +1446,25 @@ groups:
             running. Check that Temporal and the mcp-http sidecar are up, that the
             gateway's METAFORGE_MCP_URL points at the sidecar, and the
             design_flow_cancel_failed and operation_sidecar_unreachable log events.
+
+  # Lamp golden path, step 1: interface contract checks
+  # (api_gateway/twin/interface_contracts.py).
+  - name: metaforge_interface_contracts
+    rules:
+      - alert: InterfaceContractChecksFailing
+        expr: >-
+          sum(increase(metaforge_interface_contract_check_total{outcome="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_interface_contract_check_total[30m])), 1) > 0.2
+          and sum(increase(metaforge_interface_contract_check_total{outcome="failed"}[30m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Interface contract checks are failing"
+          description: >-
+            More than a fifth of the last half hour's interface contract
+            evaluations raised instead of answering satisfied, violated, not
+            evaluated or stale. A violated contract is a design finding, not an
+            error; this alert is about the checker itself. Each contract keeps
+            showing its last recorded check, marked stale once its inputs move.
+            Check the gateway logs (interface_contract_check_failed).

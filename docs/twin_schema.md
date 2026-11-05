@@ -1229,6 +1229,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `manufacturing_context` | definition | `MFC` | `WorkProduct` `manufacturing_context`: how the product (`MFC-PROJECT`) or one component (`MFC-<COMPONENT>`) might be made, each field with its authority and provenance. Every change is the next revision; every generated concept records the revision it used. See [the manufacturing context](#manufacturing-context) |
 | `appearance` | definition | `APR` | `WorkProduct` `appearance`: how the product and each component look (`APR-PROJECT`): colour, finish, render material and texture refs, keyed by component name. Never CAD, never the manufacturing context. See [the appearance record](#appearance-record) |
 | `feature_history_proposal` | definition | `FHP` | `WorkProduct` `feature_history_proposal`: a proposed editable feature history for one component of an accepted concept (`FHP-<component>`), each parameter estimated, confirmed or unknown with its source, the assumptions, the open questions and the DFM strategy note. A proposal, not CAD; accepted features become parametric sketches. See [parametric reconstruction](#parametric-reconstruction) |
+| `interface_contract` | definition | `IFC` | `WorkProduct` `interface_contract`: a typed agreement between domains (`IFC-CAD-EDA`, `IFC-EDA-FIRMWARE`, `IFC-SIMULATION`, `IFC-MANUFACTURING`): coupled parameters with unit, tolerance, owning domain and basis, the items implementing each side and the artifacts expected. Every change is the next revision; the interface version moves only when values change. See [interface contracts](#interface-contracts) |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
@@ -1236,6 +1237,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `change_impact` | record | | `WorkProduct` `change_impact`: what one change did across domains, the stale results it left and the reruns it proposes, each rerun's approval decision recorded in place |
 | `dfm_finding_set` | record | | `WorkProduct` `dfm_finding_set`: one component's DFM findings under one process rule profile, pinned to the geometry and manufacturing context revisions it read. Kind `heuristic` is guidance, never an analysis pass; kind `exact` is the profile's exact checks on a validated B-Rep revision. See [DFM findings](#dfm-findings) and [exact DFM](#exact-dfm) |
 | `dfm_report` | record | | `WorkProduct` `dfm_report`: a revision-specific DFM report with its manufacturing release checklist, as JSON and Markdown, pinned to the revisions it read. See [the DFM report](#dfm-report) |
+| `interface_contract_check` | record | | `WorkProduct` `interface_contract_check`: one evaluation of an interface contract, each check `satisfied`, `violated` (with values), `not_evaluated` (with the missing input) or `stale`, pinned to the contract revision and every item revision it read. See [interface contracts](#interface-contracts) |
 | `approval` | record | | approvals service |
 | `session` | record | | `agent_sessions` (Postgres) |
 | `run` | record | | runs / design-flow workflow |
@@ -3748,6 +3750,96 @@ Metrics: `metaforge_reconstruction_proposal_total{outcome}`,
 `metaforge_reconstruction_feature_accepted_total{kind, suggested_by}` and
 `metaforge_reconstruction_llm_pass_total{outcome}`; alert
 `ReconstructionProposalFailures`.
+
+### Interface contracts {#interface-contracts}
+
+An [interface edge](#interface-edges-and-cross-domain-impact) says that two
+items are coupled. An interface contract says what the domains on each side
+agree on before either side exists: the coupled parameters, their values,
+units and tolerances, which domain owns each value and how far it can be
+trusted. It is the first step of the [desk lamp golden path](examples/desk-lamp.md).
+
+**The record.** One `interface_contract` definition item per kind
+(`twin_core/models/interface_contract.py`), stored by
+`api_gateway/twin/interface_contracts.py`:
+
+| Kind | Key | Owning domains | Coupled parameters or artifacts |
+|------|-----|----------------|---------------------------------|
+| `cad_eda` | `IFC-CAD-EDA` | mechanical, electronics | PCB outline, board to wall clearance, mounting hole positions and diameter, maximum component height, LED position and orientation, USB-C position and cut-out, keep-outs, cable routing path |
+| `eda_firmware` | `IFC-EDA-FIRMWARE` | electronics, firmware | controller part, LED PWM pin, control input pins, maximum LED current, PWM frequency range, supply voltage; the interface version |
+| `simulation` | `IFC-SIMULATION` | mechanical, electronics, simulation | geometry revision, materials, LED electrical power and heat estimate, ambient temperature, convection, operating assumption |
+| `manufacturing` | `IFC-MANUFACTURING` | mechanical, electronics, manufacturing | expected artifacts (print file per printed part, Gerbers, drill, pick-and-place, BOM, assembly instructions, firmware binary), each with its compatibility rule |
+
+Each coupled parameter has `name`, `label`, `value`, `unit` (a pint unit),
+`tolerance` (plus or minus, in the unit), `owner` (a domain) and `basis`:
+`stated`, `estimated`, `assumed` or `unknown`. An unknown value is never
+shown as one. Each link names a side's `role` (`enclosure`, `pcb`, `pinmap`,
+`firmware`, `head`, `schematic`), its `domain`, the `item_types` that may fill
+it, the `item_key` once the item exists (`null` until then) and
+`produced_by`, the step that would produce it.
+
+**Versions.** Every write that changes the contract is its next revision.
+`metadata.interface_version` moves only when the owning domains, the
+parameters or the artifacts change, so linking an item (a new revision with a
+`DEPENDS_ON` edge, kind `contract_link`, to the item's head) keeps the
+agreements made on that version.
+
+**Status.** `proposed` until every owning domain agreed to the current
+interface version, then `agreed`. A latest check that found a mismatch makes
+it `violated`; a latest check that read revisions which have since moved
+makes it `stale`. Agreement is a person's act: `POST .../agree` records a
+design decision with `metadata.contract_agreement` (`contract_key`,
+`contract_revision`, `interface_version`, `domain`, `decided_by`, `at`) and
+`depends_on` the contract revision. An actor that is an agent, a tool or a
+project policy is refused (`403`); the MCP `twin.record_decision` tool never
+passes an agreement.
+
+**Edges for the impact walker.** A contract whose links name items on both
+sides implies interface edges, derived on read with id
+`derived:contract:<key>:<type>`: `clearance_to`, `mounts_to` and
+`connects_via` between the enclosure and the board of `IFC-CAD-EDA`, and
+`pin_maps_to` between the pin map and the firmware of `IFC-EDA-FIRMWARE`, each
+coupled on the contract's parameters. They are `proposed`
+(`declared_by: inferred`) until the contract is agreed, then `confirmed`
+(`declared_by: human`, `decided_by` the person who agreed last), so only an
+agreed contract marks results stale or proposes reruns.
+
+**Checks.** `twin_core/contracts/checker.py` evaluates a contract against the
+linked items' current heads. Each check answers `satisfied`, `violated` (with
+`values`), `not_evaluated` (with `missing`, each naming the step that would
+produce it) or `stale`:
+
+| Kind | Checks |
+|------|--------|
+| `cad_eda` | `pcb_fits_envelope` (board plus clearance inside `internal_envelope`, or `dimensions` less `internal_clearance`), `pcb_outline_matches`, `mounting_holes_match` (holes on `mounting_standoffs` within tolerance, diameters as agreed), `usb_c_matches_cutout` (connector centre on the cut-out, cut-out at least the connector and as agreed), `component_height` (`component_max_height`), `led_position` |
+| `eda_firmware` | `controller_matches`, `pins_match_netlist` (the contract's nets on the contract's pins in the pin map), `firmware_uses_pins` (from the `pin_maps_to` edges the interface proposals infer), `pwm_frequency` (`pwm_frequency_hz`), `led_current` (`led_current_ma`), `interface_version` (the firmware's `interface_version`, `IFC-EDA-FIRMWARE v<n>`) |
+| `simulation` | `geometry_revision`, `materials` (the manufacturing context's selected material, with its authority), `led_heat_estimate`, `boundary_conditions` |
+| `manufacturing` | `artifact_<kind>` (and per part for print files): missing, `stale` when made from a revision that has since moved, `violated` for a failed result, `satisfied` when made from the current revision |
+
+Positions are compared in the frame both sides record them in, in
+millimetres; no frame transform is applied.
+
+The evaluation rolls up to `violated`, then `stale`, then `satisfied` when
+every check is satisfied, else `not_evaluated`, and maps onto the shared
+validation vocabulary: `PASS`, `FAIL`, `STALE`, `INCOMPLETE` (some checks ran)
+or `NOT_EVALUATED`. Each evaluation is stored as an
+`interface_contract_check` record (`metadata.contract_check`, `result.status`,
+producer `metaforge.contract_check`) pinned to the contract revision and every
+item revision it read. A head move of any of them marks it stale through the
+record pins, and the impact report lists it as a stale result of check kind
+`contract`. A re-check supersedes the contract's earlier checks.
+
+| Route | What it does |
+|-------|--------------|
+| `GET /v1/twin/projects/{project_id}/contracts` | Every contract with parameters, links (and each linked item's head), agreements for the current version, `awaiting_agreement`, the latest check with its staleness and validation status, `status` and `create_line` (the plain sentence Create shows) |
+| `POST /v1/twin/projects/{project_id}/contracts/check` | Evaluate every contract (or `key`) and record each result |
+| `POST /v1/twin/projects/{project_id}/contracts/{key}/links` | Name the item that implements a side (`role`, `item_key`; `null` unlinks); `422` for a role the contract does not have or an item of the wrong type |
+| `POST /v1/twin/projects/{project_id}/contracts/{key}/agree` | One owning domain agrees (`domain`, `rationale`); `403` for an actor that is not a person, `422` for a domain that does not own it |
+
+Metrics: `metaforge_interface_contract_check_total{kind, outcome}` (outcome
+`failed` when the checker raised) and
+`metaforge_interface_contract_violation_total{kind, check}`; alert
+`InterfaceContractChecksFailing`.
 
 ## 6. Twin API
 

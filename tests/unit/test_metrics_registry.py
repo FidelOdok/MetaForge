@@ -95,7 +95,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 slicer cross-check after exact FDM DFM.
         # + 3 reconstruction proposals, accepted features and model passes (4B).
         # + 4 concept segmentation, part mapping, regeneration and completion.
-        assert len(all_metrics) == 152
+        # + 2 interface contract checks and violations (lamp golden path).
+        assert len(all_metrics) == 154
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
