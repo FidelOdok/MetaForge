@@ -3454,10 +3454,10 @@ compared with the exact result. It is stored on that revision as
 | Field | Meaning |
 |---|---|
 | `outcome` | `consistent` (every check ran and is within tolerance), `discrepancy` (a check exceeded it) or `incomplete` (none exceeded it, at least one could not run) |
-| `checks` | `bounding_box` (largest corner difference), `dimensions` (sorted extents), `volume` (relative difference against `cadquery.validate_shape`), `surface_distance` (sampled bidirectional distance: largest and mean, preview to exact and exact to preview, over 96 points per surface), `features` (intended through-holes against the genus of the welded exact tessellation); each with `outcome` `pass`, `fail` or `not_evaluated`, and its values |
+| `checks` | `bounding_box` (largest corner difference), `dimensions` (sorted extents), `volume` (relative difference against `cadquery.validate_shape`), `surface_distance` (sampled bidirectional distance: largest and mean, preview to exact and exact to preview, over 96 points per surface), `features` (the intended openings against the genus, and for a revolve the closed shells, of the welded exact tessellation, with the `basis` of the prediction); each with `outcome` `pass`, `fail` or `not_evaluated`, and its values |
 | `discrepancies` | The checks that failed |
 | `tolerance` | `abs_mm`, `rel`, `volume_rel`, the `linear_mm` applied, `basis` and `source` (`default` or `component`) |
-| `preview` | `op`, `definition_hash`, `bounding_box`, `volume_mm3`, `intended_through_holes`, `sketch_ref` |
+| `preview` | `op` (`extrude`, `revolve` or `multi_feature`), `definition_hash`, `bounding_box`, `volume_mm3`, `intended_through_holes`, `intended_topology` (`genus`, `shells`, `basis`, or the `reason` it is not predicted), `sketch_ref` |
 | `item_ref`, `method`, `compared_at` | The exact revision, how it was measured, when |
 
 There is no universal threshold. The default tolerance is the larger of
@@ -3473,6 +3473,60 @@ tessellation (the GLB the viewer shows, from the converter at
 `OCCT_CONVERTER_URL`); without it, or when its box does not match the
 B-Rep's, they are `not_evaluated`. The sampled distance estimates the
 largest deviation from below: between samples it can be larger.
+
+**Openings, by feature.** The `features` check predicts the exact solid's
+topology from the definition alone, and says `not_evaluated` with the reason
+when it cannot:
+
+| Feature | Intended |
+|---|---|
+| Extrude | one through-hole per inner loop of the profile (shells not compared); a shelled profile with holes is not predicted |
+| Revolve, whole turn | a bore when the profile is clear of the axis (none when it meets the axis), plus one enclosed ring-shaped cavity per inner loop: genus `bore + holes`, `1 + holes` closed shells |
+| Revolve, part turn | no bore; each inner loop opens at both end faces: genus `holes`, one shell |
+| Profile across the revolve axis, or separate regions | not predicted |
+
+**Multi-feature parts.** A design IR the L2 preview does not draw (for
+example a pad followed by pockets and edge fillets) still gets a record,
+with `preview.op: multi_feature`. Its openings are read from the IR: one
+padded body, then pockets parallel to the pad, and `fillet_edges`,
+`chamfer_edges`, `fillet` or `chamfer`, which keep openings as they are. A
+pocket loop wholly inside the padded profile that cuts the pad's whole
+thickness is a through-hole; one that cuts part of it is blind; one that
+crosses the profile's edge is a notch (and the shell count is then not
+predicted, since a notch can split the part). Another pad, a revolve, a
+loft, a sweep, a shell, a boolean, a pocket that is not parallel or cuts
+that overlap are `not_evaluated` with that reason. There is no preview to
+measure, so `bounding_box`, `dimensions`, `volume` and `surface_distance`
+are `not_evaluated` with *a multi-feature part has no L2 preview to measure
+against*, and the outcome is at best `incomplete`. An IR with no pad or
+revolve (primitives and booleans) gets no record.
+
+**Assemblies.** `GET /v1/twin/nodes/{node_id}/assembly-comparison`
+(`refresh=true` to recompute) compares a `cad_model` revision component by
+component and stores the record on it as `metadata.assembly_comparison`
+(returned as it is while the revision's content is unchanged; any other
+work product type answers `400`). The revision's STEP is converted with its
+component ids (see [component ids](#representation-levels)), so each GLB
+node names its component; the project's newest structured mesh (L1) gives
+the intended layout. Checks:
+
+| Check | Meaning |
+|---|---|
+| `component_pose` | each component's centre against the layout's, after removing the whole assembly's offset (the layout and the CAD need not share an origin); `value_mm` is the largest offset, `components` each one |
+| `component_alignment` | each component's long axis against the layout's; a part whose two longest sides are within 10% of each other has no clear long axis and is not judged |
+| `interference` | every pair of components: clear when their boxes are apart (the gap is a lower bound on the clearance), otherwise 48 sampled points of each part tested inside the other. `interfering` past the contact tolerance (the larger of 0.001 mm and 0.01% of the assembly's diagonal), `contact` for parts that only touch. The smallest clearance found is reported in `min_clearance_mm` and not judged: no clearance requirement is recorded |
+
+The pose tolerance is the larger of 2 mm and 5% of the assembly's diagonal,
+because the layout's sizes and positions are estimated: it says whether
+each part sits where the layout put it, not whether the parts fit. With no
+layout the pose checks are `not_evaluated`, as are pairs with an open mesh,
+assemblies of more than 16 components (the pairwise check is bounded) and
+pairs holding more than 40 000 triangles; without the converter all three
+checks are `not_evaluated` with the converter's reason. Counted in the same
+`metaforge_preview_comparison_total` and
+`metaforge_preview_discrepancy_total{check}`; spans
+`twin.get_assembly_comparison`, `twin.preview_comparison.assembly_node` and
+`twin.preview_comparison.assembly`.
 
 **Observability.** `metaforge_preview_rebuild_seconds{op}` (the browser's
 reported rebuild time), `metaforge_preview_comparison_total{outcome}`
@@ -3546,6 +3600,19 @@ before ids existed is read as if they had been issued then. The id travels:
   component. Nothing is renamed;
 - onto face semantic tags as a prefix (`CMP-base::<tag>`); signature
   matching compares tags without the prefix.
+- into STEP product names, as `<name> [CMP-...]`: a STEP export of a
+  validated revision (`step_export.component_ids_in_step` counts them) and
+  the STEP sent to the OCCT converter for the viewer
+  (`GET /v1/twin/nodes/{id}/model`). An assembly's members are matched to
+  `part_component_ids` by exact name only, on the product and instance
+  names; a single part's product is named after the item when OCCT left its
+  default name. Only names change, never geometry, and any CAD tool keeps a
+  product name, so the id survives a round trip;
+- into the GLB the converter writes: it splits `<name> [CMP-...]` back into
+  the part name it shows and the id, which goes into the node's
+  `extras.component_id` (with `part_name`) and the metadata part's
+  `componentId`. A part of a multi-part model is then selected by its
+  component in the viewer.
 
 **The L1 mesh.** `twin.render_structured_mesh`, or
 `POST /v1/twin/projects/{id}/structured-mesh`, draws the project's newest

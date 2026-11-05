@@ -29,6 +29,7 @@ RUN micromamba install -y -n base -c conda-forge \
 
 COPY convert.py /app/convert.py
 COPY colorize.py /app/colorize.py
+COPY component_ids.py /app/component_ids.py
 COPY server.py /app/server.py
 
 WORKDIR /app

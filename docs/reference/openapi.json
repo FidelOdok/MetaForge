@@ -38476,6 +38476,63 @@
         ]
       }
     },
+    "/v1/twin/nodes/{node_id}/assembly-comparison": {
+      "get": {
+        "description": "Compare a CAD revision's components: pose, alignment, interference (spec section 7).\n\nEach component is found by the id written into its GLB node; poses are\ncompared with the project's structured layout (L1). What cannot be\nmeasured is ``not_evaluated`` with the reason. The record is stored on\nthe revision under ``assembly_comparison``.",
+        "operationId": "get_assembly_comparison_v1_twin_nodes__node_id__assembly_comparison_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Recompute even when a record for this content exists",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Recompute even when a record for this content exists",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Assembly Comparison V1 Twin Nodes  Node Id  Assembly Comparison Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Assembly Comparison",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/nodes/{node_id}/assembly-joints": {
       "patch": {
         "description": "Add/edit/delete mates+joints on an already-committed assembly node.\n\nWhole-list replace -- matches how the URDF/SDF/USD export panel's own\nmanual joint-list form already works. Persisted\ndirectly onto ``metadata.assembly.joints``: a joint is a logical\nannotation, not new geometry, so this deliberately skips the full\n``VersionService`` revision machinery ``/nodes/{id}/iterate`` uses for\nan actual re-export -- editing joints here never touches the underlying\ncommitted blob.\n\nUnlike the export panel, this does NOT require a live FreeCAD session or\nre-running an export -- it works on any already-committed node, any\ntime, which is the whole point (joints are persisted onto the node at commit time; this is what\nmakes them editable afterward).",
