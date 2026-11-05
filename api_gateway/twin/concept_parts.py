@@ -984,11 +984,17 @@ class ConceptPartsService:
                         "unmatched_components": [],
                         "method": "no parts to map",
                     }
+                # What was actually sent to the provider, read back from the request
+                # body it reports, so the record names the model a reader asks for
+                # (``model``) and the options Tripo really received.
+                sent = result.options
+                sent_model = str(sent.get("model") or result.model_version or model_id)
                 segmentation = {
                     "provider": result.provider,
-                    "model_version": result.model_version,
-                    "granularity": gran,
-                    "split_by_connectivity": split,
+                    "model": sent_model,
+                    "model_version": sent_model,
+                    "granularity": sent.get("segmentation_granularity", gran),
+                    "split_by_connectivity": sent.get("split_by_connectivity", split),
                     "task_id": result.task_id,
                     "input_kind": kind,
                     "input_task_id": task_input,
@@ -1012,7 +1018,7 @@ class ConceptPartsService:
                         SEGMENTATION_KEY: segmentation,
                         "segmentation_status": reading.status,
                         "provider": result.provider,
-                        "model_version": result.model_version,
+                        "model_version": sent_model,
                         "task_id": result.task_id,
                         "mode": result.mode,
                         **size_record,

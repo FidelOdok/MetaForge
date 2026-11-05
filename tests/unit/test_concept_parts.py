@@ -232,13 +232,19 @@ class FakeTripo:
 
     async def segment(self, **kwargs: Any) -> GeneratedMesh:
         self.calls.append(("segment", kwargs))
+        # The request body as TripoMeshGenerator.segment builds it.
+        body: dict[str, Any] = {"model": kwargs["model"]}
+        if kwargs.get("granularity") is not None:
+            body["segmentation_granularity"] = kwargs["granularity"]
+        if kwargs.get("split_by_connectivity") is not None:
+            body["split_by_connectivity"] = kwargs["split_by_connectivity"]
         return GeneratedMesh(
             glb_bytes=self.segmented,
             provider="tripo",
             model_version=kwargs["model"],
             task_id="task-seg",
             mode="mesh_segment",
-            options={"model": kwargs["model"]},
+            options=body,
             credits=40.0,
             output={"rendered_image_url": "https://cdn.example/seg.png"},
         )
@@ -441,6 +447,28 @@ async def test_segmentation_uploads_the_glb_when_there_is_no_task(world: World) 
     _kind, call = world.tripo.calls[-1]
     assert call["task_id"] is None and call["glb"] is not None and call["glb"][:4] == b"glTF"
     assert call["model"] == SEGMENT_MODEL_SEMANTIC and call["granularity"] == "detailed"
+
+
+async def test_segmentation_records_the_model_and_options_sent(world: World) -> None:
+    """The stored record names the model sent, never null, with its options."""
+    original = await world.lamp()
+    plain = await world.service.segment(node_id=original)
+    seg = (await world.node(plain["node_id"])).metadata["segmentation"]
+    assert seg["model"] == "v1.0-20250506" == seg["model_version"]
+    assert seg["granularity"] is None and seg["split_by_connectivity"] is None
+
+    await world.service.decide(node_id=plain["node_id"], decision="accept", actor="person:a")
+    out = await world.service.segment(
+        node_id=plain["node_id"],
+        model=SEGMENT_MODEL_SEMANTIC,
+        granularity="balanced",
+        split_by_connectivity=True,
+    )
+    node = await world.node(out["node_id"])
+    seg = node.metadata["segmentation"]
+    assert seg["model"] == SEGMENT_MODEL_SEMANTIC == seg["model_version"]
+    assert seg["granularity"] == "balanced" and seg["split_by_connectivity"] is True
+    assert node.metadata["model_version"] == SEGMENT_MODEL_SEMANTIC
 
 
 async def test_segmentation_refuses_bad_options_and_unaccepted_sources(world: World) -> None:

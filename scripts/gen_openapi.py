@@ -9,8 +9,11 @@ Usage:
     python scripts/gen_openapi.py            # write docs/reference/openapi.json
     python scripts/gen_openapi.py --check    # fail if the committed spec is stale
 
-The docs CI does NOT run this (it only builds the static site); the committed
-JSON is the build input. Run it locally before merging route/schema changes.
+The docs build does not run this; the committed JSON is its input. The CI
+"Tests" job runs `--check`, so run it locally before merging route or schema
+changes and commit the result rather than editing the JSON by hand. Use
+pydantic 2.13 or newer (the pyproject floor): 2.12 splits models used as both
+a request and a response into identical "-Input"/"-Output" copies.
 """
 
 from __future__ import annotations

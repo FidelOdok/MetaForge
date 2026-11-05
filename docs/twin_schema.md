@@ -3688,8 +3688,11 @@ rather than changing the concept it started from:
 
 Each revision is linked `generated_from` the one before it.
 
-**Segmentation.** `metadata.segmentation` records `provider`,
-`model_version`, `granularity`, `split_by_connectivity`, `task_id`,
+**Segmentation.** `metadata.segmentation` records `provider`, `model` (the
+segmentation model sent to the provider; `model_version` carries the same
+value), `granularity` and `split_by_connectivity` as sent (null when the
+request left them to the provider's default, which it always does for the
+geometry model), `task_id`,
 `input_kind` (`task_id`, `file_token` or `url`), `input_task_id`,
 `credits` (when the task reports any), `rendered_image_url`, `status`
 (`segmented` or `not_segmented`), `note`, `labelled` and `part_count`.
@@ -3697,6 +3700,13 @@ Each revision is linked `generated_from` the one before it.
 `label_source`, `bbox_min`, `bbox_max` in metres and glTF axes, primitive and
 triangle counts) and `part_face_samples` its triangles binned by normal
 (build axis +Z) for the mesh overhang check.
+
+**What Tripo returns.** Verified on a real run with the semantic model
+`v2.0-20260430`: the concept came back as 16 parts, each a separate GLB node
+named `tripo_part_N`, with no semantic label in the node names or in their
+`extras`. So `labelled` is false and the part to component mapping rests on
+each part's geometry and the project layout, not on a label from the
+provider; a person confirms or corrects it.
 
 **Part mapping.** `part_mapping` has a `status` (`proposed`,
 `partially_confirmed`, `confirmed` or `not_segmented`), the layout

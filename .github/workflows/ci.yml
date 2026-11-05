@@ -94,6 +94,12 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: pytest tests/unit/ -x --tb=short -q
+      # The published API reference is rendered from the committed
+      # docs/reference/openapi.json. Regenerate it from the live app and
+      # fail if it differs, so a route change cannot ship with a stale or
+      # hand-edited spec.
+      - name: OpenAPI spec is current
+        run: python scripts/gen_openapi.py --check
       # FORGE-560: the skills' own tests.py, beside each handler.
       - run: pytest domain_agents/ -x --tb=short -q
       # FORGE-562: workflow generation and lifecycle suites (scenario-driven).
