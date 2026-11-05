@@ -3641,6 +3641,250 @@
         "title": "ComponentHealth",
         "type": "object"
       },
+      "ConceptMeshRequest": {
+        "properties": {
+          "confirm_spend": {
+            "default": false,
+            "title": "Confirm Spend",
+            "type": "boolean"
+          },
+          "image_node_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Node Id"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "source": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "generated_sketch",
+              "concept_image",
+              "text"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "title": "ConceptMeshRequest",
+        "type": "object"
+      },
+      "ConceptMeshSource": {
+        "properties": {
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "kind": {
+            "enum": [
+              "generated_sketch",
+              "concept_image",
+              "text"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "ConceptMeshSource",
+        "type": "object"
+      },
+      "ConceptMeshStarted": {
+        "properties": {
+          "authority": {
+            "default": "illustrative",
+            "title": "Authority",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expected_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Seconds"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "label": {
+            "default": "AI 3D reference model, illustrative only",
+            "title": "Label",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ConceptMeshSource"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/SpendInfo"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "operation_id",
+          "source",
+          "spend"
+        ],
+        "title": "ConceptMeshStarted",
+        "type": "object"
+      },
+      "ConceptMeshState": {
+        "properties": {
+          "active_job": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Job"
+          },
+          "authority": {
+            "default": "illustrative",
+            "title": "Authority",
+            "type": "string"
+          },
+          "label": {
+            "default": "AI 3D reference model, illustrative only",
+            "title": "Label",
+            "type": "string"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest"
+          },
+          "next_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConceptMeshSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spend": {
+            "$ref": "#/components/schemas/SpendInfo"
+          }
+        },
+        "required": [
+          "spend"
+        ],
+        "title": "ConceptMeshState",
+        "type": "object"
+      },
       "ConfidenceTier": {
         "description": "Provenance tier for a memory record.\n\nAligned with the property-extraction tiers so the same vocabulary\nflows from L1 extraction through to L3 reasoning:\n\n* ``VERBATIM`` \u2014 copied directly from a structured event field (1.0)\n* ``LLM_INFERRED`` \u2014 produced by an LLM synthesis step (0.6-0.8)\n* ``DERIVED`` \u2014 computed from other records (0.4-0.6)",
         "enum": [
@@ -22488,6 +22732,41 @@
         "title": "SourceSummaryResponse",
         "type": "object"
       },
+      "SpendInfo": {
+        "properties": {
+          "cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap"
+          },
+          "policy_mode": {
+            "title": "Policy Mode",
+            "type": "string"
+          },
+          "policy_would_approve": {
+            "title": "Policy Would Approve",
+            "type": "boolean"
+          },
+          "used_last_hour": {
+            "title": "Used Last Hour",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used_last_hour",
+          "cap",
+          "policy_mode",
+          "policy_would_approve"
+        ],
+        "title": "SpendInfo",
+        "type": "object"
+      },
       "StageSnapshot": {
         "description": "The latest state of one stage of an operation.",
         "properties": {
@@ -37756,6 +38035,100 @@
           }
         },
         "summary": "Get Attachable Geometry",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/concept-mesh": {
+      "get": {
+        "description": "The newest 3D concept, the job still running and what the next one would use.",
+        "operationId": "concept_mesh_state_v1_twin_projects__project_id__concept_mesh_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptMeshState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Concept Mesh State",
+        "tags": [
+          "twin"
+        ]
+      },
+      "post": {
+        "description": "Make an illustrative 3D concept (a GLB) as a background job.\n\nFrom the accepted concept, else the newest concept image, else the brief\nin words. 409 ``spend_confirmation_required`` when a person must confirm\nthe paid call first (``confirm_spend``).",
+        "operationId": "start_concept_mesh_v1_twin_projects__project_id__concept_mesh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConceptMeshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptMeshStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Concept Mesh",
         "tags": [
           "twin"
         ]

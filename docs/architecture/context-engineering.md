@@ -334,11 +334,29 @@ The assembler runs on every harness chat turn via the layer-4 adapter
 - **Telemetry** — `context.stats` gains a `retrieved_context`
   component; the `project_brief` component is now computed from the
   explicit brief text rather than sniffing the history pair.
+- **Playbooks and working rules**: the dashboard chat gets the know-how
+  the Claude Code and Codex plugins ship, read from the same sources the
+  packages are built from (`api_gateway/chat/playbooks.py`): each domain
+  skill's `PLUGIN.md` (or `SKILL.md`), the plugin-only skills in
+  `mcp_core/plugin_skills`, and the curated workflows in
+  `mcp_core.workflows` (the plugin's slash commands), leaving out the four
+  about wiring up a client (`connect`, `use`, `drive`, `doctor`). The system
+  prompt carries the plugin's working rules, adapted for the dashboard
+  (sourced values, a person approves, verified means done, `no_data` is a
+  gap), and one line per playbook, about 10,600 characters for 59 playbooks
+  and stable per process, so the prompt cache still hits. The agent reads
+  a full procedure with the read-only `chat.read_playbook` tool (capped at
+  24,000 characters) before multi-step work, the way Claude Code loads a
+  skill only when it is relevant; inlining every body would cost over
+  100,000 characters a turn. Chat turns only: design-flow phases get their
+  procedures from the phase brain's overlay. Observability:
+  `chat_playbooks_loaded`, `chat_playbook_read`, span `chat.read_playbook`.
 
 The layered system prompt (native path) composes: identity/rules →
 current date → tool-family capability summary (from the runtime's
 registry) → project brief → response guidance (cite bracketed source
-ids).
+ids) → on a chat turn, working rules and the playbook list → answer
+style.
 
 ## Filling the memory tier
 

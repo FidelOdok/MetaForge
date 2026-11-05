@@ -99,6 +99,11 @@ export interface GeneratedConcept {
   authority: 'illustrative';
   label: string;
   editable: false;
+  /**
+   * A short, truthful manufacturing note for this concept, when the
+   * provisional rule checks ran. Absent: "Manufacturing not assessed".
+   */
+  manufacturing_note?: string | null;
 }
 
 export interface ConceptLine {

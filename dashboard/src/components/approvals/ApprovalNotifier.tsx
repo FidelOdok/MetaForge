@@ -49,6 +49,11 @@ function writeSeen(ids: Set<string>): void {
   }
 }
 
+/** A creation's workspace in the Create view (`/create/<id>`), not the home list. */
+export function inCreation(pathname: string): boolean {
+  return /^\/create\/[^/]+/.test(pathname);
+}
+
 export function usePendingApprovals(): ApprovalItem[] {
   const { data } = useApprovals({ status: 'pending' });
   return useMemo(() => (data?.items ?? []).filter((i) => i.status === 'pending'), [data]);
@@ -71,7 +76,9 @@ export function ApprovalNotifier() {
   }, [pending, seen]);
 
   const unseen = pending.filter((i) => !seen.has(i.id));
-  if (pathname.startsWith('/approvals') || unseen.length === 0) return null;
+  // A creation's own Decisions tab carries the waiting count as a badge, so
+  // the notice never covers its stage (UXS-017). The approval flow is the same.
+  if (pathname.startsWith('/approvals') || inCreation(pathname) || unseen.length === 0) return null;
 
   const acknowledge = () => {
     const next = new Set([...seen, ...pending.map((i) => i.id)]);

@@ -691,3 +691,39 @@ label.mb-option > span {
   border-color: var(--mb-accent);
   color: var(--mb-text);
 }
+
+/* Model choice, shared by both chats */
+.mb-model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--mf-c-9a9aaa);
+}
+.mb-model-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mb-model-picker select,
+.mb-model-picker input {
+  padding: 5px 8px;
+  border: 1px solid var(--mf-c-3c3e49);
+  border-radius: 6px;
+  background: var(--mf-c-1e1f26);
+  color: var(--mf-c-e2e2eb);
+  font: inherit;
+}
+.mb-model-picker p {
+  margin: 0;
+}
+.mb-model-reset {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mf-c-86cfff);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

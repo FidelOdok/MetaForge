@@ -82,6 +82,7 @@ from api_gateway.technical_drawings.routes import router as technical_drawings_r
 from api_gateway.testplans.routes import router as testplans_router
 from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.baseline_routes import router as twin_baselines_router
+from api_gateway.twin.concept_mesh_routes import router as twin_concept_mesh_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
 from api_gateway.twin.face_attachment_routes import router as twin_face_attachment_router
@@ -2373,6 +2374,7 @@ def create_app(
     app.include_router(twin_sketch_compiler_router)
     # FORGE-794: AI concept sketches generated from text, references or a sketch.
     app.include_router(twin_sketch_generation_router)
+    app.include_router(twin_concept_mesh_router)
     # CDE slice 6: exact CAD builds and revision-linked STEP exports.
     app.include_router(twin_exact_cad_router)
     # CDE slice 9: sketches on model faces and their reattachment.

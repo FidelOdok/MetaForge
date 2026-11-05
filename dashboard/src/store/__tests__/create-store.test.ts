@@ -4,6 +4,7 @@ import * as chat from '../../api/endpoints/twin-chat';
 import * as uploads from '../../api/endpoints/uploads';
 import * as create from '../../api/endpoints/create';
 import { displayText, intentOf, useCreateStore } from '../create-store';
+import { useModelChoice } from '../model-choice';
 
 const TOOLS = { ask: [], change: ['twin.propose_change'], design: ['cadquery.create'] };
 const P = 'p1';
@@ -29,6 +30,23 @@ describe('create store', () => {
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     expect(send.mock.calls[0]![1].content).toContain('A desk hook');
     await waitFor(() => expect(useCreateStore.getState().session(P).queue).toHaveLength(0));
+  });
+
+  it('sends the model the person chose, and nothing when they use the default', async () => {
+    const send = vi.spyOn(chat, 'sendTwinChatMessage').mockResolvedValue({} as never);
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());
+    const s = useCreateStore.getState();
+    useModelChoice.getState().choose({ provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5' });
+    s.setDraft(P, 'first');
+    s.submit(P, TOOLS);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0]![1]).toMatchObject({ provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5' });
+    useModelChoice.getState().reset();
+    s.setDraft(P, 'second');
+    s.submit(P, TOOLS);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![1]).not.toHaveProperty('provider');
+    expect(send.mock.calls[1]![1]).not.toHaveProperty('model');
   });
 
   it('sends an answer from a reply block as a question, leaving the draft alone', async () => {

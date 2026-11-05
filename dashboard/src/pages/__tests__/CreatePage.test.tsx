@@ -12,6 +12,8 @@ import { useApprovals } from '../../hooks/use-approvals';
 import { useHarnessTools } from '../../hooks/use-harness';
 import { useProjectStore } from '../../store/project-store';
 import { useCreateStore } from '../../store/create-store';
+import { PANELS_KEY, useCreateLayoutStore } from '../../store/create-layout-store';
+import { ApprovalNotifier } from '../../components/approvals/ApprovalNotifier';
 import { resetSampleCreation, routeSampleCreate } from '../../lib/sample-create';
 import type { CreationView } from '../../api/endpoints/create';
 
@@ -31,7 +33,11 @@ vi.mock('../../hooks/use-approvals', () => ({
   useApprovals: vi.fn(),
   useDecideApproval: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }));
-vi.mock('../../hooks/use-harness', () => ({ useHarnessTools: vi.fn() }));
+vi.mock('../../hooks/use-harness', () => ({
+  useHarnessTools: vi.fn(),
+  useHarnessProviders: () => ({ data: { activeProvider: 'openrouter', activeModel: 'openai/gpt-4o', providers: [] } }),
+  useHarnessModels: () => ({ data: [] }),
+}));
 vi.mock('../../hooks/use-twin-chat', () => ({
   useTwinChatThreads: vi.fn(() => ({ data: [] })),
   useTwinChatThread: vi.fn(() => ({ data: undefined })),
@@ -66,6 +72,8 @@ function renderAt(path: string) {
 
 describe('CreatePage', () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    useCreateLayoutStore.getState().reset();
     resetSampleCreation();
     useCreateStore.setState({ sessions: {} });
     mockWorkspace(routeSampleCreate('get', `/create/${P}`, {}, P, 'sample-pcb') as CreationView);
@@ -81,7 +89,9 @@ describe('CreatePage', () => {
     expect(screen.getByRole('heading', { name: 'Drone FC' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Build completed' })).toBeInTheDocument();
     const progress = screen.getByRole('list', { name: 'Progress' });
-    expect(within(progress).getByText('Inspect').closest('li')).toHaveAttribute('aria-current', 'step');
+    // Four milestones as summaries: Imagine, Develop, Check, Make.
+    expect(within(progress).getAllByRole('listitem')).toHaveLength(4);
+    expect(within(progress).getByText('Make').closest('li')).toHaveAttribute('aria-current', 'step');
     expect(useProjectStore.getState().activeProjectId).toBe(P);
   });
 
@@ -165,5 +175,54 @@ describe('CreatePage', () => {
     first.unmount();
     renderAt(`/create/${P}`);
     expect(screen.getByLabelText('Describe your product or ask for a change')).toHaveValue('Make the holes M3');
+  });
+
+  it('collapses the conversation and the details to a slim rail, and remembers it', async () => {
+    const first = renderAt(`/create/${P}`);
+    await userEvent.click(screen.getByRole('button', { name: 'Collapse the conversation' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Collapse the details' }));
+    expect(screen.getByTestId('chat-rail')).toBeInTheDocument();
+    expect(screen.getByTestId('side-rail')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Describe your product or ask for a change')).toBeNull();
+    // The stage stays.
+    expect(screen.getByRole('region', { name: 'Product' })).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: true, side: true });
+    first.unmount();
+
+    // A new page load reads the preference back.
+    useCreateLayoutStore.getState().reset();
+    renderAt(`/create/${P}`);
+    expect(screen.getByTestId('chat-rail')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Show the conversation' }));
+    expect(screen.getByLabelText('Describe your product or ask for a change')).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: false, side: true });
+  });
+
+  it('shows waiting approvals as a badge on Decisions, never as a popup over the stage', () => {
+    vi.mocked(useApprovals).mockReturnValue({
+      data: {
+        items: [{ id: 'a1', kind: 'sketch', title: 'Parametric sketch', status: 'pending' }],
+        unscopedCount: 0,
+      },
+    } as never);
+    window.history.pushState({}, '', `/create/${P}`);
+    render(
+      <>
+        <ApprovalNotifier />
+        <Routes>
+          <Route path="/create/:projectId" element={<CreatePage />} />
+        </Routes>
+      </>,
+    );
+    const badge = screen.getByTestId('decisions-badge');
+    expect(badge).toHaveTextContent('1');
+    expect(screen.getByRole('tab', { name: /Decisions/ })).toContainElement(badge);
+    const stage = screen.getByRole('region', { name: 'Product' });
+    expect(stage.contains(badge)).toBe(false);
+    expect(screen.queryByRole('status', { name: 'Approvals waiting' })).toBeNull();
+
+    // Collapsed, the rail carries the same badge.
+    act(() => useCreateLayoutStore.getState().setCollapsed('side', true));
+    expect(within(screen.getByTestId('side-rail')).getByTestId('decisions-badge')).toHaveTextContent('1');
   });
 });

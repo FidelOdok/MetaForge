@@ -7,7 +7,10 @@ reviewer can turn the concept around. It is for concept review only.
 Three ways in, exactly one per call:
 
 * ``image_node_id``: one concept image (Tripo ``image-to-model``). The model
-  has to guess the sides it cannot see.
+  has to guess the sides it cannot see. The image is a render made by
+  ``twin.render_concept_image`` or an accepted generated concept sketch
+  (``generated_sketch``, the Create stage's accepted concept); the record
+  says which in ``source_kind``.
 * ``view_images``: the concept's own straight-on views, ``front`` plus at
   least one of ``left`` / ``back`` / ``right``, each a concept image rendered
   with that ``view`` (Tripo ``multiview-to-model``). The model sees the back
@@ -149,6 +152,27 @@ def _conditioned_on(wp: Any) -> dict[str, Any]:
     meta = getattr(wp, "metadata", None) or {}
     cond = meta.get("conditioned_on")
     return dict(cond) if isinstance(cond, dict) else {}
+
+
+#: What a mesh can be made from, by ``source_kind``.
+SOURCE_CONCEPT_IMAGE = "concept_image"
+SOURCE_GENERATED_SKETCH = "generated_sketch"
+
+
+def source_kind(wp: Any) -> str | None:
+    """``concept_image``, ``generated_sketch`` or ``None`` when ``wp`` cannot be a source.
+
+    A render qualifies when ``twin.render_concept_image`` made it. A generated
+    concept sketch qualifies once a person accepted it (a proposal never
+    does: it has not been chosen).
+    """
+    metadata = dict(getattr(wp, "metadata", None) or {})
+    kind = _wp_type(wp)
+    if kind == "render" and metadata.get("generated_by") == "twin.render_concept_image":
+        return SOURCE_CONCEPT_IMAGE
+    if kind == "generated_sketch" and metadata.get("generation_status") == "accepted":
+        return SOURCE_GENERATED_SKETCH
+    return None
 
 
 def generation_options(
@@ -368,14 +392,10 @@ def make_concept_mesh_recorder(
         except ValueError as exc:
             raise ValueError(f"{TOOL}: '{field}' is not a node id: {node_ref!r}") from exc
         wp = await twin.get_work_product(node_id)
-        metadata = dict(getattr(wp, "metadata", None) or {}) if wp is not None else {}
-        if (
-            wp is None
-            or _wp_type(wp) != "render"
-            or metadata.get("generated_by") != "twin.render_concept_image"
-        ):
+        if wp is None or source_kind(wp) is None:
             raise ValueError(
-                f"{TOOL}: {node_ref} is not a concept image made by twin.render_concept_image"
+                f"{TOOL}: {node_ref} is not a concept image made by twin.render_concept_image "
+                "or an accepted generated concept"
             )
         try:
             content, _filename = read_blob(wp)
@@ -465,6 +485,7 @@ def make_concept_mesh_recorder(
         validate_only: bool = False,
         speculative: bool = False,
         component: str | None = None,
+        request_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -496,7 +517,12 @@ def make_concept_mesh_recorder(
             if not isinstance(image_node_id, str) or not image_node_id.strip():
                 raise ValueError(f"{TOOL}: 'image_node_id' must be a non-empty string")
             source, raw, mime = await _source_image(image_node_id)
-            image, mime, cropped = strip_label_band(raw, mime)
+            if source_kind(source) == SOURCE_CONCEPT_IMAGE:
+                image, mime, cropped = strip_label_band(raw, mime)
+            else:
+                # A generated concept carries its label in the PNG text, not
+                # on its pixels: there is no banner to crop.
+                image = raw
         elif view_images is not None:
             for view, (wp, raw, raw_mime) in (await _view_sources(view_images)).items():
                 sent, sent_mime, was_cropped = strip_label_band(raw, raw_mime)
@@ -683,6 +709,14 @@ def make_concept_mesh_recorder(
                 metadata["source_work_product_id"] = source_id
                 metadata["source_content_hash"] = source.content_hash
                 metadata["label_band_removed"] = cropped
+                kind = source_kind(source)
+                if kind:
+                    metadata["source_kind"] = kind
+                src_meta = getattr(source, "metadata", None) or {}
+                if src_meta.get("item_key") and src_meta.get("item_revision"):
+                    metadata["source_item_ref"] = (
+                        f"{src_meta['item_key']}@{src_meta['item_revision']}"
+                    )
                 if concept:
                     metadata["concept_name"] = concept
             if views:
@@ -690,7 +724,11 @@ def make_concept_mesh_recorder(
                 metadata["label_band_removed_views"] = view_cropped
             if text is not None:
                 metadata["prompt"] = text
+                metadata["source_kind"] = "text"
                 metadata["prompt_sent"] = sent_text
+            if request_context:
+                # Who asked, where, and on what spend terms (the Create route).
+                metadata["request"] = dict(request_context)
             # 3D-RC-011 / DFM-013: the context it was made with, its DFM status.
             metadata.update(manufacturing.provenance())
             now = datetime.now(UTC)
@@ -752,6 +790,7 @@ def make_concept_mesh_recorder(
                 "task_id": mesh.task_id,
                 "size_bytes": len(stored_glb),
                 "source_image_node_id": source_id,
+                "source_kind": metadata.get("source_kind"),
                 "authority": "illustrative",
                 "label": SPECULATIVE_MESH_LABEL if speculative else LABEL,
                 "content_hash": content_hash,

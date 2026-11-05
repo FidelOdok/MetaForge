@@ -85,14 +85,15 @@ describe('SketchLayer plane prompt', () => {
     expect(screen.queryByRole('button', { name: /Use in 3D/ })).toBeNull();
   });
 
-  it('shows the prompt only when the person asks to use a saved sketch in 3D', async () => {
+  it('asks the stage drawer for the plane choice only when the person asks to use a saved sketch in 3D', async () => {
     seedSavedSketch();
-    render(<SketchLayer projectId={P} />);
+    const onRequestPanel = vi.fn();
+    render(<SketchLayer projectId={P} onRequestPanel={onRequestPanel} />);
     const use = await screen.findByRole('button', { name: /Use in 3D/ });
-    expect(screen.queryByTestId('plane-prompt')).toBeNull();
+    expect(onRequestPanel).not.toHaveBeenCalled();
     fireEvent.click(use);
-    expect(screen.getByTestId('plane-prompt')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Keep as concept' }));
+    expect(onRequestPanel).toHaveBeenCalledWith('plane');
+    // The choice opens in the drawer beside the drawing, never over it.
     expect(screen.queryByTestId('plane-prompt')).toBeNull();
     expect(screen.getByText(/no plane yet/)).toBeInTheDocument();
   });
@@ -100,7 +101,7 @@ describe('SketchLayer plane prompt', () => {
   it('names the plane once one is confirmed, and offers no prompt', async () => {
     getSketchPlane.mockResolvedValue(view('CONFIRMED', 'XZ'));
     seedSavedSketch();
-    render(<SketchLayer projectId={P} />);
+    render(<SketchLayer projectId={P} onRequestPanel={vi.fn()} />);
     await waitFor(() => expect(screen.getByText(/on the Front plane/)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /Use in 3D/ })).toBeNull();
   });

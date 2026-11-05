@@ -4,7 +4,7 @@ Create is the dashboard's nontechnical view of a project. Anyone can describe a
 product in their own words, watch it take shape, choose how to make it, check
 what comes out and improve it, without opening the engineering tools:
 
-**Describe → Clarify → Design → Check → Approve → Make → Inspect → Improve or accept**
+**Imagine → Develop → Check → Make**
 
 It is a view, not a separate product. A creation *is* a project: its
 conversation is the project's chat thread, its designs are the project's work
@@ -28,13 +28,13 @@ acceptance) and a **history** of every change.
 
 ## The screen
 
-- **Product stage** (centre). The newest dimensioned model, or the newest
-  concept when there is no model yet, with a badge that says which it is:
-  *Engineering model · dimensioned* or *Concept · illustrative, not a
-  manufacturable model*. An attractive image is never presented as a model
-  that can be made. The revision on screen is named, earlier results sit in a
-  strip below, and *Discuss this* starts a message about the shown item.
-  While a pass is running the last finished result stays on screen.
+The product stage takes the middle and most of the width. Everything else is
+secondary and can be put away.
+
+- **Product stage** (centre). One dominant artifact: the newest dimensioned
+  model, or the newest concept when there is no model yet. A bar of its own
+  above the drawing area (never over it) carries the stage mode, the
+  artifact's maturity, its status, the one next action and a **More** menu.
 - **Conversation** (left). The project's chat thread. Each message says what
   it is: a *Question* and its *Discussion*, a *Change request* and its
   *Proposed change · awaiting your decision*, or a *Design pass* and what it
@@ -42,18 +42,79 @@ acceptance) and a **history** of every change.
   inner scrollbar), shrinks as text is removed, re-measures when its width
   changes, and takes pasted or dropped files.
 - **Where it stands** (right). The readiness state, what it means, the next
-  action and each blocker with the action that clears it.
-- **Brief, Decisions, Make, Inspect, History** tabs. The open tab is in the
+  action and each blocker with the action that clears it, above the
+  **Brief, Decisions, Make, Inspect, History** tabs. The open tab is in the
   address (`?panel=make`), so back, forward and direct links work.
-- **Journey rail** (top) showing the step the creation is on.
+- **Journey** (top). Four milestones, **Imagine**, **Develop**, **Check** and
+  **Make**, each with a one-line summary (*Concept on stage*, *Dimensioned
+  model*, *2 to resolve*, *Making finished*). They summarise where the
+  creation stands; they are not gates or pages, and work in a later milestone
+  can already be under way. Readiness, decisions, making and inspection
+  behind them are unchanged.
+
+### Collapsible panels
+
+The conversation and the details each have a collapse button. Collapsed, a
+panel becomes a slim rail at the edge: the conversation's rail shows how many
+instructions are waiting, the details' rail has one button per tab, with the
+waiting-decisions count on **Decisions**. The choice is the person's own
+preference, kept in this browser (`metaforge.create.panels` in local
+storage) and the same in every creation; with storage unavailable the panels
+simply start expanded. Presentation mode always shows both.
+
+### Maturity and status
+
+The stage labels the artifact it shows with one maturity word, **Illustrative**,
+**Preview**, **Exact** or **Validated**, and a short status line:
+
+| Shown | Status line |
+|---|---|
+| An image or generated concept | *Concept · illustrative* |
+| An AI 3D concept | *3D Concept · illustrative* |
+| A provisional mesh or preview geometry | *3D Preview · provisional* |
+| Exact CAD | *Engineering Geometry · exact model available* |
+| Exact CAD whose checks are running | *Engineering Update · validation pending* |
+| Validated CAD | *Engineering Geometry · validated* |
+| Exact CAD whose checks failed | *Preview available · Engineering update needs attention* (the last checked version is kept) |
+
+A provisional mesh is never called exact, and an illustrative or provisional
+item never carries *verified*, *validated* or *production-ready* wording: the
+stage passes every such label through a guard that falls back to the plain
+illustrative wording. An illustrative concept also shows its manufacturing
+note when one was assessed (for example *Likely printable with supports
+(preliminary)*), and *Manufacturing not assessed* otherwise. The same note is
+on each card in the generated-concept strip.
+
+### One next action
+
+The stage offers one primary action at a time; everything else is in **More**.
+
+| The creation has | Primary action |
+|---|---|
+| Nothing yet | Three equal ways in: **Describe** (focuses the composer), **Sketch it** (Sketch mode, pen ready), **Add reference** (the references drawer) |
+| A description, concept, sketch or reference, but no 3D concept | **Make a 3D concept** |
+| A 3D concept and a sketch that is not editable yet | **Make editable** |
+| A 3D concept (and an editable sketch, if there is a sketch) | **Build exact model**: puts a design request in the composer, ready to send |
+| A dimensioned model | **Prepare prototype**: opens the Make tab |
+
+**More** holds the rest: *Generate a concept*, *Make a 3D concept*, *Editable
+sketch*, *Sketch plane*, *Add reference*, *Sketch it*, *Describe a change*,
+*Build exact model* and *Discuss this*, each shown only where it applies.
+
+### Waiting approvals
+
+Inside a creation, waiting approvals are a count badge on the **Decisions**
+tab (or its rail button). The page-wide *approvals waiting* notice that other
+pages show is not shown over a creation, so it never covers the stage. The
+approval flow itself is unchanged.
 
 ## Activity overlay
 
 Work that takes time (a design-flow run, a tool job, a Create chat turn) is
 shown as an **operation** in a small activity card. The card has its own row
 directly above the stage, and the stage starts below it, so the compact card
-never covers the stage's toolbars or panels (the sketch tools, *Generate*, the
-editable sketch), the composer or the conversation. It can be expanded into a
+never covers the stage's bar, the sketch tools, the drawer, the composer or
+the conversation. It stays the compact card until expanded. It can be expanded into a
 larger, slightly translucent overlay that lays over the top right of the
 stage, and minimised again with its button or **Escape**. Minimising or
 closing it never cancels anything. The card comes before the conversation and
@@ -111,16 +172,44 @@ The operations live in a store shared with the Engineering view
 stage, revision and preview. The overlay reads the project's operation
 snapshot and stream (`/v1/projects/{project_id}/operations` and
 `.../operations/stream`, described in the operations page of these docs).
-While the project has operations, the journey rail's *working* state is
+While the project has operations, the journey's *working* state is
 taken from them; before any exist it falls back to the local instruction
 queue.
 
+## Stage modes: View and Sketch
+
+The stage has two modes, switched in its bar. Neither is a separate
+workspace.
+
+- **View** (the default) shows only the artifact, which can be turned,
+  zoomed and selected. Once there is a saved sketch, **My sketch** shows it
+  as a thin, read-only overlay; the view underneath stays the one that takes
+  input.
+- **Sketch** is entered on purpose (the mode switch, **Sketch it**, or an
+  action that needs the sketch, such as **Make editable**). It shows a
+  drawing paper. The 3D view is not mounted under it, so the paper and the
+  view never look merged and are never both interactive. **Trace over the
+  current view** shows a faint still image of what the view showed (the
+  image itself for an image, a capture of the 3D view otherwise) under the
+  paper; it takes no input.
+
+Leaving Sketch keeps the sketch: it is saved as it is drawn (below).
+
+### The drawer
+
+The editable sketch, *Generate a concept*, the sketch plane choice and the
+references open in one drawer beside the drawing area, never floating over
+the stage's controls. Only one is open at a time: opening another replaces
+it. The drawer can be collapsed to a slim tab and opened again, or closed.
+The editable sketch and the plane choice belong to Sketch mode, so returning
+to View closes them; their state is kept. The panels in the drawer are the
+same ones as before, docked.
+
 ## Sketching on the stage
 
-The product stage carries a freehand sketch layer. It is part of the stage,
-not a separate workspace: drawing over the current concept or model, or over
-the empty stage before anything exists, needs no setup and never asks for a
-plane first.
+In Sketch mode the stage carries the freehand sketch layer. Drawing on the
+paper, before anything exists or over a traced view, needs no setup and never
+asks for a plane first.
 
 | Tool | Does |
 |---|---|
@@ -184,8 +273,8 @@ draws it on that plane, with its plane controls (see
 ### Placing a sketch on a plane
 
 Drawing never needs a plane. Once a sketch is saved, the status bar offers
-**Use in 3D**. Only then does a compact choice appear beside it, without
-covering the stage:
+**Use in 3D**. Only then does the choice open, in the drawer beside the
+drawing:
 
 | Choice | Does |
 |---|---|
@@ -226,8 +315,9 @@ under the choice says why.
 **When the surface changes.** When the part gets a new revision, MetaForge
 looks for the surface again by its signature, never by a face number. If it
 finds exactly one match, the sketch moves with it and nothing is asked. If
-two surfaces could be it, or it is gone, the sketch keeps its last place and
-Create says, in plain words, *The surface this sketch was on changed; choose
+two surfaces could be it, or it is gone, the sketch keeps its last place, the
+status bar offers *Surface changed · choose*, and the drawer says, in plain
+words, *The surface this sketch was on changed; choose
 where it goes*, with **Pick the surface** (the surfaces that could be it are
 marked), **Front**, **Side**, **Top**, **Keep as concept** and **Decide
 later**. Until a choice is made, making the sketch editable for real and
@@ -238,9 +328,12 @@ See [face attachment](twin_schema.md#face-attachment).
 
 ### Making a sketch editable
 
-A saved sketch offers **Make editable**. It turns the strokes into shapes a
-person can size and constrain, in the browser, in a few tens of
-milliseconds, without leaving the stage:
+**Make editable** (the primary action once a 3D concept exists, or *Editable
+sketch* in More) opens the editable sketch in the drawer, in Sketch mode. Its
+button turns the saved strokes into shapes a person can size and constrain,
+in the browser, in a few tens of milliseconds, without leaving the stage. The
+shapes are drawn over the strokes; the panel with the rules and sizes is in
+the drawer:
 
 - **Shapes over the strokes.** Each stroke is fitted with lines, arcs,
   circles, ellipses or, when nothing simpler fits, a smooth curve. A shape
@@ -287,9 +380,9 @@ nothing the drawing does not say is invented. See
 
 ### Generating a concept
 
-**Generate**, at the top right of the stage, draws a freeform concept
-sketch with an image model. It opens a small panel on the stage; there is no
-separate studio. What the image is drawn from follows from what is there:
+**Generate a concept** (in More) draws a freeform concept sketch with an
+image model. It opens in the drawer; there is no separate studio. What the
+image is drawn from follows from what is there:
 
 | There is | Mode | What is sent |
 |---|---|---|
@@ -317,8 +410,9 @@ it* with what changed, and the activity overlay asks for a review rather
 than presenting it as done. Features to keep and things to avoid also go
 into the prompt.
 
-**Alternatives.** Every image is a proposal in the strip under the panel,
-labelled *Generated concept · illustrative*. Each has **Accept**,
+**Alternatives.** Every image is a proposal in the strip under the form,
+labelled *Generated concept · illustrative*, each card with its
+manufacturing note (*Manufacturing not assessed* until one is assessed). Each has **Accept**,
 **Reject**, **Compare** (pick two to see them side by side with the share of
 pixels that differ) and **Branch** (start a separate line of concepts from
 it). Nothing replaces the accepted concept until the person accepts one; the
@@ -356,6 +450,39 @@ assumptions. A concept asked for as *speculative* is labelled *Speculative
 concept* and the context is recorded but not applied. No concept is ever
 labelled verified or production-ready: no manufacturing check has run on an
 illustration.
+
+### Making a 3D concept
+
+**Make a 3D concept** turns the concept into an illustrative 3D model that can
+be turned around on the stage (correspondence level L0: approximate visual
+form, no CAD meaning). The gateway starts `twin.generate_concept_mesh` as its
+usual background job, from, in order:
+
+1. the accepted generated concept (the head of the accepted concept line);
+2. else the newest concept image made by `twin.render_concept_image`;
+3. else the brief in words (intended use, appearance, size and fit,
+   materials).
+
+With none of these there is nothing to make it from and the stage says so.
+The job's progress is the activity overlay's operation; the button reads
+*Making a 3D concept…* until it ends, and the last finished artifact stays
+on the stage meanwhile. The result is a GLB `render` labelled *AI 3D
+reference model, illustrative only*, shown with the existing 3D viewer as
+**Illustrative** · *3D Concept · illustrative*. When the source image came
+from a block layout, the model is scaled to its envelope as before and the
+stage adds *Sized to the concept layout*.
+
+**Spend and approval.** It is a paid generation of about two and a half
+minutes. The person's click is the decision for one call, under the same
+rules as the held tool: a tool on the never-approved list always asks, and
+past the project's hourly mesh cap (`METAFORGE_AUTO_APPROVE_MESH_PER_HOUR`,
+3 by default) the stage says how many were made in the last hour and makes
+one only when the person chooses **Make it anyway**. An agent uses
+`twin.generate_concept_mesh`, which is held for approval; the Create route
+refuses an agent caller. The model records its source (`source_kind`, the
+source node and, for an accepted concept, its revision), who asked, from
+which surface, the project's policy mode and whether that policy alone would
+have approved it.
 
 ### References and their roles
 
@@ -408,6 +535,13 @@ MetaForge's thinking bubble under it (see
 [generative UI](generative-ui.md#while-the-agent-works)) until the reply
 arrives. A send that fails stays in the conversation with *Retry*, *Edit*
 (back into the composer) and *Discard*, so a failure never loses the text.
+
+*Actions* beside the intents fills in a common request (where it stands,
+design this, run a stress check, review the gate, what is waiting, did it
+work) and switches to *Design*; nothing runs until it is sent (see
+[actions](generative-ui.md#actions)). The model button next to it shows which
+model answers, and lets the person choose their own (see
+[choosing the model](generative-ui.md#choosing-the-model)).
 
 The draft, the chosen intent, attached references and queued instructions
 live in a store outside the page (`store/create-store.ts`). Switching to the
@@ -561,8 +695,10 @@ released or being made: deleting never stops a machine.
 ## Presentation mode
 
 **Present** fills the screen with the creation and adds a caption bar that
-steps through the eight journey steps (arrow keys or the buttons; Esc leaves),
-opening the tab that tells each step's story. In the offline sample workspace
+steps through eight captions of the loop (Describe, Clarify, Design, Check,
+Approve, Make, Inspect, Improve or accept; arrow keys or the buttons; Esc
+leaves), lighting the milestone each belongs to and opening the tab that
+tells its story. In the offline sample workspace
 (`?demo=1`) the sample project is a complete creation with a delivered build
 waiting for its last check, so the whole loop can be shown without a gateway.
 
@@ -613,6 +749,8 @@ The sketch layer uses these twin routes:
 | `GET .../sketch-generations/compare?a=&b=` | Two concepts side by side, with the share of pixels that differ |
 | `POST .../sketch-generations/{node_id}/accept` | Make a proposal the accepted concept (`409` when it is stale or another was accepted since) |
 | `POST .../sketch-generations/{node_id}/reject`, `POST .../branch` | Set a proposal aside, or start a separate line from it |
+| `POST /v1/twin/projects/{project_id}/concept-mesh` | Make a 3D concept as a job (from the accepted concept, the newest concept image, or the brief); `409` with `spend_confirmation_required` when a person must confirm; refused for an agent |
+| `GET /v1/twin/projects/{project_id}/concept-mesh` | The newest 3D concept, the job still running, the source the next one would use, and the hourly count |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the
@@ -633,6 +771,10 @@ refused with `403`. The full schemas are in the
 - Pen pressure is recorded with each point but not yet drawn as varying
   width.
 
+- A 3D concept is one model from one image or text; the multiview source
+  (front, side, back) the tool supports is not offered from Create yet, and
+  the concept's manufacturing note is shown only when the concept record
+  carries one.
 - Readiness is read by polling every five seconds, not pushed.
 - Marking a dimension directly on a photo or the model, and calibrated camera
   measurement, are not built; measurements are typed, with their source.
