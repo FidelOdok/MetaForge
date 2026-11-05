@@ -30,7 +30,7 @@ const LABEL_CEILING: Record<RepresentationLevel, string[]> = {
 /** A label the level allows, or the most it may claim. */
 export function guardedLabel(level: RepresentationLevel, label: string): string {
   const allowed = LABEL_CEILING[level] ?? ['Illustrative'];
-  return allowed.includes(label) ? label : allowed[allowed.length - 1];
+  return allowed.includes(label) ? label : (allowed[allowed.length - 1] ?? 'Illustrative');
 }
 
 export function representationText(rep: RepresentationView | null | undefined): string | null {

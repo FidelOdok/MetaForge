@@ -2320,6 +2320,7 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.MANUFACTURING_CONTEXT_INJECTION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"generator": generator, "resolution": resolution})
+
     def record_structured_mesh(self, outcome: str) -> None:
         """Record one structured mesh (L1) outcome (C3D slice 2)."""
         counter = self._instruments.get(MetricsRegistry.STRUCTURED_MESH_TOTAL.name)

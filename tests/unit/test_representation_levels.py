@@ -18,11 +18,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from api_gateway.twin import representation_routes
+from api_gateway.twin import representation_routes, structured_mesh
 from api_gateway.twin import routes as twin_routes
 from api_gateway.twin.decision_recorder import make_decision_recorder
 from api_gateway.twin.glb_bounds import glb_bounds, gltf_json
-from api_gateway.twin import structured_mesh
 from api_gateway.twin.structured_mesh import (
     NoLayoutError,
     make_structured_mesh_recorder,
@@ -167,11 +166,11 @@ async def _check(twin: Any, ref: str, result: dict[str, Any]) -> UUID:
     return created.id
 
 
-async def _assembly(twin: Any, assembly: dict[str, Any] = ASSEMBLY, title: str = "Concept A") -> Any:
+async def _assembly(
+    twin: Any, assembly: dict[str, Any] = ASSEMBLY, title: str = "Concept A"
+) -> Any:
     record = make_decision_recorder(twin)
-    return await record(
-        title=title, rationale="chosen", assembly=assembly, project_id=str(PROJECT)
-    )
+    return await record(title=title, rationale="chosen", assembly=assembly, project_id=str(PROJECT))
 
 
 # ---------------------------------------------------------------------------
@@ -241,8 +240,9 @@ async def test_l3_only_from_a_validated_exact_revision() -> None:
 async def test_l0_and_l1_are_never_labelled_exact_or_validated() -> None:
     for level, ceiling in (("L0", "illustrative"), ("L1", "structured")):
         for claim in ("exact", "validated"):
-            rep = representation_of("render", {REPRESENTATION_KEY: {"level": level,
-                                                                    "authority": claim}})
+            rep = representation_of(
+                "render", {REPRESENTATION_KEY: {"level": level, "authority": claim}}
+            )
             assert rep is not None
             assert rep["authority"] == ceiling
             assert rep["label"] not in ("Exact", "Validated")
@@ -576,4 +576,3 @@ async def test_the_routes(twin: Any, monkeypatch: pytest.MonkeyPatch) -> None:
             assert bad.status_code == 400
     finally:
         representation_routes.set_recorder(None)
-

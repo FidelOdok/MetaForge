@@ -336,6 +336,8 @@ class TestAlertingRules:
                 "ToolJobsFailingOrInterrupted",
                 # FORGE-801: Create, decision or flow syncs into the context fail.
                 "ManufacturingContextSyncFailing",
+                # C3D slice 2: a stored representation claimed more than it is.
+                "RepresentationMislabelGuardHits",
             ]
         )
 

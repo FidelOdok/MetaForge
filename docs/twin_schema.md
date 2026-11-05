@@ -2965,6 +2965,104 @@ simple exact build through `cadquery.execute_script` about 60 ms, a
 validity check 30 to 110 ms, and a STEP export about 80 ms for a small
 part.
 
+### Representation levels, component ids and maturity {#representation-levels}
+
+Every artifact a screen can show as the product carries a representation
+descriptor. Code: `twin_core/representation.py` (the descriptor and its
+guard), `twin_core/component_identity.py` (component ids),
+`twin_core/maturity.py` (maturity per component),
+`tool_registry/tools/twin/layout_mesh.py` and
+`api_gateway/twin/structured_mesh.py` (the L1 mesh),
+`api_gateway/twin/representation_routes.py` (the routes).
+
+**The descriptor.** Node responses (`GET /v1/twin/nodes`,
+`GET /v1/twin/nodes/{id}`) return `representation: {level, authority, label,
+source_revision, component_ids, generated_by, derived, display_rank,
+dimensions, guarded}`, or `null` for a node that is not displayable.
+
+| Level | What it is | Most it may claim | Display rank |
+|---|---|---|---|
+| `L3` | Tessellation of a `cad_model` revision whose geometry state is `validated` or `released` | `validated` | 5 |
+| `L2` | A `cad_model` revision not yet validated (`exact`), or a failed or preview one (`preview`) | `exact` | 4 |
+| `L1` | Simple 3D parts drawn from the concept block layout, sizes estimated | `structured` | 3 |
+| `L0` | An AI 3D concept (`twin.generate_concept_mesh`, or any mesh `render`) | `illustrative` | 2 |
+| `illustration_image` | A concept image, a picture render, a design sketch, a generated sketch or sketch strokes | `illustrative` | 1 |
+
+`authority` is one of `illustrative`, `structured`, `preview`, `exact` and
+`validated`; `label` is the word Create shows (`Illustrative`, `Preview`,
+`Exact` or `Validated`; `structured` reads `Preview`). `source_revision` is
+the `KEY@n` the artifact derives from. `generated_by` is `{tool,
+operation_id}`. A generator that knows its descriptor stores it in
+`metadata.representation` (`derived: false`); every older artifact gets one
+derived at read time from its type and geometry state (`derived: true`), so
+nothing is backfilled.
+
+Two rules hold on every read, whatever was stored: `L3` only for a
+`cad_model` revision that is validated or released (any other `L3` claim
+reads the level its type implies, `L2` for CAD), and `L0`, `L1` and pictures
+never above their ceiling in the table. A corrected claim is listed in
+`guarded`, logged as `representation_mislabel_guarded` and counted in
+`metaforge_representation_mislabel_total{level, claimed}`
+(alert `RepresentationMislabelGuardHits`). A generator cannot write such a
+claim in the first place: `descriptor()` refuses it.
+
+**Component ids.** A component gets an id, `CMP-<slug>` (with `-2`, `-3` on
+a clash), the first time a concept assembly names it (`twin.record_decision`
+with `assembly`), and keeps it. The decision stores it on each part
+(`assembly.parts[i].component_id`) and as `component_identity: {name: id}`;
+a later assembly keeps every id already issued, and a decision recorded
+before ids existed is read as if they had been issued then. The id travels:
+
+- into the L1 mesh, as each part node's name and `extras.component_id`;
+- onto CAD revisions: when a `cad_model` revision is committed, its
+  `component_id` (or `part_component_ids` for an assembly's members) is
+  carried from the prior revision, or matched by name once with the design
+  gate's rule; recording an assembly also stamps the CAD heads that existed
+  before it. Later matching is by the stored id, so a renamed part keeps its
+  component. Nothing is renamed;
+- onto face semantic tags as a prefix (`CMP-base::<tag>`); signature
+  matching compares tags without the prefix.
+
+**The L1 mesh.** `twin.render_structured_mesh`, or
+`POST /v1/twin/projects/{id}/structured-mesh`, draws the project's newest
+concept block layout (the `concept_layout` of a sketch made by
+`twin.render_concept_sketch`), or a named one, as a GLB: one node per part
+named by its component id, with `extras` giving `component_id`, `part_name`,
+`shape`, `size_mm`, `position_mm`, `provenance`, `dimensions: "estimated"` and
+`level: "L1"`, under a root node `metaforge_structured_mesh` (Y up, metres).
+It is stored as a `render` with `authority: structured`, `generated_from` the
+sketch. It is deterministic and free (no provider), so it answers inline: the
+same layout and ids give the same bytes, and an identical mesh already in the
+project is returned with `reused: true` instead of a new node. Recording a
+concept assembly draws it once when a layout exists. Counted in
+`metaforge_structured_mesh_total{outcome}`.
+
+**Maturity per component.** `GET /v1/twin/projects/{id}/maturity` returns,
+per component, one of:
+
+| Maturity | When |
+|---|---|
+| Illustrative | Named in the concept assembly, or shown in an L0 mesh or a picture |
+| Structured | A part of an L1 mesh |
+| Parametric | A CAD revision exists for it (feature definitions) but is not validated, or a parametric sketch carries its id |
+| Exact | Its CAD head is validated |
+| Verified | Exact, and at least one current check pinned to that head passed (`PASS` or `WARN` in the shared validation status), with none `FAIL` or `STALE` |
+| Released | Verified, and the head was released through the release path |
+
+Each component lists its `evidence` (`{maturity, kind, node_id, ref, detail}`
+per claim) and a `next_step`. `product` gives `maturity` (that of the least
+mature required component), `by_maturity`, `limited_by`, `claims: {exact,
+verified, released}` (true only when every required component is at least
+that) and a plain `summary`. Required components are the current assembly's
+`made` parts; bought and standard parts are listed but not required. Without
+an assembly, every known component is required. So a product with a verified
+base and an illustrative cushion is Illustrative, never Exact.
+
+Accepting a visual proposal is recorded as acceptance and is never read by
+the maturity computation: no acceptance or approval flag raises a component
+above what its geometry and checks show. Counted in
+`metaforge_maturity_query_total{product}`.
+
 ## 6. Twin API
 
 The Twin API is the public interface for all graph operations. Agents, the orchestrator, and the gateway interact with the Twin exclusively through this API.

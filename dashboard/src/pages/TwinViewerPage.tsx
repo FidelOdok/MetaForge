@@ -1357,11 +1357,11 @@ export function TwinViewerPage() {
   useEffect(() => {
     if (tab !== 'model' || selectedId || searchParams.get('node') || !activeProjectId) return;
     if (autoPicked.current === activeProjectId) return;
-    const best = preferredDisplayNode(items.filter((n) => (n.representation?.display_rank ?? 0) >= 2));
+    const best = preferredDisplayNode((nodes ?? []).filter((n) => (n.representation?.display_rank ?? 0) >= 2));
     if (!best) return;
     autoPicked.current = activeProjectId;
     setSelectedId(best.id);
-  }, [tab, selectedId, searchParams, activeProjectId, items]);
+  }, [tab, selectedId, searchParams, activeProjectId, nodes]);
 
   // ── derived ──
   const query = search.toLowerCase();

@@ -45,7 +45,8 @@ export function pickedComponent(object: unknown, node: TwinNode): SelectedCompon
   const fromMesh = componentOfObject(object as Parameters<typeof componentOfObject>[0]);
   if (fromMesh) return fromMesh;
   const ids = node.representation?.component_ids ?? [];
-  return ids.length === 1 ? { componentId: ids[0], name: node.name } : null;
+  const only = ids.length === 1 ? ids[0] : undefined;
+  return only ? { componentId: only, name: node.name } : null;
 }
 
 function MeshFileObject({ url, format }: { url: string; format: string }) {
