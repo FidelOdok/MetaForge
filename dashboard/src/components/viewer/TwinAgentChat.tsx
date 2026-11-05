@@ -20,7 +20,9 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { useHarnessModels, useHarnessProviders, useHarnessTools } from '../../hooks/use-harness';
+import { useHarnessProviders, useHarnessTools } from '../../hooks/use-harness';
+import { modelChoiceFields, useModelChoice } from '../../store/model-choice';
+import { ModelPicker, useModelLabel } from '../chat/ModelPicker';
 import { ActivitySteps } from '../chat/ActivitySteps';
 import { MessageBody } from '../chat/MessageBody';
 import { TurnInProgress } from '../chat/TurnInProgress';
@@ -58,7 +60,7 @@ const POPOVER_TITLES: Record<Popover, string> = {
   attach: 'Add to this turn',
   commands: 'Commands',
   tools: 'Connectors and tools',
-  model: 'Model for this turn',
+  model: 'Model',
   effort: 'Reasoning effort',
   verbosity: 'Show',
   context: 'Working context',
@@ -128,8 +130,8 @@ export function TwinAgentChat({
   const [notice, setNotice] = useState('');
   const [tab, setTab] = useState<PanelTab>('conversation');
   const [popover, setPopover] = useState<Popover | null>(null);
-  const [provider, setProvider] = useState('');
-  const [model, setModel] = useState('');
+  const modelChoice = useModelChoice();
+  const modelLabel = useModelLabel();
   const [verbosity, setVerbosity] = useState<Verbosity>('normal');
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
   const [includeNode, setIncludeNode] = useState(true);
@@ -146,7 +148,6 @@ export function TwinAgentChat({
   const [reviewNote, setReviewNote] = useState('');
   const decide = useDecideProposal();
 
-  const models = useHarnessModels(provider || providers.data?.activeProvider || null);
   const captured = useCapturedSessions(projectId, popover === 'threads');
   const contextNode = includeNode ? node : undefined;
 
@@ -158,7 +159,7 @@ export function TwinAgentChat({
     ? (proposals.data?.proposals ?? []).filter((p) => p.status === 'pending' && p.project_id === projectId)
     : [];
   const proposeTool = tools.data?.find((t) => t.id === 'twin.propose_change');
-  const effectiveProvider = provider || providers.data?.activeProvider;
+  const effectiveProvider = modelChoice.provider || providers.data?.activeProvider;
   const canSend = !!(effectiveProvider && providers.data?.providers.some((p) => p.id === effectiveProvider && p.configured));
   const turnTools = interaction === 'propose' && proposeTool ? [proposeTool.id] : interaction === 'tools' ? selectedTools : [];
   const draftTokens = Math.ceil(draft.length / 4);
@@ -350,8 +351,7 @@ export function TwinAgentChat({
               : '') +
             instruction,
           tools: fromBlock ? [] : turnTools,
-          ...(provider ? { provider } : {}),
-          ...(model.trim() ? { model: model.trim() } : {}),
+          ...modelChoiceFields(modelChoice),
           ...(refNode ? { graph_ref_node: refNode.id, graph_ref_type: refNode.type, graph_ref_label: refNode.name } : {}),
         },
         controller.signal,
@@ -666,8 +666,8 @@ export function TwinAgentChat({
             {turnTools.length > 0 && <sup>{turnTools.length}</sup>}
           </button>
           <span className="sc-divider" />
-          <button type="button" className="sc-setting" title="Model for this turn" onClick={() => toggle('model')}>
-            {model || providers.data?.activeModel || 'Model'}
+          <button type="button" className="sc-setting" title="Model" onClick={() => toggle('model')}>
+            {modelLabel}
             <ChevronDown size={11} />
           </button>
           <button type="button" className="sc-setting" title="Reasoning effort" onClick={() => toggle('effort')}>
@@ -891,44 +891,7 @@ export function TwinAgentChat({
             </>
           )}
 
-          {popover === 'model' && (
-            <>
-              <label>
-                Provider
-                <select
-                  value={provider}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setProvider(e.target.value);
-                    setModel('');
-                  }}
-                >
-                  <option value="">Gateway default · {providers.data?.activeProvider || 'unconfigured'}</option>
-                  {providers.data?.providers.map((p) => (
-                    <option key={p.id} value={p.id} disabled={!p.configured}>
-                      {p.id}
-                      {p.configured ? '' : ' · not configured'}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Model
-                <input
-                  list="sc-model-list"
-                  value={model}
-                  disabled={busy}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder={providers.data?.activeModel || 'Provider default'}
-                />
-                <datalist id="sc-model-list">
-                  {models.data?.map((m) => <option key={m} value={m} />)}
-                </datalist>
-              </label>
-              {models.isError && <p>Model list unavailable. Enter a supported model ID.</p>}
-              <p>Overrides this turn only. Gateway defaults stay unchanged.</p>
-            </>
-          )}
+          {popover === 'model' && <ModelPicker disabled={busy} />}
 
           {popover === 'effort' && (
             <>
