@@ -191,6 +191,7 @@ export function applyToOperation(current: OperationView | undefined, event: Oper
     last_sequence: event.sequence,
     base_revision: olderRevision ? base.base_revision : (event.base_revision ?? base.base_revision),
     target_revision: olderRevision ? base.target_revision : (event.target_revision ?? base.target_revision),
+    target_key: event.target_key ?? base.target_key ?? null,
     message: event.message || base.message,
     severity: event.severity ?? base.severity,
     artifact_refs: olderRevision ? base.artifact_refs : mergeArtifacts(base.artifact_refs, event.artifact_refs ?? []),

@@ -542,6 +542,14 @@ async def get_node_model(
         # 404 / empty model even though the blob was safe in MinIO (MET-522/489).
         content, filename = _resolve_blob(wp)
         span.set_attribute("model.filename", filename)
+        # C3D: the revision's component ids go into the STEP product names,
+        # so the converter writes them into the GLB node extras and the
+        # viewer can select a part of a multi-part model by its component.
+        if Path(filename).suffix.lower() in (".step", ".stp"):
+            from twin_core.component_identity import stamp_step_for_node
+
+            content, stamped = stamp_step_for_node(content, name=wp.name, meta=wp.metadata)
+            span.set_attribute("model.component_ids", stamped)
 
         try:
             # MET-725: ConversionService.convert is synchronous and does a
@@ -575,6 +583,57 @@ async def get_node_model(
             cached=result.get("cached", False),
         )
         return result
+
+
+def _exact_glb(step: bytes, filename: str) -> tuple[bytes | None, str | None]:
+    """The OCCT tessellation of a STEP, or ``(None, why)``."""
+    from api_gateway.twin.render_recorder import convert_step_to_glb
+
+    try:
+        return convert_step_to_glb(step, filename), None
+    except Exception as exc:  # noqa: BLE001 - no mesh is "not evaluated"
+        return None, str(exc)[:200]
+
+
+def _read_wp_blob(wp: Any) -> bytes | None:
+    try:
+        content, _name = _resolve_blob(wp)
+        return content
+    except Exception as exc:  # noqa: BLE001 - an unreadable blob is "not available"
+        logger.info("wp_blob_unreadable", node_id=str(wp.id), error=str(exc)[:200])
+        return None
+
+
+@router.get("/nodes/{node_id}/assembly-comparison")
+async def get_assembly_comparison(
+    node_id: str,
+    refresh: bool = Query(
+        False, description="Recompute even when a record for this content exists"
+    ),
+) -> dict[str, Any]:
+    """Compare a CAD revision's components: pose, alignment, interference (spec section 7).
+
+    Each component is found by the id written into its GLB node; poses are
+    compared with the project's structured layout (L1). What cannot be
+    measured is ``not_evaluated`` with the reason. The record is stored on
+    the revision under ``assembly_comparison``.
+    """
+    from api_gateway.twin.preview_comparison import assembly_comparison_for_node
+
+    with tracer.start_as_current_span("twin.get_assembly_comparison") as span:
+        span.set_attribute("twin.node_id", node_id)
+        try:
+            uid = UUID(node_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid node ID format")
+        wp = await _twin.get_work_product(uid)
+        if wp is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        if wp.type != WorkProductType.CAD_MODEL:
+            raise HTTPException(status_code=400, detail=f"{wp.name} is not CAD geometry")
+        return await assembly_comparison_for_node(
+            _twin, wp, read_blob=_read_wp_blob, to_glb=_exact_glb, refresh=refresh
+        )
 
 
 # ---------------------------------------------------------------------------
