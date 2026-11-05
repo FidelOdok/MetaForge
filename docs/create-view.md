@@ -524,8 +524,11 @@ MetaForge's thinking bubble under it (see
 arrives. A send that fails stays in the conversation with *Retry*, *Edit*
 (back into the composer) and *Discard*, so a failure never loses the text.
 
-The model button beside the intents shows which model answers, and lets the
-person choose their own (see
+*Actions* beside the intents fills in a common request (where it stands,
+design this, run a stress check, review the gate, what is waiting, did it
+work) and switches to *Design*; nothing runs until it is sent (see
+[actions](generative-ui.md#actions)). The model button next to it shows which
+model answers, and lets the person choose their own (see
 [choosing the model](generative-ui.md#choosing-the-model)).
 
 The draft, the chosen intent, attached references and queued instructions

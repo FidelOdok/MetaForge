@@ -74,6 +74,28 @@ Engineering). It is one choice for both chats, kept in that browser
 saved provider that is no longer connected falls back to the default rather
 than failing every message.
 
+## Actions
+
+Both chats offer the main things the Claude Code plugin's commands do, as
+actions written in plain words (`dashboard/src/components/chat/quickActions.ts`):
+
+| Action | Plugin command it stands for |
+|---|---|
+| Where it stands | `/metaforge:status` |
+| Design this | `/metaforge:design` |
+| Run a stress check | `/metaforge:fea` |
+| Review the gate | `/metaforge:gate` |
+| What's waiting for me | `/metaforge:approvals` |
+| Did it work? | `/metaforge:verify` |
+
+Choosing one fills in the message about the selected part (Engineering) or
+the product (Create) and turns the agent's tools on: *Design* in Create, all
+tools in Engineering. Nothing runs until the person sends it, so a stray click
+never starts a paid design pass, and writes still wait for approval. The
+agent follows the matching playbook, the same procedure the plugin command
+uses. Create shows them under *Actions* beside the intents; Engineering lists
+them under `/` and offers the first three in an empty conversation.
+
 ## While the agent works
 
 A turn never leaves the conversation blank. As soon as a message is sent it

@@ -6,6 +6,7 @@ import { ReferenceChip } from './ReferenceChip';
 import { referenceRecord } from '../../api/endpoints/create';
 import { useCreation } from '../../hooks/use-creation';
 import { ModelPicker, useModelLabel } from '../chat/ModelPicker';
+import { QUICK_ACTIONS } from '../chat/quickActions';
 
 const INTENTS: Array<{ id: Intent; label: string; hint: string }> = [
   { id: 'ask', label: 'Ask', hint: 'Discuss the product. Nothing is changed.' },
@@ -37,7 +38,9 @@ export function CreateComposer({ projectId, tools, busy, placeholder, autoFocus 
   const submit = useCreateStore((s) => s.submit);
   const fileInput = useRef<HTMLInputElement>(null);
   const modelLabel = useModelLabel();
-  const [choosingModel, setChoosingModel] = useState(false);
+  // One panel under the intents at a time: the actions list or the model choice.
+  const [panel, setPanel] = useState<'actions' | 'model' | null>(null);
+  const toggle = (next: 'actions' | 'model') => setPanel((p) => (p === next ? null : next));
 
   const uploading = session.attachments.some((a) => a.state === 'uploading');
   const changeUnavailable = session.intent === 'change' && tools.change.length === 0;
@@ -68,44 +71,87 @@ export function CreateComposer({ projectId, tools, busy, placeholder, autoFocus 
         if (files.length) attach(projectId, files);
       }}
     >
-      <div className="cv-intents" role="radiogroup" aria-label="What should happen with this message">
-        {INTENTS.map((it) => (
-          <button
-            key={it.id}
-            type="button"
-            role="radio"
-            aria-checked={session.intent === it.id}
-            className={`cv-intent ${session.intent === it.id ? 'is-on' : ''}`}
-            title={it.hint}
-            onClick={() => setIntent(projectId, it.id)}
-          >
-            {it.label}
-          </button>
-        ))}
+      <div className="cv-intents">
+        <span className="cv-intent-group" role="radiogroup" aria-label="What should happen with this message">
+          {INTENTS.map((it) => (
+            <button
+              key={it.id}
+              type="button"
+              role="radio"
+              aria-checked={session.intent === it.id}
+              className={`cv-intent ${session.intent === it.id ? 'is-on' : ''}`}
+              title={it.hint}
+              onClick={() => setIntent(projectId, it.id)}
+            >
+              {it.label}
+            </button>
+          ))}
+        </span>
         <span className="cv-intent-hint">{INTENTS.find((i) => i.id === session.intent)?.hint}</span>
         <button
           type="button"
+          className="cv-model cv-quick-btn"
+          aria-expanded={panel === 'actions'}
+          title="Common requests, written for you to send"
+          onClick={() => toggle('actions')}
+        >
+          Actions
+          <ChevronDown size={11} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
           className="cv-model"
-          aria-expanded={choosingModel}
+          aria-expanded={panel === 'model'}
           title="Choose the model for your messages"
-          onClick={() => setChoosingModel((v) => !v)}
+          onClick={() => toggle('model')}
         >
           {modelLabel}
           <ChevronDown size={11} aria-hidden="true" />
         </button>
       </div>
 
-      {choosingModel && (
+      {panel === 'actions' && (
+        <div
+          className="cv-model-panel"
+          role="group"
+          aria-label="Actions"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setPanel(null);
+          }}
+        >
+          <ul className="cv-quick-actions">
+            {QUICK_ACTIONS.map((a) => (
+              <li key={a.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // These need the agent's tools, so the message goes as a design pass; writes still wait.
+                    setIntent(projectId, 'design');
+                    setDraft(projectId, a.prompt('this product'));
+                    setPanel(null);
+                  }}
+                >
+                  <strong>{a.label}</strong>
+                  <small>{a.hint}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="cv-quick-note">Fills in the message and switches to Design. Nothing runs until you send it.</p>
+        </div>
+      )}
+
+      {panel === 'model' && (
         <div
           className="cv-model-panel"
           role="group"
           aria-label="Model"
           onKeyDown={(e) => {
-            if (e.key === 'Escape') setChoosingModel(false);
+            if (e.key === 'Escape') setPanel(null);
           }}
         >
           <ModelPicker />
-          <button type="button" className="cv-model-done" onClick={() => setChoosingModel(false)}>
+          <button type="button" className="cv-model-done" onClick={() => setPanel(null)}>
             Done
           </button>
         </div>
