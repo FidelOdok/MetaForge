@@ -13,7 +13,7 @@ export function FieldNote({ children, testId }: { children: React.ReactNode; tes
     <div
       data-testid={testId}
       className="rounded px-3 py-2"
-      style={{ fontSize: 11, color: MUTED, background: 'rgba(40,42,48,0.6)', border: '1px solid rgba(65,72,90,0.2)' }}
+      style={{ fontSize: 12, color: MUTED, border: '1px solid var(--mf-r-65-72-90-0p2)' }}
     >
       {children}
     </div>
@@ -46,7 +46,7 @@ export function SimFieldPanel({ resultId, hasField, height = 360, title }: SimFi
       <div
         data-testid="field-loading"
         className="animate-pulse rounded-lg"
-        style={{ height, background: 'rgba(40,42,48,0.4)' }}
+        style={{ height, background: 'var(--mf-r-40-42-48-0p3)' }}
       />
     );
   }

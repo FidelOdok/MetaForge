@@ -211,6 +211,17 @@ promotion and guarded `ect.approve` against a *blank* approver, which is not
 the same as guarding it against a supplied one. Both now read the approver
 from the approval record, and both are in `HUMAN_AUTHORITY_TOOLS`.
 
+**Recording an approver without requiring one.** A few writes work without a
+person but mean more when one approved them. `twin.state_manufacturing_context`
+records an agent's values as assumptions; a value becomes `user_stated` only
+when a person approved the held call. Such tools are in
+`guardrails.APPROVER_RECORDED`: the dispatcher hands them the approver in the
+same reserved `__approved_by__` argument (taken from the approval, stripped
+from client arguments), but unlike a human-authority tool they are not
+refused to a service or a session without an approval surface; without a
+named person they can only propose, and a project policy's automatic
+approval names no person.
+
 ### Client intelligence mode and gates in the chat
 
 A run can have its phase work done by the connected MCP client (Claude Code,

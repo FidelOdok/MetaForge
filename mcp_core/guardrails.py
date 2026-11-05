@@ -316,6 +316,23 @@ def requires_human_authority(tool_id: str) -> bool:
     return tool_id in HUMAN_AUTHORITY_TOOLS
 
 
+#: Writes that work without a person but record one when a person approved
+#: the call. Unlike :data:`HUMAN_AUTHORITY_TOOLS` they are not refused to a
+#: service or a stdio session: without a named approver they only propose.
+#:
+#: ``twin.state_manufacturing_context`` takes an agent's values as
+#: assumptions. A value becomes ``user_stated`` only when the call was held
+#: and a person approved it, and the person recorded is the approver the
+#: dispatcher hands over in :data:`APPROVED_BY_ARG`, never a name the model
+#: wrote. A project policy's automatic approval names no person.
+APPROVER_RECORDED: frozenset[str] = frozenset({"twin.state_manufacturing_context"})
+
+
+def records_approver(tool_id: str) -> bool:
+    """Does this tool record the approving person when one approved the call?"""
+    return tool_id in APPROVER_RECORDED
+
+
 # -- What a project's approval policy may decide (FORGE-780) -----------------
 
 #: Writes that only illustrate: a concept sketch, image or mesh, a check of

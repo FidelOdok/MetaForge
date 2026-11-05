@@ -14,7 +14,10 @@ time a concept assembly names the part (``twin.record_decision`` with an
   name, with the same rule the design gate uses; once stored, the id is
   carried to the item's next revisions, so later matching is by id;
 * on face semantic tags (``CMP-x::<tag>``), so a face says which component
-  made it.
+  made it;
+* in STEP product names, ``"<name> [CMP-x]"`` (:func:`stamp_step_component_ids`),
+  on a STEP export and on the STEP the OCCT converter tessellates for the
+  viewer, which writes the id into each GLB node's ``extras``.
 
 Nothing is renamed and there is no new store: the mapping lives in the twin,
 on the records above. A decision recorded before ids existed is read as if
@@ -118,6 +121,149 @@ def tag_core(tag: str | None) -> str | None:
     if tag and tag.startswith(PREFIX) and TAG_SEPARATOR in tag:
         return tag.split(TAG_SEPARATOR, 1)[1]
     return tag
+
+
+# ---------------------------------------------------------------------------
+# Component ids in STEP product names (SYNC-001, SYNC-002)
+# ---------------------------------------------------------------------------
+
+#: A product name that carries its component: ``"Base plate [CMP-base-plate]"``.
+#: Any STEP reader keeps a product name, so the id survives a round trip
+#: through other CAD tools, and the OCCT converter reads it back into GLB
+#: node extras (``tools/occt-converter/component_ids.py`` mirrors this rule).
+_STEP_NAME = re.compile(r"^(?P<name>.*?)\s*\[(?P<cid>CMP-[A-Za-z0-9-]+)\]\s*$")
+#: ``PRODUCT('id','name',...`` and ``NEXT_ASSEMBLY_USAGE_OCCURRENCE('id','name',...``.
+_STEP_ENTITY = re.compile(
+    r"(?<![A-Z_])(?P<kind>PRODUCT|NEXT_ASSEMBLY_USAGE_OCCURRENCE)\s*\(\s*"
+    r"'(?P<first>(?:[^']|'')*)'\s*,\s*'(?P<second>(?:[^']|'')*)'"
+)
+#: How OCCT names a product nobody named ("Open CASCADE STEP translator 7.7 1").
+_DEFAULT_PRODUCT_PREFIX = "open cascade"
+
+
+def product_name_with_id(name: str, component_id: str) -> str:
+    """``"Base"`` and ``"CMP-base"`` to ``"Base [CMP-base]"``."""
+    base = str(name or "").strip()
+    found = _STEP_NAME.match(base)
+    if found:
+        base = found.group("name").strip()
+    return f"{base} [{component_id}]" if base else f"[{component_id}]"
+
+
+def split_product_name(name: str | None) -> tuple[str, str | None]:
+    """``"Base [CMP-base]"`` to ``("Base", "CMP-base")``; a plain name has no id."""
+    text = str(name or "").strip()
+    found = _STEP_NAME.match(text)
+    if found:
+        return found.group("name").strip() or found.group("cid"), found.group("cid")
+    if is_component_id(text) and re.fullmatch(r"CMP-[A-Za-z0-9-]+", text):
+        return text, text
+    return text, None
+
+
+def _step_unescape(value: str) -> str:
+    return value.replace("''", "'")
+
+
+def _step_escape(value: str) -> str:
+    # Only ASCII travels unencoded in a STEP string; anything else is dropped
+    # from the display part (the id itself is always ASCII).
+    return value.encode("ascii", "ignore").decode("ascii").replace("'", "''")
+
+
+def stamp_step_component_ids(
+    step: bytes,
+    *,
+    item_name: str,
+    component_id: str | None = None,
+    part_component_ids: dict[str, str] | None = None,
+) -> tuple[bytes, int]:
+    """Write component ids into a STEP's product names. Pure, never raises.
+
+    Returns ``(step, products stamped)``. An assembly's members are matched
+    to ``part_component_ids`` by the exact name key (no substring guess, so a
+    wrong product is never stamped), on both the ``PRODUCT`` and the
+    ``NEXT_ASSEMBLY_USAGE_OCCURRENCE`` (instance) names. ``component_id`` goes
+    on the product named like the item, or on the only product there is
+    (which, when OCCT left its default name, is renamed after the item). A
+    name that already carries an id keeps it. Geometry is never touched.
+    """
+    members: dict[str, str] = {}
+    for member, cid in (part_component_ids or {}).items():
+        if is_component_id(cid) and name_key(member):
+            members[name_key(member)] = str(cid)
+    single = component_id if is_component_id(component_id) else None
+    if not members and not single:
+        return step, 0
+    try:
+        text = step.decode("latin-1")
+    except Exception:  # noqa: BLE001 - not a text STEP: nothing to stamp
+        return step, 0
+    if "ISO-10303-21" not in text[:200]:
+        return step, 0
+    product_count = sum(1 for m in _STEP_ENTITY.finditer(text) if m.group("kind") == "PRODUCT")
+    item_key = name_key(item_name)
+    stamped = 0
+
+    def replace(found: re.Match[str]) -> str:
+        nonlocal stamped
+        kind, first, second = found.group("kind"), found.group("first"), found.group("second")
+        name = _step_unescape(second)
+        if split_product_name(name)[1]:
+            return found.group(0)
+        cid = members.get(name_key(name))
+        display = name
+        if cid is None and kind == "PRODUCT" and single:
+            if name_key(name) == item_key and item_key:
+                cid = single
+            elif product_count == 1:
+                cid = single
+                if not name_key(name) or name.lower().startswith(_DEFAULT_PRODUCT_PREFIX):
+                    display = item_name
+        if cid is None:
+            return found.group(0)
+        new_name = _step_escape(product_name_with_id(display, cid))
+        # A product's id usually repeats its name; keep the two equal.
+        new_first = new_name if (kind == "PRODUCT" and first == second) else first
+        stamped += 1
+        whole, at = found.group(0), found.start(0)
+        fs, fe = found.start("first") - at, found.end("first") - at
+        ss, se = found.start("second") - at, found.end("second") - at
+        return whole[:fs] + new_first + whole[fe:ss] + new_name + whole[se:]
+
+    out = _STEP_ENTITY.sub(replace, text)
+    if not stamped:
+        return step, 0
+    logger.info("step_component_ids_stamped", item=item_name, products=stamped)
+    return out.encode("latin-1", errors="replace"), stamped
+
+
+def step_ids_for_node(meta: dict[str, Any] | None) -> tuple[str | None, dict[str, str]]:
+    """``(component_id, {member: id})`` a CAD revision's metadata names."""
+    m = meta or {}
+    single = m.get(COMPONENT_ID_KEY)
+    parts = m.get(PART_COMPONENT_IDS_KEY)
+    members = (
+        {str(k): str(v) for k, v in parts.items() if is_component_id(v)}
+        if isinstance(parts, dict)
+        else {}
+    )
+    return (str(single) if is_component_id(single) else None), members
+
+
+def stamp_step_for_node(
+    step: bytes, *, name: str, meta: dict[str, Any] | None
+) -> tuple[bytes, int]:
+    """:func:`stamp_step_component_ids` with the ids a CAD revision carries."""
+    single, members = step_ids_for_node(meta)
+    if not single and not members:
+        return step, 0
+    with tracer.start_as_current_span("component_identity.stamp_step") as span:
+        out, n = stamp_step_component_ids(
+            step, item_name=name, component_id=single, part_component_ids=members
+        )
+        span.set_attribute("component_identity.products_stamped", n)
+        return out, n
 
 
 def _assembly_parts(meta: dict[str, Any]) -> list[dict[str, Any]]:
@@ -329,10 +475,15 @@ __all__ = [
     "issue_ids",
     "match_name",
     "name_key",
+    "product_name_with_id",
     "project_identity",
     "slug",
+    "split_product_name",
     "stamp_cad_revision",
     "stamp_project_cad",
+    "stamp_step_component_ids",
+    "stamp_step_for_node",
+    "step_ids_for_node",
     "tag_core",
     "tag_with_component",
 ]

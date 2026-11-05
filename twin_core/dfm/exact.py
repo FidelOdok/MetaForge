@@ -399,6 +399,7 @@ def evaluate_exact(
     production_goal: str | None = None,
     previous_items: list[VerificationItem] | None = None,
     build_direction_source: str = "default +Z (no orientation stated)",
+    build_rotation_deg: float | None = None,
 ) -> DfmFindingSet:
     """The exact findings of one component. See the module docstring."""
     with tracer.start_as_current_span("twin.dfm.evaluate_exact") as span:
@@ -444,6 +445,7 @@ def evaluate_exact(
             "kernel": (measured or {}).get("kernel"),
             "build_direction": (measured or {}).get("build_direction") or [0.0, 0.0, 1.0],
             "build_direction_source": build_direction_source,
+            "build_rotation_deg": build_rotation_deg,
             "wall_method": wall.get("method"),
             "wall_limits": list(wall.get("limits") or []),
             "wall_samples": wall.get("samples"),
@@ -464,7 +466,7 @@ def evaluate_exact(
             previous=list(previous_items or []),
             geometry_ref=geometry_ref,
         )
-        inputs = {
+        inputs: dict[str, Any] = {
             "profile": profile.ref,
             "geometry_ref": geometry_ref,
             "context": context.model_dump(mode="json"),
@@ -473,6 +475,12 @@ def evaluate_exact(
             "tolerances_stated": tolerances_stated,
             "production_goal": production_goal,
         }
+        if build_rotation_deg is not None:
+            # Only when stated, so sets made before rotation existed still match.
+            inputs["build_rotation_deg"] = build_rotation_deg
+        if not build_direction_source.startswith("default"):
+            # Who stated the direction is part of what the set says.
+            inputs["build_direction_source"] = build_direction_source
         out = DfmFindingSet(
             component_id=component_id,
             component_name=component_name,

@@ -64,6 +64,15 @@ and view tabs (Files, Knowledge, Requirements, Approvals) share the Files
 page's chip, with the selected one filled. Styles are in
 `dashboard/src/styles/page.css`.
 
+**Page sections.** On Requirements, Simulation and BOM every section is a
+`Panel` (`dashboard/src/components/ui/Panel.tsx`), the Files page's glass
+card: a small uppercase label with its count and the section's buttons in the
+header, and tables running edge to edge below it. Search is the Files pill
+(`SearchField`), loading is one quiet line, and an empty section says so with
+the Files empty state (`EmptyState`, used everywhere): a faint icon, a short
+line and one plain sentence. Figures, such as Requirements' traceability
+coverage, are small labelled tiles inside their panel.
+
 Every route below has a sidebar entry. Two entries run the other way —
 **Requirements** (`/requirements`) and **Evals** (`/evals`) are in the
 rail but have no section here yet. The default landing page is

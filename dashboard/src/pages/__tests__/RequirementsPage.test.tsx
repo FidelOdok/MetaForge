@@ -166,8 +166,8 @@ describe('RequirementsPage', () => {
       data: undefined,
       isLoading: true,
     } as unknown as ReturnType<typeof useRequirementQuality>);
-    const { container } = render(<RequirementsPage />);
-    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    render(<RequirementsPage />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading');
   });
 
   it('shows empty state when there are no requirements', () => {

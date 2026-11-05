@@ -272,11 +272,13 @@ def _dfm_row(c: Any) -> dict[str, Any] | None:
                 "kernel",
                 "build_direction",
                 "build_direction_source",
+                "build_rotation_deg",
                 "wall_method",
                 "wall_limits",
                 "wall_samples",
                 "hole_limits",
                 "measured",
+                "slicer",
             )
             if k in c.exact_evidence
         },
@@ -288,6 +290,24 @@ def _md_value(v: Any) -> str:
     if v is None:
         return "unknown"
     return str(v).replace("|", "/")
+
+
+def _slicer_line(slicer: dict[str, Any]) -> str:
+    """One sentence on the slicer cross-check: evidence, never a verdict."""
+    if slicer.get("status") != "evaluated":
+        return f"Slicer cross-check not evaluated: {slicer.get('reason') or 'no reason given'}."
+    support = slicer.get("support_volume_cm3")
+    text = (
+        f"Slicer cross-check ({slicer.get('slicer') or 'slicer.slice'}, "
+        f"{slicer.get('printer_basis') or slicer.get('printer')}): print time "
+        f"{slicer.get('print_time') or slicer.get('print_time_s')} (an estimate), support "
+        + (f"{support} cm3" if support is not None else "not measured")
+        + f", filament {_md_value(slicer.get('filament_cm3'))} cm3."
+    )
+    warnings = slicer.get("warnings") or []
+    if warnings:
+        text += " Slicer warnings: " + "; ".join(str(w) for w in warnings[:5]) + "."
+    return text + " Evidence only; it does not change the status."
 
 
 def render_markdown(report: dict[str, Any], *, generated_at: str = "") -> str:
@@ -335,6 +355,10 @@ def render_markdown(report: dict[str, Any], *, generated_at: str = "") -> str:
                 + "; ".join(m.get("wall_limits") or [])
                 + "."
             )
+        slicer = m.get("slicer")
+        if isinstance(slicer, dict):
+            lines.append("")
+            lines.append(_slicer_line(slicer))
         if d["findings"]:
             lines += ["", "| Rule | Severity | Measured | Limit | Anchor | Decision |"]
             lines.append("|---|---|---|---|---|---|")

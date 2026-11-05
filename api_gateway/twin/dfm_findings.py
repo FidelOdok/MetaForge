@@ -86,6 +86,8 @@ RELEVANT_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "quantity",
         "machine_or_supplier_profile",
         "tolerances",
+        # The exact FDM checks measure overhangs and build height along it.
+        "print_orientation",
     }
 )
 #: Item types whose head move changes a component's geometry.
@@ -1068,6 +1070,30 @@ async def on_head_moved(twin: Any, item: Any, head_revision: int, head_node_id: 
         logger.warning("dfm_recompute_failed", item_key=getattr(item, "key", None), error=str(exc))
 
 
+def _product_sets_of_component(nodes: list[Any], key: str) -> list[Any]:
+    """Valid sets of component ``key`` (``MFC-<component>``) read under the product's context."""
+    from api_gateway.twin.manufacturing_context import (
+        ManufacturingContextError,
+        item_key_for,
+    )
+
+    out: list[Any] = []
+    for n in nodes:
+        if not _valid(n) or key in _pinned_keys(n):
+            continue
+        body = (n.metadata or {}).get(META_KEY) or {}
+        for name in (body.get("component_name"), body.get("component_id")):
+            if not name:
+                continue
+            try:
+                if item_key_for(str(name)) == key:
+                    out.append(n)
+                    break
+            except ManufacturingContextError:
+                continue
+    return out
+
+
 async def on_context_written(twin: Any, project_id: str | UUID, outcome: Any) -> None:
     """After a manufacturing context write: recompute or revalidate. Never raises."""
     from twin_core.consistency.record_pins import set_record_status
@@ -1092,9 +1118,22 @@ async def on_context_written(twin: Any, project_id: str | UUID, outcome: Any) ->
                 )
             )
         ]
+        changed = set(getattr(outcome, "changed", []) or [])
+        if key != "MFC-PROJECT" and changed & RELEVANT_CONTEXT_FIELDS:
+            # A component's own context overrides the product's from now on:
+            # its sets read under the product's context are out of date too.
+            for n in _product_sets_of_component(nodes, key):
+                if n in under:
+                    continue
+                await set_record_status(
+                    twin,
+                    n.id,
+                    StalenessStatus.STALE,
+                    f"the component now has its own manufacturing context {stored.ref}",
+                )
+                under.append(n)
         if not under:
             return
-        changed = set(getattr(outcome, "changed", []) or [])
         if changed & RELEVANT_CONTEXT_FIELDS:
             affected = sorted(
                 {str(((n.metadata or {}).get(META_KEY) or {}).get("component_id")) for n in under}
@@ -1527,9 +1566,36 @@ class DfmService:
         view = await dfm_view(self._twin, project_id, include_history=history)
         return view.model_dump(mode="json")
 
+    # -- the manufacturing context, the report and the checklist ------------
+
+    async def context(self, project_id: str, component: str | None = None) -> dict[str, Any]:
+        from api_gateway.twin.manufacturing_tools import get_context
+
+        return await get_context(self._twin, project_id, component)
+
+    async def state_context(self, project_id: str, **kwargs: Any) -> dict[str, Any]:
+        from api_gateway.twin.manufacturing_tools import state_context
+
+        return await state_context(self._twin, project_id, **kwargs)
+
+    async def report(self, project_id: str) -> dict[str, Any]:
+        from api_gateway.twin.manufacturing_tools import get_report
+
+        return await get_report(self._twin, project_id)
+
+    async def checklist(self, project_id: str) -> dict[str, Any]:
+        from api_gateway.twin.manufacturing_tools import get_checklist
+
+        return await get_checklist(self._twin, project_id)
+
 
 def make_dfm_service(twin: Any) -> DfmService:
-    """The service ``twin.evaluate_dfm`` and ``twin.get_dfm_findings`` call."""
+    """The service the DFM and manufacturing context tools call.
+
+    ``twin.evaluate_dfm``, ``twin.get_dfm_findings``,
+    ``twin.get_manufacturing_context``, ``twin.state_manufacturing_context``,
+    ``twin.get_dfm_report`` and ``twin.get_release_checklist``.
+    """
     return DfmService(twin)
 
 

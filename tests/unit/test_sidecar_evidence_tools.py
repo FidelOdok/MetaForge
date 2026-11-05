@@ -37,6 +37,11 @@ WIRED = {
     # C3D slice 4: heuristic DFM findings, evaluated and read.
     "twin.evaluate_dfm",
     "twin.get_dfm_findings",
+    # The manufacturing context, the DFM report and the release checklist.
+    "twin.get_manufacturing_context",
+    "twin.state_manufacturing_context",
+    "twin.get_dfm_report",
+    "twin.get_release_checklist",
     "twin.commit_hazard_analysis",
     "twin.commit_system_architecture",
     "twin.commit_technical_drawing",

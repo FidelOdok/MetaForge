@@ -72,7 +72,15 @@ export type DimensionView =
     };
 
 export interface ComparisonCheck {
-  check: 'bounding_box' | 'dimensions' | 'volume' | 'surface_distance' | 'features';
+  check:
+    | 'bounding_box'
+    | 'dimensions'
+    | 'volume'
+    | 'surface_distance'
+    | 'features'
+    | 'component_pose'
+    | 'component_alignment'
+    | 'interference';
   outcome: 'pass' | 'fail' | 'not_evaluated';
   detail: string;
   [value: string]: unknown;
@@ -83,7 +91,15 @@ export interface ComparisonRecord {
   checks: ComparisonCheck[];
   discrepancies: ComparisonCheck[];
   tolerance: { abs_mm: number; rel: number; volume_rel: number; linear_mm: number; basis: string; source: string };
-  preview: { op: string; definition_hash: string | null; volume_mm3: number; intended_through_holes: number; sketch_ref?: string };
+  /** `op` is `multi_feature` for a feature tree with no L2 preview (only `features` is measured). */
+  preview: {
+    op: string;
+    definition_hash: string | null;
+    volume_mm3: number | null;
+    intended_through_holes: number | null;
+    intended_topology?: { genus?: number; shells?: number | null; basis?: string; reason?: string };
+    sketch_ref?: string;
+  };
   item_ref?: string;
   compared_at: string;
 }

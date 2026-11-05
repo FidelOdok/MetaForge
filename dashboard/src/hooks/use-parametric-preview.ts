@@ -7,6 +7,8 @@ import { amountOf, isDirty, withOverrides, type PreviewDefinition, type PreviewO
 import { buildPreviewTimed, type PreviewBuild } from '../lib/preview/buildPreview';
 import { parametricDisplay, type ParametricDisplay } from '../lib/preview/display';
 import { NO_LENGTH_EDITS, applyLength, geometryPayload, type LengthEdits } from '../lib/preview/lineLength';
+import type { OperationView } from '../lib/operations-reducer';
+import { useProjectOperations } from '../store/operations-store';
 
 export const parametricPreviewKeys = {
   definition: (projectId: string, sketchKey: string, featureId: string | null, jobId: string | null) =>
@@ -15,6 +17,39 @@ export const parametricPreviewKeys = {
 };
 
 const RUNNING = new Set(['queued', 'running']);
+/** How often the twin is polled while the operations stream is offline. */
+export const FALLBACK_POLL_MS = 1_500;
+/**
+ * Exact build events that change what the stage shows (the gateway's
+ * `exact_cad` event table): the exact B-Rep was built, a validated revision
+ * was recorded; a terminal state is the build's verdict (`validation_completed`
+ * arrives as `completed`) or its failure.
+ */
+const SWAP_STAGES = new Set(['exact_geometry_ready', 'validation_completed', 'artifact_ready']);
+const VERDICT_STATES = new Set(['completed', 'failed', 'stale', 'superseded', 'cancelled']);
+
+/**
+ * What the stream has said about the exact builds this preview cares about:
+ * its own job's operation and any other build of the same CAD item. Changes
+ * only when one of the events above arrives.
+ */
+export function buildSignal(
+  ops: Record<string, OperationView>,
+  operationId: string | null,
+  targetKey: string | null,
+): string {
+  const parts: string[] = [];
+  for (const op of Object.values(ops)) {
+    const mine = operationId !== null && op.operation_id === operationId;
+    const sameTarget = !!targetKey && op.target_key === targetKey && op.kind === 'job';
+    if (!mine && !sameTarget) continue;
+    const stages = op.stages.map((s) => s.stage_id).filter((s) => SWAP_STAGES.has(s)).sort();
+    const verdict = VERDICT_STATES.has(op.state) ? op.state : '';
+    if (!stages.length && !verdict) continue;
+    parts.push(`${op.operation_id}:${verdict}:${stages.join(',')}`);
+  }
+  return parts.sort().join('|');
+}
 
 function refusalText(err: unknown): string {
   const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -60,6 +95,11 @@ export interface ParametricPreviewState {
   retry: () => Promise<void>;
   retrying: boolean;
   jobId: string | null;
+  /**
+   * How the stage learns that the exact build ended: from the operations
+   * stream, or by polling the twin while the stream is offline.
+   */
+  updates: 'stream' | 'polling' | 'idle';
 }
 
 /**
@@ -68,8 +108,12 @@ export interface ParametricPreviewState {
  * Every parameter change rebuilds the mesh here, in the browser, at once
  * (no network call). A commit (drag release, Enter, Apply) writes the new
  * parameter as the sketch's next revision with its `base_revision`, and the
- * gateway schedules the one exact build; the definition is then polled
- * until the job ends, so the stage can swap to the validated L3 model.
+ * gateway schedules the one exact build. The stage then follows that build
+ * on the operations stream (the store `use-operations` keeps): when it
+ * reports the exact geometry built, the build's verdict or its failure, the
+ * definition is read again, so the stage swaps to the validated L3 model or
+ * shows the failure. Only while the stream is not live is the twin polled
+ * instead, every {@link FALLBACK_POLL_MS} ms.
  */
 export function useParametricPreview(
   projectId: string | null | undefined,
@@ -84,16 +128,45 @@ export function useParametricPreview(
   const [commitError, setCommitError] = useState<string | null>(null);
   const [buildMs, setBuildMs] = useState<number | null>(null);
   const enabled = !!projectId && !!sketchKey;
+  const operations = useProjectOperations(projectId);
+  const streamLive = operations.health === 'live';
 
   const query = useQuery({
     queryKey: parametricPreviewKeys.definition(projectId ?? '', sketchKey ?? '', featureId, jobId),
     queryFn: ({ signal }) => getPreviewDefinition(projectId!, sketchKey!, { featureId, jobId }, signal),
     enabled,
-    // While the exact build runs, look again until it ends (polling the twin).
-    refetchInterval: (q) => (q.state.data?.build && RUNNING.has(q.state.data.build.status) ? 1_500 : false),
+    // While the exact build runs and the stream is offline, poll the twin.
+    refetchInterval: (q) =>
+      !streamLive && q.state.data?.build && RUNNING.has(q.state.data.build.status) ? FALLBACK_POLL_MS : false,
     retry: false,
   });
   const definition = query.data;
+  const building = !!definition?.build && RUNNING.has(definition.build.status);
+
+  // The stream's word on this build: read the definition again when it changes.
+  const operationId = definition?.build?.operation_id ?? (jobId ? `job:${jobId}` : null);
+  const targetKey = definition?.cad?.item_key ?? null;
+  const watched = `${operationId ?? ''}|${targetKey ?? ''}`;
+  const signal = useMemo(
+    () => buildSignal(operations.ops.byId, operationId, targetKey),
+    [operations.ops.byId, operationId, targetKey],
+  );
+  const lastSignal = useRef<{ watched: string; signal: string } | null>(null);
+  const refetch = query.refetch;
+  useEffect(() => {
+    const last = lastSignal.current;
+    lastSignal.current = { watched, signal };
+    // The first reading of what is watched is the history already known
+    // (the definition just read covers it); only a change after it is news.
+    if (!last || last.watched !== watched || last.signal === signal || !enabled) return;
+    const previous = last.signal;
+    void refetch();
+    // A new verdict may have added a revision: the twin's lists are stale too.
+    const before = new Set(previous.split('|'));
+    if (signal.split('|').some((part) => !before.has(part) && /:(completed|failed|stale|superseded|cancelled):/.test(part))) {
+      void qc.invalidateQueries({ queryKey: twinKeys.all });
+    }
+  }, [signal, watched, enabled, refetch, qc]);
 
   const effective = useMemo(() => (definition ? withOverrides(definition, overrides) : undefined), [definition, overrides]);
   const built = useMemo(() => {
@@ -252,5 +325,6 @@ export function useParametricPreview(
     retry,
     retrying,
     jobId,
+    updates: building ? (streamLive ? 'stream' : 'polling') : 'idle',
   };
 }

@@ -185,6 +185,66 @@ async def _context(twin: Any, pid: UUID, name: str, cid: str) -> tuple[Any, Any]
     return stored, process_context(stored)
 
 
+class Orientation:
+    """The build direction the exact checks measure along, and where it came from."""
+
+    __slots__ = ("direction", "rotation_deg", "source", "origin")
+
+    def __init__(
+        self,
+        direction: tuple[float, float, float],
+        rotation_deg: float | None,
+        source: str,
+        origin: str,
+    ) -> None:
+        self.direction = direction
+        self.rotation_deg = rotation_deg
+        #: In words, for the evidence: ``stated in the request``, ``manufacturing
+        #: context MFC-...@n (stated by a person)``, ``default +Z ...``.
+        self.source = source
+        #: ``request``, ``context`` or ``default``.
+        self.origin = origin
+
+
+def resolve_orientation(
+    stored: Any, explicit: list[float] | tuple[float, ...] | None
+) -> Orientation:
+    """The request's direction when it names one, else the context's, else +Z.
+
+    The context's ``print_orientation`` is read only while it is current (an
+    assumption made stale by a process change is ignored).
+    """
+    from twin_core.manufacturing import Authority
+
+    if explicit is not None:
+        values = tuple(float(v) for v in explicit)
+        if len(values) != 3:
+            raise ExactDfmError("build_direction is three numbers")
+        return Orientation(
+            (values[0], values[1], values[2]), None, "stated in the request", "request"
+        )
+    if stored is not None:
+        entry = stored.record.get("print_orientation")
+        if entry.known and not entry.stale and isinstance(entry.value, dict):
+            d = [float(v) for v in entry.value.get("build_direction") or []]
+            if len(d) == 3:
+                who = (
+                    "stated by a person"
+                    if entry.authority is Authority.USER_STATED
+                    else "assumed, may change"
+                )
+                rotation = entry.value.get("rotation_deg")
+                return Orientation(
+                    (d[0], d[1], d[2]),
+                    float(rotation) if isinstance(rotation, int | float) else None,
+                    f"manufacturing context {stored.ref} ({who})",
+                    "context",
+                )
+    return Orientation(
+        DEFAULT_BUILD_DIRECTION, None, "default +Z (no orientation stated)", "default"
+    )
+
+
 def _context_facts(stored: Any) -> tuple[bool, str | None]:
     """``(tolerances stated, production goal)`` from a stored context."""
     if stored is None:
@@ -226,7 +286,7 @@ async def schedule(
         )
         ref = f"{item.key}@{revision}"
         span.set_attribute("item.ref", ref)
-        _stored, ctx = await _context(twin, pid, name, cid)
+        stored, ctx = await _context(twin, pid, name, cid)
         profile = profile_for_process(ctx.process)
         if profile is None or not profile.exact_checks:
             reason = (
@@ -236,7 +296,11 @@ async def schedule(
             )
             logger.info("dfm_exact_not_scheduled", item_ref=ref, reason=reason)
             return {"scheduled": False, "item_ref": ref, "component_id": cid, "reason": reason}
-        direction = list(build_direction or DEFAULT_BUILD_DIRECTION)
+        # The request's direction overrides the context's print orientation.
+        orientation = resolve_orientation(stored, build_direction)
+        explicit = list(orientation.direction) if orientation.origin == "request" else None
+        direction = list(orientation.direction)
+        span.set_attribute("dfm.orientation", orientation.origin)
         if mark_pending:
             from api_gateway.twin.dfm_findings import evaluate_project
 
@@ -257,7 +321,7 @@ async def schedule(
                 pid,
                 node_id=str(node.id),
                 trigger=trigger,
-                build_direction=direction,
+                build_direction=explicit,
                 service=service,
             )
 
@@ -276,6 +340,8 @@ async def schedule(
                 # No trigger here: a validation and a recompute of the same
                 # revision are the same work, so they coalesce into one job.
                 "build_direction": direction,
+                # A retry re-reads the context unless the request named it.
+                "build_direction_explicit": explicit is not None,
             },
             work,
             session_id=session_id,
@@ -292,6 +358,8 @@ async def schedule(
             "item_ref": ref,
             "component_id": cid,
             "profile": profile.ref,
+            "build_direction": direction,
+            "build_direction_source": orientation.source,
             **dict(job_runner.reply(job, reused)),
         }
 
@@ -304,12 +372,21 @@ def exact_retry(arguments: dict[str, Any]) -> Any:
     project_id = arguments.get("project_id")
     if not node_id or not project_id:
         raise ValueError("the failed exact DFM job names no revision")
+    explicit = arguments.get("build_direction_explicit")
+    stored_direction = arguments.get("build_direction")
+    if explicit is None:
+        # A job stored before the flag existed: only a non-default direction
+        # can have come from the request.
+        explicit = isinstance(stored_direction, list) and [
+            float(v) for v in stored_direction
+        ] != list(DEFAULT_BUILD_DIRECTION)
+    named = stored_direction if explicit else None
     return lambda: run_exact(
         get_twin(),
         str(project_id),
         node_id=str(node_id),
         trigger="retry",
-        build_direction=arguments.get("build_direction"),
+        build_direction=named,
     )
 
 
@@ -380,6 +457,38 @@ def _signatures(measured: dict[str, Any] | None) -> dict[str, str]:
     return out
 
 
+async def _slicer_evidence(
+    svc: Any,
+    *,
+    profile: Any,
+    ctx: Any,
+    measured: dict[str, Any] | None,
+    step: bytes | None,
+    ref: str,
+    direction: tuple[float, float, float],
+    enabled: bool | None,
+) -> dict[str, Any] | None:
+    """The slicer cross-check record for an FDM set, or ``None`` when it does not apply."""
+    from api_gateway.twin import dfm_slicer
+
+    if enabled is False or getattr(profile, "id", None) != "fdm":
+        return None
+    if measured is None or svc is None:
+        return dfm_slicer.not_evaluated(
+            "no_step",
+            "the exact measurement did not run, so the revision was not sliced",
+            geometry_ref=ref,
+        )
+    return await dfm_slicer.cross_check(
+        svc.invoke_tool,
+        step=step,
+        geometry_ref=ref,
+        machine=ctx.machine,
+        material=ctx.material,
+        build_direction=direction,
+    )
+
+
 def _incomplete_reason(text: str) -> str:
     lowered = text.lower()
     if "no machine" in lowered or "machine is unknown" in lowered:
@@ -407,8 +516,14 @@ async def run_exact(
     trigger: str = "validated",
     build_direction: list[float] | tuple[float, float, float] | None = None,
     service: Any = None,
+    slicer_check: bool | None = None,
 ) -> dict[str, Any]:
-    """Measure, evaluate and store the exact set of one validated revision."""
+    """Measure, evaluate and store the exact set of one validated revision.
+
+    ``build_direction`` given here overrides the context's print orientation.
+    ``slicer_check`` ``False`` skips the slicer cross-check; ``None`` runs it
+    unless ``METAFORGE_DFM_SLICER_CHECK`` switches it off.
+    """
     from api_gateway.twin.dfm_findings import (
         Gathered,
         _annotate_outputs,
@@ -431,17 +546,14 @@ async def run_exact(
             raise ExactDfmError(
                 f"no exact checks apply to {ref} under {ctx.process or 'no process'}"
             )
-        direction = tuple(float(v) for v in (build_direction or DEFAULT_BUILD_DIRECTION))
-        if len(direction) != 3:
-            raise ExactDfmError("build_direction is three numbers")
-        direction_source = (
-            "default +Z (no orientation stated)"
-            if tuple(direction) == DEFAULT_BUILD_DIRECTION
-            else "stated in the request"
-        )
+        # The request's direction wins; else the context's print orientation; else +Z.
+        orientation = resolve_orientation(stored, build_direction)
+        direction = orientation.direction
+        span.set_attribute("dfm.orientation", orientation.origin)
         svc = _service(service)
         measured: dict[str, Any] | None = None
         error: str | None = None
+        step: bytes | None = None
         if svc is None:
             error = "the CAD adapter is not available"
         else:
@@ -468,6 +580,16 @@ async def run_exact(
             sequence=20,
             message=MSG_MEASURED if measured is not None else MSG_FAILED,
         )
+        slicer = await _slicer_evidence(
+            svc,
+            profile=profile,
+            ctx=ctx,
+            measured=measured,
+            step=step,
+            ref=ref,
+            direction=direction,
+            enabled=slicer_check,
+        )
         async with _lock(pid):
             existing = await _sets(twin, pid)
             previous: list[VerificationItem] = []
@@ -492,8 +614,12 @@ async def run_exact(
                 tolerances_stated=tolerances,
                 production_goal=goal,
                 previous_items=previous,
-                build_direction_source=direction_source,
+                build_direction_source=orientation.source,
+                build_rotation_deg=orientation.rotation_deg,
             )
+            if slicer is not None:
+                # Evidence only: the status above is already set and stays.
+                fs.exact_evidence["slicer"] = slicer
             gathered = Gathered(
                 component_id=cid,
                 name=name,

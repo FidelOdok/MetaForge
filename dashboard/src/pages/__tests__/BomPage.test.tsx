@@ -47,9 +47,8 @@ describe('BomPage', () => {
 
   it('shows loading state', () => {
     mockUseBom.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useBom>);
-    const { container } = render(<BomPage />);
-    // KC renders animate-pulse skeleton rows (no data-testid)
-    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+    render(<BomPage />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading');
   });
 
   it('shows empty state', () => {
