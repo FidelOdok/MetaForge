@@ -442,6 +442,11 @@ PROFILES: dict[str, frozenset[str]] = {
         "vendor.handoffs",
         # FORGE-615: a rough cost before any quote exists.
         "cost.estimate_manufacturing",
+        # twin.get_manufacturing_context, twin.state_manufacturing_context,
+        # twin.get_dfm_report and twin.get_release_checklist stay in `all`:
+        # adding even two put the route_selection phase over PHASE_MCP_BUDGET,
+        # which drops web.*. The phase already gets the context in its flow
+        # context block.
     },
     # FORGE-633: industrial design (the Planner's discipline #2): form factor,
     # ergonomics and DFM-aware finishes. Renders a design in its library

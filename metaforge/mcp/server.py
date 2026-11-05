@@ -75,6 +75,7 @@ from mcp_core.guardrails import (
     HumanAuthorityRequiredError,
     decide,
     never_auto_approved,
+    records_approver,
     reject_caller_supplied_approver,
     requires_human_authority,
     resolve_approval,
@@ -3179,7 +3180,9 @@ class UnifiedMcpServer:
         if not isinstance(progress_token, str | int) or isinstance(progress_token, bool):
             progress_token = None
         approver = await self._authorise(tool_id, arguments, call_id, progress_token)
-        if approver is not None and requires_human_authority(tool_id):
+        if approver is not None and (
+            requires_human_authority(tool_id) or records_approver(tool_id)
+        ):
             # The tool reads its deciding human from here and nowhere else.
             arguments[APPROVED_BY_ARG] = approver.label
 

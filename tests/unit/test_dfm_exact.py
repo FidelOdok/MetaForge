@@ -475,6 +475,9 @@ def machine_library() -> Iterator[SqliteMachineLibrary]:
 def _blobs(monkeypatch: pytest.MonkeyPatch) -> None:
     import digital_twin.storage.work_product_blobs as blobs
 
+    # The slicer cross-check has its own tests (test_dfm_context_tools.py).
+    monkeypatch.setenv("METAFORGE_DFM_SLICER_CHECK", "off")
+
     monkeypatch.setattr(
         blobs,
         "store_work_product_blob",

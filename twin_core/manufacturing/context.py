@@ -49,6 +49,7 @@ item (``api_gateway.twin.manufacturing_context``).
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -149,6 +150,7 @@ CONTEXT_FIELDS: tuple[str, ...] = (
     "fastening",
     "applicable_rules",
     "evidence",
+    "print_orientation",
 )
 
 #: Fields MetaForge never fills by assumption (DFM-014).
@@ -176,7 +178,14 @@ FIELD_WORDS: dict[str, str] = {
     "fastening": "fastening",
     "applicable_rules": "rule profile",
     "evidence": "evidence",
+    "print_orientation": "print orientation",
 }
+
+#: Authorities ``print_orientation`` may carry: a person states it or MetaForge
+#: assumes it. No design decision records an orientation.
+ORIENTATION_AUTHORITIES: frozenset[Authority] = frozenset(
+    {Authority.USER_STATED, Authority.ASSUMPTION, Authority.UNKNOWN}
+)
 
 #: What a gap is called in ``unknowns``.
 GAP_WORDS: dict[str, str] = {
@@ -267,6 +276,64 @@ def _empty(value: Any) -> bool:
     return False
 
 
+_UNIT: dict[str, tuple[float, float, float]] = {
+    "x": (1.0, 0.0, 0.0),
+    "y": (0.0, 1.0, 0.0),
+    "z": (0.0, 0.0, 1.0),
+}
+#: Axis names a person may state an orientation as.
+_AXES: dict[str, tuple[float, float, float]] = {
+    **{f"+{k}": v for k, v in _UNIT.items()},
+    **{k: v for k, v in _UNIT.items()},
+    **{f"-{k}": (-v[0], -v[1], -v[2]) for k, v in _UNIT.items()},
+}
+
+
+def normalize_orientation(value: Any) -> dict[str, Any]:
+    """A print orientation as the record keeps it, or ``ValueError``.
+
+    ``build_direction`` is three finite numbers, not all zero, scaled to unit
+    length; ``rotation_deg`` (optional) is a turn about it, in ``[0, 360)``.
+    A bare ``[x, y, z]`` or an axis name (``+Z``, ``-Y``, ``x``) is read as
+    the build direction.
+    """
+    if isinstance(value, str):
+        axis = _AXES.get(value.strip().lower().replace(" ", ""))
+        if axis is None:
+            raise ValueError("print_orientation as text is an axis: +X, -X, +Y, -Y, +Z or -Z")
+        value = {"build_direction": list(axis)}
+    if isinstance(value, list | tuple):
+        value = {"build_direction": list(value)}
+    if not isinstance(value, dict):
+        raise ValueError("print_orientation is {build_direction: [x, y, z], rotation_deg}")
+    raw = value.get("build_direction")
+    if not isinstance(raw, list | tuple) or len(raw) != 3:
+        raise ValueError("print_orientation.build_direction is three numbers")
+    nums: list[float] = []
+    for v in raw:
+        if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+            raise ValueError("print_orientation.build_direction is three finite numbers")
+        nums.append(float(v))
+    length = math.sqrt(sum(v * v for v in nums))
+    if length < 1e-9:
+        raise ValueError("print_orientation.build_direction cannot be zero")
+    out: dict[str, Any] = {
+        # ``+ 0.0`` turns a -0.0 into 0.0, so equal directions compare equal.
+        "build_direction": [round(v / length, 6) + 0.0 for v in nums],
+        "rotation_deg": None,
+    }
+    rotation = value.get("rotation_deg")
+    if rotation is not None:
+        if (
+            isinstance(rotation, bool)
+            or not isinstance(rotation, int | float)
+            or not math.isfinite(rotation)
+        ):
+            raise ValueError("print_orientation.rotation_deg is a number of degrees")
+        out["rotation_deg"] = round(float(rotation) % 360.0, 6)
+    return out
+
+
 def _field() -> ContextField:
     return ContextField()
 
@@ -300,6 +367,12 @@ class ManufacturingContextRecord(BaseModel):
     fastening: ContextField = Field(default_factory=_field)
     applicable_rules: ContextField = Field(default_factory=_field)
     evidence: ContextField = Field(default_factory=_field)
+    #: How the part sits on the build plate (additive processes):
+    #: ``{"build_direction": [x, y, z], "rotation_deg": float | None}``, the
+    #: direction the layers stack along in the part's own frame and an optional
+    #: turn about it. Stated by a person or assumed, never decided. Exact FDM
+    #: DFM reads it when no request names a direction.
+    print_orientation: ContextField = Field(default_factory=_field)
 
     #: Derived on every validation: the gaps (DFM-010) and the assumed fields.
     unknowns: list[str] = Field(default_factory=list)
@@ -325,6 +398,13 @@ class ManufacturingContextRecord(BaseModel):
                 raise ValueError("target_cost is {amount, currency, text}")
             if cost.get("amount") is not None and not str(cost.get("currency") or "").strip():
                 raise ValueError("target_cost with an amount needs its currency")
+        orientation = self.print_orientation
+        if orientation.authority not in ORIENTATION_AUTHORITIES:
+            raise ValueError("print_orientation is stated by a person or assumed, never decided")
+        if orientation.known:
+            self.print_orientation = orientation.model_copy(
+                update={"value": normalize_orientation(orientation.value)}
+            )
         for name in ("process_candidates", "material_candidates"):
             value = self.get(name).value
             if value is not None and not (
@@ -450,6 +530,8 @@ def apply_updates(
         if name not in CONTEXT_FIELDS:
             raise ValueError(f"unknown manufacturing context field {name!r}")
         current = record.get(name)
+        if name == "print_orientation" and incoming.known:
+            incoming = incoming.model_copy(update={"value": normalize_orientation(incoming.value)})
         if _same(current, incoming):
             continue
         ok, why = may_override(current, incoming, allow_clear=allow_clear)
@@ -547,6 +629,12 @@ def _display(value: Any, name: str = "") -> str:
             text = f"{amount:g} {value.get('currency') or ''}".strip()
             return _clean(text)
         return _clean(str(value.get("text") or "stated"))
+    if name == "print_orientation" and isinstance(value, dict):
+        d = value.get("build_direction") or []
+        text = "build direction " + ", ".join(f"{float(v):g}" for v in d)
+        if value.get("rotation_deg") is not None:
+            text += f", turned {float(value['rotation_deg']):g} deg about it"
+        return _clean(text)
     if name == "lead_time" and isinstance(value, dict):
         days = value.get("days")
         if isinstance(days, int | float):

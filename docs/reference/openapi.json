@@ -13378,6 +13378,9 @@
           "material_candidates": {
             "$ref": "#/components/schemas/ContextField"
           },
+          "print_orientation": {
+            "$ref": "#/components/schemas/ContextField"
+          },
           "process_candidates": {
             "$ref": "#/components/schemas/ContextField"
           },
