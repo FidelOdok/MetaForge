@@ -1,4 +1,5 @@
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { PageHeader } from '../components/ui/PageHeader';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
@@ -109,36 +110,12 @@ export function SessionDetailPage() {
 
   return (
     <div>
-      {/* Back link */}
-      <div style={{ marginBottom: 12 }}>
-        <Link
-          to="/sessions"
-          className="font-mono"
-          style={{ fontSize: 12, color: KC.onSurfaceVariant, textDecoration: 'none' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = KC.onSurface; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = KC.onSurfaceVariant; }}
-        >
-          <span style={{ marginRight: 4 }}>←</span>Sessions
-        </Link>
-      </div>
-
-      {/* Page header */}
-      <div className="flex items-start justify-between" style={{ marginBottom: 16 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 500, color: KC.onSurface, lineHeight: 1.2 }}>
-            {session.taskType.replace(/_/g, ' ')}
-          </h1>
-          <span
-            className="font-mono"
-            style={{ fontSize: 12, color: KC.onSurfaceVariant }}
-          >
-            {session.agentCode} · started {formatRelativeTime(session.startedAt)}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusBadge status={session.status} />
-        </div>
-      </div>
+      <PageHeader
+        back={{ to: '/sessions', label: 'Sessions' }}
+        title={session.taskType.replace(/_/g, ' ')}
+        badge={<StatusBadge status={session.status} />}
+        meta={`${session.agentCode} · started ${formatRelativeTime(session.startedAt)}`}
+      />
 
       {/* Meta row */}
       <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>

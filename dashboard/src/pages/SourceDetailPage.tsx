@@ -1,4 +1,5 @@
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { PageHeader } from '../components/ui/PageHeader';
 
 /**
  * Placeholder for the per-source drill-in (L1-E4 — deferred to v2).
@@ -14,40 +15,11 @@ export function SourceDetailPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <Link
-          to="/knowledge"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12,
-            color: 'var(--mf-c-9a9aaa)',
-            textDecoration: 'none',
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
-            arrow_back
-          </span>
-          Back to knowledge
-        </Link>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-        <span style={{ fontSize: 18, fontWeight: 500, color: 'var(--mf-c-e8e8ed)' }}>
-          Source detail
-        </span>
-        <span
-          style={{
-            fontFamily: 'monospace',
-            fontSize: 11,
-            color: 'var(--mf-c-9a9aaa)',
-            wordBreak: 'break-all',
-          }}
-        >
-          {sourceId}
-        </span>
-      </div>
+      <PageHeader
+        back={{ to: '/knowledge', label: 'Back to knowledge' }}
+        title="Source detail"
+        meta={<span style={{ wordBreak: 'break-all' }}>{sourceId}</span>}
+      />
 
       <div
         style={{

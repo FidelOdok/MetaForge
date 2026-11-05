@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Button, buttonClasses } from '../components/ui/Button';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Play, RefreshCw, Search } from 'lucide-react';
 
@@ -49,32 +51,28 @@ export function RunsPage() {
 
   return (
     <div>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">EXECUTION &amp; EVIDENCE</p>
-          <h1>
-            Runs<span className="heading-period">.</span>
-          </h1>
-          <p className="page-description">
-            Follow execution, inspect outcomes, and review approval gates.
-          </p>
-        </div>
-        <div className="heading-actions">
-          <Link className="action-primary" to="/runs/new">
-            <Play size={16} />
-            New design run
-          </Link>
-          <button
-            type="button"
-            className="action-secondary"
-            onClick={() => void runs.refetch()}
-            disabled={runs.isFetching}
-          >
-            <RefreshCw size={16} />
-            Refresh
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Runs"
+        meta="execution and evidence"
+        actions={
+          <>
+            <Link className={buttonClasses('primary', 'sm')} to="/runs/new">
+              <Play size={15} />
+              New design run
+            </Link>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void runs.refetch()}
+              disabled={runs.isFetching}
+            >
+              <RefreshCw size={15} />
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       {unscoped > 0 && (
         <p className="review-queue-message" role="status" data-testid="runs-unscoped">

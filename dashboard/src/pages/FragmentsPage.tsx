@@ -1,5 +1,4 @@
-import { Link } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { PageHeader } from '../components/ui/PageHeader';
 
 import { useDesignFragments } from '../hooks/use-design-fragments';
 import type { DesignFragment, DesignFragmentTask } from '../types/design-flows';
@@ -18,22 +17,12 @@ export function FragmentsPage() {
 
   return (
     <div className="flow-workspace">
-      <Link className="text-action" to="/runs/new">
-        <ArrowLeft size={16} />
-        New run
-      </Link>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">COMPOSABLE WORKFLOWS</p>
-          <h1>
-            Domain fragments<span className="heading-period">.</span>
-          </h1>
-          <p className="page-description">
-            Each fragment adds one domain&apos;s tasks to a workflow. A task&apos;s dependencies
-            come from the items it reads and writes, and the gate of its stage checks it.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        back={{ to: '/runs/new', label: 'New run' }}
+        title="Domain fragments"
+        meta="composable workflows"
+        description="Each fragment adds one domain's tasks to a workflow. A task's dependencies come from the items it reads and writes, and the gate of its stage checks it."
+      />
 
       {catalog.isLoading && <p className="field-help">Loading fragments…</p>}
       {catalog.isError && (

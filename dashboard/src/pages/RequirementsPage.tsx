@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
@@ -2029,29 +2030,24 @@ export function RequirementsPage() {
 
   return (
     <div data-testid="requirements-panel">
-      <div className="mb-4 flex items-start justify-between">
-        <div>
-          <h1 className="text-lg font-medium text-on-surface" style={{ margin: 0 }}>
-            Requirements
-          </h1>
-          <span className="font-mono text-xs text-on-surface-variant">
-            {requirements.length} requirements &middot; {conflicts.length} conflicts
-          </span>
-        </div>
-        <select
-          value={productType}
-          onChange={(e) => setProductType(e.target.value)}
-          aria-label="Product type"
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
-          style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
-        >
-          {PRODUCT_TYPES.map((p) => (
-            <option key={p.value} value={p.value}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="Requirements"
+        meta={`${requirements.length} requirements · ${conflicts.length} conflicts`}
+        actions={
+          <select
+            value={productType}
+            onChange={(e) => setProductType(e.target.value)}
+            aria-label="Product type"
+            className="mf-select"
+          >
+            {PRODUCT_TYPES.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        }
+      />
 
       <CoverageHeatmapSection projectId={activeProjectId ?? undefined} />
 

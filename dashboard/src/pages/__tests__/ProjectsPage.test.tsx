@@ -76,11 +76,11 @@ describe('ProjectsPage', () => {
     mockCreateMutate.mockClear();
   });
 
-  it('renders the heading, eyebrow and new project action', () => {
+  it('renders the heading, its summary and the new project action', () => {
     setProjects([]);
     render(<ProjectsPage />);
-    expect(screen.getByText('YOUR ENGINEERING WORKSPACE')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Projects.');
+    expect(screen.getByText('engineering workspace')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Projects');
     expect(screen.getByRole('button', { name: /New project/ })).toBeInTheDocument();
   });
 

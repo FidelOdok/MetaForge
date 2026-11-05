@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
@@ -401,12 +402,7 @@ export function SettingsPage() {
 
   return (
     <div style={{ maxWidth: 880 }}>
-      <header className="mb-6">
-        <h1 style={{ fontSize: 30, fontWeight: 600, color: C.onSurface }}>Settings</h1>
-        <p style={{ fontSize: 14, color: C.onSurfaceVariant, marginTop: 4 }}>
-          Manage your gateway, AI providers and cloud adapters.
-        </p>
-      </header>
+      <PageHeader title="Settings" meta="gateway, AI providers and cloud adapters" />
 
       <section style={{ ...GLASS, padding: 20 }} aria-labelledby="gateway-heading">
         <div className="flex items-center gap-2">

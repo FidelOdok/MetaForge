@@ -1,4 +1,5 @@
 import { useEvals } from '../hooks/use-evals';
+import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
 
@@ -61,14 +62,7 @@ export function EvalsPage() {
 
   return (
     <div>
-      <div className="mb-4">
-        <h1 className="text-lg font-medium leading-tight text-on-surface" style={{ margin: 0 }}>
-          Evals
-        </h1>
-        <span className="font-mono text-xs text-on-surface-variant">
-          Pass rate per scenario, over recorded nightly runs
-        </span>
-      </div>
+      <PageHeader title="Evals" meta="pass rate per scenario, over recorded nightly runs" />
 
       {!isLoading && scenarios.length === 0 && (
         <EmptyState

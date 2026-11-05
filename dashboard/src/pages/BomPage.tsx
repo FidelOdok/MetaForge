@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { Button } from '../components/ui/Button';
@@ -638,13 +639,10 @@ export function BomPage() {
 
   return (
     <div>
-      {/* Page header */}
-      <div className="mb-4 flex items-start justify-between">
-        <div>
-          <h1 className="text-lg font-medium text-on-surface" style={{ margin: 0 }}>
-            Bill of Materials
-          </h1>
-          <span className="font-mono text-xs text-on-surface-variant">
+      <PageHeader
+        title="Bill of Materials"
+        meta={
+          <>
             {view === 'flat'
               ? costPartial
                 ? (
@@ -657,62 +655,38 @@ export function BomPage() {
                   )
                 : <>{items.length} components &middot; total ${totalCost.toFixed(2)}</>
               : <>{(hierarchicalLines ?? []).length} EBOM lines</>}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div
-            className="flex items-center rounded overflow-hidden"
-            style={{ border: '1px solid var(--mf-r-65-72-90-0p3)' }}
-            role="group"
-            aria-label="BOM view"
-          >
-            {(['flat', 'hierarchical'] as BomView[]).map((v) => (
-              <button
-                key={v}
+          </>
+        }
+        actions={
+          <>
+            <div className="mf-segment" role="group" aria-label="BOM view">
+              {(['flat', 'hierarchical'] as BomView[]).map((v) => (
+                <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>
+                  {v}
+                </button>
+              ))}
+            </div>
+            {view === 'flat' && (
+              <Button type="button" variant="secondary" size="sm" onClick={handleExportCsv}>
+                <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>download</span>
+                CSV
+              </Button>
+            )}
+            {view === 'flat' && activeProjectId && (
+              <Button
                 type="button"
-                aria-pressed={view === v}
-                onClick={() => setView(v)}
-                className="px-2.5 py-1 text-xs capitalize transition-colors"
-                style={{
-                  background: view === v ? 'var(--mf-c-282a30)' : 'transparent',
-                  color: view === v ? 'var(--mf-c-e2e2eb)' : 'var(--mf-c-9a9aaa)',
-                }}
+                variant="secondary"
+                size="sm"
+                onClick={() => bomRisk.mutate(activeProjectId)}
+                disabled={bomRisk.isPending}
               >
-                {v}
-              </button>
-            ))}
-          </div>
-          {view === 'flat' && (
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-              style={{
-                background: 'var(--mf-c-282a30)',
-                border: '1px solid var(--mf-r-65-72-90-0p3)',
-              }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>download</span>
-              CSV
-            </button>
-          )}
-          {view === 'flat' && activeProjectId && (
-            <button
-              type="button"
-              onClick={() => bomRisk.mutate(activeProjectId)}
-              disabled={bomRisk.isPending}
-              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors disabled:opacity-50"
-              style={{
-                background: 'var(--mf-c-282a30)',
-                border: '1px solid var(--mf-r-65-72-90-0p3)',
-              }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>shield</span>
-              {bomRisk.isPending ? 'Scoring…' : 'Supply-chain risk'}
-            </button>
-          )}
-        </div>
-      </div>
+                <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>shield</span>
+                {bomRisk.isPending ? 'Scoring…' : 'Supply-chain risk'}
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* Supply-chain risk panel (FORGE-268, gap G-C4) -- on-demand, since
           each run resolves real distributor offers for every real BOM line. */}

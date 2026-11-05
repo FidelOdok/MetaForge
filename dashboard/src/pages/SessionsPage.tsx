@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Link } from 'react-router-dom';
 import { formatRelativeTime } from '../utils/format-time';
 import { useSessions } from '../hooks/use-sessions';
@@ -839,64 +840,21 @@ export function SessionsPage() {
       `}</style>
 
       <div>
-        {/* Page header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            marginBottom: 16,
-          }}
-        >
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: 18,
-                fontWeight: 500,
-                color: KC.onSurface,
-                lineHeight: 1.2,
-              }}
-            >
-              Orchestrator
-            </h1>
-            <span
-              style={{
-                fontFamily: 'Roboto Mono, monospace',
-                fontSize: 12,
-                color: KC.onSurfaceVariant,
-              }}
-            >
+        <PageHeader
+          title="Orchestrator"
+          meta={
+            <>
               DAG executor · {runningCount} workflow{runningCount !== 1 ? 's' : ''} running
-            </span>
-            {unscopedSessions > 0 && (
-              <span
-                data-testid="sessions-unscoped"
-                style={{
-                  display: 'block',
-                  fontFamily: 'Roboto Mono, monospace',
-                  fontSize: 11,
-                  color: KC.onSurfaceVariant,
-                  marginTop: 2,
-                }}
-              >
-                {unscopedSessions} internal workflow run
-                {unscopedSessions === 1 ? '' : 's'} not shown: no project recorded.
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
-            <span
-              style={{
-                fontFamily: 'Roboto Mono, monospace',
-                fontSize: 11,
-                color: KC.onSurfaceVariant,
-              }}
-            >
-              {now}
-            </span>
-          </div>
-        </div>
+              {unscopedSessions > 0 && (
+                <span data-testid="sessions-unscoped" style={{ display: 'block', marginTop: 2 }}>
+                  {unscopedSessions} internal workflow run
+                  {unscopedSessions === 1 ? '' : 's'} not shown: no project recorded.
+                </span>
+              )}
+            </>
+          }
+          actions={<span className="mf-page-header-meta">{now}</span>}
+        />
 
         {/* Two-column layout */}
         <div className="page-split" style={{ '--aside': '300px', alignItems: 'start' } as CSSProperties}>
