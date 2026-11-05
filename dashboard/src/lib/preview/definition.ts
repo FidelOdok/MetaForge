@@ -9,6 +9,8 @@
  * no second product definition in the browser.
  */
 
+import { withSolvedElements, type SolvedGeometry, type SolverSketch } from './lineLength';
+
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 
@@ -45,16 +47,29 @@ export interface FeatureParameterView {
   assumed: boolean;
 }
 
-export interface DimensionView {
-  constraint_id: string;
-  type: 'radius';
-  primitive_id: string;
-  value: number;
-  unit: string;
-  source: string;
-  /** The circle's centre on the plane. */
-  center: Vec2;
-}
+/** A confirmed dimension a handle or field can edit. */
+export type DimensionView =
+  | {
+      constraint_id: string;
+      type: 'radius';
+      primitive_id: string;
+      value: number;
+      unit: string;
+      source: string;
+      /** The circle's centre on the plane. */
+      center: Vec2;
+    }
+  | {
+      constraint_id: string;
+      type: 'length';
+      primitive_id: string;
+      value: number;
+      unit: string;
+      source: string;
+      /** The line's ends on the plane (v up). */
+      start: Vec2;
+      end: Vec2;
+    };
 
 export interface ComparisonCheck {
   check:
@@ -149,6 +164,8 @@ export interface PreviewDefinition {
   buildable: boolean;
   dimensions: DimensionView[];
   handles: { kind: string; parameter?: string; constraint_id?: string; primitive_id?: string; axis?: string }[];
+  /** The sketch (sketch space) and its accepted rules, for re-solving a length drag in the browser. */
+  solver_sketch?: SolverSketch | null;
   intended_through_holes: number;
   comparison_tolerance: Record<string, unknown> | null;
   representation: { level: 'L2'; authority: 'preview'; label: string; source_revision: string | null };
@@ -162,11 +179,18 @@ export interface PreviewOverrides {
   amount?: number;
   /** Radius of a circle, by its dimension's constraint id. */
   radius?: Record<string, number>;
+  /** Length of a line, by its dimension's constraint id (re-solved, see `lineLength.ts`). */
+  length?: Record<string, number>;
+  /** The solved sketch geometry the length edits produced, sketch space. */
+  solved?: SolvedGeometry;
 }
 
 /** The definition with the browser's uncommitted edits applied. Pure. */
 export function withOverrides(def: PreviewDefinition, o: PreviewOverrides): PreviewDefinition {
   let out = def;
+  if (o.solved && Object.keys(o.solved).length) {
+    out = { ...out, elements: withSolvedElements(out.elements, o.solved) };
+  }
   if (o.amount !== undefined && Number.isFinite(o.amount) && o.amount > 0) {
     out = def.op === 'extrude' ? { ...out, depth: o.amount } : { ...out, angle: Math.min(o.amount, 360) };
   }
@@ -196,7 +220,7 @@ export function amountOf(def: PreviewDefinition): number {
 export function isDirty(def: PreviewDefinition, o: PreviewOverrides): boolean {
   if (o.amount !== undefined && Math.abs(o.amount - amountOf(def)) > 1e-9) return true;
   for (const d of def.dimensions) {
-    const r = o.radius?.[d.constraint_id];
+    const r = (d.type === 'length' ? o.length : o.radius)?.[d.constraint_id];
     if (r !== undefined && Math.abs(r - d.value) > 1e-9) return true;
   }
   return false;

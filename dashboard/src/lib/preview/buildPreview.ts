@@ -20,16 +20,26 @@ import { REVOLVE_SEGMENT_DEG, insetLoop, profileLoops, signedArea, type Profile 
  */
 
 export interface PreviewHandle {
-  kind: 'extrude_depth' | 'radius';
-  /** `depth` for the extrude handle. */
+  kind: 'extrude_depth' | 'radius' | 'length' | 'revolve_angle';
+  /** `depth` for the extrude handle, `angle` for the revolve one. */
   parameter?: string;
   constraintId?: string;
+  /** The sketch element a dimension handle sizes. */
+  primitiveId?: string;
   /** Where the handle sits, world millimetres. */
   position: Vec3;
   /** The unit direction a drag moves it along, world. */
   direction: Vec3;
   /** The value it edits, in the definition's units. */
   value: number;
+  /** World millimetres per unit of the value (default: the definition's scale). Degrees for an angle. */
+  mmPerUnit?: number;
+  /** Snap step and limits of the value. */
+  step?: number;
+  min?: number;
+  max?: number;
+  /** The revolve gizmo: the arc it is drawn along, world millimetres. */
+  arc?: Vec3[];
 }
 
 export interface PreviewBuild {
@@ -125,6 +135,78 @@ function centroid(loop: Vec2[]): Vec2 {
   return [loop.reduce((a, p) => a + p[0], 0) / n, loop.reduce((a, p) => a + p[1], 0) / n];
 }
 
+/**
+ * A handle at the middle of each line with an accepted length dimension,
+ * dragged along the line (it grows the line). `h` is the height above the
+ * plane it sits at (the top face of an extrude).
+ */
+function lengthHandles(
+  def: PreviewDefinition,
+  s: number,
+  h: number,
+  worldPoint: (u: number, v: number, h: number) => Vec3,
+  worldDir: (d: Vec3) => Vec3,
+): PreviewHandle[] {
+  const out: PreviewHandle[] = [];
+  for (const d of def.dimensions ?? []) {
+    if (d.type !== 'length') continue;
+    const line = def.elements.find((e) => e.type === 'line' && e.id === d.primitive_id);
+    if (!line || line.type !== 'line') continue;
+    const du = line.end[0] - line.start[0];
+    const dv = line.end[1] - line.start[1];
+    const len = Math.hypot(du, dv);
+    if (len < 1e-12) continue;
+    out.push({
+      kind: 'length',
+      constraintId: d.constraint_id,
+      primitiveId: d.primitive_id,
+      position: worldPoint(((line.start[0] + line.end[0]) / 2) * s, ((line.start[1] + line.end[1]) / 2) * s, h),
+      direction: worldDir([du / len, dv / len, 0]),
+      value: len,
+    });
+  }
+  return out;
+}
+
+/** Degrees between the revolve gizmo's arc points. */
+const GIZMO_STEP_DEG = 5;
+
+/**
+ * The revolve angle gizmo: an arc just outside the part, about the revolve
+ * axis, from the profile to where the turn ends, with the handle at its end.
+ * A drag along the arc's end tangent changes the angle (degrees).
+ */
+function revolveHandle(profile: Profile, s: number, angle: number, lathe: THREE.Matrix4): PreviewHandle {
+  const all = [...profile.outer, ...profile.holes.flat(), ...profile.islands.flat()];
+  const reach = Math.max(1e-6, ...all.map(([u]) => Math.abs(u))) * s;
+  const r = reach * 1.25;
+  const vs = profile.outer.map(([, v]) => v * s);
+  const vMid = vs.length ? (Math.min(...vs) + Math.max(...vs)) / 2 : 0;
+  const at = (deg: number): Vec3 => {
+    const phi = (deg * Math.PI) / 180;
+    const p = new THREE.Vector3(r * Math.sin(phi), vMid, r * Math.cos(phi)).applyMatrix4(lathe);
+    return [p.x, p.y, p.z];
+  };
+  const arc: Vec3[] = [];
+  for (let deg = 0; deg < angle; deg += GIZMO_STEP_DEG) arc.push(at(deg));
+  arc.push(at(angle));
+  const phi = (angle * Math.PI) / 180;
+  const tangent = new THREE.Vector3(Math.cos(phi), 0, -Math.sin(phi)).transformDirection(lathe);
+  return {
+    kind: 'revolve_angle',
+    parameter: 'angle',
+    position: at(angle),
+    direction: [tangent.x, tangent.y, tangent.z],
+    value: angle,
+    // One degree along the arc, in millimetres.
+    mmPerUnit: (r * Math.PI) / 180,
+    step: 1,
+    min: 1,
+    max: 360,
+    arc,
+  };
+}
+
 /** Build the preview mesh of a definition. Throws when the profile has no closed loop. */
 export function buildPreview(def: PreviewDefinition): PreviewBuild {
   const s = def.scale_to_mm || 1;
@@ -170,16 +252,19 @@ export function buildPreview(def: PreviewDefinition): PreviewBuild {
       value: Number(def.depth ?? 0),
     });
     for (const d of def.dimensions ?? []) {
+      if (d.type === 'length') continue;
       const circle = def.elements.find((e) => e.type === 'circle' && e.id === d.primitive_id);
       if (!circle || circle.type !== 'circle') continue;
       handles.push({
         kind: 'radius',
         constraintId: d.constraint_id,
+        primitiveId: d.primitive_id,
         position: worldPoint((circle.center[0] + circle.radius) * s, circle.center[1] * s, depth),
         direction: worldDir([1, 0, 0]),
         value: circle.radius,
       });
     }
+    handles.push(...lengthHandles(def, s, depth, worldPoint, worldDir));
   } else {
     const angle = Math.min(Number(def.angle ?? 360), 360);
     const segments = Math.max(3, Math.ceil(angle / REVOLVE_SEGMENT_DEG));
@@ -214,6 +299,8 @@ export function buildPreview(def: PreviewDefinition): PreviewBuild {
       }
     }
     volume = Math.abs(regionMoment(profile)) * s * s * s * phi;
+    handles.push(revolveHandle(profile, s, angle, lathe));
+    handles.push(...lengthHandles(def, s, 0, worldPoint, worldDir));
   }
 
   const merged = parts.length === 1 ? parts[0] : mergeGeometries(parts, false);

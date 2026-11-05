@@ -6,6 +6,7 @@ import { twinKeys } from './use-twin';
 import { amountOf, isDirty, withOverrides, type PreviewDefinition, type PreviewOverrides } from '../lib/preview/definition';
 import { buildPreviewTimed, type PreviewBuild } from '../lib/preview/buildPreview';
 import { parametricDisplay, type ParametricDisplay } from '../lib/preview/display';
+import { NO_LENGTH_EDITS, applyLength, geometryPayload, type LengthEdits } from '../lib/preview/lineLength';
 import type { OperationView } from '../lib/operations-reducer';
 import { useProjectOperations } from '../store/operations-store';
 
@@ -56,6 +57,14 @@ function refusalText(err: unknown): string {
   return 'The change could not be saved.';
 }
 
+export interface CommitExtra {
+  amount?: number;
+  radius?: Record<string, number>;
+  /** A line's length by its dimension's constraint id: committed with the solved geometry. */
+  length?: Record<string, number>;
+  material?: string;
+}
+
 export interface ParametricPreviewState {
   definition: PreviewDefinition | undefined;
   loading: boolean;
@@ -71,8 +80,16 @@ export interface ParametricPreviewState {
   display: ParametricDisplay | null;
   setAmount: (value: number) => void;
   setRadius: (constraintId: string, value: number) => void;
+  /**
+   * A line's length: re-solves the sketch's accepted rules in the browser and
+   * redraws the preview from the solved geometry. A length the rules cannot
+   * all hold leaves the last good geometry and sets `conflict`.
+   */
+  setLength: (constraintId: string, value: number) => void;
+  /** Why the last length cannot hold, in plain words; nothing is committed while it is set. */
+  conflict: string | null;
   /** Commit the browser's edits: a new parametric revision, then one exact build. */
-  commit: (source: 'drag' | 'numeric', extra?: { amount?: number; radius?: Record<string, number>; material?: string }) => Promise<void>;
+  commit: (source: 'drag' | 'numeric', extra?: CommitExtra) => Promise<void>;
   committing: boolean;
   /** Re-run the failed exact build (the existing operation retry). */
   retry: () => Promise<void>;
@@ -187,9 +204,42 @@ export function useParametricPreview(
     setOverrides((o) => ({ ...o, radius: { ...(o.radius ?? {}), [constraintId]: value } }));
   }, []);
 
+  // Line lengths (FORGE-808): the last good solve, read at release too (a
+  // drag's callbacks are captured when the drag starts, so state is stale there).
+  const [conflict, setConflict] = useState<string | null>(null);
+  const solveRef = useRef<LengthEdits>(NO_LENGTH_EDITS);
+  const baseRevision = definition?.base_revision;
+  useEffect(() => {
+    solveRef.current = NO_LENGTH_EDITS;
+    setConflict(null);
+  }, [baseRevision]);
+  const setLength = useCallback(
+    (constraintId: string, value: number) => {
+      if (!definition) return;
+      setCommitError(null);
+      const next = applyLength(definition, solveRef.current, constraintId, value);
+      solveRef.current = next;
+      setConflict(next.conflict);
+      if (!next.conflict) setOverrides((o) => ({ ...o, length: next.length, solved: next.solved }));
+    },
+    [definition],
+  );
+
   const commit = useCallback(
-    async (source: 'drag' | 'numeric', extra: { amount?: number; radius?: Record<string, number>; material?: string } = {}) => {
+    async (source: 'drag' | 'numeric', extra: CommitExtra = {}) => {
       if (!definition || !projectId || !sketchKey) return;
+      let edits = solveRef.current;
+      for (const [cid, v] of Object.entries(extra.length ?? {})) {
+        if (edits.conflict || edits.length[cid] !== v) edits = applyLength(definition, edits, cid, v);
+      }
+      if (edits.conflict) {
+        // Refused: the accepted rules cannot all hold. Back to the last saved part.
+        setCommitError(edits.conflict);
+        solveRef.current = NO_LENGTH_EDITS;
+        setConflict(null);
+        setOverrides((o) => ({ ...o, length: undefined, solved: undefined }));
+        return;
+      }
       const amount = extra.amount ?? overrides.amount;
       const radius = { ...(overrides.radius ?? {}), ...(extra.radius ?? {}) };
       const values: Record<string, number | string> = {};
@@ -199,9 +249,13 @@ export function useParametricPreview(
       }
       if (extra.material) values.material = extra.material;
       const dimensions: Record<string, number> = {};
+      let lengthEdited = false;
       for (const d of definition.dimensions) {
-        const r = radius[d.constraint_id];
-        if (r !== undefined && Math.abs(r - d.value) > 1e-9) dimensions[d.constraint_id] = r;
+        const r = d.type === 'length' ? edits.length[d.constraint_id] : radius[d.constraint_id];
+        if (r !== undefined && Math.abs(r - d.value) > 1e-9) {
+          dimensions[d.constraint_id] = r;
+          if (d.type === 'length') lengthEdited = true;
+        }
       }
       if (!Object.keys(values).length && !Object.keys(dimensions).length) return;
       setCommitting(true);
@@ -212,9 +266,11 @@ export function useParametricPreview(
           feature_id: definition.feature_id,
           values,
           dimensions,
+          ...(lengthEdited ? { geometry: geometryPayload(edits.solved) } : {}),
           source,
           preview_ms: buildMs,
         });
+        solveRef.current = NO_LENGTH_EDITS;
         const next = reply.build?.job_id ?? null;
         if (reply.build && !reply.build.job_id && reply.build.status !== 'succeeded' && reply.build.detail) {
           setCommitError(reply.build.detail);
@@ -262,6 +318,8 @@ export function useParametricPreview(
     display,
     setAmount,
     setRadius,
+    setLength,
+    conflict,
     commit,
     committing,
     retry,

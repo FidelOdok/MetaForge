@@ -230,6 +230,27 @@
 .cv-stage-notice.is-error {
   color: #fca5a5;
 }
+/* Build exact model's one just-in-time question. */
+.cv-stage-notice.is-question {
+  color: #e2e2eb;
+}
+.cv-question-prompt {
+  font-weight: 600;
+}
+.cv-question-other {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cv-question-other input {
+  width: 140px;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: #e2e2eb;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+}
 
 /* The drawing area and the drawer sit side by side; the drawer never floats. */
 .cv-stage-body {
@@ -247,9 +268,9 @@
   position: relative;
   flex: 1;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 24px 24px,
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 24px 24px,
-    var(--mf-c-0c0e14);
+    linear-gradient(var(--mf-sketch-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, var(--mf-sketch-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--mf-sketch-paper);
 }
 .cv-trace {
   position: absolute;
@@ -272,7 +293,7 @@
 }
 .cv-sketch-overlay path {
   fill: none;
-  stroke: rgba(248, 250, 252, 0.7);
+  stroke: var(--mf-sketch-overlay);
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -526,6 +547,21 @@
 }
 .cv-param-secondary {
   color: #b4b4c2;
+}
+/* A length the accepted rules cannot hold: said plainly, above the notes. */
+.cv-param-conflict {
+  position: absolute;
+  bottom: 52px;
+  left: 10px;
+  margin: 0;
+  padding: 6px 10px;
+  max-width: calc(100% - 20px);
+  font-size: 12px;
+  color: #fca5a5;
+  background: rgba(17, 19, 25, 0.88);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 8px;
+  pointer-events: none;
 }
 .cv-param-notes {
   position: absolute;

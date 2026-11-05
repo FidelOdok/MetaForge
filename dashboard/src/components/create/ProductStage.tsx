@@ -31,6 +31,8 @@ import { StageDrawer } from './StageDrawer';
 import { ParametricStage } from '../preview/ParametricStage';
 import { useParametricPreview } from '../../hooks/use-parametric-preview';
 import { DfmGuidanceBadge } from './DfmGuidanceBadge';
+import { BuildExactNotice } from './BuildExactNotice';
+import { useBuildExact } from '../../hooks/use-build-exact';
 import { ReadinessStatus } from './ReadinessStatus';
 import {
   NOT_ASSESSED as NOT_ASSESSED_NOTE,
@@ -107,7 +109,7 @@ interface ProductStageProps {
   facts?: Partial<Pick<StageFacts, 'described' | 'hasReferences'>>;
   /** Describe: the conversation's composer takes focus. */
   onDescribe?: () => void;
-  /** Build exact model: a design request in the composer, ready to send. */
+  /** Build exact model with no parametric sketch yet: a design request in the composer, ready to send. */
   onBuildExact?: () => void;
   /** Prepare prototype: the Make panel. */
   onPrepare?: () => void;
@@ -158,6 +160,8 @@ export function ProductStage({
   const parametricActive =
     !!projectId && !!psk && (!selectedId || selectedId === psk.nodeId || selectedItem === cadKeyForSketch(psk.key));
   const pp = useParametricPreview(parametricActive ? projectId : null, parametricActive ? psk!.key : null);
+  // Build exact model starts the build of the parametric sketch, asking first for a missing input.
+  const exact = useBuildExact(projectId, psk?.key ?? null);
   const showParametric = parametricActive && !pp.unavailable;
   const paramDisplay = showParametric ? pp.display : null;
   const history = useNodeVersionHistory(node?.id);
@@ -278,7 +282,9 @@ export function ProductStage({
         openDrawer(projectId, 'generate');
         return;
       case 'build_exact':
-        onBuildExact?.();
+        // With a parametric sketch, the exact build itself; without one, a design request.
+        if (psk) void exact.start();
+        else onBuildExact?.();
         return;
       case 'prepare_prototype':
         onPrepare?.();
@@ -488,6 +494,18 @@ export function ProductStage({
             </>
           )}
         </div>
+      )}
+
+      {exact.state.phase !== 'idle' && (
+        <BuildExactNotice
+          state={exact.state}
+          onAnswer={(v) => void exact.answer(v)}
+          onFix={(fix) => {
+            exact.dismiss();
+            run(fix);
+          }}
+          onDismiss={exact.dismiss}
+        />
       )}
 
       <div className={`cv-stage-body ${drawerOpen ? 'has-drawer' : ''}`}>

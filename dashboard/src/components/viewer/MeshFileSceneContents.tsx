@@ -9,5 +9,5 @@ interface MeshFileSceneContentsProps extends Omit<SceneBodyProps, 'scene'> {
 
 export function MeshFileSceneContents({ glbUrl, format, ...props }: MeshFileSceneContentsProps) {
   const scene = useMeshFileObject(glbUrl, format);
-  return <SceneBody scene={scene} {...props} />;
+  return <SceneBody scene={scene} format={format} {...props} />;
 }

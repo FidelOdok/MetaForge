@@ -40,8 +40,28 @@ vi.mock('../../sketch/GeneratePanel', async (orig) => ({
   GeneratePanel: ({ docked }: { docked?: boolean }) => <div data-testid="generate-panel" data-docked={String(!!docked)} />,
 }));
 vi.mock('../../sketch/PlanePrompt', () => ({ PlanePrompt: () => <div data-testid="plane-prompt" /> }));
+// Build exact model (FORGE-808): the routes it calls, and a stage without WebGL.
+const getPreviewDefinition = vi.fn();
+const commitParameters = vi.fn();
+const requestExactBuild = vi.fn();
+const getManufacturingContext = vi.fn();
+vi.mock('../../../api/endpoints/parametricPreview', () => ({
+  getPreviewDefinition: (...a: unknown[]) => getPreviewDefinition(...a),
+  commitParameters: (...a: unknown[]) => commitParameters(...a),
+}));
+vi.mock('../../../api/endpoints/cad-artifacts', async (orig) => ({
+  ...(await orig<typeof import('../../../api/endpoints/cad-artifacts')>()),
+  requestExactBuild: (...a: unknown[]) => requestExactBuild(...a),
+}));
+vi.mock('../../../api/endpoints/manufacturingContext', async (orig) => ({
+  ...(await orig<typeof import('../../../api/endpoints/manufacturingContext')>()),
+  getManufacturingContext: (...a: unknown[]) => getManufacturingContext(...a),
+}));
+vi.mock('../../preview/ParametricStage', () => ({ ParametricStage: () => <div data-testid="parametric-stage" /> }));
 
 import { ProductStage } from '../ProductStage';
+import { definition } from '../../../lib/preview/__tests__/fixtures';
+import { useOperationsStore } from '../../../store/operations-store';
 
 const P = 'proj-stage';
 
@@ -230,5 +250,111 @@ describe('Make a 3D concept', () => {
     stage([node('Lamp mesh', { ...MESH.properties, manufacturing_note: 'Likely printable with supports (preliminary)' })]);
     expect(screen.getByTestId('stage-mfg-note')).toHaveTextContent('Likely printable with supports (preliminary)');
     expect(screen.getByTestId('stage-status')).not.toHaveTextContent(/verified|production/i);
+  });
+});
+
+describe('Build exact model', () => {
+  const PSK = node('Parametric sketch: Slot', { wp_type: 'parametric_sketch', item_key: 'PSK-SLOT', item_revision: 1 });
+
+  beforeEach(() => {
+    getPreviewDefinition.mockReset();
+    commitParameters.mockReset();
+    requestExactBuild.mockReset();
+    getManufacturingContext.mockReset();
+    useOperationsStore.getState().reset();
+  });
+
+  async function clickBuild() {
+    const primary = screen.queryByTestId('stage-primary');
+    if (primary?.textContent?.includes('Build exact model')) {
+      await userEvent.click(primary);
+      return;
+    }
+    await userEvent.click(screen.getByRole('button', { name: /More/ }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Build exact model' }));
+  }
+
+  it('starts the exact build when every required input is known', async () => {
+    getPreviewDefinition.mockResolvedValue(definition());
+    requestExactBuild.mockResolvedValue({ job_id: 'j1', status: 'running' });
+    const onBuildExact = vi.fn();
+    stage([MESH, PSK], { facts: { described: true }, onBuildExact });
+    expect(screen.getByTestId('stage-primary')).toHaveTextContent('Build exact model');
+    await clickBuild();
+    await waitFor(() => expect(requestExactBuild).toHaveBeenCalledTimes(1));
+    expect(requestExactBuild).toHaveBeenCalledWith('PSK-SLOT', P, null, { featureId: 'feat-extrude-1' });
+    expect(commitParameters).not.toHaveBeenCalled();
+    expect(onBuildExact).not.toHaveBeenCalled();
+    expect(await screen.findByTestId('build-exact-notice')).toHaveTextContent('Building the exact model. Its progress is in the activity panel.');
+    // Progress is shown in the activity overlay.
+    expect(useOperationsStore.getState().projects[P]?.size).toBe('expanded');
+    expect(screen.queryByTestId('build-exact-question')).toBeNull();
+  });
+
+  it('asks one question at a time for a missing input, never inventing one, then starts the build', async () => {
+    getPreviewDefinition.mockResolvedValue(
+      definition({
+        buildable: false,
+        missing: ['material', 'depth'],
+        parameters: {
+          depth: { value: 2, status: 'required_input', unit: 'mm', question: 'How thick should this be?', assumed: true },
+          material: { value: null, status: 'required_input', unit: null, question: 'What material is it made of?', assumed: false },
+        },
+      }),
+    );
+    getManufacturingContext.mockResolvedValue({
+      ref: 'MFC-1@1',
+      record: {
+        selected_material: { value: 'PETG', authority: 'user_stated' },
+        material_candidates: { value: ['PETG', 'ASA'], authority: 'assumption' },
+      },
+    });
+    commitParameters.mockResolvedValue({ build: { status: 'running', job_id: 'j2', operation_id: 'job:j2' } });
+    stage([MESH, PSK], { facts: { described: true } });
+    await clickBuild();
+
+    // The depth first: concrete choices from the sketch, or another value. Nothing is sent yet.
+    const first = await screen.findByTestId('build-exact-question');
+    expect(first).toHaveAccessibleName('How thick should this be?');
+    expect(within(first).getByRole('button', { name: 'A quarter of its width (10 mm)' })).toBeInTheDocument();
+    expect(commitParameters).not.toHaveBeenCalled();
+    expect(requestExactBuild).not.toHaveBeenCalled();
+    await userEvent.type(within(first).getByRole('spinbutton', { name: 'Another thickness (mm)' }), '6');
+    await userEvent.click(within(first).getByRole('button', { name: 'Use this' }));
+
+    // Then the material, from the manufacturing notes.
+    const second = await screen.findByRole('group', { name: 'What material is it made of?' });
+    expect(within(second).getByRole('button', { name: 'ASA (a candidate in your manufacturing notes)' })).toBeInTheDocument();
+    expect(commitParameters).not.toHaveBeenCalled();
+    await userEvent.click(within(second).getByRole('button', { name: 'PETG (from your manufacturing notes)' }));
+
+    await waitFor(() => expect(commitParameters).toHaveBeenCalledTimes(1));
+    expect(commitParameters).toHaveBeenCalledWith(P, 'PSK-SLOT', {
+      base_revision: 1,
+      feature_id: 'feat-extrude-1',
+      values: { depth: 6, material: 'PETG' },
+      source: 'numeric',
+    });
+    expect(requestExactBuild).not.toHaveBeenCalled();
+    expect(await screen.findByTestId('build-exact-notice')).toHaveTextContent('Building the exact model');
+  });
+
+  it('says what must be done first, and never starts a build from an unapproved sketch', async () => {
+    getPreviewDefinition.mockResolvedValue(definition({ approved: false }));
+    stage([MESH, PSK], { facts: { described: true } });
+    await clickBuild();
+    const blocked = await screen.findByTestId('build-exact-blocked');
+    expect(blocked).toHaveTextContent('Approve the editable sketch first');
+    expect(within(blocked).getByRole('button', { name: 'Open the editable sketch' })).toBeInTheDocument();
+    expect(requestExactBuild).not.toHaveBeenCalled();
+    expect(commitParameters).not.toHaveBeenCalled();
+  });
+
+  it('without a parametric sketch, still prepares a design request', async () => {
+    const onBuildExact = vi.fn();
+    stage([MESH], { facts: { described: true }, onBuildExact });
+    await clickBuild();
+    expect(onBuildExact).toHaveBeenCalled();
+    expect(getPreviewDefinition).not.toHaveBeenCalled();
   });
 });

@@ -638,6 +638,128 @@ async def test_a_radius_dimension_commit_moves_the_circle_and_its_rule(h: Harnes
         )
 
 
+async def _box_sketch(h: Harness) -> Any:
+    """A 40 x 20 plate: four joined lines, square corners, both sizes confirmed."""
+    from twin_core.models.enums import WorkProductType
+
+    def line(i: str, a: tuple[float, float], b: tuple[float, float]) -> dict[str, Any]:
+        return {"id": i, "type": "line", "start": a, "end": b}
+
+    def rule(i: str, t: str, refs: list[str], value: float | None = None) -> dict[str, Any]:
+        out: dict[str, Any] = {"id": i, "type": t, "refs": refs, "status": "accepted"}
+        if value is not None:
+            out.update(value=value, unit="mm", source="human_confirmed")
+        return out
+
+    sketch = {
+        "unit": "mm",
+        "plane_id": "PLN-SLOT@1",
+        "elements": [
+            line("top", (0.0, 0.0), (40.0, 0.0)),
+            line("right", (40.0, 0.0), (40.0, 20.0)),
+            line("bottom", (40.0, 20.0), (0.0, 20.0)),
+            line("left", (0.0, 20.0), (0.0, 0.0)),
+        ],
+        "constraints": [
+            rule("k1", "coincident", ["top.end", "right.start"]),
+            rule("k2", "coincident", ["right.end", "bottom.start"]),
+            rule("k3", "coincident", ["bottom.end", "left.start"]),
+            rule("k4", "coincident", ["left.end", "top.start"]),
+            rule("h1", "horizontal", ["top"]),
+            rule("h2", "horizontal", ["bottom"]),
+            rule("v1", "vertical", ["right"]),
+            rule("v2", "vertical", ["left"]),
+            rule("L1", "length", ["top"], 40.0),
+            rule("L2", "length", ["right"], 20.0),
+        ],
+        "profiles": [{"primitive_ids": ["top", "right", "bottom", "left"]}],
+        "feature_plan": [
+            {
+                "id": "feat-extrude-1",
+                "op": "extrude",
+                "profile_primitive_ids": ["top", "right", "bottom", "left"],
+                "parameters": {
+                    "depth": {"status": "provided", "value": 3, "unit": "mm"},
+                    "material": {"status": "provided", "value": "PLA"},
+                },
+            }
+        ],
+    }
+    return await _definition(
+        h,
+        item_type="parametric_sketch",
+        wp_type=WorkProductType.PARAMETRIC_SKETCH,
+        name="Parametric sketch: Plate",
+        key="PSK-PLATE",
+        metadata={"parametric_sketch": sketch, "approved": True},
+    )
+
+
+async def test_a_length_dimension_commit_takes_the_solved_geometry(h: Harness) -> None:
+    await _parametric(h, depth=5)  # the plane
+    await _box_sketch(h)
+    d = await preview_definition(h.twin, h.service, project_id=PROJECT, sketch_key="PSK-PLATE")
+    lengths = {x["constraint_id"]: x for x in d["dimensions"] if x["type"] == "length"}
+    assert set(lengths) == {"L1", "L2"}
+    # On the plane, v up: the top line runs along v = 0.
+    assert lengths["L1"]["start"] == [0.0, -0.0] and lengths["L1"]["end"] == [40.0, -0.0]
+    assert {h_["kind"] for h_ in d["handles"]} == {"extrude_depth", "length"}
+    solver = d["solver_sketch"]
+    assert len(solver["elements"]) == 4 and len(solver["constraints"]) == 10
+
+    # The browser solved the top to 50: the right side moved with it.
+    solved = {
+        "top": {"start": [0.0, 0.0], "end": [50.0, 0.0]},
+        "right": {"start": [50.0, 0.0], "end": [50.0, 20.0]},
+        "bottom": {"start": [50.0, 20.0], "end": [0.0, 20.0]},
+    }
+    out = await commit_parameters(
+        h.twin,
+        h.service,
+        project_id=PROJECT,
+        sketch_key="PSK-PLATE",
+        request=ParameterCommitRequest(
+            base_revision=1, dimensions={"L1": 50.0}, geometry=solved, source="drag", build=False
+        ),
+    )
+    assert out["sketch_ref"] == "PSK-PLATE@2"
+    psk = await find_item(h.twin, "PSK-PLATE", PROJECT)
+    node = await h.node(str(psk.head_node_id))
+    content = node.metadata["parametric_sketch"]
+    top = next(e for e in content["elements"] if e["id"] == "top")
+    assert top["end"] == [50.0, 0.0]
+    l1 = next(c for c in content["constraints"] if c["id"] == "L1")
+    assert l1["value"] == 50.0 and l1["source"] == "human_confirmed"
+    assert node.metadata["parameter_edit"]["solved_elements"] == ["bottom", "right", "top"]
+
+    # A solve that broke a rule (the right side no longer vertical) is refused.
+    broken = {**solved, "top": {"start": [0.0, 0.0], "end": [60.0, 0.0]}}
+    with pytest.raises(ParametricPreviewError) as caught:
+        await commit_parameters(
+            h.twin,
+            h.service,
+            project_id=PROJECT,
+            sketch_key="PSK-PLATE",
+            request=ParameterCommitRequest(
+                base_revision=2, dimensions={"L1": 60.0}, geometry=broken, build=False
+            ),
+        )
+    assert caught.value.status == 409 and "breaks accepted rules" in str(caught.value)
+    # A length without its solved geometry, and geometry without a length, are refused.
+    for request in (
+        ParameterCommitRequest(base_revision=2, dimensions={"L1": 45.0}, build=False),
+        ParameterCommitRequest(base_revision=2, geometry=solved, values={"depth": 4}),
+        ParameterCommitRequest(
+            base_revision=2, dimensions={"L1": 45.0}, geometry={"ghost": {"start": [0, 0]}}
+        ),
+    ):
+        with pytest.raises(ParametricPreviewError) as caught:
+            await commit_parameters(
+                h.twin, h.service, project_id=PROJECT, sketch_key="PSK-PLATE", request=request
+            )
+        assert caught.value.status == 422
+
+
 async def test_the_preview_definition_matches_the_exact_build(h: Harness) -> None:
     await _parametric(h)  # depth not given yet
     d = await preview_definition(h.twin, h.service, project_id=PROJECT, sketch_key="PSK-SLOT")

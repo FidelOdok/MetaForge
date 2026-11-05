@@ -3,10 +3,10 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  --skc-shape: #38bdf8;
-  --skc-accept: #22c55e;
-  --skc-propose: #f59e0b;
-  --skc-bad: #f87171;
+  --skc-shape: var(--mf-sketch-shape);
+  --skc-accept: var(--mf-sketch-accept);
+  --skc-propose: var(--mf-sketch-propose);
+  --skc-bad: var(--mf-sketch-bad);
   --skc-panel: rgba(17, 19, 25, 0.92);
   --skc-text: #e2e2eb;
   --skc-muted: #9ca3af;
@@ -28,15 +28,15 @@
   opacity: 0.85;
 }
 .skc-shape.is-construction {
-  stroke: var(--skc-muted);
+  stroke: var(--mf-sketch-muted);
   stroke-width: 1;
   stroke-dasharray: 2 5;
 }
 .skc-ghost {
   fill: none;
-  stroke: #f472b6;
+  stroke: var(--mf-sketch-ghost);
   stroke-width: 1.5;
-  opacity: 0.6;
+  opacity: 0.75;
 }
 .skc-badge {
   position: absolute;
@@ -46,7 +46,7 @@
   padding: 0 3px;
   border-radius: 8px;
   border: 1px solid var(--skc-propose);
-  background: rgba(17, 19, 25, 0.85);
+  background: var(--mf-sketch-chip);
   color: var(--skc-propose);
   font-size: 10px;
   line-height: 14px;
@@ -57,7 +57,7 @@
 }
 .skc-badge.is-accepted {
   border-color: var(--skc-accept);
-  color: #0b1a10;
+  color: var(--mf-sketch-on-accept);
   background: var(--skc-accept);
 }
 .skc-launch {

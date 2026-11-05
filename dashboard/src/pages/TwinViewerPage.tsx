@@ -126,7 +126,11 @@ async function fetchViewerModel(
 ): Promise<{ url: string; manifest: ModelManifest; format: string } | null> {
   const { engine, format } = previewEngineFor(node);
   if (engine === 'mesh3d') {
-    return { url: nodeFileUrl(node.id), manifest: EMPTY_MANIFEST, format: format === 'gltf' ? 'glb' : format };
+    return {
+      url: nodeFileUrl(node.id),
+      manifest: { ...EMPTY_MANIFEST, origin: { source: 'file', representation: node.representation ?? null } },
+      format: format === 'gltf' ? 'glb' : format,
+    };
   }
   if (engine !== 'cad3d') return null;
   const result = await getNodeModel(node.id);
@@ -140,6 +144,7 @@ async function fetchViewerModel(
     meshToNodeMap: {},
     materials: result.metadata.materials ?? [],
     stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
+    origin: { source: 'converter', representation: node.representation ?? null },
   };
   return { url: resolveGatewayHref(result.glb_url), manifest, format: 'glb' };
 }

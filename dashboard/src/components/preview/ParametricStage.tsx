@@ -5,7 +5,7 @@ import { getNodeModel } from '../../api/endpoints/twin';
 import { resolveGatewayHref } from '../../lib/gatewayConfig';
 import { amountOf, type ComparisonRecord } from '../../lib/preview/definition';
 import type { PreviewHandle } from '../../lib/preview/buildPreview';
-import type { ParametricPreviewState } from '../../hooks/use-parametric-preview';
+import type { CommitExtra, ParametricPreviewState } from '../../hooks/use-parametric-preview';
 import { ParametricCanvas } from './ParametricCanvas';
 
 /**
@@ -128,11 +128,17 @@ export function ParametricStage({ pp, variant }: ParametricStageProps) {
   const unit = def.op === 'extrude' ? (def.unit === 'unknown' ? 'units' : def.unit) : 'deg';
   const needsMaterial = def.missing.includes('material');
   const onHandleChange = (h: PreviewHandle, v: number) => {
-    if (h.kind === 'extrude_depth') pp.setAmount(v);
+    if (h.kind === 'extrude_depth' || h.kind === 'revolve_angle') pp.setAmount(v);
+    else if (h.kind === 'length' && h.constraintId) pp.setLength(h.constraintId, v);
     else if (h.constraintId) pp.setRadius(h.constraintId, v);
   };
   const onHandleRelease = (h: PreviewHandle, v: number) => {
-    const extra = h.kind === 'extrude_depth' ? { amount: v } : { radius: { [h.constraintId!]: v } };
+    const extra: CommitExtra =
+      h.kind === 'extrude_depth' || h.kind === 'revolve_angle'
+        ? { amount: v }
+        : h.kind === 'length'
+          ? { length: { [h.constraintId!]: v } }
+          : { radius: { [h.constraintId!]: v } };
     void pp.commit('drag', { ...extra, material: material.trim() || undefined });
   };
   const apply = () => void pp.commit('numeric', { material: material.trim() || undefined });
@@ -163,6 +169,11 @@ export function ParametricStage({ pp, variant }: ParametricStageProps) {
             </button>
           )}
         </div>
+        {pp.conflict && (
+          <p className="cv-param-conflict" role="alert" data-testid="parametric-conflict">
+            {pp.conflict}
+          </p>
+        )}
         {(display.notes.length > 0 || pp.buildError) && (
           <ul className="cv-param-notes" data-testid="parametric-notes">
             {pp.buildError && <li>{pp.buildError}</li>}
@@ -192,9 +203,9 @@ export function ParametricStage({ pp, variant }: ParametricStageProps) {
           <NumberField
             key={d.constraint_id}
             id={`param-${def.sketch_key}-${d.constraint_id}`}
-            label={`Radius ${d.primitive_id} (${d.unit === 'unknown' ? 'units' : d.unit})`}
-            value={pp.overrides.radius?.[d.constraint_id] ?? d.value}
-            onChange={(v) => pp.setRadius(d.constraint_id, v)}
+            label={`${d.type === 'length' ? 'Length' : 'Radius'} ${d.primitive_id} (${d.unit === 'unknown' ? 'units' : d.unit})`}
+            value={(d.type === 'length' ? pp.overrides.length : pp.overrides.radius)?.[d.constraint_id] ?? d.value}
+            onChange={(v) => (d.type === 'length' ? pp.setLength(d.constraint_id, v) : pp.setRadius(d.constraint_id, v))}
             onCommit={apply}
           />
         ))}

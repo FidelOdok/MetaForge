@@ -3406,8 +3406,13 @@ commit), `api_gateway/twin/preview_comparison.py` (the comparison) and
   path. `unit` and `scale_assumed` say whether the scale is confirmed;
   `plane_assumed` and `plane_blocked` say whether the preview is on the
   sketch's real plane or on XY;
-- `dimensions` (the confirmed radius dimensions of circles a handle can
-  edit) and `handles`;
+- `dimensions` (the confirmed dimensions a handle can edit: a circle's
+  radius, with its `center`, and a line's length, with its `start` and `end`
+  on the plane) and `handles` (`extrude_depth` or `revolve_angle`,
+  `radius`, `length`);
+- `solver_sketch`: the sketch's elements (sketch space, y down) and its
+  accepted rules, which the browser's solver re-solves while a length
+  handle is dragged;
 - `representation`: always `L2` / `preview`, with the sketch revision as
   `source_revision` (`preview_descriptor` in `twin_core/representation.py`);
 - `cad`: the CAD item it builds into, its head, geometry state and
@@ -3426,9 +3431,15 @@ segments per span, on both sides.
 `POST /v1/twin/projects/{project_id}/parametric-sketches/{sketch_key}/parameters`
 with `base_revision` (the sketch revision the browser edited), optional
 `feature_id`, `values` (`depth` or `angle`, and `material`), `dimensions`
-(`{constraint_id: radius}` for an accepted radius dimension of a circle),
-`source` (`drag` or `numeric`), and optionally `preview_ms` (the browser's
-rebuild time) and `comparison_tolerance`. It is the only way a manipulation
+(`{constraint_id: value}` for an accepted radius dimension of a circle or
+length dimension of a line), `geometry` (with a length: the browser
+solver's new positions of the sketch's elements, sketch space,
+`{element_id: fields}`; only the geometric fields of existing elements are
+taken), `source` (`drag` or `numeric`), and optionally `preview_ms` (the
+browser's rebuild time) and `comparison_tolerance`. A length edit always
+carries its solved geometry, and geometry is only taken with a length;
+every accepted rule is then checked on the result, so a solve that broke
+one is refused (`409`) and nothing is stored. It is the only way a manipulation
 becomes authoritative: the mesh the person dragged is never stored. The edit
 is classified `geometric` by the person's own action (stage `person`),
 re-checked against every accepted rule, and written as the sketch's next
@@ -3441,9 +3452,10 @@ race to a newer head ends `stale` and the newer head is kept. The reply
 gives the new `sketch_ref` and `build` (`job_id` and `status`; or
 `needs_input`, `blocked` or `refused` with the reason; or `skipped` when the
 definition is unchanged). A value that is not a positive number, an angle
-over 360, a parameter the feature does not have or a dimension that is not
-a circle's radius answers `422`; an unapproved sketch or a broken rule
-answers `409`.
+over 360, a parameter the feature does not have, a dimension that is not
+a circle's radius or a line's length, a length without its solved geometry
+or geometry without a length answers `422`; an unapproved sketch or a
+broken rule answers `409`.
 
 **The comparison** (spec section 7). When an exact build of a supported
 design IR commits a validated revision, the L2 preview of the same

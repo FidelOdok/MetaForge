@@ -17,8 +17,9 @@ feature definition (``twin_core.design_ir.feature_definition``):
 
 :func:`commit_parameters`
     The only way a manipulation becomes authoritative (spec section 8's
-    safety rule): a parameter edit (extrude depth, revolve angle, or a
-    confirmed radius dimension of a circle) committed as the parametric
+    safety rule): a parameter edit (extrude depth, revolve angle, a
+    confirmed radius dimension of a circle, or a confirmed length dimension
+    of a line with the browser solver's re-solved geometry) committed as the parametric
     sketch's next revision, pinned to the revision the browser edited
     (``base_revision``; a moved head is refused, 409), classified as a
     ``geometric`` change (slice 3) and re-checked against every accepted
@@ -86,8 +87,15 @@ class ParameterCommitRequest(BaseModel):
     #: ``depth`` (extrude) or ``angle`` (revolve) in the sketch's unit / degrees,
     #: and optionally ``material`` (the plan's other required input).
     values: dict[str, float | str] = Field(default_factory=dict)
-    #: Confirmed radius dimensions of circles: ``{constraint_id: radius}``.
+    #: Confirmed dimensions: a circle's radius or a line's length,
+    #: ``{constraint_id: value}``.
     dimensions: dict[str, float] = Field(default_factory=dict)
+    #: With a length dimension: the browser solver's re-solved positions of
+    #: the sketch's elements (sketch space, y down), ``{element_id: fields}``.
+    #: Only geometric fields of existing elements are taken, and every
+    #: accepted rule is checked on the result, so a solve that broke one is
+    #: refused rather than stored.
+    geometry: dict[str, dict[str, Any]] = Field(default_factory=dict)
     source: Literal["drag", "numeric"] = "numeric"
     #: How long the browser took to rebuild the preview mesh, if it measured it.
     preview_ms: float | None = Field(default=None, ge=0, le=60000)
@@ -155,16 +163,31 @@ def _amount_name(op: str) -> str:
 
 
 def _supported_dimensions(sketch: Any) -> list[dict[str, Any]]:
-    """Confirmed dimensions a handle or field can edit: a radius on a circle."""
-    from twin_core.design_ir.models import SketchCircle
+    """Confirmed dimensions a handle or field can edit: a circle's radius, a line's length."""
+    from twin_core.design_ir.models import SketchCircle, SketchLine
 
     by_id = {getattr(el, "id", None): el for el in sketch.elements}
     out: list[dict[str, Any]] = []
     for c in sketch.constraints:
-        if c.type != "radius" or c.status != "accepted" or len(c.refs) != 1:
+        if c.status != "accepted" or len(c.refs) != 1:
             continue
         el = by_id.get(c.refs[0])
-        if isinstance(el, SketchCircle):
+        if c.type == "length" and isinstance(el, SketchLine) and not el.construction:
+            out.append(
+                {
+                    "constraint_id": c.id,
+                    "type": "length",
+                    "primitive_id": el.id,
+                    "value": float(c.value or math.dist(el.start, el.end)),
+                    "unit": c.unit or sketch.unit,
+                    "source": c.source,
+                    # On the plane (v up), like the preview's elements.
+                    "start": [float(el.start[0]), -float(el.start[1])],
+                    "end": [float(el.end[0]), -float(el.end[1])],
+                }
+            )
+            continue
+        if c.type == "radius" and isinstance(el, SketchCircle):
             out.append(
                 {
                     "constraint_id": c.id,
@@ -295,7 +318,7 @@ async def preview_definition(
         dims = _supported_dimensions(sketch)
         handles += [
             {
-                "kind": "radius",
+                "kind": d["type"],
                 "constraint_id": d["constraint_id"],
                 "primitive_id": d["primitive_id"],
             }
@@ -326,6 +349,14 @@ async def preview_definition(
             "buildable": buildable,
             "dimensions": dims,
             "handles": handles,
+            # What the browser's solver re-solves a length drag over: the
+            # sketch's elements (sketch space) and its accepted rules.
+            "solver_sketch": {
+                "elements": [el.model_dump(mode="json") for el in sketch.elements],
+                "constraints": [
+                    c.model_dump(mode="json") for c in sketch.constraints if c.status == "accepted"
+                ],
+            },
             "intended_through_holes": holes,
             "comparison_tolerance": meta.get("comparison_tolerance"),
             "representation": preview_descriptor(
@@ -522,15 +553,47 @@ async def commit_parameters(
             elements = list(sketch.elements)
             constraints = list(sketch.constraints)
             supported = {d["constraint_id"]: d for d in _supported_dimensions(sketch)}
+            lengths = [
+                supported[cid]
+                for cid in request.dimensions
+                if cid in supported and supported[cid]["type"] == "length"
+            ]
+            if request.geometry and not lengths:
+                _record("record_manipulation_commit", request.source, "refused")
+                raise ParametricPreviewError(
+                    "solved geometry is only taken with a line's length dimension", 422
+                )
+            if lengths:
+                unsent = [
+                    d["primitive_id"] for d in lengths if d["primitive_id"] not in request.geometry
+                ]
+                if unsent:
+                    _record("record_manipulation_commit", request.source, "refused")
+                    raise ParametricPreviewError(
+                        "a length edit carries the solved sketch geometry; none was sent for "
+                        + ", ".join(unsent),
+                        422,
+                    )
+                elements = _apply_geometry(elements, request.geometry)
             for cid, raw in request.dimensions.items():
                 dim = supported.get(cid)
                 if dim is None:
                     _record("record_manipulation_commit", request.source, "refused")
                     raise ParametricPreviewError(
                         f"dimension {cid!r} cannot be edited here: only an accepted radius "
-                        "of a circle maps to a handle",
+                        "of a circle or length of a line maps to a handle",
                         422,
                     )
+                if dim["type"] == "length":
+                    length = _number(f"dimension {cid}", raw)
+                    constraints = [
+                        c.model_copy(update={"value": length, "source": "human_confirmed"})
+                        if c.id == cid
+                        else c
+                        for c in constraints
+                    ]
+                    stated.append(f"length {length} {sketch.unit}")
+                    continue
                 radius = _number(f"dimension {cid}", raw)
                 elements = [
                     el.model_copy(update={"radius": radius})
@@ -619,6 +682,7 @@ async def commit_parameters(
                             "feature_id": chosen.id,
                             "values": dict(request.values),
                             "dimensions": dict(request.dimensions),
+                            "solved_elements": sorted(request.geometry),
                             "source": request.source,
                             "authority": "human_confirmed",
                         },
@@ -660,6 +724,39 @@ async def commit_parameters(
             },
             "build": build,
         }
+
+
+#: The fields of each element type a re-solve may move.
+_GEOMETRY_FIELDS: dict[str, tuple[str, ...]] = {
+    "line": ("start", "end"),
+    "circle": ("center", "radius"),
+    "arc": ("center", "radius", "start_angle", "end_angle"),
+    "ellipse": ("center", "major_radius", "minor_radius", "rotation"),
+    "spline": ("points",),
+}
+
+
+def _apply_geometry(elements: list[Any], geometry: dict[str, dict[str, Any]]) -> list[Any]:
+    """The elements with the solver's new positions; only geometric fields move."""
+    by_id = {getattr(el, "id", None): el for el in elements}
+    unknown = sorted(k for k in geometry if k not in by_id)
+    if unknown:
+        raise ParametricPreviewError(f"no element {unknown[0]!r} in this sketch", 422)
+    out = []
+    for el in elements:
+        moved = geometry.get(getattr(el, "id", None) or "")
+        if not moved:
+            out.append(el)
+            continue
+        fields = _GEOMETRY_FIELDS.get(str(el.type), ())
+        update = {k: v for k, v in moved.items() if k in fields}
+        try:
+            out.append(type(el).model_validate({**el.model_dump(), **update}))
+        except Exception as exc:  # noqa: BLE001 - a malformed solve is the caller's
+            raise ParametricPreviewError(
+                f"the solved geometry of {el.id} is not valid: {exc}", 422
+            ) from exc
+    return out
 
 
 async def _schedule_build(

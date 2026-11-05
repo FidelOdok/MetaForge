@@ -20,6 +20,14 @@ export interface ModelManifest {
   /** Rigid groups for interactive manipulation (MET-519). Optional — when
    * absent the viewer treats each top-level part as its own single-part group. */
   rigidGroups?: RigidGroup[];
+  /**
+   * Where the model came from and what the twin says it is, so the viewer
+   * can tell a Z-up CAD mesh from a Y-up glTF-native one (lib/up-axis.ts).
+   */
+  origin?: {
+    source: 'converter' | 'file';
+    representation?: { level?: string | null; generated_by?: { tool?: string | null } | null } | null;
+  };
 }
 
 /**
