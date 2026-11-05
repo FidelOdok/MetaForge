@@ -35719,7 +35719,7 @@
     },
     "/v1/twin/nodes": {
       "get": {
-        "description": "List work-product nodes in the Digital Twin.\n\n``project_id`` scopes the view to a single project. Omitted\nor empty returns every node (including unscoped legacy nodes) \u2014\npreserving the prior global behaviour. A specific ``project_id``\nreturns only that project's nodes; unscoped nodes are excluded.\n\na design-flow run's drafts are left out until its gate\napproves them (and for good if it never does); ``include_drafts=true``\nlists them too.",
+        "description": "List work-product nodes in the Digital Twin.\n\n``project_id`` scopes the view to a single project. Omitted\nor empty returns every node (including unscoped legacy nodes) \u2014\npreserving the prior global behaviour. A specific ``project_id``\nreturns only that project's nodes; unscoped nodes are excluded.\n\na design-flow run's drafts are left out until its gate\napproves them (and for good if it never does); ``include_drafts=true``\nlists them too.\n\nHistory records about a change (``change_impact``) are not design work\nproducts, so they are left out of the list and of ``total``;\n``include_history=true`` lists them too. They are always readable through\n``/v1/twin/projects/{id}/impact``.",
         "operationId": "list_twin_nodes_v1_twin_nodes_get",
         "parameters": [
           {
@@ -35761,6 +35761,16 @@
             "schema": {
               "default": false,
               "title": "Include Drafts",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_history",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include History",
               "type": "boolean"
             }
           }
@@ -38881,7 +38891,7 @@
     },
     "/v1/twin/relationships": {
       "get": {
-        "description": "List edges in the Digital Twin graph.\n\n``project_id`` scopes the view to a single project, matching\n``list_twin_nodes``. Omitted or empty returns every edge (including\nunscoped legacy nodes) \u2014 preserving the prior global behaviour.",
+        "description": "List edges in the Digital Twin graph.\n\n``project_id`` scopes the view to a single project, matching\n``list_twin_nodes``. Omitted or empty returns every edge (including\nunscoped legacy nodes) \u2014 preserving the prior global behaviour.\n\nLike ``list_twin_nodes``, history records about a change are left out\nunless ``include_history=true``.",
         "operationId": "list_twin_relationships_v1_twin_relationships_get",
         "parameters": [
           {
@@ -38898,6 +38908,16 @@
                 }
               ],
               "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_history",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include History",
+              "type": "boolean"
             }
           }
         ],

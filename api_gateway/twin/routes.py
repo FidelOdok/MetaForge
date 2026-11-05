@@ -64,7 +64,7 @@ from api_gateway.twin.version_schemas import (
 from api_gateway.twin.version_service import VersionService
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
-from twin_core.models.enums import EdgeType, WorkProductType
+from twin_core.models.enums import HISTORY_WORK_PRODUCT_TYPES, EdgeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
 
 logger = structlog.get_logger(__name__)
@@ -265,11 +265,18 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
 # ---------------------------------------------------------------------------
 
 
+def _without_history(work_products: list[WorkProduct]) -> tuple[list[WorkProduct], int]:
+    """Drop history records (a ``change_impact``); return the rest and how many went."""
+    kept = [wp for wp in work_products if wp.type not in HISTORY_WORK_PRODUCT_TYPES]
+    return kept, len(work_products) - len(kept)
+
+
 @router.get("/nodes", response_model=TwinNodeListResponse)
 async def list_twin_nodes(
     domain: str | None = None,
     project_id: str | None = None,
     include_drafts: bool = False,
+    include_history: bool = False,
 ) -> TwinNodeListResponse:
     """List work-product nodes in the Digital Twin.
 
@@ -281,6 +288,11 @@ async def list_twin_nodes(
     FORGE-525: a design-flow run's drafts are left out until its gate
     approves them (and for good if it never does); ``include_drafts=true``
     lists them too.
+
+    History records about a change (``change_impact``) are not design work
+    products, so they are left out of the list and of ``total``;
+    ``include_history=true`` lists them too. They are always readable through
+    ``/v1/twin/projects/{id}/impact``.
     """
     with tracer.start_as_current_span("twin.list_nodes") as span:
         if domain is not None:
@@ -293,6 +305,9 @@ async def list_twin_nodes(
                 raise HTTPException(status_code=400, detail="Invalid project_id format")
             span.set_attribute("twin.filter.project_id", project_id)
         work_products = await _twin.list_work_products(domain=domain, project_id=scoped_project)
+        history_hidden = 0
+        if not include_history:
+            work_products, history_hidden = _without_history(work_products)
         hidden = 0
         if not include_drafts:
             from twin_core.items import is_unapproved_draft, supports_items
@@ -303,12 +318,14 @@ async def list_twin_nodes(
                 work_products = kept
         nodes = [_wp_to_response(wp) for wp in work_products]
         span.set_attribute("twin.drafts_hidden", hidden)
+        span.set_attribute("twin.history_hidden", history_hidden)
         logger.info(
             "twin_nodes_listed",
             count=len(nodes),
             domain=domain,
             project_id=project_id,
             drafts_hidden=hidden,
+            history_hidden=history_hidden,
         )
         return TwinNodeListResponse(nodes=nodes, total=len(nodes))
 
@@ -316,12 +333,16 @@ async def list_twin_nodes(
 @router.get("/relationships", response_model=TwinRelationshipListResponse)
 async def list_twin_relationships(
     project_id: str | None = None,
+    include_history: bool = False,
 ) -> TwinRelationshipListResponse:
     """List edges in the Digital Twin graph.
 
     ``project_id`` scopes the view to a single project (MET-491), matching
     ``list_twin_nodes``. Omitted or empty returns every edge (including
     unscoped legacy nodes) — preserving the prior global behaviour.
+
+    Like ``list_twin_nodes``, history records about a change are left out
+    unless ``include_history=true``.
     """
     with tracer.start_as_current_span("twin.list_relationships") as span:
         scoped_project: UUID | None = None
@@ -332,6 +353,8 @@ async def list_twin_relationships(
                 raise HTTPException(status_code=400, detail="Invalid project_id format")
             span.set_attribute("twin.filter.project_id", project_id)
         work_products = await _twin.list_work_products(project_id=scoped_project)
+        if not include_history:
+            work_products, _ = _without_history(work_products)
         edges = []
         seen: set[str] = set()
         skipped = 0

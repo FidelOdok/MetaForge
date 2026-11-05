@@ -199,6 +199,12 @@ class WorkProductType(StrEnum):
     CHANGE_IMPACT = "change_impact"
 
 
+#: Work product types that are history about a change, not design work
+#: products. The twin's node and relationship lists leave them out unless
+#: asked (``include_history``); they stay readable through their own routes.
+HISTORY_WORK_PRODUCT_TYPES: frozenset[WorkProductType] = frozenset({WorkProductType.CHANGE_IMPACT})
+
+
 class ConstraintSeverity(StrEnum):
     """How critical a constraint violation is."""
 
