@@ -53,15 +53,18 @@ rail but have no section here yet. The default landing page is
 ## `/create`: the Create view
 
 The nontechnical view of a project: describe a product, see it take shape,
-choose how to make it, inspect what comes out and improve it. A conversation
-on the left, the product on a stage in the middle, and readiness with the
-brief, decisions, making and inspection on the right. Opened from the
-**Create** nav item or the topbar switch. See [The Create view](create-view.md)
-for the whole journey.
+choose how to make it, inspect what comes out and improve it. The product on
+a stage in the middle takes most of the width, with a conversation on the
+left and readiness with the brief, decisions, making and inspection on the
+right; either side collapses to a slim rail. The stage has a View mode and a
+Sketch mode, one contextual drawer, one primary next action (such as **Make a
+3D concept**) and a More menu, and the journey reads Imagine, Develop, Check
+and Make. Opened from the **Create** nav item or the topbar switch. See
+[The Create view](create-view.md) for the whole journey.
 
 - **Backed by:** `/v1/create/{project_id}`, plus `/v1/projects`,
-  `/v1/chat/threads`, `/v1/twin/nodes`, `/v1/approvals`, `/v1/uploads` and
-  `/v1/library/machines`.
+  `/v1/chat/threads`, `/v1/twin/nodes`, `/v1/approvals`, `/v1/uploads`,
+  `/v1/library/machines` and `/v1/twin/projects/{project_id}/concept-mesh`.
 
 ## `/projects`: project workspace
 

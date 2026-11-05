@@ -39,13 +39,11 @@ import {
   type Point,
   type Viewport,
 } from './geometry';
-import { PlanePrompt } from './PlanePrompt';
 import { SketchCompiler } from './SketchCompiler';
-import { AcceptedConceptImage, GeneratePanel } from './GeneratePanel';
+import { AcceptedConceptImage } from './GeneratePanel';
 import { useSketchGenerationStore } from '../../store/sketch-generation-store';
 import { useSketchPlane } from '../../hooks/use-sketch-plane';
 import { isPlaced, needsReattachment } from '../../api/endpoints/sketchPlanes';
-import { ReattachChoices } from './ReattachChoices';
 import { VIEW_NAMES } from '../../lib/sketch/planeMath';
 import '../../styles/sketch.css';
 
@@ -127,6 +125,16 @@ export interface SketchLayerProps {
   projectId: string;
   /** Project images and renders that can be shown under the strokes. */
   referenceNodes?: TwinNode[];
+  /**
+   * Opens a panel in the stage's contextual drawer: the plane choice. The
+   * layer itself floats no panels over the drawing.
+   */
+  onRequestPanel?: (panel: 'plane') => void;
+  /**
+   * Where the editable sketch panel renders: the drawer's body while the
+   * drawer shows it, `null` while it does not. Left out, it renders in place.
+   */
+  editableHost?: HTMLElement | null;
 }
 
 /**
@@ -139,7 +147,7 @@ export interface SketchLayerProps {
  * as a revision of the project's `sketch_strokes` item. It is a human sketch,
  * not CAD: it has no scale and no plane yet, and the layer says so.
  */
-export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps) {
+export function SketchLayer({ projectId, referenceNodes = [], onRequestPanel, editableHost }: SketchLayerProps) {
   const doc = useSketchStore((s) => s.docs[projectId]) ?? useSketchStore.getState().doc(projectId);
   const tool = useSketchStore((s) => s.tool);
   const setTool = useSketchStore((s) => s.setTool);
@@ -151,16 +159,11 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
   const regionRef = useRef<SVGRectElement>(null);
   const gesture = useRef<Gesture | null>(null);
   const [size, setSize] = useState<Viewport>({ width: 1, height: 1 });
-  // The plane prompt appears only when the person asks to use the sketch in 3D (UXS-006).
-  const [planePrompt, setPlanePrompt] = useState(false);
+  // The plane choice opens in the drawer only when the person asks to use the
+  // sketch in 3D (UXS-006), or when the surface it was on changed.
   const planeQuery = useSketchPlane(projectId, doc.itemKey);
   const plane = planeQuery.data?.plane ?? null;
   const placed = isPlaced(plane);
-  // "Decide later" hides the reattach choice until the plane changes again.
-  const [reattachLater, setReattachLater] = useState(false);
-  useEffect(() => {
-    setReattachLater(false);
-  }, [planeQuery.data?.item_ref]);
 
   // Materialise the project's doc (and its restored draft) in the store once.
   useEffect(() => {
@@ -526,36 +529,29 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
           >
             <Save size={14} aria-hidden="true" /> {doc.saveState === 'failed' ? 'Retry save' : 'Save sketch'}
           </button>
-          {doc.itemKey && !placed && (
+          {doc.itemKey && onRequestPanel && plane && needsReattachment(plane) ? (
             <button
               type="button"
               className="sk-save"
-              title="Choose the plane this sketch sits on, so it can be shown in 3D"
-              aria-expanded={planePrompt}
-              onClick={() => (needsReattachment(plane) ? setReattachLater(false) : setPlanePrompt((open) => !open))}
+              title="The surface this sketch was on changed. Choose what to do."
+              onClick={() => onRequestPanel('plane')}
             >
-              <Box size={14} aria-hidden="true" /> Use in 3D
+              <Box size={14} aria-hidden="true" /> Surface changed · choose
             </button>
+          ) : (
+            doc.itemKey &&
+            onRequestPanel &&
+            !placed && (
+              <button
+                type="button"
+                className="sk-save"
+                title="Choose the plane this sketch sits on, so it can be shown in 3D"
+                onClick={() => onRequestPanel('plane')}
+              >
+                <Box size={14} aria-hidden="true" /> Use in 3D
+              </button>
+            )
           )}
-        </div>
-      )}
-
-      {/* FORGE-794: Generate a concept from the description, references or sketch. */}
-      <GeneratePanel
-        projectId={projectId}
-        sketchKey={doc.strokes.length > 0 ? doc.itemKey : null}
-        sketchRevision={doc.savedRevision}
-        sketchUnsaved={!!doc.pendingSaveId}
-      />
-
-      {planePrompt && doc.itemKey && !needsReattachment(plane) && (
-        <PlanePrompt projectId={projectId} sketchKey={doc.itemKey} onDone={() => setPlanePrompt(false)} />
-      )}
-
-      {/* CDE slice 9: the surface the sketch was on changed; plain words in Create. */}
-      {doc.itemKey && plane && needsReattachment(plane) && !reattachLater && (
-        <div className="sk-plane-prompt">
-          <ReattachChoices projectId={projectId} sketchKey={doc.itemKey} plane={plane} onClose={() => setReattachLater(true)} />
         </div>
       )}
 
@@ -568,6 +564,7 @@ export function SketchLayer({ projectId, referenceNodes = [] }: SketchLayerProps
         unsaved={!!doc.pendingSaveId}
         view={size}
         plane={placed && plane ? { plane_id: plane.plane_id, unit: plane.unit } : null}
+        panelHost={editableHost}
       />
     </div>
   );

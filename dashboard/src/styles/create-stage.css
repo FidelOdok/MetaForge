@@ -1,0 +1,413 @@
+/* ── Simplified Create stage: modes, drawer, collapsible panels ───────────
+   View shows the product; Sketch shows the paper. One drawer beside the
+   drawing holds the editable sketch, Generate, the plane or the references.
+   The conversation and the details collapse to a slim rail (VIEW-010).
+   Loaded after create.css, so these rules extend it.
+   ─────────────────────────────────────────────────────────────────────── */
+.cv-body.is-chat-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr) minmax(300px, 380px);
+}
+.cv-body.is-side-collapsed {
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) 44px;
+}
+.cv-body.is-chat-collapsed.is-side-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+.cv-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border: 1px solid var(--cv-line);
+  border-radius: 10px;
+  background: var(--cv-panel);
+}
+.cv-rail-chat {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+.cv-rail-side {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+.cv-rail-tab {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cv-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cv-rail-tab:hover {
+  background: var(--cv-high);
+  color: var(--cv-text);
+}
+.cv-rail-tab .cv-count {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+}
+.cv-chat,
+.cv-side {
+  position: relative;
+}
+.cv-collapse {
+  align-self: flex-end;
+  color: var(--cv-muted);
+}
+.cv-journey-text {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.cv-journey-summary {
+  color: var(--cv-muted);
+  font-size: 11px;
+}
+
+/* The stage's own bar: mode, maturity and status, the one next action. It is
+   a row of its own, so nothing here ever covers the drawing. */
+.cv-stage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(17, 19, 25, 0.86);
+  color: #e2e2eb;
+}
+.cv-stage-bar .cv-stage-badges {
+  position: static;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  pointer-events: auto;
+}
+.cv-mode-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.cv-mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #b4b4c2;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cv-mode-switch button.is-on {
+  background: rgba(255, 90, 10, 0.18);
+  color: #fff;
+}
+.cv-maturity {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  background: rgba(17, 19, 25, 0.72);
+  color: #e2e2eb;
+}
+.cv-maturity.is-illustrative {
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.8);
+}
+.cv-maturity.is-preview {
+  box-shadow: inset 0 0 0 1px rgba(134, 207, 255, 0.8);
+}
+.cv-maturity.is-exact {
+  box-shadow: inset 0 0 0 1px rgba(154, 154, 170, 0.9);
+}
+.cv-maturity.is-validated {
+  box-shadow: inset 0 0 0 1px rgba(61, 214, 140, 0.8);
+}
+.cv-mfg-note {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #b4b4c2;
+  background: rgba(17, 19, 25, 0.72);
+}
+.cv-stage-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.cv-stage-bar .cv-chip-btn {
+  background: rgba(17, 19, 25, 0.8);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #e2e2eb;
+}
+.cv-stage-bar .cv-chip-btn.is-on {
+  border-color: var(--cv-accent);
+}
+.cv-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--cv-accent);
+  border-radius: 999px;
+  background: var(--cv-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.cv-primary:hover:not(:disabled) {
+  background: #e24e05;
+}
+.cv-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.cv-start {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #b4b4c2;
+}
+.cv-more {
+  position: relative;
+}
+.cv-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(17, 19, 25, 0.97);
+}
+.cv-more-menu button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #e2e2eb;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-more-menu button:hover,
+.cv-more-menu button:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+.cv-stage-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #fbbf24;
+  background: rgba(17, 19, 25, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cv-stage-notice.is-error {
+  color: #fca5a5;
+}
+
+/* The drawing area and the drawer sit side by side; the drawer never floats. */
+.cv-stage-body {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.cv-stage-body .cv-stage-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.cv-paper {
+  position: relative;
+  flex: 1;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--mf-c-0c0e14);
+}
+.cv-trace {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0.22;
+  pointer-events: none;
+  user-select: none;
+}
+.cv-sketch-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cv-sketch-overlay svg {
+  width: 100%;
+  height: 100%;
+}
+.cv-sketch-overlay path {
+  fill: none;
+  stroke: rgba(248, 250, 252, 0.7);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.cv-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(340px, 40%);
+  min-height: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(17, 19, 25, 0.96);
+  color: #e2e2eb;
+  font-size: 12px;
+}
+.cv-drawer.is-collapsed {
+  width: 36px;
+}
+.cv-drawer-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  color: #e2e2eb;
+  cursor: pointer;
+}
+.cv-drawer-tab span {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+}
+.cv-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cv-drawer-head strong {
+  flex: 1;
+  font-size: 13px;
+}
+.cv-drawer-head .cv-icon-btn {
+  color: #b4b4c2;
+}
+.cv-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+.cv-drawer-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cv-drawer-ref-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cv-stage-body .cv-stage-working {
+  bottom: 16px;
+  pointer-events: none;
+}
+
+/* Docked in the drawer, the existing panels sit in flow. */
+.cv-drawer .sk-generate.is-docked {
+  position: static;
+  max-width: none;
+  align-items: stretch;
+}
+.cv-drawer .sk-generate.is-docked .sk-variants {
+  justify-content: flex-start;
+}
+.sk-variant-note {
+  color: #b4b4c2;
+  font-size: 10px;
+  line-height: 1.2;
+}
+.cv-drawer .skc-launch.is-docked,
+.cv-drawer .skc-panel.is-docked {
+  position: static;
+  width: auto;
+  max-height: none;
+  padding: 0;
+  background: transparent;
+}
+
+@media (max-width: 1200px) {
+  .cv-body.is-chat-collapsed,
+  .cv-body.is-chat-collapsed.is-side-collapsed {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .cv-body.is-side-collapsed {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  }
+  .cv-rail-side {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    flex-direction: row;
+    justify-content: center;
+    margin-top: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .cv-rail {
+    flex-direction: row;
+    justify-content: center;
+  }
+  .cv-rail-chat {
+    order: 3;
+  }
+  .cv-rail-side {
+    order: 2;
+    margin-top: 0;
+  }
+  .cv-stage-body {
+    flex-direction: column;
+  }
+  .cv-drawer,
+  .cv-drawer.is-collapsed {
+    width: 100%;
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .cv-drawer.is-collapsed .cv-drawer-tab {
+    flex-direction: row;
+    justify-content: center;
+    padding: 8px;
+  }
+  .cv-drawer-tab span {
+    writing-mode: horizontal-tb;
+  }
+}

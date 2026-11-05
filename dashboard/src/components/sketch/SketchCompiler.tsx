@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, Columns2, Info, Redo2, RotateCcw, Sparkles, Undo2, Wand2, X } from 'lucide-react';
 import { approveParametricSketch, promoteInterpretation, storeInterpretation } from '../../api/endpoints/sketchCompiler';
@@ -25,6 +26,13 @@ export interface SketchCompilerProps {
   view: Viewport;
   /** The sketch's plane, when it is placed (carried into the proposal, never read). */
   plane: { plane_id: string; unit: string } | null;
+  /**
+   * Where the panel (and the *Make editable* button) renders: an element (the
+   * stage drawer), `null` to keep it hidden while the drawer shows something
+   * else, or left out to render in place. The shapes overlay always stays on
+   * the drawing.
+   */
+  panelHost?: HTMLElement | null;
 }
 
 /** How many proposed rules the panel lists before *Show all*. */
@@ -43,7 +51,9 @@ const STATUS_TONE: Record<string, string> = { fully: 'is-good', under: 'is-info'
  * `sketch_interpretation`, and *Make it a parametric sketch* promotes the
  * accepted rules for sign-off.
  */
-export function SketchCompiler({ projectId, strokes, itemKey, savedRevision, unsaved, view, plane }: SketchCompilerProps) {
+export function SketchCompiler({ projectId, strokes, itemKey, savedRevision, unsaved, view, plane, panelHost }: SketchCompilerProps) {
+  const place = (panel: ReactNode): ReactNode =>
+    panelHost === undefined ? panel : panelHost ? createPortal(panel, panelHost) : null;
   const doc = useSketchCompilerStore((s) => s.docs[projectId]) ?? useSketchCompilerStore.getState().doc(projectId);
   const store = useSketchCompilerStore.getState();
   const queryClient = useQueryClient();
@@ -119,8 +129,8 @@ export function SketchCompiler({ projectId, strokes, itemKey, savedRevision, uns
   if (!sketch) {
     if (!itemKey || strokes.length === 0) return null;
     const why = unsaved || !savedRevision ? 'Save the sketch first' : undefined;
-    return (
-      <div className="skc-launch">
+    return place(
+      <div className={panelHost ? 'skc-launch is-docked' : 'skc-launch'}>
         <button
           type="button"
           className="skc-btn skc-primary"
@@ -131,7 +141,7 @@ export function SketchCompiler({ projectId, strokes, itemKey, savedRevision, uns
         >
           <Wand2 size={14} aria-hidden="true" /> Make editable
         </button>
-      </div>
+      </div>,
     );
   }
 
@@ -147,7 +157,8 @@ export function SketchCompiler({ projectId, strokes, itemKey, savedRevision, uns
   return (
     <>
       <Overlay sketch={sketch} original={doc.compare ? doc.original : null} view={view} labels={labels} onToggle={(c) => edit(setStatus(sketch, [c.id], c.status === 'accepted' ? 'proposed' : 'accepted'))} />
-      <aside className="skc-panel" aria-label="Editable sketch" data-testid="sketch-compiler">
+      {place(
+      <aside className={panelHost ? 'skc-panel is-docked' : 'skc-panel'} aria-label="Editable sketch" data-testid="sketch-compiler">
         <header className="skc-head">
           <strong>Editable sketch</strong>
           <span className="skc-tag" title="Read off your drawing. Nothing here is a measurement until you confirm it.">estimated</span>
@@ -292,7 +303,8 @@ export function SketchCompiler({ projectId, strokes, itemKey, savedRevision, uns
             </div>
           )}
         </footer>
-      </aside>
+      </aside>,
+      )}
     </>
   );
 }

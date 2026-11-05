@@ -70,6 +70,61 @@ export function journeyStep(view: CreationView | undefined): number {
   }
 }
 
+/**
+ * The four journey milestones Create shows (16.2 item 2). They summarise
+ * where a creation stands; they are not gates and not pages. Concept, CAD,
+ * electronics, firmware, simulation and making work may overlap, and the
+ * mechanisms behind them (readiness, decisions, making, inspection) are the
+ * same as before.
+ */
+export const MILESTONES = ['Imagine', 'Develop', 'Check', 'Make'] as const;
+export type Milestone = (typeof MILESTONES)[number];
+
+/** The milestone each of the eight detailed journey steps belongs to. */
+export const STEP_MILESTONE = [0, 0, 1, 2, 2, 3, 3, 3] as const;
+
+/** Where a creation is, as a milestone index; 4 means all four are done (accepted). */
+export function milestoneIndex(view: CreationView | undefined): number {
+  if (!view) return 0;
+  return STAGE_MILESTONE[view.readiness.stage];
+}
+
+const STAGE_MILESTONE: Record<Stage, number> = {
+  concept: 0,
+  design_in_development: 1,
+  checked_design: 2,
+  ready_for_making: 3,
+  released_for_making: 3,
+  build_completed: 3,
+  accepted_product: 4,
+};
+
+/** One short summary per milestone, from the same readiness and records. */
+export function milestoneSummaries(view: CreationView | undefined): Record<Milestone, string> {
+  if (!view) return { Imagine: 'Describe, sketch or add a reference', Develop: 'Not started', Check: 'Not yet', Make: 'Not yet' };
+  const { readiness, creation } = view;
+  const latest = creation.builds[creation.builds.length - 1];
+  const index = STAGE_ORDER.indexOf(readiness.stage);
+  const checked = index >= STAGE_ORDER.indexOf('checked_design');
+  const open = readiness.blockers.length;
+  return {
+    Imagine: readiness.has_concept ? 'Concept on stage' : 'Describe, sketch or add a reference',
+    Develop: readiness.has_engineering_model ? 'Dimensioned model' : 'Not started',
+    Check: checked ? 'Checks recorded' : readiness.has_engineering_model && open ? `${open} to resolve` : 'Not yet',
+    Make: latest ? BUILD_STATUS_COPY[latest.status] : readiness.stage === 'ready_for_making' ? 'Ready for making' : 'Not yet',
+  };
+}
+
+const STAGE_ORDER: Stage[] = [
+  'concept',
+  'design_in_development',
+  'checked_design',
+  'ready_for_making',
+  'released_for_making',
+  'build_completed',
+  'accepted_product',
+];
+
 export const BRIEF_COPY: Record<BriefKey, { label: string; question: string; placeholder: string }> = {
   intended_use: {
     label: 'Intended use',
