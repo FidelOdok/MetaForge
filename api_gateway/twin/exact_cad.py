@@ -39,6 +39,7 @@ FRS name                   event ``type``      when
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import os
@@ -91,6 +92,9 @@ ROUND_TRIP_BBOX_REL = 1e-4
 
 _BBOX_KEYS = ("min_x", "min_y", "min_z", "max_x", "max_y", "max_z")
 
+#: A parametric sketch's per-component comparison tolerance (C3D slice 5).
+COMPARISON_TOLERANCE_KEY = "comparison_tolerance"
+
 #: Fixed phrases the operation stream shows. Never a tool's own text.
 MSG_EXACT_READY = "Exact geometry built; engineering checks running"
 MSG_VALIDATED = "Geometry validated"
@@ -102,6 +106,20 @@ MSG_STEP_READY = "STEP ready"
 MSG_STEP_ROUND_TRIP_FAILED = "STEP re-import did not match; not usable for release"
 MSG_STEP_FAILED = "STEP export failed"
 MSG_STEP_STALE = "This STEP belongs to an older revision"
+MSG_DEFINITION_UNCHANGED = "Nothing changed in the definition; the validated model is kept"
+
+#: Node metadata key of the preview comparison (see ``preview_comparison``).
+COMPARISON_KEY = "preview_comparison"
+
+
+def _comparison_summary(record: Any) -> dict[str, Any] | None:
+    """``{outcome, discrepancies}`` of a stored comparison, for a build result."""
+    if not isinstance(record, dict):
+        return None
+    return {
+        "outcome": record.get("outcome"),
+        "discrepancies": [c.get("check") for c in record.get("discrepancies") or []],
+    }
 
 
 class ExactCadError(ValueError):
@@ -317,6 +335,68 @@ def _default_blob_reader(wp: Any) -> bytes | None:
     return _cache_get(getattr(wp, "content_hash", None))
 
 
+def _default_mesh_reader(step: bytes) -> bytes | None:
+    """The exact revision's display GLB (the OCCT converter), for the preview comparison.
+
+    ``None`` when no converter is configured (``OCCT_CONVERTER_URL``) or it
+    could not convert: the comparison then says its mesh checks did not run.
+    """
+    if not (os.environ.get("OCCT_CONVERTER_URL") or "").strip():
+        return None
+    try:
+        from api_gateway.twin.render_recorder import convert_step_to_glb
+
+        return convert_step_to_glb(step, "exact.step")
+    except Exception as exc:  # noqa: BLE001 - no mesh is "not evaluated", never a failure
+        logger.info("preview_comparison_mesh_unavailable", error=str(exc)[:200])
+        return None
+
+
+def load_parametric_sketch(meta: dict[str, Any]) -> dict[str, Any]:
+    """A parametric sketch revision's content: inline, else its stored blob."""
+    raw = meta.get("parametric_sketch")
+    if isinstance(raw, dict) and raw:
+        return raw
+    key = (meta.get("sketch_files") or {}).get("parametric_sketch.json")
+    if key:
+        try:
+            import json
+
+            from api_gateway.twin.blob_store import fetch_work_product_blob
+
+            loaded = json.loads(fetch_work_product_blob(str(key)).decode("utf-8"))
+            if isinstance(loaded, dict):
+                return loaded
+        except Exception as exc:  # noqa: BLE001 - reported as unreadable by the caller
+            logger.info("parametric_sketch_blob_unreadable", key=key, error=str(exc))
+    return {}
+
+
+def parametric_feature_ir(
+    sketch: Any, chosen: Any, amount: float, placement: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The design IR entities of one feature of a parametric sketch (exact path and preview).
+
+    The sketch's elements go on the plane (``v`` up), filtered to the
+    feature's profile (construction geometry is kept; the lowering skips
+    it), then ``pad`` or ``revolve`` by ``amount``.
+    """
+    from twin_core.design_ir.feature_definition import feature_entities
+
+    profile = set(chosen.profile_primitive_ids)
+    entity = sketch.to_sketch_entity("sketch1", "body1", **placement)
+    elements = [
+        el
+        for el in entity.elements
+        if el.construction or not profile or getattr(el, "id", None) in profile
+    ]
+    return feature_entities(
+        entity.model_copy(update={"elements": elements}).model_dump(mode="json"),
+        op=chosen.op,
+        amount=amount,
+    )
+
+
 def _default_blob_writer(node_id: str, filename: str, content: bytes) -> str | None:
     try:
         from digital_twin.storage.work_product_blobs import store_work_product_blob
@@ -390,8 +470,10 @@ class ExactCadService:
         blob_writer: Callable[[str, str, bytes], str | None] | None = None,
         publisher: Publisher | None = None,
         job_runner: Any = None,
+        mesh_reader: Callable[[bytes], bytes | None] | None = None,
     ) -> None:
         self._twin = twin
+        self._read_mesh = mesh_reader or _default_mesh_reader
         self._bridge = bridge
         self._recorder = recorder
         self._read_blob = blob_reader or _default_blob_reader
@@ -878,9 +960,11 @@ class ExactCadService:
             base_revision=str(base),
             artifact_refs=[artifact],
         )
+        comparison = await self.store_comparison(node_id, source, step, validity, ref=ref)
         return {
             "node_id": node_id,
             "item_ref": ref,
+            "preview_comparison": _comparison_summary(comparison),
             "revision": result.get("revision"),
             # The head this job itself moved to: the runner does not call it stale.
             "target_revision": str(result.get("revision")),
@@ -1219,6 +1303,7 @@ class ExactCadService:
         or supplied in ``inputs`` by the person asking. The sketch must be
         approved, in millimetres and on a confirmed principal plane.
         """
+        from twin_core.design_ir.feature_definition import definition_hash
         from twin_core.design_ir.sketch_compiler import ParametricSketch
 
         meta = dict(psk_node.metadata or {})
@@ -1227,7 +1312,7 @@ class ExactCadService:
                 "this parametric sketch has not been approved yet; approve it before exact CAD"
             )
         try:
-            sketch = ParametricSketch.model_validate(meta.get("parametric_sketch") or {})
+            sketch = ParametricSketch.model_validate(load_parametric_sketch(meta))
         except Exception as exc:  # noqa: BLE001 - a stored sketch that does not parse
             raise ExactCadError(f"the parametric sketch could not be read: {exc}") from exc
         plan = list(sketch.feature_plan)
@@ -1268,42 +1353,18 @@ class ExactCadService:
             raise ExactCadError(f"{numeric} must be a number, not {values[numeric]!r}") from exc
         if amount <= 0:
             raise ExactCadError(f"{numeric} must be above zero")
-        profile = set(chosen.profile_primitive_ids)
-        entity = sketch.to_sketch_entity("sketch1", "body1", **placement)
-        elements = [
-            el
-            for el in entity.elements
-            if el.construction or not profile or getattr(el, "id", None) in profile
-        ]
-        entities: list[dict[str, Any]] = [
-            {"id": "body1", "op": "create_body"},
-            entity.model_copy(update={"elements": elements}).model_dump(mode="json"),
-        ]
-        if chosen.op == "extrude":
-            entities.append(
-                {
-                    "id": "feature1",
-                    "op": "pad",
-                    "body_ref": "body1",
-                    "sketch_ref": "sketch1",
-                    "depth": amount,
-                }
-            )
-        else:
-            entities.append(
-                {
-                    "id": "feature1",
-                    "op": "revolve",
-                    "body_ref": "body1",
-                    "sketch_ref": "sketch1",
-                    "angle": min(amount, 360.0),
-                }
-            )
+        # The shared feature definition (C3D slice 5): the L2 preview reads
+        # these same entities back (twin_core.design_ir.feature_definition).
+        entities = parametric_feature_ir(sketch, chosen, amount, placement)
         source = self.parse_source({"entities": entities}, None)
         assert source is not None
         source["feature_id"] = chosen.id
         source["inputs"] = values
         source["plane_ref"] = plane_used
+        source["definition_hash"] = definition_hash(source["design_ir"]["entities"])
+        tolerance = meta.get(COMPARISON_TOLERANCE_KEY)
+        if isinstance(tolerance, dict) and tolerance:
+            source["comparison_tolerance"] = dict(tolerance)
         return source
 
     async def _check_plane_block(self, plane_ref: str | None, project_id: Any) -> None:
@@ -1398,6 +1459,10 @@ class ExactCadService:
             head = str(cad.head_revision)
             if base_revision not in (None, "") and str(base_revision) != head:
                 raise ItemRevisionConflictError(f"{cad_key} is at @{head}, not @{base_revision}")
+            unchanged = await self.unchanged_build(cad, source)
+            if unchanged is not None:
+                return unchanged
+            _record("record_exact_incremental", "rebuilt")
             return await self.build(
                 project_id=project_id,
                 item_key=cad_key,
@@ -1504,7 +1569,11 @@ class ExactCadService:
         await self._pin_plane(result["node_id"], source, project_id)
         wp = await self._wp(result["node_id"])
         artifact = self._wp_ref(wp, ref, GeometryState.VALIDATED)
+        comparison = await self.store_comparison(
+            str(result["node_id"]), source, step, validity, ref=ref
+        )
         return {
+            "preview_comparison": _comparison_summary(comparison),
             "item_key": cad_key,
             "node_id": str(result["node_id"]),
             "item_ref": ref,
@@ -1515,6 +1584,93 @@ class ExactCadService:
             "validity": validity,
             "operation_event": {"message": MSG_VALIDATED, "artifact_refs": [artifact]},
         }
+
+    # -- incremental and comparison (C3D slice 5) ---------------------------
+
+    async def unchanged_build(self, cad: Any, source: dict[str, Any]) -> dict[str, Any] | None:
+        """The head's result when it was built from this exact definition and is validated.
+
+        SYNC-008 at component level: each parametric sketch builds its own
+        CAD item, and a definition whose hash matches the validated head's is
+        not rebuilt. ``None`` means a rebuild is needed.
+        """
+        wanted = source.get("definition_hash")
+        if not wanted or cad.head_node_id is None:
+            return None
+        head = await self._wp(cad.head_node_id)
+        stored = (head.metadata or {}).get(EXACT_SOURCE_KEY)
+        state = geometry_state_of(head.type.value, head.metadata)
+        if not isinstance(stored, dict) or stored.get("definition_hash") != wanted:
+            return None
+        if state not in validated_states():
+            return None
+        ref = f"{cad.key}@{cad.head_revision}"
+        _record("record_exact_incremental", "skipped")
+        logger.info("exact_cad_definition_unchanged", item_ref=ref, definition_hash=wanted)
+        return {
+            "item_key": cad.key,
+            "item_ref": ref,
+            "node_id": str(head.id),
+            "revision": cad.head_revision,
+            "target_revision": str(cad.head_revision),
+            "geometry_state": state.value if state else None,
+            "validated": True,
+            "already_validated": True,
+            "skipped": "definition_unchanged",
+            "definition_hash": wanted,
+            "preview_comparison": _comparison_summary((head.metadata or {}).get(COMPARISON_KEY)),
+            "operation_event": {
+                "message": MSG_DEFINITION_UNCHANGED,
+                "artifact_refs": [self._wp_ref(head, ref, state)],
+            },
+        }
+
+    async def store_comparison(
+        self,
+        node_id: str,
+        source: dict[str, Any],
+        step: bytes,
+        validity: dict[str, Any],
+        *,
+        ref: str,
+    ) -> dict[str, Any] | None:
+        """Compare the L2 preview of ``source`` with this exact revision and store it.
+
+        Best effort: a comparison that cannot run is counted and logged, and
+        never fails the build or unvalidates the revision.
+        """
+        from api_gateway.twin.preview_comparison import comparison_for_source
+
+        if source.get("kind") != "design_ir":
+            return None
+        with tracer.start_as_current_span("twin.exact_cad.preview_comparison") as span:
+            span.set_attribute("item.ref", ref)
+            try:
+                glb = await asyncio.to_thread(self._read_mesh, step)
+                record = await asyncio.to_thread(
+                    comparison_for_source, source, validity=validity, glb=glb
+                )
+                if record is None:
+                    return None
+                record["item_ref"] = ref
+                wp = await self._wp(node_id)
+                await set_node_metadata(self._twin, wp, **{COMPARISON_KEY: record})
+            except Exception as exc:  # noqa: BLE001 - never fails the build
+                span.record_exception(exc)
+                _record("record_preview_comparison", "error")
+                logger.warning("preview_comparison_failed", item_ref=ref, error=str(exc)[:300])
+                return None
+            span.set_attribute("comparison.outcome", record["outcome"])
+            _record("record_preview_comparison", record["outcome"])
+            for check in record["discrepancies"]:
+                _record("record_preview_discrepancy", str(check["check"]))
+            logger.info(
+                "preview_comparison_recorded",
+                item_ref=ref,
+                outcome=record["outcome"],
+                discrepancies=[c["check"] for c in record["discrepancies"]],
+            )
+            return record
 
     # -- jobs ------------------------------------------------------------
 
@@ -1628,7 +1784,7 @@ class ExactCadService:
         if psk_item.head_node_id is None:
             raise ExactCadError(f"{psk_item.key} has no current revision")
         # Refuses now when a required input is missing: nothing is invented.
-        await self.parametric_source(
+        source = await self.parametric_source(
             await self._wp(psk_item.head_node_id), feature_id=feature_id, inputs=inputs
         )
         arguments: dict[str, Any] = {"project_id": project_id, "sketch_key": psk_item.key}
@@ -1641,6 +1797,11 @@ class ExactCadService:
         base = str(cad.head_revision) if cad is not None and cad.head_node_id else None
         if base is not None:
             arguments["base_revision"] = str(base_revision) if base_revision else base
+            # SYNC-008: the definition the head was built from is unchanged,
+            # so no job is started at all.
+            unchanged = await self.unchanged_build(cad, source)
+            if unchanged is not None:
+                return {"job_id": None, "status": "succeeded", "skipped": True, "result": unchanged}
         if wait:
             return await self.build_from_parametric_sketch(**arguments)
         runner = self._job_runner()

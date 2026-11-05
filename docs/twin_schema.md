@@ -3224,6 +3224,36 @@ built into the item `CAD-<name>`, linked `generated_from` the sketch. Every
 is refused at once (422 on the route) and nothing is assumed. The sketch
 must be approved and in millimetres.
 
+**One shared definition.** The design IR built for a parametric sketch's
+feature is the definition both the exact build and the browser's L2 preview
+read (`twin_core/design_ir/feature_definition.py`): `feature_entities`
+makes the entities, `definition_from_entities` reads them back as the
+preview definition, and `definition_hash` is the SHA-256 of the canonical
+entities (key order and float noise ignored). The exact build stores the
+hash in `exact_source.definition_hash`. See
+[L2 preview, comparison and parameter commits](#l2-preview).
+
+**Incremental builds.** What is incremental and what is a full rebuild:
+
+- **Skipped:** a build of a parametric sketch whose definition hash equals
+  the one stored on the CAD item's validated head runs nothing: no job is
+  started (the reply is `skipped: true` with the head as its result), and a
+  job that was already queued returns the head with `skipped:
+  "definition_unchanged"`. Material is not part of the design IR, so a
+  material-only change does not rebuild geometry.
+- **Per component:** each parametric sketch builds its own CAD item
+  (`PSK-X` into `CAD-X`), so a change to one component schedules one build
+  of that item only; the other components' heads, STEP exports and checks are
+  untouched.
+- **Full rebuild of the changed component:** within one component the
+  CadQuery path rebuilds the whole solid from its design IR. There is no
+  per-feature B-Rep cache inside a component: CadQuery has no persistent
+  feature tree to replay from, and one parametric sketch is one feature
+  today.
+
+Counted in `metaforge_exact_incremental_total{outcome}` (`skipped`,
+`rebuilt`).
+
 **STEP export** (`twin.export_cad_step`, `POST /v1/twin/nodes/{id}/exports/step`
 with optional `critical`): only from a `validated` or `released` revision
 (409 otherwise). `cadquery.export_step` writes the STEP with the adapter's
@@ -3278,6 +3308,112 @@ simple exact build through `cadquery.execute_script` about 60 ms, a
 validity check 30 to 110 ms, and a STEP export about 80 ms for a small
 part.
 
+### L2 preview, comparison and parameter commits {#l2-preview}
+
+The L2 preview is drawn in the browser (`dashboard/src/lib/preview/`) from
+the shared definition above; it is never stored as engineering geometry.
+Code: `api_gateway/twin/parametric_preview.py` (the definition view and the
+commit), `api_gateway/twin/preview_comparison.py` (the comparison) and
+`api_gateway/twin/parametric_preview_routes.py`.
+
+**The preview definition.** `GET /v1/twin/projects/{project_id}/parametric-sketches/{sketch_key}/preview-definition`
+(optional `feature_id`, and `job_id` to read a build's state) returns:
+
+- `op` (`extrude` or `revolve`), `elements` (the profile's elements on the
+  plane, `v` up), `frame` (`origin`, `x_dir`, `y_dir`, `normal` in world
+  millimetres, using CadQuery's own named-plane conventions, so the preview
+  sits where the B-Rep will), `depth` or `angle`, `scale_to_mm` and
+  `definition_hash`;
+- `parameters`, each with `value`, `status` and `assumed`. A parameter
+  nobody gave yet is drawn at a labelled assumed value (a tenth of the
+  sketch's extent for a depth, a whole turn for an angle); the definition is
+  then not `buildable` and has no hash, and nothing assumed reaches the exact
+  path. `unit` and `scale_assumed` say whether the scale is confirmed;
+  `plane_assumed` and `plane_blocked` say whether the preview is on the
+  sketch's real plane or on XY;
+- `dimensions` (the confirmed radius dimensions of circles a handle can
+  edit) and `handles`;
+- `representation`: always `L2` / `preview`, with the sketch revision as
+  `source_revision` (`preview_descriptor` in `twin_core/representation.py`);
+- `cad`: the CAD item it builds into, its head, geometry state and
+  `definition_hash`, `matches_definition`, the stored `comparison`, the
+  latest attempt and the last validated revision;
+- `build`: given `job_id`, that exact build job's `status` and error.
+
+The preview supports extrude (outer loop with inner loops as through-holes,
+islands as extra shapes; lines, arcs, circles, ellipses, rectangles and
+splines), revolve about the plane's `v` axis (caps on a partial turn) and an
+empty-selector shell (approximate: a cavity inset by the thickness). Arcs and
+circles are drawn with 6 degree segments and splines as Catmull-Rom with 8
+segments per span, on both sides.
+
+**Parameter commits (Strategy A).**
+`POST /v1/twin/projects/{project_id}/parametric-sketches/{sketch_key}/parameters`
+with `base_revision` (the sketch revision the browser edited), optional
+`feature_id`, `values` (`depth` or `angle`, and `material`), `dimensions`
+(`{constraint_id: radius}` for an accepted radius dimension of a circle),
+`source` (`drag` or `numeric`), and optionally `preview_ms` (the browser's
+rebuild time) and `comparison_tolerance`. It is the only way a manipulation
+becomes authoritative: the mesh the person dragged is never stored. The edit
+is classified `geometric` by the person's own action (stage `person`),
+re-checked against every accepted rule, and written as the sketch's next
+revision pinned to `base_revision` (a moved head answers `409`). The new
+revision keeps the sketch's approval and records `parameter_edit` (base,
+values, dimensions, source) and `change_classification`. Then exactly one
+exact build of the sketch's CAD item is scheduled through
+`twin.build_exact_cad` with the CAD head as its base; a result that loses a
+race to a newer head ends `stale` and the newer head is kept. The reply
+gives the new `sketch_ref` and `build` (`job_id` and `status`; or
+`needs_input`, `blocked` or `refused` with the reason; or `skipped` when the
+definition is unchanged). A value that is not a positive number, an angle
+over 360, a parameter the feature does not have or a dimension that is not
+a circle's radius answers `422`; an unapproved sketch or a broken rule
+answers `409`.
+
+**The comparison** (spec section 7). When an exact build of a supported
+design IR commits a validated revision, the L2 preview of the same
+definition is rebuilt in Python with the browser's tessellation rules and
+compared with the exact result. It is stored on that revision as
+`metadata.preview_comparison`:
+
+| Field | Meaning |
+|---|---|
+| `outcome` | `consistent` (every check ran and is within tolerance), `discrepancy` (a check exceeded it) or `incomplete` (none exceeded it, at least one could not run) |
+| `checks` | `bounding_box` (largest corner difference), `dimensions` (sorted extents), `volume` (relative difference against `cadquery.validate_shape`), `surface_distance` (sampled bidirectional distance: largest and mean, preview to exact and exact to preview, over 96 points per surface), `features` (intended through-holes against the genus of the welded exact tessellation); each with `outcome` `pass`, `fail` or `not_evaluated`, and its values |
+| `discrepancies` | The checks that failed |
+| `tolerance` | `abs_mm`, `rel`, `volume_rel`, the `linear_mm` applied, `basis` and `source` (`default` or `component`) |
+| `preview` | `op`, `definition_hash`, `bounding_box`, `volume_mm3`, `intended_through_holes`, `sketch_ref` |
+| `item_ref`, `method`, `compared_at` | The exact revision, how it was measured, when |
+
+There is no universal threshold. The default tolerance is the larger of
+0.25 mm and 1% of the bounding-box diagonal (2% for volume): it covers the
+preview's chord error on arcs (under 0.14% of the radius) and the difference
+between Catmull-Rom and the kernel's interpolating B-splines, and it says
+whether the preview showed the exact part faithfully, not whether the part
+can be made. A component sets its own with `comparison_tolerance` on a
+parameter commit, kept on its parametric sketch. A discrepancy is reported
+with its values; it never fails the build, unvalidates the revision or
+blocks a gate. The two mesh checks need the exact revision's OCCT
+tessellation (the GLB the viewer shows, from the converter at
+`OCCT_CONVERTER_URL`); without it, or when its box does not match the
+B-Rep's, they are `not_evaluated`. The sampled distance estimates the
+largest deviation from below: between samples it can be larger.
+
+**Observability.** `metaforge_preview_rebuild_seconds{op}` (the browser's
+reported rebuild time), `metaforge_preview_comparison_total{outcome}`
+(`consistent`, `discrepancy`, `incomplete`, `error`),
+`metaforge_preview_discrepancy_total{check}`,
+`metaforge_manipulation_commit_total{source, outcome}` (`committed`,
+`refused`, `stale`) and `metaforge_exact_incremental_total{outcome}`. Alert
+`PreviewComparisonErrors` (comparisons that raise, not discrepancies).
+Spans `twin.parametric_preview.definition`, `twin.parametric_preview.commit`,
+`twin.exact_cad.preview_comparison` and `twin.preview_comparison.compare`.
+
+Measured in the dashboard's test run (jsdom, one workstation): rebuilding the
+preview of a plate with two holes, a rounded slot or a 270 degree revolve
+takes a median of about 1 ms and a 95th percentile under 3 ms, against a
+budget of 100 ms for simple parts.
+
 ### Representation levels, component ids and maturity {#representation-levels}
 
 Every artifact a screen can show as the product carries a representation
@@ -3296,7 +3432,7 @@ dimensions, guarded}`, or `null` for a node that is not displayable.
 | Level | What it is | Most it may claim | Display rank |
 |---|---|---|---|
 | `L3` | Tessellation of a `cad_model` revision whose geometry state is `validated` or `released` | `validated` | 5 |
-| `L2` | A `cad_model` revision not yet validated (`exact`), or a failed or preview one (`preview`) | `exact` | 4 |
+| `L2` | The browser's parametric preview from the shared definition (`preview`, computed client-side; a stored snapshot is a `render` by `dashboard.parametric_preview`), a `cad_model` revision not yet validated (`exact`), or a failed or preview one (`preview`) | `exact` | 4 |
 | `L1` | Simple 3D parts drawn from the concept block layout, sizes estimated | `structured` | 3 |
 | `L0` | An AI 3D concept (`twin.generate_concept_mesh`, or any mesh `render`) | `illustrative` | 2 |
 | `illustration_image` | A concept image, a picture render, a design sketch, a generated sketch or sketch strokes | `illustrative` | 1 |

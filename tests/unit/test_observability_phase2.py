@@ -297,7 +297,7 @@ class TestAllMetricsCombined:
         # + 3 structured mesh, maturity queries, representation mislabels (C3D slice 2).
         # + 4 DFM evaluations, findings, stale recomputes and decisions (C3D slice 4).
         # + 4 exact DFM, report and release checklist (C3D slice 6).
-        assert len(MetricsRegistry.all_metrics()) == 139
+        assert len(MetricsRegistry.all_metrics()) == 144
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

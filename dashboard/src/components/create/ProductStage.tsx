@@ -28,11 +28,15 @@ import { useSketchStore } from '../../store/sketch-store';
 import { useSketchCompilerStore } from '../../store/sketch-compiler-store';
 import { EMPTY_STAGE, useCreateLayoutStore, type DrawerPanel } from '../../store/create-layout-store';
 import { StageDrawer } from './StageDrawer';
+import { ParametricStage } from '../preview/ParametricStage';
+import { useParametricPreview } from '../../hooks/use-parametric-preview';
 import { DfmGuidanceBadge } from './DfmGuidanceBadge';
 import { ReadinessStatus } from './ReadinessStatus';
 import {
   NOT_ASSESSED as NOT_ASSESSED_NOTE,
   PRIMARY_LABEL,
+  cadKeyForSketch,
+  latestParametricSketch,
   isConceptMesh,
   levelText,
   preferredDisplayNode,
@@ -147,6 +151,15 @@ export function ProductStage({
     [nodes],
   );
   const node = visual.find((n) => n.id === selectedId) ?? defaultStageNode(visual);
+  // C3D slice 5: a parametric component leads the stage with its L2 preview,
+  // and swaps to the validated exact model built from the same definition.
+  const psk = useMemo(() => latestParametricSketch(nodes), [nodes]);
+  const selectedItem = String(nodes.find((n) => n.id === selectedId)?.properties?.item_key ?? '');
+  const parametricActive =
+    !!projectId && !!psk && (!selectedId || selectedId === psk.nodeId || selectedItem === cadKeyForSketch(psk.key));
+  const pp = useParametricPreview(parametricActive ? projectId : null, parametricActive ? psk!.key : null);
+  const showParametric = parametricActive && !pp.unavailable;
+  const paramDisplay = showParametric ? pp.display : null;
   const history = useNodeVersionHistory(node?.id);
   const revision = history.data?.length ? Math.max(...history.data.map((r) => r.revision)) : null;
   const references = useMemo(() => visual.filter((n) => previewEngineFor(n).engine === 'image'), [visual]);
@@ -326,6 +339,30 @@ export function ProductStage({
               <PenLine size={13} aria-hidden="true" /> Sketching · your drawing saves as you go
             </span>
           ) : (
+            paramDisplay ? (
+              <>
+                <span
+                  className={`cv-maturity is-${paramDisplay.maturity.toLowerCase()}`}
+                  data-testid="stage-maturity"
+                  title="How far this representation can be trusted"
+                >
+                  {paramDisplay.maturity}
+                </span>
+                <span
+                  className={`cv-truth ${paramDisplay.show === 'l3' ? 'is-engineering' : 'is-concept'}`}
+                  data-testid="stage-status"
+                >
+                  <Box size={13} aria-hidden="true" />
+                  {paramDisplay.status}
+                </span>
+                <span className="cv-revision" data-testid="stage-level" title="Which representation is on screen, and what it was made from">
+                  {paramDisplay.show === 'l3'
+                    ? `L3 · from ${paramDisplay.l3Ref ?? 'the validated exact model'}`
+                    : `L2 · preview · from ${pp.definition?.sketch_ref ?? 'the parametric sketch'}`}
+                </span>
+                {projectId && <DfmGuidanceBadge projectId={projectId} />}
+              </>
+            ) : (
             node &&
             rep && (
               <>
@@ -371,7 +408,7 @@ export function ProductStage({
                   </span>
                 )}
               </>
-            )
+            ))
           )}
         </div>
 
@@ -462,6 +499,11 @@ export function ProductStage({
               )}
               {sketch}
             </div>
+          ) : showParametric ? (
+            <>
+              <ParametricStage pp={pp} variant="create" />
+              {projectId && layout.overlay && hasSketch && <SketchOverlay projectId={projectId} />}
+            </>
           ) : node ? (
             <>
               <PreviewHost key={node.id} node={node} mode="modal" />

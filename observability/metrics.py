@@ -1322,6 +1322,61 @@ class MetricsRegistry:
         labels=["decision", "outcome"],
     )
 
+    # ── L2 preview, comparison and direct manipulation (C3D slice 5) ────
+
+    PREVIEW_REBUILD_SECONDS = MetricDefinition(
+        name="metaforge_preview_rebuild_seconds",
+        type="histogram",
+        description=(
+            "How long the browser took to rebuild the L2 parametric preview mesh after a "
+            "parameter change, as reported with a parameter commit, by feature op "
+            "(extrude, revolve). Target: 0.1 s for simple parts (C3D slice 5)"
+        ),
+        labels=["op"],
+        unit="s",
+        buckets=[0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+    )
+
+    PREVIEW_COMPARISON_TOTAL = MetricDefinition(
+        name="metaforge_preview_comparison_total",
+        type="counter",
+        description=(
+            "Preview versus exact comparisons stored on a validated revision, by outcome "
+            "(consistent, discrepancy, incomplete, error) (C3D slice 5)"
+        ),
+        labels=["outcome"],
+    )
+
+    PREVIEW_DISCREPANCY_TOTAL = MetricDefinition(
+        name="metaforge_preview_discrepancy_total",
+        type="counter",
+        description=(
+            "Comparison checks that exceeded the component's tolerance, by check "
+            "(bounding_box, dimensions, volume, surface_distance, features) (C3D slice 5)"
+        ),
+        labels=["check"],
+    )
+
+    MANIPULATION_COMMIT_TOTAL = MetricDefinition(
+        name="metaforge_manipulation_commit_total",
+        type="counter",
+        description=(
+            "Parameter commits from direct manipulation, by source (drag, numeric) and "
+            "outcome (committed, refused, stale) (C3D slice 5)"
+        ),
+        labels=["source", "outcome"],
+    )
+
+    EXACT_INCREMENTAL_TOTAL = MetricDefinition(
+        name="metaforge_exact_incremental_total",
+        type="counter",
+        description=(
+            "Exact builds of a parametric component, by outcome: skipped (its definition "
+            "hash matched the validated head) or rebuilt (C3D slice 5)"
+        ),
+        labels=["outcome"],
+    )
+
     # ── Exact DFM, report and release checklist (C3D slice 6) ──────────
 
     DFM_EXACT_EVALUATION_TOTAL = MetricDefinition(
@@ -1538,6 +1593,11 @@ class MetricsRegistry:
             cls.DFM_FINDING_TOTAL,
             cls.DFM_STALE_RECOMPUTE_TOTAL,
             cls.DFM_DECISION_TOTAL,
+            cls.PREVIEW_REBUILD_SECONDS,
+            cls.PREVIEW_COMPARISON_TOTAL,
+            cls.PREVIEW_DISCREPANCY_TOTAL,
+            cls.MANIPULATION_COMMIT_TOTAL,
+            cls.EXACT_INCREMENTAL_TOTAL,
             cls.DFM_EXACT_EVALUATION_TOTAL,
             cls.DFM_EXACT_INCOMPLETE_TOTAL,
             cls.DFM_REPORT_TOTAL,
@@ -2516,6 +2576,36 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.DFM_DECISION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"decision": decision, "outcome": outcome})
+
+    def record_preview_rebuild(self, op: str, seconds: float) -> None:
+        """Record one browser-reported L2 preview rebuild time (C3D slice 5)."""
+        hist = self._instruments.get(MetricsRegistry.PREVIEW_REBUILD_SECONDS.name)
+        if hist is not None:
+            hist.record(max(0.0, float(seconds)), attributes={"op": op})
+
+    def record_preview_comparison(self, outcome: str) -> None:
+        """Record one stored preview versus exact comparison (C3D slice 5)."""
+        counter = self._instruments.get(MetricsRegistry.PREVIEW_COMPARISON_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_preview_discrepancy(self, check: str) -> None:
+        """Record one comparison check over its tolerance (C3D slice 5)."""
+        counter = self._instruments.get(MetricsRegistry.PREVIEW_DISCREPANCY_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"check": check})
+
+    def record_manipulation_commit(self, source: str, outcome: str) -> None:
+        """Record one direct-manipulation parameter commit (C3D slice 5)."""
+        counter = self._instruments.get(MetricsRegistry.MANIPULATION_COMMIT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"source": source, "outcome": outcome})
+
+    def record_exact_incremental(self, outcome: str) -> None:
+        """Record whether a parametric component's exact build was skipped (C3D slice 5)."""
+        counter = self._instruments.get(MetricsRegistry.EXACT_INCREMENTAL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
 
     def record_dfm_exact_evaluation(self, outcome: str) -> None:
         """Record one exact DFM evaluation of a validated revision (C3D slice 6)."""
