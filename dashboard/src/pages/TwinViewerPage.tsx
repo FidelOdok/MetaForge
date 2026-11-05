@@ -78,6 +78,7 @@ import { isPlaced } from '../api/endpoints/sketchPlanes';
 import { useAppearanceSync } from '../hooks/use-appearance';
 import { DfmFindingsSection } from '../components/viewer/DfmFindingsSection';
 import { ParametricPreviewSection } from '../components/viewer/ParametricPreviewSection';
+import { FeatureHistorySection } from '../components/viewer/FeatureHistorySection';
 import { useComponentSelection } from '../store/component-selection-store';
 import './TwinViewerPage.css';
 
@@ -1930,7 +1931,13 @@ export function TwinViewerPage() {
               <DfmFindingsSection projectId={activeProjectId} componentId={selectedComponent?.componentId ?? null} />
             ) : node ? (
               inspectorTab === 'overview' ? (
-                <NodeDetail node={node} onClose={() => setSelectedId(null)} onSelectNode={selectNode} />
+                <>
+                  <NodeDetail node={node} onClose={() => setSelectedId(null)} onSelectNode={selectNode} />
+                  {/* Spec 4B: the proposed feature history, on demand. */}
+                  {activeProjectId && !sampleMode && (
+                    <FeatureHistorySection projectId={activeProjectId} componentId={selectedComponent?.componentId ?? null} />
+                  )}
+                </>
               ) : inspectorTab === 'history' ? (
                 <>
                   {itemKeyOf(node) && (

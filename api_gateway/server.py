@@ -102,6 +102,7 @@ from api_gateway.twin.manufacturing_context_routes import (
 )
 from api_gateway.twin.parametric_preview_routes import router as twin_parametric_preview_router
 from api_gateway.twin.prd_routes import router as twin_prd_router
+from api_gateway.twin.reconstruction_routes import router as twin_reconstruction_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.representation_routes import router as twin_representation_router
 from api_gateway.twin.routes import router as twin_router
@@ -2406,6 +2407,8 @@ def create_app(
     app.include_router(twin_exact_cad_router)
     # C3D slice 5: the L2 preview definition and parameter commits.
     app.include_router(twin_parametric_preview_router)
+    # Spec 4B: parametric reconstruction from an accepted concept.
+    app.include_router(twin_reconstruction_router)
     # CDE slice 9: sketches on model faces and their reattachment.
     app.include_router(twin_face_attachment_router)
     # FORGE-793: interface edges and cross-domain impact. The hooks give the

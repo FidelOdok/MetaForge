@@ -42,9 +42,17 @@ describe('primaryActionFor', () => {
     expect(primaryActionFor({ ...NONE, hasEngineering: true })).toBe('prepare_prototype');
   });
 
+  it('offers to make an accepted concept editable until its features are accepted', () => {
+    expect(primaryActionFor({ ...NONE, hasConcept: true, conceptAccepted: true })).toBe('reconstruct');
+    expect(primaryActionFor({ ...NONE, hasConcept3d: true, hasSketch: true, conceptAccepted: true })).toBe('reconstruct');
+    expect(primaryActionFor({ ...NONE, hasConcept3d: true, conceptAccepted: true, editableFromConcept: true })).toBe('build_exact');
+    expect(primaryActionFor({ ...NONE, hasEngineering: true, conceptAccepted: true })).toBe('prepare_prototype');
+  });
+
   it('labels each action in plain words', () => {
     expect(PRIMARY_LABEL).toEqual({
       concept_3d: 'Make a 3D concept',
+      reconstruct: 'Make it editable',
       make_editable: 'Make editable',
       build_exact: 'Build exact model',
       prepare_prototype: 'Prepare prototype',

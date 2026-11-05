@@ -134,7 +134,8 @@ class TestAlertingRules:
         # + 1 DFM evaluation errors (DfmEvaluationErrors, C3D slice 4).
         # + 1 preview comparison errors (PreviewComparisonErrors, C3D slice 5).
         # + 1 exact DFM failures (DfmExactEvaluationFailures, C3D slice 6).
-        assert len(rules) == 83
+        # + 1 reconstruction failures (ReconstructionProposalFailures, spec 4B).
+        assert len(rules) == 84
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -211,7 +212,8 @@ class TestAlertingRules:
         # + 1 representation mislabel guard hits (C3D slice 2).
         # + 1 DFM evaluation errors (C3D slice 4).
         # + 1 exact DFM failures (C3D slice 6).
-        assert len(warnings) == 67
+        # + 1 reconstruction failures (spec 4B).
+        assert len(warnings) == 68
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -353,6 +355,8 @@ class TestAlertingRules:
                 "DfmExactEvaluationFailures",
                 # C3D slice 5: preview versus exact comparisons raise.
                 "PreviewComparisonErrors",
+                # Spec 4B: feature history proposals fail to store.
+                "ReconstructionProposalFailures",
             ]
         )
 

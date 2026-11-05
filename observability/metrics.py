@@ -1419,6 +1419,38 @@ class MetricsRegistry:
         labels=["blocker"],
     )
 
+    # ── Parametric reconstruction from an accepted concept (spec 4B) ─────
+
+    RECONSTRUCTION_PROPOSAL_TOTAL = MetricDefinition(
+        name="metaforge_reconstruction_proposal_total",
+        type="counter",
+        description=(
+            "Feature history proposals for a component of an accepted concept, by outcome "
+            "(proposed, reused, accepted, partially_accepted, refused, failed)"
+        ),
+        labels=["outcome"],
+    )
+
+    RECONSTRUCTION_FEATURE_ACCEPTED_TOTAL = MetricDefinition(
+        name="metaforge_reconstruction_feature_accepted_total",
+        type="counter",
+        description=(
+            "Proposed features a person accepted, by kind (sketch_profile, extrude, revolve, "
+            "shell, opening, boss, rib) and by who suggested them (deterministic, llm)"
+        ),
+        labels=["kind", "suggested_by"],
+    )
+
+    RECONSTRUCTION_LLM_PASS_TOTAL = MetricDefinition(
+        name="metaforge_reconstruction_llm_pass_total",
+        type="counter",
+        description=(
+            "Optional model passes over a feature history proposal (names, order and "
+            "missing features, never numbers), by outcome (used, unavailable, invalid)"
+        ),
+        labels=["outcome"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1602,6 +1634,9 @@ class MetricsRegistry:
             cls.DFM_EXACT_INCOMPLETE_TOTAL,
             cls.DFM_REPORT_TOTAL,
             cls.MANUFACTURING_RELEASE_REFUSED_TOTAL,
+            cls.RECONSTRUCTION_PROPOSAL_TOTAL,
+            cls.RECONSTRUCTION_FEATURE_ACCEPTED_TOTAL,
+            cls.RECONSTRUCTION_LLM_PASS_TOTAL,
         ]
 
     @classmethod
@@ -2630,6 +2665,24 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.MANUFACTURING_RELEASE_REFUSED_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"blocker": blocker})
+
+    def record_reconstruction_proposal(self, outcome: str) -> None:
+        """Record one feature history proposal outcome (spec 4B)."""
+        counter = self._instruments.get(MetricsRegistry.RECONSTRUCTION_PROPOSAL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_reconstruction_feature_accepted(self, kind: str, suggested_by: str) -> None:
+        """Record one proposed feature a person accepted (spec 4B)."""
+        counter = self._instruments.get(MetricsRegistry.RECONSTRUCTION_FEATURE_ACCEPTED_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind, "suggested_by": suggested_by})
+
+    def record_reconstruction_llm_pass(self, outcome: str) -> None:
+        """Record one optional model pass over a proposal (spec 4B)."""
+        counter = self._instruments.get(MetricsRegistry.RECONSTRUCTION_LLM_PASS_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
 
     def record_tool_job(self, tool: str, status: str) -> None:
         """Record one state change of a tool job (FORGE-783)."""

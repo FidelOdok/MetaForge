@@ -601,3 +601,72 @@
 .cv-readiness.is-prototype {
   border-color: rgba(58, 157, 93, 0.7);
 }
+
+/* Spec 4B: "Make it editable" from an accepted concept, in plain words. */
+.cv-editable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #e2e2eb;
+  background: rgba(17, 19, 25, 0.94);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cv-editable-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cv-editable-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cv-editable-summary {
+  margin: 0;
+  line-height: 1.45;
+}
+.cv-editable-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #b4b4c2;
+}
+.cv-editable-status.is-error {
+  color: #fca5a5;
+}
+.cv-editable-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cv-editable-question {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cv-editable-question legend {
+  margin-bottom: 4px;
+  color: #cfcfe0;
+}
+.cv-editable-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cv-editable-options .is-on {
+  border-color: var(--cv-accent);
+}
+.cv-editable-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cv-editable-hint {
+  font-size: 12px;
+  color: #fbbf24;
+}

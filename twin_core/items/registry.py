@@ -297,6 +297,18 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "mesh keeps its look. Never changes CAD or the manufacturing context."
         ),
     ),
+    TwinTypeSpec(
+        "feature_history_proposal",
+        TwinTypeKind.DEFINITION,
+        "work_product:feature_history_proposal",
+        key_prefix="FHP",
+        description=(
+            "A proposed editable feature history for one component of an accepted concept "
+            "(FHP-<component>): ordered features with each parameter estimated, confirmed or "
+            "unknown and its source, assumptions, open questions and the DFM strategy note. "
+            "A proposal, not CAD; accepted features become parametric sketches."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",
