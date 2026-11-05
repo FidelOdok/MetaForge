@@ -1231,6 +1231,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
 | `interface_edge` | record | | `WorkProduct` `interface_edge`: a typed coupling between two items in different domains, pinned to their revisions. Its status (`proposed`, `confirmed`, `removed`) changes in place; it is never deleted. See [interface edges](#interface-edges-and-cross-domain-impact) |
 | `change_impact` | record | | `WorkProduct` `change_impact`: what one change did across domains, the stale results it left and the reruns it proposes, each rerun's approval decision recorded in place |
+| `dfm_finding_set` | record | | `WorkProduct` `dfm_finding_set`: one component's heuristic DFM findings under one process rule profile, pinned to the geometry and manufacturing context revisions it read. Guidance only, never an analysis pass. See [DFM findings](#dfm-findings) |
 | `approval` | record | | approvals service |
 | `session` | record | | `agent_sessions` (Postgres) |
 | `run` | record | | runs / design-flow workflow |
@@ -1820,7 +1821,7 @@ An `InterfaceEdge` (`twin_core/models/interface.py`) is typed and revision-aware
 
 | Field | Meaning |
 |-------|---------|
-| `type` | `mounts_to` (a part carries a board's mounting holes), `clearance_to` (an enclosure must clear a board outline or component envelope), `connects_via` (a connector meets a cable or cut-out), `pin_maps_to` (an MCU pin or net is used by a firmware module, driver or config), `simulation_input_of` (geometry, material or load feeds a simulation), `feature_of` (a sketch or sketch plane feeds what is built from it), `manufactured_by` (a manufacturing context shaped what was generated under it) |
+| `type` | `mounts_to` (a part carries a board's mounting holes), `clearance_to` (an enclosure must clear a board outline or component envelope), `connects_via` (a connector meets a cable or cut-out), `pin_maps_to` (an MCU pin or net is used by a firmware module, driver or config), `simulation_input_of` (geometry, material or load feeds a simulation), `feature_of` (a sketch or sketch plane feeds what is built from it), `manufactured_by` (a manufacturing context shaped what was generated under it), `dfm_constrains` (a DFM finding set constrains a component's geometry under a manufacturing context, see [DFM findings](#dfm-findings)) |
 | `source`, `target` | each an item key pinned to the revision the coupling was stated against (`ref`, `revision`, `domain`, `item_type`, `node_id`), or a result record as `record:<uuid>` |
 | `domain_pair` | the two ends' domains, from the item type (`cad_model` is mechanical, `pcb_layout` and `pinmap` electronics, `firmware_source` firmware) |
 | `declared_by` | `human`, `tool` (recorded as a fact by the tool that ran) or `inferred` (MetaForge read it from data) |
@@ -2084,7 +2085,8 @@ read that component's context.
 success), `verification_required` (physical or supplier confirmation
 required) and `released`. A generated concept is `not_assessed` unless a real
 heuristic check ran (then `preliminary_guidance`); it can never carry a later
-state. `manufacturing_note` is the short, truthful line a concept card shows:
+state. The heuristic checks that set a component's status are in
+[DFM findings](#dfm-findings). `manufacturing_note` is the short, truthful line a concept card shows:
 "Manufacturing not assessed" when nothing informed it, "Informed by: FDM
 (assumed), PLA (assumed) · Manufacturing not assessed" when a context did. No
 illustrative label or note ever says verified or production-ready; a unit
@@ -2144,7 +2146,173 @@ Routes: `GET /v1/twin/projects/{project_id}/appearance` and `PUT` the same path;
 
 ---
 
-### 2.38 Migrating legacy nodes into items {#migrating-legacy-nodes}
+### 2.38 DFM findings {#dfm-findings}
+
+Cheap design for manufacture checks run during interactive refinement, long
+before an exact check can. They are guidance: a finding set's status is never
+an analysis pass.
+
+#### Rule profiles
+
+One versioned profile per process, in `twin_core/dfm/profiles/`: `fdm`,
+`resin`, `cnc`, `injection_moulding` and `sheet_metal` (each `1.0.0`). A
+profile is picked from the manufacturing context's process words ("3D
+printing" is `fdm`, "SLA resin" is `resin`). Every rule has an id
+(`fdm.min_wall`), a check, the quantity it reads, a limit (absolute, or a
+factor of another quantity such as the sheet thickness), and its **kind and
+source**:
+
+| Kind | Meaning |
+|------|---------|
+| `machine_limit` | A capability of the selected machine, read from the machine library at evaluation time with the library's own source. A profile only names the capability (`build_volume_mm`); its number is never in the profile |
+| `supplier_limit` | Only from a verified integration. No profile seeds one: the model refuses it |
+| `heuristic` | A MetaForge rule of thumb (supports inside an enclosed cavity cannot be removed) |
+| `general_guidance` | Widely published process design guidance, marked as such in its source |
+
+A guidance rule may defer to the machine (`machine_override`): when the
+selected machine records that capability (a minimum wall, a tool diameter),
+the machine's value and source replace the guidance. The FDM profile has
+minimum wall, minimum feature, overhang angle, unsupported bridge, build
+volume (from the selected machine), minimum hole and support access. The
+starter profiles have resin wall, detail, hole, drainage and build volume;
+CNC internal corner radius, corner radius for the pocket depth, pocket depth
+to width, walls by material family, hole and travel; moulding minimum and
+maximum wall, wall uniformity, draft and rib thickness; sheet metal bend
+radius, flange length, hole to bend distance and hole size, in multiples of
+the sheet thickness.
+
+#### Geometry the checks read
+
+For each component (a `CMP-*` id, or `item:<KEY>` for CAD with no component)
+the best geometry it has is read, and quantities the best source lacks are
+filled from lower ones, each measure keeping its own confidence:
+
+| Source | Measures | Confidence |
+|--------|----------|------------|
+| Exact, validated CAD | bounding box as the envelope; generation parameters (`wall_thickness`, `hole_diameter`, `draft_angle` ...) | `exact` (box), `design_parameter` |
+| CAD not yet validated | the same | `design_parameter` |
+| Parametric sketch | an extrude depth a person gave, as a wall | `human_confirmed` |
+| Concept layout (L1) | each block's size as the envelope and its smallest side as the thinnest section | `estimated` (`human_confirmed` for a `verified` part) |
+| Face tables | a face table recorded on the CAD (`dfm_faces`), else the faces of a current overhang check pinned to it | `estimated` |
+
+Faces run the FDM overhang check (the same one `twin.evaluate_overhang_metric`
+uses): undirected for a mesh face table, so flat tops are flagged too, and
+directed only when the table says its normals point outward.
+
+#### Findings and gaps
+
+A finding has an id stable across recomputes, the rule id, the profile and
+version, a severity, an **anchor** (the component, plus the feature or face
+signature when known, and every face it covers), the quantity measured
+against the limit with units, comparison and the measure's confidence, the
+limit's source, the evidence refs it was read from, a plain message, a
+suggested fix and what the fix would change. A finding is `blocking` only
+when the limit is a machine (or supplier) limit and the measure is exact,
+confirmed by a person or a design parameter; anything on guidance or on
+estimated geometry is `advisory`.
+
+A rule whose input is unknown is listed in `not_assessed` with the reason,
+never passed: "Not assessed for minimum wall thickness because the wall
+thickness is unknown", "because the machine is unknown", "because the
+material is unknown" (a rule for one material family), or, with no process,
+one entry "because the process is unknown".
+
+#### Status semantics
+
+| Status | When |
+|--------|------|
+| `issues_found` | any finding, blocking or advisory |
+| `analysis_pending` | exact checks are scheduled and nothing was found |
+| `preliminary_guidance` | only heuristics ran and nothing was found |
+| `not_assessed` | no rule ran |
+
+A finding set is never `analysis_passed`, `verification_required` or
+`released`: the model refuses those states. The product's status is its
+worst component's. The note is grounded in what ran: *Likely printable with
+supports (preliminary)* only for FDM and only when the overhang rule ran and
+found only overhangs, *No issues in 3 preliminary CNC machining checks*, *2
+manufacturing suggestions for FDM (preliminary)*, *1 blocking manufacturing
+issue for FDM (preliminary)*, or *Manufacturing not assessed (the process is
+unknown)*.
+
+#### The record
+
+One `dfm_finding_set` record (a `WorkProduct`, a history type left out of
+the node lists) per component and evaluation, with the set in
+`metadata.dfm_finding_set`, pinned to the geometry item revisions and the
+manufacturing context revision it read (`depends_on_items`, revision pin
+edges), and `result.verdict: incomplete` so the shared validation status
+never reads it as a pass. The same inputs reuse the current set. A recompute
+under the same profile supersedes the old set; under another profile (the
+process changed) the old set is marked `stale` with the reason and kept. The
+CAD revision (or the L1 mesh, per component in `dfm_components`) it was
+computed on gets `dfm_status`, `dfm_status_label`, `manufacturing_note` and
+`dfm_finding_set_id` as status tags, only when a rule ran.
+
+#### Incremental recompute
+
+When a component's geometry head moves (`cad_model`, `assembly`,
+`parametric_sketch`), the record pins mark its finding set stale and, after
+the other head-move listeners, only the components whose sets were pinned to
+that item are recomputed. A manufacturing context write that changes a field
+the rules read (process, process candidates, material, material candidates,
+quantity, machine or supplier, tolerances) recomputes the sets made under
+that context; any other change (a finish, the intended use) revalidates the
+sets its move marked stale. A process change therefore gives findings keyed
+to the new profile and leaves the old process's findings stale, while every
+stated or decided field and every geometry revision stays as it was.
+
+#### In the impact graph
+
+Each current or stale set is derived as `dfm_constrains` interface edges
+(symmetric, `declared_by: tool`) from `record:<set>` to each item it is
+pinned to. The edge to the manufacturing context is coupled on the fields
+above, so a finish edit does not reach the findings. A geometry change lists
+the set as a stale result of kind `dfm`, with the review action "Review the
+recomputed manufacturing guidance"; no tool rerun is proposed, since the
+recompute happens on its own.
+
+#### Decisions
+
+`keep_design` records the person's choice on the finding (carried to later
+recomputes of the same finding; it no longer counts as a suggestion).
+`try_fix` returns the fix as a proposal and changes nothing; when the fix
+would change a field a person stated in the manufacturing context, or a
+reference's protected feature, it files a design-change approval
+(`change:<id>`) instead. `explore_process` previews the component under the
+other profiles and stores nothing.
+
+#### Generation guidance
+
+A concept generation with `manufacturability_variant: true` makes its last
+variant a proposal shaped by the selected process's profile, as guidance
+text (only when the process is specified; otherwise the reason is returned).
+That variant records `variant_kind: manufacturability`, `dfm_profile` and
+`dfm_rules_applied` (each rule id, version, kind and source); its DFM status
+stays `not_assessed`, since nothing checked the picture.
+
+#### API
+
+| Route | Purpose |
+|-------|---------|
+| `GET /v1/twin/projects/{id}/dfm` | current findings by component, product status, open suggestion count and profile versions; `?history=true` adds stale and superseded sets |
+| `POST /v1/twin/projects/{id}/dfm/evaluate` | run the checks now (`component_ids` to narrow) |
+| `POST /v1/twin/projects/{id}/dfm/findings/{finding_id}/decision` | `keep_design`, `try_fix` or `explore_process` |
+
+MCP: `twin.evaluate_dfm` (additive) and `twin.get_dfm_findings` (read only).
+Observability: `metaforge_dfm_evaluation_total{trigger, outcome}`,
+`metaforge_dfm_finding_total{severity, process}`,
+`metaforge_dfm_stale_recompute_total{reason}` and
+`metaforge_dfm_decision_total{decision, outcome}`; the `DfmEvaluationErrors`
+alert; spans `twin.dfm.evaluate`, `twin.dfm.evaluate_project`,
+`twin.dfm.view`, `twin.dfm.decide` and `twin.dfm_routes.*`; operation events
+in the `manufacturing` domain titled "Manufacturing guidance".
+
+*Source: `twin_core/dfm/`, `api_gateway/twin/dfm_findings.py`, `api_gateway/twin/dfm_routes.py`*
+
+---
+
+### 2.39 Migrating legacy nodes into items {#migrating-legacy-nodes}
 
 A project written before items existed holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
 

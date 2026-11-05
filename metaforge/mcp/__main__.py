@@ -2126,6 +2126,17 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("structured_mesh_renderer", _structured_mesh)
 
+    # C3D slice 4: twin.evaluate_dfm and twin.get_dfm_findings. A geometry head
+    # this process moves recomputes the affected components' findings.
+    def _dfm_service() -> Any:
+        from api_gateway.twin.dfm_findings import make_dfm_service
+        from api_gateway.twin.dfm_findings import register as register_dfm
+
+        register_dfm()
+        return make_dfm_service(twin)
+
+    _try("dfm_service", _dfm_service)
+
     # FORGE-794: twin.generate_sketch. Registered whether or not an image
     # provider is configured; an unconfigured one fails the call clearly.
     def _sketch_generator() -> Any:

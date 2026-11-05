@@ -114,12 +114,24 @@ class InterfaceType(StrEnum):
     #: generated under it. Derived from the ``manufacturing_context_ref`` an
     #: output records; a process change walks it (3D-RC-013).
     MANUFACTURED_BY = "manufactured_by"
+    #: A DFM finding set constrains a component's geometry under a
+    #: manufacturing context. Derived from the set's own revision pins; a
+    #: change to the geometry or to the process, material or quantity walks
+    #: it (DFM-012).
+    DFM_CONSTRAINS = "dfm_constrains"
 
 
 #: Couplings where a change on either end affects the other: moving the
 #: board's holes breaks the enclosure as surely as moving the standoffs.
 SYMMETRIC_TYPES: frozenset[InterfaceType] = frozenset(
-    {InterfaceType.MOUNTS_TO, InterfaceType.CLEARANCE_TO, InterfaceType.CONNECTS_VIA}
+    {
+        InterfaceType.MOUNTS_TO,
+        InterfaceType.CLEARANCE_TO,
+        InterfaceType.CONNECTS_VIA,
+        # A finding constrains its component, and a change to the component
+        # (or its context) reaches the finding.
+        InterfaceType.DFM_CONSTRAINS,
+    }
 )
 
 

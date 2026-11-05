@@ -58,85 +58,25 @@ promotion to consult it.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 from uuid import UUID
 
-#: Build direction (unit vector) the overhang check measures tilt against
-#: when the caller doesn't supply one. Z-up, matching this codebase's other
-#: geometry conventions (CAD/mesh coordinates).
-DEFAULT_BUILD_AXIS: tuple[float, float, float] = (0.0, 0.0, 1.0)
+# The check itself lives in twin_core so the DFM heuristics (C3D slice 4)
+# reuse it; these names stay importable from here.
+from twin_core.dfm.overhang import (
+    DEFAULT_BUILD_AXIS,
+    OVERHANG_TILT_THRESHOLD_DEG,
+    compute_face_tilt_from_vertical_deg,
+    compute_overhang_faces,
+)
 
-#: The standard FDM "self-supporting" overhang convention: a face tilted up
-#: to 45 degrees from a vertical wall orientation prints without support; a
-#: face tilted further needs it. Measured here on the UNDIRECTED face
-#: plane (see module docstring) -- a face at exactly 45.0 degrees is NOT
-#: flagged (the threshold is the maximum still-printable tilt).
-OVERHANG_TILT_THRESHOLD_DEG = 45.0
-
-
-def _normalize(v: tuple[float, float, float]) -> tuple[float, float, float]:
-    mag = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
-    if mag < 1e-12:
-        return (0.0, 0.0, 0.0)
-    return (v[0] / mag, v[1] / mag, v[2] / mag)
-
-
-def compute_face_tilt_from_vertical_deg(
-    normal: tuple[float, float, float],
-    build_axis: tuple[float, float, float] = DEFAULT_BUILD_AXIS,
-) -> float:
-    """Undirected tilt (0-90 degrees) of a face's plane from the vertical
-    build axis. 0 = a perfectly vertical wall (normal perpendicular to the
-    build axis). 90 = a perfectly horizontal face (normal parallel to the
-    build axis, either sense).
-
-    Uses ``abs()`` of the normal/axis dot product deliberately: the mesh
-    normal's sense (which way it points) isn't guaranteed (see module
-    docstring), so this treats the normal as an undirected line. A
-    zero-magnitude normal (degenerate/unresolved face) returns 0.0 --
-    treated as a safe vertical wall rather than flagged, since there's no
-    real geometric signal to flag on.
-    """
-    n = _normalize(normal)
-    if n == (0.0, 0.0, 0.0):
-        return 0.0
-    b = _normalize(build_axis)
-    dot = abs(n[0] * b[0] + n[1] * b[1] + n[2] * b[2])
-    dot_clamped = max(-1.0, min(1.0, dot))
-    angle_from_axis_deg = math.degrees(math.acos(dot_clamped))
-    return 90.0 - angle_from_axis_deg
-
-
-def compute_overhang_faces(
-    faces: list[dict[str, Any]],
-    *,
-    build_axis: tuple[float, float, float] = DEFAULT_BUILD_AXIS,
-    threshold_deg: float = OVERHANG_TILT_THRESHOLD_DEG,
-) -> list[dict[str, Any]]:
-    """Per-face overhang check over a ``freecad.list_named_faces`` face
-    table. Faces with no resolvable normal (empty/zero-magnitude, e.g. a
-    degenerate group) are skipped -- not flagged, not silently counted as
-    passing; they simply don't appear in the result."""
-    out: list[dict[str, Any]] = []
-    for face in faces:
-        normal = face.get("normal")
-        if not isinstance(normal, (list, tuple)) or len(normal) != 3:
-            continue
-        normal_t = (float(normal[0]), float(normal[1]), float(normal[2]))
-        if _normalize(normal_t) == (0.0, 0.0, 0.0):
-            continue
-        tilt = compute_face_tilt_from_vertical_deg(normal_t, build_axis)
-        out.append(
-            {
-                "name": face.get("name"),
-                "area_mm2": face.get("area_mm2"),
-                "normal": [round(v, 6) for v in normal_t],
-                "tilt_from_vertical_deg": round(tilt, 3),
-                "flagged": tilt > threshold_deg,
-            }
-        )
-    return out
+__all__ = [
+    "DEFAULT_BUILD_AXIS",
+    "OVERHANG_TILT_THRESHOLD_DEG",
+    "compute_face_tilt_from_vertical_deg",
+    "compute_overhang_faces",
+    "make_overhang_evidence_recorder",
+]
 
 
 def make_overhang_evidence_recorder(

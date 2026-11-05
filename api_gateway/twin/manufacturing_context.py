@@ -456,7 +456,7 @@ async def write_context(
                 unknowns=record.unknowns,
             )
             _publish(pid, out, source, merge.changed)
-            return WriteOutcome(
+            outcome = WriteOutcome(
                 stored=out,
                 changed=merge.changed,
                 refused=merge.refused,
@@ -464,6 +464,13 @@ async def write_context(
                 process_change=merge.process_change,
                 revision_created=True,
             )
+            # C3D slice 4: a process, material or quantity change recomputes the
+            # DFM findings made under this context; any other change leaves
+            # them valid. Never raises.
+            from api_gateway.twin.dfm_findings import on_context_written
+
+            await on_context_written(twin, pid, outcome)
+            return outcome
 
 
 def stated(value: Any, *, source: str, actor: str = "", ref: str | None = None) -> ContextField:

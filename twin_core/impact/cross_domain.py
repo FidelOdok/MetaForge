@@ -97,6 +97,7 @@ RELEVANT_CHECKS: dict[InterfaceType, frozenset[str]] = {
     InterfaceType.SIMULATION_INPUT_OF: frozenset({"fea", "thermal"}),
     InterfaceType.FEATURE_OF: frozenset(),
     InterfaceType.MANUFACTURED_BY: frozenset(),
+    InterfaceType.DFM_CONSTRAINS: frozenset({"dfm"}),
 }
 
 #: The re-check to propose for a directly affected item that has no result
@@ -117,6 +118,7 @@ _COUPLING_WORDS: dict[InterfaceType, str] = {
     InterfaceType.SIMULATION_INPUT_OF: "the analysed geometry, material or load",
     InterfaceType.FEATURE_OF: "the sketch it was built from",
     InterfaceType.MANUFACTURED_BY: "the process and material it was generated for",
+    InterfaceType.DFM_CONSTRAINS: "the geometry, process, material and quantity it was checked for",
 }
 #: What depends on it, on the affected side.
 _DEPENDENT_WORDS: dict[InterfaceType, str] = {
@@ -127,6 +129,7 @@ _DEPENDENT_WORDS: dict[InterfaceType, str] = {
     InterfaceType.SIMULATION_INPUT_OF: "was computed from them",
     InterfaceType.FEATURE_OF: "was made from that sketch",
     InterfaceType.MANUFACTURED_BY: "process-specific assumptions are out of date",
+    InterfaceType.DFM_CONSTRAINS: "manufacturing guidance is recomputed for it",
 }
 #: The proposed action per edge type when no tool re-check applies.
 _REVIEW_ACTIONS: dict[InterfaceType, tuple[str, str]] = {
@@ -139,6 +142,10 @@ _REVIEW_ACTIONS: dict[InterfaceType, tuple[str, str]] = {
     InterfaceType.MANUFACTURED_BY: (
         "review_manufacturing",
         "Review it against the new process; keep what the person approved",
+    ),
+    InterfaceType.DFM_CONSTRAINS: (
+        "review_dfm",
+        "Review the recomputed manufacturing guidance",
     ),
 }
 
@@ -175,6 +182,12 @@ _BOOKKEEPING_KEYS = frozenset(
         "store_error",
         "preview_error",
         "flow_slot_key",
+        # C3D slice 4: DFM status tags written on an output after the fact.
+        "dfm_status",
+        "dfm_status_label",
+        "manufacturing_note",
+        "dfm_finding_set_id",
+        "dfm_components",
     }
 )
 
@@ -489,6 +502,9 @@ def classify_check(node: Any) -> str | None:
         return "thermal" if "thermal" in analysis else "fea"
     if record_type == "design_decision":
         return "decision"
+    if record_type == "dfm_finding_set":
+        # Recomputed by the gateway after the head move; no tool to re-run.
+        return "dfm"
     if record_type != "evidence":
         return None
     tool = producer_tool(meta).lower()
@@ -569,6 +585,8 @@ def _phrase(entity: ImpactedEntity) -> str:
         return "the simulation results"
     if entity.edge_type is InterfaceType.MANUFACTURED_BY:
         return "concepts generated for the previous process"
+    if entity.edge_type is InterfaceType.DFM_CONSTRAINS:
+        return "the manufacturing guidance"
     return "what was built from this sketch"
 
 

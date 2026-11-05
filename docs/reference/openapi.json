@@ -4155,6 +4155,136 @@
         "title": "ComponentAppearance",
         "type": "object"
       },
+      "ComponentFindingsView": {
+        "properties": {
+          "component_id": {
+            "title": "Component Id",
+            "type": "string"
+          },
+          "context_ref": {
+            "title": "Context Ref",
+            "type": "string"
+          },
+          "evaluated_at": {
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "finding_set_id": {
+            "title": "Finding Set Id",
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "geometry_level": {
+            "title": "Geometry Level",
+            "type": "string"
+          },
+          "geometry_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Geometry Refs",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "not_assessed": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Not Assessed",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "process": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process"
+          },
+          "process_authority": {
+            "title": "Process Authority",
+            "type": "string"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "rules_run": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules Run",
+            "type": "array"
+          },
+          "staleness": {
+            "additionalProperties": true,
+            "title": "Staleness",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_label": {
+            "title": "Status Label",
+            "type": "string"
+          },
+          "trigger": {
+            "default": "",
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "name",
+          "finding_set_id",
+          "status",
+          "status_label",
+          "note",
+          "process",
+          "process_authority",
+          "profile",
+          "geometry_level",
+          "geometry_refs",
+          "context_ref",
+          "staleness",
+          "findings",
+          "not_assessed",
+          "rules_run",
+          "evaluated_at"
+        ],
+        "title": "ComponentFindingsView",
+        "type": "object"
+      },
       "ComponentHealth": {
         "description": "Health snapshot for one downstream dependency.",
         "properties": {
@@ -6343,6 +6473,52 @@
         "title": "DesignFlowView",
         "type": "object"
       },
+      "DfmDecisionRequest": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "keep_design",
+              "try_fix",
+              "explore_process"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "DfmDecisionRequest",
+        "type": "object"
+      },
+      "DfmEvaluateRequest": {
+        "description": "Which components to check; all when left out.",
+        "properties": {
+          "component_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Ids"
+          }
+        },
+        "title": "DfmEvaluateRequest",
+        "type": "object"
+      },
       "DfmStatus": {
         "description": "The spec's DFM status semantics (DFM-013).",
         "enum": [
@@ -6356,6 +6532,78 @@
         ],
         "title": "DfmStatus",
         "type": "string"
+      },
+      "DfmView": {
+        "properties": {
+          "blocking": {
+            "title": "Blocking",
+            "type": "integer"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentFindingsView"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "disclaimer": {
+            "default": "Preliminary manufacturing guidance from heuristic rules. Not an analysis pass, not a supplier confirmation and not a manufacturing release.",
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "heuristic_only": {
+            "default": true,
+            "title": "Heuristic Only",
+            "type": "boolean"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentFindingsView"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "profiles": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_label": {
+            "title": "Status Label",
+            "type": "string"
+          },
+          "suggestions": {
+            "title": "Suggestions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id",
+          "status",
+          "status_label",
+          "note",
+          "suggestions",
+          "blocking"
+        ],
+        "title": "DfmView",
+        "type": "object"
       },
       "DiscoverMachineRequest": {
         "properties": {
@@ -9206,6 +9454,11 @@
             "maxItems": 10,
             "title": "Locked Regions",
             "type": "array"
+          },
+          "manufacturability_variant": {
+            "default": false,
+            "title": "Manufacturability Variant",
+            "type": "boolean"
           },
           "mask": {
             "anyOf": [
@@ -39021,6 +39274,185 @@
           }
         },
         "summary": "Start Concept Mesh",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/dfm": {
+      "get": {
+        "description": "The project's current DFM findings by component, status and profile versions.",
+        "operationId": "get_dfm_v1_twin_projects__project_id__dfm_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Include stale and superseded sets",
+            "in": "query",
+            "name": "history",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include stale and superseded sets",
+              "title": "History",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DfmView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dfm",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/dfm/evaluate": {
+      "post": {
+        "description": "Run the heuristic DFM rules now and return the updated findings.\n\nPreliminary guidance only: a component's status is ``issues_found``,\n``preliminary_guidance``, ``analysis_pending`` or ``not_assessed``, never\nan analysis pass.",
+        "operationId": "evaluate_dfm_v1_twin_projects__project_id__dfm_evaluate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DfmEvaluateRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DfmView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evaluate Dfm",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/dfm/findings/{finding_id}/decision": {
+      "post": {
+        "description": "Keep the design, try the suggested fix, or explore another process.",
+        "operationId": "decide_finding_v1_twin_projects__project_id__dfm_findings__finding_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "title": "Finding Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DfmDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Finding V1 Twin Projects  Project Id  Dfm Findings  Finding Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Finding",
         "tags": [
           "twin"
         ]

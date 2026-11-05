@@ -34,6 +34,9 @@ WIRED = {
     "twin.generate_concept_mesh",
     # C3D slice 2: the concept as simple 3D parts (L1), free, no provider.
     "twin.render_structured_mesh",
+    # C3D slice 4: heuristic DFM findings, evaluated and read.
+    "twin.evaluate_dfm",
+    "twin.get_dfm_findings",
     "twin.commit_hazard_analysis",
     "twin.commit_system_architecture",
     "twin.commit_technical_drawing",

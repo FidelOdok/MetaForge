@@ -21,7 +21,13 @@ second copy could only drift:
   head records (``MFC-PROJECT@3``), coupled on the selected process and
   material, so a process change reaches what was generated for the old one.
 
-All three are listed with ``derived: true``, ``declared_by: tool`` and status
+* ``dfm_constrains``: a ``dfm_finding_set`` record's own revision pins. The
+  findings constrain the component's geometry revision they were computed
+  on, under the manufacturing context revision they read; the context edge
+  is coupled on the fields the rules read (process, material, quantity,
+  machine), so a finish edit does not reach the findings (DFM-012).
+
+All of them are listed with ``derived: true``, ``declared_by: tool`` and status
 ``confirmed``. A person may still declare any of them by hand.
 
 Provenance is honest by construction: a person's declaration is confirmed at
@@ -67,6 +73,17 @@ MANUFACTURED_ITEM_TYPES = ("generated_sketch",)
 #: What crosses a ``manufactured_by`` edge: a change elsewhere in the context
 #: (the intended use, a note) does not reach what was generated.
 MANUFACTURED_COUPLED = ("selected_process", "selected_material")
+#: What crosses a ``dfm_constrains`` edge from a manufacturing context: the
+#: fields DFM rules read. Geometry edges name none, so any change travels.
+DFM_CONTEXT_COUPLED = (
+    "selected_process",
+    "process_candidates",
+    "selected_material",
+    "material_candidates",
+    "quantity",
+    "machine_or_supplier_profile",
+    "tolerances",
+)
 
 _metrics: Any = None
 
@@ -570,6 +587,67 @@ async def _manufacturing_edges(twin: Any, pid: UUID) -> list[InterfaceEdge]:
     return out
 
 
+async def _dfm_edges(twin: Any, pid: UUID) -> list[InterfaceEdge]:
+    """``dfm_constrains`` from each current or stale DFM finding set's revision pins."""
+    from twin_core.consistency.record_pins import record_pins, record_staleness
+
+    out: list[InterfaceEdge] = []
+    sets = await twin.list_work_products(
+        work_product_type=WorkProductType.DFM_FINDING_SET, project_id=pid
+    )
+    for node in sets:
+        meta = node.metadata or {}
+        if record_staleness(meta) in ("superseded", "invalid"):
+            continue  # replaced by a recompute, or never about the design
+        raw = meta.get("dfm_finding_set")
+        finding_set: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        component = str(finding_set.get("component_id") or "")
+        for pin in record_pins(meta):
+            key = str(pin["item_key"])
+            item_type = str(pin.get("item_type") or "")
+            revision = int(pin.get("revision") or 0)
+            context = item_type == "manufacturing_context"
+            out.append(
+                InterfaceEdge(
+                    id=f"derived:dfm:{node.id}:{key}",
+                    project_id=str(pid),
+                    type=InterfaceType.DFM_CONSTRAINS,
+                    source=InterfaceEnd(
+                        ref=f"{RECORD_REF_PREFIX}{node.id}",
+                        domain="manufacturing",
+                        item_type="dfm_finding_set",
+                        node_id=str(node.id),
+                        label=node.name,
+                    ),
+                    target=InterfaceEnd(
+                        ref=key,
+                        revision=revision,
+                        domain=domain_for_item_type(item_type),
+                        item_type=item_type,
+                        node_id=str(pin.get("node_id") or "") or None,
+                        label=key,
+                    ),
+                    declared_by=DeclaredBy.TOOL,
+                    status=InterfaceStatus.CONFIRMED,
+                    coupled_parameters=list(DFM_CONTEXT_COUPLED) if context else [],
+                    rationale=(
+                        f"DFM findings for {component or 'the component'} were computed "
+                        f"{'under' if context else 'on'} {key}@{revision}"
+                    ),
+                    evidence={
+                        "pin": pin.get("item_ref") or f"{key}@{revision}",
+                        "component_id": component,
+                        "context_ref": finding_set.get("context_ref"),
+                        "profile": finding_set.get("profile_id"),
+                    },
+                    derived=True,
+                    created_at=node.created_at.isoformat() if node.created_at else None,
+                    created_by=node.created_by,
+                )
+            )
+    return out
+
+
 async def list_interfaces(
     twin: Any,
     project_id: UUID | str,
@@ -582,7 +660,12 @@ async def list_interfaces(
     with tracer.start_as_current_span("twin.interfaces.list") as span:
         edges = await list_stored(twin, pid, include_removed=include_removed)
         if include_derived:
-            for loader in (_simulation_edges, _feature_edges, _manufacturing_edges):
+            for loader in (
+                _simulation_edges,
+                _feature_edges,
+                _manufacturing_edges,
+                _dfm_edges,
+            ):
                 try:
                     edges.extend(await loader(twin, pid))
                 except Exception as exc:  # noqa: BLE001 - one source must not hide the rest

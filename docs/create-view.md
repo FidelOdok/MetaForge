@@ -90,6 +90,28 @@ example *Likely printable with supports (preliminary)*), and *Manufacturing
 not assessed* otherwise; an engineering model shows it when it has one. The
 same note is on each card in the generated-concept strip.
 
+**Manufacturing guidance.** When the preliminary checks found something, a
+compact badge sits beside the maturity word: *Manufacturing guidance: 2
+suggestions*. It is a count, never a readiness percentage, and it is absent
+when nothing was found or nothing was assessed. Selecting it lists each
+suggestion in plain words; selecting one highlights the affected part (the
+shared component selection) and offers three choices:
+
+- **Keep design**: the suggestion is recorded as seen and kept, and no longer
+  counted.
+- **Try suggested fix**: the fix comes back as a proposal; nothing changes
+  until the person applies it. A fix that would change something the person
+  stated or protected waits for an approval instead.
+- **Explore another process**: the same part checked against the other
+  processes' rules, as a preview that changes nothing.
+
+The checks are heuristics on the best geometry each part has (see
+[DFM findings](twin_schema.md#dfm-findings)); a note such as *Likely
+printable with supports (preliminary)* only appears when that rule ran. The
+Engineering inspector has a **DFM** tab, opened on demand, with the rule
+profile and version, measured against limit, anchors, evidence and whether
+it is out of date.
+
 Beside the revision, a level line says which representation is on screen and
 what it was made from, for example *L1 · simple parts, sizes estimated · from
 SKT-LAMP@2* or *L3 · from the validated exact model · from CAD-BASE@4*.
@@ -809,6 +831,8 @@ The sketch layer uses these twin routes:
 | `GET /v1/twin/projects/{project_id}/concept-mesh` | The newest 3D concept, the job still running, the source the next one would use, and the hourly count |
 | `POST /v1/twin/projects/{project_id}/classify-change` | What a request would change: class, confidence, target, handling and the plain line. Writes nothing |
 | `GET /v1/twin/projects/{project_id}/appearance`, `PUT ...` | The product's and each component's look; a `PUT` sets one, and never touches CAD or the manufacturing context |
+| `GET /v1/twin/projects/{project_id}/dfm` | Preliminary manufacturing guidance by part: the badge's suggestion count, each finding and its status |
+| `POST .../dfm/evaluate`, `POST .../dfm/findings/{finding_id}/decision` | Run the checks now; **Keep design**, **Try suggested fix** or **Explore another process** on one suggestion |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the

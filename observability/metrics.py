@@ -1279,6 +1279,49 @@ class MetricsRegistry:
         labels=["level", "claimed"],
     )
 
+    # ── Heuristic DFM findings (C3D slice 4) ────────────────────────────
+
+    DFM_EVALUATION_TOTAL = MetricDefinition(
+        name="metaforge_dfm_evaluation_total",
+        type="counter",
+        description=(
+            "Heuristic DFM evaluations of a project's components, by trigger (manual, "
+            "tool, geometry_changed, context_changed) and outcome (evaluated, failed)"
+        ),
+        labels=["trigger", "outcome"],
+    )
+
+    DFM_FINDING_TOTAL = MetricDefinition(
+        name="metaforge_dfm_finding_total",
+        type="counter",
+        description=(
+            "DFM findings recorded in new finding sets, by severity (blocking, advisory) "
+            "and rule profile (fdm, resin, cnc, injection_moulding, sheet_metal)"
+        ),
+        labels=["severity", "process"],
+    )
+
+    DFM_STALE_RECOMPUTE_TOTAL = MetricDefinition(
+        name="metaforge_dfm_stale_recompute_total",
+        type="counter",
+        description=(
+            "Incremental DFM work after a change, by reason: geometry (a component's "
+            "geometry head moved), context (a process, material or quantity change) or "
+            "revalidated (a context change no rule reads)"
+        ),
+        labels=["reason"],
+    )
+
+    DFM_DECISION_TOTAL = MetricDefinition(
+        name="metaforge_dfm_decision_total",
+        type="counter",
+        description=(
+            "A person's decisions on DFM findings, by decision (keep_design, try_fix, "
+            "explore_process) and outcome (recorded, failed)"
+        ),
+        labels=["decision", "outcome"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1449,6 +1492,10 @@ class MetricsRegistry:
             cls.STRUCTURED_MESH_TOTAL,
             cls.MATURITY_QUERY_TOTAL,
             cls.REPRESENTATION_MISLABEL_TOTAL,
+            cls.DFM_EVALUATION_TOTAL,
+            cls.DFM_FINDING_TOTAL,
+            cls.DFM_STALE_RECOMPUTE_TOTAL,
+            cls.DFM_DECISION_TOTAL,
         ]
 
     @classmethod
@@ -2399,6 +2446,30 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.REPRESENTATION_MISLABEL_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"level": level, "claimed": claimed})
+
+    def record_dfm_evaluation(self, trigger: str, outcome: str) -> None:
+        """Record one heuristic DFM evaluation of a project (C3D slice 4)."""
+        counter = self._instruments.get(MetricsRegistry.DFM_EVALUATION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"trigger": trigger, "outcome": outcome})
+
+    def record_dfm_finding(self, severity: str, process: str) -> None:
+        """Record one DFM finding in a new finding set (C3D slice 4)."""
+        counter = self._instruments.get(MetricsRegistry.DFM_FINDING_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"severity": severity, "process": process})
+
+    def record_dfm_stale_recompute(self, reason: str) -> None:
+        """Record incremental DFM work after a change (C3D slice 4)."""
+        counter = self._instruments.get(MetricsRegistry.DFM_STALE_RECOMPUTE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"reason": reason})
+
+    def record_dfm_decision(self, decision: str, outcome: str) -> None:
+        """Record a person's decision on a DFM finding (C3D slice 4)."""
+        counter = self._instruments.get(MetricsRegistry.DFM_DECISION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"decision": decision, "outcome": outcome})
 
     def record_tool_job(self, tool: str, status: str) -> None:
         """Record one state change of a tool job (FORGE-783)."""

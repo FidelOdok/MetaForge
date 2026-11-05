@@ -76,6 +76,8 @@ import { SketchPlaneControls } from '../components/sketch/SketchPlaneControls';
 import { useSketchPlane, useSketchStrokes } from '../hooks/use-sketch-plane';
 import { isPlaced } from '../api/endpoints/sketchPlanes';
 import { useAppearanceSync } from '../hooks/use-appearance';
+import { DfmFindingsSection } from '../components/viewer/DfmFindingsSection';
+import { useComponentSelection } from '../store/component-selection-store';
 import './TwinViewerPage.css';
 
 // `?demo=1` serves the illustrative sample workspace offline. Idempotent, so
@@ -1077,7 +1079,7 @@ function GraphLinksBar({
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
 type TwinTab = 'graph' | 'structure' | 'model' | 'sim' | 'asm' | 'mfg' | 'thread';
-type InspectorTab = 'overview' | 'constraints' | 'history';
+type InspectorTab = 'overview' | 'constraints' | 'history' | 'dfm';
 type NodeScope = 'all' | 'attention' | string;
 
 const TWIN_TABS: TwinTab[] = ['graph', 'structure', 'model', 'sim', 'asm', 'mfg', 'thread'];
@@ -1098,7 +1100,8 @@ const TAB_LABELS: Record<TwinTab, string> = {
   // FORGE-687: BOM to schematic to board to fab files, and the firmware.
   thread: 'Electronics',
 };
-const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history'];
+// C3D slice 4: DFM findings on demand (section 11), never expanded by default.
+const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history', 'dfm'];
 
 const LARGE_TWIN_LINKS: ReadonlySet<LinkGroup> = new Set<LinkGroup>(['parts']);
 
@@ -1171,6 +1174,10 @@ export function TwinViewerPage() {
   const activeProjectId = sampleMode ? SAMPLE_PROJECT_ID : selectedProjectId;
   // The appearance record, applied to every mesh the viewer shows.
   useAppearanceSync(sampleMode ? null : activeProjectId);
+  // The part picked in Create or here narrows the DFM findings (3D-RC-009).
+  const selectedComponent = useComponentSelection((s) =>
+    activeProjectId ? (s.selected[activeProjectId] ?? null) : null,
+  );
   // FORGE-647: watch an agent put an assembly together, part by part.
   const [liveOpen, setLiveOpen] = useState(false);
   const projectName = sampleMode ? SAMPLE_PROJECT_NAME : activeProject?.name;
@@ -1915,7 +1922,9 @@ export function TwinViewerPage() {
             ))}
           </div>
           <div className="tw-inspector-content">
-            {node ? (
+            {inspectorTab === 'dfm' && activeProjectId && !sampleMode ? (
+              <DfmFindingsSection projectId={activeProjectId} componentId={selectedComponent?.componentId ?? null} />
+            ) : node ? (
               inspectorTab === 'overview' ? (
                 <NodeDetail node={node} onClose={() => setSelectedId(null)} onSelectNode={selectNode} />
               ) : inspectorTab === 'history' ? (

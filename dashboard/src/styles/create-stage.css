@@ -411,3 +411,81 @@
     writing-mode: horizontal-tb;
   }
 }
+
+/* C3D slice 4: the manufacturing guidance badge and its suggestions. */
+.cv-dfm {
+  position: relative;
+}
+.cv-dfm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+}
+.cv-dfm-badge[aria-expanded='true'] {
+  border-color: var(--cv-accent);
+}
+.cv-dfm-panel {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 25;
+  width: min(360px, 80vw);
+  max-height: 420px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(17, 19, 25, 0.97);
+  color: #e2e2eb;
+  font-size: 12px;
+}
+.cv-dfm-intro {
+  margin: 0 0 6px;
+  color: #b4b4c2;
+}
+.cv-dfm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cv-dfm-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-dfm-list li.is-on .cv-dfm-item,
+.cv-dfm-item:hover,
+.cv-dfm-item:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+.cv-dfm-detail {
+  padding: 4px 8px 8px;
+}
+.cv-dfm-detail p {
+  margin: 0 0 6px;
+}
+.cv-dfm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cv-dfm-result {
+  margin-top: 6px;
+  color: #b4b4c2;
+}
+.cv-dfm-error {
+  color: #ff8a80;
+}

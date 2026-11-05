@@ -131,7 +131,8 @@ class TestAlertingRules:
         # + 1 manufacturing context sync (ManufacturingContextSyncFailing, FORGE-801).
         # + 1 appearance updates failing (AppearanceUpdatesFailing).
         # + 1 representation mislabel guard hits (C3D slice 2).
-        assert len(rules) == 80
+        # + 1 DFM evaluation errors (DfmEvaluationErrors, C3D slice 4).
+        assert len(rules) == 81
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -206,7 +207,8 @@ class TestAlertingRules:
         # + 1 manufacturing context sync (FORGE-801).
         # + 1 appearance updates failing.
         # + 1 representation mislabel guard hits (C3D slice 2).
-        assert len(warnings) == 64
+        # + 1 DFM evaluation errors (C3D slice 4).
+        assert len(warnings) == 65
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -342,6 +344,8 @@ class TestAlertingRules:
                 "AppearanceUpdatesFailing",
                 # C3D slice 2: a stored representation claimed more than it is.
                 "RepresentationMislabelGuardHits",
+                # C3D slice 4: heuristic DFM evaluations are failing.
+                "DfmEvaluationErrors",
             ]
         )
 
