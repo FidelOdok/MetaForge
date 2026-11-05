@@ -442,6 +442,12 @@ PROFILES: dict[str, frozenset[str]] = {
         "vendor.handoffs",
         # FORGE-615: a rough cost before any quote exists.
         "cost.estimate_manufacturing",
+        # The manufacturing context record: read it, and propose assumptions
+        # (only a person's approved statement becomes user_stated). The DFM
+        # report and release checklist readers stay in `all`: the profile is
+        # at MAX_TOOLS with these two.
+        "twin.get_manufacturing_context",
+        "twin.state_manufacturing_context",
     },
     # FORGE-633: industrial design (the Planner's discipline #2): form factor,
     # ergonomics and DFM-aware finishes. Renders a design in its library

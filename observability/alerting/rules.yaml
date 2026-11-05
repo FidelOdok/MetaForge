@@ -1271,6 +1271,25 @@ groups:
             blocked. Check the CadQuery adapter image and the gateway logs
             (dfm_exact_failed, dfm_exact_measure_failed).
 
+      # The slicer cross-check after an exact FDM evaluation (slicer.slice).
+      - alert: DfmSlicerCrossCheckUnavailable
+        expr: >-
+          sum(increase(metaforge_dfm_slicer_check_total{reason=~"unavailable|failed"}[1h]))
+          / clamp_min(sum(increase(metaforge_dfm_slicer_check_total{reason!="disabled"}[1h])), 1) > 0.5
+          and sum(increase(metaforge_dfm_slicer_check_total{reason=~"unavailable|failed"}[1h])) >= 3
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "The slicer cross-check is not running"
+          description: >-
+            More than half of the last hour's slicer cross-checks after an exact
+            FDM evaluation could not slice (the slicer adapter is not reachable,
+            or slicer.slice failed on the validated STEP). The exact findings
+            are unaffected and each set records the check as not_evaluated with
+            the reason. Check the slicer-adapter container and the gateway logs
+            (dfm_slicer_check_not_evaluated).
+
   # C3D slice 5 -- the L2 preview versus exact comparison
   # (api_gateway/twin/preview_comparison.py).
   - name: metaforge_preview_comparison

@@ -2011,6 +2011,7 @@ with an `authority` and a `provenance` (`source`, `at`, `actor`, `ref`):
 | `machine_or_supplier_profile` | `{machine, machine_id, supplier, description}` as stated |
 | `dimensional_envelope`, `tolerances`, `finish`, `assembly`, `fastening` | dimensional, appearance and joining requirements |
 | `applicable_rules`, `evidence` | rule profile and validation provenance |
+| `print_orientation` | how the part sits on the build plate for an additive process: `{build_direction: [x, y, z], rotation_deg}`, the direction the layers stack along in the part's own frame (scaled to unit length) and an optional turn about it in degrees. Stated as a vector or an axis name (`+Z`, `-Y`). `user_stated` or `assumption`, never `decision`. Exact FDM DFM reads it (see [exact DFM](#exact-dfm)); a component's own record holds its own orientation |
 | `unknowns`, `assumed`, `confidence` | derived on every write: the gaps, the assumed fields, and `low`, `medium` or `high` |
 | `dfm_status` | see below |
 | `conflicts` | the last refused writes, each with what was kept and why |
@@ -2117,6 +2118,29 @@ records none. A speculative concept is not walked.
 | `PUT /v1/twin/projects/{id}/manufacturing-context` | state `fields` (`null` clears one), with `expected_revision` (409 when the head moved). An agent caller (`X-MetaForge-Surface: agent`) only proposes assumptions |
 | `GET /v1/twin/projects/{id}/manufacturing-context/history` | every revision with what it changed |
 | `POST /v1/twin/projects/{id}/manufacturing-context/propose` | candidate processes and materials; writes nothing |
+
+MCP: `twin.get_manufacturing_context` (read only; `component` scopes it) and
+`twin.state_manufacturing_context` (additive, held for approval like any
+twin write). The write takes `fields`, `notes`, `change_reason`,
+`expected_revision` and `statement`:
+
+- `proposal` (the default): an agent's values are assumptions with
+  provenance source `mcp_agent`. They never override a stated value or a
+  decision (the refusal is returned and kept in `conflicts`), clearing a
+  field is refused, and `target_cost`, `lead_time` and
+  `machine_or_supplier_profile` are refused. An assumed `print_orientation`
+  is `process_specific`, so a process change marks it stale.
+- `user_stated`: recorded only when a person approved the held call. The
+  MCP dispatcher hands the tool that person (the reserved `__approved_by__`
+  argument, set for the tools in `guardrails.APPROVER_RECORDED` and stripped
+  from whatever a client sends), and the value is stored with source
+  `mcp_person` and that person as the actor. With no approver, or with a
+  project policy's automatic approval (which names no person), the call is
+  refused with the reason. The tool is not a human-authority tool: a
+  service or a local session can still propose.
+
+A `decision` never comes from this tool; it comes from `twin.record_decision`
+with a `manufacturing_route`, as above.
 
 Observability: `metaforge_manufacturing_context_write_total{authority,
 outcome}` (`written`, `unchanged`, `refused`, `failed`) and
@@ -2259,9 +2283,12 @@ When a component's geometry head moves (`cad_model`, `assembly`,
 the other head-move listeners, only the components whose sets were pinned to
 that item are recomputed. A manufacturing context write that changes a field
 the rules read (process, process candidates, material, material candidates,
-quantity, machine or supplier, tolerances) recomputes the sets made under
-that context; any other change (a finish, the intended use) revalidates the
-sets its move marked stale. A process change therefore gives findings keyed
+quantity, machine or supplier, tolerances, print orientation) recomputes the
+sets made under that context; any other change (a finish, the intended use) revalidates the
+sets its move marked stale. A component's first record of its own
+(`MFC-<COMPONENT>`) with such a field also marks that component's sets made
+under the product's record stale, since its own record now applies. A
+process change therefore gives findings keyed
 to the new profile and leaves the old process's findings stale, while every
 stated or decided field and every geometry revision stays as it was.
 
@@ -2331,7 +2358,7 @@ The job reads the revision's STEP and calls the CadQuery adapter's
 | Check | What is measured |
 |-------|------------------|
 | `fdm.min_wall` | Wall thickness by ray casting: points sampled on an `n x n` grid over each face (only points inside the trimmed face), a ray from just inside the surface along the inward normal, the first exit through the solid is the local thickness. `n` shrinks so the part stays under 1500 rays |
-| `fdm.overhang` | Every face's outward normal (planar faces) or most downward sampled normal (curved faces) against the profile's angle and the build direction (+Z unless the request states one); a downward face at the lowest extent rests on the build plate and is skipped |
+| `fdm.overhang` | Every face's outward normal (planar faces) or most downward sampled normal (curved faces) against the profile's angle and the build direction (see below); a downward face at the lowest extent rests on the build plate and is skipped |
 | `fdm.build_volume` | The extents along and across the build direction against the selected machine's build volume from the machine library; the footprint may turn on the bed, the height may not. No machine selected is a stated gap, not a pass |
 | `fdm.min_hole`, `fdm.min_feature` | Complete cylindrical faces: a hole when the material is outside the cylinder, a pin or boss when inside; their diameters |
 
@@ -2343,6 +2370,47 @@ whose normal does not point out of the solid are skipped. Holes and pins are
 read from complete cylinders only, so slots and polygonal holes are not
 counted. `fdm.bridge` and `fdm.support_access` stay guidance
 (`guidance_only_rules`).
+
+**The build direction.** A `build_direction` in the request
+(`POST .../dfm/exact`) wins, explicitly. Without one the job reads the
+component's manufacturing context `print_orientation` (the component's own
+record, else the product's) while it is current; with neither it is +Z.
+`exact_evidence.build_direction_source` says which: `stated in the request`,
+`manufacturing context MFC-...@n (stated by a person)` or `(assumed, may
+change)`, or `default +Z (no orientation stated)`; a stated turn is kept as
+`build_rotation_deg`. The scheduled job records whether its direction was
+named in the request (`build_direction_explicit`), so a retry re-reads the
+context instead of pinning an old direction. Because the orientation is one
+of the fields the rules read, changing it marks the exact set (pinned to the
+context revision) stale and schedules the exact checks again through the
+recompute path.
+
+#### The slicer cross-check {#slicer-cross-check}
+
+For an FDM set, after the exact measurement, the job may slice the validated
+revision's STEP with `slicer.slice` (PrusaSlicer, over MCP through the same
+bridge as the measurement, inside the same `dfm.evaluate_exact` job). The
+STEP is staged on the shared adapter workspace (`ADAPTER_WORKSPACE_DIR`,
+`_dfm_slicer/`) and removed after. It is sliced twice, with automatic
+supports and without, on the smallest built-in generic printer that holds
+the selected machine's build volume, with the selected material's preset
+when the slicer has one. The record is `exact_evidence.slicer`:
+
+| Key | Holds |
+|-----|-------|
+| `status` | `evaluated` or `not_evaluated` |
+| `reason_code`, `reason` | why it did not run: `no_machine` (no machine from the library in the context), `orientation` (the slicer slices the part as modelled, +Z up, and cannot yet be turned to another build direction), `no_step`, `unavailable` (the slicer adapter is not served, or there is no adapter workspace), `failed` (the slice failed) or `disabled` (`METAFORGE_DFM_SLICER_CHECK=off`) |
+| `print_time_s`, `print_time` | the slicer's own estimate, with `print_time_is_estimate: true` and `estimate_note`: for a generic printer sized like the machine, not a quotation (DFM-014) |
+| `support_volume_cm3`, `support_volume_method` | filament volume with supports minus without, both the slicer's figures; `null` with the reason when the second slice failed |
+| `filament_cm3`, `filament_g`, `layers`, `height_mm`, `warnings` | the slicer's figures and messages |
+| `printer`, `printer_basis`, `material`, `material_basis`, `machine`, `slicer` | what was sliced on, and why |
+| `affects_status` | always `false` |
+
+The cross-check is evidence only. It is attached after the exact checks set
+the status and never changes it: a clean slice does not turn
+`analysis_pending` or `issues_found` into a pass, and a slicer that cannot
+run leaves the exact findings as they were. The DFM report shows it per
+component (`measurement.slicer`) and in the Markdown, marked as an estimate.
 
 The result is a `dfm_finding_set` of `kind: exact`, pinned to the geometry
 revision and the manufacturing context revision. Findings are anchored to
@@ -2430,11 +2498,18 @@ the open items are its next steps. The checklist is part of G8: see
 | `GET /v1/twin/projects/{id}/dfm/report` | the latest report with its staleness; `?format=markdown` the rendered copy |
 | `GET /v1/twin/projects/{id}/dfm/reports/{report_id}` | one stored report |
 
+MCP: `twin.get_dfm_report` (read only: the latest stored report with its
+staleness, or with none stored an unstored preview, `stored: false`) and
+`twin.get_release_checklist` (read only: the checklist and readiness,
+`applies: false` when none applies).
+
 Observability: `metaforge_dfm_exact_evaluation_total{outcome}`,
 `metaforge_dfm_exact_incomplete_total{rule, reason}`,
+`metaforge_dfm_slicer_check_total{outcome, reason}`,
 `metaforge_dfm_report_total{outcome}` and
 `metaforge_manufacturing_release_refused_total{blocker}`; the
-`DfmExactEvaluationFailures` alert; spans `twin.dfm.exact.schedule`,
+`DfmExactEvaluationFailures` and `DfmSlicerCrossCheckUnavailable` alerts;
+spans `twin.dfm.exact.schedule`, `twin.dfm.slicer_cross_check`,
 `twin.dfm.exact.run`, `twin.dfm.evaluate_exact`, `twin.dfm.report.generate`,
 `twin.dfm.release_checklist` and `cadquery.dfm_measure`.
 
