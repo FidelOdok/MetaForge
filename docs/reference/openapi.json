@@ -1447,6 +1447,17 @@
         "title": "AttemptPromotionResponse",
         "type": "object"
       },
+      "Authority": {
+        "description": "How far a field can be trusted, and who it came from.",
+        "enum": [
+          "user_stated",
+          "decision",
+          "assumption",
+          "unknown"
+        ],
+        "title": "Authority",
+        "type": "string"
+      },
       "BaselineDetail": {
         "properties": {
           "approved_by": {
@@ -2242,7 +2253,7 @@
         "title": "BranchBody",
         "type": "object"
       },
-      "Brief": {
+      "Brief-Input": {
         "properties": {
           "assumptions": {
             "items": {
@@ -2267,7 +2278,48 @@
           },
           "reference_details": {
             "items": {
-              "$ref": "#/components/schemas/ReferenceRecord"
+              "$ref": "#/components/schemas/ReferenceRecord-Input"
+            },
+            "title": "Reference Details",
+            "type": "array"
+          },
+          "references": {
+            "items": {
+              "type": "string"
+            },
+            "title": "References",
+            "type": "array"
+          }
+        },
+        "title": "Brief",
+        "type": "object"
+      },
+      "Brief-Output": {
+        "properties": {
+          "assumptions": {
+            "items": {
+              "$ref": "#/components/schemas/Assumption"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BriefItem"
+            },
+            "title": "Items",
+            "type": "object"
+          },
+          "measurements": {
+            "items": {
+              "$ref": "#/components/schemas/Measurement"
+            },
+            "title": "Measurements",
+            "type": "array"
+          },
+          "reference_details": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceRecord-Output"
             },
             "title": "Reference Details",
             "type": "array"
@@ -2321,7 +2373,7 @@
       "BriefUpdate": {
         "properties": {
           "brief": {
-            "$ref": "#/components/schemas/Brief"
+            "$ref": "#/components/schemas/Brief-Input"
           },
           "expected_version": {
             "anyOf": [
@@ -2911,6 +2963,79 @@
         "title": "Candidate",
         "type": "object"
       },
+      "CandidateView": {
+        "properties": {
+          "authority": {
+            "default": "assumption",
+            "title": "Authority",
+            "type": "string"
+          },
+          "library_machines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Library Machines",
+            "type": "array"
+          },
+          "library_materials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Library Materials",
+            "type": "array"
+          },
+          "materials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Materials",
+            "type": "array"
+          },
+          "process": {
+            "title": "Process",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "route_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Hint"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "process",
+          "why"
+        ],
+        "title": "CandidateView",
+        "type": "object"
+      },
       "CapabilityView": {
         "description": "Per-phase tool coverage and the gap register for one flow.",
         "properties": {
@@ -3437,7 +3562,7 @@
             "type": "array"
           },
           "spec": {
-            "$ref": "#/components/schemas/CreateAssemblyRequest",
+            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
             "description": "The compiled declarative spec."
           }
         },
@@ -4002,6 +4127,224 @@
         "title": "ConsumeHoldRequest",
         "type": "object"
       },
+      "ContextField": {
+        "description": "One field: a value, how far it can be trusted, and where it came from.",
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/Authority",
+            "default": "unknown"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "pending_gate": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Gate"
+          },
+          "process_specific": {
+            "default": false,
+            "title": "Process Specific",
+            "type": "boolean"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provenance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "stale_reason": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Stale Reason",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "title": "ContextField",
+        "type": "object"
+      },
+      "ContextPutRequest": {
+        "description": "Fields to state. ``null`` clears a field; a field left out is unchanged.",
+        "properties": {
+          "change_reason": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Change Reason",
+            "type": "string"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "fields": {
+            "additionalProperties": true,
+            "title": "Fields",
+            "type": "object"
+          },
+          "notes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "object"
+          }
+        },
+        "title": "ContextPutRequest",
+        "type": "object"
+      },
+      "ContextView": {
+        "description": "The context as the API returns it.",
+        "properties": {
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed",
+            "type": "array"
+          },
+          "component_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Key"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "dfm_status": {
+            "title": "Dfm Status",
+            "type": "string"
+          },
+          "dfm_status_label": {
+            "title": "Dfm Status Label",
+            "type": "string"
+          },
+          "inherited": {
+            "default": false,
+            "title": "Inherited",
+            "type": "boolean"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "manufacturing_note": {
+            "title": "Manufacturing Note",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "prompt_block": {
+            "title": "Prompt Block",
+            "type": "string"
+          },
+          "record": {
+            "$ref": "#/components/schemas/ManufacturingContextRecord"
+          },
+          "recorded": {
+            "title": "Recorded",
+            "type": "boolean"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "refused": {
+            "items": {
+              "$ref": "#/components/schemas/FieldConflict"
+            },
+            "title": "Refused",
+            "type": "array"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "stale": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stale",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id",
+          "item_key",
+          "ref",
+          "recorded",
+          "record",
+          "dfm_status",
+          "dfm_status_label",
+          "manufacturing_note",
+          "prompt_block"
+        ],
+        "title": "ContextView",
+        "type": "object"
+      },
       "ConversionResult": {
         "description": "Response payload for a completed conversion.",
         "properties": {
@@ -4065,7 +4408,45 @@
         "title": "CoverageResponse",
         "type": "object"
       },
-      "CreateAssemblyRequest": {
+      "CreateAssemblyRequest-Input": {
+        "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
+        "properties": {
+          "name": {
+            "description": "Assembly name.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parts": {
+            "description": "Parts to author + assemble.",
+            "items": {
+              "$ref": "#/components/schemas/AssemblyPart"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to scope the cad_model to.",
+            "title": "Project Id"
+          }
+        },
+        "required": [
+          "name",
+          "parts"
+        ],
+        "title": "CreateAssemblyRequest",
+        "type": "object"
+      },
+      "CreateAssemblyRequest-Output": {
         "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
         "properties": {
           "name": {
@@ -4548,7 +4929,7 @@
       "Creation": {
         "properties": {
           "brief": {
-            "$ref": "#/components/schemas/Brief"
+            "$ref": "#/components/schemas/Brief-Output"
           },
           "builds": {
             "items": {
@@ -5394,6 +5775,20 @@
         ],
         "title": "DesignFlowView",
         "type": "object"
+      },
+      "DfmStatus": {
+        "description": "The spec's DFM status semantics (DFM-013).",
+        "enum": [
+          "not_assessed",
+          "preliminary_guidance",
+          "analysis_pending",
+          "issues_found",
+          "analysis_passed",
+          "verification_required",
+          "released"
+        ],
+        "title": "DfmStatus",
+        "type": "string"
       },
       "DiscoverMachineRequest": {
         "properties": {
@@ -6798,6 +7193,48 @@
         "title": "FeaturePlanItem",
         "type": "object"
       },
+      "FieldConflict": {
+        "description": "A write the conflict rule refused, kept so a reviewer can see it.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "kept_authority": {
+            "$ref": "#/components/schemas/Authority"
+          },
+          "kept_value": {
+            "title": "Kept Value"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "refused_authority": {
+            "$ref": "#/components/schemas/Authority"
+          },
+          "refused_value": {
+            "title": "Refused Value"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "kept_authority",
+          "refused_authority",
+          "reason"
+        ],
+        "title": "FieldConflict",
+        "type": "object"
+      },
       "FieldDelta": {
         "description": "Change for a single metadata field.",
         "properties": {
@@ -7832,7 +8269,7 @@
             "type": "integer"
           },
           "spec": {
-            "$ref": "#/components/schemas/CreateAssemblyRequest",
+            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
             "description": "The declarative spec compiled from the description."
           }
         },
@@ -8152,6 +8589,18 @@
             ],
             "title": "Baseline Key"
           },
+          "component": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component"
+          },
           "confirm_spend": {
             "default": false,
             "title": "Confirm Spend",
@@ -8282,6 +8731,11 @@
               }
             ],
             "title": "Sketch Revision"
+          },
+          "speculative": {
+            "default": false,
+            "title": "Speculative",
+            "type": "boolean"
           },
           "style": {
             "default": "industrial_sketch",
@@ -11898,6 +12352,121 @@
         "title": "ManufacturingContextBody",
         "type": "object"
       },
+      "ManufacturingContextRecord": {
+        "description": "The manufacturing context of one product, or one of its components.",
+        "properties": {
+          "applicable_rules": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "assembly": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "assumed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumed",
+            "type": "array"
+          },
+          "component_key": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Key"
+          },
+          "confidence": {
+            "default": "low",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/FieldConflict"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "dfm_status": {
+            "$ref": "#/components/schemas/DfmStatus",
+            "default": "not_assessed"
+          },
+          "dimensional_envelope": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "fastening": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "finish": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "intended_use": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "lead_time": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "machine_or_supplier_profile": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "material_candidates": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "process_candidates": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "production_goal": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "route": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "selected_material": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "selected_process": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "target_cost": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "tolerances": {
+            "$ref": "#/components/schemas/ContextField"
+          },
+          "unknowns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unknowns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "ManufacturingContextRecord",
+        "type": "object"
+      },
       "ManufacturingRoute": {
         "enum": [
           "in_house",
@@ -12661,7 +13230,7 @@
             "type": "boolean"
           },
           "plan": {
-            "$ref": "#/components/schemas/MigrationPlan",
+            "$ref": "#/components/schemas/MigrationPlan-Input",
             "description": "The plan exactly as the dry run returned it."
           },
           "reason": {
@@ -12699,7 +13268,76 @@
         "title": "MigrationApplyResponse",
         "type": "object"
       },
-      "MigrationPlan": {
+      "MigrationPlan-Input": {
+        "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
+        "properties": {
+          "counts_after": {
+            "additionalProperties": true,
+            "title": "Counts After",
+            "type": "object"
+          },
+          "counts_before": {
+            "additionalProperties": true,
+            "title": "Counts Before",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposedItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "low_confidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Low Confidence",
+            "type": "array"
+          },
+          "plan_hash": {
+            "default": "",
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/RecordAction"
+            },
+            "title": "Records",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "twin_fingerprint": {
+            "title": "Twin Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "twin_fingerprint",
+          "created_at"
+        ],
+        "title": "MigrationPlan",
+        "type": "object"
+      },
+      "MigrationPlan-Output": {
         "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
         "properties": {
           "counts_after": {
@@ -12775,7 +13413,7 @@
             "type": "boolean"
           },
           "plan": {
-            "$ref": "#/components/schemas/MigrationPlan"
+            "$ref": "#/components/schemas/MigrationPlan-Output"
           },
           "report": {
             "title": "Report",
@@ -15454,6 +16092,60 @@
         "title": "ProposalListResponse",
         "type": "object"
       },
+      "ProposalView": {
+        "description": "Candidate processes and materials. Proposals only: nothing is written.",
+        "properties": {
+          "based_on": {
+            "title": "Based On",
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateView"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "component_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Key"
+          },
+          "note": {
+            "default": "Assumptions proposed by MetaForge. Nothing is recorded until a person states a process or material (PUT the manufacturing context).",
+            "title": "Note",
+            "type": "string"
+          },
+          "process_known": {
+            "title": "Process Known",
+            "type": "boolean"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "unknown_inputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unknown Inputs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id",
+          "based_on",
+          "process_known"
+        ],
+        "title": "ProposalView",
+        "type": "object"
+      },
       "ProposeFlowRequest": {
         "properties": {
           "budget": {
@@ -15616,6 +16308,19 @@
           "reason"
         ],
         "title": "ProposePatchRequest",
+        "type": "object"
+      },
+      "ProposeRequest": {
+        "description": "What to propose from, on top of what the record already says.",
+        "properties": {
+          "text": {
+            "default": "",
+            "maxLength": 1500,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "title": "ProposeRequest",
         "type": "object"
       },
       "ProposedBy": {
@@ -15782,6 +16487,44 @@
           "evidence"
         ],
         "title": "ProposedRevision",
+        "type": "object"
+      },
+      "Provenance": {
+        "description": "Where a field's value came from.",
+        "properties": {
+          "actor": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "source": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "Provenance",
         "type": "object"
       },
       "ProviderInfo": {
@@ -16601,7 +17344,109 @@
         "title": "ReferenceFact",
         "type": "object"
       },
-      "ReferenceRecord": {
+      "ReferenceRecord-Input": {
+        "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
+        "properties": {
+          "active": {
+            "default": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "associations": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceAssociation"
+            },
+            "maxItems": 50,
+            "title": "Associations",
+            "type": "array"
+          },
+          "disclosures": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceDisclosure"
+            },
+            "title": "Disclosures",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceFact"
+            },
+            "maxItems": 500,
+            "title": "Facts",
+            "type": "array"
+          },
+          "mime": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Mime",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Name",
+            "type": "string"
+          },
+          "protected_features": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Protected Features",
+            "type": "array"
+          },
+          "role": {
+            "default": "inspiration",
+            "enum": [
+              "inspiration",
+              "geometry",
+              "functional_demo",
+              "specification",
+              "manufacturing_rule",
+              "verification_evidence",
+              "existing_design"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "source_hash": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          },
+          "work_product_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id"
+        ],
+        "title": "ReferenceRecord",
+        "type": "object"
+      },
+      "ReferenceRecord-Output": {
         "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
         "properties": {
           "active": {
@@ -16879,7 +17724,7 @@
           "reference": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ReferenceRecord"
+                "$ref": "#/components/schemas/ReferenceRecord-Output"
               },
               {
                 "type": "null"
@@ -24444,7 +25289,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.3.0"
+    "version": "0.0.0+unknown"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -25715,7 +26560,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateAssemblyRequest"
+                "$ref": "#/components/schemas/CreateAssemblyRequest-Input"
               }
             }
           },
@@ -38115,6 +38960,273 @@
           }
         },
         "summary": "Live Assembly State",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/manufacturing-context": {
+      "get": {
+        "description": "The current manufacturing context. ``recorded: false`` and ref ``unresolved`` when none.",
+        "operationId": "get_manufacturing_context_v1_twin_projects__project_id__manufacturing_context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Component"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Manufacturing Context",
+        "tags": [
+          "twin"
+        ]
+      },
+      "put": {
+        "description": "State manufacturing context fields, as the context's next revision.\n\nA person's values are ``user_stated`` and win over assumptions and over\nolder statements or decisions; ``null`` clears a field. An agent caller\nonly proposes: its values are assumptions, which never override a stated\nvalue or a decision. Nothing changed means no new revision.",
+        "operationId": "put_manufacturing_context_v1_twin_projects__project_id__manufacturing_context_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Component"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextPutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Manufacturing Context",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/manufacturing-context/history": {
+      "get": {
+        "description": "Every revision of the context, oldest first, with what each one changed.",
+        "operationId": "get_manufacturing_context_history_v1_twin_projects__project_id__manufacturing_context_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Component"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Manufacturing Context History V1 Twin Projects  Project Id  Manufacturing Context History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Manufacturing Context History",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/manufacturing-context/propose": {
+      "post": {
+        "description": "Candidate processes and materials, as assumptions. Writes nothing.\n\nProposed from the intended use, the envelope and the product text, then\nchecked against the machine library and ``rank_manufacturing_processes``.\nAlways at least two candidates, so no method is locked in silently. To\naccept one, state it with ``PUT``.",
+        "operationId": "propose_manufacturing_context_v1_twin_projects__project_id__manufacturing_context_propose_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Component"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ProposeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Manufacturing Context",
         "tags": [
           "twin"
         ]

@@ -197,6 +197,14 @@ class WorkProductType(StrEnum):
     # the impact graph, the results it made stale and the reruns it proposes,
     # with each rerun's approval decision recorded in place.
     CHANGE_IMPACT = "change_impact"
+    # The manufacturing context one product (or one component) is generated
+    # against (twin_core/manufacturing/context.py): intended use, process and
+    # material, quantity, commercial targets, envelope, tolerances, finish,
+    # joining, rules and evidence, each with its authority (user_stated,
+    # decision, assumption, unknown) and provenance. A definition item
+    # (MFC-PROJECT, MFC-<component>): every change is its next revision, and
+    # every generated concept records the revision it was made with.
+    MANUFACTURING_CONTEXT = "manufacturing_context"
 
 
 #: Work product types that are history about a change, not design work

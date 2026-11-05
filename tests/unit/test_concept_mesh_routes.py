@@ -276,7 +276,9 @@ async def test_falls_back_to_the_concept_image_then_the_brief(
     assert from_text.status_code == 200, from_text.text
     assert from_text.json()["source"]["kind"] == "text"
     await _finish(world, from_text.json())
-    assert world.mesh.calls[-1]["prompt"] == "A desk lamp with a weighted base"
+    # The brief's words go first and whole; the manufacturing context follows.
+    sent = world.mesh.calls[-1]["prompt"]
+    assert sent.startswith("A desk lamp with a weighted base\nManufacturing context (unresolved)")
 
     image = await world.concept_image()
     from_image = await client.post(URL, json={})

@@ -12,7 +12,8 @@ export type InterfaceType =
   | 'connects_via'
   | 'pin_maps_to'
   | 'simulation_input_of'
-  | 'feature_of';
+  | 'feature_of'
+  | 'manufactured_by';
 
 export type InterfaceStatus = 'proposed' | 'confirmed' | 'removed';
 export type DeclaredBy = 'human' | 'tool' | 'inferred';

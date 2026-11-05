@@ -435,14 +435,16 @@ async def test_the_concept_phase_prompt_carries_only_confirmed_readings(
     ctx = FlowContext(goal="a stool", project_id=PROJECT)
 
     out = await _interpret(twin)
-    assert await flow_brain._phase_inputs(concept, ctx) == ""
+    assert await flow_brain._sketch_inputs(ctx) == ""
 
     await make_sketch_reading_decider(twin)(
         out["node_id"], decision="confirm", decided_by="user:ada"
     )
     block = await flow_brain._phase_inputs(concept, ctx)
     assert "A small stool" in block
-    assert await flow_brain._phase_inputs(design, ctx) == ""
+    # Every phase gets the manufacturing context; only the concept phase the readings.
+    design_inputs = await flow_brain._phase_inputs(design, ctx)
+    assert "Manufacturing context" in design_inputs and "A small stool" not in design_inputs
 
     prompt = flow_brain.ReActPhaseBrain(mcp_bridge=None)._prompt("a stool", concept, ctx, block)
     assert "confirmed by a person" in prompt

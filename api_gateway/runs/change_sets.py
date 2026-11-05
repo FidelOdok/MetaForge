@@ -180,6 +180,11 @@ async def commit_for_approval(
         _last_conflict[run.id] = str(exc)
         raise
     _last_conflict.pop(run.id, None)
+    # The run's route decision, held as an assumption until a person approved
+    # this gate, is now a decision in the manufacturing context. Never raises.
+    from api_gateway.twin.manufacturing_context import promote_run_decisions
+
+    await promote_run_decisions(twin, _project(run), run.id, decided_by=decided_by)
     return {"items": result.refs, "outcome": result.outcome}
 
 

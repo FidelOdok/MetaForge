@@ -96,6 +96,7 @@ RELEVANT_CHECKS: dict[InterfaceType, frozenset[str]] = {
     InterfaceType.PIN_MAPS_TO: frozenset({"firmware_build", "firmware_static", "firmware_test"}),
     InterfaceType.SIMULATION_INPUT_OF: frozenset({"fea", "thermal"}),
     InterfaceType.FEATURE_OF: frozenset(),
+    InterfaceType.MANUFACTURED_BY: frozenset(),
 }
 
 #: The re-check to propose for a directly affected item that has no result
@@ -115,6 +116,7 @@ _COUPLING_WORDS: dict[InterfaceType, str] = {
     InterfaceType.PIN_MAPS_TO: "the pin assignment",
     InterfaceType.SIMULATION_INPUT_OF: "the analysed geometry, material or load",
     InterfaceType.FEATURE_OF: "the sketch it was built from",
+    InterfaceType.MANUFACTURED_BY: "the process and material it was generated for",
 }
 #: What depends on it, on the affected side.
 _DEPENDENT_WORDS: dict[InterfaceType, str] = {
@@ -124,6 +126,7 @@ _DEPENDENT_WORDS: dict[InterfaceType, str] = {
     InterfaceType.PIN_MAPS_TO: "modules and drivers use those pins",
     InterfaceType.SIMULATION_INPUT_OF: "was computed from them",
     InterfaceType.FEATURE_OF: "was made from that sketch",
+    InterfaceType.MANUFACTURED_BY: "process-specific assumptions are out of date",
 }
 #: The proposed action per edge type when no tool re-check applies.
 _REVIEW_ACTIONS: dict[InterfaceType, tuple[str, str]] = {
@@ -133,6 +136,10 @@ _REVIEW_ACTIONS: dict[InterfaceType, tuple[str, str]] = {
     InterfaceType.PIN_MAPS_TO: ("review_firmware", "Review the firmware pin use"),
     InterfaceType.SIMULATION_INPUT_OF: ("review_simulation", "Review the simulation inputs"),
     InterfaceType.FEATURE_OF: ("review_feature", "Regenerate the feature from the sketch"),
+    InterfaceType.MANUFACTURED_BY: (
+        "review_manufacturing",
+        "Review it against the new process; keep what the person approved",
+    ),
 }
 
 #: Metadata keys that describe bookkeeping, not the design.
@@ -560,6 +567,8 @@ def _phrase(entity: ImpactedEntity) -> str:
         return "the firmware"
     if entity.edge_type is InterfaceType.SIMULATION_INPUT_OF:
         return "the simulation results"
+    if entity.edge_type is InterfaceType.MANUFACTURED_BY:
+        return "concepts generated for the previous process"
     return "what was built from this sketch"
 
 
@@ -1000,6 +1009,7 @@ async def analyse_change(
                     InterfaceType.CLEARANCE_TO,
                     InterfaceType.CONNECTS_VIA,
                     InterfaceType.FEATURE_OF,
+                    InterfaceType.MANUFACTURED_BY,
                 ):
                     kind, label = _REVIEW_ACTIONS[coupling.edge_type]
                     reviews.setdefault(
@@ -1266,6 +1276,15 @@ async def changed_parameters(
             found = None
         if found is not None:
             return found
+    if getattr(item, "item_type", "") == "manufacturing_context":
+        # The record is data, so what changed is known field by field: a
+        # process change travels along manufactured_by, an intended-use edit
+        # does not (3D-RC-013).
+        from twin_core.manufacturing.context import changed_fields
+
+        return changed_fields(
+            _meta(old).get("manufacturing_context"), _meta(new).get("manufacturing_context")
+        )
     if getattr(old, "content_hash", None) != getattr(new, "content_hash", None):
         return None
     old_meta, new_meta = _meta(old), _meta(new)

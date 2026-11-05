@@ -274,6 +274,18 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "available. Illustrative only: not an editable sketch, not CAD, not evidence."
         ),
     ),
+    TwinTypeSpec(
+        "manufacturing_context",
+        TwinTypeKind.DEFINITION,
+        "work_product:manufacturing_context",
+        key_prefix="MFC",
+        description=(
+            "The manufacturing context a product (MFC-PROJECT) or one component "
+            "(MFC-<component>) is generated against: process, material, quantity, "
+            "targets and gaps, each field with its authority and provenance. Every "
+            "change is the next revision; each generated concept records the one it used."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",

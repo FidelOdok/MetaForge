@@ -599,6 +599,54 @@ class ProposeFlowRequest(BaseModel):
         )
 
 
+async def _with_manufacturing_record(body: ProposeFlowRequest) -> ProposeFlowRequest:
+    """One manufacturing context for flows and generators (DFM-001).
+
+    A proposal that states its manufacturing context records it in the
+    project's context item (``user_stated``). One that states none takes the
+    record's confirmed values instead, so a route already chosen in Create or
+    decided earlier is not asked for again. Assumptions never become a flow's
+    stated context. Best effort: a twin that cannot be read changes nothing.
+    """
+    if not body.projectId:
+        return body
+    from api_gateway.twin.manufacturing_context import (
+        flow_body_from_record,
+        read_context,
+        seed_from_flow,
+    )
+
+    try:
+        from api_gateway.twin.routes import get_twin
+
+        twin = get_twin()
+    except Exception as exc:  # noqa: BLE001 - no twin: the body stands as sent
+        logger.info("flow_manufacturing_context_no_twin", error=str(exc))
+        return body
+    if body.manufacturingContext is not None:
+        await seed_from_flow(twin, body.projectId, body.manufacturingContext)
+        return body
+    try:
+        stored = await read_context(twin, body.projectId)
+    except Exception as exc:  # noqa: BLE001 - unreadable: ask as before
+        logger.warning("flow_manufacturing_context_unreadable", error=str(exc))
+        return body
+    if stored is None:
+        return body
+    fields = flow_body_from_record(stored.record)
+    if not fields:
+        return body
+    logger.info(
+        "flow_manufacturing_context_from_record",
+        project_id=body.projectId,
+        ref=stored.ref,
+        fields=sorted(fields),
+    )
+    return body.model_copy(
+        update={"manufacturingContext": ManufacturingContextBody.model_validate(fields)}
+    )
+
+
 class QuestionView(BaseModel):
     id: str
     question: str
@@ -797,6 +845,7 @@ async def propose_flow(
     if not body.intent.strip():
         raise HTTPException(status_code=400, detail="intent is required")
 
+    body = await _with_manufacturing_record(body)
     context = body.flow_context()
     if body.projectId:
         # FORGE-571: what the project already has current, so generation can

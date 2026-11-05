@@ -130,6 +130,9 @@ DEFAULT_THRESHOLD = 0.9
 MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024
 REFERENCE_IMAGE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 MAX_COORD = 1000.0
+#: DFM-004: the label a speculative concept carries instead of :data:`LABEL`.
+SPECULATIVE_ITEM_LABEL = "Speculative concept · illustrative"
+NOT_ASSESSED_NOTE = "Manufacturing not assessed"
 
 _metrics: Any = None
 
@@ -253,6 +256,13 @@ class GenerateSketchRequest(BaseModel):
     expected_baseline: str | None = Field(None, max_length=200)
     #: Go past the hourly image cap (a person's explicit choice).
     confirm_spend: bool = False
+    #: DFM-004: a deliberately speculative concept. The manufacturing context
+    #: is recorded with the output but does not constrain it, and the output
+    #: is labelled "Speculative concept".
+    speculative: bool = False
+    #: The component this concept is of, for its manufacturing context
+    #: (``MFC-<component>``, else the product's).
+    component: str | None = Field(None, max_length=120)
 
     @field_validator("constraints", "negative", "protected_features")
     @classmethod
@@ -350,12 +360,15 @@ def build_prompt(
     mask: Region | None,
     mask_instruction: str,
     provider_masks: bool,
+    manufacturing: str = "",
 ) -> tuple[str, str]:
     """``(prompt, negative_prompt)`` for one request. Deterministic.
 
     ``first_image`` says what the first conditioning image is: ``sketch``
     (the person's strokes), ``baseline`` (the accepted concept being refined)
-    or ``None`` when only references are sent.
+    or ``None`` when only references are sent. ``manufacturing`` is the
+    manufacturing context block (DFM-001); a ``manufacturing_rule``
+    reference's stated values stay constraints, as before.
     """
     lines = [
         f"Freeform product concept sketch: {intent.strip()}",
@@ -402,6 +415,8 @@ def build_prompt(
             )
     if negative:
         lines.append("Do not: " + "; ".join(negative) + ".")
+    if manufacturing:
+        lines.append(manufacturing)
     lines.append(
         "This is an illustrative concept, not an engineering drawing: add no dimensions, "
         "text, labels, logos or watermarks."
@@ -628,6 +643,8 @@ class Prepared:
     target_key: str
     base_revision: str
     requested_at: float = field(default_factory=time.monotonic)
+    #: The manufacturing context block this request was prepared with (DFM-001).
+    manufacturing: Any = None
 
     def job_arguments(self) -> dict[str, Any]:
         """What identifies this request (hashed for coalescing; kept for a retry)."""
@@ -850,6 +867,17 @@ class SketchGenerationService:
                     "before editing a region"
                 )
             region = f"region-{request.mask.digest()}" if request.mask is not None else "full"
+            from api_gateway.twin.manufacturing_context import manufacturing_context_block
+
+            manufacturing = await manufacturing_context_block(
+                project_id,
+                request.component,
+                twin=self._twin,
+                generator="sketch_generation",
+                speculative=request.speculative,
+                hint=request.intent,
+            )
+            span.set_attribute("sketch_generation.manufacturing_context_ref", manufacturing.ref)
             prepared = Prepared(
                 project_id=str(project_id),
                 request=request,
@@ -862,6 +890,7 @@ class SketchGenerationService:
                 line_source=str(source),
                 target_key=f"{source}:{region}",
                 base_revision=base_revision,
+                manufacturing=manufacturing,
             )
             span.set_attribute("sketch_generation.target_key", prepared.target_key)
             span.set_attribute("sketch_generation.base_revision", base_revision)
@@ -1075,6 +1104,7 @@ class SketchGenerationService:
                 mask=request.mask,
                 mask_instruction=request.mask_instruction,
                 provider_masks=provider_masks,
+                manufacturing=prepared.manufacturing.text if prepared.manufacturing else "",
             )
             mask_png = (
                 provider_mask_png(request.mask, width, height)
@@ -1163,8 +1193,9 @@ class SketchGenerationService:
                 "target_key": prepared.target_key,
                 "base_revision": prepared.base_revision,
                 "authority": AUTHORITY,
-                "label": LABEL,
+                "label": stored[0].get("label") or LABEL,
                 "stale": stale,
+                **_manufacturing_fields(prepared),
             }
             if stale:
                 for _ in stored:
@@ -1382,6 +1413,7 @@ class SketchGenerationService:
             "images_sent": image.images_sent or (1 if image.conditioned else 0),
             "provider_masked": bool(image.masked),
             "partial_images": False,
+            **_manufacturing_fields(prepared),
         }
         metadata: dict[str, Any] = {
             "original_filename": filename,
@@ -1391,7 +1423,7 @@ class SketchGenerationService:
             # FSG-009 / PR-003: a generated picture of intent. Never an editable
             # sketch, never CAD, never evidence.
             "authority": AUTHORITY,
-            "illustrative_label": LABEL,
+            "illustrative_label": SPECULATIVE_ITEM_LABEL if request.speculative else LABEL,
             "representation": REPRESENTATION,
             "editable": False,
             "generated_by": TOOL,
@@ -1404,6 +1436,8 @@ class SketchGenerationService:
             "preservation": preservation,
             "latency_s": latency,
             "surface": prepared.surface,
+            # 3D-RC-011 / DFM-013: the context it was made with and its DFM status.
+            **_manufacturing_fields(prepared),
         }
         if status == "stale":
             metadata["stale_reason"] = (
@@ -1857,7 +1891,21 @@ def summarise(wp: Any) -> dict[str, Any]:
         "authority": meta.get("authority") or AUTHORITY,
         "label": meta.get("illustrative_label") or LABEL,
         "editable": False,
+        "manufacturing_context_ref": meta.get("manufacturing_context_ref"),
+        "manufacturing_context_unresolved": meta.get("manufacturing_context_unresolved") or [],
+        "speculative": bool(meta.get("speculative")),
+        "manufacturing_note": meta.get("manufacturing_note") or NOT_ASSESSED_NOTE,
+        "dfm_status": meta.get("dfm_status") or "not_assessed",
     }
+
+
+def _manufacturing_fields(prepared: Prepared) -> dict[str, Any]:
+    """The manufacturing context fields an output records (none before it was prepared)."""
+    block = prepared.manufacturing
+    if block is None:
+        return {}
+    out: dict[str, Any] = block.provenance()
+    return out
 
 
 def _png(img: Any) -> bytes:

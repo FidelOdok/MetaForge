@@ -7,7 +7,7 @@ interface to simulation input relationships. Each edge is an
 in place and it is never deleted, so a removed coupling still reads in
 history).
 
-Two edge types are not stored, because the twin already holds them and a
+Three edge types are not stored, because the twin already holds them and a
 second copy could only drift:
 
 * ``simulation_input_of``: a ``simulation_result`` record's own revision pins
@@ -17,8 +17,12 @@ second copy could only drift:
   interpretation or parametric sketch revision to the sketch revision it was
   made from (kinds ``sketch_plane`` and ``sketch_compiler``).
 
-Both are listed with ``derived: true``, ``declared_by: tool`` and status
-``confirmed``. A person may still declare either type by hand.
+* ``manufactured_by``: the ``manufacturing_context_ref`` a generated item's
+  head records (``MFC-PROJECT@3``), coupled on the selected process and
+  material, so a process change reaches what was generated for the old one.
+
+All three are listed with ``derived: true``, ``declared_by: tool`` and status
+``confirmed``. A person may still declare any of them by hand.
 
 Provenance is honest by construction: a person's declaration is confirmed at
 once; an inferred proposal (``declared_by: inferred``) stays ``proposed``,
@@ -57,6 +61,12 @@ EDGE_META_KEY = "interface"
 FEATURE_EDGE_KINDS = frozenset({"sketch_plane", "sketch_compiler"})
 #: Item types whose head may depend on a sketch revision.
 FEATURE_ITEM_TYPES = ("sketch_plane", "sketch_interpretation", "parametric_sketch")
+#: Item types whose head records the manufacturing context it was generated
+#: under (``metadata.manufacturing_context_ref``), each a ``manufactured_by``.
+MANUFACTURED_ITEM_TYPES = ("generated_sketch",)
+#: What crosses a ``manufactured_by`` edge: a change elsewhere in the context
+#: (the intended use, a note) does not reach what was generated.
+MANUFACTURED_COUPLED = ("selected_process", "selected_material")
 
 _metrics: Any = None
 
@@ -501,6 +511,65 @@ async def _feature_edges(twin: Any, pid: UUID) -> list[InterfaceEdge]:
     return out
 
 
+async def _manufacturing_edges(twin: Any, pid: UUID) -> list[InterfaceEdge]:
+    """``manufactured_by`` from the ``manufacturing_context_ref`` a generated item records."""
+    from twin_core.items import ItemError, list_items, parse_item_ref
+
+    contexts = {
+        i.key: i for i in await list_items(twin, project_id=pid, item_type="manufacturing_context")
+    }
+    if not contexts:
+        return []
+    out: list[InterfaceEdge] = []
+    for item_type in MANUFACTURED_ITEM_TYPES:
+        for item in await list_items(twin, project_id=pid, item_type=item_type):
+            if item.head_node_id is None:
+                continue
+            node = await twin.graph.get_node(item.head_node_id)
+            meta = dict(getattr(node, "metadata", None) or {})
+            ref = meta.get("manufacturing_context_ref")
+            if not isinstance(ref, str) or "@" not in ref or meta.get("speculative"):
+                # Unresolved, or speculative: nothing constrained it.
+                continue
+            try:
+                key, revision = parse_item_ref(ref)
+            except ItemError:
+                continue
+            context = contexts.get(key)
+            if context is None:
+                continue
+            out.append(
+                InterfaceEdge(
+                    id=f"derived:manufactured:{item.head_node_id}:{key}",
+                    project_id=str(pid),
+                    type=InterfaceType.MANUFACTURED_BY,
+                    source=InterfaceEnd(
+                        ref=key,
+                        revision=revision,
+                        domain="manufacturing",
+                        item_type="manufacturing_context",
+                        node_id=str(context.head_node_id) if context.head_node_id else None,
+                        label=context.name or key,
+                    ),
+                    target=InterfaceEnd(
+                        ref=item.key,
+                        revision=item.head_revision,
+                        domain=domain_for_item_type(item.item_type),
+                        item_type=item.item_type,
+                        node_id=str(item.head_node_id),
+                        label=item.name,
+                    ),
+                    declared_by=DeclaredBy.TOOL,
+                    status=InterfaceStatus.CONFIRMED,
+                    coupled_parameters=list(MANUFACTURED_COUPLED),
+                    rationale=f"{item.key}@{item.head_revision} was generated under {ref}",
+                    evidence={"manufacturing_context_ref": ref},
+                    derived=True,
+                )
+            )
+    return out
+
+
 async def list_interfaces(
     twin: Any,
     project_id: UUID | str,
@@ -513,7 +582,7 @@ async def list_interfaces(
     with tracer.start_as_current_span("twin.interfaces.list") as span:
         edges = await list_stored(twin, pid, include_removed=include_removed)
         if include_derived:
-            for loader in (_simulation_edges, _feature_edges):
+            for loader in (_simulation_edges, _feature_edges, _manufacturing_edges):
                 try:
                     edges.extend(await loader(twin, pid))
                 except Exception as exc:  # noqa: BLE001 - one source must not hide the rest

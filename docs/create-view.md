@@ -439,6 +439,18 @@ A generated image is illustrative: never an editable sketch and never CAD.
 **Make editable** works on the person's own strokes. Turning a generated
 image into editable shapes is not built yet.
 
+**Manufacturing note.** Every concept carries a short, truthful note about
+how it might be made, from the project's
+[manufacturing context](twin_schema.md#manufacturing-context):
+*Manufacturing not assessed* when nothing informed it, or *Informed by: FDM
+(assumed), PLA (assumed) · Manufacturing not assessed* when a stated,
+decided or assumed process and material did. A first-time user never has to
+choose a process first: with none stated, MetaForge proposes candidates as
+assumptions. A concept asked for as *speculative* is labelled *Speculative
+concept* and the context is recorded but not applied. No concept is ever
+labelled verified or production-ready: no manufacturing check has run on an
+illustration.
+
 ### Making a 3D concept
 
 **Make a 3D concept** turns the concept into an illustrative 3D model that can

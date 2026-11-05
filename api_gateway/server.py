@@ -93,6 +93,9 @@ from api_gateway.twin.item_migration_routes import router as twin_item_migration
 from api_gateway.twin.item_routes import router as twin_items_router
 from api_gateway.twin.live_routes import publish_local as _publish_live_local
 from api_gateway.twin.live_routes import router as twin_live_router
+from api_gateway.twin.manufacturing_context_routes import (
+    router as twin_manufacturing_context_router,
+)
 from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
@@ -2366,6 +2369,7 @@ def create_app(
     app.include_router(twin_sketch_router)
     # FORGE-790: the plane a sketch is placed on.
     app.include_router(twin_sketch_plane_router)
+    app.include_router(twin_manufacturing_context_router)
     # FORGE-791: interpretations of a sketch and their promotion.
     app.include_router(twin_sketch_compiler_router)
     # FORGE-794: AI concept sketches generated from text, references or a sketch.

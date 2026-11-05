@@ -503,6 +503,9 @@ async def test_the_tool_is_registered_with_its_schema() -> None:
         "generate_parts",
         "smart_low_poly",
         "fit_to_envelope",
+        # The manufacturing context: speculative mode and the component scope.
+        "speculative",
+        "component",
         "wait",
         # FORGE-788: the job's target, for supersede and stale results.
         "target_key",

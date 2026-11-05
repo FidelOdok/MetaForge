@@ -317,6 +317,16 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["manufacturing_route"] = route_decision.as_metadata()
             if ranking is not None:
                 metadata["process_ranking"] = ranking.as_metadata()
+            run_id = None
+            if route_decision is not None or ranking is not None:
+                # The manufacturing context treats a route decision made inside a
+                # design-flow run as pending until that run's gate approves it.
+                from api_gateway.twin.item_revisions import revision_run_id
+                from api_gateway.twin.manufacturing_context import DECISION_RUN_KEY
+
+                run_id = revision_run_id()
+                if run_id:
+                    metadata[DECISION_RUN_KEY] = run_id
             if review is not None:
                 metadata["dfm_review"] = review.as_metadata()
             if selected_assembly is not None:
@@ -424,7 +434,24 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 evidence_count=len(resolved_evidence_ids),
                 depends_on=pin_result.depends_on,
             )
+            mfc_ref: str | None = None
+            if route_decision is not None or ranking is not None:
+                # One source (DFM-001): the route decision feeds the
+                # manufacturing context record. Best effort, never fails this.
+                from api_gateway.twin.manufacturing_context import sync_from_decision
+
+                synced = await sync_from_decision(
+                    twin,
+                    project_id,
+                    decision_node_id=node_id,
+                    route=metadata.get("manufacturing_route"),
+                    ranking=metadata.get("process_ranking"),
+                    run_id=run_id,
+                )
+                if synced is not None and synced.stored is not None:
+                    mfc_ref = synced.stored.ref
             return {
+                **({"manufacturing_context_ref": mfc_ref} if mfc_ref else {}),
                 "node_id": node_id,
                 "minio_object_key": minio_object_key,
                 "content_hash": content_hash,
