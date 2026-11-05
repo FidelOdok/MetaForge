@@ -82,6 +82,8 @@ services:
       - METAFORGE_ADAPTER_FIRMWARE_URL=http://firmware-adapter:8105
       # PrusaSlicer is only in slicer-adapter's image.
       - METAFORGE_ADAPTER_SLICER_URL=http://slicer-adapter:8106
+      # Chromium and three.js for model view renders are only in render-adapter's image.
+      - METAFORGE_ADAPTER_RENDER_URL=http://render-adapter:8107
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -540,7 +542,7 @@ services:
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
-      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam,firmware,simready,slicer,meshy,zoo,tripo,slant3d,files
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam,firmware,simready,slicer,render,meshy,zoo,tripo,slant3d,files
       --allow-twin-mutations
       --capture-sessions
     ports:
@@ -659,6 +661,8 @@ services:
       - METAFORGE_ADAPTER_FIRMWARE_URL=http://firmware-adapter:8105
       # PrusaSlicer is only in slicer-adapter's image.
       - METAFORGE_ADAPTER_SLICER_URL=http://slicer-adapter:8106
+      # Chromium and three.js for model view renders are only in render-adapter's image.
+      - METAFORGE_ADAPTER_RENDER_URL=http://render-adapter:8107
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       # MET-495: same MinIO config as the gateway so twin.record_decision can
@@ -925,6 +929,43 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── Render Adapter (model views in headless Chromium, three.js r169) ─
+  # The CAD design loop's eyes: a GLB rendered from fixed views (iso, front,
+  # side, top, sections) with a scale bar and measured dimensions. three.js
+  # ships in the image, so a render needs no network. The published port is
+  # loopback only; the gateway reaches the adapter over the compose network.
+  render-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/render/Dockerfile
+    image: ghcr.io/fidelodok/metaforge-render-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "127.0.0.1:8107:8107"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - RENDER_WORK_DIR=/workspace
+      - RENDER_HTTP_PORT=8107
+      - RENDER_MAX_OPERATION_TIME=${RENDER_MAX_OPERATION_TIME:-120}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # Chromium uses shared memory for its renderer processes.
+    shm_size: "512m"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8107/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     networks:
       - metaforge
     restart: unless-stopped

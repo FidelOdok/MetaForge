@@ -509,6 +509,17 @@ class JobStore:
             ).fetchall()
         return [self._row(r) for r in rows]
 
+    def active_for_tool(self, project_id: str, tool_id: str) -> list[JobRecord]:
+        """Jobs of ``tool_id`` still open in ``project_id``, on any target, oldest first."""
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT {_COLUMNS} FROM tool_jobs"  # noqa: S608
+                " WHERE project_id = ? AND tool_id = ? AND status IN ('queued', 'running')"
+                " ORDER BY created_at",
+                (project_id, tool_id),
+            ).fetchall()
+        return [self._row(r) for r in rows]
+
     def take_unnotified(self, session_id: str) -> list[JobRecord]:
         """This session's finished jobs it has not been told of, now marked told."""
         with self._lock:

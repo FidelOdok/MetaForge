@@ -82,6 +82,7 @@ import { InterfaceContractsSection } from '../components/viewer/InterfaceContrac
 import { ParametricPreviewSection } from '../components/viewer/ParametricPreviewSection';
 import { FeatureHistorySection } from '../components/viewer/FeatureHistorySection';
 import { ConceptPartsSection } from '../components/viewer/ConceptPartsSection';
+import { CadLoopSection } from '../components/viewer/CadLoopSection';
 import { useComponentSelection } from '../store/component-selection-store';
 import './TwinViewerPage.css';
 
@@ -1975,6 +1976,8 @@ export function TwinViewerPage() {
                       <FeatureHistorySection projectId={activeProjectId} componentId={selectedComponent?.componentId ?? null} />
                       {/* Concept parts: segmentation provenance and the part mapping. */}
                       <ConceptPartsSection projectId={activeProjectId} />
+                      {/* The CAD design loop: each run's iteration timeline. */}
+                      <CadLoopSection projectId={activeProjectId} componentId={selectedComponent?.componentId ?? null} />
                     </>
                   )}
                 </>

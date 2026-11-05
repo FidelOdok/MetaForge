@@ -36,6 +36,7 @@ import { useBuildExact } from '../../hooks/use-build-exact';
 import { ReadinessStatus } from './ReadinessStatus';
 import { MakeEditablePanel } from './MakeEditablePanel';
 import { ConceptPartsPanel } from './ConceptPartsPanel';
+import { CadLoopPanel } from './CadLoopPanel';
 import { getReconstruction, reconstructionKeys } from '../../api/endpoints/reconstruction';
 import {
   NOT_ASSESSED as NOT_ASSESSED_NOTE,
@@ -493,6 +494,11 @@ export function ProductStage({
       {/* Concept parts: split the 3D concept, map its parts, redo or seal one part. */}
       {projectId && mode === 'view' && node && isConceptMesh(node) && (
         <ConceptPartsPanel projectId={projectId} selectedComponent={selectedComponent} onShow={onSelect} />
+      )}
+
+      {/* The CAD design loop: refine a component with a parametric plan automatically. */}
+      {projectId && mode === 'view' && psk && (
+        <CadLoopPanel projectId={projectId} sketchKey={psk.key} componentName={selectedComponent?.name ?? null} />
       )}
 
       {(partsState.busy || partsState.error) && (

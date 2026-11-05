@@ -152,6 +152,9 @@ READ_ONLY: frozenset[str] = frozenset(
         # scratch directory removed; nothing is left behind.
         "blender.render",
         "blender.export_blend",
+        # Model views of a GLB in a headless browser, returned inline; the
+        # adapter keeps nothing.
+        "render.model_views",
         # FORGE-615: arithmetic over the caller's figures.
         "cost.estimate_manufacturing",
         # Composable flows: search arithmetic over the caller's evaluations.
@@ -423,6 +426,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-794: adds an illustrative generated_sketch proposal; the sketch,
         # its references and the accepted concept are never touched.
         "twin.generate_sketch",
+        # CAD design loop: adds one cad_design_loop record with its iterations and
+        # a proposed version; the CAD item is never touched (a person accepts it).
+        "twin.design_cad_loop",
         # CDE slice 6: a validated exact revision is the item's next revision
         # (the older ones stay); a failed attempt is recorded beside it. A STEP
         # export is kept on its revision as a status tag; nothing is removed.
@@ -675,6 +681,9 @@ OPEN_WORLD: frozenset[str] = frozenset(
         # FORGE-794: the prompt, the drawn sketch and active reference images go to
         # the configured image API.
         "twin.generate_sketch",
+        # CAD design loop: the intent, context and scripts go to the configured
+        # model, and the rendered views to the vision model.
+        "twin.design_cad_loop",
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",

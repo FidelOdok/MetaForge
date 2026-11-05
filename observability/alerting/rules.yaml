@@ -1332,6 +1332,28 @@ groups:
             the gateway logs (concept_segmentation_failed,
             concept_part_regeneration_failed, concept_part_completion_failed).
 
+  # CAD design loop: model writes CadQuery, it is built, rendered and critiqued
+  # (api_gateway/twin/cad_design_loop.py).
+  - name: metaforge_cad_design_loop
+    rules:
+      - alert: CadDesignLoopFailing
+        expr: >-
+          (sum(increase(metaforge_cad_loop_run_total{stop_reason="failed"}[1h]))
+          + sum(increase(metaforge_cad_loop_render_total{outcome=~"convert_failed|render_failed"}[1h])))
+          >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CAD design loop runs or renders are failing"
+          description: >-
+            Three or more CAD design loop runs ended failed, or model view
+            renders failed, in the last hour. A run fails when the model, the
+            vision critic, the CadQuery adapter, the OCCT converter or the
+            render adapter cannot be reached. Check the render-adapter and
+            occt-converter containers and the gateway logs (cad_loop_failed,
+            cad_loop_render_failed).
+
   # C3D slice 5 -- the L2 preview versus exact comparison
   # (api_gateway/twin/preview_comparison.py).
   - name: metaforge_preview_comparison

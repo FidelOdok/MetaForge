@@ -116,6 +116,17 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.slicer.config",
         "config_class": "SlicerConfig",
     },
+    # Model views of a GLB in headless Chromium (three.js), for the CAD design
+    # loop's critic. Registers so tools/list is stable; a call needs the
+    # render-adapter container (METAFORGE_ADAPTER_RENDER_URL), since the
+    # gateway and sidecar images have no browser and raise
+    # BrowserNotAvailableError in-process.
+    "render": {
+        "module": "tool_registry.tools.render.adapter",
+        "class": "RenderServer",
+        "config_module": "tool_registry.tools.render.config",
+        "config_class": "RenderConfig",
+    },
     # MET-633: opt-in like freecad/kicad above -- needs a real `gz` binary
     # (Gazebo Sim) in the container/host PATH to execute; the adapter
     # registers regardless so tools/list is stable, but handlers raise
@@ -407,6 +418,8 @@ async def bootstrap_tool_registry(
     concept_image_critic: Any = None,
     concept_mesh_generator: Any = None,
     concept_parts_service: Any = None,
+    # The CAD design loop (twin.design_cad_loop).
+    cad_design_loop_service: Any = None,
     structured_mesh_renderer: Any = None,
     # C3D slice 4: heuristic DFM findings (twin.evaluate_dfm, twin.get_dfm_findings).
     dfm_service: Any = None,
@@ -647,6 +660,10 @@ async def bootstrap_tool_registry(
             ``twin.segment_concept_mesh``, ``twin.regenerate_concept_part`` and
             ``twin.complete_concept_part``: split the 3D concept into parts and
             redo or seal one part. ``None`` skips registration.
+        cad_design_loop_service: Optional CAD design loop service
+            (make_cad_design_loop_service). When supplied, registers
+            ``twin.design_cad_loop``: write CadQuery, build, render, critique
+            and revise into a proposed revision. ``None`` skips registration.
         structured_mesh_renderer: Optional async ``render(...)``
             (make_structured_mesh_recorder, C3D slice 2). When supplied,
             registers ``twin.render_structured_mesh``: the concept's block
@@ -915,6 +932,7 @@ async def bootstrap_tool_registry(
                     concept_image_critic=concept_image_critic,
                     concept_mesh_generator=concept_mesh_generator,
                     concept_parts_service=concept_parts_service,
+                    cad_design_loop_service=cad_design_loop_service,
                     structured_mesh_renderer=structured_mesh_renderer,
                     dfm_service=dfm_service,
                     sketch_generator=sketch_generator,

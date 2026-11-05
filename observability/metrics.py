@@ -1529,6 +1529,70 @@ class MetricsRegistry:
         labels=["kind", "check"],
     )
 
+    # ── CAD design loop (self-validating CadQuery loop) ─────────────────
+
+    CAD_LOOP_RUN_TOTAL = MetricDefinition(
+        name="metaforge_cad_loop_run_total",
+        type="counter",
+        description=(
+            "CAD design loop runs that ended, by stop reason: satisfied (critic satisfied, "
+            "validity pass, no blocking DFM finding, stated dimensions in tolerance), "
+            "iteration_cap or spend_cap (stopped with open issues), needs_input (blocked "
+            "on a person's answer) or failed (a model or adapter could not be reached)"
+        ),
+        labels=["stop_reason"],
+    )
+
+    CAD_LOOP_ITERATION_TOTAL = MetricDefinition(
+        name="metaforge_cad_loop_iteration_total",
+        type="counter",
+        description=(
+            "CAD design loop iterations, by outcome: built (the script built and was "
+            "checked), build_failed, invalid (validity did not pass), question (the model "
+            "asked instead of writing) or unrendered"
+        ),
+        labels=["outcome"],
+    )
+
+    CAD_LOOP_RENDER_TOTAL = MetricDefinition(
+        name="metaforge_cad_loop_render_total",
+        type="counter",
+        description=(
+            "Model view renders the CAD design loop asked for (render.model_views), by "
+            "outcome: rendered, convert_failed (STEP to GLB) or render_failed"
+        ),
+        labels=["outcome"],
+    )
+
+    CAD_LOOP_CRITIC_TOTAL = MetricDefinition(
+        name="metaforge_cad_loop_critic_total",
+        type="counter",
+        description=(
+            "Vision critic verdicts in the CAD design loop: satisfied, not_satisfied, "
+            "unparsed (the reply could not be read) or unavailable. A verdict is never "
+            "evidence and never validates geometry"
+        ),
+        labels=["verdict"],
+    )
+
+    CAD_LOOP_MODEL_CALL_TOTAL = MetricDefinition(
+        name="metaforge_cad_loop_model_call_total",
+        type="counter",
+        description="Model calls the CAD design loop made, by role (author, critic)",
+        labels=["role"],
+    )
+
+    CAD_LOOP_SPEND_USD_TOTAL = MetricDefinition(
+        name="metaforge_cad_loop_spend_usd_total",
+        type="counter",
+        description=(
+            "Priced model spend of the CAD design loop in USD, by role (author, critic). "
+            "Calls with no known price are counted in metaforge_cad_loop_model_call_total "
+            "and add nothing here"
+        ),
+        labels=["role"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1722,6 +1786,12 @@ class MetricsRegistry:
             cls.CONCEPT_PART_COMPLETION_TOTAL,
             cls.INTERFACE_CONTRACT_CHECK_TOTAL,
             cls.INTERFACE_CONTRACT_VIOLATION_TOTAL,
+            cls.CAD_LOOP_RUN_TOTAL,
+            cls.CAD_LOOP_ITERATION_TOTAL,
+            cls.CAD_LOOP_RENDER_TOTAL,
+            cls.CAD_LOOP_CRITIC_TOTAL,
+            cls.CAD_LOOP_MODEL_CALL_TOTAL,
+            cls.CAD_LOOP_SPEND_USD_TOTAL,
         ]
 
     @classmethod
@@ -2810,6 +2880,39 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.INTERFACE_CONTRACT_VIOLATION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"kind": kind, "check": check})
+
+    def record_cad_loop_run(self, stop_reason: str) -> None:
+        """Record one CAD design loop run that ended, by stop reason."""
+        counter = self._instruments.get(MetricsRegistry.CAD_LOOP_RUN_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"stop_reason": stop_reason})
+
+    def record_cad_loop_iteration(self, outcome: str) -> None:
+        """Record one CAD design loop iteration, by outcome."""
+        counter = self._instruments.get(MetricsRegistry.CAD_LOOP_ITERATION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_cad_loop_render(self, outcome: str) -> None:
+        """Record one model view render the CAD design loop asked for."""
+        counter = self._instruments.get(MetricsRegistry.CAD_LOOP_RENDER_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_cad_loop_critic(self, verdict: str) -> None:
+        """Record one vision critic verdict in the CAD design loop."""
+        counter = self._instruments.get(MetricsRegistry.CAD_LOOP_CRITIC_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"verdict": verdict})
+
+    def record_cad_loop_model_call(self, role: str, cost_usd: float | None) -> None:
+        """Record one CAD design loop model call, and its priced spend when known."""
+        calls = self._instruments.get(MetricsRegistry.CAD_LOOP_MODEL_CALL_TOTAL.name)
+        if calls is not None:
+            calls.add(1, attributes={"role": role})
+        spend = self._instruments.get(MetricsRegistry.CAD_LOOP_SPEND_USD_TOTAL.name)
+        if spend is not None and cost_usd:
+            spend.add(float(cost_usd), attributes={"role": role})
 
     def record_tool_job(self, tool: str, status: str) -> None:
         """Record one state change of a tool job (FORGE-783)."""

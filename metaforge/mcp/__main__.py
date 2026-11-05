@@ -2167,6 +2167,12 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         )
         exact_cad.register_retries()
         bindings["exact_cad_service"] = exact_cad
+        # The CAD design loop: twin.design_cad_loop, over the same bridge.
+        from api_gateway.twin.cad_design_loop import make_cad_design_loop_service
+
+        bindings["cad_design_loop_service"] = make_cad_design_loop_service(
+            twin, exact_cad=exact_cad
+        )
         # CDE slice 9: a CAD head this process moves re-finds the faces sketch
         # planes sit on, reading them through this service.
         from api_gateway.twin.face_attachment import register as register_face_attachment

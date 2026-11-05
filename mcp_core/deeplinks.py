@@ -71,6 +71,7 @@ _ROUTES: dict[str, tuple[str, str | None, str | None, str]] = {
     "twin.complete_concept_part": ("twin?tab=model", "node_id", "node", "View the concept"),
     "twin.interpret_sketch": ("twin?tab=model", "node_id", "node", "View the sketch"),
     "twin.generate_sketch": ("twin?tab=model", "node_id", "node", "View the generated concept"),
+    "twin.design_cad_loop": ("twin?tab=model", "node_id", "node", "View the design loop"),
     "twin.commit_system_architecture": (
         "twin?tab=structure",
         "node_id",

@@ -124,7 +124,8 @@ class TestTelemetryMetricsGroupAccess:
         # + 4 exact DFM, report and release checklist (C3D slice 6).
         # + 1 slicer cross-check after exact FDM DFM.
         # + 3 reconstruction proposals, accepted features and model passes (4B).
-        assert len(MetricsRegistry.all_metrics()) == 154
+        # + 6 CAD design loop runs, iterations, renders, verdicts, calls and spend.
+        assert len(MetricsRegistry.all_metrics()) == 160
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
