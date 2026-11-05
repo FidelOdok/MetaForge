@@ -422,6 +422,50 @@ and revolve features with depth, angle and material marked as needed input:
 nothing the drawing does not say is invented. See
 [the sketch compiler](twin_schema.md#sketch-compiler).
 
+### The editable part: preview, exact model and handles
+
+Once a parametric sketch exists, the stage shows it as a part. Nothing
+needs to be selected: the newest parametric sketch leads the stage (and
+selecting its CAD item shows the same view).
+
+- **Preview.** The part is drawn in the browser from the same definition
+  the exact model is built from, so a change shows at once: *3D Preview ·
+  provisional*. Typing a new depth, or dragging a handle, redraws it
+  without asking the gateway anything. When the sketch does not say how
+  deep the part is, or its scale or plane is not confirmed yet, the preview
+  still draws it and says what it assumed, for example *Depth not set ·
+  showing an assumed 4 mm* or *Scale not confirmed · drawn at an assumed 1
+  sketch unit = 1 mm*. An assumed value is never used to build the exact
+  model.
+- **Handles.** An orange handle on the top face drags the depth along the
+  part's normal; a handle on the rim of a circle with a confirmed radius
+  drags that radius. The preview follows the pointer, and the change is
+  saved once, when the pointer is released: the parametric sketch's next
+  revision, then one exact build. Escape during a drag puts the value back.
+  The same values have number fields under the view (the keyboard way):
+  Enter or **Apply** saves. A part with no material yet asks for one there.
+  The dragged mesh is never what is saved: only the parameter, through the
+  normal parametric path, and it is checked against the sketch's accepted
+  rules first.
+- **Swap.** While the exact model is built the view keeps the preview and
+  says *Engineering Update · validation pending*. When the validated exact
+  model built from this very definition arrives, the view swaps to it:
+  *Engineering Geometry · exact model available*. If the comparison found
+  that the exact model differs from what the preview showed, a short note
+  says where, for example *The exact model differs from the preview in
+  volume, holes.*
+- **When the exact model fails.** The preview stays, the last valid exact
+  model stays faintly underneath it, and the view says *Preview available ·
+  Engineering update needs attention* with **Retry** (the same retry as the
+  activity overlay). Nothing is called exact.
+
+In Engineering, the inspector of a parametric sketch, or of the CAD item it
+builds, shows the same view with the comparison values (bounding box, main
+dimensions, volume, sampled surface distance and holes, each with its
+tolerance), the revisions involved and how long the last preview rebuild
+took. See [L2 preview, comparison and parameter
+commits](twin_schema.md#l2-preview).
+
 ### Generating a concept
 
 **Generate a concept** (in More) draws a freeform concept sketch with an
@@ -822,6 +866,8 @@ The sketch layer uses these twin routes:
 | `POST /v1/twin/projects/{project_id}/sketches/{sketch_key}/interpretations` | Store a proposal made by **Make editable** (idempotent per `interpretation_id`; `409` when the sketch was redrawn since) |
 | `POST /v1/twin/projects/{project_id}/interpretations/{key}/promote` | Promote a proposal's accepted rules to a parametric sketch held for sign-off (idempotent per `promote_id`; `409` when a rule does not hold) |
 | `POST /v1/twin/nodes/{node_id}/approve-parametric-sketch` | Sign off a parametric sketch |
+| `GET /v1/twin/projects/{project_id}/parametric-sketches/{sketch_key}/preview-definition` | The shared definition the part's preview is drawn from, with the exact model it swaps to and, given `job_id`, the build's state |
+| `POST /v1/twin/projects/{project_id}/parametric-sketches/{sketch_key}/parameters` | Save a depth, angle, material or circle radius as the sketch's next revision and start one exact build (`409` when the sketch moved on since `base_revision`) |
 | `POST /v1/twin/projects/{project_id}/sketch-generations` | Start a concept generation as a job on its target (`409` with `spend_confirmation_required` past the hourly limit; refused for an agent) |
 | `GET /v1/twin/projects/{project_id}/sketch-generations` | The accepted concept lines with their history, and recent proposals |
 | `GET .../sketch-generations/compare?a=&b=` | Two concepts side by side, with the share of pixels that differ |
@@ -841,8 +887,10 @@ refused with `403`. The full schemas are in the
 ## Not yet
 
 - An editable sketch's shapes are lines, arcs, circles, ellipses and smooth
-  curves; there are no angle or point-to-point distance dimensions yet, and
-  shapes cannot be dragged. A generated (raster) image cannot be made
+  curves; there are no angle or point-to-point distance dimensions yet.
+  On the 3D part only the depth and a circle's confirmed radius have drag
+  handles; a revolve's angle is a number field only, and a line's length
+  cannot be dragged (it would need the sketch solved again). A generated (raster) image cannot be made
   editable yet: only strokes drawn on the stage.
 - Generated concepts: no configured provider streams partial images, so
   there is no progressive preview. Front, side and top views are not

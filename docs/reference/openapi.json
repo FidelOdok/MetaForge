@@ -3934,6 +3934,40 @@
         "title": "ComparisonOption",
         "type": "object"
       },
+      "ComparisonTolerance": {
+        "description": "A component's preview versus exact tolerance (no universal threshold).",
+        "properties": {
+          "abs_mm": {
+            "default": 0.25,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Abs Mm",
+            "type": "number"
+          },
+          "basis": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Basis",
+            "type": "string"
+          },
+          "rel": {
+            "default": 0.01,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Rel",
+            "type": "number"
+          },
+          "volume_rel": {
+            "default": 0.02,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Volume Rel",
+            "type": "number"
+          }
+        },
+        "title": "ComparisonTolerance",
+        "type": "object"
+      },
       "CompileRequest": {
         "description": "Compile a description into a spec WITHOUT building it (dry run).",
         "properties": {
@@ -15455,6 +15489,91 @@
           "flagged"
         ],
         "title": "OverhangFace",
+        "type": "object"
+      },
+      "ParameterCommitRequest": {
+        "description": "A parameter edit from the viewer: drag handle release or the numeric field.",
+        "properties": {
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "build": {
+            "default": true,
+            "title": "Build",
+            "type": "boolean"
+          },
+          "comparison_tolerance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComparisonTolerance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dimensions": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Dimensions",
+            "type": "object"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "preview_ms": {
+            "anyOf": [
+              {
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Ms"
+          },
+          "source": {
+            "default": "numeric",
+            "enum": [
+              "drag",
+              "numeric"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "base_revision"
+        ],
+        "title": "ParameterCommitRequest",
         "type": "object"
       },
       "PartBlock": {
@@ -40594,6 +40713,156 @@
           }
         },
         "summary": "Project Maturity",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/parametric-sketches/{sketch_key}/parameters": {
+      "post": {
+        "description": "Commit a parameter edit as a new parametric revision and schedule the exact build.",
+        "operationId": "post_parameters_v1_twin_projects__project_id__parametric_sketches__sketch_key__parameters_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParameterCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Parameters V1 Twin Projects  Project Id  Parametric Sketches  Sketch Key  Parameters Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Parameters",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/parametric-sketches/{sketch_key}/preview-definition": {
+      "get": {
+        "description": "The L2 preview definition of a parametric sketch's feature, and its exact status.",
+        "operationId": "get_preview_definition_v1_twin_projects__project_id__parametric_sketches__sketch_key__preview_definition_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sketch_key",
+            "required": true,
+            "schema": {
+              "title": "Sketch Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Preview Definition V1 Twin Projects  Project Id  Parametric Sketches  Sketch Key  Preview Definition Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Preview Definition",
         "tags": [
           "twin"
         ]
