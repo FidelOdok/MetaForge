@@ -158,12 +158,14 @@ The stage offers one primary action at a time; everything else is in **More**.
 | The creation has | Primary action |
 |---|---|
 | Nothing yet | Three equal ways in: **Describe** (focuses the composer), **Sketch it** (Sketch mode, pen ready), **Add reference** (the references drawer) |
+| An accepted concept whose features are not accepted yet | **Make it editable** (see [making a concept editable](#making-a-concept-editable)) |
 | A description, concept, sketch or reference, but no 3D concept | **Make a 3D concept** |
 | A 3D concept and a sketch that is not editable yet | **Make editable** |
 | A 3D concept (and an editable sketch, if there is a sketch) | **Build exact model**: starts the exact build of the parametric sketch (see [Build exact model](#build-exact-model)); with no parametric sketch yet, puts a design request in the composer, ready to send |
 | A dimensioned model | **Prepare prototype**: opens the Make tab |
 
-**More** holds the rest: *Generate a concept*, *Make a 3D concept*, *Show as
+**More** holds the rest: *Generate a concept*, *Make a 3D concept*, *Make it
+editable*, *Show as
 simple 3D parts*, *Editable sketch*, *Sketch plane*, *Add reference*, *Sketch
 it*, *Describe a change*, *Build exact model* and *Discuss this*, each shown
 only where it applies.
@@ -660,6 +662,27 @@ rather than a new one. With no concept sketch yet the stage says there is no
 layout to build from. It is also drawn once when a concept assembly is
 recorded. See [representation levels](twin_schema.md#representation-levels).
 
+### Making a concept editable
+
+Once a concept is accepted (its parts are recorded with it), the primary
+action becomes **Make it editable**. It opens a short panel under the stage
+bar that asks for a proposal if there is none yet, then shows how the
+product would be built in plain words ("We'd build this as: the base: a
+round disc; the shade: a round rod, hollowed out"). There is no feature tree
+and no parameters here. The questions that need the person come next as
+choices (hollow or solid, where an opening goes, how it will be made); the
+accept button waits until the consequential ones are answered.
+
+Accepting takes the features the concept itself supports (not the ones a
+model only suggested) and turns each part into an editable sketch held for
+sign-off in Approvals. Sizes that were only estimated from the concept are
+asked for again before the exact model is built; nothing is assumed for
+them. Engineering shows the same proposal in full under **Feature history
+(proposed)** in the inspector: each feature, each parameter with its value,
+estimated, confirmed or unknown status and source, the assumptions, the DFM
+strategy note with the rules that shaped it, and what it was made from. See
+[parametric reconstruction](twin_schema.md#parametric-reconstruction).
+
 ### References and their roles
 
 Each added reference shows as a compact chip with its role and whether the
@@ -958,6 +981,8 @@ The sketch layer uses these twin routes:
 | `GET /v1/twin/projects/{project_id}/dfm/checklist` | The manufacturing release checklist and the readiness the chip may show |
 | `POST .../dfm/report`, `GET .../dfm/report` | Generate the revision's DFM report; read the latest (`?format=markdown` for the rendered copy) |
 | `POST .../dfm/verification/{item_id}/evidence` | Record evidence for a physical verification item; it counts once a reviewer approves it |
+| `POST /v1/twin/projects/{project_id}/reconstruction`, `GET ...` | Propose how an accepted concept would be built as editable features; read the latest proposal per part |
+| `POST .../reconstruction/{key}/accept` | Accept a part's proposed features with answers; its editable sketch waits for sign-off |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the

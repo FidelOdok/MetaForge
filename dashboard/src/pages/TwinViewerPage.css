@@ -1882,3 +1882,119 @@
 .tw-dfm-checklist-items li.is-fail {
   border-left-color: #d64545;
 }
+
+/* Spec 4B: the proposed feature history, on demand in the inspector. */
+.tw-fh {
+  padding: 8px 12px;
+  border-top: 1px solid rgba(65, 72, 90, 0.25);
+  font-size: 12px;
+}
+.tw-fh-toggle,
+.tw-fh-propose {
+  padding: 4px 8px;
+  border: 1px solid rgba(65, 72, 90, 0.45);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tw-fh-toggle[aria-expanded='true'] {
+  border-color: #6aa0ff;
+}
+.tw-fh-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.tw-fh-component header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.tw-fh-ref,
+.tw-fh-kind,
+.tw-fh-index {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.tw-fh-badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(65, 72, 90, 0.45);
+  font-size: 11px;
+}
+.tw-fh-badge.is-llm {
+  border-color: #c084fc;
+}
+.tw-fh-badge.is-stale {
+  border-color: #f59e0b;
+}
+.tw-fh-features {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tw-fh-feature-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.tw-fh-line {
+  margin: 2px 0 0 18px;
+  opacity: 0.85;
+}
+.tw-fh-params {
+  margin: 4px 0 0 18px;
+  border-collapse: collapse;
+}
+.tw-fh-params th,
+.tw-fh-params td {
+  padding: 1px 6px 1px 0;
+  text-align: left;
+  font-weight: normal;
+}
+.tw-fh-status.is-estimated {
+  color: #d97706;
+}
+.tw-fh-status.is-confirmed {
+  color: #16a34a;
+}
+.tw-fh-status.is-unknown {
+  color: #dc2626;
+}
+.tw-fh-source {
+  opacity: 0.75;
+}
+.tw-fh-label {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.tw-fh-block ul {
+  margin: 2px 0 0;
+  padding-left: 16px;
+}
+.tw-fh-block p {
+  margin: 2px 0 0;
+}
+.tw-fh-provenance {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 1px 8px;
+  margin: 6px 0 0;
+}
+.tw-fh-provenance dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

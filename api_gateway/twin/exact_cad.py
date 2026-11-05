@@ -1352,9 +1352,19 @@ class ExactCadService:
             raise ExactCadError(
                 f"the sketch's unit is {sketch.unit}; place it on a plane in millimetres first"
             )
-        if not sketch.plane_id:
-            raise ExactCadError("the sketch is not placed on a plane yet")
-        placement, plane_used = await self._plane_fields(str(sketch.plane_id), psk_node.project_id)
+        if sketch.plane_id:
+            placement, plane_used = await self._plane_fields(
+                str(sketch.plane_id), psk_node.project_id
+            )
+        else:
+            # A reconstructed sketch carries the principal plane the person
+            # accepted with its proposal (twin_core.design_ir.feature_history).
+            from twin_core.design_ir.feature_history import principal_placement
+
+            accepted_plane = principal_placement(meta)
+            if accepted_plane is None:
+                raise ExactCadError("the sketch is not placed on a plane yet")
+            placement, plane_used = accepted_plane, None
         numeric = "depth" if chosen.op == "extrude" else "angle"
         try:
             amount = float(values[numeric])

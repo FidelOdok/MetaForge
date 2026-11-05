@@ -53,6 +53,8 @@ def test_definitions_are_the_versioned_types() -> None:
         "manufacturing_context",
         # How the product and its components look.
         "appearance",
+        # A proposed feature history for one component of an accepted concept.
+        "feature_history_proposal",
     }
 
 

@@ -223,6 +223,16 @@ class WorkProductType(StrEnum):
     # state and the release checklist, as JSON plus rendered Markdown. A
     # record pinned to the revisions it read, so it reads stale when they move.
     DFM_REPORT = "dfm_report"
+    # A proposed editable feature history for one component of an accepted
+    # concept (api_gateway/twin/reconstruction.py): an ordered list of
+    # features (sketch profile, extrude or revolve, shell, openings, bosses,
+    # ribs), each parameter estimated, confirmed or unknown with its source,
+    # the unresolved assumptions, the questions a person must answer and the
+    # DFM strategy note naming the rules that shaped it. A proposal, never
+    # CAD: accepting features turns them into parametric sketches. A
+    # definition item (FHP-<component>), DEPENDS_ON the concept assembly, the
+    # L1 layout, the references, the sketches and the manufacturing context.
+    FEATURE_HISTORY_PROPOSAL = "feature_history_proposal"
 
 
 #: Work product types that are history about a change, not design work

@@ -2549,7 +2549,7 @@
         "title": "BranchBody",
         "type": "object"
       },
-      "Brief": {
+      "Brief-Input": {
         "properties": {
           "assumptions": {
             "items": {
@@ -2574,7 +2574,48 @@
           },
           "reference_details": {
             "items": {
-              "$ref": "#/components/schemas/ReferenceRecord"
+              "$ref": "#/components/schemas/ReferenceRecord-Input"
+            },
+            "title": "Reference Details",
+            "type": "array"
+          },
+          "references": {
+            "items": {
+              "type": "string"
+            },
+            "title": "References",
+            "type": "array"
+          }
+        },
+        "title": "Brief",
+        "type": "object"
+      },
+      "Brief-Output": {
+        "properties": {
+          "assumptions": {
+            "items": {
+              "$ref": "#/components/schemas/Assumption"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BriefItem"
+            },
+            "title": "Items",
+            "type": "object"
+          },
+          "measurements": {
+            "items": {
+              "$ref": "#/components/schemas/Measurement"
+            },
+            "title": "Measurements",
+            "type": "array"
+          },
+          "reference_details": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceRecord-Output"
             },
             "title": "Reference Details",
             "type": "array"
@@ -2628,7 +2669,7 @@
       "BriefUpdate": {
         "properties": {
           "brief": {
-            "$ref": "#/components/schemas/Brief"
+            "$ref": "#/components/schemas/Brief-Input"
           },
           "expected_version": {
             "anyOf": [
@@ -4037,7 +4078,7 @@
             "type": "array"
           },
           "spec": {
-            "$ref": "#/components/schemas/CreateAssemblyRequest",
+            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
             "description": "The compiled declarative spec."
           }
         },
@@ -5219,7 +5260,45 @@
         "title": "CoverageResponse",
         "type": "object"
       },
-      "CreateAssemblyRequest": {
+      "CreateAssemblyRequest-Input": {
+        "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
+        "properties": {
+          "name": {
+            "description": "Assembly name.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parts": {
+            "description": "Parts to author + assemble.",
+            "items": {
+              "$ref": "#/components/schemas/AssemblyPart"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to scope the cad_model to.",
+            "title": "Project Id"
+          }
+        },
+        "required": [
+          "name",
+          "parts"
+        ],
+        "title": "CreateAssemblyRequest",
+        "type": "object"
+      },
+      "CreateAssemblyRequest-Output": {
         "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
         "properties": {
           "name": {
@@ -5702,7 +5781,7 @@
       "Creation": {
         "properties": {
           "brief": {
-            "$ref": "#/components/schemas/Brief"
+            "$ref": "#/components/schemas/Brief-Output"
           },
           "builds": {
             "items": {
@@ -8040,6 +8119,77 @@
         "title": "FeatureDiffResponse",
         "type": "object"
       },
+      "FeatureHistoryProposalView": {
+        "properties": {
+          "component_id": {
+            "title": "Component Id",
+            "type": "string"
+          },
+          "component_name": {
+            "title": "Component Name",
+            "type": "string"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "open_questions": {
+            "default": 0,
+            "title": "Open Questions",
+            "type": "integer"
+          },
+          "proposal": {
+            "additionalProperties": true,
+            "title": "Proposal",
+            "type": "object"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "staleness": {
+            "default": "current",
+            "title": "Staleness",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "component_name",
+          "item_key",
+          "node_id",
+          "status",
+          "proposal"
+        ],
+        "title": "FeatureHistoryProposalView",
+        "type": "object"
+      },
       "FeatureParameter": {
         "description": "A feature parameter. Missing ones are ``required_input``, never guessed.",
         "properties": {
@@ -9217,7 +9367,7 @@
             "type": "integer"
           },
           "spec": {
-            "$ref": "#/components/schemas/CreateAssemblyRequest",
+            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
             "description": "The declarative spec compiled from the description."
           }
         },
@@ -14271,7 +14421,7 @@
             "type": "boolean"
           },
           "plan": {
-            "$ref": "#/components/schemas/MigrationPlan",
+            "$ref": "#/components/schemas/MigrationPlan-Input",
             "description": "The plan exactly as the dry run returned it."
           },
           "reason": {
@@ -14309,7 +14459,76 @@
         "title": "MigrationApplyResponse",
         "type": "object"
       },
-      "MigrationPlan": {
+      "MigrationPlan-Input": {
+        "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
+        "properties": {
+          "counts_after": {
+            "additionalProperties": true,
+            "title": "Counts After",
+            "type": "object"
+          },
+          "counts_before": {
+            "additionalProperties": true,
+            "title": "Counts Before",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposedItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "low_confidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Low Confidence",
+            "type": "array"
+          },
+          "plan_hash": {
+            "default": "",
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/RecordAction"
+            },
+            "title": "Records",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "twin_fingerprint": {
+            "title": "Twin Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "twin_fingerprint",
+          "created_at"
+        ],
+        "title": "MigrationPlan",
+        "type": "object"
+      },
+      "MigrationPlan-Output": {
         "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
         "properties": {
           "counts_after": {
@@ -14385,7 +14604,7 @@
             "type": "boolean"
           },
           "plan": {
-            "$ref": "#/components/schemas/MigrationPlan"
+            "$ref": "#/components/schemas/MigrationPlan-Output"
           },
           "report": {
             "title": "Report",
@@ -18074,6 +18293,391 @@
         "title": "ReassignedStroke",
         "type": "object"
       },
+      "ReconstructionAcceptRequest": {
+        "description": "Accept (and edit) proposed features of one component.",
+        "properties": {
+          "accepted_by": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted By"
+          },
+          "base_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "choices": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "object"
+          },
+          "edits": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "title": "Edits",
+            "type": "object"
+          },
+          "feature_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Feature Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "feature_ids"
+        ],
+        "title": "ReconstructionAcceptRequest",
+        "type": "object"
+      },
+      "ReconstructionAcceptResponse": {
+        "properties": {
+          "accepted": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted",
+            "type": "array"
+          },
+          "added_dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added Dependencies",
+            "type": "array"
+          },
+          "existing": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Existing",
+            "type": "object"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "process_written": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Written"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/FeatureHistoryProposalView"
+          },
+          "rejected": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rejected",
+            "type": "array"
+          },
+          "sketches": {
+            "items": {
+              "$ref": "#/components/schemas/ReconstructionSketch"
+            },
+            "title": "Sketches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id",
+          "operation_id",
+          "proposal",
+          "accepted",
+          "rejected"
+        ],
+        "title": "ReconstructionAcceptResponse",
+        "type": "object"
+      },
+      "ReconstructionComponent": {
+        "properties": {
+          "component_id": {
+            "title": "Component Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeatureHistoryProposalView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "default": "made",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "name"
+        ],
+        "title": "ReconstructionComponent",
+        "type": "object"
+      },
+      "ReconstructionProposeRequest": {
+        "description": "Propose a feature history for the accepted concept's components.",
+        "properties": {
+          "component_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 60,
+            "title": "Component Ids",
+            "type": "array"
+          },
+          "use_llm": {
+            "default": false,
+            "title": "Use Llm",
+            "type": "boolean"
+          }
+        },
+        "title": "ReconstructionProposeRequest",
+        "type": "object"
+      },
+      "ReconstructionProposeResponse": {
+        "properties": {
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureHistoryProposalView"
+            },
+            "title": "Proposals",
+            "type": "array"
+          },
+          "reused": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reused",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/ReconstructionSkipped"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "operation_id"
+        ],
+        "title": "ReconstructionProposeResponse",
+        "type": "object"
+      },
+      "ReconstructionSketch": {
+        "properties": {
+          "approval_id": {
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "approved": {
+            "default": false,
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "estimated_parameters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Estimated Parameters",
+            "type": "array"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "pending_features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Features",
+            "type": "array"
+          },
+          "required_input": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Input",
+            "type": "array"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "feature_id",
+          "node_id",
+          "approval_id"
+        ],
+        "title": "ReconstructionSketch",
+        "type": "object"
+      },
+      "ReconstructionSkipped": {
+        "properties": {
+          "component_id": {
+            "title": "Component Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "name",
+          "reason"
+        ],
+        "title": "ReconstructionSkipped",
+        "type": "object"
+      },
+      "ReconstructionView": {
+        "properties": {
+          "accepted": {
+            "default": false,
+            "title": "Accepted",
+            "type": "boolean"
+          },
+          "assembly_decision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assembly Decision Id"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/ReconstructionComponent"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "concept_accepted": {
+            "title": "Concept Accepted",
+            "type": "boolean"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "concept_accepted"
+        ],
+        "title": "ReconstructionView",
+        "type": "object"
+      },
       "RecordAction": {
         "description": "One record update: a run-summary flag or a revision pin.",
         "properties": {
@@ -18465,7 +19069,109 @@
         "title": "ReferenceFact",
         "type": "object"
       },
-      "ReferenceRecord": {
+      "ReferenceRecord-Input": {
+        "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
+        "properties": {
+          "active": {
+            "default": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "associations": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceAssociation"
+            },
+            "maxItems": 50,
+            "title": "Associations",
+            "type": "array"
+          },
+          "disclosures": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceDisclosure"
+            },
+            "title": "Disclosures",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceFact"
+            },
+            "maxItems": 500,
+            "title": "Facts",
+            "type": "array"
+          },
+          "mime": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Mime",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Name",
+            "type": "string"
+          },
+          "protected_features": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Protected Features",
+            "type": "array"
+          },
+          "role": {
+            "default": "inspiration",
+            "enum": [
+              "inspiration",
+              "geometry",
+              "functional_demo",
+              "specification",
+              "manufacturing_rule",
+              "verification_evidence",
+              "existing_design"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "source_hash": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          },
+          "work_product_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id"
+        ],
+        "title": "ReferenceRecord",
+        "type": "object"
+      },
+      "ReferenceRecord-Output": {
         "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
         "properties": {
           "active": {
@@ -18743,7 +19449,7 @@
           "reference": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ReferenceRecord"
+                "$ref": "#/components/schemas/ReferenceRecord-Output"
               },
               {
                 "type": "null"
@@ -26553,7 +27259,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.3.0"
+    "version": "0.0.0+unknown"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -27824,7 +28530,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateAssemblyRequest"
+                "$ref": "#/components/schemas/CreateAssemblyRequest-Input"
               }
             }
           },
@@ -41446,6 +42152,169 @@
           }
         },
         "summary": "Get Project Prd",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/reconstruction": {
+      "get": {
+        "description": "The latest feature history proposal per component.",
+        "operationId": "get_reconstruction_v1_twin_projects__project_id__reconstruction_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconstructionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Reconstruction",
+        "tags": [
+          "twin"
+        ]
+      },
+      "post": {
+        "description": "Propose an editable feature history for the accepted concept's components.",
+        "operationId": "post_reconstruction_v1_twin_projects__project_id__reconstruction_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReconstructionProposeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconstructionProposeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Reconstruction",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/reconstruction/{key}/accept": {
+      "post": {
+        "description": "Accept (and edit) features of one proposal; bodies become parametric sketches.",
+        "operationId": "post_accept_v1_twin_projects__project_id__reconstruction__key__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconstructionAcceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconstructionAcceptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Accept",
         "tags": [
           "twin"
         ]

@@ -39,6 +39,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
+from twin_core.design_ir.feature_history import principal_placement
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.parametric_preview")
@@ -283,6 +284,10 @@ async def preview_definition(
                 plane_blocked = str(exc)
             except Exception as exc:  # noqa: BLE001 - the preview falls back to XY, labelled
                 plane_blocked = str(exc)[:300]
+        elif unit == "mm" and principal_placement(meta) is not None:
+            # A reconstructed sketch: the principal plane accepted with its proposal.
+            placement = principal_placement(meta) or placement
+            plane_assumed = False
         # The preview reads the IR the exact path lowers. Unknown scale is not
         # CAD, so the entity is made as if in millimetres and labelled.
         as_mm = sketch if unit == "mm" else sketch.model_copy(update={"unit": "mm"})

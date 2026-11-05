@@ -1228,6 +1228,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `generated_sketch` | definition | `GSK` | `WorkProduct` `generated_sketch`: the accepted AI-generated concept sketch for a sketch or a text concept; each accepted proposal is the next revision. Illustrative only: never an editable sketch, CAD or evidence |
 | `manufacturing_context` | definition | `MFC` | `WorkProduct` `manufacturing_context`: how the product (`MFC-PROJECT`) or one component (`MFC-<COMPONENT>`) might be made, each field with its authority and provenance. Every change is the next revision; every generated concept records the revision it used. See [the manufacturing context](#manufacturing-context) |
 | `appearance` | definition | `APR` | `WorkProduct` `appearance`: how the product and each component look (`APR-PROJECT`): colour, finish, render material and texture refs, keyed by component name. Never CAD, never the manufacturing context. See [the appearance record](#appearance-record) |
+| `feature_history_proposal` | definition | `FHP` | `WorkProduct` `feature_history_proposal`: a proposed editable feature history for one component of an accepted concept (`FHP-<component>`), each parameter estimated, confirmed or unknown with its source, the assumptions, the open questions and the DFM strategy note. A proposal, not CAD; accepted features become parametric sketches. See [parametric reconstruction](#parametric-reconstruction) |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
@@ -3665,6 +3666,88 @@ Accepting a visual proposal is recorded as acceptance and is never read by
 the maturity computation: no acceptance or approval flag raises a component
 above what its geometry and checks show. Counted in
 `metaforge_maturity_query_total{product}`.
+
+### Parametric reconstruction {#parametric-reconstruction}
+
+An accepted concept is turned into a *proposed* editable feature history per
+component (spec section 4B). It is an inference, never a recovery of
+original CAD features, and it never reads a size from pixels. Code:
+`twin_core/design_ir/feature_history.py` (the record, the deterministic
+pass, the model pass merge and acceptance), `api_gateway/twin/reconstruction.py`
+(gathering, storing, accepting) and `api_gateway/twin/reconstruction_routes.py`.
+
+**The record.** One `feature_history_proposal` definition item per made
+component of the current concept assembly, `FHP-<component>` (for
+`CMP-base-plate`, `FHP-BASE-PLATE`). Bought and standard parts are skipped.
+The node's `metadata.feature_history` holds:
+
+| Field | What it is |
+|---|---|
+| `features` | Ordered proposed features, each `{id, kind, name, plain, depends_on, parameters, placement, profile, confidence, suggested_by, provenance, dfm_rules, buildable, existing_ref, status, note}`. `kind` is `sketch_profile`, `extrude`, `revolve`, `loft`, `shell`, `opening`, `boss` or `rib` |
+| `parameters` | Per feature, `{value, unit, status, source, question, minimum, minimum_rule}`. `status` is `estimated` (the L1 layout or an estimated reference fact), `confirmed` (a stated fact of a specification or manufacturing rule reference, an accepted parametric sketch, or a person) or `unknown` (no value; it stays a question). `minimum` is a bound from a DFM rule, never a value |
+| `placement` | A sketch profile's principal plane (`XY`, `YZ`, `XZ`) and offset in mm, estimated from the layout block's position |
+| `assumptions` | Unresolved assumptions in plain words (sizes estimated, the plane used, a part the concept marks as open) |
+| `ambiguities` | Interpretations a person must settle: `{id, question, options, feature_id, consequential, default, choice}` (extrude or turned shape, hollow or solid, where an opening goes, a printable split, the process) |
+| `dfm_strategy` | The DFM strategy note: the rule profile and version, the process and its authority, the context revision, each rule that shaped the strategy (`{rule_id, title, kind, limit, unit, source, applied_as}`) and the text. Rules shape the strategy; they are not checks of this geometry |
+| `summary` | Plain words for Create (`the base: a round disc, hollowed out`) |
+| `inputs` | What it read: the assembly decision, the layout revision and node, the L1 mesh node, the reference ids, the sketch refs and the context revision |
+| `llm` | The optional model pass: `requested`, `outcome` (`not_requested`, `used`, `unavailable`, `invalid`), provider, model, renamed and suggested counts, ignored items |
+| `accepted_sketches` | After acceptance, `{feature_id: PSK-...@n}` |
+
+The node `DEPENDS_ON` (edge `kind: reconstruction`, with a `role`) the
+concept assembly decision, the L1 layout and mesh, the references, the
+component's sketches (`SKT`, `SKI`, `PSK`) and the manufacturing context
+revision, and is pinned (`depends_on_items`) to the item revisions among
+them, so a new layout, sketch or context revision marks it stale.
+
+**The deterministic pass.** A layout box becomes a rectangle profile on the
+plane normal to its axis and an extrude; a cylinder becomes a circle and an
+extrude, with the question whether it should be a turned (revolved) shape. A
+component's parametric sketches are carried as features with their own
+statuses (`existing_ref`). A shell is proposed when the component's name or
+the intended use says it is an enclosure (or for moulded production parts),
+with its wall thickness unknown and the profile's minimum beside it.
+Openings come from reference facts that name one, bosses from fastened
+joints. A stated fact of an authoritative reference replaces the layout's
+estimate and is `confirmed`; an estimated fact stays `estimated`; a value
+without a unit is not read at all.
+
+**The model pass** (`use_llm`). Through the gateway's provider chain, a
+model may rename features, reorder them (only into an order that keeps every
+feature after what it depends on) and suggest missing shells, openings,
+bosses or ribs. It never supplies a number: a name with a digit is not taken,
+suggestions get no parameters, and each is marked `suggested_by: llm` with
+an assumption saying so. When no model answers, the deterministic proposal
+stands (`llm.outcome: unavailable`).
+
+**Acceptance.** A person accepts features (their dependencies come along),
+edits parameters (each edit becomes `confirmed`, source `person`, refused
+below a rule minimum) and answers questions. Each accepted body becomes a
+`parametric_sketch` (`PSK-REC-<component>`), carrying the component id, the
+proposal ref, the accepted principal plane (`principal_placement`), the
+estimated parameter names and the accepted features the exact path does not
+build yet (`pending_features`: shell, openings, bosses, ribs). Its feature
+plan keeps every value a person has not confirmed as `required_input`, with
+the estimate in the question. The sketch is held for the parametric sketch
+approval (`/v1/approvals`) before exact CAD; the exact path builds a
+reconstructed sketch on its accepted principal plane. The proposal's next
+revision records the accepted and rejected features. Choosing a process in
+the answers writes it to the manufacturing context as stated. Maturity moves
+to Parametric only then: a proposal is never read as maturity.
+
+| Method and path | Does |
+|---|---|
+| `POST /v1/twin/projects/{project_id}/reconstruction` | Propose (or reuse, when nothing it read changed) a feature history per component; `409` when no concept is accepted |
+| `GET /v1/twin/projects/{project_id}/reconstruction` | The latest proposal per component of the accepted concept, its staleness and open questions, and the plain summary |
+| `POST /v1/twin/projects/{project_id}/reconstruction/{key}/accept` | Accept features of `FHP-...` with edits and answers; `409` when `base_revision` is not the head or it was already accepted, `422` for a bad feature, value or answer |
+
+Each request is one operation (`job:reconstruction-<project>`, domain
+`mechanical`): `preview_ready` when proposals are stored, `review_required`
+with an approval action per sketch on acceptance, `failed` on error.
+Metrics: `metaforge_reconstruction_proposal_total{outcome}`,
+`metaforge_reconstruction_feature_accepted_total{kind, suggested_by}` and
+`metaforge_reconstruction_llm_pass_total{outcome}`; alert
+`ReconstructionProposalFailures`.
 
 ## 6. Twin API
 

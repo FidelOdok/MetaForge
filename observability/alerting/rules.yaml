@@ -1290,6 +1290,26 @@ groups:
             the reason. Check the slicer-adapter container and the gateway logs
             (dfm_slicer_check_not_evaluated).
 
+  # Spec 4B -- parametric reconstruction from an accepted concept
+  # (api_gateway/twin/reconstruction.py).
+  - name: metaforge_reconstruction
+    rules:
+      - alert: ReconstructionProposalFailures
+        expr: >-
+          sum(increase(metaforge_reconstruction_proposal_total{outcome="failed"}[30m])) >= 3
+          and sum(increase(metaforge_reconstruction_proposal_total{outcome="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_reconstruction_proposal_total[30m])), 1) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Feature history proposals are failing"
+          description: >-
+            More than a fifth of the last half hour's reconstruction requests
+            raised instead of storing a proposal, so an accepted concept cannot
+            be made editable. A refused request (no accepted concept) is not
+            counted. Check the gateway logs (reconstruction_failed).
+
   # C3D slice 5 -- the L2 preview versus exact comparison
   # (api_gateway/twin/preview_comparison.py).
   - name: metaforge_preview_comparison

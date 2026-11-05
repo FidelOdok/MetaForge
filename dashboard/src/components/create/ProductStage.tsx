@@ -34,6 +34,8 @@ import { DfmGuidanceBadge } from './DfmGuidanceBadge';
 import { BuildExactNotice } from './BuildExactNotice';
 import { useBuildExact } from '../../hooks/use-build-exact';
 import { ReadinessStatus } from './ReadinessStatus';
+import { MakeEditablePanel } from './MakeEditablePanel';
+import { getReconstruction, reconstructionKeys } from '../../api/endpoints/reconstruction';
 import {
   NOT_ASSESSED as NOT_ASSESSED_NOTE,
   PRIMARY_LABEL,
@@ -178,6 +180,14 @@ export function ProductStage({
     enabled: !!projectId,
   });
   const mesh = useConceptMesh(projectId);
+  // Spec 4B: an accepted concept can be made editable (a proposed feature history).
+  const reconstruction = useQuery({
+    queryKey: reconstructionKeys.project(projectId ?? ''),
+    queryFn: ({ signal }) => getReconstruction(projectId!, signal),
+    enabled: !!projectId,
+    retry: false,
+  });
+  const [editableOpen, setEditableOpen] = useState(false);
   const [editableHost, setEditableHost] = useState<HTMLElement | null>(null);
   const [traceSrc, setTraceSrc] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -226,6 +236,8 @@ export function ProductStage({
     hasSketch,
     hasEditable: !!compiled || nodes.some((n) => EDITABLE_TYPES.has(wpTypeOf(n))),
     hasEngineering: nodes.some(isEngineering),
+    conceptAccepted: !!reconstruction.data?.concept_accepted,
+    editableFromConcept: !!reconstruction.data?.accepted,
   };
   const primary = projectId ? primaryActionFor(stageFacts) : null;
   const mode = projectId ? layout.mode : 'view';
@@ -269,6 +281,9 @@ export function ProductStage({
       case 'concept_3d':
         mesh.start(false);
         return;
+      case 'reconstruct':
+        setEditableOpen(true);
+        return;
       case 'make_editable':
       case 'editable':
         if (mode !== 'sketch') enterSketch();
@@ -298,6 +313,9 @@ export function ProductStage({
   if (projectId) {
     more.push({ id: 'generate', label: 'Generate a concept', onClick: () => run('generate') });
     if (primary !== 'concept_3d') more.push({ id: 'concept_3d', label: PRIMARY_LABEL.concept_3d, onClick: () => run('concept_3d') });
+    if (primary !== 'reconstruct' && stageFacts.conceptAccepted) {
+      more.push({ id: 'reconstruct', label: PRIMARY_LABEL.reconstruct, onClick: () => run('reconstruct') });
+    }
     if (primary !== 'start') {
       more.push({ id: 'simple_parts', label: 'Show as simple 3D parts', onClick: () => void showSimpleParts() });
     }
@@ -468,6 +486,8 @@ export function ProductStage({
           </div>
         )}
       </div>
+
+      {projectId && editableOpen && <MakeEditablePanel projectId={projectId} onClose={() => setEditableOpen(false)} />}
 
       {(partsState.busy || partsState.error) && (
         <div className={`cv-stage-notice ${partsState.error ? 'is-error' : ''}`} role={partsState.error ? 'alert' : 'status'} data-testid="simple-parts-notice">
