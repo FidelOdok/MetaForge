@@ -5,6 +5,7 @@ import { createUpload } from '../api/endpoints/uploads';
 import { conflictOf, getCreation, putBrief, refusalOf, type ReferenceRole } from '../api/endpoints/create';
 import { useSketchStore } from './sketch-store';
 import { useSketchGenerationStore } from './sketch-generation-store';
+import { modelChoiceFields, useModelChoice } from './model-choice';
 
 /**
  * The Create view's working state, per creation (project).
@@ -184,6 +185,7 @@ export const useCreateStore = create<CreateStore>()(
             content: next.text + refs + ctx + INTENT_INSTRUCTION[next.intent],
             tools: turnTools.get(next.id) ?? [],
             client_turn_id: turnId,
+            ...modelChoiceFields(useModelChoice.getState()),
           });
           turnTools.delete(next.id);
           // The gateway's operation id is the acknowledgement of record.

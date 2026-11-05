@@ -61,6 +61,19 @@ figures, questions, measurements and warnings as blocks rather than prose.
 This is guidance to the model, not a hard limit: a long reply is still shown
 in full.
 
+## Choosing the model
+
+Both chats send each message to the workspace's default model unless the
+person picks another. The default is the provider and model set on the
+Settings page, and it applies to everyone using the gateway. A person's own
+choice is made from the model button in either composer (next to *Ask*,
+*Change* and *Design* in Create, in the composer's settings row in
+Engineering). It is one choice for both chats, kept in that browser
+(`dashboard/src/store/model-choice.ts`), sent as the message's `provider` and
+`model`, and it never changes the default. *Use the default* clears it, and a
+saved provider that is no longer connected falls back to the default rather
+than failing every message.
+
 ## While the agent works
 
 A turn never leaves the conversation blank. As soon as a message is sent it

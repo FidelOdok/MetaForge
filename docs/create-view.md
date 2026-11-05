@@ -524,6 +524,10 @@ MetaForge's thinking bubble under it (see
 arrives. A send that fails stays in the conversation with *Retry*, *Edit*
 (back into the composer) and *Discard*, so a failure never loses the text.
 
+The model button beside the intents shows which model answers, and lets the
+person choose their own (see
+[choosing the model](generative-ui.md#choosing-the-model)).
+
 The draft, the chosen intent, attached references and queued instructions
 live in a store outside the page (`store/create-store.ts`). Switching to the
 Engineering view and back finds them as they were, and an instruction already

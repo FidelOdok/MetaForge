@@ -33,7 +33,11 @@ vi.mock('../../hooks/use-approvals', () => ({
   useApprovals: vi.fn(),
   useDecideApproval: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }));
-vi.mock('../../hooks/use-harness', () => ({ useHarnessTools: vi.fn() }));
+vi.mock('../../hooks/use-harness', () => ({
+  useHarnessTools: vi.fn(),
+  useHarnessProviders: () => ({ data: { activeProvider: 'openrouter', activeModel: 'openai/gpt-4o', providers: [] } }),
+  useHarnessModels: () => ({ data: [] }),
+}));
 vi.mock('../../hooks/use-twin-chat', () => ({
   useTwinChatThreads: vi.fn(() => ({ data: [] })),
   useTwinChatThread: vi.fn(() => ({ data: undefined })),

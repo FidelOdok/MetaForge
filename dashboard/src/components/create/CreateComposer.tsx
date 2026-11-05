@@ -1,10 +1,11 @@
-import { useRef } from 'react';
-import { AlertTriangle, ArrowUp, Check, Loader2, Paperclip, X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { AlertTriangle, ArrowUp, Check, ChevronDown, Loader2, Paperclip, X } from 'lucide-react';
 import { useCreateStore, type Intent } from '../../store/create-store';
 import { AutoGrowTextarea } from './AutoGrowTextarea';
 import { ReferenceChip } from './ReferenceChip';
 import { referenceRecord } from '../../api/endpoints/create';
 import { useCreation } from '../../hooks/use-creation';
+import { ModelPicker, useModelLabel } from '../chat/ModelPicker';
 
 const INTENTS: Array<{ id: Intent; label: string; hint: string }> = [
   { id: 'ask', label: 'Ask', hint: 'Discuss the product. Nothing is changed.' },
@@ -35,6 +36,8 @@ export function CreateComposer({ projectId, tools, busy, placeholder, autoFocus 
     .brief;
   const submit = useCreateStore((s) => s.submit);
   const fileInput = useRef<HTMLInputElement>(null);
+  const modelLabel = useModelLabel();
+  const [choosingModel, setChoosingModel] = useState(false);
 
   const uploading = session.attachments.some((a) => a.state === 'uploading');
   const changeUnavailable = session.intent === 'change' && tools.change.length === 0;
@@ -80,7 +83,33 @@ export function CreateComposer({ projectId, tools, busy, placeholder, autoFocus 
           </button>
         ))}
         <span className="cv-intent-hint">{INTENTS.find((i) => i.id === session.intent)?.hint}</span>
+        <button
+          type="button"
+          className="cv-model"
+          aria-expanded={choosingModel}
+          title="Choose the model for your messages"
+          onClick={() => setChoosingModel((v) => !v)}
+        >
+          {modelLabel}
+          <ChevronDown size={11} aria-hidden="true" />
+        </button>
       </div>
+
+      {choosingModel && (
+        <div
+          className="cv-model-panel"
+          role="group"
+          aria-label="Model"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setChoosingModel(false);
+          }}
+        >
+          <ModelPicker />
+          <button type="button" className="cv-model-done" onClick={() => setChoosingModel(false)}>
+            Done
+          </button>
+        </div>
+      )}
 
       {session.attachments.length > 0 && (
         <ul className="cv-attachments" aria-label="References">
