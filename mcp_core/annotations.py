@@ -351,6 +351,9 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.interpret_sketch",
         # FORGE-760: draws a sketch and adds it as a new design_sketch node.
         "twin.render_concept_sketch",
+        # C3D slice 2: draws the layout as simple 3D parts (L1), a new render
+        # node; an unchanged layout reuses the existing one.
+        "twin.render_structured_mesh",
         "twin.commit_engineering_change",
         "twin.commit_geometry",
         # FORGE-647: a live-view placement, see guardrails.BOOKKEEPING.
