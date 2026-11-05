@@ -310,15 +310,15 @@ function ComponentSelectionSection({ projectId }: { projectId?: string }) {
             <span className="font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
               Required specs
             </span>
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               type="button"
               data-testid="add-required-spec-button"
               onClick={() => setRequiredSpecs((rs) => [...rs, { ...EMPTY_REQUIRED_SPEC }])}
-              className="rounded px-2 py-0.5 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
             >
               + Add spec
-            </button>
+            </Button>
           </div>
           <div className="flex flex-col gap-1">
             {requiredSpecs.map((r, i) => (
@@ -369,15 +369,15 @@ function ComponentSelectionSection({ projectId }: { projectId?: string }) {
             <span className="font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
               Candidates
             </span>
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               type="button"
               data-testid="add-candidate-button"
               onClick={() => setCandidates((cs) => [...cs, { ...EMPTY_CANDIDATE }])}
-              className="rounded px-2 py-0.5 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
             >
               + Add candidate
-            </button>
+            </Button>
           </div>
           <table className="w-full text-left border-collapse">
             <thead>

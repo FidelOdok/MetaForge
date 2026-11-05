@@ -300,15 +300,15 @@ function RequirementRow({ requirement }: { requirement: RequirementRecord }) {
         </td>
         <td className="px-3 text-right">
           {hasIssues && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               type="button"
               onClick={handleFix}
               disabled={proposeFix.isPending}
-              className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
             >
               {proposeFix.isPending ? 'Asking…' : 'Fix with AI'}
-            </button>
+            </Button>
           )}
         </td>
       </tr>
@@ -556,34 +556,34 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
         </h2>
         <div className="flex gap-2">
           {projectId && !showForm && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               type="button"
               data-testid="new-constraint-button"
               onClick={() => setShowForm(true)}
-              className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
             >
               + New constraint
-            </button>
+            </Button>
           )}
           {rows.length > 0 && (
             <>
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 type="button"
                 onClick={() => exportMatrixCsv(rows)}
-                className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-                style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
               >
                 Export CSV
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 type="button"
                 onClick={() => exportMatrixMd(rows)}
-                className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-                style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
               >
                 Export MD
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -617,12 +617,7 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
                 type="button"
                 aria-pressed={on}
                 onClick={() => setStatus(s)}
-                className="rounded-full px-2.5 py-0.5 text-xs"
-                style={{
-                  border: `1px solid ${on ? '#ff5a0a' : 'var(--mf-r-65-72-90-0p3)'}`,
-                  background: on ? 'rgba(255,90,10,0.12)' : 'transparent',
-                  color: on ? 'var(--mf-c-e2e2eb)' : 'var(--mf-c-9a9aaa)',
-                }}
+                className="mf-chip"
               >
                 {s === 'all' ? 'All' : STATUS_LABEL[s]} {n}
               </button>
@@ -1147,15 +1142,15 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
           Design loop
         </h2>
         {projectId && !showForm && (
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             type="button"
             data-testid="start-design-loop-button"
             onClick={() => setShowForm(true)}
-            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
           >
             + Start design loop
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1373,15 +1368,15 @@ function GateReviewSection({
           Gate review
         </h2>
         {projectId && !showForm && (
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             type="button"
             data-testid="open-gate-review-button"
             onClick={() => setShowForm(true)}
-            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
           >
             + Attempt promotion
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1589,15 +1584,15 @@ function FeatureLibrarySection({ projectId }: { projectId?: string }) {
           Feature library
         </h2>
         {!showForm && (
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             type="button"
             data-testid="open-feature-library-button"
             onClick={() => setShowForm(true)}
-            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
           >
             + Generate feature
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1836,15 +1831,15 @@ function TradeStudySection({ projectId }: { projectId?: string }) {
           Concept trade study
         </h2>
         {projectId && !showAddForm && (
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             type="button"
             data-testid="open-add-option-button"
             onClick={() => setShowAddForm(true)}
-            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
           >
             + Add option
-          </button>
+          </Button>
         )}
       </div>
 
