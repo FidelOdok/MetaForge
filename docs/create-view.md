@@ -439,6 +439,18 @@ A generated image is illustrative: never an editable sketch and never CAD.
 **Make editable** works on the person's own strokes. Turning a generated
 image into editable shapes is not built yet.
 
+**Manufacturing note.** Every concept carries a short, truthful note about
+how it might be made, from the project's
+[manufacturing context](twin_schema.md#manufacturing-context):
+*Manufacturing not assessed* when nothing informed it, or *Informed by: FDM
+(assumed), PLA (assumed) · Manufacturing not assessed* when a stated,
+decided or assumed process and material did. A first-time user never has to
+choose a process first: with none stated, MetaForge proposes candidates as
+assumptions. A concept asked for as *speculative* is labelled *Speculative
+concept* and the context is recorded but not applied. No concept is ever
+labelled verified or production-ready: no manufacturing check has run on an
+illustration.
+
 ### Making a 3D concept
 
 **Make a 3D concept** turns the concept into an illustrative 3D model that can
@@ -523,6 +535,13 @@ MetaForge's thinking bubble under it (see
 [generative UI](generative-ui.md#while-the-agent-works)) until the reply
 arrives. A send that fails stays in the conversation with *Retry*, *Edit*
 (back into the composer) and *Discard*, so a failure never loses the text.
+
+*Actions* beside the intents fills in a common request (where it stands,
+design this, run a stress check, review the gate, what is waiting, did it
+work) and switches to *Design*; nothing runs until it is sent (see
+[actions](generative-ui.md#actions)). The model button next to it shows which
+model answers, and lets the person choose their own (see
+[choosing the model](generative-ui.md#choosing-the-model)).
 
 The draft, the chosen intent, attached references and queued instructions
 live in a store outside the page (`store/create-store.ts`). Switching to the

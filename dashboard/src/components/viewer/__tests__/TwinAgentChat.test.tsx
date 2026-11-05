@@ -124,14 +124,27 @@ describe('TwinAgentChat', () => {
 
   it('opens option popovers from the toolbar', async () => {
     renderChat();
-    fireEvent.click(screen.getByTitle('Slash commands'));
-    expect(screen.getByText('Prompt shortcuts. No command runs until you send.')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Actions and prompts'));
+    expect(screen.getByText(/Nothing runs until you send/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /\/propose/ }));
     expect(screen.getByLabelText('Message to engineering agent')).toHaveValue(
       'Propose a reviewable change to the selected component.',
     );
     fireEvent.click(screen.getByTitle('Response detail'));
     expect(screen.getByText('Plus raw received events and timestamps')).toBeInTheDocument();
+  });
+
+  it('fills an action about the selected part and turns the tools on, without sending it', async () => {
+    const send = vi.spyOn(chatApi, 'sendTwinChatMessage');
+    renderChat();
+    await screen.findByText('Scripted sample assistant');
+    fireEvent.click(screen.getByTitle('Actions and prompts'));
+    fireEvent.click(screen.getByRole('button', { name: /Run a stress check/ }));
+    expect(screen.getByLabelText('Message to engineering agent')).toHaveValue(
+      'Run a stress check on "flight-controller.pcb" under its expected loads, and record the result as evidence for the revision you checked.',
+    );
+    await waitFor(() => expect(screen.getByTitle('Connectors and tools').querySelector('sup')).not.toBeNull());
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('asks for a project when none is active', () => {

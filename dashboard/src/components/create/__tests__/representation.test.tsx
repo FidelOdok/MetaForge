@@ -167,6 +167,18 @@ describe('the Create stage', () => {
     expect(screen.getByTestId('stage-selected-component')).toHaveTextContent('Selected: Arm');
   });
 
+  it('shows the manufacturing note beside the maturity label, guarded', () => {
+    const noted = { ...L1, properties: { ...L1.properties, manufacturing_note: 'Likely printable with supports (preliminary)' } };
+    const { unmount } = render(
+      <ProductStage projectId={P} nodes={[noted]} selectedId={null} onSelect={vi.fn()} onDiscuss={vi.fn()} working={false} facts={{ described: true }} />,
+    );
+    expect(screen.getByTestId('stage-mfg-note')).toHaveTextContent('Likely printable with supports (preliminary)');
+    unmount();
+    const lying = { ...L1, properties: { ...L1.properties, manufacturing_note: 'Verified production ready' } };
+    render(<ProductStage projectId={P} nodes={[lying]} selectedId={null} onSelect={vi.fn()} onDiscuss={vi.fn()} working={false} facts={{ described: true }} />);
+    expect(screen.getByTestId('stage-mfg-note')).toHaveTextContent('Manufacturing not assessed');
+  });
+
   it('offers Show as simple 3D parts in More, and shows the result', async () => {
     const onSelect = vi.fn();
     makeStructuredMesh.mockResolvedValue({ node_id: 'Simple parts', reused: false });

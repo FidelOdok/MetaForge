@@ -29,6 +29,7 @@ import { useSketchCompilerStore } from '../../store/sketch-compiler-store';
 import { EMPTY_STAGE, useCreateLayoutStore, type DrawerPanel } from '../../store/create-layout-store';
 import { StageDrawer } from './StageDrawer';
 import {
+  NOT_ASSESSED as NOT_ASSESSED_NOTE,
   PRIMARY_LABEL,
   isConceptMesh,
   levelText,
@@ -329,6 +330,13 @@ export function ProductStage({
                 <span className={`cv-maturity is-${rep.maturity.toLowerCase()}`} data-testid="stage-maturity" title="How far this representation can be trusted">
                   {rep.maturity}
                 </span>
+                {(illustrative || rep.kind === 'preview' || !!node.properties?.manufacturing_note) && (
+                  <span className="cv-mfg-note" data-testid="stage-mfg-note" title="What the provisional manufacturing checks said">
+                    {rep.kind === 'engineering'
+                      ? truthfulLabel(String(node.properties?.manufacturing_note ?? ''), rep.maturity, NOT_ASSESSED_NOTE)
+                      : manufacturingNote(node.properties?.manufacturing_note)}
+                  </span>
+                )}
                 <span
                   className={`cv-truth ${rep.kind === 'engineering' ? 'is-engineering' : 'is-concept'}`}
                   data-testid="stage-status"
@@ -349,11 +357,6 @@ export function ProductStage({
                 {selectedComponent && (
                   <span className="cv-revision" data-testid="stage-selected-component" title={selectedComponent.componentId}>
                     Selected: {selectedComponent.name ?? selectedComponent.componentId}
-                  </span>
-                )}
-                {illustrative && (
-                  <span className="cv-mfg-note" data-testid="stage-mfg-note">
-                    {manufacturingNote(node.properties?.manufacturing_note)}
                   </span>
                 )}
                 {isConceptMesh(node) && node.properties?.fit_to_envelope === true && (

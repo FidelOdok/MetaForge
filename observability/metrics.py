@@ -1179,6 +1179,34 @@ class MetricsRegistry:
         labels=["outcome", "mode"],
     )
 
+    # ── Manufacturing context (DFM-grounded generation) ────────────────
+
+    MANUFACTURING_CONTEXT_WRITE_TOTAL = MetricDefinition(
+        name="metaforge_manufacturing_context_write_total",
+        type="counter",
+        description=(
+            "Manufacturing context field writes, by the authority each field was "
+            "written with (user_stated, decision, assumption, unknown) and outcome: "
+            "written, unchanged, refused (an assumption that may not override a "
+            "stated value or a decision) or failed (a sync from Create, a decision "
+            "or a flow proposal that could not be written)"
+        ),
+        labels=["authority", "outcome"],
+    )
+
+    MANUFACTURING_CONTEXT_INJECTION_TOTAL = MetricDefinition(
+        name="metaforge_manufacturing_context_injection_total",
+        type="counter",
+        description=(
+            "Manufacturing context blocks given to a generator, by generator "
+            "(sketch_generation, concept_image, concept_mesh, concept_sketch, "
+            "project_brief, flow_phase) and resolution: record (a recorded "
+            "MFC revision), unresolved (no record yet, so the unresolved set was "
+            "recorded instead) or speculative (recorded but not applied)"
+        ),
+        labels=["generator", "resolution"],
+    )
+
     # ── Representation levels and maturity (C3D slice 2) ────────────────
 
     STRUCTURED_MESH_TOTAL = MetricDefinition(
@@ -1376,6 +1404,8 @@ class MetricsRegistry:
             cls.INTERFACE_EDGE_TOTAL,
             cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
             cls.CONCEPT_MESH_TOTAL,
+            cls.MANUFACTURING_CONTEXT_WRITE_TOTAL,
+            cls.MANUFACTURING_CONTEXT_INJECTION_TOTAL,
             cls.STRUCTURED_MESH_TOTAL,
             cls.MATURITY_QUERY_TOTAL,
             cls.REPRESENTATION_MISLABEL_TOTAL,
@@ -2279,6 +2309,17 @@ class MetricsCollector:
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome, "mode": mode})
 
+    def record_manufacturing_context_write(self, authority: str, outcome: str) -> None:
+        """Record one manufacturing context field write by authority and outcome."""
+        counter = self._instruments.get(MetricsRegistry.MANUFACTURING_CONTEXT_WRITE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"authority": authority, "outcome": outcome})
+
+    def record_manufacturing_context_injection(self, generator: str, resolution: str) -> None:
+        """Record one manufacturing context block given to a generator."""
+        counter = self._instruments.get(MetricsRegistry.MANUFACTURING_CONTEXT_INJECTION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"generator": generator, "resolution": resolution})
     def record_structured_mesh(self, outcome: str) -> None:
         """Record one structured mesh (L1) outcome (C3D slice 2)."""
         counter = self._instruments.get(MetricsRegistry.STRUCTURED_MESH_TOTAL.name)

@@ -979,6 +979,27 @@ groups:
             saved, but they cannot be placed on a plane or moved, so they do not
             appear in 3D. Check the gateway logs (sketch_plane_change_failed).
 
+  # The manufacturing context record (api_gateway/twin/manufacturing_context.py).
+  - name: metaforge_manufacturing_context
+    rules:
+      - alert: ManufacturingContextSyncFailing
+        expr: >-
+          sum(increase(metaforge_manufacturing_context_write_total{outcome="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_manufacturing_context_write_total{outcome=~"written|unchanged|refused|failed"}[30m])), 1) > 0.2
+          and sum(increase(metaforge_manufacturing_context_write_total{outcome="failed"}[30m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The manufacturing context is not being updated"
+          description: >-
+            More than a fifth of the last half hour's manufacturing context
+            syncs (from a Create brief or route save, a route decision or a
+            flow proposal) failed. The saves themselves stand, but concepts are
+            generated against an out-of-date context, or none. Check the gateway
+            logs (manufacturing_context_sync_failed,
+            manufacturing_context_promote_failed).
+
   # FORGE-791 -- sketch compiler (api_gateway/twin/sketch_compiler_recorder.py).
   - name: metaforge_sketch_compile
     rules:

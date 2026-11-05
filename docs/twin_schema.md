@@ -242,6 +242,10 @@ proposal until a person accepts it, then a revision of a `GSK-*` item.
 Always illustrative. See [Generated concept sketches](#generated-sketch)
 below.
 
+`MANUFACTURING_CONTEXT = "manufacturing_context"` is the manufacturing context
+every generator reads, an `MFC-*` item. See
+[The manufacturing context](#manufacturing-context) below.
+
 **Pydantic Model**:
 
 ```python
@@ -1220,6 +1224,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `sketch_interpretation` | definition | `SKI` | `WorkProduct` `sketch_interpretation`: the sketch compiler's proposal for a sketch, fitted primitives and proposed, accepted and rejected constraints, all estimated. `DEPENDS_ON` the strokes revision it was made from. A proposal, not CAD |
 | `parametric_sketch` | definition | `PSK` | `WorkProduct` `parametric_sketch`: a sketch a person promoted, with only the accepted constraints (re-checked by the gateway) and a feature plan whose depth, angle and material are required input. `DEPENDS_ON` the interpretation and the strokes. Held for approval |
 | `generated_sketch` | definition | `GSK` | `WorkProduct` `generated_sketch`: the accepted AI-generated concept sketch for a sketch or a text concept; each accepted proposal is the next revision. Illustrative only: never an editable sketch, CAD or evidence |
+| `manufacturing_context` | definition | `MFC` | `WorkProduct` `manufacturing_context`: how the product (`MFC-PROJECT`) or one component (`MFC-<COMPONENT>`) might be made, each field with its authority and provenance. Every change is the next revision; every generated concept records the revision it used. See [the manufacturing context](#manufacturing-context) |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
@@ -1814,7 +1819,7 @@ An `InterfaceEdge` (`twin_core/models/interface.py`) is typed and revision-aware
 
 | Field | Meaning |
 |-------|---------|
-| `type` | `mounts_to` (a part carries a board's mounting holes), `clearance_to` (an enclosure must clear a board outline or component envelope), `connects_via` (a connector meets a cable or cut-out), `pin_maps_to` (an MCU pin or net is used by a firmware module, driver or config), `simulation_input_of` (geometry, material or load feeds a simulation), `feature_of` (a sketch or sketch plane feeds what is built from it) |
+| `type` | `mounts_to` (a part carries a board's mounting holes), `clearance_to` (an enclosure must clear a board outline or component envelope), `connects_via` (a connector meets a cable or cut-out), `pin_maps_to` (an MCU pin or net is used by a firmware module, driver or config), `simulation_input_of` (geometry, material or load feeds a simulation), `feature_of` (a sketch or sketch plane feeds what is built from it), `manufactured_by` (a manufacturing context shaped what was generated under it) |
 | `source`, `target` | each an item key pinned to the revision the coupling was stated against (`ref`, `revision`, `domain`, `item_type`, `node_id`), or a result record as `record:<uuid>` |
 | `domain_pair` | the two ends' domains, from the item type (`cad_model` is mechanical, `pcb_layout` and `pinmap` electronics, `firmware_source` firmware) |
 | `declared_by` | `human`, `tool` (recorded as a fact by the tool that ran) or `inferred` (MetaForge read it from data) |
@@ -1823,7 +1828,7 @@ An `InterfaceEdge` (`twin_core/models/interface.py`) is typed and revision-aware
 | `coupled_parameters` | what crosses the interface, when known (`mounting_holes`, pin `PA5`, peripheral `SPI1`) |
 | `evidence` | what an inferred or tool edge was read from (the names it matched, the files, the counts it compared) |
 
-`mounts_to`, `clearance_to` and `connects_via` are symmetric: a change on either end reaches the other. A stored edge is an `interface_edge` work product. Two types are derived on read rather than stored twice: `simulation_input_of` from a `simulation_result`'s own revision pins, and `feature_of` from the sketch layer's `DEPENDS_ON` edges (kinds `sketch_plane` and `sketch_compiler`). Both are `declared_by: tool`, `confirmed` and `derived: true`. Confirming an edge re-pins both ends to their current heads; the list route reports an edge whose pinned revision is behind the head (`source_behind`, `target_behind`).
+`mounts_to`, `clearance_to` and `connects_via` are symmetric: a change on either end reaches the other. A stored edge is an `interface_edge` work product. Three types are derived on read rather than stored twice: `simulation_input_of` from a `simulation_result`'s own revision pins, `feature_of` from the sketch layer's `DEPENDS_ON` edges (kinds `sketch_plane` and `sketch_compiler`), and `manufactured_by` from the `manufacturing_context_ref` a generated item's head records (see [a process change](#manufacturing-context)). All three are `declared_by: tool`, `confirmed` and `derived: true`. Confirming an edge re-pins both ends to their current heads; the list route reports an edge whose pinned revision is behind the head (`source_behind`, `target_behind`).
 
 Proposals come only from data the tools already recorded (`api_gateway/twin/interface_proposals.py`). With no data behind a pair there is no edge.
 
@@ -1966,7 +1971,165 @@ an hour are flagged.
 
 ---
 
-### 2.36 Migrating legacy nodes into items {#migrating-legacy-nodes}
+### 2.36 The manufacturing context {#manufacturing-context}
+
+`MANUFACTURING_CONTEXT = "manufacturing_context"` is the one record of how a
+product, or one of its components, might be made. Every concept, sketch,
+image and illustrative 3D generation is made against it, even when it is
+incomplete, and never against nothing in silence (DFM-001). It is a definition
+item: `MFC-PROJECT` for the product, `MFC-<COMPONENT>` for a component (a
+component with no record of its own reads the product's, and its first write
+starts from a copy of it). Every change is the next revision, and each
+revision's metadata says what changed (`changed_fields`), what the conflict
+rule refused (`refused_fields`), which assumptions went stale
+(`stale_fields`) and, for a process change, `process_change` (`from`, `to`).
+
+#### Fields, authority and provenance
+
+`twin_core/manufacturing/context.py` holds the record. Each field is a value
+with an `authority` and a `provenance` (`source`, `at`, `actor`, `ref`):
+
+| Authority | Meaning |
+|-----------|---------|
+| `user_stated` | a person said so: the Create brief or route, `PUT .../manufacturing-context`, or a design flow proposal's stated context |
+| `decision` | a `manufacturing_route` (and its `process_ranking`) design decision recorded outside a design-flow run, or one a run's gate approved |
+| `assumption` | proposed by MetaForge, or by an agent; shown as "may change", never as a constraint |
+| `unknown` | not known; listed as a gap |
+
+| Field | Holds |
+|-------|-------|
+| `intended_use`, `production_goal` | what it is for; `concept`, `appearance_prototype`, `functional_prototype`, `pilot` or `production` |
+| `route` | how it will be made: `home`, `workshop` or `external` (Create), `in_house` or `vendor` (flows) |
+| `process_candidates`, `selected_process` | candidate processes and the chosen one |
+| `material_candidates`, `selected_material` | candidate materials and the chosen one |
+| `quantity`, `target_cost`, `lead_time` | commercial targets; a cost is `{amount, currency, text}` and an amount needs its currency, a lead time is `{days, text}` |
+| `machine_or_supplier_profile` | `{machine, machine_id, supplier, description}` as stated |
+| `dimensional_envelope`, `tolerances`, `finish`, `assembly`, `fastening` | dimensional, appearance and joining requirements |
+| `applicable_rules`, `evidence` | rule profile and validation provenance |
+| `unknowns`, `assumed`, `confidence` | derived on every write: the gaps, the assumed fields, and `low`, `medium` or `high` |
+| `dfm_status` | see below |
+| `conflicts` | the last refused writes, each with what was kept and why |
+
+Unknown process, material, machine, supplier, tolerance, quantity, target cost
+and lead time are listed in `unknowns` (DFM-010). The route decides two of
+them: made at home or in a workshop, no supplier is needed; made by a vendor,
+no machine. `target_cost`, `lead_time` and `machine_or_supplier_profile` are
+never assumed (DFM-014): the record refuses an assumed one, an assumed Create
+budget is not recorded, and an agent's `PUT` of one is refused. Nothing
+estimates a price, a lead time or a machine capability.
+
+#### The conflict rule
+
+The most recent explicit human statement or approved decision wins. An
+assumption never overrides a stated value or a decision; a newer assumption
+replaces an older assumption or a gap. An unknown never erases a value unless
+a person clears it (a `null` in `PUT`, or a Create value that a person
+removed, which clears only a field that came from Create). A refused write
+is kept in `conflicts`. A write that changes nothing makes no revision.
+
+#### One source
+
+| Source | What it writes |
+|--------|----------------|
+| Create brief save | `intended_use`, `dimensional_envelope` (size and fit), `finish` (appearance), `material_candidates` (materials), `target_cost` (manufacturing budget, stated only), `quantity`, and the making context into the machine or supplier profile. A confirmed item is `user_stated`; an assumed one, or one written by an agent surface, is an assumption |
+| Create route save | `route`, `selected_process`, `selected_material`, and the machine and supplier |
+| Design flow proposal | a stated `manufacturingContext` is recorded as `user_stated`. A proposal without one reads the record's confirmed values (never its assumptions) as its context, so a route already chosen is not asked for again |
+| `twin.record_decision` with `manufacturing_route` | outside a run: `decision`. Inside a design-flow run: an assumption with `pending_gate` set to the run, which cannot override a stated value, and becomes a `decision` when a person approves that run's gate (once per decision, so a later gate never overrides a newer statement) |
+
+Every write is a head write, never a design-flow draft, and is reported as a
+short operation in the `manufacturing` domain.
+
+#### Proposals when nothing is stated
+
+`POST .../manufacturing-context/propose` proposes candidate processes and
+materials from the intended use, the envelope, the quantity and the product
+text, each with its reason. It always proposes at least two, so no method is
+locked in silently, checks them against the machine library and the
+`rank_manufacturing_processes` skill, and writes nothing. To accept one, state
+it.
+
+#### Injection into generation
+
+`manufacturing_context_block(project_id, component_key=None)` in
+`api_gateway/twin/manufacturing_context.py` is the one helper every generator
+calls. It returns a compact, prompt-safe block (single lines, no control
+characters or backticks) with confirmed constraints, assumptions and gaps on
+separate lines, the ref it used, the unresolved set and the note. Where no
+process is known, proposed candidates are added to the block as assumptions,
+never stored.
+
+| Generator | How the context is used |
+|-----------|-------------------------|
+| `twin.generate_sketch` and the Create **Generate** | in the prompt, beside the stated values of `manufacturing_rule` references |
+| `twin.render_concept_image` | in the prompt |
+| `twin.generate_concept_mesh` | in a text-to-model prompt in a project, after the person's words and within the provider's limit (`prompt_sent`); metadata only for image input or a call with no project |
+| `twin.render_concept_sketch` | metadata only (the renderer is deterministic) |
+| the chat project brief | as a block in the brief |
+| design-flow phase brains | read for each phase, beside the frozen flow context |
+
+Every output records `manufacturing_context_ref` (`MFC-PROJECT@3`, or
+`unresolved` when nothing was recorded), `manufacturing_context_unresolved`,
+`manufacturing_context_applied`, `speculative`, `manufacturing_note`,
+`dfm_status` and `dfm_status_label`. Each generator takes `speculative`
+(DFM-004): the context is recorded but not applied, the prompt says so, and
+the output is labelled "Speculative concept". Each also takes `component` to
+read that component's context.
+
+#### DFM status and the note {#dfm-status}
+
+`dfm_status` has the seven states of DFM status semantics: `not_assessed`,
+`preliminary_guidance`, `analysis_pending`, `issues_found`,
+`analysis_passed` (the specified checks completed; not a guarantee of build
+success), `verification_required` (physical or supplier confirmation
+required) and `released`. A generated concept is `not_assessed` unless a real
+heuristic check ran (then `preliminary_guidance`); it can never carry a later
+state. `manufacturing_note` is the short, truthful line a concept card shows:
+"Manufacturing not assessed" when nothing informed it, "Informed by: FDM
+(assumed), PLA (assumed) · Manufacturing not assessed" when a context did. No
+illustrative label or note ever says verified or production-ready; a unit
+test scans every one.
+
+#### A process change
+
+When `selected_process` changes, every assumption marked `process_specific`
+(material candidates proposed for the old process, for example) is marked
+`stale` with the reason, and kept. Stated values and decisions are never
+touched. The impact walker then follows `manufactured_by`: a derived
+interface edge from the context item to each generated item whose head
+recorded a revision of it (an accepted `GSK-*` concept), coupled on
+`selected_process` and `selected_material`. The context's changed parameters
+are read field by field, so a process or material change records a
+`change_impact` with the review action "Review it against the new process;
+keep what the person approved", and a change to, say, the intended use
+records none. A speculative concept is not walked.
+
+#### API
+
+| Route | Purpose |
+|-------|---------|
+| `GET /v1/twin/projects/{id}/manufacturing-context` | the current context (`?component=` for one component): ref, record, gaps, note and the block a generator would get; `recorded: false` and ref `unresolved` when none |
+| `PUT /v1/twin/projects/{id}/manufacturing-context` | state `fields` (`null` clears one), with `expected_revision` (409 when the head moved). An agent caller (`X-MetaForge-Surface: agent`) only proposes assumptions |
+| `GET /v1/twin/projects/{id}/manufacturing-context/history` | every revision with what it changed |
+| `POST /v1/twin/projects/{id}/manufacturing-context/propose` | candidate processes and materials; writes nothing |
+
+Observability: `metaforge_manufacturing_context_write_total{authority,
+outcome}` (`written`, `unchanged`, `refused`, `failed`) and
+`metaforge_manufacturing_context_injection_total{generator, resolution}`
+(`record`, `unresolved`, `speculative`); the
+`ManufacturingContextSyncFailing` alert; log events
+`manufacturing_context_written`, `manufacturing_context_writes_refused`,
+`manufacturing_context_injected`, `manufacturing_context_proposed`,
+`manufacturing_context_sync_failed`; spans
+`twin.manufacturing_context.write`, `.block`, `.propose` and
+`twin.manufacturing_context_routes.*`. A sync from Create, a decision or a
+flow that fails is logged and counted, never raised: the save it follows
+stands.
+
+*Source: `twin_core/manufacturing/`, `api_gateway/twin/manufacturing_context.py`, `api_gateway/twin/manufacturing_context_routes.py`*
+
+---
+
+### 2.37 Migrating legacy nodes into items {#migrating-legacy-nodes}
 
 A project written before items existed holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
 

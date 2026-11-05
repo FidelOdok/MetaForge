@@ -310,6 +310,31 @@ text block that is stored on the flow version and frozen with it:
 The requirements phase is expected to turn the stated values (stock, loads,
 spacing) into typed constraints, and no phase should report them as unknown.
 
+### Generation receives the manufacturing context
+
+The frozen flow context is what the requester stated at proposal. The
+project's [manufacturing context](../twin_schema.md#manufacturing-context)
+record (`MFC-PROJECT`) is the shared, revisioned record every generator
+reads, and the two are kept consistent:
+
+- A proposal that states a `manufacturingContext` records it in the project's
+  context item as `user_stated`. A proposal that states none takes the
+  record's confirmed values as its context (never its assumptions, since the
+  flow context is treated as stated), so a route already chosen in Create or
+  decided earlier is not asked for again.
+- Every phase brain also gets the record's block, read when the phase starts,
+  among its phase inputs: confirmed values, assumptions and gaps on separate
+  lines, with the revision (`MFC-PROJECT@n`, or `unresolved`). A route the
+  person changed in Create, or a decision approved at an earlier gate,
+  reaches the next phase this way.
+- A `manufacturing_route` decision recorded inside a run is an assumption
+  pending that run's gate. When a person approves the gate it becomes a
+  `decision` in the record.
+- The concept tools a phase calls (`twin.render_concept_sketch`,
+  `twin.render_concept_image`, `twin.generate_concept_mesh`,
+  `twin.generate_sketch`) read the same record themselves and record the
+  `manufacturing_context_ref` they used on each output.
+
 ## Driving it from the CLI
 
 ```bash

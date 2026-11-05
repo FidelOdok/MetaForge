@@ -128,8 +128,9 @@ class TestAlertingRules:
         # + 2 exact CAD (GeometryValidityFailureSpike, StepRoundTripFailing).
         # + 1 cross-domain impact (FORGE-793).
         # + 1 face remap ambiguity (FaceRemapAmbiguitySpike, CDE slice 9).
+        # + 1 manufacturing context sync (ManufacturingContextSyncFailing, FORGE-801).
         # + 1 representation mislabel guard hits (C3D slice 2).
-        assert len(rules) == 78
+        assert len(rules) == 79
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -201,7 +202,9 @@ class TestAlertingRules:
         # + 2 exact CAD (CDE slice 6).
         # + 1 cross-domain impact (FORGE-793).
         # + 1 face remap ambiguity (CDE slice 9).
-        assert len(warnings) == 62
+        # + 1 manufacturing context sync (FORGE-801).
+        # + 1 representation mislabel guard hits (C3D slice 2).
+        assert len(warnings) == 63
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -331,6 +334,8 @@ class TestAlertingRules:
                 # FORGE-778: concept reference meshes cannot be generated.
                 "ConceptMeshGenerationUnavailable",
                 "ToolJobsFailingOrInterrupted",
+                # FORGE-801: Create, decision or flow syncs into the context fail.
+                "ManufacturingContextSyncFailing",
             ]
         )
 
