@@ -1399,6 +1399,17 @@ class MetricsRegistry:
         labels=["rule", "reason"],
     )
 
+    DFM_SLICER_CHECK_TOTAL = MetricDefinition(
+        name="metaforge_dfm_slicer_check_total",
+        type="counter",
+        description=(
+            "Slicer cross-checks after an exact FDM evaluation (slicer.slice on the "
+            "validated revision), by outcome (evaluated, not_evaluated) and reason "
+            "(sliced, unavailable, failed, no_machine, orientation, no_step, disabled)"
+        ),
+        labels=["outcome", "reason"],
+    )
+
     DFM_REPORT_TOTAL = MetricDefinition(
         name="metaforge_dfm_report_total",
         type="counter",
@@ -1632,6 +1643,7 @@ class MetricsRegistry:
             cls.EXACT_INCREMENTAL_TOTAL,
             cls.DFM_EXACT_EVALUATION_TOTAL,
             cls.DFM_EXACT_INCOMPLETE_TOTAL,
+            cls.DFM_SLICER_CHECK_TOTAL,
             cls.DFM_REPORT_TOTAL,
             cls.MANUFACTURING_RELEASE_REFUSED_TOTAL,
             cls.RECONSTRUCTION_PROPOSAL_TOTAL,
@@ -2653,6 +2665,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.DFM_EXACT_INCOMPLETE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"rule": rule, "reason": reason})
+
+    def record_dfm_slicer_check(self, outcome: str, reason: str) -> None:
+        """Record one slicer cross-check after an exact FDM evaluation."""
+        counter = self._instruments.get(MetricsRegistry.DFM_SLICER_CHECK_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "reason": reason})
 
     def record_dfm_report(self, outcome: str) -> None:
         """Record one DFM report generation (C3D slice 6)."""

@@ -221,6 +221,8 @@ def updates_from_put(
             authority=Authority.ASSUMPTION if agent else Authority.USER_STATED,
             provenance=prov,
             note=note,
+            # An assumed print orientation only holds for the process it was assumed for.
+            process_specific=agent and name == "print_orientation",
         )
     return updates, clears
 

@@ -13528,6 +13528,9 @@
           "material_candidates": {
             "$ref": "#/components/schemas/ContextField"
           },
+          "print_orientation": {
+            "$ref": "#/components/schemas/ContextField"
+          },
           "process_candidates": {
             "$ref": "#/components/schemas/ContextField"
           },
@@ -39174,6 +39177,63 @@
           }
         },
         "summary": "Approve Technical Drawing",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/assembly-comparison": {
+      "get": {
+        "description": "Compare a CAD revision's components: pose, alignment, interference (spec section 7).\n\nEach component is found by the id written into its GLB node; poses are\ncompared with the project's structured layout (L1). What cannot be\nmeasured is ``not_evaluated`` with the reason. The record is stored on\nthe revision under ``assembly_comparison``.",
+        "operationId": "get_assembly_comparison_v1_twin_nodes__node_id__assembly_comparison_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Recompute even when a record for this content exists",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Recompute even when a record for this content exists",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Assembly Comparison V1 Twin Nodes  Node Id  Assembly Comparison Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Assembly Comparison",
         "tags": [
           "twin"
         ]

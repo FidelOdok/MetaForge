@@ -4297,6 +4297,249 @@ class TwinServer(McpToolServer):
             ),
             handler=self.get_dfm_findings,
         )
+        self._register_manufacturing_context_tools()
+
+    def _register_manufacturing_context_tools(self) -> None:
+        project = {"type": "string", "description": "Project UUID."}
+        component = {
+            "type": "string",
+            "description": (
+                "A component's name (its own context, MFC-<COMPONENT>); omit for the product "
+                "as a whole (MFC-PROJECT). A component with no record of its own reads the "
+                "product's."
+            ),
+        }
+        context_schema = {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string"},
+                "recorded": {"type": "boolean"},
+                "record": {"type": "object"},
+                "changed": {"type": "array", "items": {"type": "string"}},
+                "refused": {"type": "array", "items": {"type": "object"}},
+            },
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.get_manufacturing_context",
+                adapter_id="twin",
+                name="Get Manufacturing Context",
+                description=(
+                    "Read the manufacturing context a component (or the product) is made "
+                    "under: every field (intended use, process and material, selected or "
+                    "candidates, quantity, machine or supplier, tolerances, print "
+                    "orientation ...) with its authority (user_stated, decision, assumption, "
+                    "unknown) and provenance, the gaps, the ref (MFC-...@n, or unresolved "
+                    "when none is recorded), the note a concept made now would carry and the "
+                    "block a generator is given. Reads only."
+                ),
+                capability="twin_manufacturing",
+                input_schema={
+                    "type": "object",
+                    "properties": {"project_id": project, "component": component},
+                    "required": ["project_id"],
+                },
+                output_schema=context_schema,
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.get_manufacturing_context,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.state_manufacturing_context",
+                adapter_id="twin",
+                name="State Manufacturing Context",
+                description=(
+                    "Write manufacturing context fields as the context's next revision. "
+                    "statement 'proposal' (default): the values are assumptions, shown as "
+                    "'may change'; they never override a stated value or a decision, and "
+                    "target_cost, lead_time and machine_or_supplier_profile are never "
+                    "assumed. statement 'user_stated': only when a person approved this "
+                    "call (the approver is recorded, never a name you supply); otherwise "
+                    "refused. A decision comes only from twin.record_decision. Writes the "
+                    "conflict rule refuses are returned and kept. print_orientation is "
+                    "{build_direction: [x, y, z], rotation_deg} or an axis such as '+Z'; "
+                    "exact FDM DFM reads it. Changing process, material, quantity, machine, "
+                    "tolerances or orientation recomputes the DFM findings made under it."
+                ),
+                capability="twin_manufacturing",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": project,
+                        "component": component,
+                        "fields": {
+                            "type": "object",
+                            "description": (
+                                "Field name to value: intended_use, production_goal, route, "
+                                "process_candidates, selected_process, material_candidates, "
+                                "selected_material, quantity, target_cost, lead_time, "
+                                "machine_or_supplier_profile, dimensional_envelope, "
+                                "tolerances, finish, assembly, fastening, applicable_rules, "
+                                "evidence, print_orientation."
+                            ),
+                        },
+                        "statement": {
+                            "type": "string",
+                            "enum": ["proposal", "user_stated"],
+                            "description": "proposal (assumptions, default) or user_stated.",
+                        },
+                        "notes": {
+                            "type": "object",
+                            "description": "Why each field is stated, keyed like fields.",
+                        },
+                        "change_reason": {"type": "string"},
+                        "expected_revision": {
+                            "type": "integer",
+                            "description": "Refused when the context moved past this revision.",
+                        },
+                    },
+                    "required": ["project_id", "fields"],
+                },
+                output_schema=context_schema,
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.state_manufacturing_context,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.get_dfm_report",
+                adapter_id="twin",
+                name="Get DFM Report",
+                description=(
+                    "Read the latest stored revision-specific DFM report: status, process, "
+                    "material, context ref, per-component findings with anchors and how "
+                    "the geometry was measured (build direction, slicer cross-check "
+                    "evidence), what is unresolved, verification items, stale evidence and "
+                    "the release checklist, with whether the revisions it read are still "
+                    "current. With none stored, an unstored preview (stored: false). Reads "
+                    "only."
+                ),
+                capability="twin_dfm",
+                input_schema={
+                    "type": "object",
+                    "properties": {"project_id": project},
+                    "required": ["project_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "stored": {"type": "boolean"},
+                        "report_id": {"type": ["string", "null"]},
+                        "report": {"type": "object"},
+                        "staleness": {"type": "object"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.get_dfm_report,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.get_release_checklist",
+                adapter_id="twin",
+                name="Get Manufacturing Release Checklist",
+                description=(
+                    "Read the manufacturing release checklist for the project's current "
+                    "revision: each item (exact geometry, exact DFM complete and resolved, "
+                    "verification, context gaps ...) pass, fail or not applicable with its "
+                    "detail, and the readiness Create shows. applies: false when no process "
+                    "with exact DFM checks is selected. Reads only."
+                ),
+                capability="twin_dfm",
+                input_schema={
+                    "type": "object",
+                    "properties": {"project_id": project},
+                    "required": ["project_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "applies": {"type": "boolean"},
+                        "items": {"type": "array", "items": {"type": "object"}},
+                        "readiness": {"type": "object"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.get_release_checklist,
+        )
+
+    @staticmethod
+    def _project_arg(tool: str, arguments: dict[str, Any]) -> str:
+        project_id = arguments.get("project_id")
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise ValueError(f"{tool}: 'project_id' is required")
+        return project_id.strip()
+
+    @staticmethod
+    def _component_arg(tool: str, arguments: dict[str, Any]) -> str | None:
+        value = arguments.get("component")
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f"{tool}: 'component' must be a string")
+        return value.strip() or None
+
+    async def get_manufacturing_context(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.get_manufacturing_context"
+        project_id = self._project_arg(tool, arguments)
+        with tracer.start_as_current_span(tool):
+            result: dict[str, Any] = await self._dfm_service.context(
+                project_id, self._component_arg(tool, arguments)
+            )
+        return result
+
+    async def state_manufacturing_context(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.state_manufacturing_context"
+        project_id = self._project_arg(tool, arguments)
+        fields = arguments.get("fields")
+        if not isinstance(fields, dict) or not fields:
+            raise ValueError(f"{tool}: 'fields' must be a non-empty object")
+        notes = arguments.get("notes")
+        if notes is not None and not isinstance(notes, dict):
+            raise ValueError(f"{tool}: 'notes' must be an object")
+        statement = arguments.get("statement") or "proposal"
+        if statement not in ("proposal", "user_stated"):
+            raise ValueError(f"{tool}: 'statement' is 'proposal' or 'user_stated'")
+        expected = arguments.get("expected_revision")
+        if expected is not None and (isinstance(expected, bool) or not isinstance(expected, int)):
+            raise ValueError(f"{tool}: 'expected_revision' must be an integer")
+        reason = arguments.get("change_reason")
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("mfc.statement", statement)
+            span.set_attribute("mfc.fields", len(fields))
+            result: dict[str, Any] = await self._dfm_service.state_context(
+                project_id,
+                fields=dict(fields),
+                component=self._component_arg(tool, arguments),
+                statement=statement,
+                # Set by the dispatcher when a person approved this call; a
+                # client-supplied value was stripped before it got here.
+                approved_by=arguments.get(APPROVED_BY_ARG),
+                notes=dict(notes or {}),
+                change_reason=str(reason or "")[:300],
+                expected_revision=expected,
+            )
+        return result
+
+    async def get_dfm_report(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.get_dfm_report"
+        project_id = self._project_arg(tool, arguments)
+        with tracer.start_as_current_span(tool):
+            result: dict[str, Any] = await self._dfm_service.report(project_id)
+        return result
+
+    async def get_release_checklist(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.get_release_checklist"
+        project_id = self._project_arg(tool, arguments)
+        with tracer.start_as_current_span(tool):
+            result: dict[str, Any] = await self._dfm_service.checklist(project_id)
+        return result
 
     async def evaluate_dfm(self, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = "twin.evaluate_dfm"

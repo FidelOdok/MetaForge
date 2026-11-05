@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Panel, PanelLoading, SearchField } from '../components/ui/Panel';
 import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -256,20 +257,14 @@ function ComponentSelectionSection({ projectId }: { projectId?: string }) {
   };
 
   return (
-    <div className="mt-6" data-testid="component-selection-section">
-      <h2 className="mb-2 text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-        Requirement-driven component selection
-      </h2>
-      <p className="mb-2 text-xs text-on-surface-variant">
+    <Panel title="Component selection" meta="requirement-driven" testId="component-selection-section">
+      <p className="mb-3 text-xs text-on-surface-variant">
         Compare real candidate parts against required specs (caller-asserted datasheet values,
         e.g. a servo's published torque_kg_cm) and select one -- recorded as a real Decision +
         BOMItem, not just an assertion.
       </p>
 
-      <div
-        className="rounded-lg p-3"
-        style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-      >
+      <div>
         <div className="mb-3 flex flex-wrap gap-2">
           <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
             Category
@@ -534,7 +529,7 @@ function ComponentSelectionSection({ projectId }: { projectId?: string }) {
           </div>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -747,44 +742,13 @@ export function BomPage() {
 
       {/* Toolbar (flat view only -- the hierarchical view is already structured) */}
       {view === 'flat' && (
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="relative flex items-center">
-          <span
-            className="material-symbols-outlined absolute left-2 pointer-events-none"
-            style={{ fontSize: '14px', color: 'var(--mf-c-9a9aaa)' }}
-          >
-            search
-          </span>
-          <input
-            type="text"
-            placeholder="Search components…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="rounded pl-7 pr-2 py-1 text-xs text-on-surface placeholder:text-on-surface-variant focus:outline-none"
-            style={{
-              background: 'var(--mf-c-282a30)',
-              border: '1px solid var(--mf-r-65-72-90-0p3)',
-              width: '220px',
-              maxWidth: '100%',
-            }}
-          />
-        </div>
-        <div className="relative flex items-center">
-          <span
-            className="material-symbols-outlined absolute left-2 pointer-events-none"
-            style={{ fontSize: '14px', color: 'var(--mf-c-9a9aaa)' }}
-          >
-            filter_list
-          </span>
+      <div className="mf-toolbar">
+        <SearchField value={search} onChange={setSearch} placeholder="Search components…" />
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded pl-7 pr-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
-            style={{
-              background: 'var(--mf-c-282a30)',
-              border: '1px solid var(--mf-r-65-72-90-0p3)',
-              width: '160px',
-            }}
+            aria-label="Filter by status"
+            className="mf-select"
           >
             <option value="">All statuses</option>
             <option value="available">Available</option>
@@ -792,7 +756,6 @@ export function BomPage() {
             <option value="out_of_stock">Out of Stock</option>
             <option value="alternate_needed">Alternate Needed</option>
           </select>
-        </div>
         {(search || statusFilter) && (
           <span className="font-mono text-xs text-on-surface-variant">
             {sorted.length} of {items.length}
@@ -801,157 +764,130 @@ export function BomPage() {
       </div>
       )}
 
-      {/* Loading skeleton */}
-      {isLoading && (
-        <div
-          className="rounded-lg overflow-hidden"
-          style={{
-            background: 'var(--mf-r-30-31-38-0p85)',
-            border: '1px solid var(--mf-r-65-72-90-0p2)',
-          }}
-        >
-          {[...Array(6)].map((_, i) => (
-            <div
-              key={i}
-              className="animate-pulse"
-              style={{
-                height: '36px',
-                borderBottom: '1px solid var(--mf-r-65-72-90-0p1)',
-                background: i % 2 === 0 ? 'var(--mf-r-40-42-48-0p3)' : 'transparent',
-              }}
-            />
-          ))}
-        </div>
-      )}
+      <Panel
+        title={view === 'flat' ? 'Components' : 'Engineering BOM'}
+        meta={view === 'flat' ? `${sorted.length} of ${items.length}` : (hierarchicalLines ?? []).length}
+        testId="bom-components"
+      >
+        {isLoading && <PanelLoading />}
 
-      {view === 'flat' && (
-        <>
-          {/* Empty state */}
-          {!isLoading && items.length === 0 && (
-            <EmptyState
-              title="No components"
-              description={
-                activeProjectId
-                  ? 'This project has no BOM components yet.'
-                  : 'Select a project, or run an agent, to populate the bill of materials.'
-              }
-            />
-          )}
+        {view === 'flat' && (
+          <>
+            {/* Empty state */}
+            {!isLoading && items.length === 0 && (
+              <EmptyState
+                title="No components"
+                description={
+                  activeProjectId
+                    ? 'This project has no BOM components yet.'
+                    : 'Select a project, or run an agent, to populate the bill of materials.'
+                }
+              />
+            )}
 
-          {/* Empty search result */}
-          {!isLoading && items.length > 0 && sorted.length === 0 && (
-            <EmptyState
-              title="No matches"
-              description="Try adjusting your search or filter."
-            />
-          )}
+            {/* Empty search result */}
+            {!isLoading && items.length > 0 && sorted.length === 0 && (
+              <EmptyState
+                title="No matches"
+                description="Try adjusting your search or filter."
+              />
+            )}
 
-          {/* Table */}
-          {!isLoading && sorted.length > 0 && (
-            <div
-              className="rounded-lg overflow-hidden overflow-x-auto"
-              style={{
-                background: 'var(--mf-r-30-31-38-0p85)',
-                border: '1px solid var(--mf-r-65-72-90-0p2)',
-              }}
-            >
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr style={{ background: 'var(--mf-c-191b22)' }}>
-                    <th
-                      style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', width: '32px' }}
-                      aria-label="Image"
-                    />
-                    {(
-                      [
-                        { field: 'designator' as SortField, label: 'Ref', align: 'left' },
-                        { field: 'partNumber' as SortField, label: 'Part Number', align: 'left' },
-                        { field: 'description' as SortField, label: 'Description', align: 'left' },
-                        { field: 'manufacturer' as SortField, label: 'Manufacturer', align: 'left' },
-                        { field: 'quantity' as SortField, label: 'Qty', align: 'right' },
-                        { field: 'unitPrice' as SortField, label: 'Unit Price', align: 'right' },
-                        { field: 'status' as SortField, label: 'Status', align: 'left' },
-                      ] as { field: SortField; label: string; align: string }[]
-                    ).map(({ field, label, align }) => (
+            {/* Table */}
+            {!isLoading && sorted.length > 0 && (
+              <div className="mf-bleed overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr style={{ background: 'var(--mf-c-191b22)' }}>
                       <th
-                        key={field}
-                        className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
-                        style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                        onClick={() => handleSort(field)}
-                      >
-                        {label}
-                        <SortIcon field={field} />
-                      </th>
+                        style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', width: '32px' }}
+                        aria-label="Image"
+                      />
+                      {(
+                        [
+                          { field: 'designator' as SortField, label: 'Ref', align: 'left' },
+                          { field: 'partNumber' as SortField, label: 'Part Number', align: 'left' },
+                          { field: 'description' as SortField, label: 'Description', align: 'left' },
+                          { field: 'manufacturer' as SortField, label: 'Manufacturer', align: 'left' },
+                          { field: 'quantity' as SortField, label: 'Qty', align: 'right' },
+                          { field: 'unitPrice' as SortField, label: 'Unit Price', align: 'right' },
+                          { field: 'status' as SortField, label: 'Status', align: 'left' },
+                        ] as { field: SortField; label: string; align: string }[]
+                      ).map(({ field, label, align }) => (
+                        <th
+                          key={field}
+                          className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
+                          style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                          onClick={() => handleSort(field)}
+                        >
+                          {label}
+                          <SortIcon field={field} />
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((component) => (
+                      <BomRow
+                        key={component.id}
+                        component={component}
+                        revision={revisionIndex?.[component.id]}
+                        projectId={activeProjectId ?? undefined}
+                      />
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sorted.map((component) => (
-                    <BomRow
-                      key={component.id}
-                      component={component}
-                      revision={revisionIndex?.[component.id]}
-                      projectId={activeProjectId ?? undefined}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
 
-      {view === 'hierarchical' && (
-        <>
-          {/* Empty state -- FORGE-267: no product hierarchy recorded yet
-              (twin.record_hierarchy_node hasn't been used for this project),
-              distinct from "no BOM at all" */}
-          {!isLoading && (hierarchicalLines ?? []).length === 0 && (
-            <EmptyState
-              title="No product hierarchy yet"
-              description={
-                activeProjectId
-                  ? 'Build one with twin.record_hierarchy_node -- a product, its subsystems, and the parts/components each one is realized by -- to see a derived EBOM here.'
-                  : 'Select a project to view its hierarchical BOM.'
-              }
-            />
-          )}
+        {view === 'hierarchical' && (
+          <>
+            {/* Empty state -- FORGE-267: no product hierarchy recorded yet
+                (twin.record_hierarchy_node hasn't been used for this project),
+                distinct from "no BOM at all" */}
+            {!isLoading && (hierarchicalLines ?? []).length === 0 && (
+              <EmptyState
+                title="No product hierarchy yet"
+                description={
+                  activeProjectId
+                    ? 'Build one with twin.record_hierarchy_node -- a product, its subsystems, and the parts/components each one is realized by -- to see a derived EBOM here.'
+                    : 'Select a project to view its hierarchical BOM.'
+                }
+              />
+            )}
 
-          {/* Table */}
-          {!isLoading && (hierarchicalLines ?? []).length > 0 && (
-            <div
-              className="rounded-lg overflow-hidden overflow-x-auto"
-              style={{
-                background: 'var(--mf-r-30-31-38-0p85)',
-                border: '1px solid var(--mf-r-65-72-90-0p2)',
-              }}
-            >
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr style={{ background: 'var(--mf-c-191b22)' }}>
-                    {(
-                      ['Name', 'Part Number', 'Description', 'Manufacturer', 'Qty', 'Unit Cost', 'Source'] as string[]
-                    ).map((label, i) => (
-                      <th
-                        key={label}
-                        className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${i >= 4 && i <= 5 ? 'text-right' : 'text-left'}`}
-                        style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', whiteSpace: 'nowrap' }}
-                      >
-                        {label}
-                      </th>
+            {/* Table */}
+            {!isLoading && (hierarchicalLines ?? []).length > 0 && (
+              <div className="mf-bleed overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                      {(
+                        ['Name', 'Part Number', 'Description', 'Manufacturer', 'Qty', 'Unit Cost', 'Source'] as string[]
+                      ).map((label, i) => (
+                        <th
+                          key={label}
+                          className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${i >= 4 && i <= 5 ? 'text-right' : 'text-left'}`}
+                          style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', whiteSpace: 'nowrap' }}
+                        >
+                          {label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(hierarchicalLines ?? []).map((line) => (
+                      <HierarchicalBomRow key={`${line.hierarchyNodeId}-${line.componentId}`} line={line} />
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(hierarchicalLines ?? []).map((line) => (
-                    <HierarchicalBomRow key={`${line.hierarchyNodeId}-${line.componentId}`} line={line} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </Panel>
 
       <ComponentSelectionSection projectId={activeProjectId ?? undefined} />
     </div>

@@ -134,8 +134,9 @@ class TestAlertingRules:
         # + 1 DFM evaluation errors (DfmEvaluationErrors, C3D slice 4).
         # + 1 preview comparison errors (PreviewComparisonErrors, C3D slice 5).
         # + 1 exact DFM failures (DfmExactEvaluationFailures, C3D slice 6).
+        # + 1 slicer cross-check not running (DfmSlicerCrossCheckUnavailable, info).
         # + 1 reconstruction failures (ReconstructionProposalFailures, spec 4B).
-        assert len(rules) == 84
+        assert len(rules) == 85
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""

@@ -55,6 +55,7 @@ from uuid import UUID
 import structlog
 
 from observability.tracing import get_tracer
+from twin_core.component_identity import stamp_step_for_node
 from twin_core.geometry_state import (
     EXACT_ATTEMPTS_KEY,
     EXACT_SOURCE_KEY,
@@ -1112,6 +1113,13 @@ class ExactCadService:
                 if not step_b64:
                     raise StepExportError("cadquery.export_step returned no STEP")
                 written = base64.b64decode(step_b64)
+                # SYNC-001: the exported STEP names its component(s) in the
+                # product names, so the id survives into other CAD tools and
+                # back through the converter. Geometry is not touched.
+                written, stamped_ids = stamp_step_for_node(
+                    written, name=item.name, meta=wp.metadata
+                )
+                span.set_attribute("step.component_ids", stamped_ids)
             except (StepExportError, ExactCadError):
                 await self._mark_export_failed(wp, ref, job_id)
                 raise
@@ -1146,6 +1154,7 @@ class ExactCadService:
                 "schema": exported.get("schema"),
                 "schema_requested": exported.get("schema_requested"),
                 "kernel": exported.get("kernel"),
+                "component_ids_in_step": stamped_ids,
                 "round_trip": {
                     "outcome": outcome,
                     "findings": findings,

@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+from component_ids import add_node_extras, split_product_name
 
 logger = logging.getLogger("occt-converter")
 
@@ -236,12 +237,17 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
     materials: list[dict] = []
     total_triangles = 0
     used_names: dict[str, int] = {}
+    node_extras: dict[str, dict] = {}
 
-    for idx, (shape, part_name, src_color) in enumerate(enumerated):
+    for idx, (shape, product_name, src_color) in enumerate(enumerated):
         vertices, faces = _tessellate(shape, deflection)
         if vertices is None or faces is None:
-            logger.warning("Skipping empty shape: %s", part_name)
+            logger.warning("Skipping empty shape: %s", product_name)
             continue
+        # A product name "Base [CMP-base]" carries its component id (the
+        # gateway writes it); the part is shown as "Base".
+        part_name, component_id = split_product_name(product_name)
+        part_name = part_name or product_name
 
         # Keep node names unique for trimesh/glTF even if products repeat.
         node_name = part_name
@@ -272,12 +278,15 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
             )
             materials.append({"part": node_name, "baseColorFactor": rgba})
         scene.add_geometry(mesh, node_name=node_name, geom_name=node_name)
+        if component_id:
+            node_extras[node_name] = {"component_id": component_id, "part_name": part_name}
 
         total_triangles += len(faces)
         parts.append(
             {
                 "name": part_name,
                 "meshName": node_name,
+                "componentId": component_id,
                 "children": [],
                 "boundingBox": _bounding_box(vertices),
                 "color": rgba,
@@ -285,10 +294,15 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
             }
         )
 
-    # Export GLB
+    # Export GLB, then write each part's component id into its node extras
+    # (three.js reads them as userData; the viewer selects by them).
     glb_path = out / "model.glb"
-    scene.export(str(glb_path), file_type="glb")
+    glb_bytes = scene.export(file_type="glb")
+    glb_bytes, with_ids = add_node_extras(glb_bytes, node_extras)
+    glb_path.write_bytes(glb_bytes)
     file_size = glb_path.stat().st_size
+    if node_extras:
+        logger.info("Component ids written to %d of %d GLB nodes", with_ids, len(parts))
 
     metadata = {
         "format": "metaforge-twin-export",

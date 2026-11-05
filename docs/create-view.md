@@ -146,7 +146,9 @@ Engineering 3D model view, opened with nothing selected, picks the same one.
 
 **Selecting a part.** Clicking a part of a 3D model on the stage selects its
 component (the `component_id` in the mesh's glTF extras, or the model's only
-component), and the stage shows *Selected: Arm*. Engineering shares the
+component), and the stage shows *Selected: Arm*. This works part by part on a
+multi-part CAD model too: the exact model's STEP names each part's component,
+and the converter writes it into that part's extras. Engineering shares the
 selection: a part picked on one view is selected on the other.
 
 ### One next action
@@ -473,7 +475,12 @@ selecting its CAD item shows the same view).
 - **Swap.** While the exact model is built the view keeps the preview and
   says *Engineering Update · validation pending*. When the validated exact
   model built from this very definition arrives, the view swaps to it:
-  *Engineering Geometry · exact model available*. If the comparison found
+  *Engineering Geometry · exact model available*. The view learns this from
+  the live activity stream: when the build reports the exact geometry built,
+  its verdict or its failure, the view reads the part again and swaps, or
+  shows the failure, at once (a build of the same part started elsewhere
+  counts too). Only while the stream is offline does the view look again
+  every 1.5 seconds instead. If the comparison found
   that the exact model differs from what the preview showed, a short note
   says where, for example *The exact model differs from the preview in
   volume, holes.*

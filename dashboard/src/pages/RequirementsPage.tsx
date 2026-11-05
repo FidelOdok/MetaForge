@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Panel, PanelLoading, SearchField } from '../components/ui/Panel';
 import { Modal } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Link } from 'react-router-dom';
@@ -539,22 +540,20 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
   if (!isLoading && rows.length === 0 && !showForm && !projectId) return null;
 
   return (
-    <div className="mb-6" data-testid="requirements-matrix">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-          Evidence matrix
-          {revisionRefs.length > 0 && (
-            <span
-              data-testid="requirements-revision"
-              className="font-mono text-on-surface-variant"
-              style={{ fontSize: '11px', fontWeight: 400, marginLeft: '8px' }}
-              title={`Read from the current constraint set revision${revisionRefs.length > 1 ? 's' : ''}: ${revisionRefs.join(', ')}`}
-            >
-              {revisionRefs.length === 1 ? `from ${revisionRefs[0]}` : `from ${revisionRefs.length} constraint sets`}
-            </span>
-          )}
-        </h2>
-        <div className="flex gap-2">
+    <Panel
+      title="Evidence matrix"
+      meta={
+        revisionRefs.length > 0 && (
+          <span
+            data-testid="requirements-revision"
+            title={`Read from the current constraint set revision${revisionRefs.length > 1 ? 's' : ''}: ${revisionRefs.join(', ')}`}
+          >
+            {revisionRefs.length === 1 ? `from ${revisionRefs[0]}` : `from ${revisionRefs.length} constraint sets`}
+          </span>
+        )
+      }
+      actions={
+        <>
           {projectId && !showForm && (
             <Button
               variant="secondary"
@@ -586,8 +585,10 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
               </Button>
             </>
           )}
-        </div>
-      </div>
+        </>
+      }
+      testId="requirements-matrix"
+    >
       {projectId && showForm && (
         <NewConstraintForm projectId={projectId} onDone={() => setShowForm(false)} />
       )}
@@ -598,16 +599,8 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
         />
       )}
       {!isLoading && rows.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-2" role="group" aria-label="Filter requirements">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search requirements"
-            aria-label="Search requirements"
-            className="rounded px-2 py-1 text-xs"
-            style={{ flex: '1 1 180px', maxWidth: 280, background: 'var(--mf-c-111319)', border: '1px solid var(--mf-r-65-72-90-0p3)', color: 'var(--mf-c-e2e2eb)' }}
-          />
+        <div className="mf-toolbar" role="group" aria-label="Filter requirements">
+          <SearchField value={query} onChange={setQuery} placeholder="Search requirements" />
           {(['all', ...counts.map(([s]) => s)] as const).map((s) => {
             const on = status === s;
             const n = s === 'all' ? rows.length : (counts.find(([k]) => k === s)?.[1] ?? 0);
@@ -630,8 +623,7 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
       )}
       {!isLoading && filtered.length > 0 && (
         <div
-          className="rounded-lg overflow-hidden overflow-x-auto"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+          className="mf-bleed overflow-x-auto"
         >
           <table className="w-full text-left border-collapse">
             <thead>
@@ -674,7 +666,7 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
           )}
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -703,29 +695,21 @@ function CoverageHeatmapSection({ projectId }: { projectId?: string }) {
   if (!projectId || isLoading || !coverage) return null;
 
   return (
-    <div className="mb-6" data-testid="requirements-coverage">
-      <h2 className="mb-2 text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-        Traceability coverage
-      </h2>
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+    <Panel title="Traceability coverage" testId="requirements-coverage">
+      <div className="mf-stats">
         {COVERAGE_TILES.map((tile) => {
           const value = coverage[tile.key];
           return (
             <div
               key={tile.key}
               data-testid={`coverage-tile-${tile.key}`}
-              className="rounded-lg p-3"
-              style={{
-                background: 'var(--mf-r-30-31-38-0p85)',
-                border: `1px solid ${coverageTileColor(value)}`,
-              }}
+              className="mf-stat"
+              style={{ borderLeftColor: coverageTileColor(value) }}
             >
-              <div className="text-[10px] uppercase tracking-widest text-on-surface-variant">
-                {tile.label}
-              </div>
+              <div className="mf-stat-label">{tile.label}</div>
               <div
-                className="mt-1 text-lg font-mono"
-                style={{ color: value === null ? 'var(--mf-c-on-surface-variant)' : coverageTileColor(value) }}
+                className="mf-stat-value"
+                style={{ color: value === null ? 'var(--mf-c-9a9aaa)' : coverageTileColor(value) }}
               >
                 {value === null ? 'N/A' : `${value}%`}
               </div>
@@ -733,7 +717,7 @@ function CoverageHeatmapSection({ projectId }: { projectId?: string }) {
           );
         })}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -767,21 +751,18 @@ function ReleasePackagesSection({ projectId }: { projectId?: string }) {
   };
 
   return (
-    <div className="mb-6" data-testid="release-packages">
-      <h2 className="mb-2 text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-        Release packages
-      </h2>
-      <div className="mt-2 mb-3 flex flex-wrap items-center gap-2">
+    <Panel title="Release packages" testId="release-packages">
+      <div className="mf-toolbar">
         <input
           type="text"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Optional release title (e.g. v1.0 release candidate)"
           data-testid="release-notes-input"
-          className="min-w-[240px] flex-1 rounded-lg px-3 py-2 text-sm"
-          style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          className="mf-input min-w-[240px] flex-1"
         />
         <Button
+          size="sm"
           onClick={handleCreate}
           disabled={createRelease.isPending}
           data-testid="create-release-button"
@@ -801,8 +782,7 @@ function ReleasePackagesSection({ projectId }: { projectId?: string }) {
             <div
               key={pkg.nodeId}
               data-testid={`release-package-${pkg.nodeId}`}
-              className="rounded-lg p-3"
-              style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+              className="mf-subcard"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-on-surface">{pkg.title}</span>
@@ -842,7 +822,7 @@ function ReleasePackagesSection({ projectId }: { projectId?: string }) {
           ))}
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -863,10 +843,10 @@ function SnapshotCount({
         ? 'var(--mf-c-error, #d4595e)'
         : 'var(--mf-c-on-surface-variant)';
   return (
-    <div className="rounded-lg px-2 py-1.5" style={{ background: 'var(--mf-c-282a30)' }}>
-      <div className="text-[10px] uppercase tracking-widest text-on-surface-variant">{label}</div>
-      <div className="mt-0.5 flex items-baseline gap-1.5">
-        <span className="font-mono text-sm text-on-surface">{count}</span>
+    <div className="mf-stat">
+      <div className="mf-stat-label">{label}</div>
+      <div className="flex items-baseline gap-1.5">
+        <span className="mf-stat-value">{count}</span>
         <span className="font-mono text-[10px]" style={{ color: deltaColor }}>
           {deltaText}
         </span>
@@ -904,19 +884,22 @@ function TestPlanSection({ projectId }: { projectId?: string }) {
   };
 
   return (
-    <div className="mb-6" data-testid="test-plan">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-          Test plan
-        </h2>
-        <Button
-          onClick={handleGenerate}
-          disabled={generate.isPending}
-          data-testid="generate-test-plan-button"
-        >
-          {generate.isPending ? 'Generating…' : 'Generate test plan'}
-        </Button>
-      </div>
+    <Panel
+      title="Test plan"
+      actions={
+        <>
+          <Button
+            size="sm"
+            onClick={handleGenerate}
+            disabled={generate.isPending}
+            data-testid="generate-test-plan-button"
+          >
+            {generate.isPending ? 'Generating…' : 'Generate test plan'}
+          </Button>
+        </>
+      }
+      testId="test-plan"
+    >
 
       {isLoading ? null : !entries || entries.length === 0 ? (
         <EmptyState
@@ -924,8 +907,8 @@ function TestPlanSection({ projectId }: { projectId?: string }) {
           description="Generated from requirements whose verification method is 'test'. Add one, or generate once this project has requirements declaring verification_method='test'."
         />
       ) : (
-        <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--mf-r-65-72-90-0p2)' }}>
-          <table className="w-full text-sm">
+        <div className="mf-bleed overflow-x-auto">
+          <table className="mf-table">
             <thead>
               <tr style={{ background: 'var(--mf-c-282a30)' }}>
                 <th className="px-3 py-2 text-left text-[10px] uppercase tracking-widest text-on-surface-variant">
@@ -951,7 +934,7 @@ function TestPlanSection({ projectId }: { projectId?: string }) {
           </table>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -1136,23 +1119,25 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
   const winner = iterations.find((it) => it.is_winner);
 
   return (
-    <div className="mb-6" data-testid="design-loop-section">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-          Design loop
-        </h2>
-        {projectId && !showForm && (
-          <Button
-            variant="secondary"
-            size="sm"
-            type="button"
-            data-testid="start-design-loop-button"
-            onClick={() => setShowForm(true)}
-          >
-            + Start design loop
-          </Button>
-        )}
-      </div>
+    <Panel
+      title="Design loop"
+      actions={
+        <>
+          {projectId && !showForm && (
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                data-testid="start-design-loop-button"
+                onClick={() => setShowForm(true)}
+              >
+                + Start design loop
+              </Button>
+            )}
+        </>
+      }
+      testId="design-loop-section"
+    >
 
       {projectId && showForm && (
         <Modal
@@ -1228,8 +1213,7 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
 
       {loopId && !isLoading && iterations.length > 0 && (
         <div
-          className="rounded-lg overflow-hidden overflow-x-auto"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+          className="mf-bleed overflow-x-auto"
         >
           {start.data && (
             <LoopHealthPanel
@@ -1293,7 +1277,7 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
       )}
 
       {winner && <DecisionList nodeId={winner.id} heading="Decision" />}
-    </div>
+    </Panel>
   );
 }
 
@@ -1362,23 +1346,25 @@ function GateReviewSection({
   const canSubmit = !!projectId && selectedIds.length > 0;
 
   return (
-    <div className="mb-6" data-testid="gate-review-section">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-          Gate review
-        </h2>
-        {projectId && !showForm && (
-          <Button
-            variant="secondary"
-            size="sm"
-            type="button"
-            data-testid="open-gate-review-button"
-            onClick={() => setShowForm(true)}
-          >
-            + Attempt promotion
-          </Button>
-        )}
-      </div>
+    <Panel
+      title="Gate review"
+      actions={
+        <>
+          {projectId && !showForm && (
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                data-testid="open-gate-review-button"
+                onClick={() => setShowForm(true)}
+              >
+                + Attempt promotion
+              </Button>
+            )}
+        </>
+      }
+      testId="gate-review-section"
+    >
 
       {projectId && showForm && (
         <Modal
@@ -1462,8 +1448,7 @@ function GateReviewSection({
       {lastResult && (
         <div
           data-testid="gate-review-result"
-          className="mb-3 rounded-lg p-3"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+          className="mf-subcard"
         >
           <div className="mb-2 flex items-center gap-2">
             <Badge variant={lastResult.promoted ? 'success' : 'error'}>
@@ -1509,7 +1494,7 @@ function GateReviewSection({
           description="Attempt a promotion above to gate on real measured data -- blocks on no_data, not just fail."
         />
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -1578,23 +1563,25 @@ function FeatureLibrarySection({ projectId }: { projectId?: string }) {
   };
 
   return (
-    <div className="mb-6" data-testid="feature-library-section">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-          Feature library
-        </h2>
-        {!showForm && (
-          <Button
-            variant="secondary"
-            size="sm"
-            type="button"
-            data-testid="open-feature-library-button"
-            onClick={() => setShowForm(true)}
-          >
-            + Generate feature
-          </Button>
-        )}
-      </div>
+    <Panel
+      title="Feature library"
+      actions={
+        <>
+          {!showForm && (
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                data-testid="open-feature-library-button"
+                onClick={() => setShowForm(true)}
+              >
+                + Generate feature
+              </Button>
+            )}
+        </>
+      }
+      testId="feature-library-section"
+    >
 
       {showForm && (
         <Modal
@@ -1693,8 +1680,7 @@ function FeatureLibrarySection({ projectId }: { projectId?: string }) {
       {lastResult && (
         <div
           data-testid="feature-library-result"
-          className="rounded-lg p-3"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+          className="mf-subcard"
         >
           <div className="mb-1 flex items-center gap-2">
             <Badge variant="success">{lastResult.feature_type}</Badge>
@@ -1725,7 +1711,7 @@ function FeatureLibrarySection({ projectId }: { projectId?: string }) {
           description="Generate a bolt pattern or rib above from the parametric feature library."
         />
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -1825,23 +1811,25 @@ function TradeStudySection({ projectId }: { projectId?: string }) {
   };
 
   return (
-    <div className="mb-6" data-testid="trade-study-section">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
-          Concept trade study
-        </h2>
-        {projectId && !showAddForm && (
-          <Button
-            variant="secondary"
-            size="sm"
-            type="button"
-            data-testid="open-add-option-button"
-            onClick={() => setShowAddForm(true)}
-          >
-            + Add option
-          </Button>
-        )}
-      </div>
+    <Panel
+      title="Concept trade study"
+      actions={
+        <>
+          {projectId && !showAddForm && (
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                data-testid="open-add-option-button"
+                onClick={() => setShowAddForm(true)}
+              >
+                + Add option
+              </Button>
+            )}
+        </>
+      }
+      testId="trade-study-section"
+    >
 
       {projectId && showAddForm && (
         <Modal
@@ -1903,8 +1891,7 @@ function TradeStudySection({ projectId }: { projectId?: string }) {
         />
       ) : (
         <div
-          className="rounded-lg overflow-hidden overflow-x-auto"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+          className="mf-bleed overflow-x-auto"
         >
           <table className="w-full text-left border-collapse" data-testid="trade-study-table">
             <thead>
@@ -2018,7 +2005,7 @@ function TradeStudySection({ projectId }: { projectId?: string }) {
           </table>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -2072,81 +2059,55 @@ export function RequirementsPage() {
       <TradeStudySection projectId={activeProjectId ?? undefined} />
 
       {completeness && (
-        <div
-          data-testid="requirements-completeness"
-          className="mb-4 flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-        >
-          <span className="text-xs text-on-surface-variant" style={{ marginRight: '4px' }}>
-            Checklist ({completeness.productType}):
-          </span>
-          {completeness.covered.map((id) => (
-            <Badge key={id} variant="success">
-              {id}
-            </Badge>
-          ))}
-          {completeness.missing.map((id) => (
-            <Badge key={id} variant="error">
-              missing: {id}
-            </Badge>
-          ))}
-        </div>
+        <Panel title="Checklist" meta={completeness.productType} testId="requirements-completeness">
+          <div className="mf-chips">
+            {completeness.covered.map((id) => (
+              <Badge key={id} variant="success">
+                {id}
+              </Badge>
+            ))}
+            {completeness.missing.map((id) => (
+              <Badge key={id} variant="error">
+                missing: {id}
+              </Badge>
+            ))}
+          </div>
+        </Panel>
       )}
 
       {conflicts.length > 0 && (
-        <div
-          data-testid="requirements-conflicts"
-          className="mb-4 rounded-lg px-3 py-2"
-          style={{ background: 'rgba(255,180,171,0.08)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-        >
-          <div className="text-xs text-on-surface-variant" style={{ marginBottom: '4px' }}>
-            Conflicting requirements
-          </div>
+        <Panel title="Conflicting requirements" meta={conflicts.length} testId="requirements-conflicts">
           {conflicts.map((pair) => (
-            <div key={`${pair.aId}-${pair.bId}`} className="text-xs text-on-surface">
+            <div key={`${pair.aId}-${pair.bId}`}>
               <strong>{pair.aName}</strong> vs <strong>{pair.bName}</strong> — {pair.detail}
             </div>
           ))}
-        </div>
+        </Panel>
       )}
 
       {isLoading && (
-        <div
-          className="rounded-lg overflow-hidden"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-        >
-          {[...Array(4)].map((_, i) => (
-            <div
-              key={i}
-              className="animate-pulse"
-              style={{
-                height: '36px',
-                borderBottom: '1px solid var(--mf-r-65-72-90-0p1)',
-                background: i % 2 === 0 ? 'var(--mf-r-40-42-48-0p3)' : 'transparent',
-              }}
-            />
-          ))}
-        </div>
+        <Panel title="Requirement quality">
+          <PanelLoading />
+        </Panel>
       )}
 
       {!isLoading && requirements.length === 0 && (
-        <EmptyState
-          title="No requirements yet"
-          description={
-            activeProjectId
-              ? 'This project has no requirements recorded yet.'
-              : 'Select a project to view its requirements.'
-          }
-        />
+        <Panel title="Requirement quality">
+          <EmptyState
+            title="No requirements yet"
+            description={
+              activeProjectId
+                ? 'This project has no requirements recorded yet.'
+                : 'Select a project to view its requirements.'
+            }
+          />
+        </Panel>
       )}
 
       {!isLoading && requirements.length > 0 && (
-        <div
-          data-testid="requirements-quality-table"
-          className="rounded-lg overflow-hidden overflow-x-auto"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-        >
-          <table className="w-full text-left border-collapse">
+        <Panel title="Requirement quality" meta={requirements.length}>
+          <div data-testid="requirements-quality-table" className="mf-bleed overflow-x-auto">
+            <table className="w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--mf-c-191b22)' }}>
                 <th
@@ -2182,7 +2143,8 @@ export function RequirementsPage() {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </Panel>
       )}
     </div>
   );

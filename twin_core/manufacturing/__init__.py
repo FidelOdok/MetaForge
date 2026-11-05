@@ -28,6 +28,7 @@ from twin_core.manufacturing.context import (
     changed_fields,
     illustrative_dfm_status,
     manufacturing_note,
+    normalize_orientation,
     render_prompt_block,
 )
 from twin_core.manufacturing.proposals import (
@@ -57,6 +58,7 @@ __all__ = [
     "changed_fields",
     "illustrative_dfm_status",
     "manufacturing_note",
+    "normalize_orientation",
     "parse_envelope_mm",
     "propose_candidates",
     "render_prompt_block",

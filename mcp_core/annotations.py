@@ -235,6 +235,12 @@ READ_ONLY: frozenset[str] = frozenset(
         "twin.get_node",
         # C3D slice 4: the current DFM findings; reading them decides nothing.
         "twin.get_dfm_findings",
+        # The manufacturing context, the latest stored DFM report (or an
+        # unstored preview when none was generated) and the release checklist.
+        # Each reads the twin and writes nothing.
+        "twin.get_manufacturing_context",
+        "twin.get_dfm_report",
+        "twin.get_release_checklist",
         # FORGE-783: a slow tool's job record. Reading it changes nothing (a
         # client polls it, so holding it would hold every poll for a human).
         "twin.job_status",
@@ -362,6 +368,11 @@ ADDITIVE: frozenset[str] = frozenset(
         # inputs reuse the current one) and tags the outputs it read with their
         # status. Never changes geometry or the manufacturing context.
         "twin.evaluate_dfm",
+        # The manufacturing context's next revision. An agent's values are
+        # assumptions that never override a stated value or a decision; a
+        # person's statement needs a named approver (guardrails.APPROVER_RECORDED).
+        # A refused write is kept on the record, so nothing is lost.
+        "twin.state_manufacturing_context",
         "twin.commit_engineering_change",
         "twin.commit_geometry",
         # FORGE-647: a live-view placement, see guardrails.BOOKKEEPING.
