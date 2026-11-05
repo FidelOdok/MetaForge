@@ -280,7 +280,11 @@ def score_candidate(sig: FaceSignature, face: PlanarFace, scale: float) -> Candi
     angle = math.degrees(math.acos(cos))
     tag = "unknown"
     if sig.semantic_tag and face.semantic_tag:
-        tag = "match" if sig.semantic_tag == face.semantic_tag else "mismatch"
+        # A component prefix (CMP-x::) is identity, not shape: compare the rest.
+        from twin_core.component_identity import tag_core
+
+        same = tag_core(sig.semantic_tag) == tag_core(face.semantic_tag)
+        tag = "match" if same else "mismatch"
     if angle > MAX_NORMAL_DEG:
         return CandidateScore(face.face_id, 0.0, 0.0, tag, {"normal_deg": round(angle, 3)}, **where)
     size = max(scale, 1e-6) * POSITION_SCALE

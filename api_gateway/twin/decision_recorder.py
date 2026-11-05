@@ -319,8 +319,22 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["process_ranking"] = ranking.as_metadata()
             if review is not None:
                 metadata["dfm_review"] = review.as_metadata()
+            component_ids: dict[str, str] = {}
             if selected_assembly is not None:
                 metadata["assembly"] = selected_assembly.as_metadata()
+                # C3D slice 2 (SYNC-001): each part gets its component id the
+                # first time an assembly names it, and keeps it afterwards.
+                from twin_core.component_identity import (
+                    IDENTITY_KEY,
+                    assign_assembly_ids,
+                    project_identity,
+                )
+
+                prior = await project_identity(twin, project_id) if project_id else {}
+                component_ids = assign_assembly_ids(
+                    metadata["assembly"], prior.get("name_to_id") if prior else None
+                )
+                metadata[IDENTITY_KEY] = component_ids
             if options is not None:
                 metadata["concept_options"] = [o.as_metadata() for o in options]
             if answers_record is not None:
@@ -413,6 +427,10 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata={"content_sha256": content_hash},
             )
 
+            structured_mesh: dict[str, Any] | None = None
+            if component_ids and project_id:
+                structured_mesh = await _after_assembly(twin, project_backend, project_id)
+
             logger.info(
                 "decision_recorded",
                 node_id=node_id,
@@ -433,7 +451,42 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "evidence_refs": [str(e) for e in resolved_evidence_ids],
                 "knowledge_indexed": indexed,
                 "deduplicated": False,
+                **({"component_ids": component_ids} if component_ids else {}),
+                **({"structured_mesh": structured_mesh} if structured_mesh else {}),
                 **pin_result.as_result(),
             }
 
     return record
+
+
+async def _after_assembly(
+    twin: Any, project_backend: Any, project_id: str
+) -> dict[str, Any] | None:
+    """After a concept assembly: stamp existing CAD, and draw the L1 block mesh.
+
+    Both are best-effort and cheap (no provider). The block mesh is made once
+    per assembly and layout revision: an unchanged one is returned, not
+    redrawn. Returns a short summary of the mesh, or ``None``.
+    """
+    from twin_core.component_identity import stamp_project_cad
+
+    await stamp_project_cad(twin, project_id)
+    try:
+        from api_gateway.twin.structured_mesh import (
+            NoLayoutError,
+            make_structured_mesh_recorder,
+        )
+
+        result = await make_structured_mesh_recorder(twin, project_backend)(
+            project_id=project_id, trigger="concept_assembly"
+        )
+    except NoLayoutError:
+        return None
+    except Exception as exc:  # noqa: BLE001 - the decision is recorded either way
+        logger.warning("structured_mesh_after_assembly_failed", error=str(exc))
+        return None
+    return {
+        "node_id": result.get("node_id"),
+        "reused": bool(result.get("reused")),
+        "level": "L1",
+    }

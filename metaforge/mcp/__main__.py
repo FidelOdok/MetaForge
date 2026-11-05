@@ -2117,6 +2117,15 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("concept_mesh_generator", _concept_mesh)
 
+    # C3D slice 2: twin.render_structured_mesh, the concept's block layout as
+    # simple 3D parts (L1). Deterministic and free; no provider.
+    def _structured_mesh() -> Any:
+        from api_gateway.twin.structured_mesh import make_structured_mesh_recorder
+
+        return make_structured_mesh_recorder(twin, project_backend)
+
+    _try("structured_mesh_renderer", _structured_mesh)
+
     # FORGE-794: twin.generate_sketch. Registered whether or not an image
     # provider is configured; an unconfigured one fails the call clearly.
     def _sketch_generator() -> Any:

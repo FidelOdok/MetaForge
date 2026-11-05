@@ -46,6 +46,8 @@ import { ElectronicsThreadView } from '../components/viewer/ElectronicsThreadVie
 import { StructureView } from '../components/viewer/StructureView';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
 import { RevisionExportControls } from '../components/viewer/RevisionExportControls';
+import { RepresentationBadge } from '../components/geometry/RepresentationBadge';
+import { preferredDisplayNode } from '../components/create/stage-logic';
 import { AssemblyJointsEditor } from '../components/viewer/AssemblyJointsEditor';
 import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
 import { ActivityOverlay } from '../components/activity/ActivityOverlay';
@@ -535,6 +537,11 @@ function NodeDetail({
           <div className="font-mono mt-1" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
             {node.domain} · {node.type} · {formatRelativeTime(node.updatedAt)}
           </div>
+          {node.representation && (
+            <div className="mt-1">
+              <RepresentationBadge representation={node.representation} />
+            </div>
+          )}
         </div>
 
         {/* View 3D / Boolean cut (MET-612) */}
@@ -1342,6 +1349,19 @@ export function TwinViewerPage() {
     setSelectedId(id);
     setInspectorOpen(true);
   };
+
+  // C3D slice 2 (SYNC-010): the 3D model view opened with nothing selected
+  // shows the project's best current representation, L3 first, then L2, L1
+  // and L0. Once per project, so clearing the selection is respected.
+  const autoPicked = useRef<string | null>(null);
+  useEffect(() => {
+    if (tab !== 'model' || selectedId || searchParams.get('node') || !activeProjectId) return;
+    if (autoPicked.current === activeProjectId) return;
+    const best = preferredDisplayNode(items.filter((n) => (n.representation?.display_rank ?? 0) >= 2));
+    if (!best) return;
+    autoPicked.current = activeProjectId;
+    setSelectedId(best.id);
+  }, [tab, selectedId, searchParams, activeProjectId, items]);
 
   // ── derived ──
   const query = search.toLowerCase();

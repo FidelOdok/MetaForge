@@ -128,7 +128,8 @@ class TestAlertingRules:
         # + 2 exact CAD (GeometryValidityFailureSpike, StepRoundTripFailing).
         # + 1 cross-domain impact (FORGE-793).
         # + 1 face remap ambiguity (FaceRemapAmbiguitySpike, CDE slice 9).
-        assert len(rules) == 77
+        # + 1 representation mislabel guard hits (C3D slice 2).
+        assert len(rules) == 78
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -200,7 +201,7 @@ class TestAlertingRules:
         # + 2 exact CAD (CDE slice 6).
         # + 1 cross-domain impact (FORGE-793).
         # + 1 face remap ambiguity (CDE slice 9).
-        assert len(warnings) == 61
+        assert len(warnings) == 62
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""

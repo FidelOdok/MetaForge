@@ -66,6 +66,7 @@ from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
 from twin_core.models.enums import HISTORY_WORK_PRODUCT_TYPES, EdgeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
+from twin_core.representation import representation_of
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin")
@@ -257,6 +258,8 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         **record_view(wp.type.value, wp.metadata),
         # CDE slice 6: Concept / Preview / Exact / Validated and its revision.
         geometryState=geometry_state_view(wp.type.value, wp.metadata),
+        # C3D slice 2: L0..L3, authority, source revision and component ids.
+        representation=representation_of(wp.type.value, wp.metadata, fmt=wp.format),
     )
 
 
