@@ -4089,6 +4089,35 @@
         "title": "CompileResponse",
         "type": "object"
       },
+      "CompleteRequest": {
+        "properties": {
+          "completion_mode": {
+            "default": "quick_cap",
+            "enum": [
+              "quick_cap",
+              "ai_completion"
+            ],
+            "title": "Completion Mode",
+            "type": "string"
+          },
+          "component_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Component Id",
+            "type": "string"
+          },
+          "confirm_spend": {
+            "default": false,
+            "title": "Confirm Spend",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "component_id"
+        ],
+        "title": "CompleteRequest",
+        "type": "object"
+      },
       "CompletenessView": {
         "description": "Dashboard-facing camelCase over the reused ``CompletenessResult``\n(left untouched -- its own field names stay snake_case internally).",
         "properties": {
@@ -4493,6 +4522,23 @@
         "title": "ComponentMaturityResponse",
         "type": "object"
       },
+      "ConceptDecisionRequest": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "accept",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ConceptDecisionRequest",
+        "type": "object"
+      },
       "ConceptMeshRequest": {
         "properties": {
           "confirm_spend": {
@@ -4735,6 +4781,135 @@
           "spend"
         ],
         "title": "ConceptMeshState",
+        "type": "object"
+      },
+      "ConceptPartsStarted": {
+        "properties": {
+          "authority": {
+            "default": "illustrative",
+            "title": "Authority",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expected_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Seconds"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/SpendInfo"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "operation_id",
+          "tool",
+          "spend"
+        ],
+        "title": "ConceptPartsStarted",
+        "type": "object"
+      },
+      "ConceptPartsState": {
+        "properties": {
+          "active_jobs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Active Jobs",
+            "type": "array"
+          },
+          "authority": {
+            "default": "illustrative",
+            "title": "Authority",
+            "type": "string"
+          },
+          "components": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
+          },
+          "proposals": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Proposals",
+            "type": "array"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/SpendInfo"
+          }
+        },
+        "required": [
+          "spend"
+        ],
+        "title": "ConceptPartsState",
         "type": "object"
       },
       "ConfidenceTier": {
@@ -13718,6 +13893,25 @@
         "title": "ManufacturingRoute",
         "type": "string"
       },
+      "MappingRequest": {
+        "properties": {
+          "accept_proposals": {
+            "default": false,
+            "title": "Accept Proposals",
+            "type": "boolean"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/PartAssignment"
+            },
+            "maxItems": 200,
+            "title": "Assignments",
+            "type": "array"
+          }
+        },
+        "title": "MappingRequest",
+        "type": "object"
+      },
       "MaturityEvidence": {
         "properties": {
           "detail": {
@@ -16039,6 +16233,33 @@
           "base_revision"
         ],
         "title": "ParameterCommitRequest",
+        "type": "object"
+      },
+      "PartAssignment": {
+        "properties": {
+          "component_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Id"
+          },
+          "part": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Part",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part"
+        ],
+        "title": "PartAssignment",
         "type": "object"
       },
       "PartBlock": {
@@ -19600,6 +19821,87 @@
         "title": "ReferencesView",
         "type": "object"
       },
+      "RegenerateRequest": {
+        "properties": {
+          "component_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Component Id",
+            "type": "string"
+          },
+          "confirm_spend": {
+            "default": false,
+            "title": "Confirm Spend",
+            "type": "boolean"
+          },
+          "image_base64": {
+            "anyOf": [
+              {
+                "maxLength": 14000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Base64"
+          },
+          "image_mime": {
+            "anyOf": [
+              {
+                "enum": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/webp"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Mime"
+          },
+          "image_node_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Node Id"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "source": {
+            "enum": [
+              "text",
+              "image"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "source"
+        ],
+        "title": "RegenerateRequest",
+        "type": "object"
+      },
       "Region": {
         "description": "A closed polygon in sketch units, and an optional name for what it protects.",
         "properties": {
@@ -21754,6 +22056,65 @@
           "totalFound"
         ],
         "title": "SearchResponse",
+        "type": "object"
+      },
+      "SegmentRequest": {
+        "properties": {
+          "confirm_spend": {
+            "default": false,
+            "title": "Confirm Spend",
+            "type": "boolean"
+          },
+          "granularity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "simple",
+                  "balanced",
+                  "detailed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granularity"
+          },
+          "model": {
+            "default": "v1.0-20250506",
+            "enum": [
+              "v1.0-20250506",
+              "v2.0-20260430"
+            ],
+            "title": "Model",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "split_by_connectivity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split By Connectivity"
+          }
+        },
+        "title": "SegmentRequest",
         "type": "object"
       },
       "SelectComponentRequest": {
@@ -40532,6 +40893,354 @@
           }
         },
         "summary": "Start Concept Mesh",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/concept-parts": {
+      "get": {
+        "description": "The accepted 3D concept, the proposals beside it and what to map parts to.",
+        "operationId": "concept_parts_state_v1_twin_projects__project_id__concept_parts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptPartsState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Concept Parts State",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/concept-parts/segment": {
+      "post": {
+        "description": "Split the accepted 3D concept into parts (a paid job). 409 asks to confirm spend.",
+        "operationId": "segment_concept_v1_twin_projects__project_id__concept_parts_segment_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptPartsStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Segment Concept",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/concept-parts/{node_id}/complete": {
+      "post": {
+        "description": "Seal or complete one part with the provider (a paid job).",
+        "operationId": "complete_part_v1_twin_projects__project_id__concept_parts__node_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptPartsStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Part",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/concept-parts/{node_id}/decision": {
+      "post": {
+        "description": "Accept a proposed 3D concept revision (the previous one is superseded) or reject it.",
+        "operationId": "decide_revision_v1_twin_projects__project_id__concept_parts__node_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConceptDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Revision V1 Twin Projects  Project Id  Concept Parts  Node Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Revision",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/concept-parts/{node_id}/mapping": {
+      "post": {
+        "description": "A person confirms or corrects which component each part is.",
+        "operationId": "confirm_part_mapping_v1_twin_projects__project_id__concept_parts__node_id__mapping_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MappingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Confirm Part Mapping V1 Twin Projects  Project Id  Concept Parts  Node Id  Mapping Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Part Mapping",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/concept-parts/{node_id}/regenerate": {
+      "post": {
+        "description": "Redo one part (text or an image) and swap only it (a paid job).",
+        "operationId": "regenerate_part_v1_twin_projects__project_id__concept_parts__node_id__regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceptPartsStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate Part",
         "tags": [
           "twin"
         ]

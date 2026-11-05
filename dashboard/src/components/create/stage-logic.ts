@@ -13,6 +13,13 @@ export type Maturity = 'Illustrative' | 'Preview' | 'Exact' | 'Validated';
 
 export const CONCEPT_MESH_TOOL = 'twin.generate_concept_mesh';
 export const STRUCTURED_MESH_TOOL = 'twin.render_structured_mesh';
+/** The tools that write a new revision of a 3D concept (concept parts). */
+export const CONCEPT_REVISION_TOOLS = new Set([
+  CONCEPT_MESH_TOOL,
+  'twin.segment_concept_mesh',
+  'twin.regenerate_concept_part',
+  'twin.complete_concept_part',
+]);
 export const NOT_ASSESSED = 'Manufacturing not assessed';
 
 const ENGINEERING_TYPES = new Set(['cad_model', 'pcb_layout']);
@@ -23,7 +30,17 @@ function prop(node: TwinNode, key: string): string {
 
 /** An AI 3D concept (L0): a GLB made by the concept mesh tool, illustrative. */
 export function isConceptMesh(node: TwinNode): boolean {
-  return prop(node, 'generated_by') === CONCEPT_MESH_TOOL;
+  return CONCEPT_REVISION_TOOLS.has(prop(node, 'generated_by'));
+}
+
+/**
+ * A 3D concept revision nobody has accepted (a proposal, or one rejected or
+ * superseded): it never takes the stage on its own, so the accepted concept
+ * stays until the person chooses the new one.
+ */
+export function isPendingConceptRevision(node: TwinNode): boolean {
+  const status = prop(node, 'concept_status');
+  return isConceptMesh(node) && (status === 'proposed' || status === 'rejected' || status === 'superseded');
 }
 
 /** Simple 3D parts (L1): the concept's block layout, one node per component. */
@@ -156,7 +173,7 @@ export function currentRevisions(nodes: TwinNode[]): TwinNode[] {
 
 /** The best real representation of the current revision: L3, L2, L1, L0, then a picture. */
 export function preferredDisplayNode(nodes: TwinNode[]): TwinNode | undefined {
-  return [...currentRevisions(nodes)].sort(
+  return [...currentRevisions(nodes.filter((n) => !isPendingConceptRevision(n)))].sort(
     (a, b) => displayRank(b) - displayRank(a) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''),
   )[0];
 }

@@ -87,6 +87,7 @@ from api_gateway.twin.change_classification_routes import (
     router as twin_change_classification_router,
 )
 from api_gateway.twin.concept_mesh_routes import router as twin_concept_mesh_router
+from api_gateway.twin.concept_parts_routes import router as twin_concept_parts_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.dfm_routes import router as twin_dfm_router
 from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
@@ -1002,6 +1003,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # rendered by blender.render over the same lazy-bridge seam.
     from api_gateway.twin.concept_image import make_concept_image_recorder
     from api_gateway.twin.concept_mesh import make_concept_mesh_recorder
+    from api_gateway.twin.concept_parts import make_concept_parts_service
     from api_gateway.twin.image_critique import make_concept_image_critic
     from api_gateway.twin.render_recorder import make_work_product_renderer
     from api_gateway.twin.sketch_generation import make_sketch_generator
@@ -1358,6 +1360,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-778: an illustrative 3D reference mesh from a concept image.
         # The provider is resolved per call, like the image provider.
         concept_mesh_generator=make_concept_mesh_recorder(twin, project_backend),
+        # Concept parts: split the 3D concept, redo or seal one part. Paid,
+        # held for approval like the concept mesh; provider resolved per call.
+        concept_parts_service=make_concept_parts_service(twin, project_backend),
         # C3D slice 2: the concept's block layout as simple 3D parts (L1).
         # Deterministic and free; no provider.
         structured_mesh_renderer=make_structured_mesh_recorder(twin, project_backend),
@@ -2404,6 +2409,7 @@ def create_app(
     # FORGE-794: AI concept sketches generated from text, references or a sketch.
     app.include_router(twin_sketch_generation_router)
     app.include_router(twin_concept_mesh_router)
+    app.include_router(twin_concept_parts_router)
     app.include_router(twin_representation_router)
     # CDE slice 6: exact CAD builds and revision-linked STEP exports.
     app.include_router(twin_exact_cad_router)

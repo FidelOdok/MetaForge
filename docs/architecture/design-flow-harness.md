@@ -1196,6 +1196,46 @@ explicitly. Jobs are stored in SQLite per process; a restart marks the jobs it
 left running as `interrupted`. See [MCP specification](../mcp_spec.md) for the
 job protocol.
 
+An accepted 3D concept can then be split into parts and worked on one part at
+a time, in three more paid steps held and run as jobs the same way
+(`api_gateway/twin/concept_parts.py`). `twin.segment_concept_mesh` calls
+Tripo's `POST /mesh/segment` with the concept's own Tripo task id when it has
+one, else its GLB uploaded through `POST /files`, else a URL; `model` is
+`v1.0-20250506` (geometry, the default) or `v2.0-20260430` (semantic labels,
+beta, which alone takes `segmentation_granularity` and
+`split_by_connectivity`). Tripo does not document whether parts come back as
+separate nodes or where a label is carried, so the parser
+(`api_gateway/twin/glb_parts.py`) reads every mesh-drawing node of the default
+scene as a candidate part and looks for a label in node and mesh `extras`
+(`label`, `semantic_label`, `part_label`, `category`, `class`), then in a
+name that is not generic (`tripo_part_3` and `Mesh` are generic). Fewer than
+two mesh nodes, even one mesh with several primitives, is recorded as
+`not_segmented`: no part could be addressed by name, so none is guessed. The
+result is fitted to the source's envelope and stored as a new revision of the
+concept (still L0 and illustrative).
+
+Each part is proposed a component of the concept assembly from its label,
+then its relative size and position against the L1 block layout (the eight
+ways the layout can sit in glTF axes are tried and the best kept), then the
+order, with a confidence. A part is proposed only when one component is at
+least 0.6 and 0.1 ahead of the next; a mirror-symmetric pair that only a
+label could tell apart, and every other unclear part, is a question for the
+person. Only parts a person confirms get `component_id` in their node
+`extras`, in our stored copy.
+
+`twin.regenerate_concept_part` makes one part again through the same text or
+image to model path (the image is one the person supplies, never an automatic
+crop), and `twin.complete_concept_part` calls `POST /mesh/complete` with the
+segmentation task, `part_names` set to that part and `completion_mode`
+`quick_cap` (seal) or `ai_completion`. Either result replaces only that node:
+its mesh is dropped and a child node draws the new part, fitted uniformly to
+the part's own box with the same least squares log rule as the envelope fit
+and centred on it, so the node's pose, name and `extras` stay. The new data is
+appended after the existing binary chunk, so every other node's accessors,
+buffer views and bytes are unchanged, and the step checks that before
+storing. A part redone after the split is no longer in Tripo's segmentation,
+so sealing it is refused.
+
 The concept decision carries what it selects as data, not prose.
 `twin.record_decision` takes an `assembly` (each part with its source, made,
 bought or standard, plus material, process, quantity and a provenance tag,

@@ -406,6 +406,7 @@ class TwinServer(McpToolServer):
         concept_image_renderer: Any = None,
         concept_image_critic: Any = None,
         concept_mesh_generator: Any = None,
+        concept_parts_service: Any = None,
         structured_mesh_renderer: Any = None,
         dfm_service: Any = None,
         job_runner: Any = None,
@@ -548,6 +549,9 @@ class TwinServer(McpToolServer):
         # recorder) that has an image-to-3D model turn a concept image into an
         # illustrative GLB render. Never a cad_model, never evidence.
         self._concept_mesh_generator = concept_mesh_generator
+        # Concept parts: an injected service with segment, regenerate_part and
+        # complete_part (api_gateway.twin.concept_parts).
+        self._concept_parts_service = concept_parts_service
         # C3D slice 2: an injected async ``render(...)`` (make_structured_
         # mesh_recorder) that draws the concept's block layout as a GLB with
         # one node per component (L1, sizes estimated). Free and fast.
@@ -810,6 +814,10 @@ class TwinServer(McpToolServer):
             self._register_generate_concept_mesh()
             # FORGE-783: its jobs are read back with twin.job_status.
             self._register_job_status()
+        if concept_parts_service is not None:
+            self._register_concept_parts()
+            if concept_mesh_generator is None:
+                self._register_job_status()
         if structured_mesh_renderer is not None:
             self._register_render_structured_mesh()
         if dfm_service is not None:
@@ -818,7 +826,7 @@ class TwinServer(McpToolServer):
             self._register_generate_sketch()
         if exact_cad_service is not None:
             self._register_exact_cad()
-            if concept_mesh_generator is None:
+            if concept_mesh_generator is None and concept_parts_service is None:
                 self._register_job_status()
         if sketch_interpreter is not None:
             self._register_interpret_sketch()
@@ -5095,6 +5103,205 @@ class TwinServer(McpToolServer):
             mode=mode,
         )
         return result
+
+    # ------------------------------------------------------------------
+    # Concept parts: twin.segment_concept_mesh, twin.regenerate_concept_part,
+    # twin.complete_concept_part
+    # ------------------------------------------------------------------
+
+    _CONCEPT_PARTS_METHODS: dict[str, tuple[str, tuple[str, ...]]] = {
+        "twin.segment_concept_mesh": (
+            "segment",
+            ("node_id", "model", "granularity", "split_by_connectivity"),
+        ),
+        "twin.regenerate_concept_part": (
+            "regenerate_part",
+            ("node_id", "component_id", "source", "prompt", "image_node_id"),
+        ),
+        "twin.complete_concept_part": (
+            "complete_part",
+            ("node_id", "component_id", "completion_mode"),
+        ),
+    }
+
+    def _register_concept_parts(self) -> None:
+        def _manifest_id(*, tool_id: str) -> str:
+            # Each id is written as a tool_id keyword so the annotation scan sees it.
+            return tool_id
+
+        common_out = {
+            "type": "object",
+            "properties": {
+                "node_id": {"type": "string"},
+                "concept_revision": {"type": "integer"},
+                "concept_status": {"type": "string"},
+                "operation": {"type": "string"},
+                "lineage": {"type": ["object", "null"]},
+                "segmentation": {"type": ["object", "null"]},
+                "mapping": {"type": ["object", "null"]},
+                "parts": {"type": "array"},
+                "fit": {"type": "object"},
+                "authority": {"type": "string"},
+                "label": {"type": ["string", "null"]},
+                "job_id": {"type": "string"},
+                "status": {"type": "string"},
+                "poll": {"type": "string"},
+                "expected_seconds": {"type": ["number", "null"]},
+                "reused": {"type": "boolean"},
+            },
+        }
+        wait = {
+            "type": "boolean",
+            "description": "Wait for the result, not a job (def false for a client).",
+        }
+        node = {
+            "type": "string",
+            "description": "The 3D concept revision (a render node) to work on.",
+        }
+        component = {
+            "type": "string",
+            "description": "CMP-... of the part, as a person confirmed it.",
+        }
+        specs: list[tuple[str, str, str, dict[str, Any], list[str]]] = [
+            (
+                _manifest_id(tool_id="twin.segment_concept_mesh"),
+                "Segment Concept Mesh",
+                (
+                    "Split an accepted AI 3D concept (L0) into parts with the mesh provider's "
+                    "segmentation, as a new revision of the concept: still L0, still "
+                    "illustrative, proposed beside the accepted one until a person accepts "
+                    "it. Uses the concept's own provider task id when it has one, else uploads "
+                    "its GLB. model v1.0-20250506 (geometry, def) or v2.0-20260430 (semantic "
+                    "labels, beta, takes granularity and split_by_connectivity). Records "
+                    "provider, model, granularity, credits, task id and a proposed part to "
+                    "component mapping with confidences; unclear parts are questions for a "
+                    "person, never guesses. A model returned whole is recorded as "
+                    "not_segmented. Paid (about 40 credits); returns a job unless wait."
+                ),
+                {
+                    "node_id": node,
+                    "model": {"type": "string", "enum": ["v1.0-20250506", "v2.0-20260430"]},
+                    "granularity": {
+                        "type": "string",
+                        "enum": ["simple", "balanced", "detailed"],
+                    },
+                    "split_by_connectivity": {"type": "boolean"},
+                    "wait": wait,
+                },
+                ["node_id"],
+            ),
+            (
+                _manifest_id(tool_id="twin.regenerate_concept_part"),
+                "Regenerate Concept Part",
+                (
+                    "Generate one part of a 3D concept in parts again (text, or an image a "
+                    "person gave) and swap only that part's node, fitted to the part's "
+                    "original box and pose: every other part stays byte-identical. The part "
+                    "is found by component_id, which a person must have confirmed in the part "
+                    "mapping. Writes a new proposed revision with lineage (regenerated_part, "
+                    "previous revision), labelled illustrative. Paid; returns a job unless wait."
+                ),
+                {
+                    "node_id": node,
+                    "component_id": component,
+                    "source": {"type": "string", "enum": ["text", "image"]},
+                    "prompt": {"type": "string", "maxLength": 1024},
+                    "image_node_id": {
+                        "type": "string",
+                        "description": "A stored image of the part, edited or cropped by a person.",
+                    },
+                    "wait": wait,
+                },
+                ["node_id", "component_id", "source"],
+            ),
+            (
+                _manifest_id(tool_id="twin.complete_concept_part"),
+                "Complete Concept Part",
+                (
+                    "Seal (quick_cap, def) or complete (ai_completion) one part of a 3D "
+                    "concept in parts with the provider's mesh completion, named by its part "
+                    "name, and swap only that node. A new proposed revision with lineage "
+                    "(completed_part), labelled illustrative. Paid (about 100 credits); "
+                    "returns a job unless wait."
+                ),
+                {
+                    "node_id": node,
+                    "component_id": component,
+                    "completion_mode": {"type": "string", "enum": ["quick_cap", "ai_completion"]},
+                    "wait": wait,
+                },
+                ["node_id", "component_id"],
+            ),
+        ]
+        for tool_id, name, description, props, required in specs:
+            register_retry(tool_id, lambda args, t=tool_id: self._concept_parts_work(t, args))
+            self.register_tool(
+                manifest=ToolManifest(
+                    tool_id=tool_id,
+                    adapter_id="twin",
+                    name=name,
+                    description=description,
+                    capability="twin_design_sketch",
+                    input_schema={"type": "object", "properties": props, "required": required},
+                    output_schema=common_out,
+                    phase=2,
+                    resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+                ),
+                handler=lambda args, t=tool_id: self._concept_parts_tool(t, args),
+            )
+
+    def _concept_parts_call(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """The service call's keyword arguments, or ``ValueError`` for a bad request."""
+        _method, fields = self._CONCEPT_PARTS_METHODS[tool]
+        call = {k: arguments[k] for k in fields if arguments.get(k) is not None}
+        for key in ("node_id", "component_id"):
+            if key in fields and (not isinstance(call.get(key), str) or not call[key].strip()):
+                raise ValueError(f"{tool}: '{key}' must be a non-empty string")
+        return call
+
+    def _concept_parts_work(
+        self, tool: str, arguments: dict[str, Any]
+    ) -> Callable[[], Awaitable[dict[str, Any]]]:
+        call = self._concept_parts_call(tool, arguments)
+        method = self._CONCEPT_PARTS_METHODS[tool][0]
+        context = {"surface": "mcp", "tool": tool}
+
+        async def work() -> dict[str, Any]:
+            with tracer.start_as_current_span(tool):
+                result: dict[str, Any] = await getattr(self._concept_parts_service, method)(
+                    **call, request_context=context
+                )
+            logger.info("concept_parts_tool_done", tool=tool, node_id=result.get("node_id"))
+            return result
+
+        return work
+
+    async def _concept_parts_tool(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        wait = arguments.get("wait")
+        if wait is not None and not isinstance(wait, bool):
+            raise ValueError(f"{tool}: 'wait' must be true or false")
+        work = self._concept_parts_work(tool, arguments)
+        if wait is None:
+            wait = caller_waits()
+        if wait:
+            return await work()
+        # Refuse a bad call now, before any paid work starts on a job.
+        method = self._CONCEPT_PARTS_METHODS[tool][0]
+        await getattr(self._concept_parts_service, method)(
+            **self._concept_parts_call(tool, arguments), validate_only=True
+        )
+        runner = self._job_runner or default_job_runner()
+        session_id, ctx_project = session_of_call()
+        job, reused = await runner.start(
+            tool,
+            {k: v for k, v in arguments.items() if k != "wait"},
+            work,
+            session_id=session_id,
+            project_id=ctx_project,
+            expected_seconds=CONCEPT_MESH_EXPECTED_SECONDS,
+        )
+        logger.info("concept_parts_job_started", tool=tool, job_id=job.job_id, reused=reused)
+        return runner.reply(job, reused)
 
     # ------------------------------------------------------------------
     # twin.generate_sketch (FORGE-794)

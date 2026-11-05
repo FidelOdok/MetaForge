@@ -650,6 +650,33 @@ source node and, for an accepted concept, its revision), who asked, from
 which surface, the project's policy mode and whether that policy alone would
 have approved it.
 
+### Working on the 3D concept one part at a time
+
+With a 3D concept on the stage, **Split into parts** asks the mesh provider to
+split it into parts (a paid step, about 40 credits). The split comes back as a
+new version beside the accepted one; the stage keeps showing the accepted
+concept until the person picks **Use this version** (or **Keep the previous
+one**), as with concept alternatives. **Show** puts a version on the stage
+without accepting it.
+
+The parts are then matched to the concept's components. The ones the gateway
+is sure of are filled in with how sure it is; the ones it is not sure of
+(including a left and right pair that look the same) say *Not sure: please
+choose*, and nothing is assumed for them. **Confirm parts** records the
+answers and the sure suggestions. Only confirmed parts carry their component,
+so after that selecting a part on the stage selects its component, the
+component's colour and finish apply to that part, and the DFM guidance and
+*Make it editable* can read the part's size as an estimate. When the model
+came back whole the stage says it could not be split.
+
+With a confirmed part selected, **Redo this part** makes just that part again
+from words or from a picture the person gives (an edited or cropped image),
+and **Seal this part** closes the part's open edges. Both are paid steps that
+ask before spending past the hourly cap, and each result is again a new
+version to accept or keep aside. Every other part stays exactly as it was.
+The model stays illustrative throughout. Engineering's inspector shows the
+split's provenance (provider, model, task, credits) and the part mapping.
+
 ### Showing it as simple 3D parts
 
 **Show as simple 3D parts** (in **More**) draws the concept's block layout as

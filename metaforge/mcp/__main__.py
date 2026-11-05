@@ -2117,6 +2117,16 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("concept_mesh_generator", _concept_mesh)
 
+    # Concept parts: twin.segment_concept_mesh, twin.regenerate_concept_part
+    # and twin.complete_concept_part. Registered whether or not a mesh provider
+    # is configured; an unconfigured one fails the call clearly.
+    def _concept_parts() -> Any:
+        from api_gateway.twin.concept_parts import make_concept_parts_service
+
+        return make_concept_parts_service(twin, project_backend)
+
+    _try("concept_parts_service", _concept_parts)
+
     # C3D slice 2: twin.render_structured_mesh, the concept's block layout as
     # simple 3D parts (L1). Deterministic and free; no provider.
     def _structured_mesh() -> Any:

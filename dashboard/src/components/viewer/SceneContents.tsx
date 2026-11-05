@@ -44,6 +44,8 @@ interface MeshEntry {
   mesh: THREE.Mesh;
   name: string;
   meshName: string;
+  /** The component the mesh's glTF extras name (a mapped concept part, a CAD part). */
+  componentName?: string;
   originalMaterial: THREE.Material | THREE.Material[];
   center: THREE.Vector3;
   boundingBox: { min: [number, number, number]; max: [number, number, number] };
@@ -239,6 +241,7 @@ export function SceneBody({ scene, asset, format, manifest, onPartClick, overlay
           mesh,
           name: partName,
           meshName,
+          componentName: componentOfObject(mesh)?.name,
           originalMaterial: mesh.material,
           center,
           boundingBox: {
@@ -270,8 +273,9 @@ export function SceneBody({ scene, asset, format, manifest, onPartClick, overlay
       } else if (name === selectedMeshName) {
         entry.mesh.material = highlightMaterial;
       } else {
+        // A mapped concept part (tripo_part_2) gets its component's look.
         const look = appearanceFor(appearance, {
-          name: entry.name,
+          name: entry.componentName ?? entry.name,
           nodeId: manifest.meshToNodeMap?.[name],
           meshName: name,
         });

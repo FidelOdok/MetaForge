@@ -355,7 +355,9 @@ def read_parts(glb: bytes) -> PartsReading:
                 bbox_max=box[1],
                 primitive_count=len(mesh.get("primitives") or []),
                 triangle_count=_triangles(doc, mesh_index) if mesh_index >= 0 else None,
-                extras=dict(node.get("extras") or {}) if isinstance(node.get("extras"), dict) else {},
+                extras=dict(node.get("extras") or {})
+                if isinstance(node.get("extras"), dict)
+                else {},
             )
         )
     if not parts:
@@ -507,7 +509,11 @@ def node_face_samples(
     ]
     acc: dict[tuple[int, int], list[float]] = {}
     seen = 0
-    prims = [(p, world) for mesh_index, world in drawn for p in meshes[mesh_index].get("primitives") or []]
+    prims = [
+        (p, world)
+        for mesh_index, world in drawn
+        for p in meshes[mesh_index].get("primitives") or []
+    ]
     for prim, world in prims:
         if prim.get("mode", 4) != 4:
             continue
@@ -992,7 +998,15 @@ def subset_glb(glb: bytes, root: int) -> bytes:
             out[key] = list(doc[key])
     new_binary = b"".join(chunks)
     out["buffers"] = [{"byteLength": len(new_binary) + (-len(new_binary) % 4)}]
-    for key in ("meshes", "accessors", "bufferViews", "materials", "textures", "images", "samplers"):
+    for key in (
+        "meshes",
+        "accessors",
+        "bufferViews",
+        "materials",
+        "textures",
+        "images",
+        "samplers",
+    ):
         if not out[key]:
             out.pop(key)
     return build_glb(out, new_binary, version)

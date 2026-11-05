@@ -28,6 +28,7 @@ from api_gateway.twin.concept_parts import (
     part_label_ok,
     propose_mapping,
 )
+from api_gateway.twin.glb_bounds import glb_bounds
 from api_gateway.twin.glb_parts import (
     REGENERATED_KEY,
     node_face_samples,
@@ -36,7 +37,6 @@ from api_gateway.twin.glb_parts import (
     split_glb,
     subset_glb,
 )
-from api_gateway.twin.glb_bounds import glb_bounds
 from api_gateway.twin.mesh_generation import (
     SEGMENT_MODEL_SEMANTIC,
     GeneratedMesh,
@@ -68,12 +68,47 @@ def _box(centre: tuple[float, float, float], size: tuple[float, float, float]) -
     return struct.pack(f"<{len(corners) * 3}f", *[v for c in corners for v in c])
 
 
-_BOX_TRIS = [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3]
+_BOX_TRIS = [
+    0,
+    1,
+    3,
+    0,
+    3,
+    2,
+    4,
+    6,
+    7,
+    4,
+    7,
+    5,
+    0,
+    4,
+    5,
+    0,
+    5,
+    1,
+    2,
+    3,
+    7,
+    2,
+    7,
+    6,
+    0,
+    2,
+    6,
+    0,
+    6,
+    4,
+    1,
+    5,
+    7,
+    1,
+    7,
+    3,
+]
 
 
-def make_glb(
-    parts: list[dict[str, Any]], *, one_mesh: bool = False
-) -> bytes:
+def make_glb(parts: list[dict[str, Any]], *, one_mesh: bool = False) -> bytes:
     """One node per part (``name``, ``centre``, ``size``, optional ``extras``).
 
     With ``one_mesh`` every part is a primitive of a single mesh on one node.
@@ -119,7 +154,10 @@ def make_glb(
                 "type": "SCALAR",
             }
         )
-        prim = {"attributes": {"POSITION": len(doc["accessors"]) - 2}, "indices": len(doc["accessors"]) - 1}
+        prim = {
+            "attributes": {"POSITION": len(doc["accessors"]) - 2},
+            "indices": len(doc["accessors"]) - 1,
+        }
         if one_mesh:
             prims.append(prim)
             continue
@@ -137,7 +175,12 @@ def make_glb(
     doc["buffers"][0]["byteLength"] = len(binary)
     raw = json.dumps(doc).encode()
     raw += b" " * (-len(raw) % 4)
-    body = struct.pack("<II", len(raw), 0x4E4F534A) + raw + struct.pack("<II", len(binary), 0x004E4942) + binary
+    body = (
+        struct.pack("<II", len(raw), 0x4E4F534A)
+        + raw
+        + struct.pack("<II", len(binary), 0x004E4942)
+        + binary
+    )
     return b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body
 
 
@@ -230,7 +273,9 @@ class World:
     def read(self, wp: Any) -> tuple[bytes, str]:
         return self.blobs[(wp.metadata or {})["minio_object_key"]], str(wp.name)
 
-    async def _wp(self, wp_type: WorkProductType, name: str, metadata: dict[str, Any], fmt: str = "") -> str:
+    async def _wp(
+        self, wp_type: WorkProductType, name: str, metadata: dict[str, Any], fmt: str = ""
+    ) -> str:
         wp_id = uuid4()
         now = datetime.now(UTC)
         await self.twin.create_work_product(
@@ -251,7 +296,12 @@ class World:
         )
         return str(wp_id)
 
-    async def lamp(self, *, layout: list[dict[str, Any]] | None = LAMP_LAYOUT, names: tuple[str, ...] = ("Base", "Arm", "Shade")) -> str:
+    async def lamp(
+        self,
+        *,
+        layout: list[dict[str, Any]] | None = LAMP_LAYOUT,
+        names: tuple[str, ...] = ("Base", "Arm", "Shade"),
+    ) -> str:
         """An accepted concept assembly, its block layout and an original concept mesh."""
         await self._wp(
             WorkProductType.DESIGN_DECISION,
@@ -299,8 +349,12 @@ def world() -> World:
 async def _segmented_and_mapped(world: World) -> tuple[str, dict[str, str]]:
     original = await world.lamp()
     seg = await world.service.segment(node_id=original)
-    comps = {c["name"]: c["component_id"] for c in (await world.service.state(PROJECT))["components"]}
-    await world.service.confirm_mapping(node_id=seg["node_id"], assignments={}, accept_proposals=True, actor="person:a")
+    comps = {
+        c["name"]: c["component_id"] for c in (await world.service.state(PROJECT))["components"]
+    }
+    await world.service.confirm_mapping(
+        node_id=seg["node_id"], assignments={}, accept_proposals=True, actor="person:a"
+    )
     return seg["node_id"], comps
 
 
@@ -370,7 +424,9 @@ async def test_segmentation_uses_the_task_id_and_records_provenance(world: World
     assert meta["concept_lineage"]["operation"] == "segmented"
     assert meta["concept_lineage"]["previous_node_id"] == original
     edges = await world.twin.get_edges(node.id, direction="outgoing")
-    assert any(e.edge_type == EdgeType.GENERATED_FROM and str(e.target_id) == original for e in edges)
+    assert any(
+        e.edge_type == EdgeType.GENERATED_FROM and str(e.target_id) == original for e in edges
+    )
     # Fitted to the source's envelope: about 400 mm tall.
     assert glb_bounds(await world.glb(out["node_id"])).size[1] == pytest.approx(0.4, rel=0.25)
 
@@ -379,7 +435,9 @@ async def test_segmentation_uploads_the_glb_when_there_is_no_task(world: World) 
     original = await world.lamp()
     first = await world.service.segment(node_id=original)
     await world.service.decide(node_id=first["node_id"], decision="accept", actor="person:a")
-    await world.service.segment(node_id=first["node_id"], model=SEGMENT_MODEL_SEMANTIC, granularity="detailed")
+    await world.service.segment(
+        node_id=first["node_id"], model=SEGMENT_MODEL_SEMANTIC, granularity="detailed"
+    )
     _kind, call = world.tripo.calls[-1]
     assert call["task_id"] is None and call["glb"] is not None and call["glb"][:4] == b"glTF"
     assert call["model"] == SEGMENT_MODEL_SEMANTIC and call["granularity"] == "detailed"
@@ -404,7 +462,9 @@ async def test_a_model_returned_whole_is_stored_as_not_segmented(world: World) -
     assert meta["segmentation_status"] == "not_segmented"
     assert meta["part_mapping"]["status"] == "not_segmented" and meta["part_mapping"]["parts"] == []
     with pytest.raises(ConceptPartsError, match="whole"):
-        await world.service.confirm_mapping(node_id=out["node_id"], assignments={}, actor="person:a")
+        await world.service.confirm_mapping(
+            node_id=out["node_id"], assignments={}, actor="person:a"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +476,9 @@ async def test_mapping_proposes_by_geometry_with_confidence(world: World) -> Non
     original = await world.lamp()
     out = await world.service.segment(node_id=original)
     mapping = out["mapping"]
-    comps = {c["name"]: c["component_id"] for c in (await world.service.state(PROJECT))["components"]}
+    comps = {
+        c["name"]: c["component_id"] for c in (await world.service.state(PROJECT))["components"]
+    }
     proposed = {p["part"]: p["proposed_component_id"] for p in mapping["parts"]}
     assert proposed == {
         "tripo_part_0": comps["Base"],
@@ -452,12 +514,18 @@ async def test_mirror_symmetric_parts_are_asked_not_guessed() -> None:
     assert asked == {"tripo_part_0", "tripo_part_1"}
     # Labels settle what geometry cannot.
     labelled = [dict(parts[0], label="leg left"), dict(parts[1], label="leg right"), parts[2]]
-    settled = {p["part"]: p["proposed_component_id"] for p in propose_mapping(labelled, comps, blocks)["parts"]}
+    settled = {
+        p["part"]: p["proposed_component_id"]
+        for p in propose_mapping(labelled, comps, blocks)["parts"]
+    }
     assert settled["tripo_part_0"] == "CMP-leg-left" and settled["tripo_part_1"] == "CMP-leg-right"
 
 
 async def test_without_a_layout_or_labels_every_part_is_a_question() -> None:
-    parts = [{"name": f"tripo_part_{i}", "bbox_min": [i, 0, 0], "bbox_max": [i + 1, 1, 1]} for i in range(2)]
+    parts = [
+        {"name": f"tripo_part_{i}", "bbox_min": [i, 0, 0], "bbox_max": [i + 1, 1, 1]}
+        for i in range(2)
+    ]
     comps = [{"component_id": "CMP-a", "name": "A"}, {"component_id": "CMP-b", "name": "B"}]
     mapping = propose_mapping(parts, comps, None)
     assert all(p["state"] == "question" for p in mapping["parts"])
@@ -470,21 +538,31 @@ async def test_component_ids_are_written_only_after_confirmation(world: World) -
     before = split_glb(await world.glb(out["node_id"]))[0]
     assert not any("component_id" in (n.get("extras") or {}) for n in before["nodes"])
 
-    comps = {c["name"]: c["component_id"] for c in (await world.service.state(PROJECT))["components"]}
+    comps = {
+        c["name"]: c["component_id"] for c in (await world.service.state(PROJECT))["components"]
+    }
     # Correct one part, leave the rest unconfirmed.
     view = await world.service.confirm_mapping(
         node_id=out["node_id"], assignments={"tripo_part_2": comps["Shade"]}, actor="person:a"
     )
     assert view["mapping"]["status"] == "partially_confirmed"
     doc = split_glb(await world.glb(out["node_id"]))[0]
-    tagged = {n["name"]: n.get("extras", {}).get("component_id") for n in doc["nodes"] if "mesh" in n}
+    tagged = {
+        n["name"]: n.get("extras", {}).get("component_id") for n in doc["nodes"] if "mesh" in n
+    }
     assert tagged == {"tripo_part_0": None, "tripo_part_1": None, "tripo_part_2": comps["Shade"]}
-    assert (await world.node(out["node_id"])).metadata["representation"]["component_ids"] == [comps["Shade"]]
+    assert (await world.node(out["node_id"])).metadata["representation"]["component_ids"] == [
+        comps["Shade"]
+    ]
 
     # Accepting the rest writes the rest, and a wrong component id is refused.
     with pytest.raises(ConceptPartsError):
-        await world.service.confirm_mapping(node_id=out["node_id"], assignments={"tripo_part_0": "CMP-nope"}, actor="a")
-    view = await world.service.confirm_mapping(node_id=out["node_id"], assignments={}, accept_proposals=True, actor="person:a")
+        await world.service.confirm_mapping(
+            node_id=out["node_id"], assignments={"tripo_part_0": "CMP-nope"}, actor="a"
+        )
+    view = await world.service.confirm_mapping(
+        node_id=out["node_id"], assignments={}, accept_proposals=True, actor="person:a"
+    )
     assert view["mapping"]["status"] == "confirmed"
     assert confirmed_parts(view["mapping"]) == {
         "tripo_part_0": comps["Base"],
@@ -497,7 +575,9 @@ async def test_a_question_is_never_confirmed_by_accepting_proposals(world: World
     original = await world.lamp(layout=None)
     out = await world.service.segment(node_id=original)
     assert all(p["state"] == "question" for p in out["mapping"]["parts"])
-    view = await world.service.confirm_mapping(node_id=out["node_id"], assignments={}, accept_proposals=True, actor="a")
+    view = await world.service.confirm_mapping(
+        node_id=out["node_id"], assignments={}, accept_proposals=True, actor="a"
+    )
     assert confirmed_parts(view["mapping"]) == {}
     assert len(view["mapping"]["questions"]) == 3
 
@@ -518,7 +598,9 @@ async def test_regenerating_a_part_swaps_only_that_node(world: World) -> None:
     shade = next(p for p in reading.parts if p.name == "tripo_part_2")
     for part in reading.parts:
         if part.name != "tripo_part_2":
-            assert node_mesh_bytes(after, part.node_index) == node_mesh_bytes(before, part.node_index)
+            assert node_mesh_bytes(after, part.node_index) == node_mesh_bytes(
+                before, part.node_index
+            )
             assert node_mesh_bytes(after, part.node_index)
     # The JSON for the other nodes is unchanged too, and their binary bytes keep their offsets.
     bdoc, bbin, _ = split_glb(before)
@@ -589,9 +671,13 @@ async def test_regeneration_from_an_image_and_refusals(world: World) -> None:
     assert world.tripo.calls[-1][1]["image"] == buf.getvalue()
     assert out["regenerated_parts"][0]["source"] == "image"
     with pytest.raises(ConceptPartsError, match="prompt"):
-        await world.service.regenerate_part(node_id=seg_id, component_id=comps["Base"], source="text")
+        await world.service.regenerate_part(
+            node_id=seg_id, component_id=comps["Base"], source="text"
+        )
     with pytest.raises(ConceptPartsError, match="confirm"):
-        await world.service.regenerate_part(node_id=seg_id, component_id="CMP-unknown", source="text", prompt="x")
+        await world.service.regenerate_part(
+            node_id=seg_id, component_id="CMP-unknown", source="text", prompt="x"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -609,19 +695,32 @@ async def test_completion_names_the_part_and_swaps_it(world: World) -> None:
     world.tripo.completed = completed
     seg_id, comps = await _segmented_and_mapped(world)
     before = await world.glb(seg_id)
-    out = await world.service.complete_part(node_id=seg_id, component_id=comps["Shade"], completion_mode="quick_cap")
+    out = await world.service.complete_part(
+        node_id=seg_id, component_id=comps["Shade"], completion_mode="quick_cap"
+    )
     kind, call = world.tripo.calls[-1]
     assert kind == "complete"
-    assert call == {"segment_task_id": "task-seg", "part_names": ["tripo_part_2"], "completion_mode": "quick_cap"}
+    assert call == {
+        "segment_task_id": "task-seg",
+        "part_names": ["tripo_part_2"],
+        "completion_mode": "quick_cap",
+    }
     after = await world.glb(out["node_id"])
     for part in read_parts(before).parts:
         if part.name != "tripo_part_2":
-            assert node_mesh_bytes(after, part.node_index) == node_mesh_bytes(before, part.node_index)
+            assert node_mesh_bytes(after, part.node_index) == node_mesh_bytes(
+                before, part.node_index
+            )
     meta = (await world.node(out["node_id"])).metadata
-    assert meta["generated_by"] == COMPLETE_TOOL and meta["concept_lineage"]["completion_mode"] == "quick_cap"
+    assert (
+        meta["generated_by"] == COMPLETE_TOOL
+        and meta["concept_lineage"]["completion_mode"] == "quick_cap"
+    )
     assert meta["completed_parts"][0]["credits"] == 100.0
     # A part redone after the split is no longer in Tripo's segmentation.
-    redo = await world.service.regenerate_part(node_id=seg_id, component_id=comps["Arm"], source="text", prompt="x")
+    redo = await world.service.regenerate_part(
+        node_id=seg_id, component_id=comps["Arm"], source="text", prompt="x"
+    )
     with pytest.raises(ConceptPartsError, match="redone"):
         await world.service.complete_part(node_id=redo["node_id"], component_id=comps["Arm"])
 
@@ -656,7 +755,9 @@ async def test_per_part_extents_are_estimated_and_faces_are_per_node(world: Worl
     seg_id, comps = await _segmented_and_mapped(world)
     extents = part_extents_mm(await world.node(seg_id))
     assert set(extents) == set(comps.values())
-    assert all(e["confidence"] == "estimated" and e["provenance"] == "open" for e in extents.values())
+    assert all(
+        e["confidence"] == "estimated" and e["provenance"] == "open" for e in extents.values()
+    )
     base = extents[comps["Base"]]
     assert base["size_mm"][0] == pytest.approx(base["size_mm"][1], rel=0.01)
     faces = node_face_samples(await world.glb(seg_id), 0)
@@ -680,7 +781,9 @@ async def test_reconstruction_reads_part_extents_as_estimates(world: World) -> N
 
     original = await world.lamp(layout=None)
     seg = await world.service.segment(node_id=original)
-    comps = {c["name"]: c["component_id"] for c in (await world.service.state(PROJECT))["components"]}
+    comps = {
+        c["name"]: c["component_id"] for c in (await world.service.state(PROJECT))["components"]
+    }
     await world.service.confirm_mapping(
         node_id=seg["node_id"],
         assignments={"tripo_part_0": comps["Base"], "tripo_part_2": comps["Shade"]},
@@ -703,8 +806,17 @@ async def test_tripo_segment_and_complete_requests() -> None:
     glb = SEGMENTED
 
     def handler(request: httpx.Request) -> httpx.Response:
-        sent.append((request.url.path, json.loads(request.content) if request.content and request.method == "POST" and b"{" in request.content[:1] else None))
-        if request.url.path.endswith("/mesh/segment") or request.url.path.endswith("/mesh/complete"):
+        sent.append(
+            (
+                request.url.path,
+                json.loads(request.content)
+                if request.content and request.method == "POST" and b"{" in request.content[:1]
+                else None,
+            )
+        )
+        if request.url.path.endswith("/mesh/segment") or request.url.path.endswith(
+            "/mesh/complete"
+        ):
             return httpx.Response(200, json={"code": 0, "data": {"task_id": "t-1"}})
         if request.url.path.endswith("/tasks/t-1"):
             return httpx.Response(
@@ -713,7 +825,10 @@ async def test_tripo_segment_and_complete_requests() -> None:
                     "code": 0,
                     "data": {
                         "status": "success",
-                        "output": {"model_url": "https://cdn.example/m.glb", "rendered_image_url": "https://cdn.example/r.png"},
+                        "output": {
+                            "model_url": "https://cdn.example/m.glb",
+                            "rendered_image_url": "https://cdn.example/r.png",
+                        },
                         "consumed_credit": 40,
                     },
                 },
@@ -726,7 +841,12 @@ async def test_tripo_segment_and_complete_requests() -> None:
         return None
 
     tripo = TripoMeshGenerator(api_key="k", transport=httpx.MockTransport(handler), sleep=no_sleep)
-    seg = await tripo.segment(task_id="task-0", model=SEGMENT_MODEL_SEMANTIC, granularity="simple", split_by_connectivity=False)
+    seg = await tripo.segment(
+        task_id="task-0",
+        model=SEGMENT_MODEL_SEMANTIC,
+        granularity="simple",
+        split_by_connectivity=False,
+    )
     assert sent[0][0].endswith("/mesh/segment")
     assert sent[0][1] == {
         "model": SEGMENT_MODEL_SEMANTIC,
@@ -736,6 +856,12 @@ async def test_tripo_segment_and_complete_requests() -> None:
     }
     assert seg.credits == 40.0 and seg.output["rendered_image_url"] == "https://cdn.example/r.png"
     sent.clear()
-    done = await tripo.complete(segment_task_id="t-seg", part_names=["tripo_part_2"], completion_mode="quick_cap")
-    assert sent[0][1] == {"input": "t-seg", "completion_mode": "quick_cap", "part_names": ["tripo_part_2"]}
+    done = await tripo.complete(
+        segment_task_id="t-seg", part_names=["tripo_part_2"], completion_mode="quick_cap"
+    )
+    assert sent[0][1] == {
+        "input": "t-seg",
+        "completion_mode": "quick_cap",
+        "part_names": ["tripo_part_2"],
+    }
     assert done.mode == "mesh_complete" and done.glb_bytes == glb

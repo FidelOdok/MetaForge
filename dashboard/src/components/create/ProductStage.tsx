@@ -35,6 +35,7 @@ import { BuildExactNotice } from './BuildExactNotice';
 import { useBuildExact } from '../../hooks/use-build-exact';
 import { ReadinessStatus } from './ReadinessStatus';
 import { MakeEditablePanel } from './MakeEditablePanel';
+import { ConceptPartsPanel } from './ConceptPartsPanel';
 import { getReconstruction, reconstructionKeys } from '../../api/endpoints/reconstruction';
 import {
   NOT_ASSESSED as NOT_ASSESSED_NOTE,
@@ -488,6 +489,11 @@ export function ProductStage({
       </div>
 
       {projectId && editableOpen && <MakeEditablePanel projectId={projectId} onClose={() => setEditableOpen(false)} />}
+
+      {/* Concept parts: split the 3D concept, map its parts, redo or seal one part. */}
+      {projectId && mode === 'view' && node && isConceptMesh(node) && (
+        <ConceptPartsPanel projectId={projectId} selectedComponent={selectedComponent} onShow={onSelect} />
+      )}
 
       {(partsState.busy || partsState.error) && (
         <div className={`cv-stage-notice ${partsState.error ? 'is-error' : ''}`} role={partsState.error ? 'alert' : 'status'} data-testid="simple-parts-notice">

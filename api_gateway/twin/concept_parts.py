@@ -306,7 +306,11 @@ def propose_mapping(
         else []
     )
     block_ids = list(blocks)
-    block_fracs = dict(zip(block_ids, _fractions([blocks[c] for c in block_ids]), strict=True)) if blocks else {}
+    block_fracs = (
+        dict(zip(block_ids, _fractions([blocks[c] for c in block_ids]), strict=True))
+        if blocks
+        else {}
+    )
 
     # Which way the layout sits in the model: the transform the parts agree with best.
     transform = None
@@ -1259,7 +1263,9 @@ class ConceptPartsService:
         if source == "text" and not text:
             raise ConceptPartsError(f"{tool}: a text source needs a prompt")
         if text and len(text) > MAX_PROMPT_CHARS:
-            raise ConceptPartsError(f"{tool}: 'prompt' is longer than {MAX_PROMPT_CHARS} characters")
+            raise ConceptPartsError(
+                f"{tool}: 'prompt' is longer than {MAX_PROMPT_CHARS} characters"
+            )
         if source == "image" and not (image_node_id or image_base64):
             raise ConceptPartsError(f"{tool}: an image source needs an image")
         wp = await self._get(node_id)
@@ -1296,7 +1302,9 @@ class ConceptPartsService:
                         generator="concept_mesh",
                         hint=str(text),
                     )
-                    sent_text = mesh_prompt(f"{text} (one part only: {comp_name})", manufacturing.text)
+                    sent_text = mesh_prompt(
+                        f"{text} (one part only: {comp_name})", manufacturing.text
+                    )
                 options, _note = generation_options(
                     auto_size=False, face_limit=PART_FACE_LIMIT, texture=True
                 )
