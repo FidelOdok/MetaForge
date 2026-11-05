@@ -4316,8 +4316,9 @@ class TwinServer(McpToolServer):
                     "Have an image-to-3D model turn a concept's images into a 3D reference "
                     "mesh for concept review, committed as an illustrative RENDER work "
                     "product in GLB. Give exactly one of image_node_id (one render made by "
-                    "twin.render_concept_image), view_images (front plus at least one of "
-                    "left, back, right, each a concept image rendered with that view, so "
+                    "twin.render_concept_image, or an accepted generated concept), "
+                    "view_images (front plus at least one of left, back, right, each a "
+                    "concept image rendered with that view, so "
                     "the model sees the sides instead of guessing them), or a text prompt. "
                     "face_limit (def 100000) caps its triangles. When the images came from "
                     "a block layout the model is scaled uniformly to best fit its envelope "
@@ -4343,8 +4344,9 @@ class TwinServer(McpToolServer):
                         "image_node_id": {
                             "type": "string",
                             "description": (
-                                "A render node made by twin.render_concept_image. Give "
-                                "exactly one of this, view_images or prompt."
+                                "A render node made by twin.render_concept_image, or an "
+                                "accepted generated concept. Give exactly one of this, "
+                                "view_images or prompt."
                             ),
                         },
                         "view_images": {

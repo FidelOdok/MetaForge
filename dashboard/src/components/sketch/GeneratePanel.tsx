@@ -24,6 +24,7 @@ import { useCreateStore } from '../../store/create-store';
 import { useProjectOperations } from '../../store/operations-store';
 import { debounceGenerate, useSketchGenerationStore } from '../../store/sketch-generation-store';
 import { ReferenceChip } from '../create/ReferenceChip';
+import { manufacturingNote } from '../create/stage-logic';
 
 export const generationKeys = {
   all: ['sketch-generations'] as const,
@@ -51,6 +52,11 @@ interface GeneratePanelProps {
   sketchRevision: string | null;
   /** Unsaved strokes: the request waits for the save rather than using an old revision. */
   sketchUnsaved: boolean;
+  /**
+   * In the stage drawer: the form is shown at once, with no toggle of its
+   * own, and nothing floats over the stage.
+   */
+  docked?: boolean;
 }
 
 /**
@@ -61,13 +67,14 @@ interface GeneratePanelProps {
  * stage while a new one is generated and when it fails, and every image is
  * labelled illustrative.
  */
-export function GeneratePanel({ projectId, sketchKey, sketchRevision, sketchUnsaved }: GeneratePanelProps) {
+export function GeneratePanel({ projectId, sketchKey, sketchRevision, sketchUnsaved, docked = false }: GeneratePanelProps) {
   const session = useSketchGenerationStore((s) => s.sessions[projectId]) ?? useSketchGenerationStore.getState().session(projectId);
   const patch = useSketchGenerationStore((s) => s.patch);
   const clearRegion = useSketchGenerationStore((s) => s.clearRegion);
   const toggleCompare = useSketchGenerationStore((s) => s.toggleCompare);
   const draft = useCreateStore((s) => s.sessions[projectId]?.draft ?? '');
-  const creation = useCreation(session.open ? projectId : null);
+  const open = docked || session.open;
+  const creation = useCreation(open ? projectId : null);
   const ops = useProjectOperations(projectId).ops;
   const qc = useQueryClient();
 
@@ -151,18 +158,20 @@ export function GeneratePanel({ projectId, sketchKey, sketchRevision, sketchUnsa
   };
 
   return (
-    <div className="sk-generate" data-testid="generate-panel">
-      <button
-        type="button"
-        className={`sk-save ${session.open ? 'is-on' : ''}`}
-        aria-expanded={session.open}
-        title="Generate a concept from your description, references or sketch"
-        onClick={() => patch(projectId, { open: !session.open })}
-      >
-        <Sparkles size={14} aria-hidden="true" /> Generate
-      </button>
+    <div className={docked ? 'sk-generate is-docked' : 'sk-generate'} data-testid="generate-panel">
+      {!docked && (
+        <button
+          type="button"
+          className={`sk-save ${session.open ? 'is-on' : ''}`}
+          aria-expanded={session.open}
+          title="Generate a concept from your description, references or sketch"
+          onClick={() => patch(projectId, { open: !session.open })}
+        >
+          <Sparkles size={14} aria-hidden="true" /> Generate
+        </button>
+      )}
 
-      {session.open && (
+      {open && (
         <div className="sk-generate-pop" role="group" aria-label="Generate a concept">
           <p className="sk-generate-mode" data-testid="generate-mode">
             {MODE_WORDS[mode]}
@@ -265,6 +274,9 @@ export function GeneratePanel({ projectId, sketchKey, sketchRevision, sketchUnsa
             <figure className="sk-variant is-accepted" role="listitem">
               <img src={nodeFileUrl(baseline.node_id)} alt="Accepted concept" />
               <figcaption>Accepted · {line?.head_ref}</figcaption>
+              <span className="sk-variant-note" data-testid="variant-note">
+                {manufacturingNote(baseline.manufacturing_note)}
+              </span>
             </figure>
           )}
           {proposals.map((p) => (
@@ -273,6 +285,9 @@ export function GeneratePanel({ projectId, sketchKey, sketchRevision, sketchUnsa
               <figcaption>
                 {p.review_required ? 'Check it: ' + (p.preservation?.failures[0] ?? 'it changed what it had to keep') : 'Proposal'}
               </figcaption>
+              <span className="sk-variant-note" data-testid="variant-note">
+                {manufacturingNote(p.manufacturing_note)}
+              </span>
               <div className="sk-variant-actions">
                 <button type="button" className="cv-icon-btn" aria-label="Accept this concept" title="Accept" onClick={() => decide.mutate({ action: 'accept', node: p })}>
                   <Check size={13} />

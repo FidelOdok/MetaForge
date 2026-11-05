@@ -43,9 +43,15 @@ describe('ReadinessCard', () => {
 });
 
 describe('JourneyRail', () => {
-  it('marks the current step', () => {
-    render(<JourneyRail step={3} />);
+  it('shows four milestones as summaries and marks the current one', () => {
+    render(<JourneyRail milestone={2} summaries={{ Imagine: 'Concept on stage', Check: '2 to resolve' }} />);
+    const items = screen.getAllByRole('listitem');
+    expect(items.map((li) => li.querySelector('.cv-journey-label')?.textContent)).toEqual(['Imagine', 'Develop', 'Check', 'Make']);
     expect(screen.getByText('Check').closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByText('Imagine').closest('li')).toHaveClass('is-done');
+    expect(screen.getByText('2 to resolve')).toBeInTheDocument();
+    // Summaries, not gates: nothing in the rail is a control.
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
   });
 });
 
