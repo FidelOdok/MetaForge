@@ -2549,7 +2549,7 @@
         "title": "BranchBody",
         "type": "object"
       },
-      "Brief-Input": {
+      "Brief": {
         "properties": {
           "assumptions": {
             "items": {
@@ -2574,48 +2574,7 @@
           },
           "reference_details": {
             "items": {
-              "$ref": "#/components/schemas/ReferenceRecord-Input"
-            },
-            "title": "Reference Details",
-            "type": "array"
-          },
-          "references": {
-            "items": {
-              "type": "string"
-            },
-            "title": "References",
-            "type": "array"
-          }
-        },
-        "title": "Brief",
-        "type": "object"
-      },
-      "Brief-Output": {
-        "properties": {
-          "assumptions": {
-            "items": {
-              "$ref": "#/components/schemas/Assumption"
-            },
-            "title": "Assumptions",
-            "type": "array"
-          },
-          "items": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BriefItem"
-            },
-            "title": "Items",
-            "type": "object"
-          },
-          "measurements": {
-            "items": {
-              "$ref": "#/components/schemas/Measurement"
-            },
-            "title": "Measurements",
-            "type": "array"
-          },
-          "reference_details": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceRecord-Output"
+              "$ref": "#/components/schemas/ReferenceRecord"
             },
             "title": "Reference Details",
             "type": "array"
@@ -2669,7 +2628,7 @@
       "BriefUpdate": {
         "properties": {
           "brief": {
-            "$ref": "#/components/schemas/Brief-Input"
+            "$ref": "#/components/schemas/Brief"
           },
           "expected_version": {
             "anyOf": [
@@ -4078,7 +4037,7 @@
             "type": "array"
           },
           "spec": {
-            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
+            "$ref": "#/components/schemas/CreateAssemblyRequest",
             "description": "The compiled declarative spec."
           }
         },
@@ -5571,45 +5530,7 @@
         "title": "CoverageResponse",
         "type": "object"
       },
-      "CreateAssemblyRequest-Input": {
-        "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
-        "properties": {
-          "name": {
-            "description": "Assembly name.",
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "parts": {
-            "description": "Parts to author + assemble.",
-            "items": {
-              "$ref": "#/components/schemas/AssemblyPart"
-            },
-            "minItems": 1,
-            "title": "Parts",
-            "type": "array"
-          },
-          "project_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Project to scope the cad_model to.",
-            "title": "Project Id"
-          }
-        },
-        "required": [
-          "name",
-          "parts"
-        ],
-        "title": "CreateAssemblyRequest",
-        "type": "object"
-      },
-      "CreateAssemblyRequest-Output": {
+      "CreateAssemblyRequest": {
         "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
         "properties": {
           "name": {
@@ -6092,7 +6013,7 @@
       "Creation": {
         "properties": {
           "brief": {
-            "$ref": "#/components/schemas/Brief-Output"
+            "$ref": "#/components/schemas/Brief"
           },
           "builds": {
             "items": {
@@ -9678,7 +9599,7 @@
             "type": "integer"
           },
           "spec": {
-            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
+            "$ref": "#/components/schemas/CreateAssemblyRequest",
             "description": "The declarative spec compiled from the description."
           }
         },
@@ -14751,7 +14672,7 @@
             "type": "boolean"
           },
           "plan": {
-            "$ref": "#/components/schemas/MigrationPlan-Input",
+            "$ref": "#/components/schemas/MigrationPlan",
             "description": "The plan exactly as the dry run returned it."
           },
           "reason": {
@@ -14789,76 +14710,7 @@
         "title": "MigrationApplyResponse",
         "type": "object"
       },
-      "MigrationPlan-Input": {
-        "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
-        "properties": {
-          "counts_after": {
-            "additionalProperties": true,
-            "title": "Counts After",
-            "type": "object"
-          },
-          "counts_before": {
-            "additionalProperties": true,
-            "title": "Counts Before",
-            "type": "object"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ProposedItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "low_confidence": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Low Confidence",
-            "type": "array"
-          },
-          "plan_hash": {
-            "default": "",
-            "title": "Plan Hash",
-            "type": "string"
-          },
-          "project_id": {
-            "title": "Project Id",
-            "type": "string"
-          },
-          "records": {
-            "items": {
-              "$ref": "#/components/schemas/RecordAction"
-            },
-            "title": "Records",
-            "type": "array"
-          },
-          "skipped": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Skipped",
-            "type": "array"
-          },
-          "twin_fingerprint": {
-            "title": "Twin Fingerprint",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_id",
-          "twin_fingerprint",
-          "created_at"
-        ],
-        "title": "MigrationPlan",
-        "type": "object"
-      },
-      "MigrationPlan-Output": {
+      "MigrationPlan": {
         "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
         "properties": {
           "counts_after": {
@@ -14934,7 +14786,7 @@
             "type": "boolean"
           },
           "plan": {
-            "$ref": "#/components/schemas/MigrationPlan-Output"
+            "$ref": "#/components/schemas/MigrationPlan"
           },
           "report": {
             "title": "Report",
@@ -19426,109 +19278,7 @@
         "title": "ReferenceFact",
         "type": "object"
       },
-      "ReferenceRecord-Input": {
-        "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
-        "properties": {
-          "active": {
-            "default": true,
-            "title": "Active",
-            "type": "boolean"
-          },
-          "associations": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceAssociation"
-            },
-            "maxItems": 50,
-            "title": "Associations",
-            "type": "array"
-          },
-          "disclosures": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceDisclosure"
-            },
-            "title": "Disclosures",
-            "type": "array"
-          },
-          "facts": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceFact"
-            },
-            "maxItems": 500,
-            "title": "Facts",
-            "type": "array"
-          },
-          "mime": {
-            "default": "",
-            "maxLength": 100,
-            "title": "Mime",
-            "type": "string"
-          },
-          "name": {
-            "default": "",
-            "maxLength": 300,
-            "title": "Name",
-            "type": "string"
-          },
-          "protected_features": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 50,
-            "title": "Protected Features",
-            "type": "array"
-          },
-          "role": {
-            "default": "inspiration",
-            "enum": [
-              "inspiration",
-              "geometry",
-              "functional_demo",
-              "specification",
-              "manufacturing_rule",
-              "verification_evidence",
-              "existing_design"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Size"
-          },
-          "source_hash": {
-            "default": "",
-            "maxLength": 64,
-            "title": "Source Hash",
-            "type": "string"
-          },
-          "versions": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceVersion"
-            },
-            "title": "Versions",
-            "type": "array"
-          },
-          "work_product_id": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Work Product Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "work_product_id"
-        ],
-        "title": "ReferenceRecord",
-        "type": "object"
-      },
-      "ReferenceRecord-Output": {
+      "ReferenceRecord": {
         "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
         "properties": {
           "active": {
@@ -19806,7 +19556,7 @@
           "reference": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ReferenceRecord-Output"
+                "$ref": "#/components/schemas/ReferenceRecord"
               },
               {
                 "type": "null"
@@ -27756,7 +27506,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.0.0+unknown"
+    "version": "0.3.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -29027,7 +28777,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateAssemblyRequest-Input"
+                "$ref": "#/components/schemas/CreateAssemblyRequest"
               }
             }
           },

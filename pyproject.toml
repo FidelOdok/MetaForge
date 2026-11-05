@@ -40,7 +40,15 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "pydantic>=2.0",
+    # 2.13 is the floor because the published API reference
+    # (docs/reference/openapi.json) is generated from the live app, and
+    # pydantic 2.12 emits identical "-Input"/"-Output" copies of models used
+    # both as a request and a response (Brief, CreateAssemblyRequest,
+    # MigrationPlan, ReferenceRecord) where 2.13+ emits one schema. With a
+    # floor of 2.0 the committed spec flipped between the two shapes
+    # depending on whose environment regenerated it. CI resolves the newest
+    # release and checks the spec with `scripts/gen_openapi.py --check`.
+    "pydantic>=2.13",
     # ``pydantic-ai`` (the umbrella) pulls every provider's extras
     # (gradio, xai-sdk, vertex, bedrock, ...) and the resolver backtracks
     # forever (MET-377). MetaForge only uses the openai + anthropic
