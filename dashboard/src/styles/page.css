@@ -159,3 +159,37 @@
   color: var(--mf-c-e2e2eb);
   font-size: 13px;
 }
+
+/* A form laid out in a modal: fields side by side, wrapping, at toolbar size. */
+.mf-form-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.mf-modal .mf-form-grid label,
+.mf-modal label.mf-check {
+  margin: 0;
+  font-size: 12px;
+}
+.mf-modal .mf-form-grid label {
+  display: flex;
+}
+.mf-modal .mf-form-grid input,
+.mf-modal .mf-form-grid select,
+.mf-modal .mf-form-grid textarea {
+  min-height: 36px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.mf-modal input[type='checkbox'],
+.mf-modal input[type='radio'] {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+}
+.mf-modal label.mf-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

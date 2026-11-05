@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Button } from '../ui/Button';
 import { Link } from 'react-router-dom';
 
 import apiClient from '../../api/client';
@@ -77,9 +78,9 @@ export function RunSupervisionPanel({ runId, ended }: { runId: string; ended: bo
             a person on anything it cannot fix.
           </p>
           {!ended && (
-            <button type="button" className="action-primary" onClick={() => act.mutate('start')}>
+            <Button type="button" size="sm" className="self-start" onClick={() => act.mutate('start')}>
               Supervise this run
-            </button>
+            </Button>
           )}
         </>
       ) : (
@@ -106,9 +107,9 @@ export function RunSupervisionPanel({ runId, ended }: { runId: string; ended: bo
             ))}
           </ol>
           {sup.active && (
-            <button type="button" className="action-secondary" onClick={() => act.mutate('stop')}>
+            <Button type="button" variant="secondary" size="sm" className="self-start" onClick={() => act.mutate('stop')}>
               Stop supervising
-            </button>
+            </Button>
           )}
         </>
       )}

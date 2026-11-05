@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
+import { Modal } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowUpRight, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { ArrowUpRight, RefreshCw, ShieldCheck } from 'lucide-react';
 
 import { ApprovalCard } from '../components/approvals/ApprovalCard';
 
@@ -35,27 +36,15 @@ export function RunDetailPage() {
   );
   const flowState = useFlowState(id, runActive);
   const toolStream = useRunToolEvents(id, runActive);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [deciding, setDeciding] = useState(false);
   const run = runQuery.data;
   const awaiting = run?.status === 'awaiting_approval';
   // The gate is read through the unified approvals API so the dialog shows
   // the same card, findings and allowed decisions as /approvals.
   const gate = useApproval(run ? `gate:${run.id}` : undefined, awaiting);
 
-  function openDecision() {
-    // jsdom lacks showModal; fall back to the open attribute.
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (typeof dialog.showModal === 'function') dialog.showModal();
-    else dialog.setAttribute('open', '');
-  }
-
-  function closeDecision() {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (typeof dialog.close === 'function') dialog.close();
-    else dialog.removeAttribute('open');
-  }
+  const openDecision = () => setDeciding(true);
+  const closeDecision = () => setDeciding(false);
 
   if (runQuery.isLoading) {
     return (
@@ -272,35 +261,30 @@ export function RunDetailPage() {
         </aside>
       </div>
 
-      <dialog ref={dialogRef} className="project-dialog" aria-labelledby="decision-title">
-        <div className="flow-form">
-          <div className="section-heading">
-            <h2 id="decision-title">Review this gate</h2>
-            <button type="button" className="icon-control" aria-label="Close decision" onClick={closeDecision}>
-              <X size={20} />
-            </button>
-          </div>
-          {!awaiting ? (
-            <p role="status">
-              This run is no longer waiting for approval. Close this dialog to view its current
-              state.
-            </p>
-          ) : gate.isError ? (
-            <p className="form-error" role="alert">
-              The gate could not be loaded. Refresh the run to check its current state.
-            </p>
-          ) : gate.data ? (
-            <ApprovalCard item={gate.data} onDecided={() => closeDecision()} />
-          ) : (
-            <p role="status">Loading gate…</p>
-          )}
-          <div className="dialog-actions">
-            <button type="button" className="action-secondary" onClick={closeDecision}>
-              Close
-            </button>
-          </div>
-        </div>
-      </dialog>
+      <Modal
+        open={deciding}
+        onClose={closeDecision}
+        title="Review this gate"
+        footer={
+          <Button type="button" variant="secondary" onClick={closeDecision}>
+            Close
+          </Button>
+        }
+      >
+        {!awaiting ? (
+          <p role="status">
+            This run is no longer waiting for approval. Close this dialog to view its current state.
+          </p>
+        ) : gate.isError ? (
+          <p className="form-error" role="alert">
+            The gate could not be loaded. Refresh the run to check its current state.
+          </p>
+        ) : gate.data ? (
+          <ApprovalCard item={gate.data} onDecided={() => closeDecision()} />
+        ) : (
+          <p role="status">Loading gate…</p>
+        )}
+      </Modal>
     </div>
   );
 }
