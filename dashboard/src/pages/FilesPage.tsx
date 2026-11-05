@@ -1,4 +1,6 @@
 import type { CSSProperties } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Button } from '../components/ui/Button';
 import { useState } from 'react';
 import { useAllLinks, useDeleteLink, useSyncNode } from '../hooks/use-links';
 import { useActiveProject } from '../hooks/use-active-project';
@@ -245,50 +247,32 @@ export function FilesPage() {
   return (
     <div>
 
-      {/* ── Page header ─────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <span style={{ fontSize: 18, fontWeight: 500, color: 'var(--mf-c-e8e8ed)' }}>Files</span>
-          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--mf-c-9a9aaa)' }}>
-            {total} linked · source file registry
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {synced > 0 && (
-            <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mf-c-3dd68c)', background: 'rgba(61,214,140,0.1)', padding: '2px 8px', borderRadius: 4 }}>
-              {synced} synced
-            </span>
-          )}
-          {changed > 0 && (
-            <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mf-c-f59e0b)', background: 'rgba(245,158,11,0.12)', padding: '2px 8px', borderRadius: 4 }}>
-              {changed} changed
-            </span>
-          )}
-          {disconnected > 0 && (
-            <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mf-c-9a9aaa)', background: 'var(--mf-r-154-154-170-0p1)', padding: '2px 8px', borderRadius: 4 }}>
-              {disconnected} disconnected
-            </span>
-          )}
-          <button
-            title="Refresh"
-            onClick={() => window.location.reload()}
-            style={{
-              width: 28,
-              height: 28,
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 4,
-              color: 'var(--mf-c-9a9aaa)',
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>refresh</span>
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Files"
+        meta={`${total} linked · source file registry`}
+        actions={
+          <>
+            {synced > 0 && (
+              <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mf-c-3dd68c)', background: 'rgba(61,214,140,0.1)', padding: '2px 8px', borderRadius: 4 }}>
+                {synced} synced
+              </span>
+            )}
+            {changed > 0 && (
+              <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mf-c-f59e0b)', background: 'rgba(245,158,11,0.12)', padding: '2px 8px', borderRadius: 4 }}>
+                {changed} changed
+              </span>
+            )}
+            {disconnected > 0 && (
+              <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mf-c-9a9aaa)', background: 'var(--mf-r-154-154-170-0p1)', padding: '2px 8px', borderRadius: 4 }}>
+                {disconnected} disconnected
+              </span>
+            )}
+            <Button type="button" variant="ghost" size="sm" title="Refresh" aria-label="Refresh" onClick={() => window.location.reload()}>
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>refresh</span>
+            </Button>
+          </>
+        }
+      />
 
       {/* ── Upload files and folders into the twin ─────────────────────────── */}
       <FileUploadPanel projectId={activeProjectId} />

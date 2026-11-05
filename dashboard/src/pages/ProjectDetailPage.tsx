@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
+import { ConfirmDialog, Modal } from '../components/ui/Modal';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useProject, useUpdateProject, useDeleteProject } from '../hooks/use-projects';
 import { useActiveProject } from '../hooks/use-active-project';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
-import { Button } from '../components/ui/Button';
+import { Button, buttonClasses } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { formatRelativeTime } from '../utils/format-time';
 import { useCurrentView } from '../hooks/use-items';
@@ -158,8 +160,7 @@ export function ProjectDetailPage() {
     setIsEditing(true);
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveEdit = () => {
     if (!editName.trim()) return;
     updateProject.mutate(
       { id: project.id, payload: { name: editName.trim(), description: editDescription.trim() } },
@@ -190,85 +191,56 @@ export function ProjectDetailPage() {
 
   return (
     <div>
-      {/* Back nav */}
-      <div className="mb-4 flex items-center gap-1.5">
-        <Link
-          to="/projects"
-          className="flex items-center gap-1 font-mono transition-opacity hover:opacity-80"
-          style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)' }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: '14px', color: 'var(--mf-c-9a9aaa)' }}>arrow_back</span>
-          Projects
-        </Link>
-        <span style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)' }}>/</span>
-        <span className="font-mono" style={{ fontSize: '11px', color: 'var(--mf-c-e2e2eb)' }}>{project.name}</span>
-      </div>
-
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-baseline gap-2">
-          <span style={{ fontSize: '18px', fontWeight: 500, color: 'var(--mf-c-e2e2eb)', letterSpacing: '-0.02em' }}>
-            {project.name}
-          </span>
-          <StatusBadge status={project.status} />
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="font-mono" style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)' }}>
-            updated {formatRelativeTime(project.lastUpdated)}
-          </span>
-          {!isEditing && (
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                aria-label="Rename project"
-                onClick={startEditing}
-                className="flex items-center justify-center rounded transition-colors hover:bg-surface-high"
-                style={{ width: 26, height: 26, color: 'var(--mf-c-9a9aaa)' }}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span>
-              </button>
-              <button
-                type="button"
-                aria-label="Delete project"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center justify-center rounded transition-colors hover:bg-surface-high"
-                style={{ width: 26, height: 26, color: 'var(--mf-c-9a9aaa)' }}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Primary project actions */}
-      <div className="project-tools" style={{ marginBottom: 24 }}>
-        <Link className="action-primary" to={`/runs/new?project=${encodeURIComponent(project.id)}`}>
-          Start design run
-        </Link>
-        <Link className="action-secondary" to="/twin">
-          Open twin &amp; agent
-        </Link>
-        <Link className="action-secondary" to="/bom">
-          Bill of materials
-        </Link>
-        <button
-          type="button"
-          className="action-secondary"
-          aria-expanded={showBaselines}
-          onClick={() => setShowBaselines((v) => !v)}
-        >
-          {showBaselines ? 'Hide baselines' : 'Baselines'}
-        </button>
-        <button
-          type="button"
-          className="action-secondary"
-          aria-expanded={showPolicy}
-          onClick={() => setShowPolicy((v) => !v)}
-        >
-          {showPolicy ? 'Hide approval policy' : 'Approval policy'}
-        </button>
-      </div>
+      <PageHeader
+        back={{ to: '/projects', label: 'Projects' }}
+        title={project.name}
+        badge={<StatusBadge status={project.status} />}
+        meta={`updated ${formatRelativeTime(project.lastUpdated)}`}
+        actions={
+          <>
+            <Link className={buttonClasses('primary', 'sm')} to={`/runs/new?project=${encodeURIComponent(project.id)}`}>
+              Start design run
+            </Link>
+            <Link className={buttonClasses('secondary', 'sm')} to="/twin">
+              Open twin &amp; agent
+            </Link>
+            <Link className={buttonClasses('secondary', 'sm')} to="/bom">
+              Bill of materials
+            </Link>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-expanded={showBaselines}
+              onClick={() => setShowBaselines((v) => !v)}
+            >
+              {showBaselines ? 'Hide baselines' : 'Baselines'}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-expanded={showPolicy}
+              onClick={() => setShowPolicy((v) => !v)}
+            >
+              {showPolicy ? 'Hide approval policy' : 'Approval policy'}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" aria-label="Rename project" title="Rename" onClick={startEditing}>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Delete project"
+              title="Delete"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
+            </Button>
+          </>
+        }
+      />
 
       {showPolicy && (
         <div className="mb-4">
@@ -282,58 +254,10 @@ export function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Description, or the rename/redescribe form */}
-      {isEditing ? (
-        <form onSubmit={handleSaveEdit} className="glass rounded p-4 mb-4 space-y-3" style={glassCard}>
-          <div>
-            <label
-              htmlFor="edit-project-name"
-              className="block mb-1 font-mono"
-              style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}
-            >
-              Project name
-            </label>
-            <input
-              id="edit-project-name"
-              type="text"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              className="w-full rounded px-3 py-1.5 text-xs outline-none focus:border-[var(--mf-r-65-72-90-0p6)]"
-              style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p3)', color: 'var(--mf-c-e2e2eb)' }}
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="edit-project-desc"
-              className="block mb-1 font-mono"
-              style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}
-            >
-              Description
-            </label>
-            <textarea
-              id="edit-project-desc"
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              rows={2}
-              className="w-full rounded px-3 py-1.5 text-xs outline-none resize-none focus:border-[var(--mf-r-65-72-90-0p6)]"
-              style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p3)', color: 'var(--mf-c-e2e2eb)' }}
-            />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={() => setIsEditing(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" size="sm" disabled={!editName.trim() || updateProject.isPending}>
-              {updateProject.isPending ? 'Saving...' : 'Save'}
-            </Button>
-          </div>
-        </form>
-      ) : (
-        project.description && (
-          <p className="mb-4 font-mono" style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)', lineHeight: '1.6' }}>
-            {project.description}
-          </p>
-        )
+      {project.description && (
+        <p className="mb-4 font-mono" style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)', lineHeight: '1.6' }}>
+          {project.description}
+        </p>
       )}
 
       {/* Metrics row */}
@@ -578,51 +502,51 @@ export function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Delete confirmation */}
-      {showDeleteConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.5)' }}
-        >
-          <div className="w-full max-w-sm rounded p-5" style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--mf-c-ffb4ab)' }}>warning</span>
-              <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--mf-c-e2e2eb)' }}>Delete project</span>
-            </div>
-            <p className="mb-4" style={{ fontSize: '12px', color: 'var(--mf-c-9a9aaa)', lineHeight: '1.5' }}>
-              Delete <strong style={{ color: 'var(--mf-c-e2e2eb)' }}>{project.name}</strong>? This removes the
-              project record and cannot be undone.
-              {project.work_products.length > 0 && (
-                <>
-                  {' '}
-                  Its {project.work_products.length} work product
-                  {project.work_products.length === 1 ? '' : 's'} will remain in the Digital Twin,
-                  unlinked from this project.
-                </>
-              )}
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowDeleteConfirm(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="danger"
-                size="sm"
-                onClick={handleDelete}
-                disabled={deleteProject.isPending}
-              >
-                {deleteProject.isPending ? 'Deleting...' : 'Delete'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={isEditing}
+        onClose={() => setIsEditing(false)}
+        title="Rename project"
+        onSubmit={handleSaveEdit}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setIsEditing(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!editName.trim() || updateProject.isPending}>
+              {updateProject.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        }
+      >
+        <label htmlFor="edit-project-name">Project name</label>
+        <input id="edit-project-name" autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} />
+        <label htmlFor="edit-project-desc">Description</label>
+        <textarea
+          id="edit-project-desc"
+          rows={3}
+          value={editDescription}
+          onChange={(e) => setEditDescription(e.target.value)}
+        />
+      </Modal>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete project"
+        tone="danger"
+        confirmLabel={deleteProject.isPending ? 'Deleting…' : 'Delete'}
+        busy={deleteProject.isPending}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      >
+        Delete <strong>{project.name}</strong>? This removes the project record and cannot be undone.
+        {project.work_products.length > 0 && (
+          <>
+            {' '}
+            Its {project.work_products.length} work product
+            {project.work_products.length === 1 ? '' : 's'} will remain in the Digital Twin, unlinked from this project.
+          </>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

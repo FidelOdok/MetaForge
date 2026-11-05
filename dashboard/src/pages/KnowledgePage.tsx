@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { listSources, searchKnowledge } from '../api/endpoints/knowledge';
@@ -213,22 +214,14 @@ export function KnowledgePage() {
   return (
     <div>
       {/* ── Page header ─────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <span style={{ fontSize: 18, fontWeight: 500, color: 'var(--mf-c-e8e8ed)' }}>Knowledge</span>
-          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--mf-c-9a9aaa)' }}>
-            {isSearching
-              ? `${searchResults?.length ?? 0} match${(searchResults?.length ?? 0) === 1 ? '' : 'es'}`
-              : `${total} ${total === 1 ? 'source' : 'sources'} · L1 corpus`}
-          </span>
-        </div>
+      <PageHeader
+        title="Knowledge"
+        meta={
+          isSearching
+            ? `${searchResults?.length ?? 0} match${(searchResults?.length ?? 0) === 1 ? '' : 'es'}`
+            : `${total} ${total === 1 ? 'source' : 'sources'} · L1 corpus`
+        }
+        actions={
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <span
             className="material-symbols-outlined"
@@ -244,6 +237,7 @@ export function KnowledgePage() {
             onChange={(e) => setSearchInput(e.target.value)}
             style={{
               width: 260,
+              minHeight: 36,
               padding: '6px 10px 6px 28px',
               background: 'var(--mf-r-30-31-38-0p85)',
               border: '1px solid var(--mf-r-65-72-90-0p3)',
@@ -255,7 +249,8 @@ export function KnowledgePage() {
             }}
           />
         </div>
-      </div>
+        }
+      />
 
       {/* ── Filter row: type chips + project_id input ───────────────────── */}
       <div style={{ marginBottom: 12 }}>

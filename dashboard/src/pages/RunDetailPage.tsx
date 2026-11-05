@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Button } from '../components/ui/Button';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowUpRight, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { ArrowUpRight, RefreshCw, ShieldCheck, X } from 'lucide-react';
 
 import { ApprovalCard } from '../components/approvals/ApprovalCard';
 
@@ -96,31 +98,24 @@ export function RunDetailPage() {
 
   return (
     <div className="flow-workspace">
-      <Link to="/runs" className="text-action">
-        <ArrowLeft size={16} />
-        All runs
-      </Link>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">EXECUTION &amp; EVIDENCE</p>
-          <h1>
-            Design run<span className="heading-period">.</span>
-          </h1>
-          <p className="page-description">{String(run.request.goal ?? 'Run details')}</p>
-        </div>
-        <div className="heading-actions">
-          <StatusBadge status={run.status} />
-          <button
+      <PageHeader
+        back={{ to: '/runs', label: 'All runs' }}
+        title="Design run"
+        badge={<StatusBadge status={run.status} />}
+        description={String(run.request.goal ?? 'Run details')}
+        actions={
+          <Button
             type="button"
-            className="action-secondary"
+            variant="secondary"
+            size="sm"
             disabled={runQuery.isFetching}
             onClick={() => void runQuery.refetch()}
           >
-            <RefreshCw size={16} />
+            <RefreshCw size={15} />
             Refresh
-          </button>
-        </div>
-      </div>
+          </Button>
+        }
+      />
 
       {/* FORGE-396: phases and gates as a graph, with the selected phase's
           activity beside it. Rendered whenever the run is a design flow --

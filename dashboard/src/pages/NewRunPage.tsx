@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, Play, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Check, Play, ShieldCheck } from 'lucide-react';
 
 import { buildDesignFlowRequest } from '../api/endpoints/design-flows';
 import { useActiveProject } from '../hooks/use-active-project';
@@ -46,22 +47,13 @@ export function NewRunPage() {
 
   return (
     <div className="flow-workspace">
-      <Link className="text-action" to="/runs">
-        <ArrowLeft size={16} />
-        All runs
-      </Link>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">INTENT TO HARDWARE</p>
-          <h1 ref={headingRef} tabIndex={-1}>
-            {reviewing ? 'Review your run' : 'Start a design run'}
-            <span className="heading-period">.</span>
-          </h1>
-          <p className="page-description">
-            Describe the outcome. Review the evidence at each engineering gate.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        back={{ to: '/runs', label: 'All runs' }}
+        title={reviewing ? 'Review your run' : 'Start a design run'}
+        titleRef={headingRef}
+        meta="intent to hardware"
+        description="Describe the outcome. Review the evidence at each engineering gate."
+      />
 
       <ol className="flow-stepper" aria-label="Run setup">
         <li aria-current={reviewing ? undefined : 'step'}>

@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { LoadCaseDialog, type LoadCaseDialogHandle } from '../components/simulation/LoadCaseDialog';
 import { ResultsCompare } from '../components/simulation/ResultsCompare';
@@ -203,30 +205,26 @@ export function SimPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-start justify-between">
-        <div>
-          <h1 className="text-lg font-medium text-on-surface" style={{ margin: 0 }}>
-            Simulation
-          </h1>
-          <span className="font-mono text-xs text-on-surface-variant">
-            {items.length} load case{items.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        {activeProjectId && (
-          <button
-            ref={newLoadCaseButtonRef}
-            type="button"
-            onClick={() => dialogRef.current?.open()}
-            className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
-              add
-            </span>
-            New load case
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Simulation"
+        meta={`${items.length} load case${items.length === 1 ? '' : 's'}`}
+        actions={
+          activeProjectId && (
+            <Button
+              ref={newLoadCaseButtonRef}
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => dialogRef.current?.open()}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>
+                add
+              </span>
+              New load case
+            </Button>
+          )
+        }
+      />
 
       {isLoading && (
         <div

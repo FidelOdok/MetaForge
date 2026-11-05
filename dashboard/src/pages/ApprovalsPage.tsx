@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Link } from 'react-router-dom';
 
 import { ApprovalCard } from '../components/approvals/ApprovalCard';
@@ -102,23 +103,17 @@ export function ApprovalsPage() {
 
   return (
     <div>
-      <div className="mb-5 flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-lg font-medium leading-tight" style={{ color: KC.onSurface }}>
-            Approvals
-          </h1>
-          <span className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
-            Human-in-the-loop review · {activeProjectId ? 'this project' : 'all projects'}
-          </span>
-        </div>
-        <label className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
-          Kind{' '}
+      <PageHeader
+        title="Approvals"
+        meta={`human-in-the-loop review · ${activeProjectId ? 'this project' : 'all projects'}`}
+        actions={
+        <label className="mf-field">
+          Kind
           <select
             aria-label="Filter by kind"
             value={kind}
             onChange={(e) => setKind(e.target.value as ApprovalKind | '')}
-            className="rounded p-1"
-            style={{ background: KC.surfaceLowest, color: KC.onSurface, border: `1px solid ${KC.border}` }}
+            className="mf-select"
           >
             <option value="">All kinds</option>
             {KINDS.map((k) => (
@@ -128,7 +123,8 @@ export function ApprovalsPage() {
             ))}
           </select>
         </label>
-      </div>
+        }
+      />
 
       <div role="tablist" aria-label="Approvals views" className="flex gap-2 mb-3">
         {(['pending', 'audit'] as const).map((t) => (

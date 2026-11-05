@@ -43,6 +43,20 @@ here with the rail expanded to show its labels:
   opens `/create/:id` for it; Engineering opens its project detail. Both
   read the same records, and Create's unsent draft survives the round trip.
 
+**One page layout.** Every Engineering page except the full-width twin opens
+with the same header, laid out like Files: the page title with a short
+summary beside it (counts, scope), a back link on a drill-in page, and the
+page's buttons on the right with an 8px gap
+(`dashboard/src/components/ui/PageHeader.tsx`). Buttons come from one
+component in four kinds (primary, secondary, ghost, danger) at one toolbar
+height; a link that acts as a button uses the same classes
+(`buttonClasses`). Dialogs are one `Modal` (`components/ui/Modal.tsx`), a
+native `<dialog>` that closes on Escape, on a click outside it and from its
+X, starts with focus inside and hands focus back to whatever opened it, with
+*Cancel* first and the main action last. A question before something that
+cannot be undone, such as deleting a project, is a `ConfirmDialog` built on
+it. Styles are in `dashboard/src/styles/page.css`.
+
 Every route below has a sidebar entry. Two entries run the other way —
 **Requirements** (`/requirements`) and **Evals** (`/evals`) are in the
 rail but have no section here yet. The default landing page is
@@ -82,9 +96,10 @@ The home of the dashboard.
 
 ## `/projects/:id`: project detail
 
-Drill-in for a single project: metrics, an action row (**Start design
-run**, **Open twin & agent**, **Bill of materials**, **Baselines**) and the
-project's artifact updates, newest first.
+Drill-in for a single project: metrics, the header's actions (**Start
+design run**, **Open twin & agent**, **Bill of materials**, **Baselines**,
+**Approval policy**, and *Rename* and *Delete*, each of which opens a dialog)
+and the project's artifact updates, newest first.
 
 **Current items.** By default the page lists one row per item
 at its current revision, grouped by type (Parts, Assemblies, Requirements,

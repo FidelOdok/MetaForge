@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { PageHeader } from '../components/ui/PageHeader';
+import { useSearchParams } from 'react-router-dom';
 
 import {
   useDesignFlows,
@@ -106,17 +107,11 @@ export function FlowEditorPage() {
 
   return (
     <div className="flow-workspace">
-      <div className="page-heading">
-        <div>
-          <h1>Flow editor</h1>
-          <span className="eyebrow">
-            EDIT A TEMPLATE · SAVING CREATES A NEW VERSION FOR APPROVAL
-          </span>
-        </div>
-        <Link className="action-secondary" to="/runs">
-          Back to runs
-        </Link>
-      </div>
+      <PageHeader
+        back={{ to: '/runs', label: 'All runs' }}
+        title="Flow editor"
+        meta="saving creates a new version for approval"
+      />
 
       {catalog.isError && (
         <p role="alert" className="field-help">

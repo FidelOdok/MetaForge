@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
 import { useActiveProject } from '../hooks/use-active-project';
 import { useChecklist, useLinkEvidence } from '../hooks/use-compliance';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -303,9 +304,7 @@ export function CompliancePage() {
   if (!activeProjectId) {
     return (
       <div>
-        <h1 className="text-lg font-medium" style={{ color: KC.onSurface, margin: 0, marginBottom: 12 }}>
-          Compliance
-        </h1>
+        <PageHeader title="Compliance" />
         <EmptyState
           title="No project selected"
           description="Select a project from the Topbar to view its compliance checklist."
@@ -321,18 +320,11 @@ export function CompliancePage() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="mb-4 flex items-start justify-between">
-        <div>
-          <h1 className="text-lg font-medium leading-tight" style={{ color: KC.onSurface, margin: 0 }}>
-            Compliance
-          </h1>
-          <span className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
-            {activeProject?.name ?? 'Project'} · {checklist?.total_items ?? 0} requirements
-          </span>
-        </div>
-        <MarketChips selected={markets} onToggle={toggleMarket} />
-      </div>
+      <PageHeader
+        title="Compliance"
+        meta={`${activeProject?.name ?? 'Project'} · ${checklist?.total_items ?? 0} requirements`}
+        actions={<MarketChips selected={markets} onToggle={toggleMarket} />}
+      />
 
       {isLoading ? (
         <div className="flex items-center justify-center gap-2" style={{ padding: '48px 0' }}>

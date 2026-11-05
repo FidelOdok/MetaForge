@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Button } from '../components/ui/Button';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
@@ -240,19 +242,16 @@ export function ProjectsPage() {
 
   return (
     <div className="projects-workspace">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">YOUR ENGINEERING WORKSPACE</p>
-          <h1>
-            Projects<span className="heading-period">.</span>
-          </h1>
-          <p className="page-description">From intent to evidence. Keep every iteration in view.</p>
-        </div>
-        <button ref={newProjectButtonRef} type="button" className="action-primary" onClick={openCreate}>
-          <Plus size={18} />
-          New project
-        </button>
-      </div>
+      <PageHeader
+        title="Projects"
+        meta="engineering workspace"
+        actions={
+          <Button ref={newProjectButtonRef} type="button" size="sm" onClick={openCreate}>
+            <Plus size={15} />
+            New project
+          </Button>
+        }
+      />
 
       <section className="workspace-metrics" aria-label="Workspace summary">
         {metrics.map((m) => (
