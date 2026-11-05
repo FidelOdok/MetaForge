@@ -193,3 +193,34 @@
   align-items: center;
   gap: 6px;
 }
+
+/* Filter chips and view tabs: the Files page's chips, in one place. */
+.mf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.mf-chip {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--mf-r-30-31-38-0p85);
+  color: var(--mf-c-9a9aaa);
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.mf-chip:hover {
+  color: var(--mf-c-e2e2eb);
+}
+.mf-chip[aria-pressed='true'],
+.mf-chip[aria-selected='true'] {
+  background: #ff5a0a;
+  color: #000;
+}

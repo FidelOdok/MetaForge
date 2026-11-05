@@ -126,7 +126,7 @@ export function ApprovalsPage() {
         }
       />
 
-      <div role="tablist" aria-label="Approvals views" className="flex gap-2 mb-3">
+      <div role="tablist" aria-label="Approvals views" className="mf-chips mb-3">
         {(['pending', 'audit'] as const).map((t) => (
           <button
             key={t}
@@ -134,14 +134,7 @@ export function ApprovalsPage() {
             role="tab"
             aria-selected={tab === t}
             onClick={() => setTab(t)}
-            className="font-mono rounded px-3 py-1.5"
-            style={{
-              fontSize: 12,
-              letterSpacing: '0.06em',
-              color: tab === t ? KC.onSurface : KC.onSurfaceVariant,
-              border: `1px solid ${tab === t ? 'var(--mf-c-ffb783)' : KC.border}`,
-              background: 'transparent',
-            }}
+            className="mf-chip"
           >
             {t === 'pending' ? 'PENDING' : 'AUDIT'}
           </button>

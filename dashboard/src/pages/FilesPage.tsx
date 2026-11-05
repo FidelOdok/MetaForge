@@ -327,26 +327,16 @@ export function FilesPage() {
         </div>
 
         {/* Filter chips */}
-        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        <div className="mf-chips" style={{ marginTop: 8 }}>
           {FILTER_CHIPS.map(chip => {
             const active = filterTool === chip;
             return (
               <button
                 key={chip}
+                type="button"
+                className="mf-chip"
+                aria-pressed={active}
                 onClick={() => setFilterTool(chip)}
-                style={{
-                  fontFamily: 'monospace',
-                  fontSize: 10,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: active ? '#ff5a0a' : 'var(--mf-r-30-31-38-0p85)',
-                  color: active ? '#000' : 'var(--mf-c-9a9aaa)',
-                  transition: 'background 0.15s, color 0.15s',
-                }}
               >
                 {chip}
               </button>
