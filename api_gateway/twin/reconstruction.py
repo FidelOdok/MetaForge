@@ -476,6 +476,17 @@ async def _layout(twin: Any, pid: UUID) -> tuple[dict[str, Any] | None, Any | No
     return None, None, None
 
 
+async def _segmented_extents(twin: Any, pid: UUID) -> tuple[dict[str, dict[str, Any]], Any | None]:
+    """Per component, the box of its part in the accepted concept in parts (estimated)."""
+    from api_gateway.twin.concept_parts import part_extents_mm, segmented_heads
+    from twin_core.models.enums import WorkProductType
+
+    heads = segmented_heads(await _list(twin, WorkProductType.RENDER, pid))
+    if not heads:
+        return {}, None
+    return part_extents_mm(heads[0]), heads[0]
+
+
 async def _context(twin: Any, pid: UUID, name: str, cid: str) -> tuple[ContextFacts, Any]:
     """The component's manufacturing context (or the product's), as reconstruction reads it."""
     from api_gateway.twin.dfm_findings import process_context
@@ -844,6 +855,7 @@ async def _propose_all(
         if layout_node is not None and layout_ref is None:
             layout_ref = f"node:{layout_node.id}"
         parts = [p for p in (layout or {}).get("parts") or [] if isinstance(p, dict)]
+        seg_extents, seg_node = await _segmented_extents(twin, pid)
         current = {cid: info for cid, info in ident["components"].items() if info.get("in_current")}
         made = {cid: info for cid, info in current.items() if info.get("source") == "made"}
         wanted = request.component_ids or list(current)
@@ -873,6 +885,14 @@ async def _propose_all(
                 (p for p in parts if match_name(str(p.get("name") or ""), {name: cid}) == cid),
                 None,
             )
+            part_ref = layout_ref if part is not None else None
+            from_segment = False
+            if part is None and cid in seg_extents and seg_node is not None:
+                # No layout block: the accepted concept's part a person mapped
+                # to this component, its box read as an estimate (never confirmed).
+                part = dict(seg_extents[cid], name=name)
+                part_ref = f"node:{seg_node.id}"
+                from_segment = True
             psks, sketch_nodes = await _sketches(twin, pid, cid)
             context, stored_context = await _context(twin, pid, name, cid)
             facts, about_ids = _reference_facts(pid, name, cid)
@@ -880,7 +900,7 @@ async def _propose_all(
                 component_id=cid,
                 component_name=name,
                 part=part,
-                layout_ref=layout_ref if part is not None else None,
+                layout_ref=part_ref,
                 sketches=psks,
                 context=context,
                 facts=facts,
@@ -913,8 +933,18 @@ async def _propose_all(
             proposal.inputs = ProposalInputs(
                 assembly_decision_id=str(decision_id),
                 layout_ref=inputs.layout_ref,
-                layout_node_id=str(layout_node.id) if layout_node is not None and part else None,
-                mesh_node_id=str(mesh_node.id) if mesh_node is not None and part else None,
+                layout_node_id=(
+                    str(layout_node.id)
+                    if layout_node is not None and part and not from_segment
+                    else None
+                ),
+                mesh_node_id=(
+                    str(seg_node.id)
+                    if from_segment and seg_node is not None
+                    else str(mesh_node.id)
+                    if mesh_node is not None and part
+                    else None
+                ),
                 reference_ids=ref_ids,
                 sketch_refs=[_ref(dict(n.metadata or {})) or f"node:{n.id}" for n in sketch_nodes],
                 context_ref=context.context_ref,
@@ -923,7 +953,9 @@ async def _propose_all(
             deps: list[_Dep] = []
             if decision is not None:
                 deps.append(_Dep(decision.id, "concept_assembly", item_type="design_decision"))
-            if part is not None and layout_node is not None:
+            if from_segment and seg_node is not None:
+                deps.append(_Dep(seg_node.id, "l0_segmented_part", item_type="render"))
+            elif part is not None and layout_node is not None:
                 deps.append(_dep_of(layout_node, "l1_layout"))
                 if mesh_node is not None:
                     deps.append(_Dep(mesh_node.id, "l1_mesh", item_type="render"))

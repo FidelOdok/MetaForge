@@ -1310,6 +1310,28 @@ groups:
             be made editable. A refused request (no accepted concept) is not
             counted. Check the gateway logs (reconstruction_failed).
 
+  # Concept parts: segmentation, part regeneration and completion
+  # (api_gateway/twin/concept_parts.py).
+  - name: metaforge_concept_parts
+    rules:
+      - alert: ConceptPartsFailures
+        expr: >-
+          (sum(increase(metaforge_concept_segmentation_total{outcome=~"failed|timeout"}[1h]))
+          + sum(increase(metaforge_concept_part_regeneration_total{outcome=~"failed|timeout"}[1h]))
+          + sum(increase(metaforge_concept_part_completion_total{outcome=~"failed|timeout"}[1h])))
+          >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Concept part steps are failing"
+          description: >-
+            Three or more paid concept part steps (splitting a 3D concept into
+            parts, redoing a part or sealing a part) failed or timed out in the
+            last hour. Each is a paid provider call. Check the mesh provider and
+            the gateway logs (concept_segmentation_failed,
+            concept_part_regeneration_failed, concept_part_completion_failed).
+
   # C3D slice 5 -- the L2 preview versus exact comparison
   # (api_gateway/twin/preview_comparison.py).
   - name: metaforge_preview_comparison

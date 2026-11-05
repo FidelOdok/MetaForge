@@ -54,7 +54,8 @@ FIRM_CONFIDENCE: frozenset[str] = frozenset({"exact", "human_confirmed", "design
 #: Weakest first: a derived measure takes the weakest of its inputs.
 _CONFIDENCE_ORDER: tuple[str, ...] = ("estimated", "design_parameter", "human_confirmed", "exact")
 
-GeometryLevel = Literal["none", "L1", "parametric_sketch", "parametric", "exact"]
+#: ``L0`` is a part of a segmented AI concept, mapped to its component by a person.
+GeometryLevel = Literal["none", "L0", "L1", "parametric_sketch", "parametric", "exact"]
 Severity = Literal["blocking", "advisory"]
 
 #: The statuses a heuristic finding set may carry (never passed or released).

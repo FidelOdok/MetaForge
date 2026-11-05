@@ -1179,6 +1179,50 @@ class MetricsRegistry:
         labels=["outcome", "mode"],
     )
 
+    # ── Concept parts: segmentation, mapping, part regeneration ─────────
+
+    CONCEPT_SEGMENTATION_TOTAL = MetricDefinition(
+        name="metaforge_concept_segmentation_total",
+        type="counter",
+        description=(
+            "Splits of an accepted 3D concept (L0) into parts, by outcome: segmented, "
+            "not_segmented (the model came back whole, no part nodes), unavailable (no "
+            "mesh provider), timeout or failed, and by the segmentation model"
+        ),
+        labels=["outcome", "model"],
+    )
+
+    CONCEPT_PART_MAPPING_TOTAL = MetricDefinition(
+        name="metaforge_concept_part_mapping_total",
+        type="counter",
+        description=(
+            "Parts of a segmented concept a person decided, by outcome: confirmed (as "
+            "proposed), corrected (to another component) or not_a_component"
+        ),
+        labels=["outcome"],
+    )
+
+    CONCEPT_PART_REGENERATION_TOTAL = MetricDefinition(
+        name="metaforge_concept_part_regeneration_total",
+        type="counter",
+        description=(
+            "One part of a segmented concept generated again and swapped in, by outcome "
+            "(regenerated, unavailable, timeout, failed) and source (text, image)"
+        ),
+        labels=["outcome", "source"],
+    )
+
+    CONCEPT_PART_COMPLETION_TOTAL = MetricDefinition(
+        name="metaforge_concept_part_completion_total",
+        type="counter",
+        description=(
+            "One part of a segmented concept sealed or completed by the provider, by "
+            "outcome (completed, unavailable, timeout, failed) and mode (quick_cap, "
+            "ai_completion)"
+        ),
+        labels=["outcome", "mode"],
+    )
+
     # ── Manufacturing context (DFM-grounded generation) ────────────────
 
     MANUFACTURING_CONTEXT_WRITE_TOTAL = MetricDefinition(
@@ -1649,6 +1693,10 @@ class MetricsRegistry:
             cls.RECONSTRUCTION_PROPOSAL_TOTAL,
             cls.RECONSTRUCTION_FEATURE_ACCEPTED_TOTAL,
             cls.RECONSTRUCTION_LLM_PASS_TOTAL,
+            cls.CONCEPT_SEGMENTATION_TOTAL,
+            cls.CONCEPT_PART_MAPPING_TOTAL,
+            cls.CONCEPT_PART_REGENERATION_TOTAL,
+            cls.CONCEPT_PART_COMPLETION_TOTAL,
         ]
 
     @classmethod
@@ -2546,6 +2594,30 @@ class MetricsCollector:
     def record_concept_mesh(self, outcome: str, mode: str = "image") -> None:
         """Record one concept mesh generation outcome by mode (FORGE-778, FORGE-779)."""
         counter = self._instruments.get(MetricsRegistry.CONCEPT_MESH_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "mode": mode})
+
+    def record_concept_segmentation(self, outcome: str, model: str) -> None:
+        """Record one split of a 3D concept into parts, by outcome and model."""
+        counter = self._instruments.get(MetricsRegistry.CONCEPT_SEGMENTATION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "model": model})
+
+    def record_concept_part_mapping(self, outcome: str) -> None:
+        """Record one part a person mapped (confirmed, corrected, not_a_component)."""
+        counter = self._instruments.get(MetricsRegistry.CONCEPT_PART_MAPPING_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_concept_part_regeneration(self, outcome: str, source: str) -> None:
+        """Record one part of a concept generated again, by outcome and source."""
+        counter = self._instruments.get(MetricsRegistry.CONCEPT_PART_REGENERATION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "source": source})
+
+    def record_concept_part_completion(self, outcome: str, mode: str) -> None:
+        """Record one part of a concept sealed or completed, by outcome and mode."""
+        counter = self._instruments.get(MetricsRegistry.CONCEPT_PART_COMPLETION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome, "mode": mode})
 

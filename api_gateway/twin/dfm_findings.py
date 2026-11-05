@@ -170,7 +170,14 @@ def _num(value: Any) -> float | None:
 # Gathering geometry
 # ---------------------------------------------------------------------------
 
-_LEVEL_RANK = {"none": 0, "L1": 1, "parametric_sketch": 2, "parametric": 3, "exact": 4}
+_LEVEL_RANK = {
+    "none": 0,
+    "L0": 1,
+    "L1": 2,
+    "parametric_sketch": 3,
+    "parametric": 4,
+    "exact": 5,
+}
 
 
 @dataclass
@@ -481,6 +488,56 @@ async def gather_components(twin: Any, project_id: str | UUID) -> list[Gathered]
                 str(cid),
                 str(part_name),
                 _Source("L1", [ref], [], l1_measures, output_nodes=[str(newest.id)]),
+            )
+
+    # The accepted concept in parts (L0): each part a person mapped to its
+    # component gives an estimated envelope and its own mesh faces for the
+    # overhang check. Never firmer than "estimated": an AI model's guess.
+    from api_gateway.twin.concept_parts import (
+        MAPPING_KEY,
+        PART_FACES_KEY,
+        confirmed_parts,
+        part_extents_mm,
+        segmented_heads,
+    )
+
+    heads = segmented_heads(renders)
+    if heads:
+        head = heads[0]
+        head_meta = dict(head.metadata or {})
+        ref = f"node:{head.id}"
+        extents = part_extents_mm(head)
+        stored_faces = _dict(head_meta.get(PART_FACES_KEY))
+        for part_name, cid in confirmed_parts(head_meta.get(MAPPING_KEY)).items():
+            ext = extents.get(cid) or {}
+            size = ext.get("size_mm")
+            l0_measures: list[Measure] = []
+            if isinstance(size, list) and len(size) == 3 and min(size) > 0:
+                l0_measures = [
+                    Measure(
+                        quantity="envelope",
+                        value=[round(float(v), 4) for v in size],
+                        confidence="estimated",
+                        source="segmented AI concept part (L0), sizes estimated",
+                        feature=part_name,
+                        evidence_ref=ref,
+                    )
+                ]
+            faces = _faces_from(stored_faces.get(part_name))
+            add(
+                cid,
+                part_name,
+                _Source(
+                    "L0",
+                    [ref],
+                    [],
+                    l0_measures,
+                    faces=faces or None,
+                    faces_confidence="estimated",
+                    faces_directed=False,
+                    faces_ref=ref if faces else None,
+                    output_nodes=[str(head.id)],
+                ),
             )
 
     out: list[Gathered] = []

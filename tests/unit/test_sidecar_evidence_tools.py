@@ -32,6 +32,10 @@ WIRED = {
     "twin.critique_concept_image",
     # FORGE-778: the illustrative 3D reference mesh, with or without a provider.
     "twin.generate_concept_mesh",
+    # Concept parts: split, redo a part, seal a part, with or without a provider.
+    "twin.segment_concept_mesh",
+    "twin.regenerate_concept_part",
+    "twin.complete_concept_part",
     # C3D slice 2: the concept as simple 3D parts (L1), free, no provider.
     "twin.render_structured_mesh",
     # C3D slice 4: heuristic DFM findings, evaluated and read.
