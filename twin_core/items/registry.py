@@ -286,6 +286,17 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "change is the next revision; each generated concept records the one it used."
         ),
     ),
+    TwinTypeSpec(
+        "appearance",
+        TwinTypeKind.DEFINITION,
+        "work_product:appearance",
+        key_prefix="APR",
+        description=(
+            "How the product and each component look (APR-PROJECT): colour, finish, "
+            "render material and texture refs, keyed by component name so a regenerated "
+            "mesh keeps its look. Never changes CAD or the manufacturing context."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",

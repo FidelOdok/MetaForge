@@ -12,6 +12,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from api_gateway.chat.ui_blocks import UiBlock
+from api_gateway.twin.change_classification import ChangeClassification
 
 # ---------------------------------------------------------------------------
 # Request schemas
@@ -92,6 +93,9 @@ class MessageResponse(BaseModel):
     #: FORGE-788 (RT-001): the turn's operation on the project stream
     #: (``chat:<id>``), for a person's message in a project thread.
     operation_id: str | None = None
+    #: What the person's message would change (spec section 5), decided before
+    #: the agent acted. Set on the reply to a person's message in a project thread.
+    classification: ChangeClassification | None = None
 
 
 class ThreadResponse(BaseModel):

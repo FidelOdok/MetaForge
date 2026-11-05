@@ -51,6 +51,8 @@ def test_definitions_are_the_versioned_types() -> None:
         "generated_sketch",
         # The manufacturing context every generator reads.
         "manufacturing_context",
+        # How the product and its components look.
+        "appearance",
     }
 
 

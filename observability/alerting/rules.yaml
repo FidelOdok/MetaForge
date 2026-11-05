@@ -1000,6 +1000,26 @@ groups:
             logs (manufacturing_context_sync_failed,
             manufacturing_context_promote_failed).
 
+  # Change classification: appearance-only updates (api_gateway/twin/appearance.py).
+  - name: metaforge_change_classification
+    rules:
+      - alert: AppearanceUpdatesFailing
+        expr: >-
+          sum(increase(metaforge_appearance_update_total{outcome="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_appearance_update_total[30m])), 1) > 0.2
+          and sum(increase(metaforge_appearance_update_total{outcome="failed"}[30m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Appearance changes are not being recorded"
+          description: >-
+            More than a fifth of the last half hour's appearance-only updates
+            (a colour or finish asked for in chat, or set through the
+            appearance route) failed. The engineering model is untouched, but
+            the viewer keeps showing the old look. Check the gateway logs
+            (appearance_update_failed).
+
   # FORGE-791 -- sketch compiler (api_gateway/twin/sketch_compiler_recorder.py).
   - name: metaforge_sketch_compile
     rules:

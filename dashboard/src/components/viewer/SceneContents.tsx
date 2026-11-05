@@ -10,6 +10,8 @@ import { parseRigidGroups, groupForMesh } from '../../lib/rigid-groups';
 import { computeExplodeOffset } from '../../lib/explode';
 import { TransformGizmo } from './TransformGizmo';
 import { DIRECT_MESH_FORMATS } from '../preview/registry';
+import { useAppearanceStore } from '../../hooks/use-appearance';
+import { appearanceFor, lookMaterial } from '../../lib/appearance';
 import type { TransformMode, Vec3 } from '../../store/transient-transform-store';
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
@@ -246,7 +248,13 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
     setSceneMeshNames(orderedNames);
   }, [scene, manifest]);
 
-  // Update highlight, visibility, and tint
+  // The project's appearance record (3D-RC-007): a part's colour, finish or
+  // render material shown as a material override, by component, so any mesh
+  // of that component (regenerated or at another level) gets it (SYNC-007).
+  const appearance = useAppearanceStore((s) => s.record);
+  const lookCache = useRef(new Map<string, THREE.Material>());
+
+  // Update highlight, visibility, tint and appearance
   useEffect(() => {
     for (const [name, entry] of meshMapRef.current) {
       entry.mesh.visible = !hiddenMeshes.has(name);
@@ -255,10 +263,25 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
       } else if (name === selectedMeshName) {
         entry.mesh.material = highlightMaterial;
       } else {
-        entry.mesh.material = entry.originalMaterial;
+        const look = appearanceFor(appearance, {
+          name: entry.name,
+          nodeId: manifest.meshToNodeMap?.[name],
+          meshName: name,
+        });
+        if (!look) {
+          entry.mesh.material = entry.originalMaterial;
+          continue;
+        }
+        const key = `${name}|${look.colour ?? ''}|${look.finish ?? ''}|${look.render_material ?? ''}`;
+        let material = lookCache.current.get(key);
+        if (!material) {
+          material = lookMaterial(entry.originalMaterial, look);
+          lookCache.current.set(key, material);
+        }
+        entry.mesh.material = material;
       }
     }
-  }, [selectedMeshName, hiddenMeshes, highlightMaterial, tintMaterial]);
+  }, [selectedMeshName, hiddenMeshes, highlightMaterial, tintMaterial, appearance, manifest, scene]);
 
   // Gizmo centroid = mean of the selected group's member-mesh centers (MET-519).
   useEffect(() => {

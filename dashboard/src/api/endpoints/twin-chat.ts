@@ -1,5 +1,6 @@
 import apiClient from '../client';
 import type { UiBlock } from '../../types/ui-blocks';
+import type { ChangeClassification } from './changeClassification';
 import { apiUrl } from '../../lib/gatewayConfig';
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,8 @@ export interface TwinChatMessage {
   created_at: string;
   /** The turn's operation on the project stream (`chat:<id>`), for a person's message. */
   operation_id?: string | null;
+  /** What the person's message would change, decided before the agent acted (section 5). */
+  classification?: ChangeClassification | null;
 }
 
 export interface TwinChatThreadSummary {

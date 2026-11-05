@@ -176,4 +176,34 @@ describe('create store', () => {
       'Make it blue',
     );
   });
+
+  it('keeps what each sent message was classified as, and sends the selected part', async () => {
+    const classification = {
+      change_class: 'appearance',
+      confidence: 0.92,
+      stage: 'rules',
+      also: [],
+      target_component: null,
+      target_component_id: null,
+      target_feature: null,
+      handling: 'update_appearance',
+      message: 'Colour change only. Your engineering model stays the same.',
+      signals: [],
+      appearance: null,
+      proposed_context_update: null,
+      choices: [],
+      stated_dimensions: [],
+    } as const;
+    const send = vi
+      .spyOn(chat, 'sendTwinChatMessage')
+      .mockResolvedValue({ id: 'm-red', classification } as never);
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());
+    const s = useCreateStore.getState();
+    s.selectNode(P, 'node-lid');
+    s.setDraft(P, 'make it red');
+    s.submit(P, TOOLS);
+    await waitFor(() => expect(useCreateStore.getState().session(P).classifications?.['m-red']).toBeTruthy());
+    expect(send.mock.calls[0]![1].graph_ref_node).toBe('node-lid');
+    expect(useCreateStore.getState().session(P).classifications?.['m-red']?.message).toMatch(/^Colour change only/);
+  });
 });

@@ -205,6 +205,11 @@ class WorkProductType(StrEnum):
     # (MFC-PROJECT, MFC-<component>): every change is its next revision, and
     # every generated concept records the revision it was made with.
     MANUFACTURING_CONTEXT = "manufacturing_context"
+    # How the product and its components look (api_gateway/twin/appearance.py):
+    # colour, finish, render material and texture refs, keyed by component
+    # name so a regenerated mesh keeps its look. A definition item
+    # (APR-PROJECT). Never CAD, never manufacturing context, never evidence.
+    APPEARANCE = "appearance"
 
 
 #: Work product types that are history about a change, not design work

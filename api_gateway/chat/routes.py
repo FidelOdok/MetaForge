@@ -28,6 +28,7 @@ from fastapi.responses import StreamingResponse
 from api_gateway.chat import operation_events as chat_ops
 from api_gateway.chat.agent_router import default_router
 from api_gateway.chat.backend import ChatBackend, InMemoryChatBackend
+from api_gateway.chat.change_turn import ClassifiedTurn, classify_turn
 from api_gateway.chat.context_adapter import (
     assemble_chat_context,
     render_context_block,
@@ -76,6 +77,7 @@ from api_gateway.chat.turn_capture import capture_step, capture_turn_done
 # chat lost its brief (get_project always missed) on any real deployment.
 from api_gateway.projects.brief import build_project_brief
 from api_gateway.projects.routes import get_project_backend
+from api_gateway.twin.change_classification import turn_classification
 from domain_agents.base_agent import get_llm_model, is_llm_available
 from domain_agents.mechanical.pydantic_ai_agent import (
     MechanicalAgentDeps,
@@ -551,14 +553,21 @@ async def _invoke_agent(
     provider: str | None = None,
     model: str | None = None,
     tools: list[str] | None = None,
+    classified: ClassifiedTurn | None = None,
 ) -> ChatMessageRecord | None:
     """Attempt to route *user_content* to a domain agent and return its response.
 
     Returns ``None`` when no LLM is configured or no agent is registered
     for the thread's ``scope_kind``.  Returns a *system* error message
     record when the agent raises an exception.
+
+    ``classified`` is the turn's change classification: it is held for the
+    turn (the tool layer refuses what it forbids) and given to the agent.
     """
-    with tracer.start_as_current_span("chat.invoke_agent") as span:
+    with (
+        tracer.start_as_current_span("chat.invoke_agent") as span,
+        turn_classification(classified.classification if classified else None),
+    ):
         span.set_attribute("scope_kind", thread.scope_kind)
 
         # Harness-backed path (MET-548, flagged) FIRST: the harness has its own
@@ -620,6 +629,12 @@ async def _invoke_agent(
                 context_block = (
                     render_context_block(ctx_response) if ctx_response is not None else None
                 )
+                if classified is not None:
+                    # The handling decided before the agent acts (section 5).
+                    span.set_attribute("change.class", classified.classification.change_class.value)
+                    context_block = "\n\n".join(
+                        part for part in (classified.agent_block(), context_block) if part
+                    )
                 # FORGE-76: every MCP tool call this turn makes needs to carry
                 # project/session scope over the wire (HttpTransport reads this
                 # ContextVar and attaches it as X-MetaForge-* headers) — without
@@ -1029,20 +1044,43 @@ async def send_message(
     if body.actor_kind == "user":
         if project_id and operation_id:
             chat_ops.turn_started(project_id, operation_id)
-        try:
-            agent_msg = await _run_cancellable_on_disconnect(
-                request.is_disconnected,
-                _invoke_agent(
-                    thread, body.content, provider=body.provider, model=body.model, tools=body.tools
-                ),
+        # Section 5: what the request would change, decided before the agent acts.
+        classified = (
+            await classify_turn(
+                project_id,
+                operation_id,
+                body.content,
+                twin=_twin,
+                component_id=body.graph_ref_node,
+                component_label=body.graph_ref_label,
             )
+            if project_id
+            else None
+        )
+        try:
+            if classified is not None and classified.needs_clarification:
+                # "Make it metallic": ask the look or the material before any
+                # agent work, so nothing is changed on a guess.
+                agent_msg = _clarification_message(thread, classified, body.content)
+            else:
+                agent_msg = await _run_cancellable_on_disconnect(
+                    request.is_disconnected,
+                    _invoke_agent(
+                        thread,
+                        body.content,
+                        provider=body.provider,
+                        model=body.model,
+                        tools=body.tools,
+                        classified=classified,
+                    ),
+                )
         except asyncio.CancelledError:
             # The client is gone -- no response will ever be read, so there's
             # nothing left to do but stop the turn and record why.
             logger.warning("chat_turn_cancelled_client_disconnected", thread_id=thread_id)
             if project_id and operation_id:
                 chat_ops.turn_cancelled(project_id, operation_id)
-            return _with_operation(_make_message_response(msg), operation_id)
+            return _with_operation(_make_message_response(msg), operation_id, classified)
         except Exception:
             if project_id and operation_id:
                 chat_ops.turn_finished(project_id, operation_id, failed=True)
@@ -1064,13 +1102,40 @@ async def send_message(
                 project_id, operation_id, failed=failed, replied=agent_msg is not None
             )
 
+        return _with_operation(_make_message_response(msg), operation_id, classified)
+
     return _with_operation(_make_message_response(msg), operation_id)
 
 
-def _with_operation(response: MessageResponse, operation_id: str | None) -> MessageResponse:
-    if operation_id is None:
-        return response
-    return response.model_copy(update={"operation_id": operation_id})
+def _with_operation(
+    response: MessageResponse,
+    operation_id: str | None,
+    classified: ClassifiedTurn | None = None,
+) -> MessageResponse:
+    update: dict[str, Any] = {}
+    if operation_id is not None:
+        update["operation_id"] = operation_id
+    if classified is not None:
+        update["classification"] = classified.classification
+    return response.model_copy(update=update) if update else response
+
+
+def _clarification_message(
+    thread: ChatThreadRecord, classified: ClassifiedTurn, content: str
+) -> ChatMessageRecord:
+    """The look-or-material question, as the reply, with the two answers as a choice."""
+    now = datetime.now(UTC)
+    text, blocks = classified.clarification(content)
+    return ChatMessageRecord(
+        id=str(uuid4()),
+        thread_id=thread.id,
+        actor_id="metaforge",
+        actor_kind="agent",
+        content=text,
+        blocks=blocks,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 # ---------------------------------------------------------------------------

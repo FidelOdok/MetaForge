@@ -1225,6 +1225,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `parametric_sketch` | definition | `PSK` | `WorkProduct` `parametric_sketch`: a sketch a person promoted, with only the accepted constraints (re-checked by the gateway) and a feature plan whose depth, angle and material are required input. `DEPENDS_ON` the interpretation and the strokes. Held for approval |
 | `generated_sketch` | definition | `GSK` | `WorkProduct` `generated_sketch`: the accepted AI-generated concept sketch for a sketch or a text concept; each accepted proposal is the next revision. Illustrative only: never an editable sketch, CAD or evidence |
 | `manufacturing_context` | definition | `MFC` | `WorkProduct` `manufacturing_context`: how the product (`MFC-PROJECT`) or one component (`MFC-<COMPONENT>`) might be made, each field with its authority and provenance. Every change is the next revision; every generated concept records the revision it used. See [the manufacturing context](#manufacturing-context) |
+| `appearance` | definition | `APR` | `WorkProduct` `appearance`: how the product and each component look (`APR-PROJECT`): colour, finish, render material and texture refs, keyed by component name. Never CAD, never the manufacturing context. See [the appearance record](#appearance-record) |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
@@ -2129,7 +2130,21 @@ stands.
 
 ---
 
-### 2.37 Migrating legacy nodes into items {#migrating-legacy-nodes}
+### 2.37 The appearance record {#appearance-record}
+
+How the product and each component look, and nothing else. One `appearance` item per project (`APR-PROJECT`) holds the product's look and each component's: colour (sRGB hex), finish, render material and texture refs.
+
+- A request the gateway classifies as **appearance** ("make it red") writes only this record. It never rebuilds CAD, never writes the manufacturing context, never moves a head revision and marks nothing stale. While a turn is classified as appearance, exact CAD builds and manufacturing context writes in that turn are held with a plain reason.
+- A component's look is keyed by the component's name (and remembers the node it was set on), so it outlives any one mesh: when a new L0, L1 or L3 mesh shows the same component, the viewer applies the stored look to it (SYNC-007).
+- Words that could mean either the look or the material ("metallic", "chrome", "wood look") are classified as ambiguous, and the person chooses: the look updates this record, the material proposes a change to the [manufacturing context](#manufacturing-context).
+
+Routes: `GET /v1/twin/projects/{project_id}/appearance` and `PUT` the same path; `POST /v1/twin/projects/{project_id}/classify-change` classifies a request without writing anything.
+
+*Source: `api_gateway/twin/appearance.py`, `api_gateway/twin/change_classification.py`, `api_gateway/twin/change_classification_routes.py`, `api_gateway/chat/change_turn.py`*
+
+---
+
+### 2.38 Migrating legacy nodes into items {#migrating-legacy-nodes}
 
 A project written before items existed holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
 

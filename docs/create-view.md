@@ -589,6 +589,28 @@ answer with a comparison of options, a question to click an answer to, a
 request for a measurement, figures against their limits or a proposed change
 to approve in place, and the text itself is Markdown.
 
+### What a request changes
+
+Before the agent acts on an instruction, the gateway classifies what it would
+change, and Create says so in one plain line under the message:
+
+| Request | Line | What happens |
+|---|---|---|
+| "Make it red" | *Colour change only. Your engineering model stays the same.* | The look is recorded in the [appearance record](twin_schema.md#appearance-record) and shown on the stage. CAD is not rebuilt, the manufacturing context is not touched and nothing is marked stale |
+| "Make it metallic", "chrome", "a wood look" | The reply asks *Do you mean the look, or the actual material it is made from?* with **The look** and **The material** | Nothing changes until one is chosen; the answer carries the request, so it is not asked again |
+| "Use aluminium instead of plastic" | *Material change to Aluminium...* with **Use Aluminium** | The person confirms; the material is stated on the manufacturing context, and the checks that depend on it are marked stale |
+| "Make it wider", "move the opening" | *Shape change...* | The design change, parametric and exact paths; dimensions not given are proposed, never invented |
+| "Add ventilation holes" | *New feature...* | An editable feature, then the relevant checks |
+| "Make it more aerodynamic" | *Performance goal...* | Alternatives and how to evaluate them come first |
+| "Make it futuristic" | *Style direction...* | Options are explored first |
+| "What material is the lid?" | *A question...* | An answer; nothing changes |
+
+While the reply is still coming, the line comes from the turn's `classified`
+event on the project stream; afterwards from the classification the gateway
+returns with the message. A request the rules do not recognise shows no line.
+The part selected on the stage travels with the instruction, so "make it red"
+colours that part rather than the whole product.
+
 References (photos, sketches, documents, design files) upload the moment they
 are attached, through `/v1/uploads` with the dashboard's own approval, and
 each shows *Uploading*, *Added*, *Not supported* (with the reason) or
@@ -785,6 +807,8 @@ The sketch layer uses these twin routes:
 | `POST .../sketch-generations/{node_id}/reject`, `POST .../branch` | Set a proposal aside, or start a separate line from it |
 | `POST /v1/twin/projects/{project_id}/concept-mesh` | Make a 3D concept as a job (from the accepted concept, the newest concept image, or the brief); `409` with `spend_confirmation_required` when a person must confirm; refused for an agent |
 | `GET /v1/twin/projects/{project_id}/concept-mesh` | The newest 3D concept, the job still running, the source the next one would use, and the hourly count |
+| `POST /v1/twin/projects/{project_id}/classify-change` | What a request would change: class, confidence, target, handling and the plain line. Writes nothing |
+| `GET /v1/twin/projects/{project_id}/appearance`, `PUT ...` | The product's and each component's look; a `PUT` sets one, and never touches CAD or the manufacturing context |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the

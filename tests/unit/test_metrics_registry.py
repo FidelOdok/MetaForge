@@ -88,8 +88,9 @@ class TestMetricsRegistryGroupedAccess:
         # + 2 cross-domain impact and interface edges (FORGE-793).
         # + 3 face attachment, remap and blocked commits (CDE slice 9).
         # + 2 manufacturing context writes and injections (FORGE-801).
+        # + 3 change classification, appearance updates and guard refusals.
         # + 3 structured mesh, maturity queries, representation mislabels (C3D slice 2).
-        assert len(all_metrics) == 128
+        assert len(all_metrics) == 131
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

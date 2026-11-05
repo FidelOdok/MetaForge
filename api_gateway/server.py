@@ -82,6 +82,9 @@ from api_gateway.technical_drawings.routes import router as technical_drawings_r
 from api_gateway.testplans.routes import router as testplans_router
 from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.baseline_routes import router as twin_baselines_router
+from api_gateway.twin.change_classification_routes import (
+    router as twin_change_classification_router,
+)
 from api_gateway.twin.concept_mesh_routes import router as twin_concept_mesh_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
@@ -2375,6 +2378,8 @@ def create_app(
     # FORGE-790: the plane a sketch is placed on.
     app.include_router(twin_sketch_plane_router)
     app.include_router(twin_manufacturing_context_router)
+    # Change classification before an authoritative edit, and the appearance record.
+    app.include_router(twin_change_classification_router)
     # FORGE-791: interpretations of a sketch and their promotion.
     app.include_router(twin_sketch_compiler_router)
     # FORGE-794: AI concept sketches generated from text, references or a sketch.

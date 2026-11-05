@@ -732,8 +732,11 @@ def test_a_chat_turn_is_an_operation_from_accepted_to_completed(
     assert [(e.type.value, e.state.value) for e in events] == [
         ("accepted", "queued"),
         ("started", "running"),
+        # Section 5: the request is classified before the agent acts.
+        ("milestone", "running"),
         ("completed", "completed"),
     ]
+    assert events[2].stage_id == "classified" and "geometric" in events[2].message
     assert all(e.operation_id == "chat:ins-abc-1" and e.kind.value == "chat" for e in events)
     assert all("PROMPT" not in e.message and "secret" not in e.message for e in events)
     assert events[0].action_refs == []  # a chat turn is neither cancellable nor retryable
