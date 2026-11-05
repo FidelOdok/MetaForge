@@ -15632,6 +15632,14 @@
             ],
             "title": "Feature Id"
           },
+          "geometry": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Geometry",
+            "type": "object"
+          },
           "preview_ms": {
             "anyOf": [
               {

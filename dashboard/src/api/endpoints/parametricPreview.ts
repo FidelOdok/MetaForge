@@ -14,6 +14,8 @@ export interface ParameterCommitBody {
   feature_id?: string | null;
   values?: Record<string, number | string>;
   dimensions?: Record<string, number>;
+  /** With a line's length: the browser solver's re-solved element positions (sketch space). */
+  geometry?: Record<string, Record<string, unknown>>;
   source: 'drag' | 'numeric';
   /** How long the preview rebuild took, if measured. */
   preview_ms?: number | null;

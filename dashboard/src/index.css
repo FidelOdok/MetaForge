@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./styles/console.css";
+@import "./styles/sketch-tokens.css";
 @import "./styles/page.css";
 @variant dark (&:where(.dark, .dark *));
 

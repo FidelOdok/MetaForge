@@ -4,8 +4,8 @@
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  --sk-ink: #f8fafc;
-  --sk-select: #ff5a0a;
+  --sk-ink: var(--mf-sketch-ink);
+  --sk-select: var(--mf-sketch-select);
 }
 .sk-svg {
   position: absolute;

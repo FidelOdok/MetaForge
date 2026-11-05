@@ -58,10 +58,13 @@ export async function requestExactBuild(
   itemKey: string,
   projectId: string,
   baseRevision?: number | null,
+  /** For a parametric sketch (PSK-*): the feature to build. */
+  opts: { featureId?: string | null } = {},
 ): Promise<JobReply> {
   const { data } = await apiClient.post<JobReply>(`/twin/items/${encodeURIComponent(itemKey)}/exact-build`, {
     project_id: projectId,
     base_revision: baseRevision != null ? String(baseRevision) : null,
+    ...(opts.featureId ? { feature_id: opts.featureId } : {}),
   });
   return data;
 }

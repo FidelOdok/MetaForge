@@ -12,12 +12,11 @@ import { TransformGizmo } from './TransformGizmo';
 import { DIRECT_MESH_FORMATS } from '../preview/registry';
 import { useAppearanceStore } from '../../hooks/use-appearance';
 import { appearanceFor, lookMaterial } from '../../lib/appearance';
+import { decideUpAxis, uprightRotationX, type GltfAssetInfo } from '../../lib/up-axis';
 import type { TransformMode, Vec3 } from '../../store/transient-transform-store';
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
 const HIGHLIGHT_COLOR = new THREE.Color(0x3b82f6);
-/** The root node name of a structured mesh (L1); see tool_registry layout_mesh.py. */
-const STRUCTURED_ROOT = 'metaforge_structured_mesh';
 const HIGHLIGHT_OPACITY = 0.4;
 const IDENTITY_QUATERNION = new THREE.Quaternion();
 const IDENTITY_SCALE_VECTOR = new THREE.Vector3(1, 1, 1);
@@ -58,16 +57,18 @@ export function SceneContents({ format, ...props }: SceneContentsProps) {
 }
 
 function GltfSceneContents({ glbUrl, ...props }: Omit<SceneContentsProps, 'format'>) {
-  const { scene } = useGLTF(glbUrl);
-  return <SceneBody scene={scene} {...props} />;
+  const { scene, asset } = useGLTF(glbUrl);
+  return <SceneBody scene={scene} asset={asset as GltfAssetInfo | undefined} format="glb" {...props} />;
 }
 
-export interface SceneBodyProps extends Omit<SceneContentsProps, 'format' | 'glbUrl'> {
+export interface SceneBodyProps extends Omit<SceneContentsProps, 'glbUrl'> {
   scene: THREE.Object3D;
+  /** The glTF `asset` block, when the scene came from a glTF file. */
+  asset?: GltfAssetInfo;
 }
 
 /** Selection, visibility, explode and gizmo behaviour over a loaded scene. */
-export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBodyProps) {
+export function SceneBody({ scene, asset, format, manifest, onPartClick, overlayTint }: SceneBodyProps) {
   const groupRef = useRef<THREE.Group>(null);
   const meshMapRef = useRef<Map<string, MeshEntry>>(new Map());
 
@@ -134,18 +135,24 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
   // keeps it that way, but this viewer (and three) treat Y as up. Left alone,
   // a table's 18mm top lies on Z while the workplane lies in XZ, so the floor
   // cuts through the model and the turntable spins about an axis that is not
-  // the model's up. The URDF path has always corrected this on load
-  // (use-urdf-robot.ts); CAD models now do the same, so both share one
-  // convention. Setting the rotation absolutely keeps it idempotent across
-  // re-renders, and the matrices are flushed here so every bound computed
-  // below -- whole-scene, per-mesh, explode centres -- is already in Y-up
-  // world space.
+  // the model's up. glTF-native assets (an AI 3D concept, a structured mesh)
+  // are already Y-up and must not be turned, so the file itself and the
+  // twin's representation descriptor decide (lib/up-axis.ts). Setting the
+  // rotation absolutely keeps it idempotent across re-renders, and the
+  // matrices are flushed here so every bound computed below -- whole-scene,
+  // per-mesh, explode centres -- is already in Y-up world space.
+  const origin = manifest.origin;
   useMemo(() => {
-    // C3D slice 2: a structured mesh (L1) is written Y-up, as glTF says.
-    const yUp = scene.getObjectByName(STRUCTURED_ROOT)?.userData?.up_axis === 'y';
-    scene.rotation.set(yUp ? 0 : -Math.PI / 2, 0, 0);
+    const { axis } = decideUpAxis({
+      asset,
+      scene,
+      format: format ?? 'glb',
+      representation: origin?.representation,
+      source: origin?.source ?? 'converter',
+    });
+    scene.rotation.set(uprightRotationX(axis), 0, 0);
     scene.updateMatrixWorld(true);
-  }, [scene]);
+  }, [scene, asset, format, origin?.source, origin?.representation]);
 
   // C3D slice 2 (3D-RC-009): the component picked on the Create stage is the
   // one selected here, found by the component id in the mesh's glTF extras.

@@ -76,8 +76,12 @@ function DragHandle({
     const startY = e.nativeEvent.clientY;
     drag.current = createAxisDrag({
       startValue: handle.value,
-      pxPerUnit: pxPerMm * (scaleToMm || 1),
+      // A length, depth or radius moves in sketch units; the revolve gizmo in degrees along its arc.
+      pxPerUnit: pxPerMm * (handle.mmPerUnit ?? (scaleToMm || 1)),
       screenDir: [x1 - x0, y1 - y0],
+      min: handle.min,
+      max: handle.max,
+      step: handle.step,
       onChange,
       onCommit: onRelease,
     });
@@ -102,17 +106,47 @@ function DragHandle({
   };
 
   const radius = 1.6;
+  const color = hover ? HANDLE_HOVER : HANDLE_COLOR[handle.kind];
   return (
-    <mesh
-      position={handle.position}
-      onPointerDown={onPointerDown}
-      onPointerOver={() => setHover(true)}
-      onPointerOut={() => setHover(false)}
-    >
-      <sphereGeometry args={[radius, 16, 12]} />
-      <meshBasicMaterial color={hover ? '#ffb020' : '#ff7a00'} depthTest={false} transparent opacity={0.95} />
-    </mesh>
+    <group>
+      {handle.arc && handle.arc.length > 1 && <GizmoArc points={handle.arc} color={color} />}
+      <mesh
+        position={handle.position}
+        onPointerDown={onPointerDown}
+        onPointerOver={() => setHover(true)}
+        onPointerOut={() => setHover(false)}
+      >
+        {handle.kind === 'length' ? <boxGeometry args={[radius * 1.8, radius * 1.8, radius * 1.8]} /> : <sphereGeometry args={[radius, 16, 12]} />}
+        <meshBasicMaterial color={color} depthTest={false} transparent opacity={0.95} />
+      </mesh>
+    </group>
   );
+}
+
+/** Handle colours: depth and radius orange, a line's length teal, the revolve gizmo violet. */
+const HANDLE_COLOR: Record<PreviewHandle['kind'], string> = {
+  extrude_depth: '#ff7a00',
+  radius: '#ff7a00',
+  length: '#14b8a6',
+  revolve_angle: '#a855f7',
+};
+const HANDLE_HOVER = '#ffb020';
+
+/** The revolve gizmo's arc, drawn over the part. */
+function GizmoArc({ points, color }: { points: [number, number, number][]; color: string }) {
+  const line = useMemo(() => {
+    const geometry = new THREE.BufferGeometry().setFromPoints(points.map((p) => new THREE.Vector3(...p)));
+    const material = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9 });
+    return new THREE.Line(geometry, material);
+  }, [points, color]);
+  useEffect(
+    () => () => {
+      line.geometry.dispose();
+      (line.material as THREE.Material).dispose();
+    },
+    [line],
+  );
+  return <primitive object={line} />;
 }
 
 export function ParametricCanvas({ build, show, l3Url, scaleToMm, onHandleChange, onHandleRelease, handlesEnabled }: ParametricCanvasProps) {

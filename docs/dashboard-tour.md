@@ -348,9 +348,15 @@ corner jumps to a face.
 
 CAD geometry is authored Z-up and the STEP converter keeps it that way,
 so the viewer turns a loaded model a quarter turn onto its feet before
-measuring it — the same correction the robot path has always
+measuring it, the same correction the robot path has always
 applied. Without it the workplane cut through the model and the camera
-turned it about an axis that wasn't its up.
+turned it about an axis that wasn't its up. Only a CAD-derived model is
+turned: the viewer reads the up axis from the file itself when it says so,
+then from what the twin records about the model. A converted CAD model, the
+tessellation of an exact model, and STL or 3MF files are turned; an AI 3D
+concept, a structured mesh and other glTF files are already Y-up, as glTF
+defines, and are shown as they are. The Create stage makes the same
+decision.
 
 The workplane is one plane, carrying the grid and receiving the model's
 shadow. It used to be two surfaces half a unit apart, which z-fought as

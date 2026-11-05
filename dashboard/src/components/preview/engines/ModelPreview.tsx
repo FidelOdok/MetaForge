@@ -11,6 +11,7 @@ import { AssemblyPartTree } from '../../viewer/AssemblyPartTree';
 import { ErrorBoundary } from '../../ErrorBoundary';
 import { PC, type PreviewMode } from '../tokens';
 import type { TwinNode } from '../../../types/twin';
+import { decideUpAxis, uprightRotationX, type GltfAssetInfo, type RepresentationHint } from '../../../lib/up-axis';
 import { NO_PROJECT, componentOfObject, useComponentSelection, type SelectedComponent } from '../../../store/component-selection-store';
 
 /**
@@ -28,12 +29,29 @@ interface ModelPreviewProps {
   mode: PreviewMode;
 }
 
-function GltfObject({ url, onPick }: { url: string; onPick?: (e: ThreeEvent<MouseEvent>) => void }) {
-  const { scene } = useGLTF(url);
+function GltfObject({
+  url,
+  source,
+  representation,
+  onPick,
+}: {
+  url: string;
+  source: 'converter' | 'file';
+  representation?: RepresentationHint | null;
+  onPick?: (e: ThreeEvent<MouseEvent>) => void;
+}) {
+  const { scene, asset } = useGLTF(url);
   // A cached glTF scene can only have one parent; clone so the main viewer
   // keeps its own copy.
   const copy = useMemo(() => scene.clone(true), [scene]);
-  return <primitive object={copy} onClick={onPick} />;
+  // Stand a Z-up CAD mesh up; leave a Y-up glTF-native one (an AI 3D
+  // concept, a structured mesh) as it is.
+  const { axis } = decideUpAxis({ asset: asset as GltfAssetInfo | undefined, scene, format: 'glb', representation, source });
+  return (
+    <group rotation={[uprightRotationX(axis), 0, 0]}>
+      <primitive object={copy} onClick={onPick} />
+    </group>
+  );
 }
 
 /**
@@ -52,7 +70,13 @@ export function pickedComponent(object: unknown, node: TwinNode): SelectedCompon
 function MeshFileObject({ url, format }: { url: string; format: string }) {
   const obj = useMeshFileObject(url, format);
   const copy = useMemo(() => (obj as THREE.Object3D).clone(true), [obj]);
-  return <primitive object={copy} />;
+  // STL and 3MF are Z-up.
+  const { axis } = decideUpAxis({ format });
+  return (
+    <group rotation={[uprightRotationX(axis), 0, 0]}>
+      <primitive object={copy} />
+    </group>
+  );
 }
 
 function Message({ children }: { children: React.ReactNode }) {
@@ -117,7 +141,7 @@ export function ModelPreview({ node, engine, format, mode }: ModelPreviewProps) 
               <directionalLight position={[-120, -40, -80]} intensity={0.5} />
               <Suspense fallback={null}>
                 <Bounds fit clip observe margin={1.2}>
-                  {direct ? <MeshFileObject url={url} format={format} /> : <GltfObject url={url} onPick={onPick} />}
+                  {direct ? <MeshFileObject url={url} format={format} /> : <GltfObject url={url} source={engine === 'cad3d' ? 'converter' : 'file'} representation={node.representation} onPick={onPick} />}
                 </Bounds>
               </Suspense>
               <OrbitControls makeDefault />

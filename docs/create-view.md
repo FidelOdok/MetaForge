@@ -158,7 +158,7 @@ The stage offers one primary action at a time; everything else is in **More**.
 | Nothing yet | Three equal ways in: **Describe** (focuses the composer), **Sketch it** (Sketch mode, pen ready), **Add reference** (the references drawer) |
 | A description, concept, sketch or reference, but no 3D concept | **Make a 3D concept** |
 | A 3D concept and a sketch that is not editable yet | **Make editable** |
-| A 3D concept (and an editable sketch, if there is a sketch) | **Build exact model**: puts a design request in the composer, ready to send |
+| A 3D concept (and an editable sketch, if there is a sketch) | **Build exact model**: starts the exact build of the parametric sketch (see [Build exact model](#build-exact-model)); with no parametric sketch yet, puts a design request in the composer, ready to send |
 | A dimensioned model | **Prepare prototype**: opens the Make tab |
 
 **More** holds the rest: *Generate a concept*, *Make a 3D concept*, *Show as
@@ -294,6 +294,12 @@ returns to Select. None of the shortcuts act while typing in the composer.
 **Reference.** The image button shows a chosen project image or render under
 the strokes, with adjustable opacity. It is labelled *Reference ·
 illustrative*: it is something to trace over, not a measurement.
+
+**Contrast.** Strokes, the fitted shapes of an editable sketch and its rule
+badges take their colours from sketch tokens that follow the theme: dark ink
+on the light paper, light ink on the dark one. Each keeps at least 3:1
+contrast against the paper in both themes. The reference image and the
+trace still stay faint on purpose.
 
 **Responsive.** Strokes render in the browser as the pointer moves, with
 pointer capture and the browser's coalesced pointer events; the stroke being
@@ -460,14 +466,28 @@ selecting its CAD item shows the same view).
   model.
 - **Handles.** An orange handle on the top face drags the depth along the
   part's normal; a handle on the rim of a circle with a confirmed radius
-  drags that radius. The preview follows the pointer, and the change is
-  saved once, when the pointer is released: the parametric sketch's next
-  revision, then one exact build. Escape during a drag puts the value back.
-  The same values have number fields under the view (the keyboard way):
-  Enter or **Apply** saves. A part with no material yet asks for one there.
-  The dragged mesh is never what is saved: only the parameter, through the
-  normal parametric path, and it is checked against the sketch's accepted
-  rules first.
+  drags that radius. A teal handle in the middle of a line with a confirmed
+  length drags that length along the line: every move solves the sketch's
+  accepted rules again in the browser, so the lines joined to it follow and
+  square corners stay square. On a revolved part a violet arc around the
+  axis shows how far it turns, and its handle drags the angle (whole
+  degrees, up to a full turn). The preview follows the pointer, and the
+  change is saved once, when the pointer is released: the parametric
+  sketch's next revision (pinned to the revision that was on screen), then
+  one exact build. Escape during a drag puts the value back. The same
+  values have number fields under the view (the keyboard way): Enter or
+  **Apply** saves. A part with no material yet asks for one there. The
+  dragged mesh is never what is saved: only the parameter (and, for a
+  length, the solved positions of the sketch's lines), through the normal
+  parametric path, and it is checked against the sketch's accepted rules
+  first.
+- **A length the rules cannot hold.** When a dragged length cannot hold
+  with the other accepted rules (two confirmed lengths on opposite sides of
+  a rectangle, say), the preview stays at the last length that worked and
+  says why in plain words, for example *A length of 50 mm cannot hold with
+  the other accepted rules. These two rules conflict: ... Remove one, or
+  change a dimension. Nothing was changed.* Releasing the handle then saves
+  nothing.
 - **Swap.** While the exact model is built the view keeps the preview and
   says *Engineering Update · validation pending*. When the validated exact
   model built from this very definition arrives, the view swaps to it:
@@ -486,6 +506,34 @@ dimensions, volume, sampled surface distance and holes, each with its
 tolerance), the revisions involved and how long the last preview rebuild
 took. See [L2 preview, comparison and parameter
 commits](twin_schema.md#l2-preview).
+
+### Build exact model
+
+**Build exact model** (the primary action, or in **More**) starts the exact
+build of the newest parametric sketch. It first reads the sketch as it is
+now:
+
+- When every input only a person can give is known (the depth of an
+  extrude or the angle of a revolve, and the material), it starts the build
+  at once through the exact build route, and the activity overlay opens to
+  show its progress. A sketch whose exact model is already built from the
+  same definition is not built again; the stage says so.
+- When an input is missing, the stage asks one short question for it, with
+  concrete choices: for a depth, fractions of the profile's own size (for
+  example *A quarter of its width (10 mm)*); for an angle, a full, half or
+  quarter turn; for a material, only what the manufacturing context names
+  or lists as a candidate. A field takes any other value, and **Not now**
+  leaves it. Nothing is filled in on the person's behalf. Once every input
+  is answered, the answers are saved as the sketch's next revision through
+  the parameters route, which starts the one exact build.
+- When something has to happen first, the stage says what and offers the
+  way there: an unapproved sketch opens the editable sketch to approve it,
+  and a sketch with no confirmed plane or unit in millimetres opens the
+  plane choice. No build is started.
+
+Approvals and refusals are the routes' own; a refusal is shown as the
+route gave it. Without a parametric sketch, **Build exact model** still
+puts a design request in the composer, ready to send.
 
 ### Generating a concept
 
@@ -912,9 +960,9 @@ refused with `403`. The full schemas are in the
 
 - An editable sketch's shapes are lines, arcs, circles, ellipses and smooth
   curves; there are no angle or point-to-point distance dimensions yet.
-  On the 3D part only the depth and a circle's confirmed radius have drag
-  handles; a revolve's angle is a number field only, and a line's length
-  cannot be dragged (it would need the sketch solved again). A generated (raster) image cannot be made
+  On the 3D part the depth, a revolve's angle, a circle's confirmed radius
+  and a line's confirmed length have drag handles; an arc's radius and the
+  distance between two points do not yet. A generated (raster) image cannot be made
   editable yet: only strokes drawn on the stage.
 - Generated concepts: no configured provider streams partial images, so
   there is no progressive preview. Front, side and top views are not
