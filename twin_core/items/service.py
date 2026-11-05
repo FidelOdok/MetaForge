@@ -674,6 +674,18 @@ async def commit_revision(
         _collector().record_twin_item_revision(
             plan.item_type, "drafted" if plan.draft else "created", plan.resolved_by
         )
+    if plan.item_type == "cad_model" and item is not None:
+        # C3D slice 2: the revision carries its concept component's id
+        # (carried from the prior revision, else matched by name once).
+        from twin_core.component_identity import stamp_cad_revision
+
+        await stamp_cad_revision(
+            twin,
+            node_id=node_id,
+            name=name,
+            project_id=plan.project_id,
+            prior_node_id=plan.prior_node_id,
+        )
     if not plan.draft and plan.prior_node_id is not None and item is not None:
         # FORGE-527: records pinned to the replaced revision are now stale.
         from twin_core.consistency.record_pins import on_head_moved

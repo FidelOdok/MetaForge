@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   ChevronDown,
@@ -15,7 +15,9 @@ import {
 } from 'lucide-react';
 import { PreviewHost } from '../preview/PreviewHost';
 import { previewEngineFor, is3dEngine } from '../preview/registry';
-import { useNodeVersionHistory } from '../../hooks/use-twin';
+import { twinKeys, useNodeVersionHistory } from '../../hooks/use-twin';
+import { makeStructuredMesh } from '../../api/endpoints/representation';
+import { useComponentSelection } from '../../store/component-selection-store';
 import { useConceptMesh } from '../../hooks/use-concept-mesh';
 import { listGenerations } from '../../api/endpoints/sketchGeneration';
 import { nodeFileUrl } from '../../api/endpoints/twin';
@@ -27,8 +29,11 @@ import { useSketchCompilerStore } from '../../store/sketch-compiler-store';
 import { EMPTY_STAGE, useCreateLayoutStore, type DrawerPanel } from '../../store/create-layout-store';
 import { StageDrawer } from './StageDrawer';
 import {
+  NOT_ASSESSED as NOT_ASSESSED_NOTE,
   PRIMARY_LABEL,
   isConceptMesh,
+  levelText,
+  preferredDisplayNode,
   manufacturingNote,
   primaryActionFor,
   representationOf,
@@ -68,10 +73,13 @@ export function isEngineering(node: TwinNode): boolean {
   return ENGINEERING_TYPES.has(wpTypeOf(node));
 }
 
-/** The newest dimensioned model if there is one, else the newest concept. */
+/**
+ * The best real representation of the current revision (SYNC-010): validated
+ * exact geometry (L3), then an exact model not yet validated (L2), simple 3D
+ * parts (L1), an AI 3D concept (L0), then a picture; the newest of a level.
+ */
 export function defaultStageNode(nodes: TwinNode[]): TwinNode | undefined {
-  const visual = nodes.filter(isVisual).sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-  return visual.find(isEngineering) ?? visual[0];
+  return preferredDisplayNode(nodes.filter(isVisual));
 }
 
 interface ProductStageProps {
@@ -154,6 +162,28 @@ export function ProductStage({
   const [editableHost, setEditableHost] = useState<HTMLElement | null>(null);
   const [traceSrc, setTraceSrc] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const qc = useQueryClient();
+  const [partsState, setPartsState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  // The component picked here or in Engineering (3D-RC-009).
+  const selectedComponent = useComponentSelection((s) => (projectId ? s.selected[projectId] : null) ?? null);
+
+  /** Show as simple 3D parts (L1): free and fast, so it answers at once. */
+  const showSimpleParts = async () => {
+    if (!projectId) return;
+    setPartsState({ busy: true, error: null });
+    try {
+      const made = await makeStructuredMesh(projectId);
+      await qc.invalidateQueries({ queryKey: twinKeys.all });
+      onSelect(made.node_id);
+      setPartsState({ busy: false, error: null });
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setPartsState({
+        busy: false,
+        error: typeof detail === 'string' ? detail : 'The simple 3D parts could not be made.',
+      });
+    }
+  };
 
   // A new 3D concept takes the stage once its job finishes.
   const latestMesh = mesh.state?.latest?.node_id ?? null;
@@ -247,6 +277,9 @@ export function ProductStage({
   if (projectId) {
     more.push({ id: 'generate', label: 'Generate a concept', onClick: () => run('generate') });
     if (primary !== 'concept_3d') more.push({ id: 'concept_3d', label: PRIMARY_LABEL.concept_3d, onClick: () => run('concept_3d') });
+    if (primary !== 'start') {
+      more.push({ id: 'simple_parts', label: 'Show as simple 3D parts', onClick: () => void showSimpleParts() });
+    }
     if (hasSketch && primary !== 'make_editable') more.push({ id: 'editable', label: 'Editable sketch', onClick: () => run('editable') });
     if (sketchDoc?.itemKey) more.push({ id: 'plane', label: 'Sketch plane', onClick: () => run('plane') });
     if (primary !== 'start') {
@@ -297,6 +330,13 @@ export function ProductStage({
                 <span className={`cv-maturity is-${rep.maturity.toLowerCase()}`} data-testid="stage-maturity" title="How far this representation can be trusted">
                   {rep.maturity}
                 </span>
+                {(illustrative || rep.kind === 'preview' || !!node.properties?.manufacturing_note) && (
+                  <span className="cv-mfg-note" data-testid="stage-mfg-note" title="What the provisional manufacturing checks said">
+                    {rep.kind === 'engineering'
+                      ? truthfulLabel(String(node.properties?.manufacturing_note ?? ''), rep.maturity, NOT_ASSESSED_NOTE)
+                      : manufacturingNote(node.properties?.manufacturing_note)}
+                  </span>
+                )}
                 <span
                   className={`cv-truth ${rep.kind === 'engineering' ? 'is-engineering' : 'is-concept'}`}
                   data-testid="stage-status"
@@ -309,9 +349,14 @@ export function ProductStage({
                   {node.name}
                   {revision !== null ? ` · revision ${revision}` : ''}
                 </span>
-                {illustrative && (
-                  <span className="cv-mfg-note" data-testid="stage-mfg-note">
-                    {manufacturingNote(node.properties?.manufacturing_note)}
+                {levelText(node) && (
+                  <span className="cv-revision" data-testid="stage-level" title="Which representation is on screen, and what it was made from">
+                    {levelText(node)}
+                  </span>
+                )}
+                {selectedComponent && (
+                  <span className="cv-revision" data-testid="stage-selected-component" title={selectedComponent.componentId}>
+                    Selected: {selectedComponent.name ?? selectedComponent.componentId}
                   </span>
                 )}
                 {isConceptMesh(node) && node.properties?.fit_to_envelope === true && (
@@ -374,6 +419,17 @@ export function ProductStage({
           </div>
         )}
       </div>
+
+      {(partsState.busy || partsState.error) && (
+        <div className={`cv-stage-notice ${partsState.error ? 'is-error' : ''}`} role={partsState.error ? 'alert' : 'status'} data-testid="simple-parts-notice">
+          <span>{partsState.error ?? 'Making simple 3D parts…'}</span>
+          {partsState.error && (
+            <button type="button" className="cv-chip-btn" onClick={() => setPartsState({ busy: false, error: null })}>
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
 
       {(mesh.spendPrompt || mesh.error) && (
         <div className={`cv-stage-notice ${mesh.spendPrompt ? 'is-spend' : 'is-error'}`} role="alert" data-testid="concept-mesh-notice">

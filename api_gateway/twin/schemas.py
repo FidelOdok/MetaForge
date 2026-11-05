@@ -42,6 +42,30 @@ class GeometryStateResponse(BaseModel):
     sourceRevision: int | None = None  # noqa: N815
 
 
+class RepresentationResponse(BaseModel):
+    """What a displayable artifact is and how far it can be trusted (C3D slice 2)."""
+
+    #: illustration_image | L0 | L1 | L2 | L3
+    level: str
+    #: illustrative | structured | preview | exact | validated
+    authority: str
+    #: Illustrative | Preview | Exact | Validated
+    label: str
+    #: ``KEY@n`` of the item revision it derives from, if any.
+    source_revision: str | None = None
+    component_ids: list[str] = Field(default_factory=list)
+    #: ``{tool, operation_id}``.
+    generated_by: dict[str, str | None] = Field(default_factory=dict)
+    #: True when derived at read time from the type and geometry state.
+    derived: bool = True
+    #: How much a screen prefers to show it (L3 highest).
+    display_rank: int = 0
+    #: ``estimated`` for L0 and L1.
+    dimensions: str | None = None
+    #: What the read-time guard corrected in a stored claim, if anything.
+    guarded: list[str] | None = None
+
+
 class TwinNodeResponse(BaseModel):
     """Single node in the Digital Twin graph, shaped for the dashboard."""
 
@@ -107,6 +131,9 @@ class TwinNodeResponse(BaseModel):
     # concept artifact: {state, badge, authority, itemKey, sourceRevision}.
     # None for nodes that are not geometry.
     geometryState: GeometryStateResponse | None = None  # noqa: N815
+    # C3D slice 2: level (L0..L3), authority, source revision and component
+    # ids of a displayable artifact. None for nodes that are not displayable.
+    representation: RepresentationResponse | None = None
 
 
 class AssemblyJoint(BaseModel):

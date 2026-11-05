@@ -3,6 +3,8 @@ import { useFrame, ThreeEvent } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useViewerStore } from '../../store/viewer-store';
+import { useProjectStore } from '../../store/project-store';
+import { NO_PROJECT, componentOfObject, useComponentSelection } from '../../store/component-selection-store';
 import { useTransientTransform } from '../../store/transient-transform-store';
 import { parseRigidGroups, groupForMesh } from '../../lib/rigid-groups';
 import { computeExplodeOffset } from '../../lib/explode';
@@ -14,6 +16,8 @@ import type { TransformMode, Vec3 } from '../../store/transient-transform-store'
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
 const HIGHLIGHT_COLOR = new THREE.Color(0x3b82f6);
+/** The root node name of a structured mesh (L1); see tool_registry layout_mesh.py. */
+const STRUCTURED_ROOT = 'metaforge_structured_mesh';
 const HIGHLIGHT_OPACITY = 0.4;
 const IDENTITY_QUATERNION = new THREE.Quaternion();
 const IDENTITY_SCALE_VECTOR = new THREE.Vector3(1, 1, 1);
@@ -137,9 +141,27 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
   // below -- whole-scene, per-mesh, explode centres -- is already in Y-up
   // world space.
   useMemo(() => {
-    scene.rotation.set(-Math.PI / 2, 0, 0);
+    // C3D slice 2: a structured mesh (L1) is written Y-up, as glTF says.
+    const yUp = scene.getObjectByName(STRUCTURED_ROOT)?.userData?.up_axis === 'y';
+    scene.rotation.set(yUp ? 0 : -Math.PI / 2, 0, 0);
     scene.updateMatrixWorld(true);
   }, [scene]);
+
+  // C3D slice 2 (3D-RC-009): the component picked on the Create stage is the
+  // one selected here, found by the component id in the mesh's glTF extras.
+  const projectKey = useProjectStore((s) => s.activeProjectId) ?? NO_PROJECT;
+  const sharedComponent = useComponentSelection((s) => s.selected[projectKey] ?? null);
+  const selectComponent = useComponentSelection((s) => s.select);
+  useEffect(() => {
+    if (!sharedComponent || sharedComponent.from === 'engineering') return;
+    let hit: string | null = null;
+    scene.traverse((obj) => {
+      if (!hit && (obj as THREE.Mesh).isMesh && componentOfObject(obj)?.componentId === sharedComponent.componentId) {
+        hit = obj.name || obj.parent?.name || null;
+      }
+    });
+    if (hit) useViewerStore.getState().selectPart(hit);
+  }, [scene, sharedComponent]);
 
   // Whole-scene bounding box — backs both the exploded-view center below and
   // modelBounds (camera auto-fit + grid sizing), so it's computed once.
@@ -336,6 +358,8 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
     const mesh = e.object as THREE.Mesh;
     const meshName = mesh.name || mesh.parent?.name || '';
     const entry = meshMapRef.current.get(meshName);
+    const component = componentOfObject(mesh);
+    if (component) selectComponent(projectKey, { ...component, from: 'engineering' });
     // Select the rigid group this mesh belongs to so the gizmo can drive it.
     selectGroup(groupForMesh(resolvedGroups, meshName)?.name ?? null);
     if (entry && onPartClick) {

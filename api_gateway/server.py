@@ -101,6 +101,7 @@ from api_gateway.twin.manufacturing_context_routes import (
 )
 from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
+from api_gateway.twin.representation_routes import router as twin_representation_router
 from api_gateway.twin.routes import router as twin_router
 from api_gateway.twin.sketch_compiler_routes import router as twin_sketch_compiler_router
 from api_gateway.twin.sketch_generation_routes import router as twin_sketch_generation_router
@@ -989,6 +990,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.image_critique import make_concept_image_critic
     from api_gateway.twin.render_recorder import make_work_product_renderer
     from api_gateway.twin.sketch_generation import make_sketch_generator
+    from api_gateway.twin.structured_mesh import make_structured_mesh_recorder
 
     work_product_renderer_bridge = _LazyBridge()
     work_product_renderer_fn = make_work_product_renderer(
@@ -1341,6 +1343,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-778: an illustrative 3D reference mesh from a concept image.
         # The provider is resolved per call, like the image provider.
         concept_mesh_generator=make_concept_mesh_recorder(twin, project_backend),
+        # C3D slice 2: the concept's block layout as simple 3D parts (L1).
+        # Deterministic and free; no provider.
+        structured_mesh_renderer=make_structured_mesh_recorder(twin, project_backend),
         # FORGE-794: concept sketch proposals from text, references or a
         # sketch, as jobs on their target. Held for approval like any paid
         # image tool; the provider is resolved per call.
@@ -2380,6 +2385,7 @@ def create_app(
     # FORGE-794: AI concept sketches generated from text, references or a sketch.
     app.include_router(twin_sketch_generation_router)
     app.include_router(twin_concept_mesh_router)
+    app.include_router(twin_representation_router)
     # CDE slice 6: exact CAD builds and revision-linked STEP exports.
     app.include_router(twin_exact_cad_router)
     # CDE slice 9: sketches on model faces and their reattachment.

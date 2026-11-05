@@ -148,6 +148,302 @@
         "title": "AnalysedRef",
         "type": "object"
       },
+      "Appearance": {
+        "description": "One look: colour, finish, render material and textures.",
+        "properties": {
+          "colour": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour"
+          },
+          "colour_name": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour Name"
+          },
+          "finish": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish"
+          },
+          "render_material": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Material"
+          },
+          "request": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Request",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "texture_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Texture Refs",
+            "type": "array"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "title": "Appearance",
+        "type": "object"
+      },
+      "AppearancePutRequest": {
+        "description": "A look for one component (by name or node id), or the product when neither is given.",
+        "properties": {
+          "colour": {
+            "anyOf": [
+              {
+                "maxLength": 7,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sRGB hex, e.g. #c62828",
+            "title": "Colour"
+          },
+          "colour_name": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour Name"
+          },
+          "component": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component"
+          },
+          "component_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Id"
+          },
+          "finish": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish"
+          },
+          "render_material": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Material"
+          },
+          "texture_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Texture Refs",
+            "type": "array"
+          }
+        },
+        "title": "AppearancePutRequest",
+        "type": "object"
+      },
+      "AppearanceRecord": {
+        "description": "The product's look and each component's.",
+        "properties": {
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentAppearance"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Appearance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "AppearanceRecord",
+        "type": "object"
+      },
+      "AppearanceValues": {
+        "description": "The look a request names, when it names one.",
+        "properties": {
+          "colour": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sRGB hex, e.g. #c62828",
+            "title": "Colour"
+          },
+          "colour_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour Name"
+          },
+          "finish": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish"
+          },
+          "render_material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Material"
+          },
+          "texture_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Texture Refs",
+            "type": "array"
+          }
+        },
+        "title": "AppearanceValues",
+        "type": "object"
+      },
+      "AppearanceView": {
+        "description": "The appearance record as a client reads it.",
+        "properties": {
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "record": {
+            "$ref": "#/components/schemas/AppearanceRecord"
+          },
+          "recorded": {
+            "title": "Recorded",
+            "type": "boolean"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "required": [
+          "project_id",
+          "recorded",
+          "record"
+        ],
+        "title": "AppearanceView",
+        "type": "object"
+      },
       "AppliedPatchView": {
         "properties": {
           "nextStep": {
@@ -2253,7 +2549,7 @@
         "title": "BranchBody",
         "type": "object"
       },
-      "Brief-Input": {
+      "Brief": {
         "properties": {
           "assumptions": {
             "items": {
@@ -2278,48 +2574,7 @@
           },
           "reference_details": {
             "items": {
-              "$ref": "#/components/schemas/ReferenceRecord-Input"
-            },
-            "title": "Reference Details",
-            "type": "array"
-          },
-          "references": {
-            "items": {
-              "type": "string"
-            },
-            "title": "References",
-            "type": "array"
-          }
-        },
-        "title": "Brief",
-        "type": "object"
-      },
-      "Brief-Output": {
-        "properties": {
-          "assumptions": {
-            "items": {
-              "$ref": "#/components/schemas/Assumption"
-            },
-            "title": "Assumptions",
-            "type": "array"
-          },
-          "items": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BriefItem"
-            },
-            "title": "Items",
-            "type": "object"
-          },
-          "measurements": {
-            "items": {
-              "$ref": "#/components/schemas/Measurement"
-            },
-            "title": "Measurements",
-            "type": "array"
-          },
-          "reference_details": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceRecord-Output"
+              "$ref": "#/components/schemas/ReferenceRecord"
             },
             "title": "Reference Details",
             "type": "array"
@@ -2373,7 +2628,7 @@
       "BriefUpdate": {
         "properties": {
           "brief": {
-            "$ref": "#/components/schemas/Brief-Input"
+            "$ref": "#/components/schemas/Brief"
           },
           "expected_version": {
             "anyOf": [
@@ -3078,6 +3333,139 @@
         "title": "CapabilityView",
         "type": "object"
       },
+      "ChangeClass": {
+        "description": "What a request would change (spec section 5).",
+        "enum": [
+          "appearance",
+          "geometric",
+          "engineering_geometry",
+          "material_engineering",
+          "performance_objective",
+          "ambiguous_style",
+          "ambiguous_appearance_or_material",
+          "not_a_change"
+        ],
+        "title": "ChangeClass",
+        "type": "string"
+      },
+      "ChangeClassification": {
+        "description": "One request's class, how sure, what it is about and how it is handled.",
+        "properties": {
+          "also": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeClass"
+            },
+            "title": "Also",
+            "type": "array"
+          },
+          "appearance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AppearanceValues"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change_class": {
+            "$ref": "#/components/schemas/ChangeClass"
+          },
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "handling": {
+            "title": "Handling",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "proposed_context_update": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Context Update"
+          },
+          "signals": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Signals",
+            "type": "array"
+          },
+          "stage": {
+            "default": "rules",
+            "title": "Stage",
+            "type": "string"
+          },
+          "stated_dimensions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stated Dimensions",
+            "type": "array"
+          },
+          "target_component": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Component"
+          },
+          "target_component_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Component Id"
+          },
+          "target_feature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Feature"
+          }
+        },
+        "required": [
+          "change_class",
+          "confidence",
+          "handling",
+          "message"
+        ],
+        "title": "ChangeClassification",
+        "type": "object"
+      },
       "ChangeStatus": {
         "description": "Lifecycle states for a design-change proposal.",
         "enum": [
@@ -3341,6 +3729,59 @@
         "title": "ClaimReviewTask",
         "type": "object"
       },
+      "ClassifyChangeRequest": {
+        "description": "A request to classify, and the component it is about when one is selected.",
+        "properties": {
+          "component": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Selected component name",
+            "title": "Component"
+          },
+          "component_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Selected node id",
+            "title": "Component Id"
+          },
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "use_llm": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use Llm"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ClassifyChangeRequest",
+        "type": "object"
+      },
       "ClosedProfile": {
         "properties": {
           "primitive_ids": {
@@ -3562,7 +4003,7 @@
             "type": "array"
           },
           "spec": {
-            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
+            "$ref": "#/components/schemas/CreateAssemblyRequest",
             "description": "The compiled declarative spec."
           }
         },
@@ -3599,6 +4040,119 @@
           "productType"
         ],
         "title": "CompletenessView",
+        "type": "object"
+      },
+      "ComponentAppearance": {
+        "description": "A component's look, keyed by its name so it outlives any one mesh.",
+        "properties": {
+          "colour": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour"
+          },
+          "colour_name": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour Name"
+          },
+          "finish": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "render_material": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Material"
+          },
+          "request": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Request",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "texture_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Texture Refs",
+            "type": "array"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "ComponentAppearance",
         "type": "object"
       },
       "ComponentHealth": {
@@ -3639,6 +4193,57 @@
           "status"
         ],
         "title": "ComponentHealth",
+        "type": "object"
+      },
+      "ComponentMaturityResponse": {
+        "properties": {
+          "component_id": {
+            "title": "Component Id",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/MaturityEvidence"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "maturity": {
+            "title": "Maturity",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Step"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "name",
+          "required",
+          "source",
+          "maturity"
+        ],
+        "title": "ComponentMaturityResponse",
         "type": "object"
       },
       "ConceptMeshRequest": {
@@ -4408,45 +5013,7 @@
         "title": "CoverageResponse",
         "type": "object"
       },
-      "CreateAssemblyRequest-Input": {
-        "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
-        "properties": {
-          "name": {
-            "description": "Assembly name.",
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "parts": {
-            "description": "Parts to author + assemble.",
-            "items": {
-              "$ref": "#/components/schemas/AssemblyPart"
-            },
-            "minItems": 1,
-            "title": "Parts",
-            "type": "array"
-          },
-          "project_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Project to scope the cad_model to.",
-            "title": "Project Id"
-          }
-        },
-        "required": [
-          "name",
-          "parts"
-        ],
-        "title": "CreateAssemblyRequest",
-        "type": "object"
-      },
-      "CreateAssemblyRequest-Output": {
+      "CreateAssemblyRequest": {
         "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
         "properties": {
           "name": {
@@ -4929,7 +5496,7 @@
       "Creation": {
         "properties": {
           "brief": {
-            "$ref": "#/components/schemas/Brief-Output"
+            "$ref": "#/components/schemas/Brief"
           },
           "builds": {
             "items": {
@@ -8269,7 +8836,7 @@
             "type": "integer"
           },
           "spec": {
-            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
+            "$ref": "#/components/schemas/CreateAssemblyRequest",
             "description": "The declarative spec compiled from the description."
           }
         },
@@ -12476,6 +13043,51 @@
         "title": "ManufacturingRoute",
         "type": "string"
       },
+      "MaturityEvidence": {
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "maturity": {
+            "title": "Maturity",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "required": [
+          "maturity",
+          "kind"
+        ],
+        "title": "MaturityEvidence",
+        "type": "object"
+      },
       "MaturityGateSummary": {
         "properties": {
           "blockedReason": {
@@ -12538,6 +13150,36 @@
           "createdAt"
         ],
         "title": "MaturityGateSummary",
+        "type": "object"
+      },
+      "MaturityResponse": {
+        "properties": {
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentMaturityResponse"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "has_assembly": {
+            "default": false,
+            "title": "Has Assembly",
+            "type": "boolean"
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductMaturityResponse"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "components",
+          "product"
+        ],
+        "title": "MaturityResponse",
         "type": "object"
       },
       "Measurement": {
@@ -13027,6 +13669,16 @@
             "title": "Blocks",
             "type": "array"
           },
+          "classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeClassification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "content": {
             "title": "Content",
             "type": "string"
@@ -13230,7 +13882,7 @@
             "type": "boolean"
           },
           "plan": {
-            "$ref": "#/components/schemas/MigrationPlan-Input",
+            "$ref": "#/components/schemas/MigrationPlan",
             "description": "The plan exactly as the dry run returned it."
           },
           "reason": {
@@ -13268,76 +13920,7 @@
         "title": "MigrationApplyResponse",
         "type": "object"
       },
-      "MigrationPlan-Input": {
-        "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
-        "properties": {
-          "counts_after": {
-            "additionalProperties": true,
-            "title": "Counts After",
-            "type": "object"
-          },
-          "counts_before": {
-            "additionalProperties": true,
-            "title": "Counts Before",
-            "type": "object"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ProposedItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "low_confidence": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Low Confidence",
-            "type": "array"
-          },
-          "plan_hash": {
-            "default": "",
-            "title": "Plan Hash",
-            "type": "string"
-          },
-          "project_id": {
-            "title": "Project Id",
-            "type": "string"
-          },
-          "records": {
-            "items": {
-              "$ref": "#/components/schemas/RecordAction"
-            },
-            "title": "Records",
-            "type": "array"
-          },
-          "skipped": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Skipped",
-            "type": "array"
-          },
-          "twin_fingerprint": {
-            "title": "Twin Fingerprint",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_id",
-          "twin_fingerprint",
-          "created_at"
-        ],
-        "title": "MigrationPlan",
-        "type": "object"
-      },
-      "MigrationPlan-Output": {
+      "MigrationPlan": {
         "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
         "properties": {
           "counts_after": {
@@ -13413,7 +13996,7 @@
             "type": "boolean"
           },
           "plan": {
-            "$ref": "#/components/schemas/MigrationPlan-Output"
+            "$ref": "#/components/schemas/MigrationPlan"
           },
           "report": {
             "title": "Report",
@@ -15722,6 +16305,62 @@
         "title": "PrincipalPlane",
         "type": "string"
       },
+      "ProductMaturityResponse": {
+        "properties": {
+          "by_maturity": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "By Maturity",
+            "type": "object"
+          },
+          "claims": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Claims",
+            "type": "object"
+          },
+          "component_count": {
+            "default": 0,
+            "title": "Component Count",
+            "type": "integer"
+          },
+          "limited_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limited By",
+            "type": "array"
+          },
+          "maturity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maturity"
+          },
+          "required_count": {
+            "default": 0,
+            "title": "Required Count",
+            "type": "integer"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "title": "ProductMaturityResponse",
+        "type": "object"
+      },
       "Progress": {
         "description": "Measured progress. Only sent when the total is known.",
         "properties": {
@@ -17344,109 +17983,7 @@
         "title": "ReferenceFact",
         "type": "object"
       },
-      "ReferenceRecord-Input": {
-        "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
-        "properties": {
-          "active": {
-            "default": true,
-            "title": "Active",
-            "type": "boolean"
-          },
-          "associations": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceAssociation"
-            },
-            "maxItems": 50,
-            "title": "Associations",
-            "type": "array"
-          },
-          "disclosures": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceDisclosure"
-            },
-            "title": "Disclosures",
-            "type": "array"
-          },
-          "facts": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceFact"
-            },
-            "maxItems": 500,
-            "title": "Facts",
-            "type": "array"
-          },
-          "mime": {
-            "default": "",
-            "maxLength": 100,
-            "title": "Mime",
-            "type": "string"
-          },
-          "name": {
-            "default": "",
-            "maxLength": 300,
-            "title": "Name",
-            "type": "string"
-          },
-          "protected_features": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 50,
-            "title": "Protected Features",
-            "type": "array"
-          },
-          "role": {
-            "default": "inspiration",
-            "enum": [
-              "inspiration",
-              "geometry",
-              "functional_demo",
-              "specification",
-              "manufacturing_rule",
-              "verification_evidence",
-              "existing_design"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Size"
-          },
-          "source_hash": {
-            "default": "",
-            "maxLength": 64,
-            "title": "Source Hash",
-            "type": "string"
-          },
-          "versions": {
-            "items": {
-              "$ref": "#/components/schemas/ReferenceVersion"
-            },
-            "title": "Versions",
-            "type": "array"
-          },
-          "work_product_id": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Work Product Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "work_product_id"
-        ],
-        "title": "ReferenceRecord",
-        "type": "object"
-      },
-      "ReferenceRecord-Output": {
+      "ReferenceRecord": {
         "description": "What the Create journey knows about one reference work product (REF-002..007).\n\nExtends ``Brief.references`` (the ids) rather than replacing it: an id in\n``references`` with no record here is an ``inspiration`` that is active.",
         "properties": {
           "active": {
@@ -17724,7 +18261,7 @@
           "reference": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ReferenceRecord-Output"
+                "$ref": "#/components/schemas/ReferenceRecord"
               },
               {
                 "type": "null"
@@ -18061,6 +18598,97 @@
           "warnings"
         ],
         "title": "RepeatabilityEstimateResponse",
+        "type": "object"
+      },
+      "RepresentationResponse": {
+        "description": "What a displayable artifact is and how far it can be trusted (C3D slice 2).",
+        "properties": {
+          "authority": {
+            "title": "Authority",
+            "type": "string"
+          },
+          "component_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Component Ids",
+            "type": "array"
+          },
+          "derived": {
+            "default": true,
+            "title": "Derived",
+            "type": "boolean"
+          },
+          "dimensions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dimensions"
+          },
+          "display_rank": {
+            "default": 0,
+            "title": "Display Rank",
+            "type": "integer"
+          },
+          "generated_by": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Generated By",
+            "type": "object"
+          },
+          "guarded": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guarded"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          }
+        },
+        "required": [
+          "level",
+          "authority",
+          "label"
+        ],
+        "title": "RepresentationResponse",
         "type": "object"
       },
       "RequiredClaimResultView": {
@@ -23122,6 +23750,113 @@
         "title": "StopSupervisionRequest",
         "type": "object"
       },
+      "StructuredMeshRequest": {
+        "properties": {
+          "layout_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout Node Id"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "title": "StructuredMeshRequest",
+        "type": "object"
+      },
+      "StructuredMeshResponse": {
+        "properties": {
+          "authority": {
+            "default": "structured",
+            "title": "Authority",
+            "type": "string"
+          },
+          "component_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Component Ids",
+            "type": "object"
+          },
+          "dimensions": {
+            "default": "estimated",
+            "title": "Dimensions",
+            "type": "string"
+          },
+          "format": {
+            "default": "glb",
+            "title": "Format",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "default": "L1",
+            "title": "Level",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          },
+          "triangle_count": {
+            "default": 0,
+            "title": "Triangle Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "name",
+          "label"
+        ],
+        "title": "StructuredMeshResponse",
+        "type": "object"
+      },
       "SubmitRequest": {
         "properties": {
           "artifacts": {
@@ -24237,6 +24972,16 @@
             "title": "Properties",
             "type": "object"
           },
+          "representation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepresentationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "staleness": {
             "anyOf": [
               {
@@ -25289,7 +26034,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.0.0+unknown"
+    "version": "0.3.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -26560,7 +27305,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateAssemblyRequest-Input"
+                "$ref": "#/components/schemas/CreateAssemblyRequest"
               }
             }
           },
@@ -37997,6 +38742,100 @@
         ]
       }
     },
+    "/v1/twin/projects/{project_id}/appearance": {
+      "get": {
+        "description": "The product's and each component's look. ``recorded: false`` when none was set.",
+        "operationId": "get_appearance_v1_twin_projects__project_id__appearance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppearanceView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Appearance",
+        "tags": [
+          "twin"
+        ]
+      },
+      "put": {
+        "description": "Set a look. Only the appearance record changes: never CAD or the manufacturing context.",
+        "operationId": "put_appearance_v1_twin_projects__project_id__appearance_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppearancePutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppearanceView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Appearance",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/projects/{project_id}/attachable-geometry": {
       "get": {
         "description": "CAD items whose head is validated exact geometry (a face can be picked on them).",
@@ -38035,6 +38874,59 @@
           }
         },
         "summary": "Get Attachable Geometry",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/classify-change": {
+      "post": {
+        "description": "Classify a change request before anything changes. Writes nothing.",
+        "operationId": "classify_change_route_v1_twin_projects__project_id__classify_change_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeClassification"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Classify Change Route",
         "tags": [
           "twin"
         ]
@@ -39232,6 +40124,49 @@
         ]
       }
     },
+    "/v1/twin/projects/{project_id}/maturity": {
+      "get": {
+        "description": "Per-component maturity and the product's readiness, with evidence for each claim.",
+        "operationId": "project_maturity_v1_twin_projects__project_id__maturity_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaturityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Project Maturity",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/projects/{project_id}/prd": {
       "get": {
         "description": "The project's prd, rendered from its current prose and requirements.",
@@ -40369,6 +41304,66 @@
           }
         },
         "summary": "Undo Sketch Plane",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/structured-mesh": {
+      "post": {
+        "description": "Show the concept as simple 3D parts (L1): one node per component, sizes estimated.",
+        "operationId": "make_structured_mesh_v1_twin_projects__project_id__structured_mesh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StructuredMeshRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StructuredMeshResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Make Structured Mesh",
         "tags": [
           "twin"
         ]

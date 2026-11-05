@@ -71,6 +71,7 @@ The stage labels the artifact it shows with one maturity word, **Illustrative**,
 |---|---|
 | An image or generated concept | *Concept · illustrative* |
 | An AI 3D concept | *3D Concept · illustrative* |
+| Simple 3D parts (L1) | *3D Preview · simple parts, sizes estimated* |
 | A provisional mesh or preview geometry | *3D Preview · provisional* |
 | Exact CAD | *Engineering Geometry · exact model available* |
 | Exact CAD whose checks are running | *Engineering Update · validation pending* |
@@ -80,10 +81,30 @@ The stage labels the artifact it shows with one maturity word, **Illustrative**,
 A provisional mesh is never called exact, and an illustrative or provisional
 item never carries *verified*, *validated* or *production-ready* wording: the
 stage passes every such label through a guard that falls back to the plain
-illustrative wording. An illustrative concept also shows its manufacturing
-note when one was assessed (for example *Likely printable with supports
-(preliminary)*), and *Manufacturing not assessed* otherwise. The same note is
-on each card in the generated-concept strip.
+illustrative wording. The guard also reads the artifact's
+[representation level](twin_schema.md#representation-levels): an AI 3D
+concept (L0) or simple parts (L1) is never shown as Exact or Validated,
+whatever its record says. The manufacturing note sits beside the maturity
+word: an illustrative concept or preview shows it when one was assessed (for
+example *Likely printable with supports (preliminary)*), and *Manufacturing
+not assessed* otherwise; an engineering model shows it when it has one. The
+same note is on each card in the generated-concept strip.
+
+Beside the revision, a level line says which representation is on screen and
+what it was made from, for example *L1 · simple parts, sizes estimated · from
+SKT-LAMP@2* or *L3 · from the validated exact model · from CAD-BASE@4*.
+
+**Which artifact.** The stage shows the best real representation of each
+item's current revision: validated exact geometry (L3) first, then an exact
+model not yet validated (L2), simple 3D parts (L1), an AI 3D concept (L0),
+then a picture; the newest of a level. An older revision of an item is never
+preferred over its current one, and an out of date revision ranks last. The
+Engineering 3D model view, opened with nothing selected, picks the same one.
+
+**Selecting a part.** Clicking a part of a 3D model on the stage selects its
+component (the `component_id` in the mesh's glTF extras, or the model's only
+component), and the stage shows *Selected: Arm*. Engineering shares the
+selection: a part picked on one view is selected on the other.
 
 ### One next action
 
@@ -97,9 +118,10 @@ The stage offers one primary action at a time; everything else is in **More**.
 | A 3D concept (and an editable sketch, if there is a sketch) | **Build exact model**: puts a design request in the composer, ready to send |
 | A dimensioned model | **Prepare prototype**: opens the Make tab |
 
-**More** holds the rest: *Generate a concept*, *Make a 3D concept*, *Editable
-sketch*, *Sketch plane*, *Add reference*, *Sketch it*, *Describe a change*,
-*Build exact model* and *Discuss this*, each shown only where it applies.
+**More** holds the rest: *Generate a concept*, *Make a 3D concept*, *Show as
+simple 3D parts*, *Editable sketch*, *Sketch plane*, *Add reference*, *Sketch
+it*, *Describe a change*, *Build exact model* and *Discuss this*, each shown
+only where it applies.
 
 ### Waiting approvals
 
@@ -483,6 +505,18 @@ refuses an agent caller. The model records its source (`source_kind`, the
 source node and, for an accepted concept, its revision), who asked, from
 which surface, the project's policy mode and whether that policy alone would
 have approved it.
+
+### Showing it as simple 3D parts
+
+**Show as simple 3D parts** (in **More**) draws the concept's block layout as
+a 3D model with one named part per component (correspondence level L1: parts
+identified, sizes estimated). It calls
+`POST /v1/twin/projects/{id}/structured-mesh`, which is free and answers at
+once, and the result takes the stage as **Preview** · *3D Preview · simple
+parts, sizes estimated*. An unchanged layout shows the model already made
+rather than a new one. With no concept sketch yet the stage says there is no
+layout to build from. It is also drawn once when a concept assembly is
+recorded. See [representation levels](twin_schema.md#representation-levels).
 
 ### References and their roles
 

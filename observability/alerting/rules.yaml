@@ -1212,6 +1212,25 @@ groups:
             TRIPO_API_KEY (and its credit), METAFORGE_MESH_TIMEOUT_S and the gateway
             logs (concept_mesh_unavailable, concept_mesh_timeout, concept_mesh_failed).
 
+  # C3D slice 2 -- representation levels (twin_core/representation.py).
+  - name: metaforge_representation
+    rules:
+      - alert: RepresentationMislabelGuardHits
+        expr: >-
+          sum(increase(metaforge_representation_mislabel_total[1h])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A stored representation claimed more than it is"
+          description: >-
+            The read-time guard corrected at least one stored representation in the
+            last hour: an L3 claim without a validated exact revision, or an AI mesh,
+            block mesh or picture claiming exact or validated. Screens show the
+            corrected level, so nothing is overclaimed, but the generator that wrote
+            the claim is wrong. Check the gateway logs (representation_mislabel_guarded)
+            for the work product type and the claim.
+
   # FORGE-783 -- slow tool calls run as polled jobs (tool_registry/jobs.py).
   - name: metaforge_tool_jobs
     rules:

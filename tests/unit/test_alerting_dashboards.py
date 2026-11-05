@@ -130,7 +130,8 @@ class TestAlertingRules:
         # + 1 face remap ambiguity (FaceRemapAmbiguitySpike, CDE slice 9).
         # + 1 manufacturing context sync (ManufacturingContextSyncFailing, FORGE-801).
         # + 1 appearance updates failing (AppearanceUpdatesFailing).
-        assert len(rules) == 79
+        # + 1 representation mislabel guard hits (C3D slice 2).
+        assert len(rules) == 80
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -204,7 +205,8 @@ class TestAlertingRules:
         # + 1 face remap ambiguity (CDE slice 9).
         # + 1 manufacturing context sync (FORGE-801).
         # + 1 appearance updates failing.
-        assert len(warnings) == 63
+        # + 1 representation mislabel guard hits (C3D slice 2).
+        assert len(warnings) == 64
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -338,6 +340,8 @@ class TestAlertingRules:
                 "ManufacturingContextSyncFailing",
                 # Appearance-only updates cannot be recorded.
                 "AppearanceUpdatesFailing",
+                # C3D slice 2: a stored representation claimed more than it is.
+                "RepresentationMislabelGuardHits",
             ]
         )
 

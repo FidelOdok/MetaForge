@@ -406,6 +406,7 @@ async def bootstrap_tool_registry(
     concept_image_renderer: Any = None,
     concept_image_critic: Any = None,
     concept_mesh_generator: Any = None,
+    structured_mesh_renderer: Any = None,
     sketch_generator: Any = None,
     # CDE slice 6: exact CAD builds, validity and revision-linked STEP.
     exact_cad_service: Any = None,
@@ -638,6 +639,11 @@ async def bootstrap_tool_registry(
             ``twin.generate_concept_mesh``: an image-to-3D model turns a
             concept image into an illustrative GLB render. ``None`` skips
             registration.
+        structured_mesh_renderer: Optional async ``render(...)``
+            (make_structured_mesh_recorder, C3D slice 2). When supplied,
+            registers ``twin.render_structured_mesh``: the concept's block
+            layout as simple 3D parts (L1), one node per component.
+            ``None`` skips registration.
         sketch_generator: Optional async ``generate(...)``
             (make_sketch_generator, FORGE-794). When supplied, registers
             ``twin.generate_sketch``: an illustrative concept sketch proposal
@@ -896,6 +902,7 @@ async def bootstrap_tool_registry(
                     concept_image_renderer=concept_image_renderer,
                     concept_image_critic=concept_image_critic,
                     concept_mesh_generator=concept_mesh_generator,
+                    structured_mesh_renderer=structured_mesh_renderer,
                     sketch_generator=sketch_generator,
                     exact_cad_service=exact_cad_service,
                 )
