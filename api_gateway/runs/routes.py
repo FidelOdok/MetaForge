@@ -702,6 +702,16 @@ class _GateCheckers:
                 )
             elif readiness:
                 route_note += f"; {len(readiness)} CAD item(s) validated with round-tripped STEP"
+        if gate_id == "G8" and hasattr(self._evaluator, "manufacturing_checklist"):
+            # C3D slice 6 (3D-RC-016): no release while exact models, DFM,
+            # physical verification or the STEP round trip are unresolved.
+            checklist = await self._evaluator.manufacturing_checklist(project_id)
+            if checklist is not None:
+                blockers = checklist.gate_blockers()
+                if blockers:
+                    missing.append("manufacturing release checklist: " + "; ".join(blockers[:6]))
+                else:
+                    route_note += "; manufacturing release checklist resolved"
 
         if phase_id == INTENT_PHASE_ID and hasattr(self._evaluator, "deciding_answers"):
             # FORGE-766: the deciding answers are recorded before intent passes.

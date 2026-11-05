@@ -595,3 +595,9 @@
 .cv-param-comparison tr.is-fail td:nth-child(2) {
   color: #fbbf24;
 }
+
+/* C3D slice 6: readiness only when the release checklist backs it. */
+.cv-readiness.is-production,
+.cv-readiness.is-prototype {
+  border-color: rgba(58, 157, 93, 0.7);
+}

@@ -6,11 +6,16 @@ unsupported bridges, holes of 2 mm and up). They are heuristics, not limits
 of any printer. The build volume is read from the selected machine in the
 machine library, never assumed; without a selected machine it is not
 assessed.
+
+Version 1.1.0 names the exact checks run on a validated B-Rep (wall
+thickness, feature and hole size, overhang faces, build volume) and the
+physical verifications a printed part needs (fit, layer strength, first
+article). The rule numbers are unchanged from 1.0.0.
 """
 
 from __future__ import annotations
 
-from twin_core.dfm.profiles.model import DfmProfile, DfmRule, RuleKind
+from twin_core.dfm.profiles.model import DfmProfile, DfmRule, RuleKind, VerificationRule
 
 _GUIDE = (
     "General FDM design guidance, widely published in 3D printing design guides; "
@@ -19,7 +24,7 @@ _GUIDE = (
 
 PROFILE = DfmProfile(
     id="fdm",
-    version="1.0.0",
+    version="1.1.0",
     process="FDM",
     title="FDM 3D printing (starter heuristics)",
     aliases=[
@@ -34,8 +39,48 @@ PROFILE = DfmProfile(
     notes=(
         "Starter heuristics for interactive guidance. The machine limits (build volume, "
         "and any wall, feature or overhang limit the machine records) come from the "
-        "machine library when a machine is selected."
+        "machine library when a machine is selected. Bridges and support access stay "
+        "guidance: no exact check measures them yet."
     ),
+    exact_checks=[
+        "fdm.min_wall",
+        "fdm.min_feature",
+        "fdm.overhang",
+        "fdm.build_volume",
+        "fdm.min_hole",
+    ],
+    verifications=[
+        VerificationRule(
+            id="fdm.fit_test",
+            title="Fit test of a printed sample",
+            kind="physical_test",
+            when="tolerances_stated",
+            needed="A printed sample fitted to its mating parts, with the measured fit "
+            "against the stated tolerances (photo, measurement or note).",
+            source="FDM parts shrink and vary with machine, material and orientation; a "
+            "stated tolerance is only confirmed on a printed part",
+        ),
+        VerificationRule(
+            id="fdm.layer_strength",
+            title="Strength across the layers",
+            kind="physical_test",
+            when="functional_use",
+            needed="A load or use test of a part printed in the intended orientation and "
+            "material, with the result.",
+            source="FDM parts are weakest between layers; no geometric check measures the "
+            "strength of a printed part",
+        ),
+        VerificationRule(
+            id="fdm.first_article",
+            title="First article on the selected machine",
+            kind="physical_test",
+            when="production_quantity",
+            needed="A first part printed on the selected machine and material, inspected "
+            "against the model (dimensions, surface, supports removed).",
+            source="Machine, filament and slicer settings decide the printed result; a "
+            "first article confirms them before a batch",
+        ),
+    ],
     rules=[
         DfmRule(
             id="fdm.min_wall",

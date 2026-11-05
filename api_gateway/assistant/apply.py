@@ -48,6 +48,20 @@ def make_apply_executor(
             )
             return {"applied": True, "action": action, **(result or {})}
 
+        if action == "accept_dfm_verification":
+            # C3D slice 6: a reviewer approved a person's physical verification
+            # evidence; only now does the item count as satisfied.
+            from api_gateway.twin.dfm_exact import accept_verification
+            from api_gateway.twin.routes import get_twin
+
+            result = await accept_verification(
+                get_twin(),
+                diff,
+                reviewer=str(proposal.reviewer or ""),
+                approval_id=f"change:{proposal.change_id}",
+            )
+            return {"action": action, **result}
+
         if (
             action == "regenerate_geometry"
             and mcp_bridge is not None

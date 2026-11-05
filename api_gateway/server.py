@@ -942,6 +942,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.dfm_findings import register as register_dfm
 
     register_dfm()
+    # C3D slice 6: a validated exact revision schedules its exact DFM checks.
+    from api_gateway.twin.dfm_exact import register as register_exact_dfm
+
+    register_exact_dfm()
     # FORGE-233: empty until the real MCP bridge exists (below, after
     # bootstrap_tool_registry returns) -- see _LazyBridgeMeasure's own
     # docstring for why this can't just be constructed with the bridge

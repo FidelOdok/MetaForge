@@ -31,6 +31,7 @@ import { StageDrawer } from './StageDrawer';
 import { ParametricStage } from '../preview/ParametricStage';
 import { useParametricPreview } from '../../hooks/use-parametric-preview';
 import { DfmGuidanceBadge } from './DfmGuidanceBadge';
+import { ReadinessStatus } from './ReadinessStatus';
 import {
   NOT_ASSESSED as NOT_ASSESSED_NOTE,
   PRIMARY_LABEL,
@@ -394,6 +395,8 @@ export function ProductStage({
                 )}
                 {/* C3D slice 4: a count of suggestions from real checks, never a percentage. */}
                 {projectId && <DfmGuidanceBadge projectId={projectId} />}
+                {/* C3D slice 6: ready for prototype or production only when the checklist backs it. */}
+                {projectId && <ReadinessStatus projectId={projectId} />}
                 {selectedComponent && (
                   <span className="cv-revision" data-testid="stage-selected-component" title={selectedComponent.componentId}>
                     Selected: {selectedComponent.name ?? selectedComponent.componentId}

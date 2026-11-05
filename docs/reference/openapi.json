@@ -4191,6 +4191,18 @@
       },
       "ComponentFindingsView": {
         "properties": {
+          "checks_required": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checks Required",
+            "type": "array"
+          },
+          "complete": {
+            "default": false,
+            "title": "Complete",
+            "type": "boolean"
+          },
           "component_id": {
             "title": "Component Id",
             "type": "string"
@@ -4202,6 +4214,16 @@
           "evaluated_at": {
             "title": "Evaluated At",
             "type": "string"
+          },
+          "exact_checks_scheduled": {
+            "default": false,
+            "title": "Exact Checks Scheduled",
+            "type": "boolean"
+          },
+          "exact_evidence": {
+            "additionalProperties": true,
+            "title": "Exact Evidence",
+            "type": "object"
           },
           "finding_set_id": {
             "title": "Finding Set Id",
@@ -4225,6 +4247,18 @@
             },
             "title": "Geometry Refs",
             "type": "array"
+          },
+          "guidance_only_rules": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Guidance Only Rules",
+            "type": "array"
+          },
+          "kind": {
+            "default": "heuristic",
+            "title": "Kind",
+            "type": "string"
           },
           "name": {
             "title": "Name",
@@ -4295,6 +4329,14 @@
             "default": "",
             "title": "Trigger",
             "type": "string"
+          },
+          "verification_items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Verification Items",
+            "type": "array"
           }
         },
         "required": [
@@ -6553,6 +6595,58 @@
         "title": "DfmEvaluateRequest",
         "type": "object"
       },
+      "DfmExactRequest": {
+        "description": "Which validated revision to check exactly: a CAD item (``KEY`` or ``KEY@n``) or a node.",
+        "properties": {
+          "build_direction": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Direction"
+          },
+          "item_key": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Key"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "wait": {
+            "default": false,
+            "title": "Wait",
+            "type": "boolean"
+          }
+        },
+        "title": "DfmExactRequest",
+        "type": "object"
+      },
       "DfmStatus": {
         "description": "The spec's DFM status semantics (DFM-013).",
         "enum": [
@@ -6625,6 +6719,11 @@
           },
           "suggestions": {
             "title": "Suggestions",
+            "type": "integer"
+          },
+          "verification_open": {
+            "default": 0,
+            "title": "Verification Open",
             "type": "integer"
           }
         },
@@ -26314,6 +26413,43 @@
         "title": "ValidationView",
         "type": "object"
       },
+      "VerificationEvidenceRequest": {
+        "description": "A person's evidence for a verification item: a note, an upload, or both.",
+        "properties": {
+          "attachment_base64": {
+            "anyOf": [
+              {
+                "maxLength": 7000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment Base64"
+          },
+          "attachment_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment Name"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "title": "VerificationEvidenceRequest",
+        "type": "object"
+      },
       "VersionedWrite": {
         "properties": {
           "expected_version": {
@@ -39453,6 +39589,51 @@
         ]
       }
     },
+    "/v1/twin/projects/{project_id}/dfm/checklist": {
+      "get": {
+        "description": "The manufacturing release checklist for the current revision, with Create's readiness.\n\n``applies: false`` when no process with exact DFM checks is selected.",
+        "operationId": "get_release_checklist_v1_twin_projects__project_id__dfm_checklist_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Release Checklist V1 Twin Projects  Project Id  Dfm Checklist Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Release Checklist",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/projects/{project_id}/dfm/evaluate": {
       "post": {
         "description": "Run the heuristic DFM rules now and return the updated findings.\n\nPreliminary guidance only: a component's status is ``issues_found``,\n``preliminary_guidance``, ``analysis_pending`` or ``not_assessed``, never\nan analysis pass.",
@@ -39508,6 +39689,61 @@
           }
         },
         "summary": "Evaluate Dfm",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/dfm/exact": {
+      "post": {
+        "description": "Schedule the exact checks for a validated CAD revision (or run them now with ``wait``).\n\nRefused (409) for a revision that is not validated; ``scheduled: false``\nwith the reason when the component's process has no exact checks.",
+        "operationId": "run_exact_dfm_v1_twin_projects__project_id__dfm_exact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DfmExactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Exact Dfm V1 Twin Projects  Project Id  Dfm Exact Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Exact Dfm",
         "tags": [
           "twin"
         ]
@@ -39572,6 +39808,224 @@
           }
         },
         "summary": "Decide Finding",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/dfm/report": {
+      "get": {
+        "description": "The latest DFM report, with whether the revisions it read are still current.",
+        "operationId": "get_dfm_report_v1_twin_projects__project_id__dfm_report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "markdown: the rendered copy",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "description": "markdown: the rendered copy",
+              "enum": [
+                "json",
+                "markdown"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dfm Report",
+        "tags": [
+          "twin"
+        ]
+      },
+      "post": {
+        "description": "Generate (or reuse) the revision-specific DFM report and store it in the twin.",
+        "operationId": "generate_dfm_report_v1_twin_projects__project_id__dfm_report_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Generate Dfm Report V1 Twin Projects  Project Id  Dfm Report Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Dfm Report",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/dfm/reports/{report_id}": {
+      "get": {
+        "description": "One stored DFM report by id (older reports stay browsable, marked stale).",
+        "operationId": "get_dfm_report_by_id_v1_twin_projects__project_id__dfm_reports__report_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Dfm Report By Id V1 Twin Projects  Project Id  Dfm Reports  Report Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dfm Report By Id",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/dfm/verification/{item_id}/evidence": {
+      "post": {
+        "description": "Record evidence for a physical or supplier verification item.\n\nThe item reads ``awaiting_approval`` and an approval is filed; it is\nsatisfied only when a reviewer approves that approval.",
+        "operationId": "record_verification_v1_twin_projects__project_id__dfm_verification__item_id__evidence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationEvidenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Verification V1 Twin Projects  Project Id  Dfm Verification  Item Id  Evidence Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Verification",
         "tags": [
           "twin"
         ]

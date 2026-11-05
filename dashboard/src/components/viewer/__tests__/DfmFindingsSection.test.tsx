@@ -85,7 +85,14 @@ function view(over: Partial<DfmView> = {}): DfmView {
 }
 
 describe('the Engineering DFM findings', () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(api, 'getReleaseChecklist').mockResolvedValue({
+      project_id: P,
+      applies: false,
+      readiness: { level: 'not_assessed', label: 'Manufacturing not assessed', prototype: false, production: false, next_steps: [] },
+    });
+  });
 
   it('shows the profile, measured against limit, anchors, evidence and staleness', async () => {
     vi.spyOn(api, 'getDfm').mockResolvedValue(view());

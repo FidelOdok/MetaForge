@@ -112,6 +112,27 @@ Engineering inspector has a **DFM** tab, opened on demand, with the rule
 profile and version, measured against limit, anchors, evidence and whether
 it is out of date.
 
+**Ready to make.** Once a process with exact checks is chosen (today 3D
+printing), a second compact chip says how far the product is from being
+made, from the manufacturing release checklist of the current revision
+(see [the release checklist](twin_schema.md#release-checklist)). It reads
+**Ready for prototype** only when every required part has a validated exact
+model, the exact manufacturing analysis passed (or a person accepted its
+issues) and each part's STEP passed its round trip, and **Ready for
+production** only when, in addition, the physical verification is approved
+and the release is approved. Otherwise it reads *Not ready to make yet: 3
+next steps*, and selecting it lists the missing items in the same words the
+status lines use, for example *Engineering Update: validation pending for
+Lid*, *Manufacturing analysis pending for Enclosure*, *Manufacturing analysis
+incomplete for Enclosure: no machine is selected in the manufacturing
+context*, or *Physical or supplier
+confirmation required: Fit test of a printed sample (Enclosure)*. It is
+never a percentage and never claims a readiness the checklist does not back.
+In Engineering the DFM tab shows exact findings with their measured values
+and the faces they are on (highlighted on the model on request), the
+verification items with a form to record evidence for approval, the
+checklist, and a link to the generated DFM report.
+
 Beside the revision, a level line says which representation is on screen and
 what it was made from, for example *L1 · simple parts, sizes estimated · from
 SKT-LAMP@2* or *L3 · from the validated exact model · from CAD-BASE@4*.
@@ -879,6 +900,9 @@ The sketch layer uses these twin routes:
 | `GET /v1/twin/projects/{project_id}/appearance`, `PUT ...` | The product's and each component's look; a `PUT` sets one, and never touches CAD or the manufacturing context |
 | `GET /v1/twin/projects/{project_id}/dfm` | Preliminary manufacturing guidance by part: the badge's suggestion count, each finding and its status |
 | `POST .../dfm/evaluate`, `POST .../dfm/findings/{finding_id}/decision` | Run the checks now; **Keep design**, **Try suggested fix** or **Explore another process** on one suggestion |
+| `GET /v1/twin/projects/{project_id}/dfm/checklist` | The manufacturing release checklist and the readiness the chip may show |
+| `POST .../dfm/report`, `GET .../dfm/report` | Generate the revision's DFM report; read the latest (`?format=markdown` for the rendered copy) |
+| `POST .../dfm/verification/{item_id}/evidence` | Record evidence for a physical verification item; it counts once a reviewer approves it |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the

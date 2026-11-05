@@ -432,6 +432,25 @@ def _slug(name: str) -> str:
 Publisher = Callable[[str, dict[str, Any]], Awaitable[Any]]
 
 
+#: Called after a build validated a revision (C3D slice 6: exact DFM scheduling).
+ValidatedListener = Callable[[Any, str, dict[str, Any]], Awaitable[None]]
+_validated_listeners: list[ValidatedListener] = []
+
+
+def register_validated_listener(listener: ValidatedListener) -> None:
+    """Run ``listener(twin, project_id, result)`` after each validated build (once each)."""
+    if listener not in _validated_listeners:
+        _validated_listeners.append(listener)
+
+
+async def _notify_validated(twin: Any, project_id: str, result: dict[str, Any]) -> None:
+    for listener in list(_validated_listeners):
+        try:
+            await listener(twin, project_id, result)
+        except Exception as exc:  # noqa: BLE001 - a follow-up never undoes a validation
+            logger.warning("exact_cad_validated_listener_failed", error=str(exc))
+
+
 async def _publish_via_seam(project_id: str, event: dict[str, Any]) -> None:
     from mcp_core.operation_events import publish_operation_event
 
@@ -858,6 +877,7 @@ class ExactCadService:
                     await self._emit_export_stale(project_id, node_id, export, item.key)
             _record("record_exact_build", "validated")
             _record("record_cad_artifact_duration", "exact_total", time.monotonic() - started)
+            await _notify_validated(self._twin, project_id, out)
             logger.info(
                 "exact_cad_validated",
                 item_key=item.key,
