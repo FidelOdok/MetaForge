@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Modal } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -89,8 +90,7 @@ function NewConstraintForm({ projectId, onDone }: { projectId: string; onDone: (
   const limitValue = Number(limit);
   const canSubmit = name.trim() !== '' && metric.trim() !== '' && limit !== '' && !Number.isNaN(limitValue);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = () => {
     if (!canSubmit) return;
     createConstraint.mutate(
       {
@@ -119,118 +119,119 @@ function NewConstraintForm({ projectId, onDone }: { projectId: string; onDone: (
   };
 
   return (
-    <form
+    <Modal
+      open
+      onClose={onDone}
+      title="New constraint"
+      size="lg"
       onSubmit={handleSubmit}
-      data-testid="new-constraint-form"
-      className="mb-3 flex flex-wrap items-end gap-2 rounded-lg px-3 py-3"
-      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+      footer={
+        <>
+          <Button type="button" variant="secondary" onClick={onDone}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!canSubmit || createConstraint.isPending}>
+            {createConstraint.isPending ? 'Recording…' : 'Record'}
+          </Button>
+        </>
+      }
     >
-      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-        Name
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="tip_deflection"
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-          style={{ ...FIELD_STYLE, width: '160px' }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-        Metric
-        <input
-          value={metric}
-          onChange={(e) => setMetric(e.target.value)}
-          placeholder="tip_deflection"
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-          style={{ ...FIELD_STYLE, width: '160px' }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-        Operator
-        <select
-          value={operator}
-          onChange={(e) => setOperator(e.target.value as (typeof OPERATORS)[number])}
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
-          style={{ ...FIELD_STYLE, width: '72px' }}
-        >
-          {OPERATORS.map((op) => (
-            <option key={op} value={op}>
-              {op}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-        Limit
-        <input
-          value={limit}
-          onChange={(e) => setLimit(e.target.value)}
-          placeholder="0.5"
-          inputMode="decimal"
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-          style={{ ...FIELD_STYLE, width: '80px' }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-        Unit
-        <input
-          value={unit}
-          onChange={(e) => setUnit(e.target.value)}
-          placeholder="mm"
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-          style={{ ...FIELD_STYLE, width: '72px' }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-        Target node type
-        <input
-          value={targetNodeType}
-          onChange={(e) => setTargetNodeType(e.target.value)}
-          placeholder="cad_model"
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-          style={{ ...FIELD_STYLE, width: '140px' }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-        Verification method
-        <input
-          value={verificationMethod}
-          onChange={(e) => setVerificationMethod(e.target.value)}
-          placeholder="FEA"
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-          style={{ ...FIELD_STYLE, width: '120px' }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-        Expected evidence
-        <select
-          value={expectedEvidence}
-          onChange={(e) =>
-            setExpectedEvidence(e.target.value as (typeof EXPECTED_EVIDENCE_TYPES)[number])
-          }
-          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
-          style={{ ...FIELD_STYLE, width: '140px' }}
-        >
-          {EXPECTED_EVIDENCE_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t || 'not declared'}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="flex gap-2">
-        <Button
-          type="submit"
-          size="sm"
-          disabled={!canSubmit || createConstraint.isPending}
-        >
-          {createConstraint.isPending ? 'Recording…' : 'Record'}
-        </Button>
-        <Button type="button" variant="secondary" size="sm" onClick={onDone}>
-          Cancel
-        </Button>
+      <div className="mf-form-grid" data-testid="new-constraint-form">
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Name
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="tip_deflection"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, width: '160px' }}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Metric
+          <input
+            value={metric}
+            onChange={(e) => setMetric(e.target.value)}
+            placeholder="tip_deflection"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, width: '160px' }}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Operator
+          <select
+            value={operator}
+            onChange={(e) => setOperator(e.target.value as (typeof OPERATORS)[number])}
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
+            style={{ ...FIELD_STYLE, width: '72px' }}
+          >
+            {OPERATORS.map((op) => (
+              <option key={op} value={op}>
+                {op}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Limit
+          <input
+            value={limit}
+            onChange={(e) => setLimit(e.target.value)}
+            placeholder="0.5"
+            inputMode="decimal"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, width: '80px' }}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Unit
+          <input
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            placeholder="mm"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, width: '72px' }}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Target node type
+          <input
+            value={targetNodeType}
+            onChange={(e) => setTargetNodeType(e.target.value)}
+            placeholder="cad_model"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, width: '140px' }}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Verification method
+          <input
+            value={verificationMethod}
+            onChange={(e) => setVerificationMethod(e.target.value)}
+            placeholder="FEA"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, width: '120px' }}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Expected evidence
+          <select
+            value={expectedEvidence}
+            onChange={(e) =>
+              setExpectedEvidence(e.target.value as (typeof EXPECTED_EVIDENCE_TYPES)[number])
+            }
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
+            style={{ ...FIELD_STYLE, width: '140px' }}
+          >
+            {EXPECTED_EVIDENCE_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t || 'not declared'}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
-    </form>
+    </Modal>
   );
 }
 
@@ -1111,8 +1112,7 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
   const canSubmit =
     workProductId.trim() !== '' && loadN !== '' && deflectionLimitMm !== '' && !Number.isNaN(Number(loadN));
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = () => {
     if (!canSubmit) return;
     start.mutate(
       {
@@ -1160,63 +1160,68 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
       </div>
 
       {projectId && showForm && (
-        <form
-          data-testid="design-loop-form"
+        <Modal
+          open
+          onClose={() => setShowForm(false)}
+          title="Start design loop"
+          size="lg"
           onSubmit={handleSubmit}
-          className="mb-3 flex flex-wrap items-end gap-2 rounded-lg p-3"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!canSubmit || start.isPending}>
+                {start.isPending ? 'Running…' : 'Run'}
+              </Button>
+            </>
+          }
         >
-          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-            CAD work product id
-            <input
-              value={workProductId}
-              onChange={(e) => setWorkProductId(e.target.value)}
-              placeholder="work product id"
-              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-              style={{ ...FIELD_STYLE, width: '220px' }}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-            Load (N)
-            <input
-              value={loadN}
-              onChange={(e) => setLoadN(e.target.value)}
-              placeholder="100"
-              type="number"
-              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-              style={{ ...FIELD_STYLE, width: '90px' }}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-            Deflection limit (mm)
-            <input
-              value={deflectionLimitMm}
-              onChange={(e) => setDeflectionLimitMm(e.target.value)}
-              placeholder="0.5"
-              type="number"
-              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-              style={{ ...FIELD_STYLE, width: '90px' }}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-            Safety factor limit
-            <input
-              value={sfLimit}
-              onChange={(e) => setSfLimit(e.target.value)}
-              type="number"
-              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-              style={{ ...FIELD_STYLE, width: '90px' }}
-            />
-          </label>
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={!canSubmit || start.isPending}>
-              {start.isPending ? 'Running…' : 'Run'}
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
-              Cancel
-            </Button>
+          <div className="mf-form-grid" data-testid="design-loop-form">
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              CAD work product id
+              <input
+                value={workProductId}
+                onChange={(e) => setWorkProductId(e.target.value)}
+                placeholder="work product id"
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                style={{ ...FIELD_STYLE, width: '220px' }}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              Load (N)
+              <input
+                value={loadN}
+                onChange={(e) => setLoadN(e.target.value)}
+                placeholder="100"
+                type="number"
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                style={{ ...FIELD_STYLE, width: '90px' }}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              Deflection limit (mm)
+              <input
+                value={deflectionLimitMm}
+                onChange={(e) => setDeflectionLimitMm(e.target.value)}
+                placeholder="0.5"
+                type="number"
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                style={{ ...FIELD_STYLE, width: '90px' }}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              Safety factor limit
+              <input
+                value={sfLimit}
+                onChange={(e) => setSfLimit(e.target.value)}
+                type="number"
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                style={{ ...FIELD_STYLE, width: '90px' }}
+              />
+            </label>
           </div>
-        </form>
+        </Modal>
       )}
 
       {!loopId && !showForm && (
@@ -1381,83 +1386,82 @@ function GateReviewSection({
       </div>
 
       {projectId && showForm && (
-        <div
-          data-testid="gate-review-form"
-          className="mb-3 rounded-lg p-3"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
-        >
-          <div className="mb-2 text-xs text-on-surface-variant">Required claims</div>
-          <div className="mb-3 flex flex-wrap gap-2">
-            {requirements.map((req) => (
-              <label
-                key={req.id}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-on-surface"
-                style={{ ...FIELD_STYLE, cursor: 'pointer' }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(req.id)}
-                  onChange={() => toggle(req.id)}
-                />
-                {req.name}
-              </label>
-            ))}
-            {requirements.length === 0 && (
-              <span className="text-xs text-on-surface-variant">No requirements to gate on yet.</span>
-            )}
-          </div>
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-              Level
-              <select
-                value={level}
-                onChange={(e) => setLevel(e.target.value as MaturityLevel)}
-                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
-                style={{ ...FIELD_STYLE, width: '160px' }}
-              >
-                {MATURITY_LEVELS.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-1 flex-col gap-1 text-xs text-on-surface-variant" style={{ minWidth: '200px' }}>
-              Comment
-              <input
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="rationale (optional on approve, becomes the reason on reject)"
-                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-                style={FIELD_STYLE}
-              />
-            </label>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                data-testid="approve-gate-button"
-                disabled={!canSubmit || attempt.isPending}
-                onClick={() => submit(false)}
-              >
-                {attempt.isPending ? 'Evaluating…' : 'Approve'}
+        <Modal
+          open
+          onClose={() => setShowForm(false)}
+          title="Attempt promotion"
+          size="lg"
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>
+                Close
               </Button>
               <Button
                 type="button"
                 variant="secondary"
-                size="sm"
                 data-testid="reject-gate-button"
                 disabled={!canSubmit || attempt.isPending}
                 onClick={() => submit(true)}
               >
                 Reject
               </Button>
-              <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
-                Close
+              <Button
+                type="button"
+                data-testid="approve-gate-button"
+                disabled={!canSubmit || attempt.isPending}
+                onClick={() => submit(false)}
+              >
+                {attempt.isPending ? 'Evaluating…' : 'Approve'}
               </Button>
+            </>
+          }
+        >
+          <div data-testid="gate-review-form">
+            <div className="mb-2 text-xs text-on-surface-variant">Required claims</div>
+            <div className="mb-3 flex flex-wrap gap-2">
+              {requirements.map((req) => (
+                <label
+                  key={req.id}
+                  className="mf-check flex items-center gap-1 rounded px-2 py-1 text-xs text-on-surface"
+                  style={{ ...FIELD_STYLE, cursor: 'pointer' }}
+                >
+                  <input type="checkbox" checked={selectedIds.includes(req.id)} onChange={() => toggle(req.id)} />
+                  {req.name}
+                </label>
+              ))}
+              {requirements.length === 0 && (
+                <span className="text-xs text-on-surface-variant">No requirements to gate on yet.</span>
+              )}
+            </div>
+            <div className="mf-form-grid">
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Level
+                <select
+                  value={level}
+                  onChange={(e) => setLevel(e.target.value as MaturityLevel)}
+                  className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
+                  style={{ ...FIELD_STYLE, width: '160px' }}
+                >
+                  {MATURITY_LEVELS.map((l) => (
+                    <option key={l} value={l}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-1 flex-col gap-1 text-xs text-on-surface-variant" style={{ minWidth: '200px' }}>
+                Comment
+                <input
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="rationale (optional on approve, becomes the reason on reject)"
+                  className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                  style={FIELD_STYLE}
+                />
+              </label>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {lastResult && (
@@ -1542,8 +1546,7 @@ function FeatureLibrarySection({ projectId }: { projectId?: string }) {
 
   const canSubmit = name.trim() !== '';
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = () => {
     if (!canSubmit) return;
     const feature =
       featureType === 'bolt_pattern'
@@ -1599,93 +1602,97 @@ function FeatureLibrarySection({ projectId }: { projectId?: string }) {
       </div>
 
       {showForm && (
-        <form
-          data-testid="feature-library-form"
+        <Modal
+          open
+          onClose={() => setShowForm(false)}
+          title="Generate a feature"
+          size="lg"
           onSubmit={handleSubmit}
-          className="mb-3 flex flex-wrap items-end gap-2 rounded-lg p-3"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!canSubmit || generate.isPending}>
+                {generate.isPending ? 'Generating…' : 'Generate'}
+              </Button>
+            </>
+          }
         >
-          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-            Feature
-            <select
-              value={featureType}
-              onChange={(e) => setFeatureType(e.target.value as FeatureType)}
-              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
-              style={{ ...FIELD_STYLE, width: '140px' }}
-            >
-              {FEATURE_TYPES.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-            Name
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Motor mount bolt pattern"
-              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-              style={{ ...FIELD_STYLE, width: '200px' }}
-            />
-          </label>
+          <div className="mf-form-grid" data-testid="feature-library-form">
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              Feature
+              <select
+                value={featureType}
+                onChange={(e) => setFeatureType(e.target.value as FeatureType)}
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
+                style={{ ...FIELD_STYLE, width: '140px' }}
+              >
+                {FEATURE_TYPES.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              Name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Motor mount bolt pattern"
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                style={{ ...FIELD_STYLE, width: '200px' }}
+              />
+            </label>
 
-          {featureType === 'bolt_pattern' && (
-            <>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Plate length (mm)
-                <input value={plateLength} onChange={(e) => setPlateLength(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Plate width (mm)
-                <input value={plateWidth} onChange={(e) => setPlateWidth(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Plate thickness (mm)
-                <input value={plateThickness} onChange={(e) => setPlateThickness(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Hole diameter (mm)
-                <input value={holeDiameter} onChange={(e) => setHoleDiameter(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Hole count
-                <input value={holeCount} onChange={(e) => setHoleCount(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '70px' }} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Pattern radius (mm)
-                <input value={patternRadius} onChange={(e) => setPatternRadius(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
-              </label>
-            </>
-          )}
+            {featureType === 'bolt_pattern' && (
+              <>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Plate length (mm)
+                  <input value={plateLength} onChange={(e) => setPlateLength(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Plate width (mm)
+                  <input value={plateWidth} onChange={(e) => setPlateWidth(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Plate thickness (mm)
+                  <input value={plateThickness} onChange={(e) => setPlateThickness(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Hole diameter (mm)
+                  <input value={holeDiameter} onChange={(e) => setHoleDiameter(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Hole count
+                  <input value={holeCount} onChange={(e) => setHoleCount(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '70px' }} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Pattern radius (mm)
+                  <input value={patternRadius} onChange={(e) => setPatternRadius(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+                </label>
+              </>
+            )}
 
-          {featureType === 'rib' && (
-            <>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Length (mm)
-                <input value={ribLength} onChange={(e) => setRibLength(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Height (mm)
-                <input value={ribHeight} onChange={(e) => setRibHeight(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Thickness (mm)
-                <input value={ribThickness} onChange={(e) => setRibThickness(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
-              </label>
-            </>
-          )}
-
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={!canSubmit || generate.isPending}>
-              {generate.isPending ? 'Generating…' : 'Generate'}
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
-              Cancel
-            </Button>
+            {featureType === 'rib' && (
+              <>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Length (mm)
+                  <input value={ribLength} onChange={(e) => setRibLength(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Height (mm)
+                  <input value={ribHeight} onChange={(e) => setRibHeight(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                  Thickness (mm)
+                  <input value={ribThickness} onChange={(e) => setRibThickness(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+                </label>
+              </>
+            )}
           </div>
-        </form>
+        </Modal>
       )}
 
       {lastResult && (
@@ -1760,8 +1767,7 @@ function TradeStudySection({ projectId }: { projectId?: string }) {
   const select = useSelectConcept();
 
   const canAddOption = title.trim() !== '';
-  const handleAddOption = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddOption = () => {
     if (!canAddOption) return;
     const criteriaScores: Record<string, number> = {};
     for (const c of TRADE_STUDY_CRITERIA) {
@@ -1843,51 +1849,56 @@ function TradeStudySection({ projectId }: { projectId?: string }) {
       </div>
 
       {projectId && showAddForm && (
-        <form
-          data-testid="add-option-form"
+        <Modal
+          open
+          onClose={() => setShowAddForm(false)}
+          title="Add an option"
+          size="lg"
           onSubmit={handleAddOption}
-          className="mb-3 flex flex-wrap items-end gap-2 rounded-lg p-3"
-          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowAddForm(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!canAddOption || addOption.isPending}>
+                {addOption.isPending ? 'Adding…' : 'Add'}
+              </Button>
+            </>
+          }
         >
-          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-            Option name
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Hollow tube"
-              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-              style={{ ...FIELD_STYLE, width: '160px' }}
-            />
-          </label>
-          {TRADE_STUDY_CRITERIA.map((c) => (
-            <label key={c} className="flex flex-col gap-1 text-xs text-on-surface-variant">
-              {c}
+          <div className="mf-form-grid" data-testid="add-option-form">
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              Option name
               <input
-                value={scores[c] ?? ''}
-                onChange={(e) => setScores((s) => ({ ...s, [c]: e.target.value }))}
-                type="number"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Hollow tube"
                 className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-                style={{ ...FIELD_STYLE, width: '80px' }}
+                style={{ ...FIELD_STYLE, width: '160px' }}
               />
             </label>
-          ))}
-          <label className="flex items-center gap-1 text-xs text-on-surface-variant">
-            <input
-              type="checkbox"
-              checked={massIsGrounded}
-              onChange={(e) => setMassIsGrounded(e.target.checked)}
-            />
-            mass_kg is a real measured value
-          </label>
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={!canAddOption || addOption.isPending}>
-              {addOption.isPending ? 'Adding…' : 'Add'}
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddForm(false)}>
-              Cancel
-            </Button>
+            {TRADE_STUDY_CRITERIA.map((c) => (
+              <label key={c} className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                {c}
+                <input
+                  value={scores[c] ?? ''}
+                  onChange={(e) => setScores((s) => ({ ...s, [c]: e.target.value }))}
+                  type="number"
+                  className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                  style={{ ...FIELD_STYLE, width: '80px' }}
+                />
+              </label>
+            ))}
+            <label className="flex items-center gap-1 text-xs text-on-surface-variant">
+              <input
+                type="checkbox"
+                checked={massIsGrounded}
+                onChange={(e) => setMassIsGrounded(e.target.checked)}
+              />
+              mass_kg is a real measured value
+            </label>
           </div>
-        </form>
+        </Modal>
       )}
 
       {!options || options.length === 0 ? (

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ConfirmDialog } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../components/ui/Button';
@@ -265,36 +266,26 @@ function ProvidersPanel() {
 
               {selected.configured && (
                 <div className="account-remove">
-                  {confirmRemove ? (
-                    <>
-                      <p>Remove the stored key for {providerId} from this gateway?</p>
-                      <button
-                        type="button"
-                        className="action-secondary"
-                        disabled={busy || !secure}
-                        onClick={() => void run('remove')}
-                      >
-                        Confirm removal
-                      </button>{' '}
-                      <button
-                        type="button"
-                        className="text-action"
-                        disabled={busy}
-                        onClick={() => setConfirmRemove(false)}
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="text-action"
-                      onClick={() => setConfirmRemove(true)}
-                      disabled={busy}
-                    >
-                      Remove stored key
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="text-action"
+                    onClick={() => setConfirmRemove(true)}
+                    disabled={busy}
+                  >
+                    Remove stored key
+                  </button>
+                  <ConfirmDialog
+                    open={confirmRemove}
+                    title="Remove stored key"
+                    tone="danger"
+                    confirmLabel="Remove key"
+                    busy={busy || !secure}
+                    onConfirm={() => void run('remove')}
+                    onCancel={() => setConfirmRemove(false)}
+                  >
+                    Remove the stored key for {providerId} from this gateway? Credentials set in the
+                    gateway's environment may still be used.
+                  </ConfirmDialog>
                 </div>
               )}
             </>

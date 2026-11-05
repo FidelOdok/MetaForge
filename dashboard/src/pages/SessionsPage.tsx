@@ -1,4 +1,6 @@
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
+import { ConfirmDialog } from '../components/ui/Modal';
+import { Button } from '../components/ui/Button';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Link } from 'react-router-dom';
 import { formatRelativeTime } from '../utils/format-time';
@@ -357,21 +359,6 @@ function ExecutionLogPanel({ sessions }: { sessions: AgentSession[] }) {
         >
           EXECUTION LOG
         </span>
-        <button
-          style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            fontFamily: 'Roboto Mono, monospace',
-            fontSize: 9,
-            letterSpacing: '0.08em',
-            color: KC.onSurfaceVariant,
-            textTransform: 'uppercase',
-            padding: '2px 6px',
-          }}
-        >
-          CLEAR
-        </button>
       </div>
 
       {/* Log area */}
@@ -417,6 +404,8 @@ function PendingApprovalCard({ projectId }: { projectId?: string }) {
   // card naming which.
   const { data } = useProposals(projectId);
   const decide = useDecideProposal();
+  // A decision is asked once more in a dialog, as on the Approvals page.
+  const [confirming, setConfirming] = useState<'approve' | 'reject' | null>(null);
   const pending = (data?.proposals ?? []).filter((p) => p.status === 'pending');
   const proposal = pending[0];
   // No phantom data: render nothing when there are no real pending proposals.
@@ -474,66 +463,43 @@ function PendingApprovalCard({ projectId }: { projectId?: string }) {
       </div>
 
       {/* Buttons — wired to the real decide mutation (mirrors /approvals) */}
-      <div style={{ padding: '10px 14px', display: 'flex', gap: 8 }}>
-        <button
-          onClick={() =>
-            decide.mutate({
-              changeId: proposal.change_id,
-              decision: 'approve',
-              reason: 'Approved via dashboard',
-              reviewer: 'dashboard-user',
-            })
-          }
-          disabled={decide.isPending}
-          style={{
-            flex: 1,
-            height: 30,
-            background: KC.running,
-            border: 'none',
-            borderRadius: 4,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 4,
-            fontSize: 11,
-            color: 'var(--mf-c-fff)',
-            fontFamily: 'inherit',
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>check</span>
+      <div className="mf-actions" style={{ padding: '10px 14px' }}>
+        <Button type="button" size="sm" className="flex-1" disabled={decide.isPending} onClick={() => setConfirming('approve')}>
+          <span className="material-symbols-outlined" style={{ fontSize: 15 }}>check</span>
           Approve
-        </button>
-        <button
-          onClick={() =>
-            decide.mutate({
-              changeId: proposal.change_id,
-              decision: 'reject',
-              reason: 'Rejected via dashboard',
-              reviewer: 'dashboard-user',
-            })
-          }
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="flex-1"
           disabled={decide.isPending}
-          style={{
-            flex: 1,
-            height: 30,
-            background: 'var(--mf-r-65-72-90-0p35)',
-            border: `1px solid ${KC.surfaceBorder}`,
-            borderRadius: 4,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 4,
-            fontSize: 11,
-            color: KC.onSurface,
-            fontFamily: 'inherit',
-          }}
+          onClick={() => setConfirming('reject')}
         >
-          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+          <span className="material-symbols-outlined" style={{ fontSize: 15 }}>close</span>
           Reject
-        </button>
+        </Button>
       </div>
+      <ConfirmDialog
+        open={confirming !== null}
+        title={confirming === 'reject' ? 'Reject this change?' : 'Approve this change?'}
+        tone={confirming === 'reject' ? 'danger' : 'primary'}
+        confirmLabel={confirming === 'reject' ? 'Reject' : 'Approve'}
+        busy={decide.isPending}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (!confirming) return;
+          decide.mutate({
+            changeId: proposal.change_id,
+            decision: confirming,
+            reason: confirming === 'approve' ? 'Approved via dashboard' : 'Rejected via dashboard',
+            reviewer: 'dashboard-user',
+          });
+          setConfirming(null);
+        }}
+      >
+        {proposal.description}
+      </ConfirmDialog>
 
       {/* Link */}
       <div style={{ padding: '0 14px 10px', textAlign: 'center' }}>

@@ -443,11 +443,11 @@ export function ApprovalCard({ item, onDecided }: ApprovalCardProps) {
               {item.not_decidable_reason ?? 'This item cannot be decided right now.'}
             </p>
           )}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="mf-actions">
             {decisions.map((d) => (
               <Button
                 key={d}
-                variant={d === 'approve' ? 'primary' : 'ghost'}
+                variant={d === 'approve' ? 'primary' : d === 'reject' ? 'danger' : 'secondary'}
                 size="sm"
                 aria-pressed={choice === d}
                 disabled={blocked}
@@ -455,18 +455,6 @@ export function ApprovalCard({ item, onDecided }: ApprovalCardProps) {
                   setChoice(choice === d ? null : d);
                   decide.reset();
                 }}
-                className="gap-1.5"
-                style={
-                  d === 'approve'
-                    ? { backgroundColor: KC.primaryContainer, color: KC.surface, border: 'none' }
-                    : d === 'reject'
-                      ? {
-                          backgroundColor: 'rgba(255,180,171,0.10)',
-                          color: KC.error,
-                          border: '1px solid rgba(255,180,171,0.20)',
-                        }
-                      : { border: `1px solid ${KC.border}` }
-                }
               >
                 <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
                   {DECISION_ICONS[d]}
@@ -516,15 +504,19 @@ export function ApprovalCard({ item, onDecided }: ApprovalCardProps) {
                   }}
                 />
               </label>
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={blocked || missingReason || missingPhase}
-                onClick={submit}
-                style={{ backgroundColor: KC.primaryContainer, color: KC.surface, border: 'none' }}
-              >
-                {decide.isPending ? 'Submitting…' : `Confirm ${DECISION_LABELS[choice].toLowerCase()}`}
-              </Button>
+              <div className="mf-actions">
+                <Button variant="secondary" size="sm" onClick={() => setChoice(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant={choice === 'reject' ? 'danger' : 'primary'}
+                  size="sm"
+                  disabled={blocked || missingReason || missingPhase}
+                  onClick={submit}
+                >
+                  {decide.isPending ? 'Submitting…' : `Confirm ${DECISION_LABELS[choice].toLowerCase()}`}
+                </Button>
+              </div>
             </div>
           )}
         </div>

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
+import { Button } from '../components/ui/Button';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useSearchParams } from 'react-router-dom';
 
@@ -161,16 +163,16 @@ export function FlowEditorPage() {
                 <strong>{phase.title}</strong>
                 <span className="mono-value">{phase.id}</span>
               </div>
-              <div className="flex items-center gap-1">
-                <button type="button" onClick={() => move(i, -1)} aria-label={`Move ${phase.id} earlier`}>
-                  ↑
-                </button>
-                <button type="button" onClick={() => move(i, 1)} aria-label={`Move ${phase.id} later`}>
-                  ↓
-                </button>
-                <button type="button" onClick={() => removePhase(i)} aria-label={`Remove ${phase.id}`}>
+              <div className="mf-actions">
+                <Button type="button" variant="ghost" size="sm" onClick={() => move(i, -1)} aria-label={`Move ${phase.id} earlier`}>
+                  <ArrowUp size={15} />
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => move(i, 1)} aria-label={`Move ${phase.id} later`}>
+                  <ArrowDown size={15} />
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => removePhase(i)} aria-label={`Remove ${phase.id}`}>
                   Remove
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -199,9 +201,9 @@ export function FlowEditorPage() {
       </ol>
 
       <div className="dialog-actions">
-        <button type="button" onClick={onSave} disabled={!dirty || !valid || save.isPending}>
+        <Button type="button" onClick={onSave} disabled={!dirty || !valid || save.isPending}>
           {save.isPending ? 'Saving…' : 'Save as new version'}
-        </button>
+        </Button>
         {!valid && (
           <span className="field-help">
             Fix the rules above before saving. An unstartable flow is not worth an approval.

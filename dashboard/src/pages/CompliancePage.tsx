@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Modal } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useActiveProject } from '../hooks/use-active-project';
 import { useChecklist, useLinkEvidence } from '../hooks/use-compliance';
@@ -119,7 +120,7 @@ function RegimeCard({ regime, items }: { regime: ComplianceRegime; items: Checkl
   );
 }
 
-// ─── Add-evidence inline form ───────────────────────────────────────────────
+// ─── Add-evidence dialog ────────────────────────────────────────────────────
 function AddEvidenceForm({
   item,
   projectId,
@@ -134,8 +135,7 @@ function AddEvidenceForm({
   const [description, setDescription] = useState('');
   const link = useLinkEvidence(projectId);
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function handleSubmit() {
     if (!title.trim()) return;
     link.mutate(
       {
@@ -149,37 +149,38 @@ function AddEvidenceForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="px-4 py-3 space-y-2" style={{ background: 'rgba(0,0,0,0.15)' }}>
+    <Modal
+      open
+      onClose={onDone}
+      title="Link evidence"
+      description={`${item.id} · ${item.requirement}`}
+      onSubmit={handleSubmit}
+      footer={
+        <>
+          <Button variant="secondary" type="button" onClick={onDone}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!title.trim() || link.isPending}>
+            {link.isPending ? 'Linking…' : 'Link evidence'}
+          </Button>
+        </>
+      }
+    >
+      <label htmlFor={`evidence-title-${item.id}`}>Title</label>
       <input
+        id={`evidence-title-${item.id}`}
         type="text"
         placeholder="Evidence title"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         autoFocus
-        style={{
-          width: '100%',
-          background: KC.surfaceHigh,
-          border: `1px solid ${KC.border}`,
-          borderRadius: 4,
-          padding: '6px 8px',
-          fontSize: 12,
-          color: KC.onSurface,
-          outline: 'none',
-        }}
       />
+      <label htmlFor={`evidence-type-${item.id}`}>Kind of evidence</label>
       <select
+        id={`evidence-type-${item.id}`}
+        className="mf-select w-full"
         value={evidenceType}
         onChange={(e) => setEvidenceType(e.target.value as EvidenceType)}
-        style={{
-          width: '100%',
-          background: KC.surfaceHigh,
-          border: `1px solid ${KC.border}`,
-          borderRadius: 4,
-          padding: '6px 8px',
-          fontSize: 12,
-          color: KC.onSurface,
-          outline: 'none',
-        }}
       >
         {EVIDENCE_TYPES.map((t) => (
           <option key={t} value={t}>
@@ -187,32 +188,17 @@ function AddEvidenceForm({
           </option>
         ))}
       </select>
+      <label htmlFor={`evidence-desc-${item.id}`}>
+        Description <span>(optional)</span>
+      </label>
       <textarea
+        id={`evidence-desc-${item.id}`}
         placeholder="Description (optional)"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
-        rows={2}
-        style={{
-          width: '100%',
-          background: KC.surfaceHigh,
-          border: `1px solid ${KC.border}`,
-          borderRadius: 4,
-          padding: '6px 8px',
-          fontSize: 12,
-          color: KC.onSurface,
-          outline: 'none',
-          resize: 'vertical',
-        }}
+        rows={3}
       />
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" type="button" onClick={onDone}>
-          Cancel
-        </Button>
-        <Button variant="primary" size="sm" type="submit" disabled={!title.trim() || link.isPending}>
-          {link.isPending ? 'Linking…' : 'Link evidence'}
-        </Button>
-      </div>
-    </form>
+    </Modal>
   );
 }
 
