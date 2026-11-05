@@ -505,6 +505,9 @@ def classify_check(node: Any) -> str | None:
     if record_type == "dfm_finding_set":
         # Recomputed by the gateway after the head move; no tool to re-run.
         return "dfm"
+    if record_type == "interface_contract_check":
+        # Re-checked through the contracts route; no tool to re-run.
+        return "contract"
     if record_type != "evidence":
         return None
     tool = producer_tool(meta).lower()

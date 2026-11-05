@@ -834,6 +834,18 @@ change that affects it shows up in Create at once with the reason.
 A finished design run is not readiness: it does not mean the product is
 manufacturable, safe for its use, or right for every process.
 
+### Parts that must fit together
+
+When the project has [interface contracts](twin_schema.md#interface-contracts)
+(the [desk lamp golden path](examples/desk-lamp.md) seeds four), a short
+**Check** card under the readiness card lists each one in plain words with
+where it stands, for example *The circuit board must fit inside the base:
+not checked yet*. The words are *checked, it fits*, *does not fit yet*,
+*not checked yet* and *needs checking again after a change*; a fit is only
+claimed after a real check on real data. **Check now** runs the checks.
+Engineering's **Interfaces** tab shows the same contracts with their coupled
+parameters, agreements, status and the evidence of each check.
+
 ## Decisions
 
 The Decisions tab lists the project's pending approvals in plain words, each

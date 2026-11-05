@@ -55,6 +55,8 @@ def test_definitions_are_the_versioned_types() -> None:
         "appearance",
         # A proposed feature history for one component of an accepted concept.
         "feature_history_proposal",
+        # A typed, versioned agreement between domains (lamp golden path).
+        "interface_contract",
     }
 
 

@@ -37,6 +37,9 @@ docker-compose*.yml
 # Docs / non-runtime
 docs
 examples
+# ...except the golden-path definitions the gateway seeds from
+# (POST /v1/examples/desk-lamp/seed reads it at /app/examples).
+!examples/desk_lamp/definition.json
 tests
 *.md
 LICENSE

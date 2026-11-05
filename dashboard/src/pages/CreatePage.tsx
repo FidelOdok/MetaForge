@@ -27,6 +27,7 @@ import { CreateComposer } from '../components/create/CreateComposer';
 import { ProductStage, defaultStageNode, isEngineering, isVisual } from '../components/create/ProductStage';
 import { JourneyRail } from '../components/create/JourneyRail';
 import { ReadinessCard } from '../components/create/ReadinessCard';
+import { FitTogetherSummary } from '../components/create/FitTogetherSummary';
 import { BriefPanel } from '../components/create/BriefPanel';
 import { DecisionsPanel } from '../components/create/DecisionsPanel';
 import { MakePanel } from '../components/create/MakePanel';
@@ -392,6 +393,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
           ) : (
             <p className="cv-muted">Loading…</p>
           )}
+          <FitTogetherSummary projectId={projectId} />
           <div className="cv-tabs" role="tablist" aria-label="Creation details">
             {PANELS.map((p) => (
               <button

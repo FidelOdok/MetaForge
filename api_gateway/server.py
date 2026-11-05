@@ -61,6 +61,7 @@ from api_gateway.evals.routes import router as evals_router
 from api_gateway.features.routes import router as features_router
 from api_gateway.files.routes import files_router, links_router, upload_links_router
 from api_gateway.firmware.routes import router as firmware_router
+from api_gateway.golden_path.routes import router as golden_path_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
@@ -93,6 +94,7 @@ from api_gateway.twin.face_attachment_routes import router as twin_face_attachme
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
 from api_gateway.twin.impact_routes import router as twin_impact_router
+from api_gateway.twin.interface_contract_routes import router as twin_contract_router
 from api_gateway.twin.item_migration_routes import router as twin_item_migration_router
 from api_gateway.twin.item_routes import router as twin_items_router
 from api_gateway.twin.live_routes import publish_local as _publish_live_local
@@ -2415,6 +2417,8 @@ def create_app(
     # twin's impact walk the approval policy, the operation stream and the
     # pin map diff; the MCP sidecar installs the same ones.
     app.include_router(twin_impact_router)
+    app.include_router(twin_contract_router)
+    app.include_router(golden_path_router)
     from api_gateway.twin.impact_service import install_impact_hooks
 
     install_impact_hooks()

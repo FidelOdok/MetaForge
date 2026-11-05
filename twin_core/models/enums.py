@@ -233,6 +233,19 @@ class WorkProductType(StrEnum):
     # definition item (FHP-<component>), DEPENDS_ON the concept assembly, the
     # L1 layout, the references, the sketches and the manufacturing context.
     FEATURE_HISTORY_PROPOSAL = "feature_history_proposal"
+    # A typed, versioned agreement between domains (twin_core/models/
+    # interface_contract.py): the coupled parameters (value, unit, tolerance,
+    # owning domain, basis), the items implementing each side and the
+    # artifacts expected. A definition item (IFC-<kind>): every change is its
+    # next revision, which is the interface version. Agreed per owning domain
+    # by recorded design decisions pinned to that revision.
+    INTERFACE_CONTRACT = "interface_contract"
+    # One evaluation of an interface contract against the items' current
+    # revisions (twin_core/contracts/checker.py): each check satisfied,
+    # violated with values, not evaluated with the missing input, or stale.
+    # A record pinned to the contract revision and every item revision it
+    # read, so it reads stale when any of them moves.
+    INTERFACE_CONTRACT_CHECK = "interface_contract_check"
 
 
 #: Work product types that are history about a change, not design work
@@ -243,6 +256,7 @@ HISTORY_WORK_PRODUCT_TYPES: frozenset[WorkProductType] = frozenset(
         WorkProductType.CHANGE_IMPACT,
         WorkProductType.DFM_FINDING_SET,
         WorkProductType.DFM_REPORT,
+        WorkProductType.INTERFACE_CONTRACT_CHECK,
     }
 )
 

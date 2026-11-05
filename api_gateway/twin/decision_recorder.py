@@ -134,6 +134,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         concept_options: list[dict[str, Any]] | None = None,
         deciding_questions: dict[str, Any] | None = None,
         industrial_design: dict[str, Any] | None = None,
+        contract_agreement: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
         from twin_core.models.enums import WorkProductType
@@ -351,6 +352,13 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["deciding_questions"] = answers_record.as_metadata()
             if id_record is not None:
                 metadata["industrial_design"] = id_record.as_metadata()
+            if contract_agreement is not None:
+                # Lamp golden path: one owning domain agrees to one interface
+                # contract version. Only the contracts route passes it (a
+                # person's act); the MCP tool never does.
+                from twin_core.models.interface_contract import AGREEMENT_META_KEY
+
+                metadata[AGREEMENT_META_KEY] = dict(contract_agreement)
             metadata.update(pin_metadata(pins))
             if pins:
                 # FORGE-528's list of refs, now every pin (one depends_on).
