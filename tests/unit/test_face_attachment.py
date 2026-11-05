@@ -373,6 +373,264 @@ def test_a_tag_mismatch_never_wins_on_geometry_alone() -> None:
     assert score_candidate(sig, imposter, part_size_of(old)).score < 0.6
 
 
+# ── displaced look-alikes: the twin of a removed feature ─────────────────
+#
+# ``cq.Workplane("XY").box(40, 20, 10).faces(">Z").workplane()
+#   .pushPoints([(-10, 0), (10, 0)]).rect(6, 6).extrude(4)``: a centred
+# 40 x 20 x 10 box with two identical 6 x 6 x 4 bosses on top. The face
+# ids and numbers are the ones the deployed ``cadquery.describe_faces``
+# reported for it.
+
+_BOSS_TOPS = {-10.0: "s0f10", 10.0: "s0f15"}
+
+
+def _boss_part(
+    bosses: list[float],
+    *,
+    height: float = 10.0,
+    shift: float = 0.0,
+    tags: dict[str, str] | None = None,
+) -> list[PlanarFace]:
+    """The box with a 6 x 6 x 4 boss at each x in ``bosses`` (+ ``shift``)."""
+    top = height / 2
+    sides = [_AXES["-x"], _AXES["+x"], _AXES["-y"], _AXES["+y"]]
+    raw = [
+        _face(
+            "s0f0",
+            _AXES["-x"],
+            (-20, 0, 0),
+            20 * height,
+            half=(0, 10, top),
+            edge=(0, 1, 0),
+            adjacent=[_AXES["-y"], _AXES["+y"], _AXES["-z"], _AXES["+z"]],
+        ),
+        _face(
+            "s0f1",
+            _AXES["+x"],
+            (20, 0, 0),
+            20 * height,
+            half=(0, 10, top),
+            edge=(0, 1, 0),
+            adjacent=[_AXES["-y"], _AXES["+y"], _AXES["-z"], _AXES["+z"]],
+        ),
+        _face(
+            "s0f2",
+            _AXES["-y"],
+            (0, -10, 0),
+            40 * height,
+            half=(20, 0, top),
+            edge=(1, 0, 0),
+            adjacent=[_AXES["-x"], _AXES["+x"], _AXES["-z"], _AXES["+z"]],
+        ),
+        _face(
+            "s0f3",
+            _AXES["+y"],
+            (0, 10, 0),
+            40 * height,
+            half=(20, 0, top),
+            edge=(1, 0, 0),
+            adjacent=[_AXES["-x"], _AXES["+x"], _AXES["-z"], _AXES["+z"]],
+        ),
+        _face(
+            "s0f4", _AXES["-z"], (0, 0, -top), 800, half=(20, 10, 0), edge=(1, 0, 0), adjacent=sides
+        ),
+        _face(
+            "s0f5",
+            _AXES["+z"],
+            (0, 0, top),
+            800 - 36 * len(bosses),
+            half=(20, 10, 0),
+            edge=(1, 0, 0),
+            adjacent=sides + sides * len(bosses),
+        ),
+    ]
+    for x in bosses:
+        cx = x + shift
+        first = int(_BOSS_TOPS[x][3:]) - 4
+        zc = top + 2
+        boss_side_adj = [_AXES["+z"], _AXES["+z"], _AXES["-y"], _AXES["+y"]]
+        raw += [
+            _face(
+                f"s0f{first}",
+                _AXES["-x"],
+                (cx - 3, 0, zc),
+                24,
+                half=(0, 3, 2),
+                edge=(0, 1, 0),
+                adjacent=boss_side_adj,
+            ),
+            _face(
+                f"s0f{first + 1}",
+                _AXES["+x"],
+                (cx + 3, 0, zc),
+                24,
+                half=(0, 3, 2),
+                edge=(0, 1, 0),
+                adjacent=boss_side_adj,
+            ),
+            _face(
+                f"s0f{first + 2}",
+                _AXES["-y"],
+                (cx, -3, zc),
+                24,
+                half=(3, 0, 2),
+                edge=(1, 0, 0),
+                adjacent=boss_side_adj,
+            ),
+            _face(
+                f"s0f{first + 3}",
+                _AXES["+y"],
+                (cx, 3, zc),
+                24,
+                half=(3, 0, 2),
+                edge=(1, 0, 0),
+                adjacent=boss_side_adj,
+            ),
+            _face(
+                _BOSS_TOPS[x],
+                _AXES["+z"],
+                (cx, 0, top + 4),
+                36,
+                half=(3, 3, 0),
+                edge=(1, 0, 0),
+                adjacent=sides,
+            ),
+        ]
+    faces = _planar(raw)
+    if tags:
+        faces = [
+            f.model_copy(update={"semantic_tag": tags[f.face_id]}) if f.face_id in tags else f
+            for f in faces
+        ]
+    return faces
+
+
+def _boss_sig(faces: list[PlanarFace], face_id: str = "s0f10") -> Any:
+    return signature_of(next(f for f in faces if f.face_id == face_id), part_size_of(faces))
+
+
+def test_the_twin_of_a_removed_boss_is_never_picked_untagged() -> None:
+    both = _boss_part([-10.0, 10.0])
+    sig = _boss_sig(both)
+    assert sig.centroid == pytest.approx((-10.0, 0.0, 9.0)) and sig.area == 36
+    without = [f for f in both if f.face_id != "s0f10"]
+    result = remap(sig, without)
+    # Geometry alone likes the twin (about 0.73 against 0.05): it is
+    # congruent, faces the same way and has the same neighbours.
+    twin = next(c for c in result.candidates if c.face_id == "s0f15")
+    assert twin.score > 0.6 and (result.runner_up or 0.0) < 0.1
+    # But it sits 20 mm away on a 6 mm face: another feature, never UNIQUE.
+    assert twin.displaced and twin.in_plane == pytest.approx(20.0)
+    assert twin.along_normal == pytest.approx(0.0) and twin.tolerance == pytest.approx(6.0)
+    assert result.outcome is RemapOutcome.MISSING
+    assert result.face is None
+    assert "s0f15" in result.reason and "20 mm" in result.reason
+    assert result.as_dict()["candidates"][0]["displaced"] is True
+
+
+def test_the_twin_of_a_removed_boss_is_never_picked_with_a_different_tag() -> None:
+    tags = {"s0f10": "PSK-B:F2:top:r1", "s0f15": "PSK-B:F2:top:r2"}
+    both = _boss_part([-10.0, 10.0], tags=tags)
+    sig = _boss_sig(both)
+    result = remap(sig, [f for f in both if f.face_id != "s0f10"])
+    assert result.outcome is not RemapOutcome.UNIQUE
+    assert result.face is None
+    # Only the signature tagged (the new build says nothing): still displaced.
+    again = remap(sig, _boss_part([10.0]))
+    assert again.outcome is RemapOutcome.MISSING
+    assert "no build tag" in again.reason
+
+
+def test_a_tag_shared_by_both_boss_tops_identifies_neither() -> None:
+    def source(origins: list[float]) -> dict[str, Any]:
+        return {
+            "kind": "design_ir",
+            "parametric_sketch_ref": "PSK-B@1",
+            "feature_id": "F2",
+            "design_ir": {
+                "entities": [
+                    {
+                        "id": "sk",
+                        "op": "sketch",
+                        "plane": "XY",
+                        "offset": 5.0,
+                        "elements": [
+                            {
+                                "id": f"r{i}",
+                                "type": "rectangle",
+                                "origin": [x - 3, -3],
+                                "width": 6,
+                                "height": 6,
+                            }
+                            for i, x in enumerate(origins)
+                        ],
+                    },
+                    {"id": "pad", "op": "pad", "sketch_ref": "sk", "depth": 4},
+                ]
+            },
+        }
+
+    both = tag_faces(_boss_part([-10.0, 10.0]), source([-10.0, 10.0]))
+    tops = {f.face_id: f.semantic_tag for f in both if f.face_id in _BOSS_TOPS.values()}
+    assert tops == {"s0f10": None, "s0f15": None}  # one pad's top names neither
+    sig = _boss_sig(both)
+    one = tag_faces(_boss_part([10.0]), source([10.0]))
+    assert next(f for f in one if f.face_id == "s0f15").semantic_tag == "PSK-B:F2:top"
+    result = remap(sig, one)
+    assert result.outcome is RemapOutcome.MISSING and result.face is None
+
+
+def test_a_taller_box_keeps_its_top_unique_by_moving_along_its_normal() -> None:
+    low = _planar(box_faces(40, 20, 10))
+    high = _planar(box_faces(40, 20, 16))
+    sig = signature_of(_top(low), part_size_of(low))
+    result = remap(sig, high)
+    assert result.outcome is RemapOutcome.UNIQUE
+    assert result.face is not None and result.face.face_id == "s0f5"
+    best = result.candidates[0]
+    assert best.along_normal == pytest.approx(6.0) and not best.displaced
+    assert "+6 mm along its normal" in result.reason
+    # Tagged the same way, still unique.
+    tagged = remap(
+        signature_of(_top(low).model_copy(update={"semantic_tag": "PSK-BOX:F1:top"}), 44.0),
+        [
+            f.model_copy(update={"semantic_tag": "PSK-BOX:F1:top"}) if f.face_id == "s0f5" else f
+            for f in high
+        ],
+    )
+    assert tagged.outcome is RemapOutcome.UNIQUE and "same build tag" in tagged.reason
+
+
+def test_a_face_moved_less_than_its_size_within_its_plane_stays_unique() -> None:
+    # The boss (a 6 mm feature) moved 1 mm: the same face, a little to the side.
+    before = _boss_part([-10.0])
+    after = _boss_part([-10.0], shift=1.0)
+    result = remap(_boss_sig(before), after)
+    assert result.outcome is RemapOutcome.UNIQUE
+    assert result.face is not None and result.face.face_id == "s0f10"
+    assert result.candidates[0].in_plane == pytest.approx(1.0)
+    assert "shifted 1 mm along its surface" in result.reason
+
+
+def test_a_removed_boss_with_no_twin_is_missing() -> None:
+    sig = _boss_sig(_boss_part([-10.0]))
+    result = remap(sig, _boss_part([]))
+    assert result.outcome is RemapOutcome.MISSING and result.face is None
+    assert "well enough" in result.reason
+
+
+def test_two_symmetric_candidates_are_ambiguous() -> None:
+    # The boss was on the centre line; it became a pair either side of it.
+    sig = signature_of(
+        next(f for f in _boss_part([-10.0], shift=10.0) if f.face_id == "s0f10"), 44.7
+    )
+    result = remap(sig, _boss_part([-10.0, 10.0], shift=0.0))
+    assert result.outcome is RemapOutcome.AMBIGUOUS
+    assert result.face is None
+    assert {c.face_id for c in result.candidates} == {"s0f10", "s0f15"}
+    assert "about equally" in result.reason
+
+
 # ── the service: attach, remap, block, resolve ───────────────────────────
 
 
@@ -726,6 +984,61 @@ async def test_resolve_by_detaching(h: Harness) -> None:
     item = await find_item(h.twin, sp.plane_item_key(sketch), PROJECT)
     history = await item_history(h.twin, item)
     assert len(history) == 3  # attached, reattachment required, detached
+
+
+def _raw(faces: list[PlanarFace]) -> list[dict[str, Any]]:
+    return [f.model_dump(mode="json") for f in faces]
+
+
+async def test_the_twin_of_a_removed_boss_requires_reattachment(h: Harness) -> None:
+    h.cad.faces = _raw(_boss_part([-10.0, 10.0]))
+    base = await _base(h)
+    sketch = await _sketch(h)
+    await _attach(h, sketch, base, face_id="s0f10")
+    psk = await _psk_on(h, sketch)
+    # The boss the sketch sat on is removed; its twin 20 mm away remains.
+    await _move_base(h, base, _raw(_boss_part([10.0])), "result = one_boss()")
+    plane = await _plane(h, sketch)
+    assert plane.state is PlaneState.REATTACHMENT_REQUIRED
+    assert plane.origin == pytest.approx((-10.0, 0.0, 9.0))  # the last valid frame
+    assert plane.attachment is not None and plane.attachment.face_ref == "s0f10"
+    pending = plane.attachment.pending or {}
+    assert pending["outcome"] == "missing" and pending["revision"] == 3
+    assert "s0f15" in pending["reason"] and "20 mm" in pending["reason"]
+    first = pending["candidates"][0]
+    assert first["face_id"] == "s0f15" and first["displaced"] is True
+    with pytest.raises(PlaneReattachmentRequiredError, match="REATTACHMENT_REQUIRED"):
+        await h.service.start_build(project_id=PROJECT, item_key=psk, session_id="s")
+
+
+def test_the_twin_of_a_removed_boss_refuses_the_exact_build_409(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from api_gateway.twin.exact_cad_routes import router as exact_router
+
+    monkeypatch.setattr(twin_routes, "get_twin", lambda: h.twin)
+    app = FastAPI()
+    app.include_router(exact_router)
+    client = TestClient(app)
+    loop = asyncio.new_event_loop()
+    try:
+        h.cad.faces = _raw(_boss_part([-10.0, 10.0]))
+        base = loop.run_until_complete(_base(h))
+        sketch = loop.run_until_complete(_sketch(h))
+        loop.run_until_complete(_attach(h, sketch, base, face_id="s0f10"))
+        loop.run_until_complete(_psk_on(h, sketch))
+        loop.run_until_complete(
+            _move_base(h, base, _raw(_boss_part([10.0])), "result = one_boss()")
+        )
+        plane = loop.run_until_complete(_plane(h, sketch))
+        assert plane.state is PlaneState.REATTACHMENT_REQUIRED
+        refused = client.post("/v1/twin/items/PSK-RIB/exact-build", json={"project_id": PROJECT})
+        assert refused.status_code == 409
+        assert "REATTACHMENT_REQUIRED" in refused.json()["detail"]
+    finally:
+        loop.close()
 
 
 # ── routes ───────────────────────────────────────────────────────────────

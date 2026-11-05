@@ -16,12 +16,20 @@ face is found again:
   face even when it moved or grew); geometry decides between faces with the
   same tag, and is all there is when no tag is known. Position tolerances are
   relative to the part size, so a small part and a large one behave alike.
+  It also measures how far the candidate's centroid moved, split into the
+  part **along the signature's normal** (the common parametric edit: a box
+  gets taller and its top rises) and the part **within its plane**. A
+  candidate that moved within its plane by more than
+  :data:`DISPLACEMENT_TOLERANCE` times the face's own characteristic length
+  (``sqrt(area)``) is *displaced*: congruent, maybe, but somewhere else.
 * :func:`remap` picks a face only when the best score is at or above
-  :data:`CONFIDENCE` and beats the runner-up by at least :data:`MARGIN`
-  (``unique``). Two faces too close to call is ``ambiguous``, nothing good
-  enough is ``missing``; either way the caller keeps the last valid
-  attachment and asks a person (PLN-010). Nothing here ever picks a face
-  silently.
+  :data:`CONFIDENCE`, beats the runner-up by at least :data:`MARGIN` and is
+  not displaced, unless its semantic tag matches the signature's
+  (``unique``). Two faces too close to call is ``ambiguous``; nothing good
+  enough, or a best look-alike that is displaced with no matching tag (the
+  twin of a removed feature), is ``missing``. Either way the caller keeps
+  the last valid attachment and asks a person (PLN-010). Nothing here ever
+  picks a face silently, and every outcome carries a plain ``reason``.
 * :func:`frame_from_face` is the plane frame a face gives: origin at the
   face centroid projected onto its plane, U along the longest straight edge
   of the outer loop (made canonical, so the same edge gives the same U),
@@ -29,7 +37,8 @@ face is found again:
 * :func:`tag_faces` adds semantic tags from a revision's recorded build
   source: the extrude of a sketch tags its end faces ``top`` and
   ``bottom`` and each straight side by the sketch primitive it was swept
-  from.
+  from. A tag that lands on more than one face identifies none of them and
+  is dropped.
 
 Pure: Pydantic and the standard library only.
 """
@@ -63,6 +72,11 @@ POSITION_SCALE = 0.3
 TAG_MATCH_FLOOR = 0.7
 #: A tag mismatch keeps at most this fraction of the geometry score.
 TAG_MISMATCH_FACTOR = 0.3
+#: A candidate whose centroid moved within the face's plane by more than this
+#: many characteristic face lengths (``sqrt(area)``) is displaced: it is
+#: never picked unless its semantic tag matches. Movement along the face's
+#: own normal does not count (that is how a face moves when a part grows).
+DISPLACEMENT_TOLERANCE = 1.0
 
 
 class RemapOutcome(StrEnum):
@@ -212,6 +226,19 @@ class CandidateScore:
     geometry: float
     tag: str  # match | mismatch | unknown
     terms: dict[str, float] = field(default_factory=dict)
+    #: How far the centroid moved within the signature's plane (mm).
+    in_plane: float = 0.0
+    #: How far the centroid moved along the signature's normal (mm, signed).
+    along_normal: float = 0.0
+    #: The in-plane distance beyond which the candidate is displaced (mm).
+    tolerance: float = 0.0
+    #: Moved within its plane by more than ``tolerance``.
+    displaced: bool = False
+
+    @property
+    def eligible(self) -> bool:
+        """May be picked on its own: in place, or the same feature by tag."""
+        return not self.displaced or self.tag == "match"
 
 
 def _falloff(x: float, scale: float) -> float:
@@ -230,8 +257,24 @@ def _adjacency(sig: FaceSignature, face: PlanarFace) -> float:
     return sum((a & b).values()) / total
 
 
+def displacement_tolerance(sig: FaceSignature, face: PlanarFace) -> float:
+    """The in-plane distance beyond which ``face`` is somewhere else (mm)."""
+    length = math.sqrt(max(sig.area, face.area, 0.0))
+    return max(DISPLACEMENT_TOLERANCE * length, 1e-6 * sig.part_size)
+
+
 def score_candidate(sig: FaceSignature, face: PlanarFace, scale: float) -> CandidateScore:
     """How well ``face`` matches ``sig``, in ``[0, 1]``. See the module docstring."""
+    moved = _sub(face.centroid, sig.centroid)
+    along = dot(moved, sig.normal)
+    in_plane = norm(_sub(moved, _mul(sig.normal, along)))
+    tolerance = displacement_tolerance(sig, face)
+    where: dict[str, Any] = {
+        "in_plane": round(in_plane, 6),
+        "along_normal": round(along, 6),
+        "tolerance": round(tolerance, 6),
+        "displaced": in_plane > tolerance,
+    }
     n_new = _unit(face.normal)
     cos = max(-1.0, min(1.0, dot(sig.normal, n_new)))
     angle = math.degrees(math.acos(cos))
@@ -239,7 +282,7 @@ def score_candidate(sig: FaceSignature, face: PlanarFace, scale: float) -> Candi
     if sig.semantic_tag and face.semantic_tag:
         tag = "match" if sig.semantic_tag == face.semantic_tag else "mismatch"
     if angle > MAX_NORMAL_DEG:
-        return CandidateScore(face.face_id, 0.0, 0.0, tag, {"normal_deg": round(angle, 3)})
+        return CandidateScore(face.face_id, 0.0, 0.0, tag, {"normal_deg": round(angle, 3)}, **where)
     size = max(scale, 1e-6) * POSITION_SCALE
     biggest = max(sig.area, face.area, 1e-12)
     terms = {
@@ -272,6 +315,7 @@ def score_candidate(sig: FaceSignature, face: PlanarFace, scale: float) -> Candi
         round(geometry, 6),
         tag,
         {k: round(v, 6) for k, v in terms.items()},
+        **where,
     )
 
 
@@ -292,7 +336,13 @@ class RemapResult:
             "score": self.score,
             "runner_up": self.runner_up,
             "candidates": [
-                {"face_id": c.face_id, "score": c.score, "tag": c.tag} for c in self.candidates
+                {
+                    "face_id": c.face_id,
+                    "score": c.score,
+                    "tag": c.tag,
+                    "displaced": c.displaced,
+                }
+                for c in self.candidates
             ],
             "reason": self.reason,
         }
@@ -314,6 +364,7 @@ def remap(
     )
     by_id = {f.face_id: f for f in faces}
     shown = [c for c in scored if c.score >= confidence * 0.5][:6]
+    was = sig.face_id or "the face"
     if not scored or scored[0].score < confidence:
         top = scored[0].score if scored else 0.0
         return RemapResult(
@@ -322,7 +373,7 @@ def remap(
             top,
             scored[1].score if len(scored) > 1 else None,
             shown,
-            f"no face matches well enough (best {top:.2f}, needs {confidence:.2f})",
+            f"no face matches {was} well enough (best {top:.2f}, needs {confidence:.2f})",
         )
     best, runner = scored[0], (scored[1] if len(scored) > 1 else None)
     if runner is not None and best.score - runner.score < margin:
@@ -332,17 +383,44 @@ def remap(
             best.score,
             runner.score,
             [c for c in shown if best.score - c.score < margin] or shown,
-            f"{best.face_id} and {runner.face_id} match about equally "
+            f"{best.face_id} and {runner.face_id} match {was} about equally "
             f"({best.score:.2f} and {runner.score:.2f})",
         )
+    if not best.eligible:
+        # Congruent but somewhere else, and nothing says it is the same
+        # feature: the face was removed and this is a look-alike (PLN-010).
+        why = (
+            "its build tag says another feature made it"
+            if best.tag == "mismatch"
+            else "no build tag says it is the same feature"
+        )
+        return RemapResult(
+            RemapOutcome.MISSING,
+            None,
+            best.score,
+            runner.score if runner else None,
+            shown,
+            f"{was} is gone: the closest look-alike, {best.face_id}, sits "
+            f"{best.in_plane:.3g} mm away along its surface, more than the face's "
+            f"own size ({best.tolerance:.3g} mm), and {why}",
+        )
+    how: list[str] = []
+    if best.tag == "match":
+        how.append("same build tag")
+    if abs(best.along_normal) > 1e-6:
+        how.append(f"moved {best.along_normal:+.3g} mm along its normal")
+    if best.in_plane > 1e-6:
+        how.append(f"shifted {best.in_plane:.3g} mm along its surface")
     return RemapResult(
         RemapOutcome.UNIQUE,
         by_id[best.face_id],
         best.score,
         runner.score if runner else None,
         shown,
-        f"{best.face_id} matches ({best.score:.2f}"
-        + (f", next best {runner.score:.2f})" if runner else ")"),
+        f"{best.face_id} matches {was} ({best.score:.2f}"
+        + (f", next best {runner.score:.2f}" if runner else "")
+        + (f"; {', '.join(how)}" if how else "")
+        + ")",
     )
 
 
@@ -507,11 +585,21 @@ def tag_faces(
                 tag = exp.tag
                 break
         out.append(face.model_copy(update={"semantic_tag": tag}) if tag else face)
-    return out
+    # A tag the build gives to more than one face (the tops of two bosses
+    # padded from one sketch, a side split in two) names no face in
+    # particular, so it is dropped rather than trusted to tell them apart.
+    counts = Counter(f.semantic_tag for f in out if f.semantic_tag)
+    return [
+        f.model_copy(update={"semantic_tag": None})
+        if f.semantic_tag and counts[f.semantic_tag] > 1
+        else f
+        for f in out
+    ]
 
 
 __all__ = [
     "CONFIDENCE",
+    "DISPLACEMENT_TOLERANCE",
     "MARGIN",
     "CandidateScore",
     "FaceFrame",
@@ -522,6 +610,7 @@ __all__ = [
     "expected_faces",
     "frame_from_face",
     "part_size_of",
+    "displacement_tolerance",
     "remap",
     "score_candidate",
     "signature_of",

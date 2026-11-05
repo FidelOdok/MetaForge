@@ -1549,11 +1549,32 @@ between faces with the same tag), a different tag at most 0.3 of its
 geometry score, and with no tag the geometry score alone. Geometry is the
 product of a normal term and an area term with a weighted sum of centroid,
 offset, loop edge and neighbour terms; position terms halve at 0.3 of the
-part size, a normal that turned by more than 20 degrees scores 0. A face is
-picked only when the best score is at least 0.6 and beats the runner-up by
-at least 0.1 (`unique`). Otherwise the outcome is `ambiguous` (two faces too
-close to call) or `missing` (nothing good enough, or the new head is not
-validated, or its faces could not be read).
+part size, a normal that turned by more than 20 degrees scores 0.
+
+Each candidate's centroid displacement is also split in two: the part along
+the signature's normal, and the part within the face's plane. Moving along
+its own normal is the common parametric edit (a box gets taller and its top
+rises) and is allowed. A candidate that moved within its plane by more than
+one characteristic face length, `sqrt(area)` (the larger of the old and new
+areas), is *displaced*: it may be congruent, but it is somewhere else, such
+as the twin of a feature that was removed. A displaced candidate is never
+picked unless its semantic tag matches the signature's.
+
+A face is picked only when the best score is at least 0.6, beats the
+runner-up by at least 0.1, and is not displaced without a matching tag
+(`unique`). Otherwise the outcome is `ambiguous` (two faces too close to
+call) or `missing` (nothing good enough, the best look-alike is displaced
+with no matching tag, the new head is not validated, or its faces could not
+be read). Every outcome carries a plain `reason` the dashboard shows, for
+example *s0f10 is gone: the closest look-alike, s0f15, sits 20 mm away
+along its surface, more than the face's own size (6 mm), and no build tag
+says it is the same feature*. Each candidate lists whether it is
+`displaced`.
+
+A semantic tag that the build source gives to more than one face of a
+revision (the tops of two bosses padded from one sketch, or a side split in
+two) names no face in particular, so it is dropped from those faces rather
+than trusted to tell them apart.
 
 | Outcome | What is written |
 |---|---|
