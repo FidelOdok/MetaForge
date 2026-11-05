@@ -628,8 +628,12 @@ class ExactCadService:
         _generated_from: list[str] | None = None,
     ) -> dict[str, Any]:
         """Build (or re-validate) exact geometry for ``item_key``. See the module docstring."""
+        from api_gateway.twin.change_classification import check_change_guard
         from tool_registry.jobs import current_job_id
         from twin_core.items import ItemRevisionConflictError
+
+        # An appearance (or not yet clarified) turn never rebuilds CAD.
+        check_change_guard("cad_rebuild")
 
         job_id = current_job_id()
         started = time.monotonic()
@@ -1517,8 +1521,10 @@ class ExactCadService:
         Everything that would refuse the request is checked first, so a bad
         call fails at once rather than on the job.
         """
+        from api_gateway.twin.change_classification import check_change_guard
         from twin_core.items import ItemRevisionConflictError
 
+        check_change_guard("cad_rebuild")
         psk_item = await self._maybe_parametric(project_id, item_key)
         if psk_item is not None:
             return await self._start_parametric_build(

@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from api_gateway.twin.change_classification import ChangeGuardRefusedError
 from api_gateway.twin.exact_cad import (
     ExactCadError,
     ExactCadService,
@@ -144,6 +145,9 @@ async def start_exact_build(key: str, body: ExactBuildRequest) -> Any:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ExactCadError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ChangeGuardRefusedError as exc:
+            # An appearance-only turn never rebuilds CAD.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return reply
 
 

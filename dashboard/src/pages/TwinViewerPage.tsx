@@ -73,6 +73,7 @@ import { SketchOnPlane } from '../components/sketch/SketchOnPlane';
 import { SketchPlaneControls } from '../components/sketch/SketchPlaneControls';
 import { useSketchPlane, useSketchStrokes } from '../hooks/use-sketch-plane';
 import { isPlaced } from '../api/endpoints/sketchPlanes';
+import { useAppearanceSync } from '../hooks/use-appearance';
 import './TwinViewerPage.css';
 
 // `?demo=1` serves the illustrative sample workspace offline. Idempotent, so
@@ -1161,6 +1162,8 @@ export function TwinViewerPage() {
   // pins the illustrative Drone FC workspace.
   const { activeProjectId: selectedProjectId, activeProject } = useActiveProject();
   const activeProjectId = sampleMode ? SAMPLE_PROJECT_ID : selectedProjectId;
+  // The appearance record, applied to every mesh the viewer shows.
+  useAppearanceSync(sampleMode ? null : activeProjectId);
   // FORGE-647: watch an agent put an assembly together, part by part.
   const [liveOpen, setLiveOpen] = useState(false);
   const projectName = sampleMode ? SAMPLE_PROJECT_NAME : activeProject?.name;

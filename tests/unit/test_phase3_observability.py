@@ -118,7 +118,8 @@ class TestTelemetryMetricsGroupAccess:
         # + 2 cross-domain impact and interface edges (FORGE-793).
         # + 3 face attachment, remap and blocked commits (CDE slice 9).
         # + 2 manufacturing context writes and injections (FORGE-801).
-        assert len(MetricsRegistry.all_metrics()) == 125
+        # + 3 change classification, appearance updates and guard refusals.
+        assert len(MetricsRegistry.all_metrics()) == 128
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

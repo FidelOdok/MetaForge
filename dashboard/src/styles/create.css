@@ -393,6 +393,16 @@
 .cv-state-sending {
   color: var(--cv-accent-soft);
 }
+/* What the request changes, decided before anything changed (section 5). */
+.cv-classified {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--cv-muted);
+}
 
 /* ── Composer ─────────────────────────────────────────────────────────── */
 .cv-composer {

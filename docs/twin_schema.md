@@ -1225,6 +1225,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `parametric_sketch` | definition | `PSK` | `WorkProduct` `parametric_sketch`: a sketch a person promoted, with only the accepted constraints (re-checked by the gateway) and a feature plan whose depth, angle and material are required input. `DEPENDS_ON` the interpretation and the strokes. Held for approval |
 | `generated_sketch` | definition | `GSK` | `WorkProduct` `generated_sketch`: the accepted AI-generated concept sketch for a sketch or a text concept; each accepted proposal is the next revision. Illustrative only: never an editable sketch, CAD or evidence |
 | `manufacturing_context` | definition | `MFC` | `WorkProduct` `manufacturing_context`: how the product (`MFC-PROJECT`) or one component (`MFC-<COMPONENT>`) might be made, each field with its authority and provenance. Every change is the next revision; every generated concept records the revision it used. See [the manufacturing context](#manufacturing-context) |
+| `appearance` | definition | `APR` | `WorkProduct` `appearance`: how the product and each component look (`APR-PROJECT`): colour, finish, render material and texture refs, keyed by component name. Never CAD, never the manufacturing context. See [the appearance record](#appearance-record) |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |

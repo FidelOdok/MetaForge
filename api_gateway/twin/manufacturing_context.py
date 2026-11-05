@@ -311,11 +311,14 @@ async def write_context(
     every generator, and an in-run decision is held as an assumption pending
     its gate instead (:func:`sync_from_decision`).
     """
+    from api_gateway.twin.change_classification import check_change_guard
     from api_gateway.twin.item_revisions import finish_definition_revision
     from twin_core.items import ItemRevisionConflictError, plan_revision, supports_items
     from twin_core.models.enums import WorkProductType
     from twin_core.models.work_product import WorkProduct
 
+    # An appearance (or not yet clarified look-or-material) turn never writes it.
+    check_change_guard("manufacturing_context_write")
     if twin is None or not supports_items(twin):
         raise ManufacturingContextError("this twin cannot keep a manufacturing context", 503)
     pid = _pid(project_id)

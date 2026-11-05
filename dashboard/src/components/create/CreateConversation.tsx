@@ -6,6 +6,10 @@ import { useProjectOperations } from '../../store/operations-store';
 import { MessageBody } from '../chat/MessageBody';
 import { TurnInProgress } from '../chat/TurnInProgress';
 import { useTurnStream } from '../chat/useTurnStream';
+import { useQueryClient } from '@tanstack/react-query';
+import { appearanceQueryKey } from '../../hooks/use-appearance';
+import { plainClassificationLine } from '../../lib/appearance';
+import { ChangeClassificationLine, PendingClassificationLine } from './ChangeClassificationLine';
 
 const TURN_LABEL: Record<Intent, string> = {
   ask: 'Question',
@@ -59,10 +63,15 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
   const refetch = thread.refetch;
   const events = useTurnStream(threadId, !!sending, () => void refetch());
   const wasBusy = useRef(busy);
+  const queryClient = useQueryClient();
   useEffect(() => {
-    if (wasBusy.current && !busy) void refetch();
+    if (wasBusy.current && !busy) {
+      void refetch();
+      // An appearance turn changed the look: show it on the stage now.
+      void queryClient.invalidateQueries({ queryKey: appearanceQueryKey(projectId) });
+    }
     wasBusy.current = busy;
-  }, [busy, refetch]);
+  }, [busy, refetch, queryClient, projectId]);
   // The server stores the message as soon as it arrives; while it is still
   // being worked on, show it once, as the instruction with its state.
   const pendingTexts = new Set(session.queue.filter((i) => i.state !== 'failed').map((i) => i.text.trim()));
@@ -119,6 +128,7 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
               onReply={(answer) => reply(projectId, answer, tools)}
               onShowPart={(nodeId) => selectNode(projectId, nodeId)}
             />
+            {mine && <ChangeClassificationLine projectId={projectId} classification={session.classifications?.[m.id]} />}
           </article>
         );
       })}
@@ -144,6 +154,13 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
               </span>
             </header>
             <p>{ins.text}</p>
+            {ins.state === 'sending' && ins.operationId && (
+              <PendingClassificationLine
+                line={plainClassificationLine(
+                  operations.ops.byId[ins.operationId]?.milestones.find((m) => m.stageId === 'classified')?.label,
+                )}
+              />
+            )}
             {ins.state === 'failed' && (
               <footer className="cv-msg-actions">
                 <span className="cv-error">{ins.error}</span>

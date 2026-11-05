@@ -27,6 +27,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from api_gateway.twin.change_classification import ChangeGuardRefusedError
 from api_gateway.twin.manufacturing_context import (
     ContextView,
     ManufacturingContextError,
@@ -81,6 +82,9 @@ async def _call(name: str, project_id: str, fn: Callable[[], Awaitable[T]]) -> T
         except ManufacturingContextError as exc:
             span.record_exception(exc)
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+        except ChangeGuardRefusedError as exc:
+            span.record_exception(exc)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ItemRevisionConflictError as exc:
             span.record_exception(exc)
             raise HTTPException(status_code=409, detail=str(exc)) from exc

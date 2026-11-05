@@ -1207,6 +1207,43 @@ class MetricsRegistry:
         labels=["generator", "resolution"],
     )
 
+    # ── Change classification (before an authoritative edit) ───────────
+
+    CHANGE_CLASSIFICATION_TOTAL = MetricDefinition(
+        name="metaforge_change_classification_total",
+        type="counter",
+        description=(
+            "Change requests classified before any authoritative edit, by class "
+            "(appearance, geometric, engineering_geometry, material_engineering, "
+            "performance_objective, ambiguous_style, ambiguous_appearance_or_material, "
+            "not_a_change), confidence band (high, medium, low) and stage: rules, llm, "
+            "person (the person chose the look or the material) or llm_failed"
+        ),
+        labels=["change_class", "confidence", "stage"],
+    )
+
+    APPEARANCE_UPDATE_TOTAL = MetricDefinition(
+        name="metaforge_appearance_update_total",
+        type="counter",
+        description=(
+            "Appearance-only updates (colour, finish, render material, textures) by "
+            "scope (component, product) and outcome: updated, refused or failed. "
+            "None of them rebuilds CAD or writes the manufacturing context"
+        ),
+        labels=["scope", "outcome"],
+    )
+
+    CHANGE_GUARD_REFUSAL_TOTAL = MetricDefinition(
+        name="metaforge_change_guard_refusal_total",
+        type="counter",
+        description=(
+            "Actions held because of the turn's change classification, by class and "
+            "action (cad_rebuild, manufacturing_context_write): an appearance request "
+            "that tried to rebuild CAD, for example"
+        ),
+        labels=["change_class", "action"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1371,6 +1408,9 @@ class MetricsRegistry:
             cls.CONCEPT_MESH_TOTAL,
             cls.MANUFACTURING_CONTEXT_WRITE_TOTAL,
             cls.MANUFACTURING_CONTEXT_INJECTION_TOTAL,
+            cls.CHANGE_CLASSIFICATION_TOTAL,
+            cls.APPEARANCE_UPDATE_TOTAL,
+            cls.CHANGE_GUARD_REFUSAL_TOTAL,
         ]
 
     @classmethod
@@ -2282,6 +2322,27 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.MANUFACTURING_CONTEXT_INJECTION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"generator": generator, "resolution": resolution})
+
+    def record_change_classification(self, change_class: str, confidence: str, stage: str) -> None:
+        """Record one change request classified before an authoritative edit."""
+        counter = self._instruments.get(MetricsRegistry.CHANGE_CLASSIFICATION_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={"change_class": change_class, "confidence": confidence, "stage": stage},
+            )
+
+    def record_appearance_update(self, scope: str, outcome: str) -> None:
+        """Record one appearance-only update by scope and outcome."""
+        counter = self._instruments.get(MetricsRegistry.APPEARANCE_UPDATE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"scope": scope, "outcome": outcome})
+
+    def record_change_guard_refusal(self, change_class: str, action: str) -> None:
+        """Record one action held because of the turn's change classification."""
+        counter = self._instruments.get(MetricsRegistry.CHANGE_GUARD_REFUSAL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"change_class": change_class, "action": action})
 
     def record_tool_job(self, tool: str, status: str) -> None:
         """Record one state change of a tool job (FORGE-783)."""

@@ -41,6 +41,7 @@ from api_gateway.chat.ui_blocks import (
     InvalidBlocksError,
     validate_blocks,
 )
+from api_gateway.twin.change_classification import guard_tool_call
 from mcp_core.profiles import MAX_TOOLS as PHASE_TOOL_CAP
 from observability.metrics import MetricsCollector
 from orchestrator.design_flow.grounding import (
@@ -526,6 +527,10 @@ async def mcp_tools_from_bridge(
 
         def _make_handler(tid: str) -> Handler:
             async def handler(arguments: dict[str, object]) -> object:
+                # The turn's change classification holds a CAD rebuild or a
+                # manufacturing context write it forbids (an appearance-only
+                # request, for one), wherever the tool itself runs.
+                guard_tool_call(tid)
                 return await bridge.invoke(tid, dict(arguments))
 
             return handler

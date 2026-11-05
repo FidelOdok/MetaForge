@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useProject } from '../hooks/use-projects';
 import { useCreation } from '../hooks/use-creation';
+import { useAppearanceSync } from '../hooks/use-appearance';
 import { useTwinNodes, useNodeVersionHistory } from '../hooks/use-twin';
 import { useHarnessTools } from '../hooks/use-harness';
 import { useApprovals } from '../hooks/use-approvals';
@@ -88,6 +89,8 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
 
   const project = useProject(projectId);
   const view = useCreation(projectId);
+  // The appearance record, applied to every mesh the stage shows.
+  useAppearanceSync(projectId);
   const nodes = useTwinNodes(projectId);
   const pending = useApprovals({ status: 'pending', projectId });
   const tools = useIntentTools();

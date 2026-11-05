@@ -6,6 +6,7 @@ import { conflictOf, getCreation, putBrief, refusalOf, type ReferenceRole } from
 import { useSketchStore } from './sketch-store';
 import { useSketchGenerationStore } from './sketch-generation-store';
 import { modelChoiceFields, useModelChoice } from './model-choice';
+import type { ChangeClassification } from '../api/endpoints/changeClassification';
 
 /**
  * The Create view's working state, per creation (project).
@@ -52,6 +53,8 @@ export interface Instruction {
   referenceRoles?: InstructionReference[];
   /** FORGE-794: the sketch revision and selected region the instruction is about. */
   context?: { sketchRevision?: string | null; region?: Array<[number, number]> | null };
+  /** The component selected when it was sent, so the request can be about it. */
+  componentId?: string | null;
   state: InstructionState;
   error?: string;
   createdAt: string;
@@ -72,6 +75,11 @@ export interface CreateSession {
   selectedNodeId: string | null;
   /** The operation id the gateway returned for the last turn it answered. */
   lastOperationId: string | null;
+  /**
+   * What each sent message would change (spec section 5), by the stored
+   * message's id, so the conversation can say "Colour change only" under it.
+   */
+  classifications?: Record<string, ChangeClassification>;
 }
 
 const EMPTY: CreateSession = {
@@ -82,7 +90,16 @@ const EMPTY: CreateSession = {
   threadId: null,
   selectedNodeId: null,
   lastOperationId: null,
+  classifications: {},
 };
+
+/** How many classifications a session keeps (the newest). */
+const CLASSIFICATIONS_KEPT = 30;
+
+function keepNewest(map: Record<string, ChangeClassification>): Record<string, ChangeClassification> {
+  const entries = Object.entries(map);
+  return entries.length > CLASSIFICATIONS_KEPT ? Object.fromEntries(entries.slice(-CLASSIFICATIONS_KEPT)) : map;
+}
 
 /** The same instructions the Engineering chat drawer appends, so both strip them for display. */
 export const INTENT_INSTRUCTION: Record<Intent, string> = {
@@ -93,7 +110,7 @@ export const INTENT_INSTRUCTION: Record<Intent, string> = {
 };
 
 export const CONTEXT_SUFFIX =
-  /\n\nSelected twin object \(context snapshot\):|\n\nAttached twin work products|\nDiscuss using the supplied context\.|\nPropose a reviewable change using|\nUse only the explicitly selected tools/;
+  /\n\nChange kind \(chosen by the person\):|\n\nSelected twin object \(context snapshot\):|\n\nAttached twin work products|\nDiscuss using the supplied context\.|\nPropose a reviewable change using|\nUse only the explicitly selected tools/;
 
 /** What kind of turn a stored user message was, from the instruction it carries. */
 export function intentOf(content: string): Intent {
@@ -185,6 +202,7 @@ export const useCreateStore = create<CreateStore>()(
             content: next.text + refs + ctx + INTENT_INSTRUCTION[next.intent],
             tools: turnTools.get(next.id) ?? [],
             client_turn_id: turnId,
+            ...(next.componentId ? { graph_ref_node: next.componentId } : {}),
             ...modelChoiceFields(useModelChoice.getState()),
           });
           turnTools.delete(next.id);
@@ -192,6 +210,10 @@ export const useCreateStore = create<CreateStore>()(
           patch(projectId, (cur) => ({
             queue: cur.queue.filter((i) => i.id !== next.id),
             lastOperationId: sent.operation_id ?? cur.lastOperationId,
+            classifications:
+              sent.classification && sent.id
+                ? keepNewest({ ...(cur.classifications ?? {}), [sent.id]: sent.classification })
+                : (cur.classifications ?? {}),
           }));
         } catch (error) {
           updateInstruction(projectId, next.id, { state: 'failed', error: refusalOf(error) });
@@ -300,6 +322,7 @@ export const useCreateStore = create<CreateStore>()(
                 references: included.map((a) => a.workProductId!),
                 referenceRoles: included.map((a) => ({ id: a.workProductId!, ...(a.role ? { role: a.role } : {}) })),
                 context: sketchRevision ? { sketchRevision, region } : undefined,
+                componentId: cur.selectedNodeId,
                 state: 'queued',
                 createdAt: new Date().toISOString(),
               },
