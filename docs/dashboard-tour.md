@@ -54,8 +54,15 @@ height; a link that acts as a button uses the same classes
 native `<dialog>` that closes on Escape, on a click outside it and from its
 X, starts with focus inside and hands focus back to whatever opened it, with
 *Cancel* first and the main action last. A question before something that
-cannot be undone, such as deleting a project, is a `ConfirmDialog` built on
-it. Styles are in `dashboard/src/styles/page.css`.
+cannot be undone, such as deleting a project or a stored provider key, or a
+decision on a proposed change from the Sessions page, is a `ConfirmDialog`
+built on it. Forms that used to open inside the page open as dialogs: a new
+constraint, a design loop, a promotion attempt, a generated feature and a
+trade-study option on Requirements, linking evidence on Compliance, renaming
+a project, a run's gate review and an item's revision history. Filter chips
+and view tabs (Files, Knowledge, Requirements, Approvals) share the Files
+page's chip, with the selected one filled. Styles are in
+`dashboard/src/styles/page.css`.
 
 Every route below has a sidebar entry. Two entries run the other way —
 **Requirements** (`/requirements`) and **Evals** (`/evals`) are in the

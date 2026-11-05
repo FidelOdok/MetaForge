@@ -254,24 +254,12 @@ export function KnowledgePage() {
 
       {/* ── Filter row: type chips + project_id input ───────────────────── */}
       <div style={{ marginBottom: 12 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+        <div className="mf-chips">
           <button
             type="button"
             onClick={() => setFilterType('all')}
             aria-pressed={filterType === 'all'}
-            style={{
-              fontFamily: 'monospace',
-              fontSize: 10,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              padding: '4px 10px',
-              borderRadius: 4,
-              border: 'none',
-              cursor: 'pointer',
-              background: filterType === 'all' ? '#ff5a0a' : 'var(--mf-r-30-31-38-0p85)',
-              color: filterType === 'all' ? '#000' : 'var(--mf-c-9a9aaa)',
-              transition: 'background 0.15s, color 0.15s',
-            }}
+            className="mf-chip"
           >
             all
           </button>
@@ -283,19 +271,7 @@ export function KnowledgePage() {
                 type="button"
                 onClick={() => setFilterType(kt)}
                 aria-pressed={active}
-                style={{
-                  fontFamily: 'monospace',
-                  fontSize: 10,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: active ? '#ff5a0a' : 'var(--mf-r-30-31-38-0p85)',
-                  color: active ? '#000' : 'var(--mf-c-9a9aaa)',
-                  transition: 'background 0.15s, color 0.15s',
-                }}
+                className="mf-chip"
               >
                 {kt.replace(/_/g, ' ')}
               </button>

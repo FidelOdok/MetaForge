@@ -159,3 +159,68 @@
   color: var(--mf-c-e2e2eb);
   font-size: 13px;
 }
+
+/* A form laid out in a modal: fields side by side, wrapping, at toolbar size. */
+.mf-form-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.mf-modal .mf-form-grid label,
+.mf-modal label.mf-check {
+  margin: 0;
+  font-size: 12px;
+}
+.mf-modal .mf-form-grid label {
+  display: flex;
+}
+.mf-modal .mf-form-grid input,
+.mf-modal .mf-form-grid select,
+.mf-modal .mf-form-grid textarea {
+  min-height: 36px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.mf-modal input[type='checkbox'],
+.mf-modal input[type='radio'] {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+}
+.mf-modal label.mf-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Filter chips and view tabs: the Files page's chips, in one place. */
+.mf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.mf-chip {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--mf-r-30-31-38-0p85);
+  color: var(--mf-c-9a9aaa);
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.mf-chip:hover {
+  color: var(--mf-c-e2e2eb);
+}
+.mf-chip[aria-pressed='true'],
+.mf-chip[aria-selected='true'] {
+  background: #ff5a0a;
+  color: #000;
+}

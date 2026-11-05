@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { RevisionIndexEntry } from '../../api/endpoints/items';
 import { ItemHistoryPanel } from './ItemHistoryPanel';
+import { Modal } from '../ui/Modal';
 
 /** FORGE-526: a row's revision (`KEY@n`) with a link to the item's history,
  * for tables whose rows are revisions (BOM components, requirements). An
@@ -34,21 +35,9 @@ export function RevisionBadge({
         @{entry.revision}
         {!entry.current && ' (old)'}
       </button>
-      {open && (
-        <div
-          role="dialog"
-          aria-label={`${entry.key} history`}
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto"
-          style={{ background: 'rgba(0,0,0,0.5)', paddingTop: 48 }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setOpen(false);
-          }}
-        >
-          <div className="w-full mx-4" style={{ maxWidth: 720 }}>
-            <ItemHistoryPanel itemKey={entry.key} projectId={projectId} onClose={() => setOpen(false)} />
-          </div>
-        </div>
-      )}
+      <Modal open={open} onClose={() => setOpen(false)} title={`${entry.key} history`} size="lg">
+        <ItemHistoryPanel itemKey={entry.key} projectId={projectId} />
+      </Modal>
     </>
   );
 }
