@@ -121,7 +121,7 @@ class TestTelemetryMetricsGroupAccess:
         # + 3 change classification, appearance updates and guard refusals.
         # + 3 structured mesh, maturity queries, representation mislabels (C3D slice 2).
         # + 4 DFM evaluations, findings, stale recomputes and decisions (C3D slice 4).
-        assert len(MetricsRegistry.all_metrics()) == 135
+        assert len(MetricsRegistry.all_metrics()) == 140
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

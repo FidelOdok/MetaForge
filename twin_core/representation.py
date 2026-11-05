@@ -7,8 +7,8 @@ mesh, a structured block mesh, an engineering model, a sketch) carries a
 ``level``
     ``illustration_image`` (a picture or sketch), ``L0`` (an AI mesh, no CAD
     semantics), ``L1`` (a structured mesh of named parts with estimated
-    sizes), ``L2`` (a preview mesh from feature definitions, or an exact
-    model not yet validated) or ``L3`` (tessellation of an exact, *validated*
+    sizes), ``L2`` (the browser's preview mesh from the shared feature definition,
+    or an exact model not yet validated) or ``L3`` (tessellation of an exact, *validated*
     B-Rep).
 ``source_revision``
     The item revision it derives from (``KEY@n``), or ``None``.
@@ -57,6 +57,10 @@ PART_COMPONENT_IDS_KEY = "part_component_ids"
 #: The tool that makes AI meshes (L0) and the one that makes block meshes (L1).
 CONCEPT_MESH_TOOL = "twin.generate_concept_mesh"
 STRUCTURED_MESH_TOOL = "twin.render_structured_mesh"
+#: The browser's L2 parametric preview (C3D slice 5). It is computed on the
+#: client from the shared feature definition; a stored snapshot of it (a
+#: ``render`` made by this tool) reads L2 / preview.
+PARAMETRIC_PREVIEW_TOOL = "dashboard.parametric_preview"
 
 
 class RepresentationLevel(StrEnum):
@@ -170,6 +174,8 @@ def _derive(wp_type: str, meta: dict[str, Any], fmt: str) -> dict[str, Any] | No
         tool = str(meta.get("generated_by") or "")
         if tool == STRUCTURED_MESH_TOOL:
             level, auth = RepresentationLevel.L1, RepresentationAuthority.STRUCTURED
+        elif tool == PARAMETRIC_PREVIEW_TOOL:
+            level, auth = RepresentationLevel.L2, RepresentationAuthority.PREVIEW
         elif tool == CONCEPT_MESH_TOOL or fmt in _MESH_FORMATS:
             level, auth = RepresentationLevel.L0, RepresentationAuthority.ILLUSTRATIVE
         else:
@@ -280,6 +286,33 @@ def representation_of(
     }
 
 
+def preview_descriptor(
+    *, source_revision: str | None, component_ids: list[str], operation_id: str | None = None
+) -> dict[str, Any]:
+    """The descriptor of the client's L2 parametric preview: always ``L2`` / ``preview``.
+
+    The preview is drawn from the parametric sketch revision named by
+    ``source_revision``; it is never exact, whatever the exact path has
+    built, and L3 stays reserved for a validated revision.
+    """
+    out = descriptor(
+        RepresentationLevel.L2,
+        RepresentationAuthority.PREVIEW,
+        source_revision=source_revision,
+        component_ids=component_ids,
+        tool=PARAMETRIC_PREVIEW_TOOL,
+        operation_id=operation_id,
+    )
+    level = RepresentationLevel.L2
+    out.update(
+        label=_LABEL[RepresentationAuthority.PREVIEW],
+        display_rank=DISPLAY_RANK[level],
+        derived=False,
+        dimensions="from the definition",
+    )
+    return out
+
+
 def descriptor(
     level: RepresentationLevel,
     authority: RepresentationAuthority,
@@ -315,6 +348,7 @@ __all__ = [
     "COMPONENT_ID_KEY",
     "CONCEPT_MESH_TOOL",
     "DISPLAY_RANK",
+    "PARAMETRIC_PREVIEW_TOOL",
     "PART_COMPONENT_IDS_KEY",
     "REPRESENTATION_KEY",
     "STRUCTURED_MESH_TOOL",
@@ -323,5 +357,6 @@ __all__ = [
     "component_ids_of",
     "descriptor",
     "guard",
+    "preview_descriptor",
     "representation_of",
 ]

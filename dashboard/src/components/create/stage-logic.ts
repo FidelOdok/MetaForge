@@ -161,6 +161,23 @@ export function preferredDisplayNode(nodes: TwinNode[]): TwinNode | undefined {
   )[0];
 }
 
+/** The CAD item a parametric sketch builds into: `PSK-X` -> `CAD-X` (the gateway's rule). */
+export function cadKeyForSketch(sketchKey: string): string {
+  const stem = sketchKey.includes('-') ? sketchKey.slice(sketchKey.indexOf('-') + 1) : sketchKey;
+  return `CAD-${stem}`.slice(0, 80);
+}
+
+/**
+ * The project's newest parametric sketch (C3D slice 5): when there is one,
+ * the stage shows its L2 preview, swapping to the validated exact model
+ * built from it.
+ */
+export function latestParametricSketch(nodes: TwinNode[]): { key: string; nodeId: string } | null {
+  const sketches = currentRevisions(nodes.filter((n) => prop(n, 'wp_type') === 'parametric_sketch' && prop(n, 'item_key')));
+  const newest = sketches.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))[0];
+  return newest ? { key: prop(newest, 'item_key'), nodeId: newest.id } : null;
+}
+
 /** The single primary next action (UXS-002, 16.2 item 5). `start` offers three equal entries. */
 export type PrimaryAction = 'start' | 'concept_3d' | 'make_editable' | 'build_exact' | 'prepare_prototype';
 

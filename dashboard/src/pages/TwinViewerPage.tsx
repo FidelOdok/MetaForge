@@ -77,6 +77,7 @@ import { useSketchPlane, useSketchStrokes } from '../hooks/use-sketch-plane';
 import { isPlaced } from '../api/endpoints/sketchPlanes';
 import { useAppearanceSync } from '../hooks/use-appearance';
 import { DfmFindingsSection } from '../components/viewer/DfmFindingsSection';
+import { ParametricPreviewSection } from '../components/viewer/ParametricPreviewSection';
 import { useComponentSelection } from '../store/component-selection-store';
 import './TwinViewerPage.css';
 
@@ -582,6 +583,9 @@ function NodeDetail({
         {isCAD && exportOpen && (
           <ExportForSimSection node={node} onClose={() => setExportOpen(false)} />
         )}
+
+        {/* C3D slice 5: the L2 preview, drag handles and the preview versus exact comparison */}
+        <ParametricPreviewSection node={node} projectId={node.projectId ?? itemProjectId ?? null} />
 
         {/* CDE slice 6: geometry state and GLB / native CAD / STEP of this revision */}
         {node.properties.wp_type === 'cad_model' && (

@@ -91,7 +91,7 @@ class TestMetricsRegistryGroupedAccess:
         # + 3 change classification, appearance updates and guard refusals.
         # + 3 structured mesh, maturity queries, representation mislabels (C3D slice 2).
         # + 4 DFM evaluations, findings, stale recomputes and decisions (C3D slice 4).
-        assert len(all_metrics) == 135
+        assert len(all_metrics) == 140
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

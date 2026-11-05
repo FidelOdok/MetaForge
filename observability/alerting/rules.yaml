@@ -1252,6 +1252,28 @@ groups:
             old guidance as out of date. Check the gateway logs
             (dfm_evaluation_failed, dfm_recompute_failed).
 
+  # C3D slice 5 -- the L2 preview versus exact comparison
+  # (api_gateway/twin/preview_comparison.py).
+  - name: metaforge_preview_comparison
+    rules:
+      - alert: PreviewComparisonErrors
+        expr: >-
+          sum(increase(metaforge_preview_comparison_total{outcome="error"}[30m])) >= 3
+          and sum(increase(metaforge_preview_comparison_total{outcome="error"}[30m]))
+          / clamp_min(sum(increase(metaforge_preview_comparison_total[30m])), 1) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Preview versus exact comparisons are failing to run"
+          description: >-
+            More than a fifth of the last half hour's preview versus exact
+            comparisons raised instead of producing a record. The exact builds
+            still commit and validate, but Engineering shows no comparison for
+            the new revisions, so a preview that drifted from its exact model
+            goes unreported. A discrepancy is a result, not an error, and does
+            not count here. Check the gateway logs (preview_comparison_failed).
+
   # FORGE-783 -- slow tool calls run as polled jobs (tool_registry/jobs.py).
   - name: metaforge_tool_jobs
     rules:
