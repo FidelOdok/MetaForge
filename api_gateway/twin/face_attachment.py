@@ -68,6 +68,7 @@ from api_gateway.twin.sketch_planes import (
     plane_item_key,
 )
 from observability.tracing import get_tracer
+from twin_core.component_identity import tag_with_component
 from twin_core.geometry.face_signature import (
     FaceSignature,
     PlanarFace,
@@ -89,6 +90,7 @@ from twin_core.models.sketch_plane import (
     principal_plane,
     unassigned_plane,
 )
+from twin_core.representation import COMPONENT_ID_KEY
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.face_attachment")
@@ -323,6 +325,15 @@ async def _faces_of(
     faces = [PlanarFace.model_validate(f) for f in raw.get("faces") or []]
     size = part_size_of(faces, raw.get("bounding_box"))
     faces = tag_faces(faces, meta.get(EXACT_SOURCE_KEY), size)
+    # C3D slice 2 (SYNC-002): a face says which component made it.
+    component = meta.get(COMPONENT_ID_KEY)
+    if isinstance(component, str) and component:
+        faces = [
+            f.model_copy(update={"semantic_tag": tag_with_component(component, f.semantic_tag)})
+            if f.semantic_tag
+            else f
+            for f in faces
+        ]
     return faces, raw, hit
 
 

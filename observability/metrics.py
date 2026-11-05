@@ -1207,6 +1207,41 @@ class MetricsRegistry:
         labels=["generator", "resolution"],
     )
 
+    # ── Representation levels and maturity (C3D slice 2) ────────────────
+
+    STRUCTURED_MESH_TOTAL = MetricDefinition(
+        name="metaforge_structured_mesh_total",
+        type="counter",
+        description=(
+            "Structured 3D meshes (L1) drawn from a concept block layout, by outcome: "
+            "generated, reused (the same mesh already existed), no_layout, failed or "
+            "store_failed"
+        ),
+        labels=["outcome"],
+    )
+
+    MATURITY_QUERY_TOTAL = MetricDefinition(
+        name="metaforge_maturity_query_total",
+        type="counter",
+        description=(
+            "Component maturity queries, by the product maturity answered: Illustrative, "
+            "Structured, Parametric, Exact, Verified, Released, none (no components) or "
+            "error"
+        ),
+        labels=["product"],
+    )
+
+    REPRESENTATION_MISLABEL_TOTAL = MetricDefinition(
+        name="metaforge_representation_mislabel_total",
+        type="counter",
+        description=(
+            "Stored representation claims the read-time guard corrected (an L3 without a "
+            "validated exact revision, or an L0/L1/picture claiming exact or validated), "
+            "by the level shown and the authority claimed"
+        ),
+        labels=["level", "claimed"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1371,6 +1406,9 @@ class MetricsRegistry:
             cls.CONCEPT_MESH_TOTAL,
             cls.MANUFACTURING_CONTEXT_WRITE_TOTAL,
             cls.MANUFACTURING_CONTEXT_INJECTION_TOTAL,
+            cls.STRUCTURED_MESH_TOTAL,
+            cls.MATURITY_QUERY_TOTAL,
+            cls.REPRESENTATION_MISLABEL_TOTAL,
         ]
 
     @classmethod
@@ -2282,6 +2320,24 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.MANUFACTURING_CONTEXT_INJECTION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"generator": generator, "resolution": resolution})
+
+    def record_structured_mesh(self, outcome: str) -> None:
+        """Record one structured mesh (L1) outcome (C3D slice 2)."""
+        counter = self._instruments.get(MetricsRegistry.STRUCTURED_MESH_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_maturity_query(self, product: str) -> None:
+        """Record one maturity query by the product maturity answered (C3D slice 2)."""
+        counter = self._instruments.get(MetricsRegistry.MATURITY_QUERY_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"product": product})
+
+    def record_representation_mislabel(self, level: str, claimed: str) -> None:
+        """Record one representation claim the guard corrected (C3D slice 2)."""
+        counter = self._instruments.get(MetricsRegistry.REPRESENTATION_MISLABEL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"level": level, "claimed": claimed})
 
     def record_tool_job(self, tool: str, status: str) -> None:
         """Record one state change of a tool job (FORGE-783)."""

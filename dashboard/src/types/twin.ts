@@ -63,6 +63,29 @@ export interface TwinNode {
   // CDE slice 6: where a geometry artifact stands (Concept / Preview / Exact /
   // Validated) and the revision it is. Undefined for nodes that are not geometry.
   geometryState?: GeometryStateView;
+  // C3D slice 2: what a displayable artifact is (L0..L3), how far it can be
+  // trusted, the revision it derives from and the components it shows.
+  representation?: RepresentationView;
+}
+
+/** C3D slice 2: the representation level of a displayable artifact. */
+export type RepresentationLevel = 'illustration_image' | 'L0' | 'L1' | 'L2' | 'L3';
+
+export interface RepresentationView {
+  level: RepresentationLevel;
+  /** illustrative | structured | preview | exact | validated */
+  authority: string;
+  /** Illustrative | Preview | Exact | Validated */
+  label: string;
+  /** KEY@n of the item revision it derives from. */
+  source_revision: string | null;
+  component_ids: string[];
+  generated_by: { tool?: string | null; operation_id?: string | null };
+  derived: boolean;
+  /** L3 5, L2 4, L1 3, L0 2, picture 1. */
+  display_rank: number;
+  dimensions?: string | null;
+  guarded?: string[] | null;
 }
 
 /** CDE slice 6 (UI-004, DEF-009): a geometry artifact's state. */

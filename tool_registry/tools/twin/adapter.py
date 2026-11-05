@@ -406,6 +406,7 @@ class TwinServer(McpToolServer):
         concept_image_renderer: Any = None,
         concept_image_critic: Any = None,
         concept_mesh_generator: Any = None,
+        structured_mesh_renderer: Any = None,
         job_runner: Any = None,
         sketch_generator: Any = None,
         exact_cad_service: Any = None,
@@ -546,6 +547,10 @@ class TwinServer(McpToolServer):
         # recorder) that has an image-to-3D model turn a concept image into an
         # illustrative GLB render. Never a cad_model, never evidence.
         self._concept_mesh_generator = concept_mesh_generator
+        # C3D slice 2: an injected async ``render(...)`` (make_structured_
+        # mesh_recorder) that draws the concept's block layout as a GLB with
+        # one node per component (L1, sizes estimated). Free and fast.
+        self._structured_mesh_renderer = structured_mesh_renderer
         # FORGE-794: an injected async ``generate(project_id=, request=, wait=,
         # session_id=)`` (make_sketch_generator) that draws a concept sketch
         # proposal from text, references or a sketch, as a job on its target.
@@ -802,6 +807,8 @@ class TwinServer(McpToolServer):
             self._register_generate_concept_mesh()
             # FORGE-783: its jobs are read back with twin.job_status.
             self._register_job_status()
+        if structured_mesh_renderer is not None:
+            self._register_render_structured_mesh()
         if sketch_generator is not None:
             self._register_generate_sketch()
         if exact_cad_service is not None:
@@ -4110,6 +4117,96 @@ class TwinServer(McpToolServer):
             view=view,
             node_id=result.get("node_id"),
         )
+        return result
+
+    # ------------------------------------------------------------------
+    # twin.render_structured_mesh (C3D slice 2)
+    # ------------------------------------------------------------------
+
+    def _register_render_structured_mesh(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.render_structured_mesh",
+                adapter_id="twin",
+                name="Render Structured Mesh",
+                description=(
+                    "Show a concept as simple 3D parts: draw its block layout (the boxes and "
+                    "cylinders of a sketch made by twin.render_concept_sketch) as a GLB with "
+                    "one named node per component, each carrying its stable component id "
+                    "(CMP-...) in the node name and extras. Representation level L1, "
+                    "authority structured, every dimension estimated: never exact, never "
+                    "evidence. Deterministic and free (no provider). Defaults to the "
+                    "project's newest concept sketch; an unchanged layout returns the mesh "
+                    "already made (reused) instead of a new revision."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "layout_node_id": {
+                            "type": "string",
+                            "description": (
+                                "A design_sketch made by twin.render_concept_sketch "
+                                "(def the project's newest)."
+                            ),
+                        },
+                        "layout": {
+                            "type": "object",
+                            "description": (
+                                "An inline block layout, the same schema as "
+                                "twin.render_concept_sketch, instead of a stored one."
+                            ),
+                            "properties": _concept_layout_properties(),
+                            "required": ["concept_name", "parts"],
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Work product name (def Simple 3D parts: <concept>).",
+                        },
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "level": {"type": "string"},
+                        "authority": {"type": "string"},
+                        "dimensions": {"type": "string"},
+                        "source_revision": {"type": ["string", "null"]},
+                        "component_ids": {"type": "object"},
+                        "nodes": {"type": "array", "items": {"type": "object"}},
+                        "triangle_count": {"type": "integer"},
+                        "reused": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.render_structured_mesh,
+        )
+
+    async def render_structured_mesh(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.render_structured_mesh"
+        project_id = arguments.get("project_id")
+        layout_node_id = arguments.get("layout_node_id")
+        inline = arguments.get("layout")
+        if project_id is not None and not isinstance(project_id, str):
+            raise ValueError(f"{tool}: 'project_id' must be a string")
+        if inline is not None and not isinstance(inline, dict):
+            raise ValueError(f"{tool}: 'layout' must be an object")
+        if not project_id and not layout_node_id and inline is None:
+            raise ValueError(f"{tool}: give project_id, layout_node_id or layout")
+        name = arguments.get("name")
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("structured_mesh.inline", inline is not None)
+            result: dict[str, Any] = await self._structured_mesh_renderer(
+                project_id=project_id or None,
+                layout_node_id=str(layout_node_id) if layout_node_id else None,
+                layout=inline,
+                name=name.strip() if isinstance(name, str) and name.strip() else None,
+                trigger="tool",
+            )
         return result
 
     # ------------------------------------------------------------------

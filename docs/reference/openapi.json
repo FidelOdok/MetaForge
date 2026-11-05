@@ -3641,6 +3641,57 @@
         "title": "ComponentHealth",
         "type": "object"
       },
+      "ComponentMaturityResponse": {
+        "properties": {
+          "component_id": {
+            "title": "Component Id",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/MaturityEvidence"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "maturity": {
+            "title": "Maturity",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Step"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "name",
+          "required",
+          "source",
+          "maturity"
+        ],
+        "title": "ComponentMaturityResponse",
+        "type": "object"
+      },
       "ConceptMeshRequest": {
         "properties": {
           "confirm_spend": {
@@ -12476,6 +12527,51 @@
         "title": "ManufacturingRoute",
         "type": "string"
       },
+      "MaturityEvidence": {
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "maturity": {
+            "title": "Maturity",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "required": [
+          "maturity",
+          "kind"
+        ],
+        "title": "MaturityEvidence",
+        "type": "object"
+      },
       "MaturityGateSummary": {
         "properties": {
           "blockedReason": {
@@ -12538,6 +12634,36 @@
           "createdAt"
         ],
         "title": "MaturityGateSummary",
+        "type": "object"
+      },
+      "MaturityResponse": {
+        "properties": {
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentMaturityResponse"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "has_assembly": {
+            "default": false,
+            "title": "Has Assembly",
+            "type": "boolean"
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductMaturityResponse"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "components",
+          "product"
+        ],
+        "title": "MaturityResponse",
         "type": "object"
       },
       "Measurement": {
@@ -15722,6 +15848,62 @@
         "title": "PrincipalPlane",
         "type": "string"
       },
+      "ProductMaturityResponse": {
+        "properties": {
+          "by_maturity": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "By Maturity",
+            "type": "object"
+          },
+          "claims": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Claims",
+            "type": "object"
+          },
+          "component_count": {
+            "default": 0,
+            "title": "Component Count",
+            "type": "integer"
+          },
+          "limited_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limited By",
+            "type": "array"
+          },
+          "maturity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maturity"
+          },
+          "required_count": {
+            "default": 0,
+            "title": "Required Count",
+            "type": "integer"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "title": "ProductMaturityResponse",
+        "type": "object"
+      },
       "Progress": {
         "description": "Measured progress. Only sent when the total is known.",
         "properties": {
@@ -18061,6 +18243,97 @@
           "warnings"
         ],
         "title": "RepeatabilityEstimateResponse",
+        "type": "object"
+      },
+      "RepresentationResponse": {
+        "description": "What a displayable artifact is and how far it can be trusted (C3D slice 2).",
+        "properties": {
+          "authority": {
+            "title": "Authority",
+            "type": "string"
+          },
+          "component_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Component Ids",
+            "type": "array"
+          },
+          "derived": {
+            "default": true,
+            "title": "Derived",
+            "type": "boolean"
+          },
+          "dimensions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dimensions"
+          },
+          "display_rank": {
+            "default": 0,
+            "title": "Display Rank",
+            "type": "integer"
+          },
+          "generated_by": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Generated By",
+            "type": "object"
+          },
+          "guarded": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guarded"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          }
+        },
+        "required": [
+          "level",
+          "authority",
+          "label"
+        ],
+        "title": "RepresentationResponse",
         "type": "object"
       },
       "RequiredClaimResultView": {
@@ -23122,6 +23395,113 @@
         "title": "StopSupervisionRequest",
         "type": "object"
       },
+      "StructuredMeshRequest": {
+        "properties": {
+          "layout_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout Node Id"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "title": "StructuredMeshRequest",
+        "type": "object"
+      },
+      "StructuredMeshResponse": {
+        "properties": {
+          "authority": {
+            "default": "structured",
+            "title": "Authority",
+            "type": "string"
+          },
+          "component_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Component Ids",
+            "type": "object"
+          },
+          "dimensions": {
+            "default": "estimated",
+            "title": "Dimensions",
+            "type": "string"
+          },
+          "format": {
+            "default": "glb",
+            "title": "Format",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "default": "L1",
+            "title": "Level",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          },
+          "triangle_count": {
+            "default": 0,
+            "title": "Triangle Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "name",
+          "label"
+        ],
+        "title": "StructuredMeshResponse",
+        "type": "object"
+      },
       "SubmitRequest": {
         "properties": {
           "artifacts": {
@@ -24236,6 +24616,16 @@
             },
             "title": "Properties",
             "type": "object"
+          },
+          "representation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepresentationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "staleness": {
             "anyOf": [
@@ -39232,6 +39622,49 @@
         ]
       }
     },
+    "/v1/twin/projects/{project_id}/maturity": {
+      "get": {
+        "description": "Per-component maturity and the product's readiness, with evidence for each claim.",
+        "operationId": "project_maturity_v1_twin_projects__project_id__maturity_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaturityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Project Maturity",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/projects/{project_id}/prd": {
       "get": {
         "description": "The project's prd, rendered from its current prose and requirements.",
@@ -40369,6 +40802,66 @@
           }
         },
         "summary": "Undo Sketch Plane",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/structured-mesh": {
+      "post": {
+        "description": "Show the concept as simple 3D parts (L1): one node per component, sizes estimated.",
+        "operationId": "make_structured_mesh_v1_twin_projects__project_id__structured_mesh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StructuredMeshRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StructuredMeshResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Make Structured Mesh",
         "tags": [
           "twin"
         ]

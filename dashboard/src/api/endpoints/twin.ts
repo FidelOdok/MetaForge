@@ -1,4 +1,4 @@
-import type { TwinNode, TwinGraph, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription, AssemblyPart, DesignFilesView, GeometryStateView } from '../../types/twin';
+import type { TwinNode, TwinGraph, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription, AssemblyPart, DesignFilesView, GeometryStateView, RepresentationView } from '../../types/twin';
 import apiClient from '../client';
 import { apiUrl } from '../../lib/gatewayConfig';
 import { isSampleMode, sampleFileUrl } from '../../lib/sample-workspace';
@@ -23,6 +23,8 @@ interface TwinNodeApiResponse {
   designFiles?: DesignFilesView | null;
   // CDE slice 6: Concept / Preview / Exact / Validated and its revision.
   geometryState?: GeometryStateView | null;
+  // C3D slice 2: L0..L3, authority, source revision and component ids.
+  representation?: RepresentationView | null;
 }
 
 export interface TwinNodeScript {
@@ -67,6 +69,7 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     projectId: node.projectId ?? undefined,
     designFiles: node.designFiles ?? undefined,
     geometryState: node.geometryState ?? undefined,
+    representation: node.representation ?? undefined,
   }));
 }
 
@@ -91,6 +94,7 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       projectId: node.projectId ?? undefined,
       designFiles: node.designFiles ?? undefined,
       geometryState: node.geometryState ?? undefined,
+      representation: node.representation ?? undefined,
     };
   } catch {
     return undefined;

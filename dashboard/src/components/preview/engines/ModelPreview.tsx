@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, type ThreeEvent } from '@react-three/fiber';
 import { Bounds, OrbitControls, useGLTF } from '@react-three/drei';
 import type * as THREE from 'three';
 import { getNodeModel, nodeFileUrl } from '../../../api/endpoints/twin';
@@ -11,6 +11,7 @@ import { AssemblyPartTree } from '../../viewer/AssemblyPartTree';
 import { ErrorBoundary } from '../../ErrorBoundary';
 import { PC, type PreviewMode } from '../tokens';
 import type { TwinNode } from '../../../types/twin';
+import { NO_PROJECT, componentOfObject, useComponentSelection, type SelectedComponent } from '../../../store/component-selection-store';
 
 /**
  * FORGE-531: a self-contained 3D preview for the full-screen modal and
@@ -27,12 +28,25 @@ interface ModelPreviewProps {
   mode: PreviewMode;
 }
 
-function GltfObject({ url }: { url: string }) {
+function GltfObject({ url, onPick }: { url: string; onPick?: (e: ThreeEvent<MouseEvent>) => void }) {
   const { scene } = useGLTF(url);
   // A cached glTF scene can only have one parent; clone so the main viewer
   // keeps its own copy.
   const copy = useMemo(() => scene.clone(true), [scene]);
-  return <primitive object={copy} />;
+  return <primitive object={copy} onClick={onPick} />;
+}
+
+/**
+ * The component a click on a node's model picks (C3D slice 2): the picked
+ * mesh's own `component_id` extras (an L1 mesh names one per part), else the
+ * node's only component (a single-part CAD revision).
+ */
+export function pickedComponent(object: unknown, node: TwinNode): SelectedComponent | null {
+  const fromMesh = componentOfObject(object as Parameters<typeof componentOfObject>[0]);
+  if (fromMesh) return fromMesh;
+  const ids = node.representation?.component_ids ?? [];
+  const only = ids.length === 1 ? ids[0] : undefined;
+  return only ? { componentId: only, name: node.name } : null;
 }
 
 function MeshFileObject({ url, format }: { url: string; format: string }) {
@@ -74,6 +88,13 @@ export function ModelPreview({ node, engine, format, mode }: ModelPreviewProps) 
   }, [node.id, engine]);
 
   const direct = engine === 'mesh3d' && DIRECT_MESH_FORMATS.has(format);
+  const select = useComponentSelection((s) => s.select);
+  const onPick = (e: ThreeEvent<MouseEvent>) => {
+    const picked = pickedComponent(e.object, node);
+    if (!picked) return;
+    e.stopPropagation();
+    select(node.projectId ?? NO_PROJECT, { ...picked, from: 'create' });
+  };
   const parts = node.assemblyParts ?? [];
   const showTree = mode === 'modal' && parts.length > 0;
 
@@ -96,7 +117,7 @@ export function ModelPreview({ node, engine, format, mode }: ModelPreviewProps) 
               <directionalLight position={[-120, -40, -80]} intensity={0.5} />
               <Suspense fallback={null}>
                 <Bounds fit clip observe margin={1.2}>
-                  {direct ? <MeshFileObject url={url} format={format} /> : <GltfObject url={url} />}
+                  {direct ? <MeshFileObject url={url} format={format} /> : <GltfObject url={url} onPick={onPick} />}
                 </Bounds>
               </Suspense>
               <OrbitControls makeDefault />
