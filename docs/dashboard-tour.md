@@ -59,7 +59,9 @@ decision on a proposed change from the Sessions page, is a `ConfirmDialog`
 built on it. Forms that used to open inside the page open as dialogs: a new
 constraint, a design loop, a promotion attempt, a generated feature and a
 trade-study option on Requirements, linking evidence on Compliance, renaming
-a project, a run's gate review and an item's revision history. Styles are in
+a project, a run's gate review and an item's revision history. Filter chips
+and view tabs (Files, Knowledge, Requirements, Approvals) share the Files
+page's chip, with the selected one filled. Styles are in
 `dashboard/src/styles/page.css`.
 
 Every route below has a sidebar entry. Two entries run the other way —
