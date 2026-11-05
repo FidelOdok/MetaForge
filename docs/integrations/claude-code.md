@@ -202,6 +202,11 @@ a recommendation, on its own model (see
 [Approval policy and the gate reviewer](../approvals.md#approval-policy-and-the-gate-reviewer)). See
 [Workflow Lifecycle](../architecture/workflow-lifecycle.md).
 
+The dashboard chat reads the same skills, workflows and working rules from
+the same sources, so the agent in the dashboard follows the same procedures
+as this package (see
+[context engineering](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/context-engineering.md#live-chat-wiring)).
+
 ### Regenerating the package
 
 `integrations/claude-code/` is build output. Edit the generator, not the

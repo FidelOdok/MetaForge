@@ -26,6 +26,12 @@ import structlog
 
 from api_gateway.chat.backend import ChatBackend
 from api_gateway.chat.experience_adapter import record_chat_experience
+from api_gateway.chat.playbooks import (
+    WORKING_RULES,
+    cached_playbooks,
+    make_read_playbook_tool,
+    playbook_index,
+)
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
 from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_registry
 from api_gateway.chat.tool_approvals import approver_reachable, get_approval_store
@@ -1263,6 +1269,13 @@ def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> st
         "provided in the conversation; when you rely on a retrieved fragment, "
         "cite its bracketed source id."
     )
+    if "chat.read_playbook" in runtime.tools.names():
+        # The plugin's working rules and playbook list (playbooks.py); stable per
+        # process, so the prompt cache still hits across turns.
+        sections.append(WORKING_RULES)
+        index = playbook_index(cached_playbooks())
+        if index:
+            sections.append(index)
     sections.append(ANSWER_STYLE)
     if "chat.render_ui" in runtime.tools.names():
         sections.append(ANSWER_STYLE_BLOCKS)
@@ -1387,7 +1400,12 @@ async def _build_context(
         ]
     native_tools = native_tools + [make_read_tool_result_tool(runtime_cell)]
     if ui_blocks is not None:
-        native_tools = native_tools + [make_render_ui_tool(ui_blocks)]
+        # A chat turn (design-flow phases pass no sink and get their procedures
+        # from the phase brain): generative UI plus the plugin's playbooks.
+        native_tools = native_tools + [
+            make_render_ui_tool(ui_blocks),
+            make_read_playbook_tool(cached_playbooks()),
+        ]
     if chat_skills_enabled() and twin is not None and mcp_bridge is not None:
         native_tools = native_tools + await skill_tools_from_registry(
             twin=twin,
