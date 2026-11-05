@@ -299,6 +299,10 @@ and publishes it as one operation, `job:impact-<impact_id>`, domain
 `cross_domain`. It is published through the same process seam as tool jobs, so
 a head moved in the MCP sidecar reports here too.
 
+A head move that reaches nothing (no affected item, no stale result, no
+proposed re-check and no review action) records no impact and opens no
+operation, so the stream never shows an impact job that has nothing to say.
+
 | Moment | Event |
 |--------|-------|
 | The impact is recorded | `accepted` |

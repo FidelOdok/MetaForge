@@ -184,7 +184,11 @@ def _collector() -> Any:
 
 
 def count_impact(event: str, kind: str = "none") -> None:
-    """Count one impact event (previewed, recorded, failed, result_invalidated, rerun_proposed)."""
+    """Count one impact event.
+
+    ``previewed``, ``recorded``, ``skipped`` (a head move that reached
+    nothing), ``failed``, ``result_invalidated``, ``rerun_proposed``.
+    """
     try:
         _collector().record_cross_domain_impact(event, kind)
     except Exception:  # noqa: BLE001 - metrics never break a write  # pragma: no cover
@@ -1269,13 +1273,25 @@ async def changed_parameters(
     return sorted(k for k in keys if old_meta.get(k) != new_meta.get(k))
 
 
+def has_downstream_impact(result: ImpactResult) -> bool:
+    """True when a walk reached something worth recording.
+
+    An affected item, a result made stale, a proposed rerun or a review
+    action. A walk with none of these leaves no ``change_impact`` record.
+    """
+    return bool(
+        result.impacted or result.stale_results or result.proposed_reruns or result.review_actions
+    )
+
+
 async def on_item_head_moved(
     twin: Any, item: Any, head_revision: int, head_node_id: Any
 ) -> ImpactResult | None:
     """Walk, invalidate and record after ``item``'s head moved. Never raises.
 
     Returns ``None`` when the item is new (no earlier revision), has no
-    project, or the change reaches nothing.
+    project, or the change reaches nothing (:func:`has_downstream_impact`):
+    then nothing is recorded and no operation is opened.
     """
     project_id = getattr(item, "project_id", None)
     if project_id is None:
@@ -1302,7 +1318,16 @@ async def on_item_head_moved(
             ),
             preview=False,
         )
-        if not result.impacted and not result.stale_results:
+        if not has_downstream_impact(result):
+            # Nothing affected, invalidated or proposed: no record and no
+            # operation. A change_impact is history about a change that
+            # reached something; an empty one would only be clutter.
+            count_impact("skipped", "no_impact")
+            logger.info(
+                "cross_domain_impact_none",
+                project_id=str(project_id),
+                change=f"{result.change.old_ref} -> {result.change.new_ref}",
+            )
             return None
         if _refiner is not None:
             try:

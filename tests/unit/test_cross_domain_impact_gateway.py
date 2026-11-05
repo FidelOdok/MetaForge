@@ -538,3 +538,114 @@ class TestRoutes:
         [after] = await list_impacts(twin, PID)
         assert after.proposed_reruns[0].status == "approved"
         assert client.get(f"/v1/approvals/rerun:{impact.id}:r9").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Impact records are history: not in the twin graph unless asked
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def graph_client(twin: InMemoryTwinAPI, events: list[dict[str, Any]]) -> Iterator[TestClient]:
+    from api_gateway.twin import routes as twin_routes
+    from api_gateway.twin.impact_routes import router as impact_router
+
+    twin_routes.init_twin(twin)
+    app = FastAPI()
+    app.state.twin = twin
+    app.include_router(impact_router)
+    app.include_router(twin_routes.router)
+    yield TestClient(app)
+
+
+async def _recorded_impact(twin: Any) -> str:
+    """An enclosure move that stales the board's DRC: one recorded impact."""
+    enclosure = await _revise(twin, "cad_model", "Enclosure")
+    board = await _revise(twin, "pcb_layout", "Main board")
+    await declare_interface(
+        twin,
+        PID,
+        type="mounts_to",
+        source_ref=enclosure,
+        target_ref=board,
+        declared_by="human",
+        actor="alice",
+    )
+    await _evidence(twin, [board], "kicad.run_drc", {"violations": 0})
+    await _revise(twin, "cad_model", "Enclosure", key=enclosure, content="v2")
+    [impact] = await list_impacts(twin, PID)
+    assert impact.id is not None
+    return impact.id
+
+
+class TestImpactIsHistory:
+    async def test_impact_records_are_left_out_of_the_node_list_and_its_count(
+        self, graph_client, twin
+    ) -> None:
+        impact_id = await _recorded_impact(twin)
+        listed = graph_client.get("/v1/twin/nodes", params={"project_id": PROJECT}).json()
+        assert listed["nodes"], "the design work products are still listed"
+        assert impact_id not in {n["id"] for n in listed["nodes"]}
+        assert "change_impact" not in {n["properties"].get("wp_type") for n in listed["nodes"]}
+        assert listed["total"] == len(listed["nodes"])
+
+        with_history = graph_client.get(
+            "/v1/twin/nodes", params={"project_id": PROJECT, "include_history": True}
+        ).json()
+        assert impact_id in {n["id"] for n in with_history["nodes"]}
+        assert with_history["total"] == listed["total"] + 1
+
+        # Still readable where it belongs.
+        impacts = graph_client.get(f"/v1/twin/projects/{PROJECT}/impact").json()["impacts"]
+        assert [i["id"] for i in impacts] == [impact_id]
+        one = graph_client.get(f"/v1/twin/projects/{PROJECT}/impact/{impact_id}")
+        assert one.status_code == 200 and one.json()["id"] == impact_id
+
+    async def test_relationships_skip_impact_records_unless_asked(self, graph_client, twin) -> None:
+        impact_id = await _recorded_impact(twin)
+        default = graph_client.get("/v1/twin/relationships", params={"project_id": PROJECT})
+        assert default.status_code == 200, default.text
+        rels = default.json()["relationships"]
+        assert impact_id not in {r["sourceId"] for r in rels} | {r["targetId"] for r in rels}
+        opted = graph_client.get(
+            "/v1/twin/relationships", params={"project_id": PROJECT, "include_history": True}
+        )
+        assert opted.status_code == 200, opted.text
+
+    async def test_a_head_move_that_reaches_nothing_records_nothing(self, twin, events) -> None:
+        key = await _revise(twin, "cad_model", "Lone part")
+        await _revise(twin, "cad_model", "Lone part", key=key, content="v2")
+        await _revise(twin, "cad_model", "Lone part", key=key, content="v3")
+        assert await list_impacts(twin, PID) == []
+        recorded = await twin.list_work_products(
+            work_product_type=WorkProductType.CHANGE_IMPACT, project_id=PID
+        )
+        assert recorded == []
+        assert not [e for e in events if str(e.get("operation_id", "")).startswith("job:impact-")]
+
+    async def test_a_real_impact_still_records_and_publishes(self, twin, events) -> None:
+        impact_id = await _recorded_impact(twin)
+        [impact] = await list_impacts(twin, PID)
+        assert impact.id == impact_id and impact.stale_results
+        types = [e["type"] for e in events if e["operation_id"] == impact.operation_id]
+        assert types == ["accepted", "milestone", "completed"]
+
+    def test_a_walk_with_only_a_review_action_is_still_an_impact(self) -> None:
+        from twin_core.impact.cross_domain import (
+            ChangeSpec,
+            ImpactResult,
+            ReviewAction,
+            has_downstream_impact,
+        )
+
+        empty = ImpactResult(
+            project_id=PROJECT,
+            preview=False,
+            change=ChangeSpec(item_key="CAD-X", old_revision=1, new_revision=2),
+        )
+        assert not has_downstream_impact(empty)
+        review = ReviewAction(
+            kind="review", target_ref="REQ-1", label="Check REQ-1", reason="it depends on CAD-X"
+        )
+        with_review = empty.model_copy(update={"review_actions": [review]})
+        assert has_downstream_impact(with_review)

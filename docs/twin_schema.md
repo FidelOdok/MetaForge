@@ -1281,7 +1281,7 @@ The `Item` gains `last_revision` (the highest number handed out) and `drafts`, a
 Who sees what:
 
 - **The run itself** sees its drafts over the head: `resolve_item_ref` and `twin.item_history` / `twin.get_node` with `item_key` resolve a bare `KEY` to the run's latest draft; a second write to the same item in the same run revises that draft.
-- **Everyone else** (the dashboard, other runs, `GET /v1/twin/items`, `GET /v1/twin/items/{key}/revisions` by default) sees approved heads only. Another run's open drafts are not in a history; `GET /v1/twin/nodes` leaves out open, rejected and abandoned drafts unless `include_drafts=true`; an item with no head yet is not listed. `GET /v1/twin/items/{key}/revisions?run_id=` reads as that run, drafts included.
+- **Everyone else** (the dashboard, other runs, `GET /v1/twin/items`, `GET /v1/twin/items/{key}/revisions` by default) sees approved heads only. Another run's open drafts are not in a history; `GET /v1/twin/nodes` leaves out open, rejected and abandoned drafts unless `include_drafts=true` (and history records such as `change_impact` unless `include_history=true`); an item with no head yet is not listed. `GET /v1/twin/items/{key}/revisions?run_id=` reads as that run, drafts included.
 - **Closed drafts** (rejected, abandoned) stay in every item's history with their status and reason, and never become current.
 
 Approval is atomic and optimistic (spec sections 40 and 41): each item's head must still be the base the run drafted on, or the whole commit is refused with `PATCH_CONFLICT` and nothing moves. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate) for the gate side.
@@ -1850,6 +1850,10 @@ When a head moves (a write outside a run, or a gate approving a change set), `re
 
 The outcome is recorded as a `change_impact` work product: the impact graph, the affected items by domain, the stale results (with what each said before, `previous_status`), the proposed reruns and review actions, the plain summary and next action, the approval policy it was judged under, and its operation id. It is the change transaction view of CHG-001: operation, source and target revision, targets, proposed effects, impact graph and approval policy (`transaction` in the API).
 
+An impact is recorded only when the walk reached something: an affected item, a result made stale, a proposed rerun or a review action. A head move that reaches nothing (a sketch with no interface edges and no results pinned to it, for example) records no `change_impact` and opens no operation; it is logged as `cross_domain_impact_none` and counted as `skipped`.
+
+A `change_impact` is history about a change, not a design work product. `GET /v1/twin/nodes` leaves it out of `nodes` and `total`, and `GET /v1/twin/relationships` does not walk it, so the twin graph and its counts show design work only; pass `include_history=true` to either to list them too. Recorded impacts are always read through `GET /v1/twin/projects/{id}/impact` and `/impact/{change_or_revision}` below, which is what the Engineering impact view uses.
+
 #### Validation statuses {#validation-statuses}
 
 Every check result maps onto one vocabulary (`twin_core/consistency/validation_status.py`): `PASS`, `WARN`, `FAIL`, `INCOMPLETE`, `NOT_EVALUATED` and `STALE`. The existing status fields are mapped, not replaced:
@@ -1879,7 +1883,7 @@ Every check result maps onto one vocabulary (`twin_core/consistency/validation_s
 
 The proposed reruns, their dispositions and approvals are described in [approvals](approvals.md#re-checks-after-a-cross-domain-change); the operation event in [operations](operations.md#cross-domain-impact).
 
-Observability: `metaforge_cross_domain_impact_total{event, kind}` (`previewed`, `recorded`, `failed`, `result_invalidated` by check kind, `rerun_proposed` by disposition, `rerun_decided`) and `metaforge_interface_edge_total{type, provenance, action}`; the `CrossDomainImpactFailing` alert; log events `cross_domain_impact_recorded`, `cross_domain_impact_failed`, `cross_domain_impact_previewed`, `record_marked_stale_for_input`, `interface_edge_declared`, `interface_edge_proposed`, `interface_edge_confirmed`, `interface_edge_removed`, `interface_edges_proposed`, `impact_rerun_decided`; spans `twin.impact.analyse`, `twin.interfaces.*`, `twin.impact.publish` and `twin.impact_routes.*`. A failed walk after a head move is logged and counted, never raised: the head move stands.
+Observability: `metaforge_cross_domain_impact_total{event, kind}` (`previewed`, `recorded`, `skipped` when a head move reached nothing, `failed`, `result_invalidated` by check kind, `rerun_proposed` by disposition, `rerun_decided`) and `metaforge_interface_edge_total{type, provenance, action}`; the `CrossDomainImpactFailing` alert; log events `cross_domain_impact_recorded`, `cross_domain_impact_none`, `cross_domain_impact_failed`, `cross_domain_impact_previewed`, `record_marked_stale_for_input`, `interface_edge_declared`, `interface_edge_proposed`, `interface_edge_confirmed`, `interface_edge_removed`, `interface_edges_proposed`, `impact_rerun_decided`; spans `twin.impact.analyse`, `twin.interfaces.*`, `twin.impact.publish` and `twin.impact_routes.*`. A failed walk after a head move is logged and counted, never raised: the head move stands.
 
 Limits: rerun approval records the decision; the tool is then run by the agent or person, and its new result supersedes the stale one through its pins. Board and enclosure proposals read the recorded metadata fields, not the KiCad or STEP files themselves.
 
