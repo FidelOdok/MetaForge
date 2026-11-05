@@ -210,12 +210,20 @@ class WorkProductType(StrEnum):
     # name so a regenerated mesh keeps its look. A definition item
     # (APR-PROJECT). Never CAD, never manufacturing context, never evidence.
     APPEARANCE = "appearance"
+    # One component's heuristic DFM findings under one process profile
+    # (twin_core/dfm/heuristics.py): anchored findings, the rules not
+    # assessed and why, and a status that is never a pass. A record pinned to
+    # the geometry revision and the manufacturing context revision it read,
+    # so either moving on marks it stale; a recompute supersedes it.
+    DFM_FINDING_SET = "dfm_finding_set"
 
 
 #: Work product types that are history about a change, not design work
 #: products. The twin's node and relationship lists leave them out unless
 #: asked (``include_history``); they stay readable through their own routes.
-HISTORY_WORK_PRODUCT_TYPES: frozenset[WorkProductType] = frozenset({WorkProductType.CHANGE_IMPACT})
+HISTORY_WORK_PRODUCT_TYPES: frozenset[WorkProductType] = frozenset(
+    {WorkProductType.CHANGE_IMPACT, WorkProductType.DFM_FINDING_SET}
+)
 
 
 class ConstraintSeverity(StrEnum):

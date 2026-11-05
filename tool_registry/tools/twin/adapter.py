@@ -407,6 +407,7 @@ class TwinServer(McpToolServer):
         concept_image_critic: Any = None,
         concept_mesh_generator: Any = None,
         structured_mesh_renderer: Any = None,
+        dfm_service: Any = None,
         job_runner: Any = None,
         sketch_generator: Any = None,
         exact_cad_service: Any = None,
@@ -551,6 +552,8 @@ class TwinServer(McpToolServer):
         # mesh_recorder) that draws the concept's block layout as a GLB with
         # one node per component (L1, sizes estimated). Free and fast.
         self._structured_mesh_renderer = structured_mesh_renderer
+        # C3D slice 4: heuristic DFM findings per component (evaluate, read).
+        self._dfm_service = dfm_service
         # FORGE-794: an injected async ``generate(project_id=, request=, wait=,
         # session_id=)`` (make_sketch_generator) that draws a concept sketch
         # proposal from text, references or a sketch, as a job on its target.
@@ -809,6 +812,8 @@ class TwinServer(McpToolServer):
             self._register_job_status()
         if structured_mesh_renderer is not None:
             self._register_render_structured_mesh()
+        if dfm_service is not None:
+            self._register_dfm_tools()
         if sketch_generator is not None:
             self._register_generate_sketch()
         if exact_cad_service is not None:
@@ -4210,6 +4215,116 @@ class TwinServer(McpToolServer):
         return result
 
     # ------------------------------------------------------------------
+    # twin.evaluate_dfm / twin.get_dfm_findings (C3D slice 4)
+    # ------------------------------------------------------------------
+
+    def _register_dfm_tools(self) -> None:
+        view_schema = {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "note": {"type": "string"},
+                "suggestions": {"type": "integer"},
+                "blocking": {"type": "integer"},
+                "components": {"type": "array", "items": {"type": "object"}},
+                "profiles": {"type": "array", "items": {"type": "object"}},
+                "heuristic_only": {"type": "boolean"},
+            },
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.evaluate_dfm",
+                adapter_id="twin",
+                name="Evaluate DFM Heuristics",
+                description=(
+                    "Run the process rule profile's cheap DFM heuristics against each "
+                    "component's best available geometry (concept block sizes, parametric "
+                    "sketch dimensions, CAD parameters, an exact B-Rep's measures, recorded "
+                    "face tables) under the project's manufacturing context, and record a "
+                    "dfm_finding_set per component, pinned to the geometry and context "
+                    "revisions it read. Findings are anchored to the component (and the "
+                    "feature or face when known), with measured against limit, units, "
+                    "confidence, the rule id and profile version and a suggested fix. An "
+                    "unknown input is reported as not assessed, never as a pass. Status is "
+                    "issues_found, preliminary_guidance, analysis_pending or not_assessed: "
+                    "never analysis_passed. Changes no design."
+                ),
+                capability="twin_dfm",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "component_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Components (CMP-...) to check (def every one).",
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+                output_schema=view_schema,
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.evaluate_dfm,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.get_dfm_findings",
+                adapter_id="twin",
+                name="Get DFM Findings",
+                description=(
+                    "Read the project's current heuristic DFM findings by component: status, "
+                    "rule profile and version, anchors, measured against limit, evidence, "
+                    "what was not assessed and why, and staleness. history=true adds earlier "
+                    "stale or superseded sets. Reads only."
+                ),
+                capability="twin_dfm",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "history": {
+                            "type": "boolean",
+                            "description": "Include stale and superseded sets (def false).",
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+                output_schema=view_schema,
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.get_dfm_findings,
+        )
+
+    async def evaluate_dfm(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.evaluate_dfm"
+        project_id = arguments.get("project_id")
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise ValueError(f"{tool}: 'project_id' is required")
+        ids = arguments.get("component_ids")
+        if ids is not None and (
+            not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)
+        ):
+            raise ValueError(f"{tool}: 'component_ids' must be a list of strings")
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("dfm.components_requested", len(ids or []))
+            result: dict[str, Any] = await self._dfm_service.evaluate(project_id.strip(), ids)
+        return result
+
+    async def get_dfm_findings(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.get_dfm_findings"
+        project_id = arguments.get("project_id")
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise ValueError(f"{tool}: 'project_id' is required")
+        with tracer.start_as_current_span(tool):
+            result: dict[str, Any] = await self._dfm_service.findings(
+                project_id.strip(), history=bool(arguments.get("history"))
+            )
+        return result
+
+    # ------------------------------------------------------------------
     # twin.critique_concept_image (FORGE-772)
     # ------------------------------------------------------------------
 
@@ -4846,6 +4961,15 @@ class TwinServer(McpToolServer):
                             "description": "The accepted concept line (GSK-...) to build on.",
                         },
                         **_manufacturing_properties(),
+                        "manufacturability_variant": {
+                            "type": "boolean",
+                            "description": (
+                                "Make the last variant a manufacturability-oriented proposal "
+                                "shaped by the selected process's DFM rule profile (def "
+                                "false). Only when the process is specified; the rules that "
+                                "shaped it are recorded on it."
+                            ),
+                        },
                         "expected_baseline": {
                             "type": "string",
                             "description": "GSK-...@n the caller saw; refused if it moved.",

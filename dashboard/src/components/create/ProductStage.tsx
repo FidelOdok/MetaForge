@@ -28,6 +28,7 @@ import { useSketchStore } from '../../store/sketch-store';
 import { useSketchCompilerStore } from '../../store/sketch-compiler-store';
 import { EMPTY_STAGE, useCreateLayoutStore, type DrawerPanel } from '../../store/create-layout-store';
 import { StageDrawer } from './StageDrawer';
+import { DfmGuidanceBadge } from './DfmGuidanceBadge';
 import {
   NOT_ASSESSED as NOT_ASSESSED_NOTE,
   PRIMARY_LABEL,
@@ -354,6 +355,8 @@ export function ProductStage({
                     {levelText(node)}
                   </span>
                 )}
+                {/* C3D slice 4: a count of suggestions from real checks, never a percentage. */}
+                {projectId && <DfmGuidanceBadge projectId={projectId} />}
                 {selectedComponent && (
                   <span className="cv-revision" data-testid="stage-selected-component" title={selectedComponent.componentId}>
                     Selected: {selectedComponent.name ?? selectedComponent.componentId}

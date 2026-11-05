@@ -1231,6 +1231,27 @@ groups:
             the claim is wrong. Check the gateway logs (representation_mislabel_guarded)
             for the work product type and the claim.
 
+  # C3D slice 4 -- heuristic DFM findings (api_gateway/twin/dfm_findings.py).
+  - name: metaforge_dfm
+    rules:
+      - alert: DfmEvaluationErrors
+        expr: >-
+          sum(increase(metaforge_dfm_evaluation_total{outcome="failed"}[30m]))
+          / clamp_min(sum(increase(metaforge_dfm_evaluation_total[30m])), 1) > 0.2
+          and sum(increase(metaforge_dfm_evaluation_total{outcome="failed"}[30m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Manufacturing guidance checks are failing"
+          description: >-
+            More than a fifth of the last half hour's heuristic DFM evaluations
+            failed (manual, tool, or the recompute after a geometry or
+            manufacturing context change). Finding sets marked stale stay stale
+            until a check succeeds, so Create and Engineering keep showing the
+            old guidance as out of date. Check the gateway logs
+            (dfm_evaluation_failed, dfm_recompute_failed).
+
   # FORGE-783 -- slow tool calls run as polled jobs (tool_registry/jobs.py).
   - name: metaforge_tool_jobs
     rules:

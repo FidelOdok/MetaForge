@@ -87,6 +87,7 @@ from api_gateway.twin.change_classification_routes import (
 )
 from api_gateway.twin.concept_mesh_routes import router as twin_concept_mesh_router
 from api_gateway.twin.decision_routes import router as decisions_router
+from api_gateway.twin.dfm_routes import router as twin_dfm_router
 from api_gateway.twin.exact_cad_routes import router as twin_exact_cad_router
 from api_gateway.twin.face_attachment_routes import router as twin_face_attachment_router
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
@@ -934,6 +935,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.face_attachment import register as register_face_attachment
 
     register_face_attachment()
+    # C3D slice 4: a geometry head move recomputes the DFM findings of only the
+    # components it affects, after the face remap above.
+    from api_gateway.twin.dfm_findings import make_dfm_service
+    from api_gateway.twin.dfm_findings import register as register_dfm
+
+    register_dfm()
     # FORGE-233: empty until the real MCP bridge exists (below, after
     # bootstrap_tool_registry returns) -- see _LazyBridgeMeasure's own
     # docstring for why this can't just be constructed with the bridge
@@ -1346,6 +1353,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # C3D slice 2: the concept's block layout as simple 3D parts (L1).
         # Deterministic and free; no provider.
         structured_mesh_renderer=make_structured_mesh_recorder(twin, project_backend),
+        # C3D slice 4: heuristic DFM findings per component.
+        dfm_service=make_dfm_service(twin),
         # FORGE-794: concept sketch proposals from text, references or a
         # sketch, as jobs on their target. Held for approval like any paid
         # image tool; the provider is resolved per call.
@@ -2380,6 +2389,8 @@ def create_app(
     app.include_router(twin_manufacturing_context_router)
     # Change classification before an authoritative edit, and the appearance record.
     app.include_router(twin_change_classification_router)
+    # C3D slice 4: heuristic DFM findings, evaluation and decisions.
+    app.include_router(twin_dfm_router)
     # FORGE-791: interpretations of a sketch and their promotion.
     app.include_router(twin_sketch_compiler_router)
     # FORGE-794: AI concept sketches generated from text, references or a sketch.

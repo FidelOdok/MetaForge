@@ -1713,3 +1713,97 @@
   margin: 2px 4px;
   background: var(--tw-line);
 }
+
+/* C3D slice 4: DFM findings in the inspector, on demand. */
+.tw-dfm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  font-size: 12px;
+}
+.tw-dfm-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tw-dfm-disclaimer,
+.tw-dfm-none,
+.tw-dfm-numbers {
+  margin: 0;
+  color: var(--tw-muted);
+}
+.tw-dfm-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--tw-line);
+}
+.tw-dfm-status.is-issues_found {
+  border-color: #d9822b;
+}
+.tw-dfm-component {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--tw-line);
+  padding-top: 8px;
+}
+.tw-dfm-component header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tw-dfm-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 8px;
+  margin: 0;
+}
+.tw-dfm-meta dt {
+  color: var(--tw-muted);
+}
+.tw-dfm-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.tw-dfm-meta dd.is-stale {
+  color: #d9822b;
+}
+.tw-dfm-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tw-dfm-findings li {
+  padding: 6px 8px;
+  border-left: 3px solid var(--tw-line);
+}
+.tw-dfm-findings li.is-blocking {
+  border-left-color: #d64545;
+}
+.tw-dfm-findings li.is-advisory {
+  border-left-color: #d9822b;
+}
+.tw-dfm-findings p {
+  margin: 2px 0;
+}
+.tw-dfm-finding-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.tw-dfm-severity {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.tw-dfm-history {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}

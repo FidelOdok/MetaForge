@@ -407,6 +407,8 @@ async def bootstrap_tool_registry(
     concept_image_critic: Any = None,
     concept_mesh_generator: Any = None,
     structured_mesh_renderer: Any = None,
+    # C3D slice 4: heuristic DFM findings (twin.evaluate_dfm, twin.get_dfm_findings).
+    dfm_service: Any = None,
     sketch_generator: Any = None,
     # CDE slice 6: exact CAD builds, validity and revision-linked STEP.
     exact_cad_service: Any = None,
@@ -643,6 +645,10 @@ async def bootstrap_tool_registry(
             (make_structured_mesh_recorder, C3D slice 2). When supplied,
             registers ``twin.render_structured_mesh``: the concept's block
             layout as simple 3D parts (L1), one node per component.
+            ``None`` skips registration.
+        dfm_service: Optional DFM service (make_dfm_service, C3D slice 4).
+            When supplied, registers ``twin.evaluate_dfm`` and
+            ``twin.get_dfm_findings``: heuristic DFM findings per component.
             ``None`` skips registration.
         sketch_generator: Optional async ``generate(...)``
             (make_sketch_generator, FORGE-794). When supplied, registers
@@ -903,6 +909,7 @@ async def bootstrap_tool_registry(
                     concept_image_critic=concept_image_critic,
                     concept_mesh_generator=concept_mesh_generator,
                     structured_mesh_renderer=structured_mesh_renderer,
+                    dfm_service=dfm_service,
                     sketch_generator=sketch_generator,
                     exact_cad_service=exact_cad_service,
                 )

@@ -295,7 +295,8 @@ class TestAllMetricsCombined:
         # + 2 manufacturing context writes and injections (FORGE-801).
         # + 3 change classification, appearance updates and guard refusals.
         # + 3 structured mesh, maturity queries, representation mislabels (C3D slice 2).
-        assert len(MetricsRegistry.all_metrics()) == 131
+        # + 4 DFM evaluations, findings, stale recomputes and decisions (C3D slice 4).
+        assert len(MetricsRegistry.all_metrics()) == 135
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

@@ -231,6 +231,8 @@ READ_ONLY: frozenset[str] = frozenset(
         # assembly.joints metadata -- reads only, writes nothing.
         "twin.get_harness_estimate",
         "twin.get_node",
+        # C3D slice 4: the current DFM findings; reading them decides nothing.
+        "twin.get_dfm_findings",
         # FORGE-783: a slow tool's job record. Reading it changes nothing (a
         # client polls it, so holding it would hold every poll for a human).
         "twin.job_status",
@@ -354,6 +356,10 @@ ADDITIVE: frozenset[str] = frozenset(
         # C3D slice 2: draws the layout as simple 3D parts (L1), a new render
         # node; an unchanged layout reuses the existing one.
         "twin.render_structured_mesh",
+        # C3D slice 4: appends a dfm_finding_set record per component (the same
+        # inputs reuse the current one) and tags the outputs it read with their
+        # status. Never changes geometry or the manufacturing context.
+        "twin.evaluate_dfm",
         "twin.commit_engineering_change",
         "twin.commit_geometry",
         # FORGE-647: a live-view placement, see guardrails.BOOKKEEPING.

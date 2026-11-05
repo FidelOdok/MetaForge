@@ -263,6 +263,11 @@ class GenerateSketchRequest(BaseModel):
     #: The component this concept is of, for its manufacturing context
     #: (``MFC-<component>``, else the product's).
     component: str | None = Field(None, max_length=120)
+    #: DFM-003: make one of the variants (the last) a manufacturability-oriented
+    #: proposal, shaped by the selected process's rule profile as guidance
+    #: text. Only when the process is specified; it stays a proposal, and the
+    #: rules that shaped it are recorded on it (DFM-005).
+    manufacturability_variant: bool = False
 
     @field_validator("constraints", "negative", "protected_features")
     @classmethod
@@ -645,6 +650,10 @@ class Prepared:
     requested_at: float = field(default_factory=time.monotonic)
     #: The manufacturing context block this request was prepared with (DFM-001).
     manufacturing: Any = None
+    #: DFM-003: the rule profile guidance for the manufacturability variant.
+    dfm_variant: Any = None
+    #: Why a requested manufacturability variant was not made.
+    dfm_variant_skipped: str = ""
 
     def job_arguments(self) -> dict[str, Any]:
         """What identifies this request (hashed for coalescing; kept for a retry)."""
@@ -878,6 +887,16 @@ class SketchGenerationService:
                 hint=request.intent,
             )
             span.set_attribute("sketch_generation.manufacturing_context_ref", manufacturing.ref)
+            dfm_variant: Any = None
+            dfm_skipped = ""
+            if request.manufacturability_variant:
+                if request.speculative:
+                    dfm_skipped = "a speculative concept is not shaped by manufacturing rules"
+                else:
+                    from api_gateway.twin.dfm_findings import manufacturability_variant
+
+                    dfm_variant, dfm_skipped = manufacturability_variant(manufacturing.record)
+                span.set_attribute("sketch_generation.dfm_variant", dfm_variant is not None)
             prepared = Prepared(
                 project_id=str(project_id),
                 request=request,
@@ -891,6 +910,8 @@ class SketchGenerationService:
                 target_key=f"{source}:{region}",
                 base_revision=base_revision,
                 manufacturing=manufacturing,
+                dfm_variant=dfm_variant,
+                dfm_variant_skipped=dfm_skipped,
             )
             span.set_attribute("sketch_generation.target_key", prepared.target_key)
             span.set_attribute("sketch_generation.base_revision", base_revision)
@@ -1111,9 +1132,14 @@ class SketchGenerationService:
                 if provider_masks and request.mask is not None
                 else None
             )
-            image_request = ImageRequest(
-                prompt=prompt, size=request.size, images=tuple(images), mask=mask_png
-            )
+            # DFM-003: the last variant carries the rule profile's guidance.
+            prompts = [prompt] * request.n_variants
+            if prepared.dfm_variant is not None:
+                prompts[-1] = prompt + "\n" + prepared.dfm_variant.text
+            image_requests = [
+                ImageRequest(prompt=p, size=request.size, images=tuple(images), mask=mask_png)
+                for p in prompts
+            ]
             limit = self._timeout_s if self._timeout_s is not None else timeout_from_env()
             generation_id = uuid4().hex[:12]
             job_id = holder.get("job_id")
@@ -1121,7 +1147,7 @@ class SketchGenerationService:
                 results = await asyncio.gather(
                     *(
                         generate_request_with_timeout(gen, image_request, timeout_s=limit)
-                        for _ in range(request.n_variants)
+                        for image_request in image_requests
                     )
                 )
             except asyncio.CancelledError:
@@ -1174,7 +1200,7 @@ class SketchGenerationService:
                         before_png=before_png,
                         first_kind=first_kind,
                         provider_masks=provider_masks,
-                        prompt=prompt,
+                        prompt=prompts[index],
                         negative_prompt=negative_prompt,
                         job_id=job_id,
                         threshold=threshold,
@@ -1196,6 +1222,11 @@ class SketchGenerationService:
                 "label": stored[0].get("label") or LABEL,
                 "stale": stale,
                 **_manufacturing_fields(prepared),
+                "manufacturability_variant": {
+                    "requested": request.manufacturability_variant,
+                    "generated": prepared.dfm_variant is not None,
+                    "skipped_reason": prepared.dfm_variant_skipped or None,
+                },
             }
             if stale:
                 for _ in stored:
@@ -1438,6 +1469,7 @@ class SketchGenerationService:
             "surface": prepared.surface,
             # 3D-RC-011 / DFM-013: the context it was made with and its DFM status.
             **_manufacturing_fields(prepared),
+            **_variant_fields(prepared, index),
         }
         if status == "stale":
             metadata["stale_reason"] = (
@@ -1896,6 +1928,29 @@ def summarise(wp: Any) -> dict[str, Any]:
         "speculative": bool(meta.get("speculative")),
         "manufacturing_note": meta.get("manufacturing_note") or NOT_ASSESSED_NOTE,
         "dfm_status": meta.get("dfm_status") or "not_assessed",
+        "variant_kind": meta.get("variant_kind") or "standard",
+        "dfm_profile": meta.get("dfm_profile"),
+        "dfm_rules_applied": meta.get("dfm_rules_applied") or [],
+    }
+
+
+def _variant_fields(prepared: Prepared, index: int) -> dict[str, Any]:
+    """DFM-003/005: what kind of variant this is, and the rules that shaped it.
+
+    The manufacturability variant is a proposal shaped by guidance: its DFM
+    status stays ``not_assessed`` (nothing checked the picture).
+    """
+    guidance = prepared.dfm_variant
+    if guidance is None or index != prepared.request.n_variants - 1:
+        return {"variant_kind": "standard"}
+    return {
+        "variant_kind": "manufacturability",
+        "dfm_profile": f"{guidance.profile_id}@{guidance.profile_version}",
+        "dfm_rules_applied": list(guidance.rules),
+        "variant_note": (
+            f"Shaped by {guidance.process} guidance (preliminary). A proposal, not a "
+            "checked design."
+        ),
     }
 
 
