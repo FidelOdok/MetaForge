@@ -1462,6 +1462,29 @@ class MetricsRegistry:
         labels=["outcome"],
     )
 
+    # ── Interface contracts (lamp golden path, step 1) ─────────────────
+
+    INTERFACE_CONTRACT_CHECK_TOTAL = MetricDefinition(
+        name="metaforge_interface_contract_check_total",
+        type="counter",
+        description=(
+            "Interface contract evaluations, by kind (cad_eda, eda_firmware, simulation, "
+            "manufacturing) and outcome (satisfied, violated, not_evaluated, stale, failed)"
+        ),
+        labels=["kind", "outcome"],
+    )
+
+    INTERFACE_CONTRACT_VIOLATION_TOTAL = MetricDefinition(
+        name="metaforge_interface_contract_violation_total",
+        type="counter",
+        description=(
+            "Violated checks found by interface contract evaluations, by kind and check "
+            "(pcb_fits_envelope, mounting_holes_match, usb_c_matches_cutout, "
+            "pins_match_netlist, ...)"
+        ),
+        labels=["kind", "check"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1649,6 +1672,8 @@ class MetricsRegistry:
             cls.RECONSTRUCTION_PROPOSAL_TOTAL,
             cls.RECONSTRUCTION_FEATURE_ACCEPTED_TOTAL,
             cls.RECONSTRUCTION_LLM_PASS_TOTAL,
+            cls.INTERFACE_CONTRACT_CHECK_TOTAL,
+            cls.INTERFACE_CONTRACT_VIOLATION_TOTAL,
         ]
 
     @classmethod
@@ -2701,6 +2726,18 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.RECONSTRUCTION_LLM_PASS_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
+
+    def record_interface_contract_check(self, kind: str, outcome: str) -> None:
+        """Record one interface contract evaluation (lamp golden path)."""
+        counter = self._instruments.get(MetricsRegistry.INTERFACE_CONTRACT_CHECK_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind, "outcome": outcome})
+
+    def record_interface_contract_violation(self, kind: str, check: str) -> None:
+        """Record one violated contract check (lamp golden path)."""
+        counter = self._instruments.get(MetricsRegistry.INTERFACE_CONTRACT_VIOLATION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind, "check": check})
 
     def record_tool_job(self, tool: str, status: str) -> None:
         """Record one state change of a tool job (FORGE-783)."""

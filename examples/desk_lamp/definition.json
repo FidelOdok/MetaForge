@@ -1,0 +1,222 @@
+{
+  "id": "desk-lamp",
+  "version": 1,
+  "project": {
+    "name": "Desk lamp (golden path)",
+    "description": "A low voltage, USB-C powered, dimmable desktop lamp: printable base, curved arm and head, LED module, diffuser and a driver/control board. The multidisciplinary golden path across CAD, EDA, firmware, simulation and manufacturing. Seeded from examples/desk_lamp."
+  },
+  "prompt": "Design a modern desktop lamp with adjustable brightness, a compact base, a curved arm and a soft diffuser. Make it suitable for 3D printing.",
+  "references": [
+    {
+      "id": "REF-PRD",
+      "role": "specification",
+      "title": "The lamp's product definition",
+      "source": "examples/desk_lamp/PRD.md",
+      "kind": "text",
+      "note": "The written brief this example seeds from. Text only."
+    },
+    {
+      "id": "REF-INSPIRATION",
+      "role": "inspiration",
+      "title": "A photo or sketch of a lamp you like",
+      "source": null,
+      "kind": "image",
+      "note": "Omitted on purpose: no reference image ships with the example, and none is faked. Add your own in Create and choose its role."
+    }
+  ],
+  "brief": {
+    "items": {
+      "intended_use": {
+        "value": "A modern desktop lamp for reading and desk work, with adjustable brightness. Powered over USB-C at 5 V (low voltage, no mains).",
+        "status": "confirmed",
+        "source": "user"
+      },
+      "appearance": {
+        "value": "Compact base, a curved arm and a soft, even light through a diffuser.",
+        "status": "confirmed",
+        "source": "user"
+      },
+      "making_context": {
+        "value": "Suitable for 3D printing: base, arm and head shell printed by FDM; driver/control board made by a PCB fabricator.",
+        "status": "confirmed",
+        "source": "user"
+      },
+      "materials": {
+        "value": "Diffuser in a translucent material (assumed: translucent PETG). Printed parts in PLA or PETG (assumed).",
+        "status": "assumed",
+        "source": "agent"
+      },
+      "quantity": {
+        "value": "1, as a functional prototype",
+        "status": "confirmed",
+        "source": "user"
+      },
+      "success_criteria": {
+        "value": "A traceable, revision-compatible prototype manufacturing package: print files, PCB fabrication files, BOM, firmware build and assembly instructions that belong to the same revision.",
+        "status": "confirmed",
+        "source": "user"
+      }
+    },
+    "measurements": [
+      {"id": "base-footprint", "label": "Base footprint (width)", "value": 120, "unit": "mm", "status": "estimated", "note": "Approximate; the parametric CAD sets the real value."},
+      {"id": "base-height", "label": "Base height", "value": 30, "unit": "mm", "status": "estimated", "note": "Approximate."},
+      {"id": "arm-length", "label": "Curved arm length along the curve", "value": 300, "unit": "mm", "status": "estimated", "note": "Approximate."},
+      {"id": "head-length", "label": "Head length", "value": 140, "unit": "mm", "status": "estimated", "note": "Approximate."},
+      {"id": "pcb-width", "label": "Driver/control board width", "value": 60, "unit": "mm", "status": "estimated", "note": "Approximate; the PCB layout sets the real value."}
+    ],
+    "assumptions": [
+      {"id": "low-voltage", "text": "Low voltage only: 5 V from USB-C. Electrical and product-safety review is still required."},
+      {"id": "diffuser-material", "text": "The diffuser is printed in a translucent material (translucent PETG) until a person chooses otherwise."},
+      {"id": "brightness-control", "text": "The brightness control is a button or a rotary encoder; not decided yet."}
+    ]
+  },
+  "manufacturing_context": {
+    "product": {
+      "intended_use": {"value": "Desktop lighting, indoors, dimmable, powered over USB-C at 5 V (low voltage)", "authority": "user_stated"},
+      "production_goal": {"value": "functional_prototype", "authority": "user_stated"},
+      "quantity": {"value": 1, "authority": "user_stated"},
+      "selected_process": {"value": "FDM", "authority": "user_stated", "note": "Base, arm and head shell are 3D printed."},
+      "process_candidates": {"value": ["FDM"], "authority": "assumption"},
+      "material_candidates": {"value": ["PLA", "PETG"], "authority": "assumption", "process_specific": true},
+      "assembly": {"value": "Screws into printed bosses and snap fits", "authority": "assumption"}
+    },
+    "components": {
+      "Diffuser": {
+        "selected_material": {"value": "Translucent PETG", "authority": "assumption", "process_specific": true, "note": "Any translucent printable material that spreads the light evenly."},
+        "material_candidates": {"value": ["Translucent PETG", "Natural (unpigmented) PLA"], "authority": "assumption", "process_specific": true}
+      },
+      "Driver PCB": {
+        "process_candidates": {"value": ["PCB fabrication and assembly"], "authority": "assumption"}
+      }
+    }
+  },
+  "concept_assembly": {
+    "title": "Desk lamp concept assembly",
+    "rationale": "The lamp's parts as the product definition names them, so each part has a stable component id from the start. Sizes are estimates until the CAD and the PCB layout exist.",
+    "parts": [
+      {"name": "Base", "source": "made", "material": "PLA or PETG", "process": "FDM", "quantity": 1, "provenance": "intended"},
+      {"name": "Arm", "source": "made", "material": "PLA or PETG", "process": "FDM", "quantity": 1, "provenance": "intended"},
+      {"name": "Head", "source": "made", "material": "PLA or PETG", "process": "FDM", "quantity": 1, "provenance": "intended"},
+      {"name": "Diffuser", "source": "made", "material": "Translucent PETG", "process": "FDM", "quantity": 1, "provenance": "assumption"},
+      {"name": "LED module", "source": "bought", "quantity": 1, "provenance": "intended"},
+      {"name": "Driver PCB", "source": "made", "material": "FR-4", "process": "PCB fabrication and assembly", "quantity": 1, "provenance": "intended"},
+      {"name": "USB-C connector", "source": "bought", "quantity": 1, "provenance": "intended"},
+      {"name": "Brightness control", "source": "bought", "quantity": 1, "provenance": "open"}
+    ],
+    "connections": [
+      {"parts": ["Base", "Arm"], "joint": "pivot, M3 screw into a printed boss", "provenance": "assumption"},
+      {"parts": ["Arm", "Head"], "joint": "pivot", "provenance": "assumption"},
+      {"parts": ["Head", "Diffuser"], "joint": "snap fit", "provenance": "assumption"},
+      {"parts": ["Head", "LED module"], "joint": "screwed to the head", "provenance": "assumption"},
+      {"parts": ["Base", "Driver PCB"], "joint": "M3 screws into printed bosses", "fasteners": "4 x M3", "provenance": "intended"},
+      {"parts": ["Driver PCB", "USB-C connector"], "joint": "soldered", "provenance": "intended"},
+      {"parts": ["Driver PCB", "LED module"], "joint": "cable routed through the arm", "provenance": "intended"},
+      {"parts": ["Base", "Brightness control"], "joint": "panel mount through the base", "provenance": "assumption"}
+    ],
+    "estimated_sizes": {
+      "Base": {"size_mm": [120, 90, 30], "basis": "estimated"},
+      "Arm": {"size_mm": [300, 18, 18], "basis": "estimated", "note": "length along the curve"},
+      "Head": {"size_mm": [140, 60, 25], "basis": "estimated"},
+      "Diffuser": {"size_mm": [130, 50, 2], "basis": "estimated"},
+      "Driver PCB": {"size_mm": [60, 40, 1.6], "basis": "estimated"}
+    }
+  },
+  "contracts": [
+    {
+      "kind": "cad_eda",
+      "title": "Base enclosure and driver board",
+      "plain": "The circuit board must fit inside the base",
+      "owning_domains": ["mechanical", "electronics"],
+      "rationale": "The base holds the driver/control board, its USB-C socket and the cable to the head.",
+      "parameters": [
+        {"name": "pcb_outline", "label": "PCB outline", "value": {"width": 60, "height": 40}, "unit": "mm", "tolerance": 0.2, "owner": "electronics", "basis": "estimated"},
+        {"name": "pcb_clearance", "label": "Clearance between the board edge and the base wall", "value": 1.0, "unit": "mm", "owner": "mechanical", "basis": "assumed"},
+        {"name": "mounting_hole_positions", "label": "Mounting hole positions", "value": [{"x": 4, "y": 4}, {"x": 56, "y": 4}, {"x": 4, "y": 36}, {"x": 56, "y": 36}], "unit": "mm", "tolerance": 0.3, "owner": "electronics", "basis": "estimated", "note": "Board frame: origin at the board's lower left corner."},
+        {"name": "mounting_hole_diameter", "label": "Mounting hole diameter", "value": 3.2, "unit": "mm", "tolerance": 0.1, "owner": "electronics", "basis": "estimated", "note": "M3 clearance."},
+        {"name": "max_component_height", "label": "Maximum component height above the board", "value": 12, "unit": "mm", "owner": "mechanical", "basis": "estimated"},
+        {"name": "led_position", "label": "LED position in the head", "value": {"x": 0, "y": 0, "z": -8}, "unit": "mm", "tolerance": 1.0, "owner": "mechanical", "basis": "estimated", "note": "Head frame: 8 mm above the diffuser, centred."},
+        {"name": "led_orientation", "label": "LED orientation", "value": "Facing down (-Z), towards the desk", "owner": "mechanical", "basis": "estimated"},
+        {"name": "usb_c_position", "label": "USB-C connector position", "value": {"x": 30, "y": 0}, "unit": "mm", "tolerance": 0.5, "owner": "electronics", "basis": "estimated", "note": "Centre of the board's front edge."},
+        {"name": "usb_c_cutout", "label": "USB-C cut-out in the base", "value": {"width": 9.5, "height": 3.8}, "unit": "mm", "tolerance": 0.2, "owner": "mechanical", "basis": "estimated"},
+        {"name": "keep_outs", "label": "Keep-outs", "value": ["3 mm ring around each mounting hole", "No parts within 2 mm of the board edge"], "owner": "electronics", "basis": "estimated"},
+        {"name": "cable_routing", "label": "Cable routing path", "value": "LED cable from the board through the arm to the head", "owner": "mechanical", "basis": "estimated"}
+      ],
+      "links": [
+        {"role": "enclosure", "label": "Base (CAD)", "domain": "mechanical", "item_types": ["cad_model", "assembly"], "produced_by": "the parametric CAD build of the base (Develop)"},
+        {"role": "pcb", "label": "Driver/control PCB layout", "domain": "electronics", "item_types": ["pcb_layout"], "produced_by": "kicad.generate_pcb"}
+      ]
+    },
+    {
+      "kind": "eda_firmware",
+      "title": "Driver board and brightness firmware",
+      "plain": "The brightness control must match the circuit board's wiring",
+      "owning_domains": ["electronics", "firmware"],
+      "rationale": "The firmware drives the LED by PWM and reads the brightness control on the pins the board assigns.",
+      "parameters": [
+        {"name": "controller", "label": "Controller part", "owner": "electronics", "basis": "unknown", "note": "Chosen with the schematic."},
+        {"name": "led_pwm_pin", "label": "PWM pin for the LED driver", "owner": "electronics", "basis": "unknown", "note": "Net LED_PWM once the schematic exists."},
+        {"name": "control_input_pins", "label": "Input pins for the brightness control", "owner": "electronics", "basis": "unknown", "note": "One pin for a button; two (A and B) for a rotary encoder."},
+        {"name": "max_led_current", "label": "Maximum LED current", "unit": "mA", "owner": "electronics", "basis": "unknown", "note": "From the LED driver and module selection."},
+        {"name": "pwm_frequency_range", "label": "PWM frequency range", "value": {"min": 1000, "max": 25000}, "unit": "Hz", "owner": "electronics", "basis": "assumed", "note": "Above visible flicker; the driver datasheet sets the real limits."},
+        {"name": "supply_voltage", "label": "Supply voltage", "value": 5, "unit": "V", "owner": "electronics", "basis": "stated", "note": "USB-C, low voltage."}
+      ],
+      "links": [
+        {"role": "schematic", "label": "Schematic", "domain": "electronics", "item_types": ["schematic"], "produced_by": "kicad.generate_schematic"},
+        {"role": "pinmap", "label": "Pin map", "domain": "electronics", "item_types": ["pinmap"], "produced_by": "kicad.get_pin_mapping"},
+        {"role": "firmware", "label": "Brightness firmware", "domain": "firmware", "item_types": ["firmware_source"], "produced_by": "the firmware scaffold, then firmware.build"}
+      ]
+    },
+    {
+      "kind": "simulation",
+      "title": "Thermal analysis inputs",
+      "plain": "The temperature check needs the lamp's shape, materials and LED heat",
+      "owning_domains": ["mechanical", "electronics", "simulation"],
+      "rationale": "A thermal check of the head and the base is only as good as the geometry, materials, heat load and boundary conditions it is given.",
+      "parameters": [
+        {"name": "materials", "label": "Materials of the head and the base", "owner": "mechanical", "basis": "unknown", "note": "Read from the manufacturing context when a material is selected."},
+        {"name": "led_electrical_power", "label": "LED electrical power", "unit": "W", "owner": "electronics", "basis": "unknown", "note": "From the LED module selection."},
+        {"name": "led_heat_estimate", "label": "Heat from the LED", "unit": "W", "owner": "electronics", "basis": "unknown", "note": "Electrical power less the light emitted."},
+        {"name": "ambient_temperature", "label": "Ambient temperature", "value": 25, "unit": "degC", "owner": "simulation", "basis": "assumed"},
+        {"name": "convection", "label": "Convection", "value": "Natural convection in still room air", "owner": "simulation", "basis": "assumed"},
+        {"name": "operating_assumption", "label": "Operating assumption", "value": "Continuous at full brightness", "owner": "simulation", "basis": "assumed"}
+      ],
+      "links": [
+        {"role": "enclosure", "label": "Base (CAD)", "domain": "mechanical", "item_types": ["cad_model", "assembly"], "produced_by": "the parametric CAD build of the base (Develop)"},
+        {"role": "head", "label": "Head (CAD)", "domain": "mechanical", "item_types": ["cad_model", "assembly"], "produced_by": "the parametric CAD build of the head (Develop)"},
+        {"role": "pcb", "label": "Driver/control PCB layout", "domain": "electronics", "item_types": ["pcb_layout"], "produced_by": "kicad.generate_pcb"}
+      ]
+    },
+    {
+      "kind": "manufacturing",
+      "title": "Prototype manufacturing package",
+      "plain": "The print files, board files and firmware must belong to the same version",
+      "owning_domains": ["mechanical", "electronics", "manufacturing"],
+      "rationale": "A prototype package is only usable when every artifact was made from the current revision of what it comes from.",
+      "artifacts": [
+        {"kind": "print_file", "label": "Print file", "parts": ["CMP-base", "CMP-arm", "CMP-head", "CMP-diffuser"], "item_types": ["gcode"], "produced_by": "slicer.slice on the part's validated STEP", "rule": "Made from the part's current CAD revision."},
+        {"kind": "gerbers", "label": "Gerbers", "item_types": ["gerber"], "produced_by": "kicad.export_gerber", "rule": "Made from the current PCB revision."},
+        {"kind": "drill", "label": "Drill file", "item_types": ["gerber", "drill"], "file_hint": ".drl", "produced_by": "kicad.export_drill", "rule": "Made from the current PCB revision."},
+        {"kind": "pick_and_place", "label": "Pick-and-place file", "item_types": ["pick_and_place"], "produced_by": "kicad.export_pos", "rule": "Made from the current PCB revision."},
+        {"kind": "bom", "label": "BOM", "item_types": ["bom"], "produced_by": "kicad.export_bom", "rule": "Made from the current schematic revision."},
+        {"kind": "assembly_instructions", "label": "Assembly instructions", "item_types": ["assembly_instructions"], "produced_by": "no MetaForge step yet (a later step of the golden path)", "rule": "Written for the current assembly revision."},
+        {"kind": "firmware_binary", "label": "Firmware binary", "producer_tool": "firmware.build", "produced_by": "firmware.build", "rule": "Built from the current firmware source against the current pin map."}
+      ]
+    }
+  ],
+  "steps": [
+    {"id": "concept", "label": "Accepted concept and 3D illustration", "item_types": ["generated_sketch"], "produced_by": "Create: generate and accept a concept"},
+    {"id": "parametric_cad", "label": "Parametric CAD of the printed parts", "item_types": ["cad_model", "assembly"], "produced_by": "Make it editable, then the parametric CAD build"},
+    {"id": "exact_step", "label": "Validated exact B-Rep and STEP", "item_types": ["cad_model"], "geometry_states": ["validated", "released"], "produced_by": "the exact CAD build (cadquery.export_step)"},
+    {"id": "schematic", "label": "Schematic", "item_types": ["schematic"], "produced_by": "kicad.generate_schematic"},
+    {"id": "pcb", "label": "PCB layout", "item_types": ["pcb_layout"], "produced_by": "kicad.generate_pcb"},
+    {"id": "erc_drc", "label": "ERC and DRC results", "evidence_tools": ["kicad.run_erc", "kicad.run_drc"], "produced_by": "kicad.run_erc and kicad.run_drc"},
+    {"id": "pinmap", "label": "Pin map", "item_types": ["pinmap"], "produced_by": "kicad.get_pin_mapping"},
+    {"id": "firmware", "label": "Brightness firmware source", "item_types": ["firmware_source"], "produced_by": "the firmware scaffold"},
+    {"id": "firmware_build", "label": "Firmware build", "evidence_tools": ["firmware.build"], "produced_by": "firmware.build"},
+    {"id": "thermal", "label": "Thermal analysis", "record_types": ["simulation_result"], "produced_by": "calculix.run_thermal"},
+    {"id": "dfm", "label": "DFM findings", "record_types": ["dfm_finding_set"], "produced_by": "the DFM checks (Run checks in Engineering)"},
+    {"id": "print_files", "label": "Print files", "item_types": ["gcode"], "produced_by": "slicer.slice"},
+    {"id": "fabrication", "label": "Gerbers, drill, pick-and-place and BOM", "item_types": ["gerber", "pick_and_place", "bom"], "produced_by": "kicad.export_gerber, kicad.export_drill, kicad.export_pos, kicad.export_bom"},
+    {"id": "release", "label": "Release manifest", "baselines": true, "produced_by": "Make: prepare prototype (release)"}
+  ]
+}

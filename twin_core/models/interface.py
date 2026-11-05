@@ -173,6 +173,8 @@ ITEM_TYPE_DOMAIN: dict[str, str] = {
     "sketch_interpretation": "sketch",
     "parametric_sketch": "sketch",
     "manufacturing_context": "manufacturing",
+    "interface_contract": "systems",
+    "interface_contract_check": "systems",
 }
 
 #: Prefix of an edge end that is a result record rather than an item.

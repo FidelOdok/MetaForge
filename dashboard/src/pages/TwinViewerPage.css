@@ -1818,6 +1818,33 @@
 .tw-dfm-status.is-prototype {
   border-color: #3a9d5d;
 }
+/* Interfaces tab: interface contracts (lamp golden path). */
+.tw-dfm-status.is-agreed {
+  border-color: #3a9d5d;
+}
+.tw-dfm-status.is-violated {
+  border-color: #c4453c;
+}
+.tw-dfm-status.is-stale {
+  border-color: #d9822b;
+}
+.tw-dfm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tw-contract-params {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.tw-contract-params th,
+.tw-contract-params td {
+  text-align: left;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--tw-line);
+  vertical-align: top;
+}
 .tw-dfm-show-faces {
   margin-top: 4px;
   font-size: 11px;

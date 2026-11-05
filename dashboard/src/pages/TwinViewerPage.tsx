@@ -77,6 +77,7 @@ import { useSketchPlane, useSketchStrokes } from '../hooks/use-sketch-plane';
 import { isPlaced } from '../api/endpoints/sketchPlanes';
 import { useAppearanceSync } from '../hooks/use-appearance';
 import { DfmFindingsSection } from '../components/viewer/DfmFindingsSection';
+import { InterfaceContractsSection } from '../components/viewer/InterfaceContractsSection';
 import { ParametricPreviewSection } from '../components/viewer/ParametricPreviewSection';
 import { FeatureHistorySection } from '../components/viewer/FeatureHistorySection';
 import { useComponentSelection } from '../store/component-selection-store';
@@ -1089,7 +1090,7 @@ function GraphLinksBar({
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
 type TwinTab = 'graph' | 'structure' | 'model' | 'sim' | 'asm' | 'mfg' | 'thread';
-type InspectorTab = 'overview' | 'constraints' | 'history' | 'dfm';
+type InspectorTab = 'overview' | 'constraints' | 'history' | 'dfm' | 'interfaces';
 type NodeScope = 'all' | 'attention' | string;
 
 const TWIN_TABS: TwinTab[] = ['graph', 'structure', 'model', 'sim', 'asm', 'mfg', 'thread'];
@@ -1111,7 +1112,7 @@ const TAB_LABELS: Record<TwinTab, string> = {
   thread: 'Electronics',
 };
 // C3D slice 4: DFM findings on demand (section 11), never expanded by default.
-const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history', 'dfm'];
+const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history', 'dfm', 'interfaces'];
 
 const LARGE_TWIN_LINKS: ReadonlySet<LinkGroup> = new Set<LinkGroup>(['parts']);
 
@@ -1934,6 +1935,8 @@ export function TwinViewerPage() {
           <div className="tw-inspector-content">
             {inspectorTab === 'dfm' && activeProjectId && !sampleMode ? (
               <DfmFindingsSection projectId={activeProjectId} componentId={selectedComponent?.componentId ?? null} />
+            ) : inspectorTab === 'interfaces' && activeProjectId && !sampleMode ? (
+              <InterfaceContractsSection projectId={activeProjectId} />
             ) : node ? (
               inspectorTab === 'overview' ? (
                 <>
