@@ -619,7 +619,11 @@ active model. Keys go straight to the gateway
 never stored in the browser. Enter the gateway's
 `METAFORGE_HARNESS_ADMIN_TOKEN` in the **Admin token** field; it is sent
 with the request and not saved. A gateway without the token refuses these
-changes from the dashboard (`scripts/install.sh` generates one).
+changes from the dashboard (`scripts/install.sh` generates one). When a
+change is refused, the page says why: the token is missing, the token is
+wrong, the gateway has no token configured, or the gateway's own reason
+(such as an unknown provider). After a refusal the pasted key stays in its
+field, so a retry with the token needs no re-paste.
 
 **Before you expose a gateway.** The gateway ships no authentication on
 its data routes; the page explains how to put it behind a private

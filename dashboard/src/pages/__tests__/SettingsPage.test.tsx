@@ -93,6 +93,58 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(selectProviderModel).toHaveBeenCalledWith('openai', 'gpt-5.5', ''));
   });
 
+  const gatewayError = (status: number, detail: string) =>
+    Object.assign(new Error(String(status)), { isAxiosError: true, response: { status, data: { detail } } });
+
+  async function saveKey(adminToken = '') {
+    render(<SettingsPage />);
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'openai' } });
+    if (adminToken) {
+      fireEvent.change(screen.getByLabelText('Admin token'), { target: { value: adminToken } });
+    }
+    fireEvent.change(screen.getByPlaceholderText('Paste your provider API key'), {
+      target: { value: 'sk-test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save key to gateway' }));
+  }
+
+  it('asks for the admin token when the gateway requires one, and keeps the key for a retry', async () => {
+    vi.mocked(saveProviderKey).mockRejectedValueOnce(
+      gatewayError(401, 'invalid or missing X-MetaForge-Admin token'),
+    );
+    await saveKey();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This gateway needs its admin token for this change. Enter it in Admin token, then try again.',
+    );
+    expect(screen.getByPlaceholderText('Paste your provider API key')).toHaveValue('sk-test');
+  });
+
+  it('says the admin token was wrong when one was sent', async () => {
+    vi.mocked(saveProviderKey).mockRejectedValueOnce(
+      gatewayError(401, 'invalid or missing X-MetaForge-Admin token'),
+    );
+    await saveKey('wrong');
+    expect(await screen.findByRole('alert')).toHaveTextContent('The gateway rejected the admin token.');
+  });
+
+  it('explains a gateway with no admin token configured', async () => {
+    vi.mocked(saveProviderKey).mockRejectedValueOnce(
+      gatewayError(401, 'credential writes need METAFORGE_HARNESS_ADMIN_TOKEN set on the gateway'),
+    );
+    await saveKey();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This gateway only accepts key changes from its own machine.',
+    );
+  });
+
+  it("shows the gateway's reason for a refused change", async () => {
+    vi.mocked(saveProviderKey).mockRejectedValueOnce(gatewayError(400, "unknown provider 'nope'"));
+    await saveKey();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "The gateway refused this change: unknown provider 'nope'",
+    );
+  });
+
   it('prompts for the gateway when providers cannot load', async () => {
     mockProviders.mockRejectedValue(new Error('down'));
     render(<SettingsPage />);
