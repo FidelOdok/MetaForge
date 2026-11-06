@@ -306,6 +306,63 @@ def _lower_sketch_profile(var: str, entity: SketchEntity, *, is_path: bool = Fal
     return lines
 
 
+def compile_design_ir_cadquery(doc: DesignIR) -> tuple[str, str, dict[str, str]]:
+    """Compile ``doc`` into one CadQuery script without running it.
+
+    Returns ``(script, terminal entity id, entity id -> script variable)``.
+    :func:`lower_design_ir_cadquery` runs the result; the CAD design loop
+    seeds its first script from it.
+
+    Raises:
+        LoweringError: Invalid IR, an unsupported op, or no exportable
+            terminal entity.
+    """
+    errors = validate_design_ir(doc)
+    if errors:
+        raise LoweringError(f"invalid Design IR document: {'; '.join(errors)}")
+
+    unsupported = [e.id for e in doc.entities if e.op in _UNSUPPORTED_OPS]
+    if unsupported:
+        raise LoweringError(
+            f"unsupported op(s) for the CadQuery Lowering Pass: {unsupported} "
+            "(v1 covers create_primitive/transform/boolean/sketch/pad/pocket/"
+            "fillet/chamfer/fillet_edges[empty]/chamfer_edges[empty]/mirror/"
+            "shell[empty]/revolve/sweep/loft only)"
+        )
+
+    terminal = _find_terminal_entity(doc)
+
+    # A sketch referenced as a sweep's path_ref must NOT be auto-closed
+    # (see _lower_sketch_profile) -- collected up front since a sketch's
+    # own line is emitted before its consumer (a later SweepEntity) is
+    # reached in document order.
+    path_sketch_ids = {e.path_ref for e in doc.entities if isinstance(e, SweepEntity)}
+
+    # loft needs to look up its section sketches by id (to re-derive
+    # their profile-building calls chained onto a shared Workplane,
+    # see LoftEntity below) -- the only entity type here that needs
+    # this, since every other entity only ever needs the already-built
+    # script variable, not the original IR entity object.
+    entities_by_id: dict[str, IREntity] = {e.id: e for e in doc.entities}
+
+    script_lines = ["import cadquery as cq"]
+    var_map: dict[str, str] = {}
+    body_current: dict[str, str] = {}
+
+    for entity in doc.entities:
+        var = _lower_one(
+            entity, var_map, body_current, script_lines, path_sketch_ids, entities_by_id
+        )
+        if var is not None:
+            var_map[entity.id] = var
+
+    terminal_var = var_map.get(terminal.id)
+    if terminal_var is None:
+        raise LoweringError(f"terminal entity {terminal.id!r} produced no CadQuery variable")
+    script_lines.append(f"result = {terminal_var}")
+    return "\n".join(script_lines), terminal.id, var_map
+
+
 async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLoweringResult:
     """Compile ``doc`` into one CadQuery script and execute it.
 
@@ -316,52 +373,8 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
     """
     with tracer.start_as_current_span("cadquery_lowering.lower") as span:
         span.set_attribute("entity_count", len(doc.entities))
-
-        errors = validate_design_ir(doc)
-        if errors:
-            raise LoweringError(f"invalid Design IR document: {'; '.join(errors)}")
-
-        unsupported = [e.id for e in doc.entities if e.op in _UNSUPPORTED_OPS]
-        if unsupported:
-            raise LoweringError(
-                f"unsupported op(s) for the CadQuery Lowering Pass: {unsupported} "
-                "(v1 covers create_primitive/transform/boolean/sketch/pad/pocket/"
-                "fillet/chamfer/fillet_edges[empty]/chamfer_edges[empty]/mirror/"
-                "shell[empty]/revolve/sweep/loft only)"
-            )
-
-        terminal = _find_terminal_entity(doc)
-        span.set_attribute("terminal_entity_id", terminal.id)
-
-        # A sketch referenced as a sweep's path_ref must NOT be auto-closed
-        # (see _lower_sketch_profile) -- collected up front since a sketch's
-        # own line is emitted before its consumer (a later SweepEntity) is
-        # reached in document order.
-        path_sketch_ids = {e.path_ref for e in doc.entities if isinstance(e, SweepEntity)}
-
-        # loft needs to look up its section sketches by id (to re-derive
-        # their profile-building calls chained onto a shared Workplane,
-        # see LoftEntity below) -- the only entity type here that needs
-        # this, since every other entity only ever needs the already-built
-        # script variable, not the original IR entity object.
-        entities_by_id: dict[str, IREntity] = {e.id: e for e in doc.entities}
-
-        script_lines = ["import cadquery as cq"]
-        var_map: dict[str, str] = {}
-        body_current: dict[str, str] = {}
-
-        for entity in doc.entities:
-            var = _lower_one(
-                entity, var_map, body_current, script_lines, path_sketch_ids, entities_by_id
-            )
-            if var is not None:
-                var_map[entity.id] = var
-
-        terminal_var = var_map.get(terminal.id)
-        if terminal_var is None:
-            raise LoweringError(f"terminal entity {terminal.id!r} produced no CadQuery variable")
-        script_lines.append(f"result = {terminal_var}")
-        script = "\n".join(script_lines)
+        script, terminal_id, var_map = compile_design_ir_cadquery(doc)
+        span.set_attribute("terminal_entity_id", terminal_id)
 
         response = await mcp.invoke("cadquery.execute_script", {"script": script}, timeout=120)
         step_b64 = response.get("step_base64")
@@ -379,7 +392,7 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
             volume_mm3=float(response.get("volume_mm3", 0.0)),
             surface_area_mm2=float(response.get("surface_area_mm2", 0.0)),
             bounding_box=bounding_box,
-            terminal_entity_id=terminal.id,
+            terminal_entity_id=terminal_id,
             obj_id_map=dict(var_map),
             script_text=script,
         )

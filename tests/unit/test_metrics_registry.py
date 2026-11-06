@@ -96,7 +96,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 3 reconstruction proposals, accepted features and model passes (4B).
         # + 4 concept segmentation, part mapping, regeneration and completion.
         # + 2 interface contract checks and violations (lamp golden path).
-        assert len(all_metrics) == 154
+        # + 6 CAD design loop runs, iterations, renders, verdicts, calls and spend.
+        assert len(all_metrics) == 160
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

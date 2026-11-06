@@ -407,6 +407,7 @@ class TwinServer(McpToolServer):
         concept_image_critic: Any = None,
         concept_mesh_generator: Any = None,
         concept_parts_service: Any = None,
+        cad_design_loop_service: Any = None,
         structured_mesh_renderer: Any = None,
         dfm_service: Any = None,
         job_runner: Any = None,
@@ -552,6 +553,10 @@ class TwinServer(McpToolServer):
         # Concept parts: an injected service with segment, regenerate_part and
         # complete_part (api_gateway.twin.concept_parts).
         self._concept_parts_service = concept_parts_service
+        # CAD design loop: an injected service with start(...)
+        # (api_gateway.twin.cad_design_loop): write CadQuery, build, render,
+        # critique and revise, recorded as a proposal a person accepts.
+        self._cad_design_loop_service = cad_design_loop_service
         # C3D slice 2: an injected async ``render(...)`` (make_structured_
         # mesh_recorder) that draws the concept's block layout as a GLB with
         # one node per component (L1, sizes estimated). Free and fast.
@@ -827,6 +832,10 @@ class TwinServer(McpToolServer):
         if exact_cad_service is not None:
             self._register_exact_cad()
             if concept_mesh_generator is None and concept_parts_service is None:
+                self._register_job_status()
+        if cad_design_loop_service is not None:
+            self._register_cad_design_loop()
+            if "twin.job_status" not in self.tool_ids:
                 self._register_job_status()
         if sketch_interpreter is not None:
             self._register_interpret_sketch()
@@ -5302,6 +5311,108 @@ class TwinServer(McpToolServer):
         )
         logger.info("concept_parts_job_started", tool=tool, job_id=job.job_id, reused=reused)
         return runner.reply(job, reused)
+
+    # ------------------------------------------------------------------
+    # twin.design_cad_loop (the self-validating CAD design loop)
+    # ------------------------------------------------------------------
+
+    def _register_cad_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.design_cad_loop",
+                adapter_id="twin",
+                name="Design CAD Loop",
+                description=(
+                    "Refine one component's CAD automatically: a model writes CadQuery from "
+                    "the component's parametric plan, it is built and checked in the CadQuery "
+                    "adapter (validity, measurements, DFM for the selected process), rendered "
+                    "in a headless browser (render.model_views) and reviewed by a vision "
+                    "critic against the intent and the manufacturing context; the model "
+                    "revises until the critic is satisfied, validity passes, no blocking DFM "
+                    "finding remains and stated sizes are in tolerance, or it stops at "
+                    "max_iterations (def 5) or the run's model call and spend budget, or on a "
+                    "question for a person. Never invents an unknown dimension: it asks, or "
+                    "uses a labelled working value (allow_working_values). Records every "
+                    "iteration; the result is a proposed CAD revision bound to the base "
+                    "revision that only a person accepts (Create or Engineering), and the "
+                    "critic's verdict never validates anything. Paid model calls; returns a "
+                    "job unless wait."
+                ),
+                capability="cad_generation",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "sketch_key": {
+                            "type": "string",
+                            "description": "The component's parametric plan (PSK-...).",
+                        },
+                        "component_id": {
+                            "type": "string",
+                            "description": "CMP-... when no sketch_key is given.",
+                        },
+                        "intent": {"type": "string", "maxLength": 2000},
+                        "target_dimensions": {
+                            "type": "object",
+                            "description": "Overall size in mm the result must have: x, y, z.",
+                        },
+                        "tolerance_mm": {"type": "number"},
+                        "answers": {
+                            "type": "object",
+                            "description": "Answers to an earlier run's questions, by name.",
+                        },
+                        "allow_working_values": {"type": "boolean"},
+                        "max_iterations": {"type": "integer", "minimum": 1, "maximum": 8},
+                        "max_model_calls": {"type": "integer", "minimum": 1, "maximum": 40},
+                        "max_spend_usd": {"type": "number"},
+                        "views": {"type": "array", "items": {"type": "string"}},
+                        "wait": {
+                            "type": "boolean",
+                            "description": "Wait for the result, not a job (def false).",
+                        },
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "stop_reason": {"type": ["string", "null"]},
+                        "stop_detail": {"type": ["string", "null"]},
+                        "iterations": {"type": "array"},
+                        "result": {"type": ["object", "null"]},
+                        "questions": {"type": "array"},
+                        "budget": {"type": "object"},
+                        "job_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "poll": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=900),
+            ),
+            handler=self._cad_design_loop_tool,
+        )
+
+    async def _cad_design_loop_tool(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        wait = arguments.get("wait")
+        if wait is not None and not isinstance(wait, bool):
+            raise ValueError("twin.design_cad_loop: 'wait' must be true or false")
+        session_id, ctx_project = session_of_call()
+        project_id = str(arguments.get("project_id") or ctx_project or "")
+        if not project_id:
+            raise ValueError("twin.design_cad_loop: name the project (project_id)")
+        call = {k: v for k, v in arguments.items() if k not in ("wait", "project_id")}
+        with tracer.start_as_current_span("twin.design_cad_loop") as span:
+            span.set_attribute("project.id", project_id)
+            result: dict[str, Any] = await self._cad_design_loop_service.start_from_tool(
+                project_id,
+                call,
+                session_id=session_id,
+                wait=caller_waits() if wait is None else wait,
+                request_context={"surface": "mcp", "tool": "twin.design_cad_loop"},
+            )
+        logger.info("cad_design_loop_tool_done", project_id=project_id, job=result.get("job_id"))
+        return result
 
     # ------------------------------------------------------------------
     # twin.generate_sketch (FORGE-794)

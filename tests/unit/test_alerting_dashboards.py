@@ -138,7 +138,8 @@ class TestAlertingRules:
         # + 1 reconstruction failures (ReconstructionProposalFailures, spec 4B).
         # + 1 concept parts failing (ConceptPartsFailures).
         # + 1 interface contract checks failing (InterfaceContractChecksFailing).
-        assert len(rules) == 87
+        # + 1 CAD design loop runs or renders failing (CadDesignLoopFailing).
+        assert len(rules) == 88
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -218,7 +219,8 @@ class TestAlertingRules:
         # + 1 reconstruction failures (spec 4B).
         # + 1 concept parts failing.
         # + 1 interface contract checks failing (lamp golden path).
-        assert len(warnings) == 70
+        # + 1 CAD design loop runs or renders failing.
+        assert len(warnings) == 71
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -366,6 +368,8 @@ class TestAlertingRules:
                 "ConceptPartsFailures",
                 # Lamp golden path: interface contract checks raise.
                 "InterfaceContractChecksFailing",
+                # CAD design loop: runs or model view renders failing.
+                "CadDesignLoopFailing",
             ]
         )
 

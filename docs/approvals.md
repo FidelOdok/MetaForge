@@ -385,7 +385,9 @@ In every mode:
 - **Spend cap.** Paid tools are capped per project per rolling hour: 20
   `twin.render_concept_image` and 20 `twin.generate_sketch` (each
   `METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`, counted per tool) and 3
-  `twin.generate_concept_mesh` (`METAFORGE_AUTO_APPROVE_MESH_PER_HOUR`). Over
+  `twin.generate_concept_mesh` (`METAFORGE_AUTO_APPROVE_MESH_PER_HOUR`), and 3
+  `twin.design_cad_loop` runs (`METAFORGE_AUTO_APPROVE_CAD_LOOP_PER_HOUR`), each of
+  which also stops at its own model-call and spend budget. Over
   the cap the call is held for a person, and the hold's reason and the held
   result's `note` say the cap was reached. A person generating on the Create
   stage is the approver of their own request, but past the same hourly count

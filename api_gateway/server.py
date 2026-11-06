@@ -83,6 +83,7 @@ from api_gateway.technical_drawings.routes import router as technical_drawings_r
 from api_gateway.testplans.routes import router as testplans_router
 from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.baseline_routes import router as twin_baselines_router
+from api_gateway.twin.cad_design_loop_routes import router as twin_cad_design_loop_router
 from api_gateway.twin.change_classification_routes import (
     router as twin_change_classification_router,
 )
@@ -936,6 +937,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin, bridge=exact_cad_bridge, recorder=geometry_recorder_fn
     )
     set_exact_cad_service(exact_cad_service)
+    # The CAD design loop builds, measures and renders over the same bridge.
+    from api_gateway.twin.cad_design_loop import (
+        make_cad_design_loop_service,
+        set_cad_design_loop_service,
+    )
+
+    cad_design_loop_service = make_cad_design_loop_service(twin, exact_cad=exact_cad_service)
+    set_cad_design_loop_service(cad_design_loop_service)
     # CDE slice 9: a CAD head move re-finds the faces sketch planes sit on.
     from api_gateway.twin.face_attachment import register as register_face_attachment
 
@@ -1363,6 +1372,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # Concept parts: split the 3D concept, redo or seal one part. Paid,
         # held for approval like the concept mesh; provider resolved per call.
         concept_parts_service=make_concept_parts_service(twin, project_backend),
+        # The CAD design loop, over the exact CAD service's bridge (cadquery.*,
+        # render.model_views); model calls through the provider chain.
+        cad_design_loop_service=cad_design_loop_service,
         # C3D slice 2: the concept's block layout as simple 3D parts (L1).
         # Deterministic and free; no provider.
         structured_mesh_renderer=make_structured_mesh_recorder(twin, project_backend),
@@ -2410,6 +2422,8 @@ def create_app(
     app.include_router(twin_sketch_generation_router)
     app.include_router(twin_concept_mesh_router)
     app.include_router(twin_concept_parts_router)
+    # The CAD design loop: write CadQuery, build, render, critique, revise.
+    app.include_router(twin_cad_design_loop_router)
     app.include_router(twin_representation_router)
     # CDE slice 6: exact CAD builds and revision-linked STEP exports.
     app.include_router(twin_exact_cad_router)

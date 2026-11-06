@@ -1238,6 +1238,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `dfm_finding_set` | record | | `WorkProduct` `dfm_finding_set`: one component's DFM findings under one process rule profile, pinned to the geometry and manufacturing context revisions it read. Kind `heuristic` is guidance, never an analysis pass; kind `exact` is the profile's exact checks on a validated B-Rep revision. See [DFM findings](#dfm-findings) and [exact DFM](#exact-dfm) |
 | `dfm_report` | record | | `WorkProduct` `dfm_report`: a revision-specific DFM report with its manufacturing release checklist, as JSON and Markdown, pinned to the revisions it read. See [the DFM report](#dfm-report) |
 | `interface_contract_check` | record | | `WorkProduct` `interface_contract_check`: one evaluation of an interface contract, each check `satisfied`, `violated` (with values), `not_evaluated` (with the missing input) or `stale`, pinned to the contract revision and every item revision it read. See [interface contracts](#interface-contracts) |
+| `cad_design_loop` | record | | `WorkProduct` `cad_design_loop`: one run of the CAD design loop, every iteration (script, build, validity, measurements, rendered views, critique, DFM findings, model, provider, cost) and the stop reason; its result is a proposed CAD revision a person accepts or rejects. See [CAD design loop records](#cad-design-loop-records) |
 | `approval` | record | | approvals service |
 | `session` | record | | `agent_sessions` (Postgres) |
 | `run` | record | | runs / design-flow workflow |
@@ -3740,6 +3741,53 @@ estimated block when the layout has none for that component. Counted in
 `metaforge_concept_part_completion_total{outcome, mode}`; the
 `ConceptPartsFailures` alert fires on three failed or timed out paid steps in
 an hour.
+
+### CAD design loop records {#cad-design-loop-records}
+
+One run of the CAD design loop
+([how it works](architecture/design-flow-harness.md#cad-design-loop)) is one
+`cad_design_loop` work product (a record, kept out of the twin's node lists as
+history). Code: `api_gateway/twin/cad_design_loop.py`,
+`api_gateway/twin/cad_design_loop_routes.py`.
+
+| Field (node metadata) | Meaning |
+|---|---|
+| `cad_design_loop` | The run: `status` (`running`, `finished`), `request`, `context` (component, `sketch_ref`, `cad_key`, `base_revision`, stated and unknown dimensions with their sources, the interface contract, envelope, targets and tolerance, `manufacturing_context_ref`, process and DFM profile, whether the first script was seeded from the plan), `budget` (limits, model calls, priced spend, unpriced calls), `iterations`, `stop_reason`, `stop_words`, `stop_detail`, `questions`, `result` and `decision` |
+| `image_files` | The rendered views and contact sheet of every iteration as named blobs (`iter-<n>-<view>.png`, `iter-<n>-sheet.png`), served at `GET /v1/twin/nodes/{id}/files/{name}` |
+| `component_ref`, `component_name` | The component the run worked on |
+| `base_item_ref` | `CAD-...@n` when the CAD item existed when the run started, else null |
+| `manufacturing_context_ref` | The `MFC-...@n` revision (or `unresolved`) every prompt carried |
+| `authority` | Always `proposal`. The record is never evidence |
+
+Each entry of `iterations` keeps `n`, `script` and `script_sha256`,
+`summary`, `focus`, `assumptions` (labelled working values), `questions`,
+`build` (`ok`, `error`, `step_sha256`), `validity` (outcome and findings from
+`cadquery.validate_shape`), `measurements` (bounding box, size, volume,
+surface area and, for exact DFM, the thinnest wall and smallest hole and
+boss), `dimension_checks` (axis, `target` or `envelope`, wanted, measured,
+`ok`), `dfm` (status, kind `exact`, `heuristic` or `none`, profile, findings
+and the rules not assessed), `render` (views with their stored file, the
+sheet, the renderer and the mesh bounding box), `critique` (`satisfied`,
+`verdict`, reasons and issues with severity, view, feature and suggested
+change; `authority: advisory`), `gate` (the four stop rule parts and
+`passed`), `models` (provider, model and cost for the author and the critic)
+and `manufacturing_context_ref`.
+
+`result` is the proposed version: the iteration, `script`, `step_sha256`,
+`cad_key`, `base_revision`, whether the run was satisfied, `open_issues` in
+plain words (manufacturing findings, sizes out of tolerance, review issues and
+working values to confirm), `assumptions`, `validated: false` and `status`
+(`proposed`, then `accepted` or `rejected`). `decision` records who decided,
+when, and for an acceptance the exact build job it started; the CAD item's
+head moves only if that build passes validity.
+
+Metrics: `metaforge_cad_loop_run_total{stop_reason}`,
+`metaforge_cad_loop_iteration_total{outcome}`,
+`metaforge_cad_loop_render_total{outcome}`,
+`metaforge_cad_loop_critic_total{verdict}`,
+`metaforge_cad_loop_model_call_total{role}` and
+`metaforge_cad_loop_spend_usd_total{role}`; the `CadDesignLoopFailing` alert
+fires on three failed runs or failed renders in an hour.
 
 ### Parametric reconstruction {#parametric-reconstruction}
 

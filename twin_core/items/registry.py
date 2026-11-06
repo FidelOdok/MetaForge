@@ -370,6 +370,17 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
         ),
     ),
     TwinTypeSpec(
+        "cad_design_loop",
+        TwinTypeKind.RECORD,
+        "work_product:cad_design_loop",
+        description=(
+            "One run of the CAD design loop: each iteration's script, build, validity, "
+            "measurements, rendered views, critique, DFM findings, model and cost, and the "
+            "stop reason. Its result is a proposed CAD revision a person accepts or keeps "
+            "the previous one; the critic's verdict is never evidence."
+        ),
+    ),
+    TwinTypeSpec(
         "interface_contract_check",
         TwinTypeKind.RECORD,
         "work_product:interface_contract_check",

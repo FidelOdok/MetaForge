@@ -758,6 +758,16 @@ processes, materials by the stated stock names), or failing that the
 library's entries up to fifteen, and says which of the three it did. A
 library with no entries leaves the context text as it was.
 
+**Browser renders for the CAD design loop.** The CAD design loop needs
+quick, repeatable pictures of each candidate, so a second render adapter
+(`render-adapter`, port 8107) loads a GLB into a local three.js page in
+headless Chromium through Playwright: `render.model_views` returns fixed
+views (iso, front, side, top and sections) with a scale bar and the measured
+dimensions drawn on, plus a contact sheet the vision critic reads. three.js
+ships in the image and the page is served from local files, so a render
+needs no network. See
+[the CAD design loop](architecture/design-flow-harness.md#cad-design-loop).
+
 **Blender renders, and the GPL boundary.** Industrial
 design reviews need to see a product, so MetaForge renders models with
 Blender 5.2.2 LTS in its own container (`blender-adapter`, port 8202):

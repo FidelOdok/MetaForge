@@ -65,11 +65,12 @@ class TestRegistryMcpBridge:
         tools for 117. The PrusaSlicer adapter adds slicer.slice and
         slicer.list_profiles for 119. cadquery.validate_shape and
         cadquery.export_step make 121. cadquery.describe_faces makes 122.
-        cadquery.dfm_measure makes 123.
+        cadquery.dfm_measure makes 123. The browser render adapter adds
+        render.model_views for 124.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 123
+        assert len(tools) == 124
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

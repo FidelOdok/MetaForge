@@ -1413,6 +1413,29 @@ runs with no stdin, so its own prompt before running a script reads no.
 
 ---
 
+### Render Adapter (`tool_registry/tools/render/`)
+
+| Property | Details |
+|----------|---------|
+| Docker Image | `ghcr.io/fidelodok/metaforge-render-adapter`, published by CI (`tool_registry/tools/render/Dockerfile`) |
+| Base Image | `mcr.microsoft.com/playwright/python:v1.49.1-noble`, pinned by digest (Chromium and its libraries); three.js r169 fetched at build time, checked against its SHA-256 and kept in the image |
+| Transport | HTTP JSON-RPC on port 8107 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_RENDER_URL` |
+| Compose | Runs by default; limited to 2 CPUs and 2 GB, two renders at a time, `RENDER_MAX_OPERATION_TIME` (120 s) each |
+| Tools | `render.model_views` |
+
+**Tools provided**:
+
+| Tool ID | Capability | Description |
+|---------|-----------|-------------|
+| `render.model_views` | `render` | Load a GLB (`glb_base64`, or `input_file` in the adapter workspace) into a local three.js page in headless Chromium and render the requested views (`iso`, `front`, `side`, `back`, `left`, `top`, `bottom`, `section` with an axis and offset). Returns `views` (one PNG each with its projection, section and mm per pixel), `sheet_png_base64` (every view on one image), `bbox_mm` and the renderer. Read-only |
+
+The page and its scripts are answered from local files by Playwright's
+request routing; any other request is aborted, so a render never reaches a
+network. In-process (the gateway or sidecar images, which have no browser) a
+call fails with a message naming the render-adapter container.
+
+---
+
 ### OpenFOAM Adapter (`tool_registry/tools/openfoam/`)
 
 | Property | Details |

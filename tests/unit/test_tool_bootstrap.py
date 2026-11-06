@@ -98,13 +98,13 @@ class TestBootstrapToolRegistry:
         in-process packaging adapter for 16, and FORGE-670 the in-process aircraft
         adapter for 17, and FORGE-674/677 the firmware build/emulation adapter for 18,
         and FORGE-711 the SimReady asset adapter for 19, and the PrusaSlicer
-        adapter for 20.
+        adapter for 20, and the browser render adapter for 21.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 20
+        assert len(adapters) == 21
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -127,6 +127,7 @@ class TestBootstrapToolRegistry:
             "firmware",
             "simready",
             "slicer",
+            "render",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -134,7 +135,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 20
+        assert len(registry.list_adapters()) == 21
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -263,8 +264,9 @@ class TestBootstrapToolRegistry:
         tools = registry.list_tools()
         # + cadquery.validate_shape and cadquery.export_step (CDE slice 6),
         # + cadquery.describe_faces (CDE slice 9),
-        # + cadquery.dfm_measure (C3D slice 6).
-        assert len(tools) == 123
+        # + cadquery.dfm_measure (C3D slice 6),
+        # + render.model_views (the browser render adapter).
+        assert len(tools) == 124
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

@@ -544,6 +544,34 @@ Approvals and refusals are the routes' own; a refusal is shown as the
 route gave it. Without a parametric sketch, **Build exact model** still
 puts a design request in the composer, ready to send.
 
+### Refining the model automatically
+
+With a parametric sketch, **Refine the model automatically** starts the CAD
+design loop on it ([how it works](architecture/design-flow-harness.md#cad-design-loop)).
+A model writes the part's CadQuery, MetaForge builds and checks it, renders
+it from fixed views and has a vision model review the pictures and the
+measured numbers against the brief and the manufacturing context, then
+revises, a few times at most. It is a paid step: past the hourly limit the
+stage asks first (**Run it anyway** or **Not now**).
+
+The activity overlay shows each round ("Iteration 2: fixing wall
+thickness"), and the stage shows the latest rendered views while it works.
+The current model stays on the stage throughout. At the end the stage says
+how it stopped, in plain words (done, stopped at the iteration or spend
+limit with issues still open, or could not go on), lists what is still open
+(manufacturing findings, sizes out of tolerance, review comments, and any
+working value it used that the person should confirm), and offers **Use this
+version** or **Keep the previous one**. Using it builds the version through
+the same exact build as **Build exact model**, so it becomes the model only
+if that build's geometry check passes. When the loop needs a number nobody
+has given (a depth, a thickness), it asks; **Answer and continue** runs it
+again with the answer. Nothing is guessed on the person's behalf.
+
+Engineering's inspector shows each run's iteration timeline: the rendered
+views, the review with its issues, the measurements and checks, the DFM
+findings, the models and their cost, and the script changes from one
+iteration to the next.
+
 ### Generating a concept
 
 **Generate a concept** (in More) draws a freeform concept sketch with an
@@ -1022,6 +1050,8 @@ The sketch layer uses these twin routes:
 | `POST .../dfm/verification/{item_id}/evidence` | Record evidence for a physical verification item; it counts once a reviewer approves it |
 | `POST /v1/twin/projects/{project_id}/reconstruction`, `GET ...` | Propose how an accepted concept would be built as editable features; read the latest proposal per part |
 | `POST .../reconstruction/{key}/accept` | Accept a part's proposed features with answers; its editable sketch waits for sign-off |
+| `POST /v1/twin/projects/{project_id}/cad-loops`, `GET ...` | Start the CAD design loop on a parametric sketch as a job (`409` with `spend_confirmation_required` past the hourly limit; refused for an agent); list the runs, newest first |
+| `GET .../cad-loops/{node_id}`, `POST .../cad-loops/{node_id}/decision` | One run with every iteration; **Use this version** (`accept`, an exact build; `409` when the model moved on) or **Keep the previous one** (`reject`), a person only |
 
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the

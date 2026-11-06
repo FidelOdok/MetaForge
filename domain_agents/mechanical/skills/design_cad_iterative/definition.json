@@ -1,0 +1,21 @@
+{
+  "name": "design_cad_iterative",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Refine one component's CAD in a self-validating loop: a model writes CadQuery from the component's parametric plan, it is built and checked (validity, measurements, DFM for the selected process), rendered in a headless browser and reviewed by a vision critic, and revised until satisfied or a cap is reached; the result is a proposed revision a person accepts",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "twin.design_cad_loop",
+      "capability": "cad_generation",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.DesignCadIterativeInput",
+  "output_schema": "schema.DesignCadIterativeOutput",
+  "timeout_seconds": 900,
+  "retries": 0,
+  "idempotent": false,
+  "tags": ["cad", "cadquery", "design-loop", "vision", "dfm", "mechanical"]
+}

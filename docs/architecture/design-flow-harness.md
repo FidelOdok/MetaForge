@@ -1436,6 +1436,112 @@ engineering_entity_approval.py`): a real approval step, generic across every
   section 63; HITL Level 4 Mandatory Authority), the same posture the
   baseline check already takes for a missing baseline.
 
+## The CAD design loop {#cad-design-loop}
+
+A component with a parametric plan (a `PSK` item) can be refined
+automatically. `twin.design_cad_loop` (`api_gateway/twin/cad_design_loop.py`)
+runs as a background job: a model writes CadQuery, the result is built,
+checked, rendered in a real headless browser and reviewed by a vision critic,
+and the model revises until it is satisfied or a cap is reached. Every tool
+call goes through MCP: scripts run only inside the CadQuery adapter
+container, never in the gateway.
+
+**Context, gathered once per run.** The brief and its measurements, the
+component, the active references with their roles and extracted facts, the
+`IFC-CAD-EDA` interface contract's parameters, the component's own envelope
+from its manufacturing context, the parametric plan's features and inputs,
+the proposed feature history (`FHP-<component>`) when reconstruction made
+one, the manufacturing context block (stated, assumed and unknown, through
+`manufacturing_context_block()`) and the component's current DFM findings.
+When every input of the plan's first feature is known, the plan is compiled
+into a seed script (`compile_design_ir_cadquery`) the first iteration starts
+from.
+
+**Unknown dimensions are never invented.** A plan input with no value and no
+answer, and a contract parameter whose basis is `unknown`, is listed to the
+model as UNKNOWN. The model asks for it, or, when `allow_working_values` is on
+(the default), uses a value it labels as an assumption with the same name; the
+assumption is recorded and shown to the person as an open issue to confirm. A
+reply that does neither for a required unknown is turned into a question and
+the run stops `needs_input` before anything is built. A later run takes the
+person's numbers in `answers`.
+
+**Each iteration.**
+
+1. The author model (the chat provider chain) returns one JSON object: the
+   whole script, a one-line summary, a few words of focus ("fixing wall
+   thickness"), assumptions and questions.
+2. `cadquery.execute_script`, then `cadquery.validate_shape`. A build error
+   or a validity finding goes back to the model in the next prompt.
+3. Measurements: the bounding box, size and volume; under a process whose
+   rule profile names exact checks (FDM), `cadquery.dfm_measure` and the
+   profile's exact checks on the candidate; under any other profile, its
+   heuristic rules on the measured extents; with no process, `not_assessed`.
+4. The STEP is converted to GLB by the OCCT converter, and
+   `render.model_views` renders iso, front, side and top views (with the
+   measured size as the dimension overlay) and a contact sheet.
+5. The vision critic (`METAFORGE_VISION_MODEL`) gets the sheet, the measured
+   numbers, the intent and the DFM findings, and returns issues (severity,
+   view, feature, suggested change) and a `satisfied` verdict with reasons.
+   A satisfied verdict that still lists a blocking or major issue counts as
+   not satisfied.
+
+**Stop rules.** The run stops `satisfied` only when all four hold: the critic
+is satisfied, validity is `pass`, no blocking DFM finding remains, and every
+stated overall size (`target_dimensions`, and the component's own envelope as
+a maximum) is within `tolerance_mm` (default 0.5 mm). It stops
+`iteration_cap` after `max_iterations` (default 5, at most 8) and `spend_cap`
+when the run's budget is used: `max_model_calls` (default twice the
+iterations) and `max_spend_usd` (default `METAFORGE_CAD_LOOP_MAX_SPEND_USD`,
+1.0). Priced calls count against the USD limit through the usage store;
+unpriced calls count as calls. It stops `needs_input` on a question and
+`failed` when a model, the OCCT converter or the render adapter cannot be
+reached (nothing is judged that nobody saw). The reason is always recorded
+with its detail.
+
+**Records and acceptance.** A run is one `cad_design_loop` record (see
+[CAD design loop records](../twin_schema.md#cad-design-loop-records)). Its
+result is the last iteration that built and passed validity, proposed and
+bound to the CAD item's head when the run started. Nothing is applied. A
+person's **Use this version** (`POST
+/v1/twin/projects/{id}/cad-loops/{node_id}/decision`) builds the script
+through the exact CAD path (`twin.build_exact_cad`): the head moves only when
+that build passes its own validity check, and a head that moved since the run
+started is refused with `409`. **Keep the previous one** records the decision
+and changes nothing. The critic's verdict never sets `validated` or
+`verified`.
+
+**Spend and approval.** From Create, a run past the project's hourly cap
+(`METAFORGE_AUTO_APPROVE_CAD_LOOP_PER_HOUR`, 3) answers `409
+spend_confirmation_required` until the person confirms, and an agent caller
+is refused. Over MCP, `twin.design_cad_loop` is additive and open world, so
+it is held for approval like other paid tools, and only the project's `auto`
+policy (within the same cap) approves it.
+
+**Progress.** Each iteration publishes an operation event on the job's
+operation: "Iteration 2: fixing wall thickness" when it starts, then the
+contact sheet as an image artifact and the stop rule's open parts. The run
+ends with a `review_required` event when a version is proposed.
+
+### The render adapter {#render-adapter}
+
+`render.model_views` (`tool_registry/tools/render/`) renders a GLB in headless
+Chromium through Playwright. The page is a local three.js (r169) viewer: the
+image fetches three.js from the npm registry at build time, checks its
+SHA-256 and keeps it, and every page request is answered from local files
+(`page.route`), so a render needs no network. Views are `iso`, `front`,
+`side`, `back`, `left`, `top`, `bottom` and `section` (a cut along a CAD axis
+at a fraction of the extent, seen from the side cut away). Directions are
+given in CAD axes (Z up) and converted to the page's Y-up frame; a GLB from
+the STEP converter is Z-up and is turned upright. Flat views are orthographic
+with a floor grid, a scale bar and an optional dimension overlay from the
+caller's measured extents, labelled with their source; the iso view is in
+perspective under a neutral studio environment. The tool returns one PNG per
+view, a contact sheet, the view metadata and the mesh's bounding box in mm,
+inline, and keeps nothing (read-only). The page-building half
+(`tool_registry/tools/render/page.py`) is pure and unit-tested without a
+browser.
+
 ## What's built vs. planned
 
 **Built (Phase 1):** the `design_v1`, `mech_v1`, and full 7-phase `hardware_v1`

@@ -246,6 +246,14 @@ class WorkProductType(StrEnum):
     # A record pinned to the contract revision and every item revision it
     # read, so it reads stale when any of them moves.
     INTERFACE_CONTRACT_CHECK = "interface_contract_check"
+    # One run of the self-validating CAD design loop (api_gateway/twin/
+    # cad_design_loop.py): every iteration's CadQuery script, build result,
+    # validity, measurements, rendered views (named blobs), the vision
+    # critic's issues and verdict, DFM findings, model, provider and cost,
+    # and why the run stopped. Its result is a proposed CAD revision bound to
+    # the base revision it started from; only a person accepts it, through
+    # the exact CAD path. Never evidence: the critic's verdict is not a check.
+    CAD_DESIGN_LOOP = "cad_design_loop"
 
 
 #: Work product types that are history about a change, not design work
@@ -257,6 +265,7 @@ HISTORY_WORK_PRODUCT_TYPES: frozenset[WorkProductType] = frozenset(
         WorkProductType.DFM_FINDING_SET,
         WorkProductType.DFM_REPORT,
         WorkProductType.INTERFACE_CONTRACT_CHECK,
+        WorkProductType.CAD_DESIGN_LOOP,
     }
 )
 
