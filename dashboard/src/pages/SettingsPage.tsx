@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import axios from 'axios';
 import { ConfirmDialog } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useQueryClient } from '@tanstack/react-query';
@@ -65,6 +66,27 @@ function isSecureDestination(base: string): boolean {
   }
 }
 
+/**
+ * Why a credential or selection change failed, in words the person can act on.
+ * The gateway answers 401 for two admin-token cases (see
+ * api_gateway/harness/routes.py `_require_admin`) and 400 with a reason.
+ */
+function providerWriteFailure(error: unknown, tokenSent: boolean): string {
+  const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+  const raw = axios.isAxiosError(error) ? (error.response?.data as { detail?: unknown } | undefined)?.detail : undefined;
+  const detail = typeof raw === 'string' ? raw : '';
+  if (status === 401) {
+    if (detail.includes('need METAFORGE_HARNESS_ADMIN_TOKEN set')) {
+      return 'This gateway only accepts key changes from its own machine. Set METAFORGE_HARNESS_ADMIN_TOKEN on the gateway, then enter that token in Admin token.';
+    }
+    return tokenSent
+      ? 'The gateway rejected the admin token. Check that it matches METAFORGE_HARNESS_ADMIN_TOKEN on the gateway, then try again.'
+      : 'This gateway needs its admin token for this change. Enter it in Admin token, then try again.';
+  }
+  if (status === 400 && detail) return `The gateway refused this change: ${detail}`;
+  return 'The gateway could not complete this request. Check its connection and provider configuration, then try again.';
+}
+
 // ── "Your models" panel ──────────────────────────────────────────────────────
 
 function ProvidersPanel() {
@@ -113,14 +135,13 @@ function ProvidersPanel() {
             ? 'Stored key removed. Environment-provided credentials may still be available.'
             : 'Active provider and model updated.',
       );
+      setApiKey('');
       await queryClient.invalidateQueries({ queryKey: ['harness'] });
-    } catch {
-      setFailure(
-        'The gateway could not complete this request. Check its connection and provider configuration, then try again.',
-      );
+    } catch (error) {
+      // The key stays in the field so a retry with the admin token needs no re-paste.
+      setFailure(providerWriteFailure(error, adminToken.trim() !== ''));
     } finally {
       setBusy(false);
-      setApiKey('');
       setConfirmRemove(false);
     }
   }
@@ -184,7 +205,7 @@ function ProvidersPanel() {
           {selected && (
             <>
               <label className="account-field">
-                Admin token (optional)
+                Admin token
                 <input
                   type="password"
                   value={adminToken}
@@ -197,7 +218,8 @@ function ProvidersPanel() {
                 />
               </label>
               <p id="admin-help">
-                Sent as the X-MetaForge-Admin header with each change below. It is not stored.
+                Required when the gateway sets METAFORGE_HARNESS_ADMIN_TOKEN. Sent as the
+                X-MetaForge-Admin header with each change below. It is not stored.
               </p>
 
               <form
