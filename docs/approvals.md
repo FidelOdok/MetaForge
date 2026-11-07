@@ -383,7 +383,9 @@ In every mode:
   a person.
 - Never approved by a policy: human-authority tools, destructive tools, and
   project, flow, run, approval, review, phase, session, library and vendor
-  tools. `phase.claim` keeps its own narrower rule, below.
+  tools. `phase.claim` keeps its own narrower rule, below. See
+  [CadQuery writes under a policy](#cadquery-writes-under-a-policy) for which
+  CadQuery tools are destructive and why.
 - **Spend cap.** Paid tools are capped per project per rolling hour: 20
   `twin.render_concept_image` and 20 `twin.generate_sketch` (each
   `METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`, counted per tool) and 3
@@ -399,6 +401,50 @@ In every mode:
   `approved_by` `policy:<mode>:<project>` (unverified), with the tool and the
   arguments hash, and marked used at once (it runs that call, not a retry). It
   is listed on the Approvals page as approved.
+
+#### CadQuery writes under a policy
+
+A policy may approve a CadQuery tool only when the tool cannot change a file
+outside the adapter's work folder (`CADQUERY_WORK_DIR`, `/workspace` in the
+container). The classification lives in `mcp_core/annotations.py`:
+
+| Tool | Class | `auto` approves it | Why |
+|------|-------|--------------------|-----|
+| `cadquery.create_parametric`, `create_assembly`, `generate_enclosure`, `generate_ros2_launch` | producing | yes | Each writes a new result file. |
+| `cadquery.boolean_operation` | producing (FORGE-829) | yes | It writes only its result. A named `output_path` must resolve inside the work folder, through any `..` or symlink, and must not exist: an existing file is never overwritten. Unnamed, the result goes to a new folder of its own, `output/cadquery/boolean/<id>/`. The two input files are only read. |
+| `cadquery.execute_script` | destructive | no, a person decides | See below. |
+| `cadquery.export_*` | destructive | no, a person decides | Each writes to a caller-supplied path and overwrites what is there. |
+
+`cadquery.execute_script` stays destructive because what confines it is the
+container, not the adapter. Checked for FORGE-829:
+
+- The script runs in the adapter's own process (`exec` in a worker thread,
+  `tool_registry/tools/cadquery/operations.py`), in the cadquery-adapter
+  container. The gateway and sidecar images do not install CadQuery, so it
+  never runs there.
+- The sandbox is source-level: a list of blocked names and a short list of
+  builtins. It does not stop dunder attribute access, so a script can reach
+  the `os` module, and its namespace includes `exporters` and the whole
+  CadQuery API, whose `exporters.export(obj, path)` and `Shape.exportStep(path)`
+  write to any path the script names.
+- `output_path` is now confined to the work folder, but that confines the
+  argument, not the script.
+- The container runs as an unprivileged user with a writable root file
+  system. It can write `/workspace`, which is the `adapter-workspace` volume
+  shared with the gateway, the sidecar and the other adapters (their outputs
+  and staged inputs), and it is on the compose `metaforge` network, so it can
+  reach the other services there.
+- The result reaches the twin by content: the response carries
+  `step_base64`, which `twin.commit_geometry` stores. The twin does not keep
+  the file path.
+
+So a script can overwrite another tool's file in the shared workspace, which
+is what a destructive tool is. An agent working under `auto` is not stopped by
+this for the common shapes: `cadquery.create_parametric`,
+`cadquery.generate_enclosure` and `cadquery.boolean_operation` are approved.
+Making `execute_script` producing needs an OS-level boundary first, such as a
+script runner with a read-only root file system, only a private work folder
+writable and no network.
 
 ## Re-checks after a cross-domain change
 

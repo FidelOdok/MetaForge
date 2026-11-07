@@ -120,7 +120,12 @@ class CadqueryServer(McpToolServer):
                         },
                         "output_path": {
                             "type": "string",
-                            "description": "Optional output file path",
+                            "description": (
+                                "Optional output file path, inside the adapter work "
+                                "folder (relative paths resolve there). It must not "
+                                "exist: an existing file is never overwritten. Omit it "
+                                "to write to a new folder of its own."
+                            ),
                         },
                     },
                     "required": ["input_file_a", "input_file_b", "operation"],
@@ -918,7 +923,10 @@ class CadqueryServer(McpToolServer):
                         },
                         "output_path": {
                             "type": "string",
-                            "description": "Output STEP file path",
+                            "description": (
+                                "Output STEP file path, inside the adapter work folder "
+                                "(relative paths resolve there)"
+                            ),
                         },
                         "timeout": {
                             "type": "number",

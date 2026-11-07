@@ -506,6 +506,10 @@ PRODUCING: frozenset[str] = frozenset(
         "cadquery.create_parametric",
         "cadquery.generate_enclosure",
         "cadquery.generate_ros2_launch",
+        # FORGE-829: writes only its result, inside the adapter work folder,
+        # never over an existing file (unnamed: a new folder of its own); the
+        # two inputs are only read. An auto policy may approve it.
+        "cadquery.boolean_operation",
         "freecad.create_parametric",
         # FORGE-492: returns the STEP bytes in the response and writes
         # nothing (its own docstring: "NOT persisted anywhere").
@@ -599,7 +603,16 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         "library.dispatch_job",
         # FORGE-427: an order can spend money. Held on every call.
         "vendor.place_order",
-        "cadquery.boolean_operation",
+        # FORGE-829: kept destructive although its output_path is now confined
+        # to the work folder. That confines the argument, not the script: the
+        # in-process sandbox is source-level (blocked names), the namespace
+        # hands the script `exporters` and the whole CadQuery API, whose
+        # `exporters.export(obj, path)` and `Shape.exportStep(path)` write to
+        # any path the script names, and dunder attribute access reaches `os`.
+        # The container is the boundary, and it can write the shared
+        # /workspace volume (other adapters' files, staged inputs) and reach
+        # every service on the compose network. Same reasoning as
+        # freecad.execute_code below (FORGE-492).
         "cadquery.execute_script",
         "cadquery.export_geometry",
         "cadquery.export_sdf",
