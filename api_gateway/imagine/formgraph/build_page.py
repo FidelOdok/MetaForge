@@ -40,6 +40,31 @@ def load_json(path):
         return json.load(f)
 
 
+def _tokens(material_id):
+    return {t for t in re.split(r'[^a-z0-9]+', str(material_id).lower()) if t}
+
+
+def resolve_material(proc, material_id):
+    """The catalogue material a library material screens as, or None (MetaForge, FORGE-827).
+
+    A process may list material "families": each catalogue material with the
+    name tokens that identify it. A library material named for its family,
+    such as prusament_petg, bambu-petg-cf or polymaker_asa, screens as that
+    family's catalogue material (petg, petgcf, asa). The longest match wins,
+    so PETG-CF is never read as plain PETG.
+    """
+    if not proc or not material_id:
+        return None
+    if material_id in proc.get('materials', {}):
+        return material_id
+    toks = _tokens(material_id)
+    best = None
+    for mid, need in (proc.get('families') or {}).items():
+        if need and set(need) <= toks and (best is None or len(need) > len(best[1])):
+            best = (mid, need)
+    return best[0] if best else None
+
+
 def validate(cfg, cat, ctx=None):
     """Return (errors, warnings) as lists of strings. ctx is the loaded context folder, if any."""
     E, W = [], []
@@ -78,7 +103,9 @@ def validate(cfg, cat, ctx=None):
         cat['processes'] = dict(cat['processes'])
         for k, v in cprocs.items():
             base = cat['processes'].get(v.get('ruleBase'))
-            if base:
+            # MetaForge (FORGE-827): a process the catalogue has natively (fdm)
+            # keeps its own rule book; a context entry cannot replace it.
+            if base and k not in cat['processes']:
                 cat['processes'][k] = dict(base, name=v.get('name', k), materials=v.get('materials', []))
 
     # form
@@ -119,7 +146,12 @@ def validate(cfg, cat, ctx=None):
         E.append(f'process.id must be one of {", ".join(cat["processes"])}.')
     else:
         mats = set(proc['materials']) | {m.get('id') for m in (ext.get('materials', {}).get(pr['id'], []) or [])}
-        if pr.get('material') not in mats:
+        family = resolve_material(proc, pr.get('material')) if pr.get('material') not in mats else None
+        if family:
+            label = proc['materials'][family] if isinstance(proc['materials'], dict) else family
+            W.append(f'process.material "{pr.get("material")}" screens as {label} ("{family}"), '
+                     'the catalogue material of its family; the twin keeps the name you gave.')
+        elif pr.get('material') not in mats:
             E.append(f'process.material "{pr.get("material")}" is not available for {proc["name"]}. Choose from: {", ".join(sorted(mats))}.')
         if pr.get('finish') and pr['finish'] not in proc['finishes']:
             E.append(f'process.finish "{pr["finish"]}" is not available for {proc["name"]}. Choose from: {", ".join(proc["finishes"])}.')
@@ -131,6 +163,8 @@ def validate(cfg, cat, ctx=None):
             E.append('process.qty must be a whole number of units.')
         if q and pr['id'] == 'im' and q < 1000:
             W.append(f'{q} units is low for injection moulding; the page will suggest a cheaper route.')
+        if q and pr['id'] == 'fdm' and q > 200:
+            W.append(f'{q} units is high for desktop FDM printing; the page will suggest another route.')
         if q and pr['id'] == 'sls' and q > 5000:
             W.append(f'{q} units is high for SLS printing; the page will suggest moulding.')
 

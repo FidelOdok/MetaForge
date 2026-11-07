@@ -124,6 +124,33 @@ def _reference_errors(ctx: dict[str, Any] | None) -> list[str]:
     return errors
 
 
+def _screen_library_material(compiled: dict[str, Any]) -> None:
+    """Give the engine the catalogue material a library material screens as (FORGE-827).
+
+    The stored config keeps the person's own material (``prusament_petg``), so
+    the manufacturing context and Develop see the library entry. The page
+    screens with its family's catalogue figures (``petg``); the original is
+    kept beside it as ``process.libraryMaterial``.
+    """
+    process = compiled.get("process")
+    if not isinstance(process, dict):
+        return
+    proc = (catalogue().get("processes") or {}).get(process.get("id"))
+    material = process.get("material")
+    extra = ((compiled.get("catalogue") or {}).get("materials") or {}).get(process.get("id")) or []
+    if (
+        not proc
+        or material in proc.get("materials", {})
+        or any(isinstance(m, dict) and m.get("id") == material for m in extra)
+    ):
+        return
+    family = build_page.resolve_material(proc, material)
+    if family:
+        process["libraryMaterial"] = material
+        process["material"] = family
+        logger.info("imagine_library_material_screened", material=material, family=family)
+
+
 def validate_config(config: dict[str, Any]) -> ValidatedConfig:
     """Check a product config with the merged formgraph rules; raise :class:`ConfigError`.
 
@@ -163,6 +190,7 @@ def validate_config(config: dict[str, Any]) -> ValidatedConfig:
             compiled = fg_context.compile_context(cfg, ctx) if ctx is not None else cfg
         except (KeyError, TypeError, AttributeError, ValueError) as exc:
             raise ConfigError([f"The context could not be compiled: {exc}"]) from exc
+        _screen_library_material(compiled)
         span.set_attribute("config.warnings", len(warnings))
         return ValidatedConfig(config=config, compiled=compiled, warnings=list(warnings))
 

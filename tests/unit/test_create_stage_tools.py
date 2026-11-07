@@ -89,10 +89,11 @@ def test_each_stage_carries_its_own_work() -> None:
 
 
 def test_the_imagine_playbook_only_names_tools_its_stages_carry() -> None:
-    """The chat follows imagine_studio in Imagine, then Develop after handover."""
+    """The chat follows imagine_studio in Imagine, then Develop, Check and Make after handover."""
     text = (REPO / "mcp_core/plugin_skills/imagine_studio/SKILL.md").read_text(encoding="utf-8")
     named = set(re.findall(r"\b((?:twin|kicad|cadquery|firmware|calculix)\.[a-z_]+)", text))
-    reachable = CREATE_STAGE_TOOLS["imagine"] | CREATE_STAGE_TOOLS["develop"]
+    # FORGE-827: a delegated run carries on through Check and Make too.
+    reachable = frozenset().union(*(CREATE_STAGE_TOOLS[s] for s in CREATE_STAGES))
     assert named and not named - reachable
 
 

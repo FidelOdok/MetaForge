@@ -67,5 +67,37 @@ def test_the_chat_agent_can_read_it_by_name() -> None:
     assert "V2" in body
 
 
+def test_the_skeleton_is_a_desk_lamp_printed_in_fdm_with_an_led_driver() -> None:
+    """FORGE-827: no process stands in for another, and the lamp has its driver."""
+    cfg = _skeleton()
+    assert cfg["process"]["id"] == "fdm" and cfg["process"]["material"] == "petg"
+    assert "e_ldrv" in cfg["functions"]
+    assert any(p["role"] == "fn:e_ldrv" for p in cfg["context"]["components"]["parts"])
+
+
+def test_a_delegated_run_carries_on_without_a_person() -> None:
+    """FORGE-827: accept, concept mesh, hand over, then Develop, Check and Make."""
+    body = load_playbooks(REPO)["imagine_studio"].body
+    for tool in (
+        "twin.imagine_accept",
+        "twin.render_concept_image",
+        "twin.generate_concept_mesh",
+        "twin.job_status",
+        "twin.imagine_handover",
+        "twin.record_decision",
+        "twin.evaluate_dfm",
+        "twin.get_release_checklist",
+    ):
+        assert f"`{tool}`" in body, tool
+    assert "A delegated run carries on" in body
+    assert "X-MetaForge-On-Behalf-Of" in body
+    from mcp_core.workflows import WORKFLOWS
+
+    command = WORKFLOWS["imagine"][1]
+    for tool in ("twin.imagine_accept", "twin.generate_concept_mesh", "twin.record_decision"):
+        assert f"`{tool}`" in command, tool
+    assert "Develop, Check and Make" in command
+
+
 def test_the_playbook_has_no_em_dashes() -> None:
     assert "—" not in PLAYBOOK.read_text(encoding="utf-8")

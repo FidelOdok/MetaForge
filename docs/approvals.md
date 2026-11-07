@@ -354,7 +354,9 @@ an Accept is never turned into a rejection.
 agent caller of `/v1/approvals` is refused them (403), and the approver
 recorded is the one the deciding surface established, never anything the
 caller sent. `approver_verified` is `true` only for an authenticated
-principal.
+principal. The one exception is the owner's delegation, where an agent that
+names the person decides for them, on the record: see
+[delegated holds through MCP](#delegated-holds-through-mcp).
 
 ### A project's policy decides held writes
 
@@ -574,17 +576,61 @@ and a decision attempt is a 403. The gateway owner can delegate them by setting
 The compose stack passes it from `.env` to both the gateway and the MCP
 sidecar, which decide the calls that land on them.
 
-The same flag delegates the Imagine handover and rework. With it
-on, `POST .../imagine/handover` and `.../imagine/rework` accept the agent
+The same flag delegates the Imagine handover, rework and acceptance. With
+it on, `POST .../imagine/handover` and `.../imagine/rework` accept the agent
 surface with `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of` (422 without
-them), and the MCP tools `twin.imagine_handover` and `twin.imagine_rework`
-stop refusing. Those tools are human-authority tools, so no approval policy
-approves them: each call is held as a `human_authority` approval, which an
-agent may then decide on the person's behalf under this same flag. The
-studio's record and the operations log name the agent and the person it
-acted for, never the person alone. Set the flag where the call lands: the
-gateway, and the MCP sidecar when it serves the twin tools. See
+them), and the MCP tools `twin.imagine_handover`, `twin.imagine_rework` and
+`twin.imagine_accept` stop refusing. Those tools are human-authority tools,
+so no approval policy approves them; over MCP they are decided as described
+in [delegated holds through MCP](#delegated-holds-through-mcp). The studio's
+record and the operations log name the agent and the person it acted for,
+never the person alone. Set the flag where the call lands: the gateway, and
+the MCP sidecar when it serves the twin tools. See
 [the Imagine stage](imagine-stage.md#delegated-to-an-agent).
+
+### Delegated holds through MCP
+
+A headless agent cannot answer a prompt. Before this, a human-authority
+call it made over MCP (`twin.imagine_handover` in a fully autonomous lamp
+run) was held on the client's own approval prompt, nobody answered, and the
+run stopped there. Now, when all of these hold, the call is not held:
+
+- the tool is human-authority (`twin.attempt_promotion`,
+  `twin.approve_design_loop`, `twin.approve_engineering_change`,
+  `twin.confirm_sketch_reading`, `twin.imagine_handover`,
+  `twin.imagine_rework`, `twin.imagine_accept`);
+- `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY` is true in the MCP server that
+  decides the hold, and in the gateway that records it (the gateway refuses
+  with 403 otherwise, and the call is held);
+- the MCP HTTP request names the agent in `X-MetaForge-Agent` and the person
+  in `X-MetaForge-On-Behalf-Of` (a headless Claude Code agent puts both in its
+  `.mcp.json` headers, beside `Authorization`);
+- when the session has a verified principal, the person named is that
+  principal.
+
+The server then records a **delegated approval** on the ledger
+(`POST /v1/chat/tool_approvals/delegated`) and runs the call once:
+
+| Field | Value |
+|-------|-------|
+| `route` | `delegated` (on the held call's request) |
+| `approver` | the verified principal, else the person named |
+| `approver_verified` | `true` only for a verified principal on an authenticated request; `false` with auth off |
+| `surface` | `agent` |
+| `agent`, `on_behalf_of` | the two header values |
+| `reason` | "decided by the agent for the person it acts for: the gateway owner delegates human-authority decisions" |
+
+It is the same decision record `forge approvals` writes for an agent
+decision, so the Approvals page shows it as approved "through an agent
+(claude-code-e2e for you@example.com)", and the tool records the person as the
+approver it acted for, never a name the model wrote. The approval is used by
+that call and is never a pass for a retry.
+
+Everything else is unchanged. With the flag off, or without
+`X-MetaForge-On-Behalf-Of` (or the agent name), the call is held as before.
+A destructive tool that is not human-authority keeps its own rules: a person,
+or the project's approval policy. This is delegation by the owner, not
+policy: no approval policy ever approves a human-authority tool, in any mode.
 
 ## Observability
 
@@ -595,12 +641,16 @@ already closed, not a fault.
 
 `metaforge_tool_approval_total{outcome}` counts durable tool approvals:
 `held`, `approved` (answered while the call waited), `approved_late_honoured`
-(an identical retry ran on it), `rejected`, `auto_approved`, `cap_held` and
+(an identical retry ran on it), `rejected`, `auto_approved`, `cap_held`,
+`delegated` (an agent decided a human-authority call for a person) and
 `expired`. The gateway logs the same as `tool_approval_held`,
 `tool_approval_approved_late_honoured`, `tool_approval_auto_approved`,
-`tool_approval_cap_held` and `tool_approval_expired`; the sidecar logs
+`tool_approval_cap_held`, `tool_approval_delegated` and
+`tool_approval_expired`; the sidecar logs
 `mcp_tool_call_held_for_approval` (with `durable=true` and the arguments
-hash), `mcp_tool_call_handed_off` and `mcp_tool_approval_approved_late_honoured`.
+hash), `mcp_tool_call_handed_off`, `mcp_tool_approval_approved_late_honoured`,
+`mcp_tool_call_delegated`, and `mcp_delegation_not_claimed` or
+`mcp_delegation_person_mismatch` when a delegation was not taken.
 The `ToolApprovalsMostlyExpiring` alert fires when more than half of the holds
 in six hours expire undecided.
 

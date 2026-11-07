@@ -71,37 +71,41 @@
     },
     {
       "id": "fdm-generic",
-      "name": "FDM printer, desktop (typical)",
+      "name": "FDM printer, desktop (Bambu Lab P1S class)",
       "process": "fdm",
       "source": "default",
       "buildVolume": [
-        250,
-        210,
-        220
+        256,
+        256,
+        256
       ],
       "materials": [
-        "asa",
-        "petg"
+        "petg",
+        "pla",
+        "petgcf",
+        "asa"
       ],
       "limits": {
         "wallMin": 1.2,
-        "wallMax": 20,
+        "wallMax": 10,
         "draft": 0,
         "slotMin": 1.0,
-        "holeMin": 2.5,
+        "holeMin": 2.0,
         "featureMin": 0.8,
-        "tolerance": 0.4
+        "tolerance": 0.2
       },
       "finishes": [
-        "dyed"
+        "asp",
+        "fine",
+        "sanded"
       ],
       "leadDays": 1,
       "qtyRange": [
         1,
         50
       ],
-      "note": "Prototype only; modelled on the printing rule book with wider limits",
-      "ruleBase": "sls"
+      "note": "Desktop FDM, 0.4 mm nozzle, 0.2 mm layers, enclosed chamber. Screened with the FDM rule book.",
+      "ruleBase": "fdm"
     },
     {
       "id": "cnc3-generic",
@@ -310,30 +314,6 @@
   ],
   "materials": [
     {
-      "id": "asa",
-      "process": "fdm",
-      "name": "ASA, UV stable",
-      "E": 2000,
-      "str": 45,
-      "k": 0.17,
-      "density": 1.07,
-      "costKg": 30,
-      "ul94": "HB",
-      "source": "typical FDM filament datasheet values"
-    },
-    {
-      "id": "petg",
-      "process": "fdm",
-      "name": "PETG",
-      "E": 2100,
-      "str": 50,
-      "k": 0.2,
-      "density": 1.27,
-      "costKg": 25,
-      "ul94": "HB",
-      "source": "typical FDM filament datasheet values"
-    },
-    {
       "id": "cfrp",
       "process": "cfrp-tube",
       "name": "Carbon fibre, epoxy (roll-wrapped or plate)",
@@ -379,15 +359,6 @@
       "ruleBase": "sls",
       "materials": [
         "pa12"
-      ]
-    },
-    "fdm": {
-      "name": "FDM printing",
-      "short": "FDM",
-      "ruleBase": "sls",
-      "materials": [
-        "asa",
-        "petg"
       ]
     },
     "cfrp-tube": {

@@ -190,6 +190,56 @@
         "ins25",
         "ins30"
       ]
+    },
+    "fdm": {
+      "name": "FDM printing",
+      "materials": {
+        "petg": "PETG (UL94 HB)",
+        "pla": "PLA (UL94 HB)",
+        "petgcf": "PETG-CF, carbon fibre filled (UL94 HB)",
+        "asa": "ASA, UV stable (UL94 HB)"
+      },
+      "finishes": {
+        "asp": "As printed, 0.2 mm layers",
+        "fine": "Fine, 0.12 mm layers",
+        "sanded": "Sanded and primed"
+      },
+      "fixings": [
+        "ins25",
+        "ins30",
+        "pt25",
+        "pt30"
+      ],
+      "machine": "Desktop FDM, Bambu Lab P1S class: 0.4 mm nozzle, 256 x 256 x 256 mm, enclosed",
+      "limits": {
+        "wallMin": 1.2,
+        "lineWidth": 0.42,
+        "layer": 0.2,
+        "slotMin": 1.0,
+        "holeMin": 2.0,
+        "bridgeMax": 20,
+        "buildVolume": [
+          256,
+          256,
+          256
+        ],
+        "tolerance": 0.2
+      },
+      "families": {
+        "petgcf": [
+          "petg",
+          "cf"
+        ],
+        "petg": [
+          "petg"
+        ],
+        "pla": [
+          "pla"
+        ],
+        "asa": [
+          "asa"
+        ]
+      }
     }
   },
   "fixings": {
@@ -308,6 +358,12 @@
       "block": "External power input",
       "bus": "PWR",
       "note": "Power comes from another system, for example an aircraft's flight pack. Set its voltage range with a context part."
+    },
+    "e_ldrv": {
+      "name": "Drives a high-power LED",
+      "block": "Constant-current LED driver (buck)",
+      "bus": "GPIO (PWM dimming)",
+      "opening": false
     }
   },
   "support_blocks": {
@@ -537,6 +593,22 @@
       "pa12gb": [
         -30,
         110
+      ],
+      "pla": [
+        -20,
+        50
+      ],
+      "petg": [
+        -20,
+        65
+      ],
+      "petgcf": [
+        -20,
+        70
+      ],
+      "asa": [
+        -30,
+        85
       ]
     },
     "sun_absorptance": {

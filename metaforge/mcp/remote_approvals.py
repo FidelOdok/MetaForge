@@ -376,6 +376,46 @@ class RemoteApprovalLedger:
             approval_id=str(body.get("id") or "") or None,
         )
 
+    async def delegated_approval(
+        self, ask: ApprovalAsk, *, agent: str, on_behalf_of: str, approver: Approver
+    ) -> ApprovalResolution | None:
+        """Record a human-authority call an agent decided for a person (FORGE-827).
+
+        ``None`` on any failure, including a gateway that does not delegate:
+        the call is then held for a person, never run unrecorded.
+        """
+        try:
+            response = await self._post(
+                f"{self._endpoint}/delegated",
+                {
+                    "tool": ask.tool_id,
+                    "arguments": ask.arguments,
+                    "caller": ask.caller.value,
+                    "session_id": ask.session_id,
+                    "project": ask.project,
+                    "client": ask.client,
+                    "agent": agent,
+                    "on_behalf_of": on_behalf_of,
+                    "approver": approver.actor_id,
+                    "approver_verified": approver.verified,
+                    "approval_key": ask.approval_key,
+                    "arguments_hash": ask.arguments_hash,
+                },
+            )
+            response.raise_for_status()
+            body: dict[str, Any] = response.json()
+        except Exception as exc:  # noqa: BLE001 - no record means a person decides
+            logger.info("mcp_delegated_approval_unavailable", tool_id=ask.tool_id, error=str(exc))
+            return None
+        return ApprovalResolution(
+            outcome=ApprovalOutcome.APPROVED,
+            approver=Approver(
+                actor_id=str(body.get("approved_by") or approver.actor_id),
+                verified=bool(body.get("approver_verified")),
+            ),
+            approval_id=str(body.get("id") or "") or None,
+        )
+
     async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
         try:
             created = await self._post(

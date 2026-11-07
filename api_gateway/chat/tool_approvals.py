@@ -746,6 +746,141 @@ async def approve_by_policy(body: PolicyApprovalRequest) -> PolicyApprovalRespon
     )
 
 
+class DelegatedApprovalRequest(BaseModel):
+    """A human-authority call an agent decides for a person (FORGE-827).
+
+    Sent by the MCP server that took the call, never by the agent: the agent
+    and the person come from the MCP request's ``X-MetaForge-Agent`` and
+    ``X-MetaForge-On-Behalf-Of`` headers, and the approver from the verified
+    principal when there is one, else the person named, unverified.
+    """
+
+    tool: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    caller: str = "untrusted"
+    session_id: str | None = None
+    project: str | None = None
+    client: str | None = None
+    agent: str = Field(min_length=1, max_length=100)
+    on_behalf_of: str = Field(min_length=1, max_length=200)
+    #: The deciding identity: the verified principal, or ``on_behalf_of``.
+    approver: str = Field(min_length=1, max_length=200)
+    #: Honoured only when this request is itself authenticated.
+    approver_verified: bool = False
+    approval_key: str | None = Field(default=None, max_length=128)
+    arguments_hash: str | None = Field(default=None, max_length=128)
+
+
+#: What the decision record says a delegated approval was.
+DELEGATED_REASON = (
+    "decided by the agent for the person it acts for: the gateway owner delegates "
+    "human-authority decisions (METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY)"
+)
+
+
+def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
+    """Record a delegated approval and return it, closed and used (FORGE-827).
+
+    Refused (403) unless this process delegates human authority too, so a
+    sidecar with the flag on cannot have a gateway that keeps it off record
+    the decision. Refused (422) for a tool that is not human-authority: any
+    other write keeps its own rules (a person, or the project's policy). The
+    record is the same one ``forge approvals`` writes for an agent decision:
+    surface ``agent``, the agent, the person, unverified unless a verified
+    principal is that person; on route ``delegated``.
+    """
+    from api_gateway.approvals.schemas import DecisionRecord
+    from mcp_core.guardrails import human_authority_delegated, requires_human_authority
+
+    if not human_authority_delegated():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "this gateway does not delegate human-authority decisions to agents "
+                "(METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY is off)"
+            ),
+        )
+    if not requires_human_authority(body.tool):
+        raise HTTPException(
+            status_code=422,
+            detail=f"'{body.tool}' is not a human-authority tool; it is not delegated",
+        )
+    project = project_for_hold(body.project, body.arguments)
+    request: dict[str, Any] = {
+        "tool": body.tool,
+        "arguments": body.arguments,
+        "caller": body.caller,
+        "source": "mcp",
+        "session_id": body.session_id,
+        "project": project,
+        "route": "delegated",
+        "client": body.client,
+        "agent": body.agent,
+        "on_behalf_of": body.on_behalf_of,
+    }
+    if body.approval_key:
+        request[APPROVAL_KEY] = body.approval_key
+    if body.arguments_hash:
+        request["arguments_hash"] = body.arguments_hash
+    # The call runs now, on this approval; it is never a pass for a retry.
+    request[_CONSUMED_AT] = _iso_now()
+    run = _approval_store.create(request)
+    _approval_store.start(run.id)
+    _approval_store.request_approval(
+        run.id,
+        reason=DELEGATED_REASON,
+        deadline=_approval_store.now() + DEFAULT_HOLD_TIMEOUT_SECONDS,
+    )
+    # The decision log is written before the transition that persists it.
+    run = _approval_store.get(run.id)
+    run.request[_DECISIONS_KEY] = [
+        DecisionRecord(
+            decision="approve",
+            reason=DELEGATED_REASON,
+            approver=body.approver,
+            approver_verified=verified,
+            surface="agent",
+            on_behalf_of=body.on_behalf_of,
+            agent=body.agent,
+            decided_at=_iso_now(),
+        ).model_dump()
+    ]
+    run = _approval_store.submit_approval(
+        run.id, ApprovalDecision.APPROVE, approved_by=body.approver, approver_verified=verified
+    )
+    run = _close_decided_hold(
+        run.id, approved=True, approver=body.approver, verified=verified, reason=DELEGATED_REASON
+    )
+    logger.info(
+        "tool_approval_delegated",
+        run_id=run.id,
+        tool=body.tool,
+        project=project,
+        agent=body.agent,
+        on_behalf_of=body.on_behalf_of,
+        approved_by=body.approver,
+        approver_verified=verified,
+        arguments_hash=body.arguments_hash,
+    )
+    _record_outcome("delegated")
+    return run
+
+
+@router.post("/delegated", response_model=RunResponse)
+def record_delegated_approval(body: DelegatedApprovalRequest, request: Request) -> RunResponse:
+    """Record a human-authority call an agent decided for a person (FORGE-827).
+
+    The MCP server calls this instead of holding the call on a client prompt
+    when the owner delegates human authority and the agent named itself and
+    the person. A claim of ``approver_verified`` stands only when this request
+    is authenticated, as for an inline answer.
+    """
+    from api_gateway.auth.dependencies import current_principal
+
+    verified = body.approver_verified and current_principal(request) is not None
+    return RunResponse.from_run(approve_delegated(body, verified=verified))
+
+
 class ResolveHoldRequest(BaseModel):
     """Close a hold nobody is waiting for any more (FORGE-466)."""
 

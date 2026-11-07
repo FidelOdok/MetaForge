@@ -221,11 +221,33 @@ async def get_engine_asset(project_id: str, name: str) -> Response:
 
 @router.post(f"{_BASE}/events", response_model=EventAccepted)
 async def post_event(project_id: str, body: ImagineEvent, request: Request) -> EventAccepted:
-    if body.kind == "assumption_confirmed" and body.data.get("confirmed") is True:
-        _require_person(request, "Confirming an assumption")
-    actor = _actor(request)
+    """One studio write. A person's acceptance, from an agent, only under delegation.
+
+    Confirming an assumption or a scenario is the person's statement. From
+    the agent surface it is refused (403) unless the owner delegates
+    human-authority decisions; then it needs ``X-MetaForge-Agent`` and
+    ``X-MetaForge-On-Behalf-Of`` (422 without) and is recorded as the
+    agent's acceptance for that person (FORGE-827). An assumption so
+    confirmed is recorded as accepted: it stays an assumption.
+    """
+    inner = body.data.get("data") if isinstance(body.data.get("data"), dict) else body.data
+    confirms = (body.kind == "assumption_confirmed" and inner.get("confirmed") is True) or (
+        body.kind == "scenario" and inner.get("confirmed") is True
+    )
+    delegated: dict[str, Any] | None = None
+    if confirms and _is_agent(request):
+        what = "Confirming an assumption" if body.kind != "scenario" else "Confirming a scenario"
+        actor, agent, on_behalf_of = _person_or_delegate(request, what)
+        delegated = {"by": actor, "agent": agent, "on_behalf_of": on_behalf_of}
+    else:
+        actor = _actor(request)
+    from_agent = _is_agent(request)
     return await _call(
-        "event", project_id, lambda: get_service().post_event(project_id, body, actor=actor)
+        "event",
+        project_id,
+        lambda: get_service().post_event(
+            project_id, body, actor=actor, delegated=delegated, from_agent=from_agent
+        ),
     )
 
 

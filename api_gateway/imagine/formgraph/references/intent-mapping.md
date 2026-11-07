@@ -27,6 +27,7 @@ Infer as many as you can from the brief. Ask only for what is missing, at most t
 | button, press, acknowledge, wake | `e_btn` |
 | status light, indicator, LED | `e_led` |
 | alarm, beep, audible | `e_buzz` |
+| lamp, light source, high-power or dimmable LED | `e_ldrv` (a constant-current buck LED driver), with `e_led` only for a status light |
 | USB-C, rechargeable, charging, plug in | `e_usbc` |
 
 Choose one radio. If the brief names neither but needs to report, ask which network is available, or pick `e_lte` for anywhere and `e_lora` for sites with a gateway and say why.
@@ -65,6 +66,7 @@ Set requirements the brief does not touch to `Off` by leaving them out, unless t
 
 | Volume | Choose |
 |---|---|
+| up to about 50, made on a desktop printer | `fdm` with `petg`, `pla`, `petgcf` or `asa` (`asa` outdoors) |
 | under 300 | `sls` with `pa12`, or `cnc` with `al6061` for a metal look |
 | 300 to 3,000 | `sls` or `cnc`; the page compares costs |
 | over 3,000 | `im` |

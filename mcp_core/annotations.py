@@ -658,6 +658,10 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # are a person's decisions an agent may make only under delegation.
         "twin.imagine_handover",
         "twin.imagine_rework",
+        # FORGE-827: an agent accepting assumptions and confirming scenarios
+        # for a person moves the studio forward towards the handover, under
+        # the same delegation.
+        "twin.imagine_accept",
     }
 )
 

@@ -880,6 +880,9 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         # human authority, and then held for an approval like any such step.
         "twin.imagine_handover",
         "twin.imagine_rework",
+        # FORGE-827: accepting assumptions and confirming scenarios for a
+        # person, under the same delegation.
+        "twin.imagine_accept",
         "twin.state_manufacturing_context",
         "twin.generate_sketch",
         "twin.commit_design_sketch",

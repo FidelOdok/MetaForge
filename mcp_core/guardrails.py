@@ -26,6 +26,7 @@ Layer-1 module: stdlib only.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -137,8 +138,28 @@ HUMAN_AUTHORITY_TOOLS: frozenset[str] = frozenset(
         # and the record names the agent and the person it acted for.
         "twin.imagine_handover",
         "twin.imagine_rework",
+        # FORGE-827: accepting an assumption, or confirming a scenario, is the
+        # person's statement about their product. An agent makes it only
+        # under the same delegation, and the record names the agent.
+        "twin.imagine_accept",
     }
 )
+
+#: The owner's switch that lets an agent decide human-authority steps for a
+#: person (FORGE-510, FORGE-824). Read in the process that decides the call.
+ALLOW_AGENT_HUMAN_AUTHORITY_ENV = "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY"
+
+
+def human_authority_delegated() -> bool:
+    """Whether the owner delegates human-authority decisions to agents, here.
+
+    Off by default. On, a human-authority call from an agent that names
+    itself and the person it acts for is recorded as a delegated approval
+    instead of being held on a prompt nobody can answer (FORGE-827). It is
+    never a policy approval: :func:`never_auto_approved` is unaffected.
+    """
+    raw = os.environ.get(ALLOW_AGENT_HUMAN_AUTHORITY_ENV, "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 #: Tools that write, but write *bookkeeping about the agent's own work* —
