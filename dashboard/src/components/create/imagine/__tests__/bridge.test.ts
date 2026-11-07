@@ -7,6 +7,7 @@ import {
   parsePageMessage,
   safeFileName,
   safeMime,
+  themedSrc,
   writeToEvent,
 } from '../bridge';
 
@@ -67,6 +68,14 @@ describe('downloads and sizes', () => {
     expect(clampHeight(10)).toBe(MIN_HEIGHT);
     expect(clampHeight(1e9)).toBe(MAX_HEIGHT);
     expect(clampHeight(812.4)).toBe(812);
+  });
+
+  it("puts Create's theme on the page's address, once", () => {
+    expect(themedSrc('/api/v1/x/engine', 'dark')).toBe('/api/v1/x/engine?theme=dark');
+    expect(themedSrc('/api/v1/x/engine?t=abc', 'light')).toBe('/api/v1/x/engine?t=abc&theme=light');
+    expect(themedSrc('/api/v1/x/engine?theme=dark&t=abc', 'light')).toBe('/api/v1/x/engine?t=abc&theme=light');
+    expect(themedSrc('https://gw.example/e?t=1#top', 'dark')).toBe('https://gw.example/e?t=1&theme=dark#top');
+    expect(themedSrc('about:blank', 'dark')).toBe('about:blank');
   });
 
   it('strips any path from a file name and keeps only a plain mime type', () => {

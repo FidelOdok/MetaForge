@@ -156,7 +156,8 @@ export function DevelopStage({
               <li key={b.id}>
                 <CircleAlert size={13} aria-hidden="true" />
                 <span>
-                  {b.message} <span className="cv-muted">{b.action}</span>
+                  {b.message}
+                  {b.action && <span className="cv-muted"> · {b.action}</span>}
                 </span>
               </li>
             ))}
