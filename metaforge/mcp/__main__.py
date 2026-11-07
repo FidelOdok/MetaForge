@@ -2208,6 +2208,14 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
     except Exception as exc:  # noqa: BLE001
         logger.warning("mcp_collaborator_init_failed", collaborator="design_files", error=str(exc))
 
+    # FORGE-821: the Imagine studio tools (twin.imagine_*).
+    try:
+        from api_gateway.imagine.service import ImagineService
+
+        bindings["imagine_studio"] = ImagineService(twin, project_backend)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="imagine", error=str(exc))
+
     try:
         from api_gateway.requirement_intelligence.promotion import attempt_promotion
 

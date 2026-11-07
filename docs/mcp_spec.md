@@ -1310,6 +1310,31 @@ context's `run_id`):
   it), with an optional `project_id` when the key exists in several projects.
   `node_id` is no longer required when `item_key` is given.
 
+### Twin adapter: the Imagine studio
+
+Three tools, registered when the gateway or sidecar injects `imagine_studio`
+(an `api_gateway.imagine.service.ImagineService`), let an agent write the
+per-product formgraph config for Create's Imagine stage
+([The Imagine stage](imagine-stage.md)). Each takes an optional `project_id`
+(UUID), defaulting to the call context's project.
+
+- `twin.imagine_get_studio` (read-only): `{project_id, status, revision,
+  config_ref, engine_url, config, updated_at, handover, collections,
+  warnings}`. `collections` is what the person did in the browser, keyed by
+  collection and document id; read it before writing a new config.
+- `twin.imagine_put_studio` (additive): takes `config`, checks it with the
+  merged formgraph rules and writes it as the next `IMG-STUDIO` revision. The
+  product context goes inline as `config.context`; a context folder path or a
+  reference `file` is refused. A config that fails the checks is a tool error
+  listing every error; a handed-over studio is a tool error until a person
+  reworks it.
+- `twin.imagine_handover_status` (read-only): `{ready, items: [{id, label,
+  status, detail}]}`, the checklist that gates Imagine to Develop.
+
+There is deliberately no handover or rework tool: both are a person's
+decisions, taken in the dashboard (`POST .../imagine/handover`, `POST
+.../imagine/rework`, refused to an agent surface).
+
 ### Twin adapter: one home for requirements
 
 Requirement values live only in the constraint set (`twin.record_constraint_set`).

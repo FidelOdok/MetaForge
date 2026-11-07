@@ -64,6 +64,7 @@ from api_gateway.firmware.routes import router as firmware_router
 from api_gateway.golden_path.routes import router as golden_path_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
+from api_gateway.imagine.routes import router as imagine_router
 from api_gateway.knowledge.routes import router as knowledge_router
 from api_gateway.library.catalog_routes import router as library_catalog_router
 from api_gateway.library.routes import router as library_router
@@ -1027,6 +1028,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.design_files_recorder import make_design_files_recorder
 
     design_files_bridge = _LazyBridge()
+    # FORGE-821: one Imagine service for the MCP tools and the REST routes.
+    from api_gateway.imagine.routes import set_service as set_imagine_service
+    from api_gateway.imagine.service import ImagineService
+
+    imagine_service = ImagineService(twin, project_backend)
+    set_imagine_service(imagine_service)
     design_files_recorder_fn = make_design_files_recorder(
         twin, project_backend, mcp_bridge=design_files_bridge
     )
@@ -1386,6 +1393,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         sketch_generator=make_sketch_generator(twin, project_backend),
         # FORGE-687: design files, bound to active_bridge below.
         design_files_recorder=design_files_recorder_fn,
+        # FORGE-821: the Imagine studio, so an agent writes the per-product
+        # formgraph config. The REST routes share the same service.
+        imagine_studio=imagine_service,
         # FORGE-316: automatic selective re-run of exactly what a
         # committed ECT's real revalidation_plan marked stale.
         revalidation_executor=revalidation_executor_fn,
@@ -2422,6 +2432,7 @@ def create_app(
     app.include_router(twin_sketch_generation_router)
     app.include_router(twin_concept_mesh_router)
     app.include_router(twin_concept_parts_router)
+    app.include_router(imagine_router)
     # The CAD design loop: write CadQuery, build, render, critique, revise.
     app.include_router(twin_cad_design_loop_router)
     app.include_router(twin_representation_router)

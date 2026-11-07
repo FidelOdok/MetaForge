@@ -139,7 +139,8 @@ class TestAlertingRules:
         # + 1 concept parts failing (ConceptPartsFailures).
         # + 1 interface contract checks failing (InterfaceContractChecksFailing).
         # + 1 CAD design loop runs or renders failing (CadDesignLoopFailing).
-        assert len(rules) == 88
+        # + 1 Imagine studio twin writes failing (ImagineStudioTwinWritesFailing, FORGE-821).
+        assert len(rules) == 89
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -220,7 +221,8 @@ class TestAlertingRules:
         # + 1 concept parts failing.
         # + 1 interface contract checks failing (lamp golden path).
         # + 1 CAD design loop runs or renders failing.
-        assert len(warnings) == 71
+        # + 1 Imagine studio twin writes failing (FORGE-821).
+        assert len(warnings) == 72
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -370,6 +372,8 @@ class TestAlertingRules:
                 "InterfaceContractChecksFailing",
                 # CAD design loop: runs or model view renders failing.
                 "CadDesignLoopFailing",
+                # FORGE-821: the Imagine studio cannot write to the twin.
+                "ImagineStudioTwinWritesFailing",
             ]
         )
 

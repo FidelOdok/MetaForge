@@ -1191,6 +1191,26 @@ groups:
             get no illustrative images. Check METAFORGE_IMAGE_PROVIDER, the provider
             key and the gateway logs (concept_image_unavailable, concept_image_failed).
 
+  # FORGE-821 -- the Imagine stage concept studio (api_gateway/imagine/).
+  - name: metaforge_imagine_studio
+    rules:
+      - alert: ImagineStudioTwinWritesFailing
+        expr: >-
+          sum(increase(metaforge_imagine_studio_total{outcome="failed"}[1h])) > 0
+          and sum(increase(metaforge_imagine_studio_total{outcome="failed"}[1h]))
+          / clamp_min(sum(increase(metaforge_imagine_studio_total[1h])), 1) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Imagine studio writes are failing"
+          description: >-
+            More than a fifth of the last hour's Imagine stage operations failed while
+            writing to the twin. Choices, scenarios and screening results from the
+            studio are not reaching Develop, and handovers may be refused. Check the
+            gateway logs (imagine_event_failed, imagine_handover_failed,
+            imagine_rework_failed) and the twin backend.
+
   # FORGE-778 -- AI 3D reference meshes (api_gateway/twin/concept_mesh.py).
   - name: metaforge_concept_mesh
     rules:

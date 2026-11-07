@@ -271,6 +271,9 @@ addopts = "-m 'not perf'"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Vendored from idroneinnovations formgraph 2.7.0 and kept close to the
+# plugin's copy so the two can be diffed; see api_gateway/imagine/README.md.
+extend-exclude = ["api_gateway/imagine/formgraph"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
@@ -286,6 +289,8 @@ exclude = [
     "dashboard/",
     "examples/",
     "tools/",
+    # Vendored from idroneinnovations formgraph 2.7.0; see api_gateway/imagine/README.md.
+    "api_gateway/imagine/formgraph/",
     "docs/",
     "venv/",
     "build/",

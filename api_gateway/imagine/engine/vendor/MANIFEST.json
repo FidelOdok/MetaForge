@@ -1,0 +1,21 @@
+{
+  "package": "three",
+  "version": "0.128.0",
+  "source": "https://registry.npmjs.org/three/-/three-0.128.0.tgz",
+  "tarball_integrity": "sha512-i0ap/E+OaSfzw7bD1TtYnPo3VEplkl70WX5fZqZnfZsE3k3aSFudqrrC9ldFZfYFkn1zwDmBcdGfiIm/hnbyZA==",
+  "license": "MIT, see LICENSE.three",
+  "files": {
+    "three.min.js": {
+      "from": "package/build/three.min.js",
+      "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+    },
+    "OrbitControls.js": {
+      "from": "package/examples/js/controls/OrbitControls.js",
+      "sha256": "02bb4ade710f3e607329e37a21f098bc3ac70eb6e33daf8a65e79f4db785e7b2"
+    },
+    "GLTFExporter.js": {
+      "from": "package/examples/js/exporters/GLTFExporter.js",
+      "sha256": "a228cae09518e5034600a1aec65c3b3453f706f8943e542721c63c5e5727499c"
+    }
+  }
+}

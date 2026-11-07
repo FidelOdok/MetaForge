@@ -254,6 +254,12 @@ class WorkProductType(StrEnum):
     # the base revision it started from; only a person accepts it, through
     # the exact CAD path. Never evidence: the critic's verdict is not a check.
     CAD_DESIGN_LOOP = "cad_design_loop"
+    # The Imagine stage's concept studio (api_gateway/imagine/): the formgraph
+    # product config, the person's choices and the V0 to V2 screening results
+    # captured in the browser, and the handover to Develop. A definition item
+    # (IMG-STUDIO): a config change or a rework is its next revision, and a
+    # handed-over revision is frozen read-only. Never above V2.
+    IMAGINE_STUDIO = "imagine_studio"
 
 
 #: Work product types that are history about a change, not design work
