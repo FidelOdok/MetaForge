@@ -183,7 +183,7 @@ storage. The two talk only by messages of the form `{fg: 1, type, ...}`:
 |---|---|---|
 | Page | `fg:ready` | Answers with `fg:snapshot {collections}`, the twin-backed state of each collection, and with `fg:readonly {value: true}` when the studio has been handed over |
 | Page | `fg:write {collection, id, data}` | Sends it to `POST .../imagine/events` as `{event_id, kind, data}` with a fresh `event_id`, the `kind` named for the collection (`choices` is `choice`, `scenarios` is `scenario`, `contextEdits` is `context_edit`, `assumptions` is `assumption_confirmed`, `requirements` is `requirement`, `ledger` and `screening` as they are). Not sent once the studio is read only |
-| Page | `fg:height {px}` | Resizes the frame (between 240 and 6000 px) |
+| Page | `fg:height {px}` | Resizes the frame (between 420 and 960 px, and never taller than the window less 140 px); the page scrolls inside it beyond that |
 | Page | `fg:select {component_id}` | Selects that component in the shared component selection, so the 3D view highlights it wherever it is shown |
 | Page | `fg:download {name, mime, base64}` | Hands the file to the person as a download (the name stripped of any path); it is never opened or run |
 | Create | `fg:readonly {value}` | Sent when the studio is handed over, or reopened, while the page is up |
@@ -192,6 +192,19 @@ A message is accepted only from the frame's own window, with the opaque
 origin a sandboxed frame has, and only in one of these shapes; anything else
 is ignored. Nothing the page sends is ever executed. A write that could not
 be saved says so under the frame.
+
+**Layout.** The Studio tab takes the stage's full width; the other stages,
+the Sketch tab and the handover under the studio keep the 920 px column,
+held to the conversation's edge so switching stages does not move it. The
+frame carries Create's resolved theme on its address (`?theme=light` or
+`?theme=dark`), so the studio matches the dashboard rather than the system
+theme; changing the theme reloads the frame in the new one. Inside the frame
+the engine lays itself out for its host (see
+[The engine hosted in Create](imagine-stage.md#the-engine-hosted-in-create)):
+one compact bar with **Design** / **Programme** and **Simple** / **Engineer**,
+the controls beside a 3D view of at most 560 px when the frame is 900 px wide
+or more, and one column below that. When the product's config sets no form
+dimensions yet, the 3D view shows *No shape yet* instead of a default part.
 
 ### The handover
 

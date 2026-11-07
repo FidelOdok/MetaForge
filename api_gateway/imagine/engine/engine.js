@@ -7,6 +7,21 @@ const DEG=Math.PI/180;
 const ENGINE='formgraph@2.0.0';
 const CFG=(()=>{try{const el=document.getElementById('fg-config');const c=el?JSON.parse(el.textContent||'{}'):{};return c&&typeof c==='object'?c:{};}catch(e){return{};}})();
 const CP=CFG.product||{},SKEY='formgraph.v1.'+(CP.id||'default');
+/* Hosted in the MetaForge dashboard (a sandboxed iframe) the page fits its
+   frame: one compact bar, the 3D view at a bounded size, and no chrome that
+   Create already gives (the product name, the stage tabs, the theme). */
+const HOSTED=(()=>{try{return window.parent!==window;}catch(e){return true;}})();
+if(HOSTED)document.documentElement.classList.add('fg-hosted');
+/* The shell's name comes from the config, never from the template's own
+   words: an airframe calls it the fuselage, anything else the shell. */
+const SHELL_NAME=(()=>{const f=CFG.form||{},n=typeof f.label==='string'?f.label.trim():'';
+  if(n)return n.slice(0,60);return CFG.airframe&&CFG.airframe.type==='multirotor'?'Fuselage shell':'Shell';})();
+/* A config that sets no form parameters has nothing of its own to draw yet.
+   Hosted, the 3D view then shows an empty state, never the template's
+   default part, until the person shapes it here. */
+const FORM_SET=!!(CFG.form&&CFG.form.params&&typeof CFG.form.params==='object'&&Object.keys(CFG.form.params).length);
+let SHOW_PART=!HOSTED||FORM_SET;
+const SHELL_MESH=SHELL_NAME.toLowerCase();
 const FEATS=CFG.form&&Array.isArray(CFG.form.features)?CFG.form.features:['slots','bosses','ribs'];
 let PENDING_WIRE=false;
 const fmt=(v,d=1)=>(v==null||!isFinite(v))?'n/a':Number(v).toFixed(d);
@@ -492,7 +507,7 @@ const ground=new THREE.Mesh(new THREE.PlaneGeometry(3000,3000),new THREE.ShadowM
 let grid=null;
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 function themeScene(){if(grid){scene.remove(grid);grid.geometry.dispose();}
-  grid=new THREE.GridHelper(600,60,new THREE.Color(css('--grid-a')),new THREE.Color(css('--grid-b')));grid.material.transparent=true;grid.material.opacity=0.55;grid.position.y=0.01;scene.add(grid);
+  grid=new THREE.GridHelper(600,60,new THREE.Color(css('--grid-a')),new THREE.Color(css('--grid-b')));grid.material.transparent=true;grid.material.opacity=0.55;grid.position.y=0.01;grid.visible=SHOW_PART;scene.add(grid);
   matCut.color.set(css('--cut')).convertSRGBToLinear();}
 
 const plane=new THREE.Plane(new THREE.Vector3(0,0,-1),0);
@@ -559,7 +574,7 @@ function buildPart(s){
   for(const it of items){
     if(mode==='draft'&&it.kind==='body')colorize(it.g,it.pull,minD);
     if(mode==='sim'&&it.kind==='body')it.g.setAttribute('color',new THREE.BufferAttribute(new Float32Array(it.g.attributes.position.count*3),3));
-    const m=new THREE.Mesh(it.g,it.mat?it.mat:it.kind==='slot'?matSlot:(mode==='draft'||mode==='sim'?matDraft:matBody));m.castShadow=true;m.receiveShadow=true;m.name=it.name||(it.kind==='body'?'fuselage shell':it.kind==='slot'?'fuselage shell cut':'internal parts');m.userData.kind=it.kind;part.add(m);
+    const m=new THREE.Mesh(it.g,it.mat?it.mat:it.kind==='slot'?matSlot:(mode==='draft'||mode==='sim'?matDraft:matBody));m.castShadow=true;m.receiveShadow=true;m.name=it.name||(it.kind==='body'?SHELL_MESH:it.kind==='slot'?SHELL_MESH+' cut':'internal parts');m.userData.kind=it.kind;part.add(m);
     if(mode==='sim'&&it.kind!=='comp')m.userData={base:Float32Array.from(it.g.attributes.position.array),pull:it.pull,slot:it.kind==='slot'};
     if(mode==='section'&&it.kind==='body'){const c=new THREE.Mesh(it.g,matCut);part.add(c);}
   }
@@ -570,10 +585,27 @@ function styleMaterial(){
   matBody.color.set(c.hex).convertSRGBToLinear();matBody.metalness=P.metal?0.9:0;matBody.roughness=P.metal?Math.max(.22,fin.rough):fin.rough;
   matBody.clearcoat=fin.cc||0;matBody.needsUpdate=true;
 }
-let framedFor=null;
-function frame(s){if(!s)return;const m=Math.max(s.W,s.D,s.H*1.6,AF?AFSPAN*1.3:0);const d=m*2.3;camera.position.set(d*0.55,d*0.5,d*0.75);controls.target.set(0,s.H/2,0);controls.update();}
-function resize(){const w=host.clientWidth,h=host.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+let framedFor=null,camMoved=false;
+const FIT_DIR=new THREE.Vector3(0.55,0.5,0.75).normalize();
+/* Frame the part: the camera backs off along a fixed three-quarter view
+   until the part's bounding sphere fits both the height and the width of
+   the view, whatever the view's aspect. */
+function fitDistance(r,fovDeg,aspect,margin){const v=fovDeg*DEG/2,h=Math.atan(Math.tan(v)*Math.max(aspect,0.05));return r*(margin||1.15)/Math.sin(Math.min(v,h));}
+function frame(s){if(!s)return;part.updateMatrixWorld(true);const box=new THREE.Box3().setFromObject(part);
+  let c,r;if(box.isEmpty()){c=new THREE.Vector3(0,s.H/2,0);r=Math.max(s.W,s.D,s.H,AF?AFSPAN:0)/2;}
+  else{const sp=box.getBoundingSphere(new THREE.Sphere());c=sp.center;r=sp.radius;}
+  r=Math.max(r,1);const d=fitDistance(r,camera.fov,camera.aspect);
+  camera.position.copy(c).addScaledVector(FIT_DIR,d);camera.near=Math.max(0.1,d/100);camera.far=Math.max(6000,d*20);camera.updateProjectionMatrix();
+  controls.target.copy(c);controls.update();camMoved=false;}
+controls.addEventListener('start',()=>{camMoved=true;});
+function resize(){const w=host.clientWidth,h=host.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();
+  // Until the person moves the camera, a new view size re-frames the part.
+  if(!camMoved&&last&&last.shape)frame(last.shape);}
 new ResizeObserver(resize).observe(host);
+window.__fgView=()=>({w:host.clientWidth,h:host.clientHeight,aspect:camera.aspect,shown:part.visible&&part.children.length>0,
+  fits:(()=>{if(!part.children.length)return null;part.updateMatrixWorld(true);camera.updateMatrixWorld(true);const b=new THREE.Box3().setFromObject(part),P=[];
+    for(let i=0;i<8;i++)P.push(new THREE.Vector3(i&1?b.max.x:b.min.x,i&2?b.max.y:b.min.y,i&4?b.max.z:b.min.z).project(camera));
+    return P.every(p=>Math.abs(p.x)<=1.001&&Math.abs(p.y)<=1.001);})()});
 (function loop(){requestAnimationFrame(loop);if(simAnim){const t=(performance.now()-simAnim.t0)/simAnim.dur;simT=Math.min(1,t);applySim(simT);if(t>=1)simAnim=null;}devTick();controls.update();renderer.render(scene,camera);})();
 
 /* ================= Panels ================= */
@@ -1061,7 +1093,7 @@ function renderQuick(ev){
   const sig=sl.map(n=>n.id+n.props.key+n.props.min+n.props.max).join('|');
   if(sig!==quickSig){quickSig=sig;const used=new Set();
     const row=n=>{used.add(n.id);const p=n.props;return `<div class="qs" data-q="${n.id}" title="${esc(QHELP[p.key]||'')}"><div class="qt"><span>${esc(p.name)}</span><span class="held" hidden>DFM</span><b></b></div><input class="rng" type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.value}" aria-label="${esc(p.name)}"></div>`;};
-    let h='<p class="qintro">Every part has its own section. Drag to shape it; red marks what its maker cannot make.</p><details class="pp" open data-pps="shell"><summary><span>Fuselage shell</span><small id="ppShellSum"></small></summary><div class="ppb">';
+    let h='<p class="qintro">Every part has its own section. Drag to shape it; red marks what its maker cannot make.</p><details class="pp" open data-pps="shell"><summary><span>'+esc(SHELL_NAME)+'</span><small id="ppShellSum"></small></summary><div class="ppb">';
     QGROUPS.forEach(([title,keys])=>{const ns=keys.map(k=>sl.find(n=>n.props.key===k)).filter(Boolean);if(ns.length)h+=`<div class="qgrp"><h3>${title}</h3>${ns.map(row).join('')}</div>`;});
     const rest=sl.filter(n=>!used.has(n.id)&&n.props.key!=='bd');if(rest.length)h+=`<div class="qgrp"><h3>Other</h3>${rest.map(row).join('')}</div>`;
     h+='</div></details><div id="partq"></div>';box.innerHTML=h;}
@@ -2219,12 +2251,12 @@ document.addEventListener('click',e=>{const u=e.target.closest('[data-unclamp]')
 function renderAcc(){accSummaries();clampLists();}
 
 /* ================= Minimisable sides ================= */
-function applySides(){S.sides=S.sides||{};const m=$('main'),L=!!S.sides.l,R=!!S.sides.r;m.classList.toggle('hideL',L);m.classList.toggle('hideR',R);
+function applySides(){S.sides=S.sides||{};if(HOSTED)S.sides={};const m=$('main'),L=!!S.sides.l,R=!!S.sides.r;m.classList.toggle('hideL',L);m.classList.toggle('hideR',R);
   const el=$('#edgeL'),er=$('#edgeR');el.classList.toggle('flip',L);er.classList.toggle('flip',R);
   el.setAttribute('aria-label',L?'Show controls':'Hide controls');el.title=(L?'Show':'Hide')+' controls ( [ )';
   er.setAttribute('aria-label',R?'Show panel':'Hide panel');er.title=(R?'Show':'Hide')+' panel ( ] )';
   setTimeout(()=>{resize();if(!L&&S.level==='eng')drawWires();},230);}
-function toggleSide(k){S.sides=S.sides||{};S.sides[k]=!S.sides[k];applySides();save();}
+function toggleSide(k){if(HOSTED)return;S.sides=S.sides||{};S.sides[k]=!S.sides[k];applySides();save();}
 $('#edgeL').addEventListener('click',()=>toggleSide('l'));$('#edgeR').addEventListener('click',()=>toggleSide('r'));
 document.addEventListener('keydown',e=>{const tg=e.target&&e.target.closest?e.target:null;if(e.ctrlKey||e.metaKey||e.altKey||(tg&&tg.closest('input,select,textarea,[contenteditable]')))return;if(e.key==='['){e.preventDefault();toggleSide('l');}else if(e.key===']'){e.preventDefault();toggleSide('r');}});
 
@@ -2462,10 +2494,14 @@ $('#ctxBody').addEventListener('submit',e=>{e.preventDefault();const f=e.target,
    host stores them in the twin and sends the current state back as
    fg:snapshot. fg:readonly freezes every edit control after the handover.
    Standalone (no parent frame), the page keeps the claude.use('db') path. */
-const HOSTED=(()=>{try{return window.parent!==window;}catch(e){return true;}})();
 const FG_ASSETS=(()=>{const el=document.getElementById('fg-assets');let a={};try{a=JSON.parse(el&&el.textContent||'{}')||{};}catch(e){}return{gltf:a.gltf||'engine/assets/GLTFExporter.js'};})();
 const FG_COLLECTIONS=['choices','scenarios','contextEdits','assumptions','requirements','ledger','screening'];
 let HOST_ORIGIN=null,READONLY=false;const HOSTQ=[];
+/** The frame height a hosted page asks for, at a given width. Wide pages
+ * sit the controls beside a view of up to 560 px; narrow ones stack. */
+function hostedHeight(w,bar){const wide=w>=900,view=wide?560:Math.min(440,Math.max(300,w*0.7)),rest=wide?300:360;
+  return clamp(bar+view+rest,480,960);}
+window.__fgHostedHeight=hostedHeight;
 function b64Of(u8){let s='';const n=0x8000;for(let i=0;i<u8.length;i+=n)s+=String.fromCharCode.apply(null,u8.subarray(i,i+n));return btoa(s);}
 function hostPost(type,o,anyOrigin){if(!HOSTED)return;const m=Object.assign({fg:1,type},o||{});
   const to=HOST_ORIGIN||(anyOrigin?'*':null);if(!to){HOSTQ.push(()=>hostPost(type,o));return;}
@@ -2516,8 +2552,13 @@ if(HOSTED){
     if(m.type==='fg:snapshot'){hostApply(m.collections);HOSTQ.splice(0).forEach(f=>f());}
     else if(m.type==='fg:readonly'){READONLY=m.value===true;applyReadonly();}});
   $('#bomBody').addEventListener('click',e=>{const li=e.target.closest&&e.target.closest('[data-cmp]');if(li&&!e.target.closest('input,button,select'))hostPost('fg:select',{component_id:li.dataset.cmp});});
-  let lastH=0;const postH=()=>{const h=Math.ceil(document.documentElement.scrollHeight);if(h!==lastH){lastH=h;hostPost('fg:height',{px:h},true);}};
-  try{new ResizeObserver(postH).observe(document.documentElement);}catch(e){window.addEventListener('resize',postH);}
+  // The height the page would like, from its width alone: the bar, the 3D
+  // view at its bounded size and room for the panels, which scroll inside.
+  // It never reads the document's height, which follows the frame's own
+  // height and would grow the frame without end.
+  let lastH=0;const postH=()=>{const h=Math.round(hostedHeight(document.documentElement.clientWidth,($('.bar')||{}).offsetHeight||0));if(h!==lastH){lastH=h;hostPost('fg:height',{px:h},true);}};
+  try{const ro=new ResizeObserver(postH);ro.observe(document.documentElement);ro.observe($('.bar'));}catch(e){window.addEventListener('resize',postH);}
+  const vb=$('[data-view="studio"]');if(vb)vb.textContent='Model';
 }
 
 /* ---------- Shared record: choices, scenarios and edits come back to Claude ---------- */
@@ -2622,7 +2663,7 @@ function afChecks(s){if(!AF||!s)return[];const G=afGeom(s),C=[],ck=o=>C.push(Obj
   ck({id:'cg',label:'Centre of gravity over the thrust centre',val:`${xcg>=0?'+':''}${fmt(xcg,0)} mm ${xcg>=0?'forward':'aft'}`,lim:`within ±${fmt(lim,0)} mm (5 % of the arm)`,st:Math.abs(xcg)<=lim?'pass':Math.abs(xcg)<=2*lim?'warn':'fail',why:'Move the battery or payload along the body to balance it'});
   ck({id:'span',label:'Size across the props',val:`${fmt(G.span,0)} mm`,lim:AF.dock?`dock takes ${AF.dock.join(' × ')} mm`:'no dock size given',st:AF.dock?(G.span<=Math.min(...AF.dock)?'pass':'fail'):'pass'});
   return C;}
-function cadMeshes(){part.updateMatrixWorld(true);const groups={};part.traverse(o=>{if(!o.isMesh||!o.geometry||!o.visible||o.name==='prop disc'||o.name==='fuselage shell cut')return;(groups[o.name]||(groups[o.name]=[])).push(o);});return groups;}
+function cadMeshes(){part.updateMatrixWorld(true);const groups={};part.traverse(o=>{if(!o.isMesh||!o.geometry||!o.visible||o.name==='prop disc'||o.name===SHELL_MESH+' cut')return;(groups[o.name]||(groups[o.name]=[])).push(o);});return groups;}
 function stlOf(meshes){const tris=[];meshes.forEach(m=>{const g=m.geometry.index?m.geometry.toNonIndexed():m.geometry,p=g.attributes.position,v=new THREE.Vector3();
     for(let i=0;i<p.count;i++){v.fromBufferAttribute(p,i).applyMatrix4(m.matrixWorld);tris.push(v.x,-v.z,v.y);}});
   const n=tris.length/9,buf=new ArrayBuffer(84+n*50),dv=new DataView(buf);dv.setUint32(80,n,true);
@@ -2742,9 +2783,9 @@ const PSTAGES=[['def','Defined'],['geo','3D'],['src','Sourced or makeable'],['in
 function partReadiness(){const rows=[],s=last&&last.shape;if(!s)return rows;
   const row=(group,name,st,notes)=>{const r={group,name,st,notes:notes||[]};r.ready=PSTAGES.every(([k])=>st[k]==='pass'||st[k]==='na');rows.push(r);};
   const fails=lines=>EL?EL.checks.filter(c=>c.st==='fail'&&(c.lines||[]).some(l=>lines.includes(l))):[];
-  // fuselage shell
+  // the shell
   {const dfm=last.rep?last.rep.rules.filter(r=>r.st==='fail'):[],bc=last.bom?last.bom.checks.filter(c=>['fitBoard','bossClr','stack','fitBatt'].includes(c.id)&&c.st==='fail'):[],room=EL?EL.checks.filter(c=>/^room/.test(c.id)&&c.st==='fail'):[];
-    row('Designed','Fuselage shell',{def:'pass',geo:'pass',src:dfm.length?'fail':'pass',int:bc.length||room.length?'fail':'pass'},[...dfm.map(r=>r.label),...bc.map(c=>c.label),...room.map(c=>c.label)]);}
+    row('Designed',SHELL_NAME,{def:'pass',geo:'pass',src:dfm.length?'fail':'pass',int:bc.length||room.length?'fail':'pass'},[...dfm.map(r=>r.label),...bc.map(c=>c.label),...room.map(c=>c.label)]);}
   // made parts
   if(CTX&&MFGP.length)mfgEval(s).forEach(r=>{const c=r.pick,af=AFC.filter(x=>x.st==='fail');
     row('Made',`${r.p.name}${(r.p.qty||1)>1?' × '+r.p.qty:''}`,{def:'pass',geo:'pass',src:!c?'fail':c.N.length?'fail':'pass',int:af.length?'fail':'pass'},[...(c?c.N:['no maker picked']),...af.map(x=>x.label)]);});
@@ -2851,11 +2892,18 @@ function schedule(){if(pending)return;pending=true;requestAnimationFrame(()=>{pe
 function recompute(){
   applyMachine();const ev=solve();EL=ev.shape?elecAnalyse(ev.shape):null;styleMaterial();buildPart(ev.shape);updateNodeReadouts(ev);ev.rep=renderPanel(ev);last=ev;
   simRes=ev.shape?simulate(ev.shape):null;ENVM=ev.shape?envModel(ev.shape):null;renderSim();scheduleJobs();REQ=reqEval(ev.shape);renderBOM();ctxCompute(ev.shape);renderQuick(ev);renderPartParams(ev.shape);renderElec();renderReqs();renderIntentExtras();renderEnv();renderCtx();renderGates();renderJobs();renderAcc();if(S.pview==='prog')renderProgramme();else PM=null;if(dev&&dev.open)renderDev();if(S.view==='sim')applySim(simAnim?simT:1);
+  applyShown();
   if(ev.shape&&framedFor===null){frame(ev.shape);framedFor=1;}
   hostScreening(ev);
   save();
 }
 let saveT=0;function save(){clearTimeout(saveT);saveT=setTimeout(()=>{if(!RESETTING)store.set(SKEY,{G,S,product:CP.id||'default',engine:ENGINE,cfg:CFGH});},300);}
+
+/* The part, or the calm empty state when the config has nothing to draw. */
+function applyShown(){part.visible=SHOW_PART;if(grid)grid.visible=SHOW_PART;ground.visible=SHOW_PART;$('#viewEmpty').hidden=SHOW_PART;
+  ['#dims','#cmf','#legend'].forEach(q=>{const el=$(q);if(el)el.classList.toggle('fg-off',!SHOW_PART);});}
+function startShaping(){if(SHOW_PART||READONLY)return;SHOW_PART=true;framedFor=null;}
+['#quick','#nodes'].forEach(q=>['input','change'].forEach(t=>$(q).addEventListener(t,startShaping,true)));
 
 /* ================= Header actions, hand off ================= */
 $('#reset').addEventListener('click',()=>{RESETTING=true;clearTimeout(saveT);try{localStorage.removeItem(SKEY);}catch(e){}location.reload();});
@@ -2879,7 +2927,7 @@ $('#ioClose').addEventListener('click',()=>{$('#ioBox').hidden=true;});
 $('#ioApply').addEventListener('click',()=>{try{const o=JSON.parse($('#io').value);const g=o.G||o;
   if(!Array.isArray(g.nodes)||!Array.isArray(g.links)||!g.nodes.every(n=>TYPES[n.type]&&n.id))throw new Error('shape');
   G={nodes:g.nodes,links:g.links.filter(l=>Array.isArray(l.from)&&Array.isArray(l.to))};if(o.S)Object.assign(S,o.S);
-  selId=null;renderProcess();renderNodes();framedFor=null;schedule();requestAnimationFrame(fitGraph);$('#ioBox').hidden=true;toast('Graph loaded.');}
+  selId=null;renderProcess();renderNodes();startShaping();framedFor=null;schedule();requestAnimationFrame(fitGraph);$('#ioBox').hidden=true;toast('Graph loaded.');}
   catch(e){toast('That text is not a Formgraph graph. Paste the output of Copy graph.');}});
 
 /* ================= Theme + boot ================= */

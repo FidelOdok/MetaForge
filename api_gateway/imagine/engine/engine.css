@@ -31,6 +31,7 @@
   color-scheme:light;
 }
 html,body{height:100%}
+body{margin:0}
 body{background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:13px;overflow:hidden}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -563,3 +564,57 @@ li.clip{display:none!important}
 :root[data-readonly] [data-fg-ro]{cursor:not-allowed}
 :root[data-readonly] #nodes{pointer-events:none}
 .fg-ro-banner{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:50;background:var(--panel);color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:6px 12px;font-size:12px;box-shadow:var(--shadow)}
+
+/* ---------- the empty 3D view ---------- */
+.vempty{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1;width:max-content;max-width:calc(100% - 32px);display:grid;justify-items:center;gap:8px;padding:20px 24px;text-align:center;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg,14px);box-shadow:var(--shadow);pointer-events:none}
+.vempty svg{width:36px;height:36px;color:var(--accent)}
+.vempty b{color:var(--fg);font-size:15px;font-weight:600}
+.vempty p{margin:0;max-width:38ch;font-size:12.5px;line-height:1.5}
+.fg-off{display:none!important}
+
+/* ---------- hosted in MetaForge Create ----------
+   The frame's height is the host's; the page never grows it. Wide frames put
+   the controls beside a bounded 3D view with the panels under it, each part
+   scrolling on its own. Below 900 px everything stacks in one column and the
+   page scrolls inside the frame. Create gives the product name, the stage
+   tabs and the theme, so the bar keeps only the view and detail switches. */
+.fg-hosted,.fg-hosted body{height:100%}
+.fg-hosted body{overflow:hidden;font-size:13px}
+.fg-hosted #app{height:100%;grid-template-rows:auto minmax(0,1fr)}
+.fg-hosted .brand,.fg-hosted .edge{display:none}
+.fg-hosted .bar{padding:8px 12px;gap:8px;box-shadow:none}
+.fg-hosted .bar .seg button{padding:4px 12px;min-height:28px;font-size:12px}
+.fg-hosted .bar .more{margin-left:auto}
+.fg-hosted .bar .ibtn{width:32px;min-height:30px}
+.fg-hosted main,.fg-hosted main.hideL,.fg-hosted main.hideR,.fg-hosted main.hideL.hideR{
+  grid-template-columns:minmax(280px,36%) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);
+  grid-template-areas:"graph view" "graph dfm";min-height:0;transition:none}
+.fg-hosted #graphPane,.fg-hosted main.hideL #graphPane{grid-area:graph;display:flex;height:auto;min-height:0;overflow:auto}
+.fg-hosted #viewPane{grid-area:view;height:min(560px,60vh);min-height:260px;border-right:0;border-bottom:1px solid var(--line)}
+.fg-hosted #dfm,.fg-hosted main.hideR #dfm{grid-area:dfm;display:block;min-height:0;overflow:auto;columns:auto;border-top:0;padding:4px 12px 20px}
+.fg-hosted .ov.tl{left:10px;top:10px;right:10px;gap:6px}
+.fg-hosted .ov.bl{left:10px;bottom:10px}
+.fg-hosted .ov.br{right:10px;bottom:10px}
+.fg-hosted .ov .seg button{padding:4px 11px;min-height:28px}
+.fg-hosted .chipbtn{padding:4px 12px;min-height:30px}
+.fg-hosted .ov .ibtn{width:32px;min-height:30px}
+.fg-hosted .dims{padding:5px 11px;font-size:11px}
+.fg-hosted .simp{top:52px;max-height:calc(100% - 64px)}
+.fg-hosted .devp{max-height:calc(100% - 20px)}
+.fg-hosted #quick{padding-bottom:16px}
+.fg-hosted .toast{bottom:16px}
+@media (max-width:899px){
+  .fg-hosted body{overflow-x:hidden;overflow-y:auto}
+  .fg-hosted #app{height:auto;min-height:100%}
+  .fg-hosted main,.fg-hosted main.hideL,.fg-hosted main.hideR,.fg-hosted main.hideL.hideR{
+    grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-template-areas:"view" "graph" "dfm"}
+  .fg-hosted #viewPane{height:clamp(300px,70vw,440px);min-height:0}
+  .fg-hosted #graphPane,.fg-hosted main.hideL #graphPane{overflow:visible;border-right:0;border-bottom:1px solid var(--line)}
+  .fg-hosted #canvas{flex:none;height:420px}
+  .fg-hosted #dfm,.fg-hosted main.hideR #dfm{overflow:visible}
+  .fg-hosted .simp,.fg-hosted .devp{left:10px;right:10px;width:auto}
+}
+@media (max-width:420px){
+  .fg-hosted .bar{gap:6px;padding:8px 10px}
+  .fg-hosted .bar .seg button{padding:4px 9px;font-size:11.5px}
+}

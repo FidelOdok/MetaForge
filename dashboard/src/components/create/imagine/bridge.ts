@@ -35,9 +35,16 @@ export const COLLECTION_KIND: Record<StudioCollection, ImagineEventKind> = {
   screening: 'screening',
 };
 
-/** The frame's height is kept within these bounds, whatever the page asks. */
-export const MIN_HEIGHT = 240;
-export const MAX_HEIGHT = 6000;
+/**
+ * The frame's height is kept within these bounds, whatever the page asks.
+ * The page asks for the height it would like at its width (its bar, a
+ * bounded 3D view and room for the panels) and scrolls inside the frame
+ * beyond that, so the frame never grows to the length of the whole page.
+ */
+export const MIN_HEIGHT = 420;
+export const MAX_HEIGHT = 960;
+/** The height the frame starts at, before the page has said what it would like. */
+export const START_HEIGHT = 720;
 /** Downloads larger than this (as base64 text) are refused. */
 export const MAX_DOWNLOAD_BASE64 = 28_000_000;
 const MAX_ID = 200;
@@ -95,6 +102,20 @@ export function writeToEvent(
 
 export function clampHeight(px: number): number {
   return Math.round(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, px)));
+}
+
+/**
+ * The page's address with Create's resolved theme on it (`?theme=`), so the
+ * studio matches the dashboard rather than the system theme. Addresses that
+ * are not pages (`about:`, `data:`, `blob:`) are left alone.
+ */
+export function themedSrc(src: string, theme: 'light' | 'dark'): string {
+  if (/^(about|data|blob|javascript):/i.test(src)) return src;
+  const hashAt = src.indexOf('#');
+  const hash = hashAt >= 0 ? src.slice(hashAt) : '';
+  const base = (hashAt >= 0 ? src.slice(0, hashAt) : src).replace(/([?&])theme=[^&]*(&|$)/, (_m, lead: string, tail: string) => (tail ? lead : ''));
+  const sep = base.includes('?') ? (/[?&]$/.test(base) ? '' : '&') : '?';
+  return `${base}${sep}theme=${theme}${hash}`;
 }
 
 /** A file name with no path in it, safe to offer as a download. */
