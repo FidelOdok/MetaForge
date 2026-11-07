@@ -411,12 +411,12 @@ container). The classification lives in `mcp_core/annotations.py`:
 | Tool | Class | `auto` approves it | Why |
 |------|-------|--------------------|-----|
 | `cadquery.create_parametric`, `create_assembly`, `generate_enclosure`, `generate_ros2_launch` | producing | yes | Each writes a new result file. |
-| `cadquery.boolean_operation` | producing (FORGE-829) | yes | It writes only its result. A named `output_path` must resolve inside the work folder, through any `..` or symlink, and must not exist: an existing file is never overwritten. Unnamed, the result goes to a new folder of its own, `output/cadquery/boolean/<id>/`. The two input files are only read. |
+| `cadquery.boolean_operation` | producing | yes | It writes only its result. A named `output_path` must resolve inside the work folder, through any `..` or symlink, and must not exist: an existing file is never overwritten. Unnamed, the result goes to a new folder of its own, `output/cadquery/boolean/<id>/`. The two input files are only read. |
 | `cadquery.execute_script` | destructive | no, a person decides | See below. |
 | `cadquery.export_*` | destructive | no, a person decides | Each writes to a caller-supplied path and overwrites what is there. |
 
 `cadquery.execute_script` stays destructive because what confines it is the
-container, not the adapter. Checked for FORGE-829:
+container, not the adapter. What was checked:
 
 - The script runs in the adapter's own process (`exec` in a worker thread,
   `tool_registry/tools/cadquery/operations.py`), in the cadquery-adapter
