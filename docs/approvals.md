@@ -590,7 +590,7 @@ the MCP sidecar when it serves the twin tools. See
 
 ### Delegated holds through MCP
 
-A headless agent cannot answer a prompt. Before FORGE-827 a human-authority
+A headless agent cannot answer a prompt. Before this, a human-authority
 call it made over MCP (`twin.imagine_handover` in a fully autonomous lamp
 run) was held on the client's own approval prompt, nobody answered, and the
 run stopped there. Now, when all of these hold, the call is not held:
