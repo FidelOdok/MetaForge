@@ -61,7 +61,7 @@ until a person reworks it.
 
 ## From a prompt
 
-The chat builds the studio from what the person says (FORGE-824). The
+The chat builds the studio from what the person says. The
 project brief the chat agent gets carries one line on the studio (*not
 started*, *draft, revision n* or *handed over at revision n*), and the chat
 system prompt adds one rule when the studio tools are in reach: with no
@@ -140,7 +140,7 @@ published to the project's operations log (`job:imagine-...`).
 When the gateway owner delegates human-authority decisions
 (`METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true`, default off; see
 [delegating approvals to an agent](approvals.md#delegating-approvals-to-an-agent)),
-an agent may hand over and rework, for fully autonomous runs (FORGE-824):
+an agent may hand over and rework, for fully autonomous runs:
 
 - **REST.** `POST /handover` and `POST /rework` from the agent surface must
   carry `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of`; without either

@@ -837,7 +837,7 @@ The layout lives in `orchestrator/harness/providers/caching.py`:
   Self-hosted OpenAI-compatible servers do not receive it.
 - **Claude through OpenRouter** (a model id starting `anthropic/`, or any
   Claude model on the `openrouter` provider) is cached only where told, like
-  Anthropic's own API (FORGE-825). The system message is sent as content
+  Anthropic's own API. The system message is sent as content
   parts: the stable text carries `cache_control: {"type": "ephemeral"}`, and
   since Claude hashes tools, then system, then messages, that one breakpoint
   caches the whole tools array and the system prompt. The request also
