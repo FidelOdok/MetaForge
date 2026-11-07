@@ -42,6 +42,7 @@ services:
       # (off, advise, auto_clean or auto). Default advise: the reviewer only
       # recommends until an operator raises it.
       - METAFORGE_AUTO_APPROVE_MAX=${METAFORGE_AUTO_APPROVE_MAX:-advise}
+      - METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=${METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY:-false}
       # FORGE-780: a held tool write's approval lasts this long (s) for the
       # identical retry; paid tools auto-approved by a project policy are
       # capped per project per hour.
@@ -564,6 +565,7 @@ services:
       # identical retry; paid tools auto-approved by a project policy are
       # capped per project per hour.
       - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-1800}
+      - METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=${METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY:-false}
       - METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR=${METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR:-20}
       - METAFORGE_AUTO_APPROVE_MESH_PER_HOUR=${METAFORGE_AUTO_APPROVE_MESH_PER_HOUR:-3}
       # FORGE-647: the key the sidecar presents when it posts a live assembly

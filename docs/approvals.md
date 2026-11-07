@@ -571,6 +571,8 @@ An agent decision without `X-MetaForge-On-Behalf-Of` is a 422.
 `rerun` cannot be decided by an agent. For an agent caller they show `decidable: false` with an explanation,
 and a decision attempt is a 403. The gateway owner can delegate them by setting
 `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true` on the gateway (default off).
+The compose stack passes it from `.env` to both the gateway and the MCP
+sidecar, which decide the calls that land on them.
 
 The same flag delegates the Imagine handover and rework. With it
 on, `POST .../imagine/handover` and `.../imagine/rework` accept the agent
