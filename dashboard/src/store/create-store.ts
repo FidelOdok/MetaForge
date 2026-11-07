@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { createTwinChatThread, sendTwinChatMessage } from '../api/endpoints/twin-chat';
+import { createTwinChatThread, sendTwinChatMessage, type CreateStage } from '../api/endpoints/twin-chat';
 import { createUpload } from '../api/endpoints/uploads';
 import { conflictOf, getCreation, putBrief, refusalOf, type ReferenceRole } from '../api/endpoints/create';
 import { useSketchStore } from './sketch-store';
@@ -64,6 +64,11 @@ export interface Instruction {
    * the server's acknowledgement shows before the reply returns.
    */
   operationId?: string;
+  /**
+   * The Create stage a design turn was asked in (FORGE-825). The gateway
+   * gives the turn that stage's tools, so a design turn never sends every id.
+   */
+  stage?: CreateStage;
 }
 
 export interface CreateSession {
@@ -80,6 +85,8 @@ export interface CreateSession {
    * message's id, so the conversation can say "Colour change only" under it.
    */
   classifications?: Record<string, ChangeClassification>;
+  /** The stage the Create view shows, stamped on each instruction (FORGE-825). */
+  stage?: CreateStage | null;
 }
 
 const EMPTY: CreateSession = {
@@ -134,7 +141,19 @@ interface CreateStore {
   attach: (projectId: string, files: File[]) => void;
   removeAttachment: (projectId: string, id: string) => void;
   updateAttachment: (projectId: string, id: string, change: Partial<Pick<Attachment, 'role' | 'active'>>) => void;
+  setStage: (projectId: string, stage: CreateStage | null) => void;
   submit: (projectId: string, tools: Record<Intent, string[]>) => boolean;
+  /**
+   * Queue and send a request at once, leaving the person's draft alone: a
+   * stage button that asks the assistant to do the next step (FORGE-824).
+   */
+  sendNow: (
+    projectId: string,
+    text: string,
+    intent: Intent,
+    tools: Record<Intent, string[]>,
+    stage?: CreateStage | null,
+  ) => boolean;
   /** Send an answer given through a reply component (a choice, a measurement), leaving the draft alone. */
   reply: (projectId: string, text: string, tools: Record<Intent, string[]>) => boolean;
   retry: (projectId: string, id: string, tools: Record<Intent, string[]>) => void;
@@ -198,9 +217,15 @@ export const useCreateStore = create<CreateStore>()(
             ? `\n\nCurrent sketch revision: ${next.context.sketchRevision}` +
               (next.context.region ? `; selected region (sketch units): ${JSON.stringify(next.context.region)}` : '')
             : '';
+          // FORGE-825: a design turn names its stage and the gateway picks
+          // that stage's tools; every other turn sends its own tool ids.
+          const scope =
+            next.intent === 'design' && next.stage
+              ? { create_stage: next.stage }
+              : { tools: turnTools.get(next.id) ?? [] };
           const sent = await sendTwinChatMessage(threadId, {
             content: next.text + refs + ctx + INTENT_INSTRUCTION[next.intent],
-            tools: turnTools.get(next.id) ?? [],
+            ...scope,
             client_turn_id: turnId,
             ...(next.componentId ? { graph_ref_node: next.componentId } : {}),
             ...modelChoiceFields(useModelChoice.getState()),
@@ -248,6 +273,7 @@ export const useCreateStore = create<CreateStore>()(
         setIntent: (projectId, intent) => patch(projectId, () => ({ intent })),
         selectNode: (projectId, nodeId) => patch(projectId, () => ({ selectedNodeId: nodeId })),
         setThread: (projectId, threadId) => patch(projectId, () => ({ threadId })),
+        setStage: (projectId, stage) => patch(projectId, () => ({ stage })),
 
         attach: (projectId, files) => {
           const added = files.map((file) => ({ file, id: nextId('ref') }));
@@ -323,11 +349,38 @@ export const useCreateStore = create<CreateStore>()(
                 referenceRoles: included.map((a) => ({ id: a.workProductId!, ...(a.role ? { role: a.role } : {}) })),
                 context: sketchRevision ? { sketchRevision, region } : undefined,
                 componentId: cur.selectedNodeId,
+                ...(cur.stage ? { stage: cur.stage } : {}),
                 state: 'queued',
                 createdAt: new Date().toISOString(),
               },
             ],
           }));
+          void pump(projectId);
+          return true;
+        },
+
+        sendNow: (projectId, text, intent, tools, stage) => {
+          const body = text.trim();
+          if (!body) return false;
+          const id = nextId('ins');
+          turnTools.set(id, tools[intent] ?? []);
+          patch(projectId, (cur) => {
+            const turnStage = stage ?? cur.stage;
+            return {
+              queue: [
+                ...cur.queue,
+                {
+                  id,
+                  text: body,
+                  intent,
+                  references: [],
+                  ...(turnStage ? { stage: turnStage } : {}),
+                  state: 'queued',
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            };
+          });
           void pump(projectId);
           return true;
         },

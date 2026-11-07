@@ -554,6 +554,7 @@ async def _invoke_agent(
     model: str | None = None,
     tools: list[str] | None = None,
     classified: ClassifiedTurn | None = None,
+    create_stage: str | None = None,
 ) -> ChatMessageRecord | None:
     """Attempt to route *user_content* to a domain agent and return its response.
 
@@ -673,6 +674,8 @@ async def _invoke_agent(
                         # project with no discipline signal yet).
                         domains=domains,
                         ui_blocks=ui_blocks,
+                        # FORGE-825: a Create design turn's stage tool set.
+                        create_stage=create_stage,
                     )
                 await notify_agent_done(thread.id, "harness-agent")
                 await capture_turn_done(
@@ -1072,6 +1075,7 @@ async def send_message(
                         model=body.model,
                         tools=body.tools,
                         classified=classified,
+                        create_stage=body.create_stage,
                     ),
                 )
         except asyncio.CancelledError:

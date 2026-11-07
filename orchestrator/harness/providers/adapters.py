@@ -121,6 +121,11 @@ def _usage_from(
         if isinstance(cached, int):
             out["cached_input_tokens"] = cached
             out["input_includes_cached"] = True
+            # FORGE-825: OpenRouter reports a Claude cache write beside the
+            # read, also inside ``prompt_tokens``.
+            written = getattr(details, "cache_write_tokens", None)
+            if isinstance(written, int):
+                out["cache_creation_input_tokens"] = written
         return out
     except (TypeError, ValueError):
         return None
@@ -197,13 +202,45 @@ def _join_system(system: str | None, suffix: str | None) -> str | None:
 def _apply_openai_cache(
     kwargs: dict[str, Any], spec: ProviderSpec, request: Any, tools: Any
 ) -> None:
-    """Canonical tool order plus a stable prompt_cache_key (FORGE-478)."""
-    if tools:
-        kwargs["tools"] = _sanitize_openai_tool_names(caching.canonical_tools(tools))
+    """Canonical tool order plus a stable prompt_cache_key (FORGE-478).
+
+    A Claude model behind OpenRouter also gets OpenRouter's top-level
+    ``cache_control``, the moving breakpoint on the conversation (FORGE-825);
+    its stable breakpoint is on the system message (:func:`_openai_messages`).
+    """
+    canonical = caching.canonical_tools(tools) if tools else None
+    if canonical:
+        kwargs["tools"] = _sanitize_openai_tool_names(canonical)
+    extra: dict[str, Any] = {}
     if caching.supports_prompt_cache_key(spec.base_url):
-        kwargs["extra_body"] = {
-            "prompt_cache_key": caching.prompt_cache_key(caching.system_text(request)[0], tools)
-        }
+        # FORGE-825: keyed on the canonical order, as sent, so the same tools
+        # in another order route to the same cache.
+        extra["prompt_cache_key"] = caching.prompt_cache_key(
+            caching.system_text(request)[0], canonical
+        )
+    if caching.routes_claude_cache_control(spec.name, spec.base_url, spec.model):
+        extra["cache_control"] = caching.automatic_cache_control()
+    if extra:
+        kwargs["extra_body"] = extra
+
+
+def _openai_messages(
+    spec: ProviderSpec, request: Any, system: str | None, messages: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Messages with the system prompt first, in the shape the target caches.
+
+    Claude behind OpenRouter takes the system prompt as content parts, the
+    stable text marked with ``cache_control`` and the volatile per-round note
+    after it unmarked (FORGE-825). Every other model gets one joined string.
+    """
+    if caching.routes_claude_cache_control(spec.name, spec.base_url, spec.model):
+        stable, suffix = caching.system_text(request)
+        if stable or suffix:
+            msg = caching.openai_claude_system_message(stable, suffix)
+            return [msg, *messages] if msg else messages
+    if system:
+        return [{"role": "system", "content": system}, *messages]
+    return messages
 
 
 _OPENAI_NAME_DOT = "__"
@@ -387,8 +424,8 @@ async def openai_invoke(
     the native tool-calling path (matches how Claude Code drives tools).
     """
     system, messages, max_tokens, temperature = _normalize_request(request)
-    if system:
-        messages = [{"role": "system", "content": system}, *messages]
+    messages = _openai_messages(spec, request, system, messages)
+
     # MET-747 follow-up: sanitize any dotted tool_calls already sitting in
     # history (from an earlier round-trip in this same turn) — see
     # _sanitize_openai_messages.
@@ -940,8 +977,8 @@ async def openai_stream_events(
     the same ``tool_calls`` shape :func:`openai_invoke` returns.
     """
     system, messages, max_tokens, temperature = _normalize_request(request)
-    if system:
-        messages = [{"role": "system", "content": system}, *messages]
+    messages = _openai_messages(spec, request, system, messages)
+
     # MET-747 follow-up: same message-history sanitization as openai_invoke.
     messages = _sanitize_openai_messages(messages)
     if client is None:

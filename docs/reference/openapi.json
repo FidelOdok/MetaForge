@@ -10722,6 +10722,17 @@
       "HandoverRecord": {
         "description": "The handover that froze a studio revision.",
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
           "at": {
             "title": "At",
             "type": "string"
@@ -10736,6 +10747,17 @@
             },
             "title": "Created",
             "type": "array"
+          },
+          "on_behalf_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Behalf Of"
           },
           "op_id": {
             "title": "Op Id",
@@ -22383,6 +22405,24 @@
             "minLength": 1,
             "title": "Content",
             "type": "string"
+          },
+          "create_stage": {
+            "anyOf": [
+              {
+                "enum": [
+                  "imagine",
+                  "develop",
+                  "check",
+                  "make"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Create view stage of a design turn. When set, the gateway uses that stage's tool set and ignores `tools`.",
+            "title": "Create Stage"
           },
           "graph_ref_label": {
             "anyOf": [

@@ -8405,6 +8405,122 @@ class TwinServer(McpToolServer):
             ),
             handler=self.imagine_handover_status,
         )
+        # FORGE-824: the handover and rework, for an agent the gateway owner
+        # lets decide human-authority steps. Always registered; refused unless
+        # METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY is on where the call lands.
+        delegation_note = (
+            " A person's decision: refused unless the gateway owner set "
+            "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true, and held for an approval "
+            "whose decider is recorded as the person the agent acted for. The record "
+            "says the agent decided, never that the person did."
+        )
+        op_id = {
+            "type": "string",
+            "description": "Idempotency key; the same op_id repeats the same call safely.",
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_handover",
+                adapter_id="twin",
+                name="Imagine: Hand Over",
+                description=(
+                    "Hand the Imagine studio over to Develop: freeze the current revision "
+                    "read only and seed the twin from it (requirements, interface "
+                    "contracts, concept assembly). Refused with the missing items unless "
+                    "twin.imagine_handover_status is ready." + delegation_note
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {**project, "op_id": op_id},
+                    "required": ["op_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "handed_over": {"type": "boolean"},
+                        "revision": {"type": "integer"},
+                        "created": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.imagine_handover,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_rework",
+                adapter_id="twin",
+                name="Imagine: Rework",
+                description=(
+                    "Reopen a handed-over Imagine studio on a new revision, with a reason; "
+                    "Develop and Check evidence made for the handed-over revision is "
+                    "marked stale." + delegation_note
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        **project,
+                        "op_id": op_id,
+                        "reason": {"type": "string", "description": "Why Imagine reopens."},
+                    },
+                    "required": ["op_id", "reason"],
+                },
+                output_schema=studio_out,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.imagine_rework,
+        )
+
+    def _imagine_delegate(self, tool_id: str, arguments: dict[str, Any]) -> tuple[str, str]:
+        """(agent, person) for a delegated Imagine step (FORGE-824).
+
+        The person is whoever answered the call's approval, put here by the
+        dispatcher; the model can never name them.
+        """
+        reject_caller_supplied_approver(tool_id, arguments)
+        person = arguments.get(APPROVED_BY_ARG)
+        if not isinstance(person, str) or not person.strip():
+            raise HumanAuthorityRequiredError(
+                tool_id, "no approver reached the tool, so nothing ran"
+            )
+        ctx = current_context()
+        agent = str(ctx.client or ctx.actor_id or "agent")
+        return agent, person.strip()
+
+    async def imagine_handover(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool_id = "twin.imagine_handover"
+        pid = self._imagine_project(arguments, tool_id)
+        op_id = str(arguments.get("op_id") or "").strip()
+        if not op_id:
+            raise ValueError(f"{tool_id}: 'op_id' is required")
+        agent, person = self._imagine_delegate(tool_id, arguments)
+        try:
+            result = await self._imagine_studio.handover(
+                pid, op_id, actor=f"agent:{agent}", agent=agent, on_behalf_of=person
+            )
+        except Exception as exc:
+            raise ValueError(f"{tool_id}: {_imagine_refusal(exc)}") from exc
+        return dict(result.model_dump(mode="json"))
+
+    async def imagine_rework(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool_id = "twin.imagine_rework"
+        pid = self._imagine_project(arguments, tool_id)
+        op_id = str(arguments.get("op_id") or "").strip()
+        reason = str(arguments.get("reason") or "").strip()
+        if not op_id or not reason:
+            raise ValueError(f"{tool_id}: 'op_id' and 'reason' are required")
+        agent, person = self._imagine_delegate(tool_id, arguments)
+        try:
+            studio = await self._imagine_studio.rework(
+                pid, op_id, reason, actor=f"agent:{agent}", agent=agent, on_behalf_of=person
+            )
+        except Exception as exc:
+            raise ValueError(f"{tool_id}: {_imagine_refusal(exc)}") from exc
+        return dict(studio.model_dump(mode="json"))
 
     async def imagine_get_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
         pid = self._imagine_project(arguments, "twin.imagine_get_studio")
@@ -9971,3 +10087,15 @@ def _vec3(value: Any, label: str) -> list[float]:
         return [float(v) for v in value]
     except (TypeError, ValueError) as exc:
         raise ValueError(f"twin.place_part: {label} must be three numbers [x, y, z]") from exc
+
+
+def _imagine_refusal(exc: Exception) -> str:
+    """A studio refusal in words, with the missing handover items when there are any."""
+    items = getattr(exc, "items", None)
+    message = str(getattr(exc, "message", None) or exc)
+    if items:
+        missing = ", ".join(
+            str(getattr(i, "label", i)) for i in items if getattr(i, "status", "") != "done"
+        )
+        return f"{message} Missing: {missing}."
+    return message

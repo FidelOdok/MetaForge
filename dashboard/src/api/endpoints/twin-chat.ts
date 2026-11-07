@@ -49,7 +49,15 @@ export interface SendTwinChatMessage {
   graph_ref_label?: string;
   /** Names the turn's operation (`chat:<client_turn_id>`) before the reply returns. */
   client_turn_id?: string;
+  /**
+   * The Create stage a design turn runs in (FORGE-825). The gateway resolves
+   * the turn's tools from its own set for that stage and ignores `tools`.
+   */
+  create_stage?: CreateStage;
 }
+
+/** The four Create stages, as the gateway names them. */
+export type CreateStage = 'imagine' | 'develop' | 'check' | 'make';
 
 /** GET /chat/threads scoped to a project. */
 export async function listTwinChatThreads(projectId: string): Promise<TwinChatThreadSummary[]> {

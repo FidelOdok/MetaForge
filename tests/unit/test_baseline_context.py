@@ -424,11 +424,14 @@ class TestLegacyBrief:
         )
         legacy = await build_project_brief(project, doc_excerpt=_excerpt)
         with_twin = await build_project_brief(project, doc_excerpt=_excerpt, twin=twin)
-        # The twin adds the manufacturing context block (DFM-001) and nothing else.
+        # The twin adds the manufacturing context block (DFM-001) and the
+        # Imagine studio line (FORGE-824), and nothing else.
         head, _, rest = with_twin.partition("\n\nManufacturing context (unresolved)")
         assert rest, "the brief carries the manufacturing context"
         tail = rest.split("assumption above as their choice.", 1)[1]
-        assert legacy == head + tail
+        imagine = "\n\nImagine studio: not started (no studio config yet)."
+        assert tail.startswith(imagine)
+        assert legacy == head + tail.removeprefix(imagine)
         assert "Existing work products in this project (5, newest first)" in legacy
         assert "Current design baseline" not in legacy
 

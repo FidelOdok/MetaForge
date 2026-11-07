@@ -572,6 +572,18 @@ An agent decision without `X-MetaForge-On-Behalf-Of` is a 422.
 and a decision attempt is a 403. The gateway owner can delegate them by setting
 `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true` on the gateway (default off).
 
+The same flag delegates the Imagine handover and rework. With it
+on, `POST .../imagine/handover` and `.../imagine/rework` accept the agent
+surface with `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of` (422 without
+them), and the MCP tools `twin.imagine_handover` and `twin.imagine_rework`
+stop refusing. Those tools are human-authority tools, so no approval policy
+approves them: each call is held as a `human_authority` approval, which an
+agent may then decide on the person's behalf under this same flag. The
+studio's record and the operations log name the agent and the person it
+acted for, never the person alone. Set the flag where the call lands: the
+gateway, and the MCP sidecar when it serves the twin tools. See
+[the Imagine stage](imagine-stage.md#delegated-to-an-agent).
+
 ## Observability
 
 `metaforge_approval_decision_total{kind, decision, surface, outcome}` counts

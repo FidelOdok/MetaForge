@@ -829,3 +829,166 @@ def resolve_profile(name: str | None) -> str | None:
 def unmapped_disciplines(disciplines: tuple[str, ...] | list[str]) -> list[str]:
     """Disciplines with no entry in :data:`DISCIPLINE_PROFILES` (common set only)."""
     return [d for d in disciplines if d.lower() not in DISCIPLINE_PROFILES]
+
+
+# ---------------------------------------------------------------------------
+# Create view stages (FORGE-825)
+# ---------------------------------------------------------------------------
+#
+# A design turn in the dashboard's Create view used to send every tool id the
+# gateway knew (171 on the sandbox), and the harness then kept 128 by name
+# order, dropping get_manufacturing_context, get_dfm_report,
+# get_release_checklist and job_status among others. Each turn now names its
+# Create stage and the gateway resolves that stage's set here, so nothing
+# needs capping. A tool outside the set stays reachable through the harness's
+# own search_tools meta-tool. Promotion, approval and ordering tools are in no
+# set: those decisions belong to the person. The Imagine handover and rework
+# are in the Imagine set because the owner may delegate them (FORGE-824);
+# without that they are refused.
+
+#: The Create view's stages, in order.
+CREATE_STAGES: tuple[str, ...] = ("imagine", "develop", "check", "make")
+
+#: Reads every stage carries: where the project stands, the node a person
+#: points at, the manufacturing context, a running job, and the studio record.
+_CREATE_READS: frozenset[str] = frozenset(
+    {
+        "project.open",
+        "project.get",
+        "twin.get_node",
+        "twin.find_by_property",
+        "twin.thread_for",
+        "twin.item_history",
+        "twin.query_cypher",
+        "twin.job_status",
+        "twin.get_manufacturing_context",
+        "twin.imagine_get_studio",
+        "twin.imagine_handover_status",
+        "twin.render_work_product",
+        "twin.record_decision",
+        "knowledge.search",
+    }
+)
+
+CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
+    # The studio, sketches, concept images and the 3D concept, and the
+    # manufacturing context a person states before engineering starts.
+    "imagine": _CREATE_READS
+    | {
+        "twin.imagine_put_studio",
+        # FORGE-824: a person's steps, refused unless the owner delegates
+        # human authority, and then held for an approval like any such step.
+        "twin.imagine_handover",
+        "twin.imagine_rework",
+        "twin.state_manufacturing_context",
+        "twin.generate_sketch",
+        "twin.commit_design_sketch",
+        "twin.render_concept_sketch",
+        "twin.render_concept_image",
+        "twin.critique_concept_image",
+        "twin.interpret_sketch",
+        "twin.confirm_sketch_reading",
+        "twin.generate_concept_mesh",
+        "twin.segment_concept_mesh",
+        "twin.record_engineering_entity",
+        "twin.record_constraint_set",
+        "web.search",
+        "web.fetch",
+    },
+    # Concept parts into exact CAD (the design loop and CadQuery), boards and
+    # firmware, with the manufacturing context and DFM findings beside them.
+    "develop": _CREATE_READS
+    | {
+        "twin.state_manufacturing_context",
+        "twin.render_concept_image",
+        "twin.generate_concept_mesh",
+        "twin.segment_concept_mesh",
+        "twin.regenerate_concept_part",
+        "twin.complete_concept_part",
+        "twin.design_cad_loop",
+        "twin.get_design_loop",
+        "twin.build_exact_cad",
+        "twin.commit_geometry",
+        "twin.place_part",
+        "twin.stage_work_product_file",
+        "twin.get_dfm_findings",
+        "twin.get_dfm_report",
+        "cadquery.execute_script",
+        "cadquery.get_properties",
+        "cadquery.dfm_measure",
+        "kicad.generate_schematic",
+        "kicad.generate_pcb",
+        "kicad.run_erc",
+        "kicad.run_drc",
+        "component.search_parametric",
+        "twin.record_component_selection",
+        "twin.create_firmware_scaffold",
+        "firmware.build",
+        "twin.record_design_files",
+    },
+    # Evidence: DFM, the contracts and constraints, simulation, and the
+    # release checklist read.
+    "check": _CREATE_READS
+    | {
+        "twin.evaluate_dfm",
+        "twin.get_dfm_report",
+        "twin.get_dfm_findings",
+        "cadquery.dfm_measure",
+        "twin.constraint_violations",
+        "constraint.validate",
+        "twin.what_verifies",
+        "twin.evaluate_metric",
+        "calculix.run_fea",
+        "calculix.run_thermal",
+        "calculix.extract_results",
+        "calculix.validate_mesh",
+        "freecad.generate_mesh",
+        "spice.run_simulation",
+        "power.check_budget",
+        "kicad.run_erc",
+        "kicad.run_drc",
+        "firmware.static_check",
+        "twin.get_release_checklist",
+        "twin.record_evidence",
+        "twin.record_document",
+        "twin.stage_work_product_file",
+    },
+    # The release: checklist, package, builds and fabrication outputs, and
+    # what making it costs. Placing an order stays the person's.
+    "make": _CREATE_READS
+    | {
+        "twin.get_release_checklist",
+        "twin.get_dfm_report",
+        "twin.create_release_package",
+        "twin.create_baseline",
+        "twin.generate_test_plan",
+        "twin.create_bringup_checklist",
+        "twin.export_cad_step",
+        "cadquery.export_geometry",
+        "kicad.export_gerber",
+        "kicad.export_drill",
+        "kicad.export_pos",
+        "kicad.export_bom",
+        "firmware.build",
+        "slicer.slice",
+        "slicer.list_profiles",
+        "cost.estimate_manufacturing",
+        "vendor.list_connectors",
+        "vendor.quote",
+        "vendor.handoffs",
+        "twin.record_document",
+        "files.link",
+    },
+}
+
+
+def create_stage_tools(stage: str) -> frozenset[str]:
+    """The MCP tool ids a Create design turn in ``stage`` carries.
+
+    Raises :class:`UnknownProfileError` for a stage that does not exist rather
+    than widening to every tool.
+    """
+    try:
+        return CREATE_STAGE_TOOLS[stage.strip().lower()]
+    except KeyError:
+        raise UnknownProfileError(stage, list(CREATE_STAGES)) from None

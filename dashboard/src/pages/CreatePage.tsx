@@ -33,7 +33,11 @@ import '../styles/create-stage.css';
 export const STAGE_IDS = ['imagine', 'develop', 'check', 'make'] as const;
 export type StageId = (typeof STAGE_IDS)[number];
 
-/** Route-mapped intents to the tools each may use. */
+/**
+ * Route-mapped intents to the tools each may use. A design turn sends no ids:
+ * it carries the Create stage, and the gateway gives it that stage's tool set
+ * (FORGE-825), so it never needs to cap or drop tools.
+ */
 function useIntentTools(): Record<Intent, string[]> {
   const tools = useHarnessTools();
   return useMemo(() => {
@@ -41,10 +45,14 @@ function useIntentTools(): Record<Intent, string[]> {
     return {
       ask: [],
       change: ids.includes('twin.propose_change') ? ['twin.propose_change'] : [],
-      design: ids,
+      design: [],
     };
   }, [tools.data]);
 }
+
+/** What the stage buttons ask the assistant to do (FORGE-824). */
+export const START_IMAGINE_TEXT = 'Start the Imagine studio for this product.';
+export const START_DEVELOP_TEXT = 'Imagine is handed over. Start developing this product.';
 
 export function CreatePage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -69,6 +77,8 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   const setDraft = useCreateStore((s) => s.setDraft);
   const setIntent = useCreateStore((s) => s.setIntent);
   const submit = useCreateStore((s) => s.submit);
+  const sendNow = useCreateStore((s) => s.sendNow);
+  const setStage = useCreateStore((s) => s.setStage);
   const openDrawer = useCreateLayoutStore((s) => s.openDrawer);
   // Operations come from the gateway (FORGE-786) and are shared with
   // Engineering. While the project has any, `working` is derived from them,
@@ -115,6 +125,11 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   const stageId = STAGE_IDS[selected];
   const imagineView: ImagineView = params.get('imagine') === 'sketch' ? 'sketch' : 'studio';
 
+  // A design turn runs with the tools of the stage on screen (FORGE-825).
+  useEffect(() => {
+    setStage(projectId, stageId ?? null);
+  }, [projectId, setStage, stageId]);
+
   const collapsed = useCreateLayoutStore((s) => s.collapsed);
   const setCollapsed = useCreateLayoutStore((s) => s.setCollapsed);
 
@@ -140,6 +155,15 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
       window.setTimeout(() => document.querySelector<HTMLTextAreaElement>(COMPOSER)?.focus(), 0);
     },
     [projectId, setCollapsed, setDraft, setIntent],
+  );
+
+  /** Send a design request in a stage now, and show the conversation it runs in. */
+  const startIn = useCallback(
+    (stage: StageId, text: string) => {
+      setCollapsed('chat', false);
+      sendNow(projectId, text, 'design', tools, stage);
+    },
+    [projectId, sendNow, setCollapsed, tools],
   );
 
   if (project.isError) {
@@ -253,7 +277,11 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
               nodes={projectNodes}
               view={imagineView}
               onView={(v) => go('imagine', v)}
-              onAskAssistant={() => ask('Start the Imagine studio for this product.', 'design')}
+              onAskAssistant={() => startIn('imagine', START_IMAGINE_TEXT)}
+              onStartDeveloping={() => {
+                go('develop');
+                startIn('develop', START_DEVELOP_TEXT);
+              }}
             />
           ) : stageId === 'develop' ? (
             <DevelopStage

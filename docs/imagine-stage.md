@@ -17,7 +17,7 @@ its own copy; this one lives in `api_gateway/imagine/` (provenance in its
 |---|---|
 | Gateway | `/v1/twin/projects/{project_id}/imagine/...` (`api_gateway/imagine/`) |
 | Twin item | `IMG-STUDIO`, work product type `imagine_studio` (a definition: every config change or rework is its next revision) |
-| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_handover_status` |
+| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_handover_status`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
 | Engine | `api_gateway/imagine/engine/` (HTML, CSS and JS), three.js r128 vendored under `engine/vendor/` |
 
 ## Verification levels
@@ -59,6 +59,49 @@ Each `PUT` is the next `IMG-STUDIO` revision. The person's earlier choices,
 scenarios and confirmations carry over. A handed-over studio refuses a `PUT`
 until a person reworks it.
 
+## From a prompt
+
+The chat builds the studio from what the person says. The
+project brief the chat agent gets carries one line on the studio (*not
+started*, *draft, revision n* or *handed over at revision n*), and the chat
+system prompt adds one rule when the studio tools are in reach: with no
+studio and a product described, read the `imagine_studio` playbook and build
+the studio; with the studio handed over and the person asking to proceed,
+read that playbook's *After handover* section and start Develop.
+
+The playbook (`mcp_core/plugin_skills/imagine_studio/SKILL.md`, read with
+`chat.read_playbook`) is the formgraph `new` workflow rewritten for the twin
+tools:
+
+1. Work from what the person said, asking at most three questions.
+2. Call `twin.imagine_put_studio` with a config built from the playbook's
+   skeleton, which passes the checks as written (`engine: "formgraph@2"`, a
+   `product` with a lowercase slug id, a `form.template` from the catalogue,
+   requirements with `pri` of `Must`, `Should` or `Off`, a `programme` with the
+   intent ledger, assumptions and markets, an `environment` block, scenarios,
+   interfaces and the inline context with the manufacturing quantity). A test
+   (`tests/unit/test_imagine_studio_playbook.py`) runs that skeleton through
+   the same validator.
+3. Fix every reported error in one retry.
+4. Call `twin.imagine_handover_status` and tell the person what to do in the
+   studio and what is still missing.
+
+The agent never claims above V2 and does not hand over: the handover is the
+person's, in the studio, unless the owner delegates it (see
+[delegated to an agent](#delegated-to-an-agent)). After it, the playbook reads the handed-over records
+and starts Develop in order: the concept mesh, then exact CAD per made part
+with the DFM and manufacturing context, then electronics and firmware against
+the interface contracts. Approvals stay the person's.
+
+In the dashboard, **Ask the assistant** on the empty studio and **Start
+developing** after the handover send these turns directly (see
+[the Create view](create-view.md#the-studio)). The Claude Code plugins carry
+the same playbook as the `imagine_studio` skill and a `/metaforge:imagine`
+command; there, after handover, mechanical parts are written client side with
+the `generate_cad_script` skill (Claude Code writes the CadQuery and the
+server runs and renders it), rather than `twin.design_cad_loop`, which spends
+the gateway's model budget.
+
 ## REST
 
 All under `/v1/twin/projects/{project_id}/imagine`. Authentication is the
@@ -91,6 +134,34 @@ The handover and the rework are a person's decisions: a request from an agent
 surface (`X-MetaForge-Surface: agent`) is refused with 403, as is an agent
 confirming an assumption. Both are idempotent per `op_id`. Each operation is
 published to the project's operations log (`job:imagine-...`).
+
+### Delegated to an agent
+
+When the gateway owner delegates human-authority decisions
+(`METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true`, default off; see
+[delegating approvals to an agent](approvals.md#delegating-approvals-to-an-agent)),
+an agent may hand over and rework, for fully autonomous runs:
+
+- **REST.** `POST /handover` and `POST /rework` from the agent surface must
+  carry `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of`; without either
+  the call is a 422, as on the approvals API. With authentication on, the
+  person must be the authenticated principal (403 otherwise). With the flag
+  off nothing changes: 403.
+- **MCP.** `twin.imagine_handover {op_id}` and `twin.imagine_rework {op_id,
+  reason}` are always registered with the studio tools and are refused unless
+  the flag is on in the process the call lands in (the gateway, or the MCP
+  sidecar that serves the twin tools, so set it on both). They are
+  human-authority tools (`mcp_core/guardrails.py`, and destructive in
+  `mcp_core/annotations.py`): no project approval policy approves them, the
+  call is held for an approval, and the person it acted for is whoever
+  decided that approval, never a name the model supplies.
+
+The record says an agent decided, for that person, never that the person
+did: the handover (and rework) record carries `by: "agent:<name>"`, `agent`
+and `on_behalf_of`, and the operations log line ends *decided by agent
+<name> on behalf of <person>*. The `imagine_studio` playbook and the
+plugins' `/metaforge:imagine` command hand over once the checklist is ready
+only when this is allowed, and otherwise ask the person.
 
 ## Mapping into the twin
 
@@ -263,6 +334,13 @@ Read the studio again to get a fresh URL. Nothing here names a provider.
 
 ## Known limits
 
+- The form catalogue (`api_gateway/imagine/formgraph/data/catalogue.json`)
+  has one template, `enclosure`: a rounded, shelled box with a lid. It can
+  stand for a lamp's base housing but not an arm, a hinge or a shade, and the
+  engine labels every product's shell *Fuselage shell* (`engine/engine.js`,
+  the parts panel and the readiness row), wording from the multirotor
+  reference. Non-box products need more templates, or their made parts in the
+  inline context.
 - The concept assembly decision records each part's envelope in its text and
   the studio's handover record; a concept layout with sizes and positions is
   still drawn by `twin.render_concept_sketch`.

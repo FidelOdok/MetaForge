@@ -273,7 +273,7 @@ write. Where they read it:
   with a reason when the store cannot be read).
 
 Metrics: `metaforge_llm_tokens_total{role, provider, model, kind}` (`kind` is
-`prompt`, `completion` or `cached_input`), `metaforge_llm_cost_usd_total{role,
+`prompt`, `completion`, `cached_input` or `cache_write`), `metaforge_llm_cost_usd_total{role,
 provider, model}`, `metaforge_llm_calls_total{..., usage_reported}` and
 `metaforge_llm_run_spend_exceeded_total{role}`. Per-run cost is not a label
 (unbounded cardinality); instead the gateway bumps the last counter once when a
@@ -823,19 +823,34 @@ are unchanged.
 | Part | Content | Stable? |
 |------|---------|---------|
 | Prefix | tool schemas (sorted by name, keys sorted), system prompt | yes |
-| Suffix | conversation history, latest tool results, per-round `system_suffix` note | no |
+| Suffix | per-turn `system_suffix` (the chat's project brief, the tools-array note), conversation history, latest tool results | no |
 
 The layout lives in `orchestrator/harness/providers/caching.py`:
 
 - **Anthropic** gets explicit `cache_control` breakpoints on the last tool, the
   stable system block and the last message block (3 of the 4 allowed), so each
   step reads the previous step's history from the cache.
-- **OpenAI and OpenRouter prefix caching** is automatic, so the
-  adapters only guarantee the ordering and send a stable `prompt_cache_key`
-  (a hash of system prompt and tools) as `extra_body` on OpenAI and OpenRouter
-  endpoints. Self-hosted OpenAI-compatible servers do not receive it.
-- The tools-array truncation note is a per-round `system_suffix`. Anthropic
-  sends it as a second, unmarked system block; other families append it to the
+- **OpenAI and OpenRouter prefix caching** is automatic for OpenAI-family
+  models, so the adapters only guarantee the ordering and send a stable
+  `prompt_cache_key` (a hash of the system prompt and the tools in their
+  canonical order) as `extra_body` on OpenAI and OpenRouter endpoints.
+  Self-hosted OpenAI-compatible servers do not receive it.
+- **Claude through OpenRouter** (a model id starting `anthropic/`, or any
+  Claude model on the `openrouter` provider) is cached only where told, like
+  Anthropic's own API. The system message is sent as content
+  parts: the stable text carries `cache_control: {"type": "ephemeral"}`, and
+  since Claude hashes tools, then system, then messages, that one breakpoint
+  caches the whole tools array and the system prompt. The request also
+  carries OpenRouter's top-level `cache_control`, which keeps a moving
+  breakpoint on the last cacheable block, so calls 2 to N of a turn and the
+  next turn read the conversation so far from the cache. Other models on
+  OpenRouter get neither. See
+  [OpenRouter prompt caching](https://openrouter.ai/docs/features/prompt-caching).
+- `system_suffix` carries what may change between turns or rounds: the chat's
+  project brief (it changes with each studio revision or new item, so it is
+  kept out of the cached system text) and the tools-array truncation note.
+  Anthropic sends it as a second, unmarked system block, Claude on OpenRouter
+  as a second, unmarked system part, and other families append it to the
   system text. It never alters the cached system block.
 - Nothing time- or id-dependent may enter the prefix. Anything that varies per
   step belongs in the suffix.
@@ -843,6 +858,33 @@ The layout lives in `orchestrator/harness/providers/caching.py`:
 Cached tokens are reported through the usage accounting
 (`providers/usage.py`): Anthropic `cache_read_input_tokens` and OpenAI
 `prompt_tokens_details.cached_tokens` land in `cached_input_tokens`, priced at
-the model's `cached_input` rate. Compare `cached_input_tokens` to
+the model's `cached_input` rate. Cache writes (Anthropic
+`cache_creation_input_tokens`, OpenRouter `prompt_tokens_details.cache_write_tokens`)
+are logged as `cache_write_tokens` on the `llm_usage` line and counted as
+`kind="cache_write"`; a Claude call that shows neither reads nor writes
+had no breakpoint applied. Compare `cached_input_tokens` to
 `prompt_tokens` in `GET /v1/runs/{id}` usage totals to see the hit rate.
 Gemini, Bedrock and Codex Responses calls are not given cache markers yet.
+
+### Create stage tool sets
+
+A design turn from the dashboard's [Create view](../create-view.md#conversation-and-instructions)
+sends `create_stage` (`imagine`, `develop`, `check` or `make`) on
+`POST /v1/chat/threads/{id}/messages` instead of a list of tool ids. The
+gateway resolves the stage's set from `CREATE_STAGE_TOOLS` in
+`mcp_core/profiles.py` and passes it as the turn's `tool_allowlist`, so a
+missing tool drops out cleanly and the `tools` field of that message is
+ignored. Each set holds 40 tools or fewer (asserted by
+`tests/unit/test_create_stage_tools.py`, which also checks every id against
+the tools the adapters register), well under the 128-tool cap, so nothing is
+truncated. Every set carries the reads a turn needs wherever it is
+(`twin.get_node`, `twin.job_status`, `twin.get_manufacturing_context`, the
+studio reads); the native `search_tools` meta-tool still reaches anything
+else. Approval, promotion and ordering tools are in no set. The gateway logs
+`chat_create_stage_tools` with the stage and the set size.
+
+Before this, a design turn sent all 171 tool ids the sandbox listed, and the
+harness kept 128 by name order, dropping `twin.get_manufacturing_context`,
+`twin.get_dfm_report`, `twin.get_release_checklist` and `twin.job_status`
+among others. Serialised, those 128 tool schemas are about 23,600 tokens; a
+stage set is about 3,900 (Imagine) to 7,300 (Develop).

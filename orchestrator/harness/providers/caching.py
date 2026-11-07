@@ -102,3 +102,62 @@ def system_text(request: Any) -> tuple[str | None, str | None]:
     if not isinstance(request, dict):
         return None, None
     return request.get("system"), request.get("system_suffix")
+
+
+# ---------------------------------------------------------------------------
+# Claude over an OpenAI-compatible router (FORGE-825)
+# ---------------------------------------------------------------------------
+#
+# OpenRouter caches Claude only where told, exactly like Anthropic's own API:
+# its automatic prefix caching covers OpenAI-family models, not Claude. A
+# live run sent 75k to 84k prompt tokens per call with ``cached_tokens: 0``.
+# So a Claude request through OpenRouter carries:
+#
+# - an explicit ``cache_control`` breakpoint on the stable system text. Claude
+#   hashes the prefix as tools, then system, then messages, so this one
+#   breakpoint caches the whole tools array and the system prompt together;
+# - the volatile per-round note as a second, unmarked system part, so it never
+#   changes the cached bytes;
+# - a top-level ``cache_control`` (OpenRouter's automatic mode), which puts a
+#   moving breakpoint on the last cacheable block. Calls 2 to N in a turn and
+#   the next turn then read the conversation so far from the cache.
+#
+# https://openrouter.ai/docs/features/prompt-caching documents both shapes.
+
+#: Routers known to forward Claude ``cache_control`` parts. A self-hosted
+#: OpenAI-compatible server could reject a content-part system message.
+_CLAUDE_CACHE_ROUTERS = ("openrouter.ai",)
+
+
+def is_claude_model(model: str | None) -> bool:
+    """A Claude model id, bare or behind a router prefix (``anthropic/...``)."""
+    m = (model or "").strip().lower().lstrip("~")
+    return m.startswith(("anthropic/", "claude")) or "/claude" in m
+
+
+def routes_claude_cache_control(
+    provider: str | None, base_url: str | None, model: str | None
+) -> bool:
+    """Does this OpenAI-compatible request need explicit Claude breakpoints?"""
+    if not is_claude_model(model):
+        return False
+    if (provider or "").strip().lower() == "openrouter":
+        return True
+    return bool(base_url) and any(host in str(base_url) for host in _CLAUDE_CACHE_ROUTERS)
+
+
+def openai_claude_system_message(stable: str | None, suffix: str | None) -> dict[str, Any] | None:
+    """The system message as content parts; the stable part carries the breakpoint."""
+    parts: list[dict[str, Any]] = []
+    if stable:
+        parts.append({"type": "text", "text": stable, "cache_control": dict(_EPHEMERAL)})
+    if suffix:
+        parts.append({"type": "text", "text": suffix})
+    if not parts:
+        return None
+    return {"role": "system", "content": parts}
+
+
+def automatic_cache_control() -> dict[str, str]:
+    """OpenRouter's top-level field: a breakpoint that follows the conversation."""
+    return dict(_EPHEMERAL)

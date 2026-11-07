@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CircleAlert, CircleCheck, CircleDashed, Lock } from 'lucide-react';
+import { ArrowRight, CircleAlert, CircleCheck, CircleDashed, Lock } from 'lucide-react';
 import { handoverMissing } from '../../../api/endpoints/imagine';
 import { refusalOf } from '../../../api/endpoints/create';
 import { useHandover, useHandoverChecklist, useRework } from '../../../hooks/use-imagine';
@@ -40,7 +40,16 @@ function ItemList({ items, label }: { items: HandoverItem[]; label: string }) {
  * missing. After handover the studio is read only; reopening it needs a
  * reason and a confirmation, and marks dependent evidence stale.
  */
-export function HandoverPanel({ projectId, studio }: { projectId: string; studio: ImagineStudio }) {
+export function HandoverPanel({
+  projectId,
+  studio,
+  onStartDeveloping,
+}: {
+  projectId: string;
+  studio: ImagineStudio;
+  /** After handover, ask the assistant to start Develop (FORGE-824). */
+  onStartDeveloping?: () => void;
+}) {
   const handedOver = studio.status === 'handed_over';
   const checklist = useHandoverChecklist(projectId, !handedOver);
   const handover = useHandover(projectId);
@@ -55,6 +64,11 @@ export function HandoverPanel({ projectId, studio }: { projectId: string; studio
           <Lock size={14} aria-hidden="true" /> Handed over to engineering
           {studio.revision !== null ? ` · revision ${studio.revision}` : ''} · read only
         </p>
+        {onStartDeveloping && !reopening && (
+          <button type="button" className="cv-primary" data-testid="stage-primary" onClick={onStartDeveloping}>
+            Start developing <ArrowRight size={14} aria-hidden="true" />
+          </button>
+        )}
         {reopening ? (
           <form
             className="cv-reopen"

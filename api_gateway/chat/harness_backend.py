@@ -43,6 +43,7 @@ from api_gateway.chat.ui_blocks import (
 )
 from api_gateway.twin.change_classification import guard_tool_call
 from mcp_core.profiles import MAX_TOOLS as PHASE_TOOL_CAP
+from mcp_core.profiles import create_stage_tools
 from observability.metrics import MetricsCollector
 from orchestrator.design_flow.grounding import (
     NO_TWIN_COMMIT_BANNER,
@@ -1242,6 +1243,16 @@ ANSWER_STYLE_BLOCKS = (
 )
 
 
+# FORGE-824: the chat drives Imagine. The project brief's "Imagine studio:"
+# line says which case applies, so neither needs a tool call to find out.
+IMAGINE_RULE = (
+    "Imagine studio: when the project has no studio and the person describes a "
+    "product, read the imagine_studio playbook and build the studio from what "
+    "they said. When the studio is handed over and the person asks to proceed, "
+    "read that playbook's After handover section and start Develop."
+)
+
+
 def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> str:
     """Layered system prompt for the native path (MET-566).
 
@@ -1274,17 +1285,33 @@ def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> st
         "provided in the conversation; when you rely on a retrieved fragment, "
         "cite its bracketed source id."
     )
-    if "chat.read_playbook" in runtime.tools.names():
+    names = runtime.tools.names()
+    if "chat.read_playbook" in names:
         # The plugin's working rules and playbook list (playbooks.py); stable per
         # process, so the prompt cache still hits across turns.
         sections.append(WORKING_RULES)
         index = playbook_index(cached_playbooks())
         if index:
             sections.append(index)
+        if any(n.endswith("imagine_put_studio") for n in names):
+            sections.append(IMAGINE_RULE)
     sections.append(ANSWER_STYLE)
-    if "chat.render_ui" in runtime.tools.names():
+    if "chat.render_ui" in names:
         sections.append(ANSWER_STYLE_BLOCKS)
     return "\n\n".join(sections)
+
+
+def native_system_parts(runtime: Any, project_brief: str | None) -> tuple[str, str | None]:
+    """(stable system prompt, per-turn context) for the native path (FORGE-825).
+
+    The stable part carries the provider cache breakpoint, so it holds nothing
+    that changes between turns of a thread. The project brief does change (a
+    studio revision, a new item), so it goes in the second part, which the
+    adapters send after the breakpoint.
+    """
+    stable = build_system_prompt(runtime)
+    context = f"[project context]\n{project_brief}" if project_brief else None
+    return stable, context
 
 
 def _brief_pair(project_brief: str) -> list[dict[str, Any]]:
@@ -1355,6 +1382,7 @@ async def _build_context(
     tool_allowlist: frozenset[str] | None = None,
     approval_mode: str = "hold",
     ui_blocks: list[dict[str, Any]] | None = None,
+    chat_stage: str | None = None,
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -1400,7 +1428,12 @@ async def _build_context(
                 mcp_bridge,
                 enabled,
                 runtime_cell,
-                max_total_tools=PHASE_TOOL_CAP if tool_allowlist is not None else None,
+                # A design-flow phase is held to its budget and the service
+                # caller's refusals; a Create stage turn (FORGE-825) is a
+                # person's chat, so search_tools may add what the turn needs.
+                max_total_tools=(
+                    PHASE_TOOL_CAP if tool_allowlist is not None and not chat_stage else None
+                ),
             )
         ]
     native_tools = native_tools + [make_read_tool_result_tool(runtime_cell)]
@@ -1810,6 +1843,8 @@ async def _run_chat_turn(
         project_brief=project_brief,
         context_block=context_block,
     )
+    # FORGE-825: the native path sends the brief after the cache breakpoint.
+    native_system, native_context = native_system_parts(ctx.runtime, project_brief)
     if native:
         cost_provider, cost_model = _cost_target(ctx)
         result = await run_native_tools(
@@ -1818,7 +1853,8 @@ async def _run_chat_turn(
             role="generator",
             invoke=invoke,
             max_steps=steps,
-            system=system,
+            system=native_system,
+            system_context=native_context,
             history=full_history,
             # MET-568: bound within-turn growth; older tool exchanges fold
             # into a synopsis once the estimate crosses the budget.
@@ -2167,6 +2203,7 @@ async def run_chat_turn_streaming(
     domains: tuple[str, ...] | None = None,
     tool_allowlist: frozenset[str] | None = None,
     ui_blocks: list[dict[str, Any]] | None = None,
+    create_stage: str | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -2201,6 +2238,12 @@ async def run_chat_turn_streaming(
     turn_start = time.monotonic()
     wall_clock = wall_clock_seconds if wall_clock_seconds is not None else chat_wall_clock_seconds()
     deadline = turn_start + wall_clock if wall_clock is not None else None
+    if create_stage and tool_allowlist is None:
+        # FORGE-825: a Create design turn carries its stage's tool set, not
+        # every tool id; the person's own tool selection does not apply.
+        tool_allowlist = create_stage_tools(create_stage)
+        enabled_tools = None
+        logger.info("chat_create_stage_tools", stage=create_stage, tools=len(tool_allowlist))
     ctx = await _build_context(
         session_id,
         store,
@@ -2215,6 +2258,7 @@ async def run_chat_turn_streaming(
         domains=domains,
         tool_allowlist=tool_allowlist,
         ui_blocks=ui_blocks,
+        chat_stage=create_stage,
     )
 
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
@@ -2227,6 +2271,8 @@ async def run_chat_turn_streaming(
         project_brief=project_brief,
         context_block=context_block,
     )
+    # FORGE-825: the native path sends the brief after the cache breakpoint.
+    native_system, native_context = native_system_parts(ctx.runtime, project_brief)
 
     # Emit a context-window snapshot for this turn before the loop runs, so a
     # client can show what's going into the model vs. what's available. Best-effort:
@@ -2293,7 +2339,8 @@ async def run_chat_turn_streaming(
             role="generator",
             invoke=invoke,
             max_steps=steps,
-            system=system,
+            system=native_system,
+            system_context=native_context,
             history=full_history,
             # MET-568: bound within-turn growth; older tool exchanges fold
             # into a synopsis once the estimate crosses the budget.

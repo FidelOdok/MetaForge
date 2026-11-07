@@ -172,7 +172,11 @@ the scenarios it must survive, the options and the chosen parts, the
 assumptions, and early screening. It is the formgraph studio, merged into
 MetaForge and styled like it. When there is no studio yet, Imagine shows one
 calm empty state: *Ask the assistant to start the studio for this product*,
-with **Ask the assistant**, which puts the request in the composer.
+with **Ask the assistant**, which opens the conversation and sends *Start the
+Imagine studio for this product.* straight away as a design turn in the
+Imagine stage. The person's draft in the composer is left as it was. The
+assistant then follows the `imagine_studio` playbook (see
+[from a prompt](imagine-stage.md#from-a-prompt)).
 
 Create hosts the studio's engine page (`engine_url` from
 `GET .../imagine/studio`) in a frame sandboxed to scripts only, with no
@@ -224,6 +228,13 @@ to engineering · revision 3 · read only*. **Reopen Imagine** asks why, and
 only after the person confirms calls `POST .../imagine/rework` with the
 reason: Imagine opens on a new studio revision, and the Develop and Check
 evidence that depends on it is marked stale.
+
+Once handed over, the panel also offers **Start developing**. It moves to the
+Develop stage and sends *Imagine is handed over. Start developing this
+product.* as a design turn in Develop, so the assistant reads the handed-over
+records and starts Develop in order (concept mesh, exact CAD per made part
+with the manufacturing context, then electronics and firmware against the
+interface contracts). Approvals along the way stay the person's.
 
 ### Sketch
 
@@ -739,7 +750,27 @@ The composer has three intents:
 |---|---|---|
 | Ask | no tools | Discussion only; the agent may not claim it changed anything |
 | Change | `twin.propose_change` | A proposal that waits in Decisions until a person approves it |
-| Design | every harness tool | A design pass; writes are still held by the approval policy |
+| Design | the current stage's tool set (`create_stage`) | A design pass; writes are still held by the approval policy |
+
+A design turn names the stage on screen (`create_stage`: `imagine`,
+`develop`, `check` or `make`) and sends no tool ids; the gateway resolves the
+stage's own set, so a turn never carries more than about 40 tools and none is
+cut by the provider's 128-tool cap:
+
+| Stage | Tools beyond the shared reads |
+|---|---|
+| Imagine | the studio (`twin.imagine_put_studio`), sketches, concept images and their critique, the 3D concept mesh and its parts, the manufacturing context, intent and constraint records, web search |
+| Develop | concept parts (segment, redo, seal), `twin.design_cad_loop` and its reader, exact CAD, CadQuery, geometry commit and placement, DFM findings, KiCad schematic and board with ERC and DRC, component search and selection, the firmware scaffold and build, design files |
+| Check | DFM evaluation and report, constraints and contracts, CalculiX, SPICE, the power budget, ERC and DRC, firmware static checks, the release checklist read, evidence and documents |
+| Make | the release checklist, release package, baseline, test plan, bring-up checklist, STEP and fabrication exports, the firmware build, slicing, cost estimates and vendor quotes and handoffs |
+
+Every stage shares the reads a turn needs wherever it is: the project, a
+node, a thread, a query, `twin.job_status`, `twin.get_manufacturing_context`,
+the studio and its handover status, a render, decisions and knowledge search.
+The agent's `search_tools` reaches anything else. Ordering, promotion and
+approvals are in no set. The sets live in one place,
+`CREATE_STAGE_TOOLS` in `mcp_core/profiles.py` (see
+[Create stage tool sets](architecture/robust-harness-design.md#create-stage-tool-sets)).
 
 Instructions are sent one at a time. Anything sent while a pass is running is
 shown as *Queued* and goes next. Each instruction sent is a chat turn

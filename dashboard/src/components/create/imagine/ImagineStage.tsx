@@ -18,6 +18,8 @@ interface ImagineStageProps {
   onView: (view: ImagineView) => void;
   /** Opens the conversation with a request to start the studio. */
   onAskAssistant?: () => void;
+  /** After handover: send a design turn in Develop (FORGE-824). */
+  onStartDeveloping?: () => void;
 }
 
 /**
@@ -25,7 +27,7 @@ interface ImagineStageProps {
  * this product, or the sketch paper, then the handover to engineering.
  * Checks here are screening only; Develop, Check and Make follow the twin.
  */
-export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant }: ImagineStageProps) {
+export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, onStartDeveloping }: ImagineStageProps) {
   const studio = useStudio(projectId);
   const data = studio.data;
   const src = data ? engineHref(data) : null;
@@ -69,7 +71,7 @@ export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant }:
         </div>
       )}
 
-      {data && data.status !== 'none' && <HandoverPanel projectId={projectId} studio={data} />}
+      {data && data.status !== 'none' && <HandoverPanel projectId={projectId} studio={data} onStartDeveloping={onStartDeveloping} />}
     </div>
   );
 }
