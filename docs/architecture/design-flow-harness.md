@@ -1326,7 +1326,7 @@ counted in `metaforge_sketch_reading_total`, and the
 
 #### Generating a freeform concept sketch {#sketch-generation}
 
-`twin.generate_sketch` (and the Create stage's **Generate**, which calls the
+`twin.generate_sketch` (and **Generate a concept** in Create's Imagine sketch, which calls the
 same service over `/v1/twin/projects/{id}/sketch-generations`) draws a
 freeform concept sketch through the same image providers as
 `twin.render_concept_image`. The module is

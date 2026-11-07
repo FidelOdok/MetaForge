@@ -24,7 +24,7 @@ sidecar) and `routes.py`.
 | A design-flow or plain run | `run:<run_id>` | `run` | the flow's phases |
 | A slow tool job | `job:<job_id>` | `job` | none |
 | A Create chat turn | `chat:<turn_id>` | `chat` | none |
-| A sketch save from the Create stage | `job:sketch-<save_id>` | `job` (domain `sketch`) | none |
+| A sketch save from Create's Imagine sketch | `job:sketch-<save_id>` | `job` (domain `sketch`) | none |
 | A sketch plane change (confirm, reassign, undo, archive) | `job:sketch-plane-<op_id>` | `job` (domain `sketch`) | none |
 | Making a sketch editable: the stored proposal, its promotion and sign-off | `job:sketch-compile-<interpretation_id>` | `job` (domain `sketch`) | `interpretation_proposed`, `parametric_review` |
 | Generating a concept sketch (`twin.generate_sketch` or Create **Generate**) | `job:<job_id>` | `job` (domain `sketch`) | a milestone when the image arrives, a preservation `review_required` |

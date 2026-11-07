@@ -2,8 +2,11 @@ import { Check } from 'lucide-react';
 import { MILESTONES, type Milestone } from './copy';
 
 interface JourneyRailProps {
-  /** The current milestone; `MILESTONES.length` when all are done. */
+  /** Where the creation stands: the current milestone; `MILESTONES.length` when all are done. */
   milestone: number;
+  /** The stage on screen. */
+  selected: number;
+  onSelect: (index: number) => void;
   /** One short summary per milestone. */
   summaries?: Partial<Record<Milestone, string>>;
   /** Something is running now, so the current milestone animates. */
@@ -11,22 +14,28 @@ interface JourneyRailProps {
 }
 
 /**
- * Imagine, Develop, Check, Make (16.2 item 2): where this creation stands, as
- * summaries rather than gates. Work in a later milestone can already be under
- * way; nothing here blocks it.
+ * Imagine, Develop, Check, Make: the navigation of Create. Each stage owns
+ * its content; the rail also says where the creation stands. Any stage can
+ * be opened: work in a later stage can already be under way.
  */
-export function JourneyRail({ milestone, summaries, active }: JourneyRailProps) {
+export function JourneyRail({ milestone, selected, onSelect, summaries, active }: JourneyRailProps) {
   return (
-    <ol className="cv-journey" aria-label="Progress">
+    <div className="cv-journey" role="tablist" aria-label="Stages">
       {MILESTONES.map((label, i) => {
         const state = i < milestone ? 'done' : i === milestone ? 'current' : 'todo';
         const summary = summaries?.[label];
         return (
-          <li
+          <button
             key={label}
-            className={`cv-journey-step is-${state} ${state === 'current' && active ? 'is-active' : ''}`}
-            aria-current={state === 'current' ? 'step' : undefined}
+            type="button"
+            role="tab"
+            id={`cv-stage-tab-${i}`}
+            aria-selected={i === selected}
+            aria-controls="cv-stage-panel"
+            className={`cv-journey-step is-${state}${i === selected ? ' is-selected' : ''}${state === 'current' && active ? ' is-active' : ''}`}
+            data-state={state}
             title={summary ? `${label}: ${summary}` : label}
+            onClick={() => onSelect(i)}
           >
             <span className="cv-journey-dot" aria-hidden="true">
               {state === 'done' ? <Check size={11} /> : i + 1}
@@ -35,9 +44,9 @@ export function JourneyRail({ milestone, summaries, active }: JourneyRailProps) 
               <span className="cv-journey-label">{label}</span>
               {summary && <span className="cv-journey-summary">{summary}</span>}
             </span>
-          </li>
+          </button>
         );
       })}
-    </ol>
+    </div>
   );
 }

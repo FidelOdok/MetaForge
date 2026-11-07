@@ -63,9 +63,9 @@ vi.mock('../ParametricCanvas', () => ({
 import { ParametricStage } from '../ParametricStage';
 import { useParametricPreview } from '../../../hooks/use-parametric-preview';
 
-function Harness({ variant = 'create' as 'create' | 'engineering' }) {
+function Harness({ variant = 'create' as 'create' | 'engineering', readOnly = false }) {
   const pp = useParametricPreview('proj-1', 'PSK-SLOT');
-  return <ParametricStage pp={pp} variant={variant} />;
+  return <ParametricStage pp={pp} variant={variant} readOnly={readOnly} />;
 }
 
 function queue(...defs: PreviewDefinition[]) {
@@ -149,6 +149,16 @@ describe('ParametricStage', () => {
     expect(screen.getByTestId('canvas').dataset.top).toBe('5');
     await userEvent.click(screen.getByRole('button', { name: /retry/i }));
     expect(retryOperation).toHaveBeenCalledWith('proj-1', 'job:j9');
+  });
+
+  it('read only (Create Develop), shows the part with no fields, no Apply and no handles', async () => {
+    queue(definition());
+    render(<Harness readOnly />);
+    await waitFor(() => expect(screen.getByTestId('canvas').dataset.top).toBe('5'));
+    expect(screen.queryByLabelText('Depth (mm)')).toBeNull();
+    expect(screen.queryByTestId('parametric-apply')).toBeNull();
+    expect(screen.queryByRole('form', { name: 'Change the part' })).toBeNull();
+    expect(screen.getByTestId('parametric-status-line')).toHaveTextContent('3D Preview · provisional');
   });
 
   it('Engineering shows the comparison values', async () => {

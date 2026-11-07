@@ -34,7 +34,7 @@ export function DecisionsPanel({ projectId }: DecisionsPanelProps) {
         <p className="cv-muted">Nothing is waiting for you.</p>
         <p className="cv-fineprint">
           Changes, spending, sharing files and machine actions each ask here first. Releasing a build and accepting it
-          are on the Make and Inspect tabs.
+          are in the Make stage.
         </p>
       </div>
     );

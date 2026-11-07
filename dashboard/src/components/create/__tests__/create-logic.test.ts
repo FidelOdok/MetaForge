@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { CreationView } from '../../../api/endpoints/create';
 import type { TwinNode } from '../../../types/twin';
-import { commitmentOf, journeyStep } from '../copy';
+import { commitmentOf } from '../copy';
 import { checksFromCriteria } from '../InspectPanel';
 import { recommendProcess } from '../MakePanel';
 import { nameFromPrompt } from '../CreationsHome';
@@ -35,19 +35,6 @@ function view(over: Partial<CreationView['readiness']> = {}, items: CreationView
 function node(id: string, wpType: string, updatedAt: string): TwinNode {
   return { id, name: id, type: 'work_product', domain: '', status: '', properties: { wp_type: wpType }, updatedAt } as TwinNode;
 }
-
-describe('journeyStep', () => {
-  it('starts at Describe and moves to Clarify once there is a brief', () => {
-    expect(journeyStep(view())).toBe(0);
-    expect(journeyStep(view({}, { intended_use: { value: 'x', status: 'confirmed', source: 'user' } }))).toBe(1);
-  });
-
-  it('puts a waiting decision on Approve and a finished build on Inspect', () => {
-    expect(journeyStep(view({ stage: 'design_in_development', blockers: [{ id: 'approvals', message: '', action: '' }] }))).toBe(4);
-    expect(journeyStep(view({ stage: 'build_completed' }))).toBe(6);
-    expect(journeyStep(view({ stage: 'accepted_product' }))).toBe(7);
-  });
-});
 
 describe('commitmentOf', () => {
   it('keeps spending, machines and file sharing apart from design approval', () => {

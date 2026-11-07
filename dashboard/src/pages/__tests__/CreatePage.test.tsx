@@ -42,11 +42,19 @@ vi.mock('../../hooks/use-twin-chat', () => ({
   useTwinChatThreads: vi.fn(() => ({ data: [] })),
   useTwinChatThread: vi.fn(() => ({ data: undefined })),
 }));
-// The stage renders WebGL previews; its behaviour is covered on its own.
-vi.mock('../../components/create/ProductStage', async (orig) => ({
-  ...(await orig<typeof import('../../components/create/ProductStage')>()),
-  ProductStage: () => <section aria-label="Product" />,
+// Each stage is covered on its own; here they only say which one is on screen.
+vi.mock('../../components/create/imagine/ImagineStage', () => ({
+  ImagineStage: ({ view, onView }: { view: string; onView: (v: 'studio' | 'sketch') => void }) => (
+    <section aria-label="Imagine stage" data-view={view}>
+      <button type="button" onClick={() => onView('sketch')}>
+        Sketch
+      </button>
+    </section>
+  ),
 }));
+vi.mock('../../components/create/DevelopStage', () => ({ DevelopStage: () => <section aria-label="Develop stage" /> }));
+vi.mock('../../components/create/CheckStage', () => ({ CheckStage: () => <section aria-label="Check stage" /> }));
+vi.mock('../../components/create/MakeStage', () => ({ MakeStage: () => <section aria-label="Make stage" /> }));
 
 const P = 'sample-drone-fc';
 
@@ -84,25 +92,48 @@ describe('CreatePage', () => {
     expect(screen.getByRole('heading', { name: 'What do you want to make?' })).toBeInTheDocument();
   });
 
-  it('shows the product, where it stands, and the journey for a creation', () => {
+  it('opens a creation on the stage where it stands, with the four stages as navigation', () => {
     renderAt(`/create/${P}`);
     expect(screen.getByRole('heading', { name: 'Drone FC' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Build completed' })).toBeInTheDocument();
-    const progress = screen.getByRole('list', { name: 'Progress' });
-    // Four milestones as summaries: Imagine, Develop, Check, Make.
-    expect(within(progress).getAllByRole('listitem')).toHaveLength(4);
-    expect(within(progress).getByText('Make').closest('li')).toHaveAttribute('aria-current', 'step');
+    const rail = screen.getByRole('tablist', { name: 'Stages' });
+    const tabs = within(rail).getAllByRole('tab');
+    expect(tabs.map((t) => t.querySelector('.cv-journey-label')?.textContent)).toEqual(['Imagine', 'Develop', 'Check', 'Make']);
+    // The sample build is completed: Make is where it stands, and on screen.
+    expect(within(rail).getByRole('tab', { name: /Make/ })).toHaveAttribute('aria-selected', 'true');
+    expect(within(rail).getByRole('tab', { name: /Make/ })).toHaveAttribute('data-state', 'current');
+    expect(screen.getByRole('region', { name: 'Make stage' })).toBeInTheDocument();
     expect(useProjectStore.getState().activeProjectId).toBe(P);
   });
 
-  it('keeps the open panel in the address, so back and forward work', async () => {
+  it('switches stage from the rail and keeps it in the address, so back and forward work', async () => {
     renderAt(`/create/${P}`);
-    await userEvent.click(screen.getByRole('tab', { name: 'Inspect' }));
-    expect(window.location.search).toContain('panel=inspect');
-    expect(screen.getByText('Boots and shows up over USB')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: /Imagine/ }));
+    expect(window.location.search).toContain('stage=imagine');
+    expect(screen.getByRole('region', { name: 'Imagine stage' })).toHaveAttribute('data-view', 'studio');
+    expect(screen.queryByRole('region', { name: 'Make stage' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Sketch' }));
+    expect(window.location.search).toContain('imagine=sketch');
+    expect(screen.getByRole('region', { name: 'Imagine stage' })).toHaveAttribute('data-view', 'sketch');
+    await userEvent.click(screen.getByRole('tab', { name: /Develop/ }));
+    expect(screen.getByRole('region', { name: 'Develop stage' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: /Check/ }));
+    expect(screen.getByRole('region', { name: 'Check stage' })).toBeInTheDocument();
   });
 
-  it('opens the Decisions panel when the overlay asks for a review', async () => {
+  it('has removed the side panels, the presentation mode and the duplicate controls', () => {
+    renderAt(`/create/${P}`);
+    for (const name of ['Brief', 'Inspect', 'History']) expect(screen.queryByRole('tab', { name })).toBeNull();
+    expect(screen.queryByRole('complementary', { name: 'Details' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Present/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Engineering/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Collapse the details' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Stage mode' })).toBeNull();
+    expect(screen.queryByTestId('fit-together')).toBeNull();
+    expect(screen.queryByTestId('readiness-status')).toBeNull();
+    expect(screen.queryByText(/Manufacturing guidance/)).toBeNull();
+  });
+
+  it('opens the decisions when the activity asks for a review', async () => {
     useOperationsStore.getState().reset();
     act(() =>
       useOperationsStore.getState().applyEvents(P, [
@@ -118,28 +149,20 @@ describe('CreatePage', () => {
     );
     renderAt(`/create/${P}`);
     await userEvent.click(screen.getByRole('button', { name: 'Review and decide' }));
-    expect(window.location.search).toContain('panel=decisions');
+    expect(screen.getByRole('dialog', { name: 'Decisions' })).toBeInTheDocument();
   });
 
-  it('docks the activity card in its own slot ahead of the stage, never inside it', () => {
+  it('keeps the activity and the decisions in one compact header spot, never over the stage', () => {
     useOperationsStore.getState().reset();
     act(() => useOperationsStore.getState().applyEvents(P, [opEvent({ project_id: P, sequence: 1 })]));
     renderAt(`/create/${P}`);
     const overlay = screen.getByTestId('activity-overlay');
-    const slot = screen.getByTestId('create-activity-slot');
-    const stage = screen.getByRole('region', { name: 'Product' });
-    // ASVG-005: the card lives in the reserved slot, not over the stage, so
-    // the stage's toolbars and panels (Generate, the editable sketch) are free.
-    expect(slot).toContainElement(overlay);
+    const status = screen.getByTestId('create-status');
+    expect(status.closest('header')).not.toBeNull();
+    expect(status).toContainElement(overlay);
+    expect(status).toContainElement(screen.getByRole('button', { name: /Decisions/ }));
     expect(overlay).toHaveClass('act-dock-create', 'is-compact');
-    expect(stage.contains(overlay)).toBe(false);
-    expect(slot.contains(stage)).toBe(false);
-    expect(slot.closest('main')).toBeNull();
-    // ASVG-012: the card comes before the conversation and the stage in the
-    // page, so the keyboard reaches it straight after the header.
-    const conversation = screen.getByRole('complementary', { name: 'Conversation' });
-    expect(slot.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(slot.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('tabpanel').contains(overlay)).toBe(false);
   });
 
   it('acknowledges a sent instruction once its operation is on the stream', () => {
@@ -177,16 +200,14 @@ describe('CreatePage', () => {
     expect(screen.getByLabelText('Describe your product or ask for a change')).toHaveValue('Make the holes M3');
   });
 
-  it('collapses the conversation and the details to a slim rail, and remembers it', async () => {
+  it('collapses the conversation to a slim rail, and remembers it', async () => {
     const first = renderAt(`/create/${P}`);
     await userEvent.click(screen.getByRole('button', { name: 'Collapse the conversation' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Collapse the details' }));
     expect(screen.getByTestId('chat-rail')).toBeInTheDocument();
-    expect(screen.getByTestId('side-rail')).toBeInTheDocument();
     expect(screen.queryByLabelText('Describe your product or ask for a change')).toBeNull();
     // The stage stays.
-    expect(screen.getByRole('region', { name: 'Product' })).toBeInTheDocument();
-    expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: true, side: true });
+    expect(screen.getByRole('tabpanel')).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: true });
     first.unmount();
 
     // A new page load reads the preference back.
@@ -195,7 +216,7 @@ describe('CreatePage', () => {
     expect(screen.getByTestId('chat-rail')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Show the conversation' }));
     expect(screen.getByLabelText('Describe your product or ask for a change')).toBeInTheDocument();
-    expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: false, side: true });
+    expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: false });
   });
 
   it('shows waiting approvals as a badge on Decisions, never as a popup over the stage', () => {
@@ -216,13 +237,9 @@ describe('CreatePage', () => {
     );
     const badge = screen.getByTestId('decisions-badge');
     expect(badge).toHaveTextContent('1');
-    expect(screen.getByRole('tab', { name: /Decisions/ })).toContainElement(badge);
-    const stage = screen.getByRole('region', { name: 'Product' });
-    expect(stage.contains(badge)).toBe(false);
+    expect(screen.getByRole('button', { name: 'Decisions, 1 waiting' })).toContainElement(badge);
+    expect(screen.getByRole('tabpanel').contains(badge)).toBe(false);
+    expect(screen.getAllByTestId('decisions-badge')).toHaveLength(1);
     expect(screen.queryByRole('status', { name: 'Approvals waiting' })).toBeNull();
-
-    // Collapsed, the rail carries the same badge.
-    act(() => useCreateLayoutStore.getState().setCollapsed('side', true));
-    expect(within(screen.getByTestId('side-rail')).getByTestId('decisions-badge')).toHaveTextContent('1');
   });
 });

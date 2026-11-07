@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor } from '../../../test/test-utils';
-import { useCreateLayoutStore } from '../../../store/create-layout-store';
-import { useSketchStore } from '../../../store/sketch-store';
 import { componentOfObject, useComponentSelection } from '../../../store/component-selection-store';
 import type { RepresentationView, TwinNode } from '../../../types/twin';
 import { guardedLabel, representationText } from '../../geometry/RepresentationBadge';
@@ -13,30 +11,20 @@ const makeStructuredMesh = vi.fn();
 vi.mock('../../../api/endpoints/representation', () => ({
   makeStructuredMesh: (...a: unknown[]) => makeStructuredMesh(...a),
 }));
-vi.mock('../../../api/endpoints/conceptMesh', async (orig) => ({
-  ...(await orig<typeof import('../../../api/endpoints/conceptMesh')>()),
-  getConceptMesh: vi.fn().mockResolvedValue({
-    latest: null,
-    active_job: null,
-    next_source: null,
-    spend: { used_last_hour: 0, cap: 3, policy_mode: 'off', policy_would_approve: false },
-  }),
-}));
-vi.mock('../../../api/endpoints/sketchGeneration', async (orig) => ({
-  ...(await orig<typeof import('../../../api/endpoints/sketchGeneration')>()),
-  listGenerations: vi.fn().mockResolvedValue({ lines: [], proposals: [] }),
+vi.mock('../../../api/endpoints/reconstruction', async (orig) => ({
+  ...(await orig<typeof import('../../../api/endpoints/reconstruction')>()),
+  getReconstruction: vi.fn().mockResolvedValue({ concept_accepted: false, accepted: false, components: [], summary: '' }),
 }));
 vi.mock('../../../hooks/use-twin', async (orig) => ({
   ...(await orig<typeof import('../../../hooks/use-twin')>()),
   useNodeVersionHistory: () => ({ data: undefined }),
 }));
-vi.mock('../../../hooks/use-creation', () => ({ useCreation: () => ({ data: undefined }) }));
-vi.mock('../../../hooks/use-sketch-plane', () => ({ useSketchPlane: () => ({ data: undefined }) }));
 vi.mock('../../preview/PreviewHost', () => ({
   PreviewHost: ({ node }: { node: TwinNode }) => <div data-testid="preview-host">{node.name}</div>,
 }));
 
 import { ProductStage } from '../ProductStage';
+import { DevelopStage } from '../DevelopStage';
 
 const P = 'proj-rep';
 
@@ -147,42 +135,46 @@ describe('selecting a component', () => {
   });
 });
 
-describe('the Create stage', () => {
+describe('the Develop stage', () => {
   beforeEach(() => {
-    window.localStorage.clear();
-    useCreateLayoutStore.getState().reset();
-    useSketchStore.getState().reset();
     useComponentSelection.setState({ selected: {} });
     makeStructuredMesh.mockReset();
   });
 
-  it('shows the best representation with its level, and the selected component', () => {
-    useComponentSelection.getState().select(P, { componentId: 'CMP-arm', name: 'Arm', from: 'engineering' });
+  function develop(nodes: TwinNode[], onSelect = vi.fn()) {
     render(
-      <ProductStage projectId={P} nodes={[IMAGE, L0, L1]} selectedId={null} onSelect={vi.fn()} onDiscuss={vi.fn()} working={false} facts={{ described: true }} />,
+      <DevelopStage
+        projectId={P}
+        nodes={nodes}
+        view={undefined}
+        selectedId={null}
+        onSelect={onSelect}
+        working={false}
+        engineeringChecks={null}
+        onAsk={vi.fn()}
+        onSketchFix={vi.fn()}
+      />,
     );
+  }
+
+  it('shows the best representation with its level', () => {
+    render(<ProductStage projectId={P} nodes={[IMAGE, L0, L1]} selectedId={null} working={false} />);
     expect(screen.getByTestId('preview-host')).toHaveTextContent('Simple parts');
     expect(screen.getByTestId('stage-maturity')).toHaveTextContent('Preview');
     expect(screen.getByTestId('stage-level')).toHaveTextContent('L1 · simple parts, sizes estimated');
-    expect(screen.getByTestId('stage-selected-component')).toHaveTextContent('Selected: Arm');
   });
 
-  it('shows the manufacturing note beside the maturity label, guarded', () => {
-    const noted = { ...L1, properties: { ...L1.properties, manufacturing_note: 'Likely printable with supports (preliminary)' } };
-    const { unmount } = render(
-      <ProductStage projectId={P} nodes={[noted]} selectedId={null} onSelect={vi.fn()} onDiscuss={vi.fn()} working={false} facts={{ described: true }} />,
-    );
-    expect(screen.getByTestId('stage-mfg-note')).toHaveTextContent('Likely printable with supports (preliminary)');
-    unmount();
+  it('never repeats a manufacturing note on the model label (Check owns manufacturing results)', () => {
     const lying = { ...L1, properties: { ...L1.properties, manufacturing_note: 'Verified production ready' } };
-    render(<ProductStage projectId={P} nodes={[lying]} selectedId={null} onSelect={vi.fn()} onDiscuss={vi.fn()} working={false} facts={{ described: true }} />);
-    expect(screen.getByTestId('stage-mfg-note')).toHaveTextContent('Manufacturing not assessed');
+    render(<ProductStage projectId={P} nodes={[lying]} selectedId={null} working={false} />);
+    expect(screen.queryByTestId('stage-mfg-note')).toBeNull();
+    expect(screen.getByTestId('stage-status')).not.toHaveTextContent(/verified|production/i);
   });
 
   it('offers Show as simple 3D parts in More, and shows the result', async () => {
     const onSelect = vi.fn();
     makeStructuredMesh.mockResolvedValue({ node_id: 'Simple parts', reused: false });
-    render(<ProductStage projectId={P} nodes={[IMAGE]} selectedId={null} onSelect={onSelect} onDiscuss={vi.fn()} working={false} facts={{ described: true }} />);
+    develop([IMAGE], onSelect);
     await userEvent.click(screen.getByRole('button', { name: /More/ }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Show as simple 3D parts' }));
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('Simple parts'));
@@ -191,7 +183,7 @@ describe('the Create stage', () => {
 
   it('says plainly when there is no layout to build from', async () => {
     makeStructuredMesh.mockRejectedValue({ response: { data: { detail: 'there is no concept block layout yet' } } });
-    render(<ProductStage projectId={P} nodes={[IMAGE]} selectedId={null} onSelect={vi.fn()} onDiscuss={vi.fn()} working={false} facts={{ described: true }} />);
+    develop([IMAGE]);
     await userEvent.click(screen.getByRole('button', { name: /More/ }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Show as simple 3D parts' }));
     expect(await screen.findByTestId('simple-parts-notice')).toHaveTextContent('no concept block layout');

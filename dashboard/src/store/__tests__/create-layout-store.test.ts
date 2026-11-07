@@ -13,11 +13,11 @@ afterEach(() => {
 });
 
 describe('create layout store', () => {
-  it('keeps the collapsed panels as the person preference across loads', () => {
-    useCreateLayoutStore.getState().setCollapsed('side', true);
-    expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: false, side: true });
+  it('keeps the collapsed conversation as the person preference across loads', () => {
+    useCreateLayoutStore.getState().setCollapsed('chat', true);
+    expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: true });
     useCreateLayoutStore.getState().reset();
-    expect(useCreateLayoutStore.getState().collapsed).toEqual({ chat: false, side: true });
+    expect(useCreateLayoutStore.getState().collapsed).toEqual({ chat: true });
   });
 
   it('starts expanded, and still collapses for the page, when storage is unavailable', () => {
@@ -27,28 +27,24 @@ describe('create layout store', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('blocked');
     });
-    expect(readCollapsed()).toEqual({ chat: false, side: false });
+    expect(readCollapsed()).toEqual({ chat: false });
     useCreateLayoutStore.getState().setCollapsed('chat', true);
     expect(useCreateLayoutStore.getState().collapsed.chat).toBe(true);
   });
 
   it('ignores a stored value that is not the expected shape', () => {
     window.localStorage.setItem(PANELS_KEY, '"nonsense"');
-    expect(readCollapsed()).toEqual({ chat: false, side: false });
+    expect(readCollapsed()).toEqual({ chat: false });
   });
 
-  it('holds one drawer panel at a time, and leaving Sketch closes the sketch-only panels', () => {
+  it('holds one drawer panel at a time, which collapses and closes', () => {
     const s = useCreateLayoutStore.getState();
-    s.setMode(P, 'sketch');
     s.openDrawer(P, 'editable');
     s.openDrawer(P, 'plane');
     expect(useCreateLayoutStore.getState().stage(P).drawer).toBe('plane');
     s.setDrawerCollapsed(P, true);
     expect(useCreateLayoutStore.getState().stage(P).drawerCollapsed).toBe(true);
-    s.setMode(P, 'view');
-    expect(useCreateLayoutStore.getState().stage(P)).toMatchObject({ mode: 'view', drawer: null });
-    s.openDrawer(P, 'generate');
-    s.setMode(P, 'sketch');
-    expect(useCreateLayoutStore.getState().stage(P).drawer).toBe('generate');
+    s.closeDrawer(P);
+    expect(useCreateLayoutStore.getState().stage(P)).toEqual({ drawer: null, drawerCollapsed: false });
   });
 });

@@ -17,6 +17,11 @@ import { ParametricCanvas } from './ParametricCanvas';
 interface ParametricStageProps {
   pp: ParametricPreviewState;
   variant: 'create' | 'engineering';
+  /**
+   * Show the part without its handles and fields: Create's Develop stage
+   * shows the twin and is not a second editor (FORGE-822).
+   */
+  readOnly?: boolean;
 }
 
 function fmt(v: number): string {
@@ -102,7 +107,7 @@ export function ComparisonTable({ comparison }: { comparison: ComparisonRecord |
   );
 }
 
-export function ParametricStage({ pp, variant }: ParametricStageProps) {
+export function ParametricStage({ pp, variant, readOnly = false }: ParametricStageProps) {
   const def = pp.definition;
   const display = pp.display;
   const [material, setMaterial] = useState('');
@@ -153,7 +158,7 @@ export function ParametricStage({ pp, variant }: ParametricStageProps) {
           scaleToMm={def.scale_to_mm}
           onHandleChange={onHandleChange}
           onHandleRelease={onHandleRelease}
-          handlesEnabled={!pp.committing}
+          handlesEnabled={!readOnly && !pp.committing}
         />
         <div className={`cv-param-status ${display.attention ? 'is-attention' : ''}`} role="status" data-testid="parametric-status">
           {display.attention ? (
@@ -183,47 +188,49 @@ export function ParametricStage({ pp, variant }: ParametricStageProps) {
           </ul>
         )}
       </div>
-      <form
-        className="cv-param-controls"
-        aria-label="Change the part"
-        onSubmit={(e) => {
-          e.preventDefault();
-          apply();
-        }}
-      >
-        <NumberField
-          id={`param-${def.sketch_key}-${amountName}`}
-          label={`${amountName === 'depth' ? 'Depth' : 'Angle'} (${unit})`}
-          value={amount}
-          max={def.op === 'revolve' ? 360 : undefined}
-          onChange={pp.setAmount}
-          onCommit={apply}
-        />
-        {def.dimensions.map((d) => (
+      {!readOnly && (
+        <form
+          className="cv-param-controls"
+          aria-label="Change the part"
+          onSubmit={(e) => {
+            e.preventDefault();
+            apply();
+          }}
+        >
           <NumberField
-            key={d.constraint_id}
-            id={`param-${def.sketch_key}-${d.constraint_id}`}
-            label={`${d.type === 'length' ? 'Length' : 'Radius'} ${d.primitive_id} (${d.unit === 'unknown' ? 'units' : d.unit})`}
-            value={(d.type === 'length' ? pp.overrides.length : pp.overrides.radius)?.[d.constraint_id] ?? d.value}
-            onChange={(v) => (d.type === 'length' ? pp.setLength(d.constraint_id, v) : pp.setRadius(d.constraint_id, v))}
+            id={`param-${def.sketch_key}-${amountName}`}
+            label={`${amountName === 'depth' ? 'Depth' : 'Angle'} (${unit})`}
+            value={amount}
+            max={def.op === 'revolve' ? 360 : undefined}
+            onChange={pp.setAmount}
             onCommit={apply}
           />
-        ))}
-        {needsMaterial && (
-          <label className="cv-param-field">
-            <span>Material</span>
-            <input type="text" value={material} placeholder="e.g. PLA" onChange={(e) => setMaterial(e.target.value)} />
-          </label>
-        )}
-        <button type="submit" className="cv-primary" disabled={pp.committing} data-testid="parametric-apply">
-          {pp.committing ? 'Saving…' : 'Apply'}
-        </button>
-        {variant === 'engineering' && pp.buildMs !== null && (
-          <span className="cv-param-muted" data-testid="parametric-build-ms">
-            Preview rebuilt in {pp.buildMs.toFixed(1)} ms · {pp.build?.triangles ?? 0} triangles
-          </span>
-        )}
-      </form>
+          {def.dimensions.map((d) => (
+            <NumberField
+              key={d.constraint_id}
+              id={`param-${def.sketch_key}-${d.constraint_id}`}
+              label={`${d.type === 'length' ? 'Length' : 'Radius'} ${d.primitive_id} (${d.unit === 'unknown' ? 'units' : d.unit})`}
+              value={(d.type === 'length' ? pp.overrides.length : pp.overrides.radius)?.[d.constraint_id] ?? d.value}
+              onChange={(v) => (d.type === 'length' ? pp.setLength(d.constraint_id, v) : pp.setRadius(d.constraint_id, v))}
+              onCommit={apply}
+            />
+          ))}
+          {needsMaterial && (
+            <label className="cv-param-field">
+              <span>Material</span>
+              <input type="text" value={material} placeholder="e.g. PLA" onChange={(e) => setMaterial(e.target.value)} />
+            </label>
+          )}
+          <button type="submit" className="cv-primary" disabled={pp.committing} data-testid="parametric-apply">
+            {pp.committing ? 'Saving…' : 'Apply'}
+          </button>
+          {variant === 'engineering' && pp.buildMs !== null && (
+            <span className="cv-param-muted" data-testid="parametric-build-ms">
+              Preview rebuilt in {pp.buildMs.toFixed(1)} ms · {pp.build?.triangles ?? 0} triangles
+            </span>
+          )}
+        </form>
+      )}
       {variant === 'engineering' && (
         <div className="cv-param-engineering">
           <p className="cv-param-muted">

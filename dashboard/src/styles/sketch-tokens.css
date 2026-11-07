@@ -1,12 +1,11 @@
 /* Sketch ink tokens: what is drawn straight on the sketch paper (strokes,
-   the fitted shapes of an editable sketch, constraint badges) and the thin
-   overlay of a saved sketch in View mode.
+   the fitted shapes of an editable sketch, constraint badges).
 
    Each stroke, shape and handle colour keeps at least 3:1 contrast against
    --mf-sketch-paper in both themes (checked by
    src/styles/__tests__/sketch-contrast.test.ts). The paper follows the
-   console surface it replaces (--mf-c-0c0e14). The reference image and the
-   trace still stay faint on purpose: they are guides, not the drawing. */
+   console surface it replaces (--mf-c-0c0e14). The reference image stays
+   faint on purpose: it is a guide, not the drawing. */
 :root,:root.dark {
   --mf-sketch-paper:#0c0e14;
   --mf-sketch-ink:#f8fafc;
@@ -19,8 +18,7 @@
   --mf-sketch-muted:#9ca3af;
   --mf-sketch-ghost:#f472b6;
   --mf-sketch-chip:#111319d9;
-  --mf-sketch-grid:#ffffff0a;
-  --mf-sketch-overlay:#f8fafcb3
+  --mf-sketch-grid:#ffffff0a
 }
 :root[data-theme=light] {
   --mf-sketch-paper:#f0f2f6;
@@ -34,6 +32,5 @@
   --mf-sketch-muted:#4b5563;
   --mf-sketch-ghost:#be185d;
   --mf-sketch-chip:#ffffffeb;
-  --mf-sketch-grid:#1f243014;
-  --mf-sketch-overlay:#1f2430b3
+  --mf-sketch-grid:#1f243014
 }

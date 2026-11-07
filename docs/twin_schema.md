@@ -211,8 +211,8 @@ which `library.dispatch_job` sends; and `IMAGE = "image"`, a picture (a
 reference photo, a sketch, a screenshot), with its pixel size in
 `metadata.width_px` and `metadata.height_px`.
 
-`SKETCH_STROKES = "sketch_strokes"` is a person's freehand sketch drawn on the
-Create stage. Its primary file is an SVG rendering (`format` is `svg`) and the
+`SKETCH_STROKES = "sketch_strokes"` is a person's freehand sketch drawn in the
+Sketch tab of Create's Imagine stage. Its primary file is an SVG rendering (`format` is `svg`) and the
 strokes themselves are the named file `strokes.json` (in
 `metadata.sketch_files`, or inline in `metadata.strokes` when the blob store
 was unavailable). Each stroke has a stable id, a tool, points in sketch units
@@ -223,7 +223,7 @@ human sketch is not CAD, nothing reads a measurement from it, and it has no
 plane until one is proposed and confirmed. `parent_revision` names the
 revision it was drawn on top of, and `save_id` is the client's id for the
 save, so a retried save returns the revision it already made. See
-[the Create view](create-view.md#sketching-on-the-stage). Once the sketch
+[the Create view](create-view.md#sketching). Once the sketch
 is placed on a plane, a later save records the plane's state and
 `plane_ref` at the time of the save instead of `UNASSIGNED`; the payload can
 never set either.
@@ -1221,7 +1221,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `firmware_source` | definition | `FW` | `WorkProduct` `firmware_source`: a firmware project's sources and build output (`twin.record_design_files`, or `twin.create_firmware_scaffold`) |
 | `purchased_model` | definition | `PMD` | `WorkProduct` `cad_model`: a bought part's OpenUSD package with its GLB preview, licence, attribution and mass (`twin.record_design_files` after `simready.import`) |
 | `gcode` | definition | `GC` | `WorkProduct` `gcode`: G-code for one printer with the `config.ini` it was sliced with (`twin.record_design_files` after `slicer.slice`), which `library.dispatch_job` sends |
-| `sketch_strokes` | definition | `SKT` | `WorkProduct` `sketch_strokes`: a person's freehand strokes from the Create stage, as JSON in a viewport-independent sketch space plus a generated SVG. Each save is the next revision. A human sketch, not CAD: scale unknown, plane `UNASSIGNED` until one is confirmed |
+| `sketch_strokes` | definition | `SKT` | `WorkProduct` `sketch_strokes`: a person's freehand strokes from Create's Imagine sketch, as JSON in a viewport-independent sketch space plus a generated SVG. Each save is the next revision. A human sketch, not CAD: scale unknown, plane `UNASSIGNED` until one is confirmed |
 | `sketch_plane` | definition | `PLN` | `WorkProduct` `sketch_plane`: the plane one sketch is placed on (frame, unit, lifecycle state, who proposed it). One item per sketch; every confirm, reassign, undo or archive is the next revision, with a `DEPENDS_ON` edge to the sketch revision it is for |
 | `sketch_interpretation` | definition | `SKI` | `WorkProduct` `sketch_interpretation`: the sketch compiler's proposal for a sketch, fitted primitives and proposed, accepted and rejected constraints, all estimated. `DEPENDS_ON` the strokes revision it was made from. A proposal, not CAD |
 | `parametric_sketch` | definition | `PSK` | `WorkProduct` `parametric_sketch`: a sketch a person promoted, with only the accepted constraints (re-checked by the gateway) and a feature plan whose depth, angle and material are required input. `DEPENDS_ON` the interpretation and the strokes. Held for approval |
@@ -1644,7 +1644,7 @@ face.
 ### 2.33 The sketch compiler {#sketch-compiler}
 
 The sketch compiler turns a person's saved strokes into an editable,
-constrained sketch (the Create stage's **Make editable**, see
+constrained sketch (**Make editable** in Create's Imagine sketch, see
 [the Create view](create-view.md#making-a-sketch-editable)). It keeps four
 representations apart, each with its own authority and revisions:
 
@@ -1908,8 +1908,8 @@ Limits: rerun approval records the decision; the tool is then run by the agent o
 ### 2.35 Generated concept sketches {#generated-sketch}
 
 `GENERATED_SKETCH = "generated_sketch"` is a concept sketch an image model
-drew from a description, the project's references or a saved sketch (the
-Create stage's **Generate**, or `twin.generate_sketch`). It is a fifth
+drew from a description, the project's references or a saved sketch
+(**Generate a concept** in Create's Imagine sketch, or `twin.generate_sketch`). It is a fifth
 representation beside the four in [the sketch compiler](#sketch-compiler),
 with its own authority: always `illustrative`. A generated raster is never an
 editable sketch, never CAD and never evidence (`editable: false`,

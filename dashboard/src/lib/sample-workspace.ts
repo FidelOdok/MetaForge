@@ -1558,6 +1558,19 @@ function route(
     if (path === '/uploads' || path === '/twin/links') return [];
     if (path === '/twin/revision-index') return { nodes: {} };
     if (path === '/bom/hierarchical') return { lines: [], total: 0 };
+    // FORGE-822: the sample has no Imagine studio, so Create shows its empty state.
+    if (/^\/twin\/projects\/[^/]+\/imagine\/studio$/.test(path)) {
+      return {
+        project_id: segment(path, 3),
+        status: 'none',
+        revision: null,
+        config_ref: null,
+        engine_url: null,
+        config: null,
+        updated_at: null,
+        handover: null,
+      };
+    }
     if (path === '/projects') return { projects: [s.project], total: 1 };
     if (path === `/projects/${s.project.id}`) return s.project;
     if (path === '/twin/nodes') return { nodes: s.nodes, total: s.nodes.length };

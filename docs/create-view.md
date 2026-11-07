@@ -6,6 +6,13 @@ what comes out and improve it, without opening the engineering tools:
 
 **Imagine → Develop → Check → Make**
 
+**Imagine** captures what the product is for and what it looks like: the
+studio the assistant builds for the product, and the sketch tools. Checks in
+Imagine are screening only. Once Imagine is handed over, the MetaForge twin
+drives **Develop**, **Check** and **Make** (exact CAD, electronics, firmware,
+simulation, manufacturing checks, contracts and release), and those three
+stages show the twin's state; they are not a second editor.
+
 It is a view, not a separate product. A creation *is* a project: its
 conversation is the project's chat thread, its designs are the project's work
 products in the digital twin, and its decisions are the project's approvals.
@@ -17,7 +24,7 @@ of the same records, so nothing is copied and nothing is lost on the way.
 | | |
 |---|---|
 | Dashboard | `/create` (start or reopen a creation), `/create/:projectId` (one creation) |
-| Gateway | `/v1/create/{project_id}/...` (`api_gateway/create/`) |
+| Gateway | `/v1/create/{project_id}/...` (`api_gateway/create/`), `/v1/twin/projects/{project_id}/imagine/...` (the Imagine studio and handover) |
 | Records | SQLite at `~/.metaforge/create.db` (`METAFORGE_CREATE_STORE_PATH`) |
 | Reused | `/v1/projects`, `/v1/chat`, `/v1/twin`, `/v1/approvals`, `/v1/uploads`, `/v1/library/machines`, `/v1/manufacture/release` |
 
@@ -28,167 +35,72 @@ acceptance) and a **history** of every change.
 
 ## The screen
 
-The product stage takes the middle and most of the width. Everything else is
-secondary and can be put away.
+Create is deliberately calm: a header, the stage rail, and one column of
+content for the stage on screen, with the conversation beside it.
 
-- **Product stage** (centre). One dominant artifact: the newest dimensioned
-  model, or the newest concept when there is no model yet. A bar of its own
-  above the drawing area (never over it) carries the stage mode, the
-  artifact's maturity, its status, the one next action and a **More** menu.
-- **Conversation** (left). The project's chat thread. Each message says what
-  it is: a *Question* and its *Discussion*, a *Change request* and its
-  *Proposed change · awaiting your decision*, or a *Design pass* and what it
-  *executed with tools*. The composer grows with the draft (no height cap, no
-  inner scrollbar), shrinks as text is removed, re-measures when its width
-  changes, and takes pasted or dropped files.
-- **Where it stands** (right). The readiness state, what it means, the next
-  action and each blocker with the action that clears it, above the
-  **Brief, Decisions, Make, Inspect, History** tabs. The open tab is in the
-  address (`?panel=make`), so back, forward and direct links work.
-- **Journey** (top). Four milestones, **Imagine**, **Develop**, **Check** and
-  **Make**, each with a one-line summary (*Concept on stage*, *Dimensioned
-  model*, *2 to resolve*, *Making finished*). They summarise where the
-  creation stands; they are not gates or pages, and work in a later milestone
-  can already be under way. Readiness, decisions, making and inspection
-  behind them are unchanged.
+- **Header.** The creation's name, and one compact status spot holding
+  **Decisions** (with the count of waiting approvals) and the activity card.
+  Nothing else sits in the header.
+- **Stage rail.** The four stages, **Imagine**, **Develop**, **Check** and
+  **Make**, are the navigation of Create: each stage owns its content. Each
+  tab also says where the creation stands (done, current or to do) with a
+  one-line summary (*Concept captured*, *Dimensioned model*, *2 to resolve*,
+  *Making finished*). Any stage can be opened; work in a later stage can
+  already be under way. A creation opens on the stage where it stands. The
+  stage on screen is in the address (`?stage=check`; Imagine's tab is
+  `?imagine=sketch`), so back, forward and direct links work.
+- **Conversation** (beside the stage). The project's chat thread. Each
+  message says what it is: a *Question* and its *Discussion*, a *Change
+  request* and its *Proposed change · awaiting your decision*, or a *Design
+  pass* and what it *executed with tools*. The composer grows with the draft
+  (no height cap, no inner scrollbar), shrinks as text is removed,
+  re-measures when its width changes, and takes pasted or dropped files.
+  Changes to the design go through here (or through Imagine rework), never
+  through an editor on the Develop, Check or Make stages.
 
-### Collapsible panels
+At phone width (375 px and up) everything is one column: the rail, the
+stage, then the conversation.
 
-The conversation and the details each have a collapse button. Collapsed, a
-panel becomes a slim rail at the edge: the conversation's rail shows how many
-instructions are waiting, the details' rail has one button per tab, with the
-waiting-decisions count on **Decisions**. The choice is the person's own
+### Collapsible conversation
+
+The conversation has a collapse button. Collapsed, it becomes a slim rail
+showing how many instructions are waiting. The choice is the person's own
 preference, kept in this browser (`metaforge.create.panels` in local
-storage) and the same in every creation; with storage unavailable the panels
-simply start expanded. Presentation mode always shows both.
+storage) and the same in every creation; with storage unavailable it simply
+starts expanded.
 
-### Maturity and status
+### One primary action per stage
 
-The stage labels the artifact it shows with one maturity word, **Illustrative**,
-**Preview**, **Exact** or **Validated**, and a short status line:
+Each stage offers exactly one primary action; everything else is in a single
+**More** menu.
 
-| Shown | Status line |
-|---|---|
-| An image or generated concept | *Concept · illustrative* |
-| An AI 3D concept | *3D Concept · illustrative* |
-| Simple 3D parts (L1) | *3D Preview · simple parts, sizes estimated* |
-| A provisional mesh or preview geometry | *3D Preview · provisional* |
-| Exact CAD | *Engineering Geometry · exact model available* |
-| Exact CAD whose checks are running | *Engineering Update · validation pending* |
-| Validated CAD | *Engineering Geometry · validated* |
-| Exact CAD whose checks failed | *Preview available · Engineering update needs attention* (the last checked version is kept) |
-
-A provisional mesh is never called exact, and an illustrative or provisional
-item never carries *verified*, *validated* or *production-ready* wording: the
-stage passes every such label through a guard that falls back to the plain
-illustrative wording. The guard also reads the artifact's
-[representation level](twin_schema.md#representation-levels): an AI 3D
-concept (L0) or simple parts (L1) is never shown as Exact or Validated,
-whatever its record says. The manufacturing note sits beside the maturity
-word: an illustrative concept or preview shows it when one was assessed (for
-example *Likely printable with supports (preliminary)*), and *Manufacturing
-not assessed* otherwise; an engineering model shows it when it has one. The
-same note is on each card in the generated-concept strip.
-
-**Manufacturing guidance.** When the preliminary checks found something, a
-compact badge sits beside the maturity word: *Manufacturing guidance: 2
-suggestions*. It is a count, never a readiness percentage, and it is absent
-when nothing was found or nothing was assessed. Selecting it lists each
-suggestion in plain words; selecting one highlights the affected part (the
-shared component selection) and offers three choices:
-
-- **Keep design**: the suggestion is recorded as seen and kept, and no longer
-  counted.
-- **Try suggested fix**: the fix comes back as a proposal; nothing changes
-  until the person applies it. A fix that would change something the person
-  stated or protected waits for an approval instead.
-- **Explore another process**: the same part checked against the other
-  processes' rules, as a preview that changes nothing.
-
-The checks are heuristics on the best geometry each part has (see
-[DFM findings](twin_schema.md#dfm-findings)); a note such as *Likely
-printable with supports (preliminary)* only appears when that rule ran. The
-Engineering inspector has a **DFM** tab, opened on demand, with the rule
-profile and version, measured against limit, anchors, evidence and whether
-it is out of date.
-
-**Ready to make.** Once a process with exact checks is chosen (today 3D
-printing), a second compact chip says how far the product is from being
-made, from the manufacturing release checklist of the current revision
-(see [the release checklist](twin_schema.md#release-checklist)). It reads
-**Ready for prototype** only when every required part has a validated exact
-model, the exact manufacturing analysis passed (or a person accepted its
-issues) and each part's STEP passed its round trip, and **Ready for
-production** only when, in addition, the physical verification is approved
-and the release is approved. Otherwise it reads *Not ready to make yet: 3
-next steps*, and selecting it lists the missing items in the same words the
-status lines use, for example *Engineering Update: validation pending for
-Lid*, *Manufacturing analysis pending for Enclosure*, *Manufacturing analysis
-incomplete for Enclosure: no machine is selected in the manufacturing
-context*, or *Physical or supplier
-confirmation required: Fit test of a printed sample (Enclosure)*. It is
-never a percentage and never claims a readiness the checklist does not back.
-In Engineering the DFM tab shows exact findings with their measured values
-and the faces they are on (highlighted on the model on request), the
-verification items with a form to record evidence for approval, the
-checklist, and a link to the generated DFM report.
-
-Beside the revision, a level line says which representation is on screen and
-what it was made from, for example *L1 · simple parts, sizes estimated · from
-SKT-LAMP@2* or *L3 · from the validated exact model · from CAD-BASE@4*.
-
-**Which artifact.** The stage shows the best real representation of each
-item's current revision: validated exact geometry (L3) first, then an exact
-model not yet validated (L2), simple 3D parts (L1), an AI 3D concept (L0),
-then a picture; the newest of a level. An older revision of an item is never
-preferred over its current one, and an out of date revision ranks last. The
-Engineering 3D model view, opened with nothing selected, picks the same one.
-
-**Selecting a part.** Clicking a part of a 3D model on the stage selects its
-component (the `component_id` in the mesh's glTF extras, or the model's only
-component), and the stage shows *Selected: Arm*. This works part by part on a
-multi-part CAD model too: the exact model's STEP names each part's component,
-and the converter writes it into that part's extras. Engineering shares the
-selection: a part picked on one view is selected on the other.
-
-### One next action
-
-The stage offers one primary action at a time; everything else is in **More**.
-
-| The creation has | Primary action |
-|---|---|
-| Nothing yet | Three equal ways in: **Describe** (focuses the composer), **Sketch it** (Sketch mode, pen ready), **Add reference** (the references drawer) |
-| An accepted concept whose features are not accepted yet | **Make it editable** (see [making a concept editable](#making-a-concept-editable)) |
-| A description, concept, sketch or reference, but no 3D concept | **Make a 3D concept** |
-| A 3D concept and a sketch that is not editable yet | **Make editable** |
-| A 3D concept (and an editable sketch, if there is a sketch) | **Build exact model**: starts the exact build of the parametric sketch (see [Build exact model](#build-exact-model)); with no parametric sketch yet, puts a design request in the composer, ready to send |
-| A dimensioned model | **Prepare prototype**: opens the Make tab |
-
-**More** holds the rest: *Generate a concept*, *Make a 3D concept*, *Make it
-editable*, *Show as
-simple 3D parts*, *Editable sketch*, *Sketch plane*, *Add reference*, *Sketch
-it*, *Describe a change*, *Build exact model* and *Discuss this*, each shown
-only where it applies.
+| Stage | Primary action | In More |
+|---|---|---|
+| Imagine (no studio yet) | **Ask the assistant** (puts *Start the Imagine studio for this product.* in the composer) | |
+| Imagine (draft) | **Hand over to engineering** | |
+| Imagine (handed over) | none: the studio is read only; **Reopen Imagine** is a secondary button | |
+| Develop | **Make it editable** (an accepted concept whose features are not accepted yet), **Build exact model** (a parametric sketch exists), **Ask for the exact model** (puts a design request in the composer) or, once a dimensioned model exists, **Describe a change** | *Make it editable*, *Show as simple 3D parts*, *Discuss this model*, each where it applies |
+| Check | **Run the checks** (the interface contracts and the manufacturing checks) | *Ask the assistant about these results* |
+| Make | **Plan the making**, or **Inspect the result** once the latest build has finished | the other one, *Ask the assistant to prepare the release* |
 
 ### Waiting approvals
 
-Inside a creation, waiting approvals are a count badge on the **Decisions**
-tab (or its rail button). The page-wide *approvals waiting* notice that other
-pages show is not shown over a creation, so it never covers the stage. The
-approval flow itself is unchanged.
+Inside a creation, waiting approvals are a count badge on **Decisions** in
+the header; selecting it opens the decisions in a small panel under it. The
+page-wide *approvals waiting* notice that other pages show is not shown over
+a creation, so it never covers the stage. The approval flow itself is
+unchanged.
 
 ## Activity overlay
 
 Work that takes time (a design-flow run, a tool job, a Create chat turn) is
-shown as an **operation** in a small activity card. The card has its own row
-directly above the stage, and the stage starts below it, so the compact card
-never covers the stage's bar, the sketch tools, the drawer, the composer or
-the conversation. It stays the compact card until expanded. It can be expanded into a
-larger, slightly translucent overlay that lays over the top right of the
-stage, and minimised again with its button or **Escape**. Minimising or
-closing it never cancels anything. The card comes before the conversation and
-the stage in the page, so the keyboard reaches its controls straight after
-the page header.
+shown as an **operation** in a small activity card. The card sits in the
+header's status spot, beside **Decisions**, so it never covers the stage,
+the sketch tools, the drawer, the composer or the conversation. It stays the
+compact card until expanded. It can be expanded into a larger, slightly
+translucent overlay, and minimised again with its button or **Escape**.
+Minimising or closing it never cancels anything. The card is in the header,
+so the keyboard reaches its controls before the rail and the stage.
 
 - **One at a time.** The card shows one primary operation: a decision waiting
   for the person first, then a failure, then live work. Any other live
@@ -214,7 +126,7 @@ the page header.
   it can carry them out. *Cancel* and *Retry* call the gateway's operation
   routes; a refusal (for example a run that can no longer be retried) is shown
   under the buttons. A retry starts a new operation that appears like any
-  other. In Create, a review opens the **Decisions** panel; in Engineering it
+  other. In Create, a review opens **Decisions** in the header; in Engineering it
   opens the existing approval card in place. There is no second approval
   screen.
 - **A late result never wins.** When newer work replaces older work on the
@@ -245,44 +157,77 @@ While the project has operations, the journey's *working* state is
 taken from them; before any exist it falls back to the local instruction
 queue.
 
-## Stage modes: View and Sketch
+## Imagine
 
-The stage has two modes, switched in its bar. Neither is a separate
-workspace.
+Imagine holds intent and concept capture. Its content is one of two tabs,
+**Studio** and **Sketch**, with the handover under it.
 
-- **View** (the default) shows only the artifact, which can be turned,
-  zoomed and selected. Once there is a saved sketch, **My sketch** shows it
-  as a thin, read-only overlay; the view underneath stays the one that takes
-  input.
-- **Sketch** is entered on purpose (the mode switch, **Sketch it**, or an
-  action that needs the sketch, such as **Make editable**). It shows a
-  drawing paper. The 3D view is not mounted under it, so the paper and the
-  view never look merged and are never both interactive. **Trace over the
-  current view** shows a faint still image of what the view showed (the
-  image itself for an image, a capture of the 3D view otherwise) under the
-  paper; it takes no input.
+### The studio
 
-Leaving Sketch keeps the sketch: it is saved as it is drawn (below).
+The studio is a page the assistant builds for this product: what it is for,
+the scenarios it must survive, the options and the chosen parts, the
+assumptions, and early screening. It is the formgraph studio, merged into
+MetaForge and styled like it. When there is no studio yet, Imagine shows one
+calm empty state: *Ask the assistant to start the studio for this product*,
+with **Ask the assistant**, which puts the request in the composer.
 
-### The drawer
+Create hosts the studio's engine page (`engine_url` from
+`GET .../imagine/studio`) in a frame sandboxed to scripts only, with no
+same-origin access, so the page can reach neither the dashboard nor its
+storage. The two talk only by messages of the form `{fg: 1, type, ...}`:
+
+| From | Message | Create does |
+|---|---|---|
+| Page | `fg:ready` | Answers with `fg:snapshot {collections}`, the twin-backed state of each collection, and with `fg:readonly {value: true}` when the studio has been handed over |
+| Page | `fg:write {collection, id, data}` | Sends it to `POST .../imagine/events` as `{event_id, kind, data}` with a fresh `event_id`, the `kind` named for the collection (`choices` is `choice`, `scenarios` is `scenario`, `contextEdits` is `context_edit`, `assumptions` is `assumption_confirmed`, `requirements` is `requirement`, `ledger` and `screening` as they are). Not sent once the studio is read only |
+| Page | `fg:height {px}` | Resizes the frame (between 240 and 6000 px) |
+| Page | `fg:select {component_id}` | Selects that component in the shared component selection, so the 3D view highlights it wherever it is shown |
+| Page | `fg:download {name, mime, base64}` | Hands the file to the person as a download (the name stripped of any path); it is never opened or run |
+| Create | `fg:readonly {value}` | Sent when the studio is handed over, or reopened, while the page is up |
+
+A message is accepted only from the frame's own window, with the opaque
+origin a sandboxed frame has, and only in one of these shapes; anything else
+is ignored. Nothing the page sends is ever executed. A write that could not
+be saved says so under the frame.
+
+### The handover
+
+Under the studio, **Ready for engineering?** lists the handover checklist
+from `GET .../imagine/handover`: the ledger, the assumptions (confirmed or
+explicitly accepted), the scenario tests, the requirements with their source
+and verification method, one chosen part per function, the manufacturing
+context, the concept assembly with component ids and an illustrative concept
+mesh, the proposed interface contracts and the screening results. Each item
+is *Done*, *Missing* or *Assumed*.
+
+**Hand over to engineering** calls `POST .../imagine/handover` with an
+`op_id`. When something is missing the gateway refuses with `409` and Create
+lists exactly the missing items. Once handed over, the studio's revision is
+frozen read only, the twin is seeded from it, and Imagine reads *Handed over
+to engineering · revision 3 · read only*. **Reopen Imagine** asks why, and
+only after the person confirms calls `POST .../imagine/rework` with the
+reason: Imagine opens on a new studio revision, and the Develop and Check
+evidence that depends on it is marked stale.
+
+### Sketch
+
+The **Sketch** tab shows the drawing paper on its own. There is no 3D view
+under it and no trace of one, so the paper and the model never look merged.
+**Generate a concept** and **References** sit above the paper.
 
 The editable sketch, *Generate a concept*, the sketch plane choice and the
-references open in one drawer beside the drawing area, never floating over
-the stage's controls. Only one is open at a time: opening another replaces
-it. The drawer can be collapsed to a slim tab and opened again, or closed.
-The editable sketch and the plane choice belong to Sketch mode, so returning
-to View closes them; their state is kept. The panels in the drawer are the
-same ones as before, docked.
+references open in one drawer beside the drawing, never over it. Only one is
+open at a time: opening another replaces it. The drawer can be collapsed to
+a slim tab and opened again, or closed.
 
-## Sketching on the stage
+### Sketching
 
-In Sketch mode the stage carries the freehand sketch layer. Drawing on the
-paper, before anything exists or over a traced view, needs no setup and never
-asks for a plane first.
+The Sketch tab carries the freehand sketch layer. Drawing on the paper needs
+no setup and never asks for a plane first.
 
 | Tool | Does |
 |---|---|
-| Select (V) | The default. Clicks pass through to the stage (orbit the model, pick a result); clicking a stroke selects it |
+| Select (V) | The default. Clicking a stroke selects it |
 | Draw (P) | A freehand pen stroke |
 | Erase (E) | Removes every stroke the eraser passes over, as one step |
 | Undo, Redo | Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y) |
@@ -302,8 +247,8 @@ illustrative*: it is something to trace over, not a measurement.
 **Contrast.** Strokes, the fitted shapes of an editable sketch and its rule
 badges take their colours from sketch tokens that follow the theme: dark ink
 on the light paper, light ink on the dark one. Each keeps at least 3:1
-contrast against the paper in both themes. The reference image and the
-trace still stay faint on purpose.
+contrast against the paper in both themes. The reference image stays faint
+on purpose.
 
 **Responsive.** Strokes render in the browser as the pointer moves, with
 pointer capture and the browser's coalesced pointer events; the stroke being
@@ -340,12 +285,12 @@ reload.
 **In Engineering.** A saved sketch is a work product of the project, so the
 Engineering view and the twin viewer list it and preview it read-only, with
 the same *Human sketch · not CAD · scale unknown · plane unassigned* label. It
-is never chosen as the result shown on the Create stage; the sketch layer is
-where it is drawn and shown. Once it is placed on a plane, the twin viewer
+is never chosen as the model shown in Develop; Imagine's Sketch tab is where
+it is drawn and shown. Once it is placed on a plane, the twin viewer
 draws it on that plane, with its plane controls (see
 [the dashboard tour](dashboard-tour.md)).
 
-### Placing a sketch on a plane
+#### Placing a sketch on a plane
 
 Drawing never needs a plane. Once a sketch is saved, the status bar offers
 **Use in 3D**. Only then does the choice open, in the drawer beside the
@@ -401,12 +346,11 @@ proposals and previews do not. The activity overlay shows the same question
 as a card waiting for the person, with a link to the sketch in Engineering.
 See [face attachment](twin_schema.md#face-attachment).
 
-### Making a sketch editable
+#### Making a sketch editable
 
-**Make editable** (the primary action once a 3D concept exists, or *Editable
-sketch* in More) opens the editable sketch in the drawer, in Sketch mode. Its
-button turns the saved strokes into shapes a person can size and constrain,
-in the browser, in a few tens of milliseconds, without leaving the stage. The
+**Make editable**, under a saved sketch in the Sketch tab, turns the strokes
+into shapes a person can size and constrain, in the browser, in a few tens
+of milliseconds, without leaving the paper. The
 shapes are drawn over the strokes; the panel with the rules and sizes is in
 the drawer:
 
@@ -453,11 +397,176 @@ and revolve features with depth, angle and material marked as needed input:
 nothing the drawing does not say is invented. See
 [the sketch compiler](twin_schema.md#sketch-compiler).
 
+### Generating a concept
+
+**Generate a concept** (above the paper in Imagine's Sketch tab) draws a
+freeform concept sketch with an image model. It opens in the drawer. What the
+image is drawn from follows from what is there:
+
+| There is | Mode | What is sent |
+|---|---|---|
+| Only a description | From your description | The description, any constraints and a style |
+| Active references | From your references | Each reference for its role (below) |
+| A saved sketch | From your sketch | The strokes, drawn to an image, refined or completed |
+
+The panel asks for a description (the composer's draft fills it), a style
+(industrial sketch, marker render, line art or concept drawing), how many
+alternatives (one unless more are chosen: each is a paid image) and what to
+avoid. The person's strokes are never changed: the generated image is a
+separate layer under them.
+
+**A region.** Drawing a rectangle with the region tool selects the strokes in
+it and also becomes the region a generation may change. With *Change only the
+selected region* ticked, the description becomes the instruction for that
+region. The region is in the paper's sketch space: a generated image has its
+centre at the sketch origin and its shorter side spanning one sketch unit,
+so the region lands on the same pixels. A provider that takes an edit mask
+gets one; with any other, the new image is put back outside the region.
+Either way, the pixels outside the region, and inside any locked feature,
+are compared with what was there. When less than 90% of them are kept
+(`METAFORGE_SKETCH_PRESERVATION_THRESHOLD`), the proposal is marked *Check
+it* with what changed, and the activity overlay asks for a review rather
+than presenting it as done. Features to keep and things to avoid also go
+into the prompt.
+
+**Alternatives.** Every image is a proposal in the strip under the form,
+labelled *Generated concept · illustrative*, each card with its
+manufacturing note (*Manufacturing not assessed* until one is assessed). Each has **Accept**,
+**Reject**, **Compare** (pick two to see them side by side with the share of
+pixels that differ) and **Branch** (start a separate line of concepts from
+it). Nothing replaces the accepted concept until the person accepts one; the
+previous accepted concept stays in the line's history.
+
+**While it runs.** Clicks are debounced, so a burst of them sends one
+request. A new request on the same target (the sketch, or the sketch and the
+same region) replaces one still running, and an identical one joins it. The
+accepted concept stays during generation and when it fails. The
+activity overlay shows the real stages (queued, started, image received,
+completed) and no invented progress: no provider configured today streams
+partial images. A result that arrives after another concept was accepted is
+kept as history, marked stale, and cannot be accepted. The time to the first
+stored proposal is measured and recorded on it; nothing promises a fixed
+time.
+
+**Spend.** Past the project's hourly image limit
+(`METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`, 20 by default), the panel says how
+many images were made in the last hour and generates only when the person
+chooses **Generate anyway**. An agent uses `twin.generate_sketch`, which is
+held for approval like every paid image tool.
+
+A generated image is illustrative: never an editable sketch and never CAD.
+**Make editable** works on the person's own strokes. Turning a generated
+image into editable shapes is not built yet.
+
+**Manufacturing note.** Every concept carries a short, truthful note about
+how it might be made, from the project's
+[manufacturing context](twin_schema.md#manufacturing-context):
+*Manufacturing not assessed* when nothing informed it, or *Informed by: FDM
+(assumed), PLA (assumed) · Manufacturing not assessed* when a stated,
+decided or assumed process and material did. A first-time user never has to
+choose a process first: with none stated, MetaForge proposes candidates as
+assumptions. A concept asked for as *speculative* is labelled *Speculative
+concept* and the context is recorded but not applied. No concept is ever
+labelled verified or production-ready: no manufacturing check has run on an
+illustration.
+
+### References and their roles
+
+References are listed in Imagine's Sketch tab (**References** opens them in
+the drawer) and attached through the composer. Each added reference shows as a compact chip with its role and whether the
+next instruction includes it. The roles are:
+
+| Role | Used as |
+|---|---|
+| Inspiration | Mood, style and materials only; its shape is not copied |
+| Shape | Its overall shape and proportions are followed |
+| How it works | How the product is used or works |
+| Current design | The current design, kept recognisable |
+| Evidence | Verification evidence. Never sent to an image model |
+| Specification | Authoritative: its explicit values are stated facts |
+| Making rule | Authoritative: a manufacturing rule |
+
+Clicking the eye leaves a reference out of (or puts it back into) the next
+instruction and generation. The arrow opens the rest only when asked for:
+features to keep unchanged, and **Find facts**. Facts are candidates with a
+citation (the reference, the line or region, the file's hash) and an
+uncertainty. A value read off an image is always *estimated*, never
+measured; only an explicit value with a unit in a specification or making
+rule is *stated*. When two authoritative references state different values
+for the same thing (120 mm against 125 mm), the activity overlay asks the
+person to choose, naming both sources.
+
+Every change of role, inclusion or file is kept as a version of the
+reference. A reference must belong to the project and be a file type the
+uploads accept. Which references were sent to which external provider, and
+when, is recorded on the reference. An instruction carries its active
+references with their roles, the current sketch revision and the selected
+region.
+
+## Develop
+
+Develop shows the twin's current model and what needs attention, with one
+primary action (see [the table above](#one-primary-action-per-stage)).
+
+### The model and its label
+
+The model is the existing 3D viewer, read only, with one label above it: the
+maturity word, **Illustrative**, **Preview**, **Exact** or **Validated**,
+then the status line, the representation level and what it was made from,
+and the item and revision:
+
+| Shown | Status line |
+|---|---|
+| An image or generated concept | *Concept · illustrative* |
+| An AI 3D concept | *3D Concept · illustrative* |
+| Simple 3D parts (L1) | *3D Preview · simple parts, sizes estimated* |
+| A provisional mesh or preview geometry | *3D Preview · provisional* |
+| Exact CAD | *Engineering Geometry · exact model available* |
+| Exact CAD whose checks are running | *Engineering Update · validation pending* |
+| Validated CAD | *Engineering Geometry · validated* |
+| Exact CAD whose checks failed | *Preview available · Engineering update needs attention* (the last checked version is kept) |
+
+A provisional mesh is never called exact, and an illustrative or provisional
+item never carries *verified*, *validated* or *production-ready* wording: the
+label passes through a guard that falls back to the plain illustrative
+wording. The guard also reads the artifact's
+[representation level](twin_schema.md#representation-levels): an AI 3D
+concept (L0) or simple parts (L1) is never shown as Exact or Validated,
+whatever its record says. The level reads, for example, *L1 · simple parts,
+sizes estimated · from SKT-LAMP@2* or *L3 · from the validated exact model ·
+from CAD-BASE@4*. Manufacturing results are not repeated on the label: they
+are in [Check](#check).
+
+**Which model.** Develop shows the best real representation of each item's
+current revision: validated exact geometry (L3) first, then an exact model
+not yet validated (L2), simple 3D parts (L1), an AI 3D concept (L0), then a
+picture; the newest of a level. An older revision of an item is never
+preferred over its current one, and an out of date revision ranks last. The
+Engineering 3D model view, opened with nothing selected, picks the same one.
+
+**What is running.** While a pass or the engineering checks run, a line on
+the model says so (*Preview updated · Engineering checks running*, or
+*Working on the next version. This is the latest finished one.*) and the
+last finished model stays on screen. The activity card in the header has the
+detail.
+
+**Needs attention.** Under the model, Develop lists the creation's
+[readiness](#readiness) blockers, each with what clears it.
+
+**Selecting a part.** Clicking a part of a 3D model selects its component
+(the `component_id` in the mesh's glTF extras, or the model's only
+component). This works part by part on a multi-part CAD model too: the exact
+model's STEP names each part's component, and the converter writes it into
+that part's extras. The selection is shared: a part picked in Engineering,
+in the studio (`fg:select`) or in Check's manufacturing results is selected
+here too.
+
 ### The editable part: preview, exact model and handles
 
-Once a parametric sketch exists, the stage shows it as a part. Nothing
-needs to be selected: the newest parametric sketch leads the stage (and
-selecting its CAD item shows the same view).
+Once a parametric sketch exists, Develop shows it as a part. Nothing needs
+to be selected: the newest parametric sketch leads (and selecting its CAD
+item shows the same view). In Create the part is shown read only: the
+handles and the number fields below are in Engineering's inspector.
 
 - **Preview.** The part is drawn in the browser from the same definition
   the exact model is built from, so a change shows at once: *3D Preview ·
@@ -518,8 +627,8 @@ commits](twin_schema.md#l2-preview).
 
 ### Build exact model
 
-**Build exact model** (the primary action, or in **More**) starts the exact
-build of the newest parametric sketch. It first reads the sketch as it is
+**Build exact model** (Develop's primary action once a parametric sketch
+exists) starts the exact build of the newest parametric sketch. It first reads the sketch as it is
 now:
 
 - When every input only a person can give is known (the depth of an
@@ -535,193 +644,61 @@ now:
   leaves it. Nothing is filled in on the person's behalf. Once every input
   is answered, the answers are saved as the sketch's next revision through
   the parameters route, which starts the one exact build.
-- When something has to happen first, the stage says what and offers the
-  way there: an unapproved sketch opens the editable sketch to approve it,
-  and a sketch with no confirmed plane or unit in millimetres opens the
-  plane choice. No build is started.
+- When something has to happen first, Develop says what and offers the way
+  there: an unapproved sketch opens Imagine's Sketch tab with the editable
+  sketch in the drawer, and a sketch with no confirmed plane or unit in
+  millimetres opens the plane choice there. No build is started.
 
 Approvals and refusals are the routes' own; a refusal is shown as the
-route gave it. Without a parametric sketch, **Build exact model** still
-puts a design request in the composer, ready to send.
+route gave it. Without a parametric sketch, **Ask for the exact model** puts
+a design request in the composer, ready to send.
 
 ### Refining the model automatically
 
-With a parametric sketch, **Refine the model automatically** starts the CAD
-design loop on it ([how it works](architecture/design-flow-harness.md#cad-design-loop)).
-A model writes the part's CadQuery, MetaForge builds and checks it, renders
-it from fixed views and has a vision model review the pictures and the
-measured numbers against the brief and the manufacturing context, then
-revises, a few times at most. It is a paid step: past the hourly limit the
-stage asks first (**Run it anyway** or **Not now**).
-
-The activity overlay shows each round ("Iteration 2: fixing wall
-thickness"), and the stage shows the latest rendered views while it works.
-The current model stays on the stage throughout. At the end the stage says
-how it stopped, in plain words (done, stopped at the iteration or spend
-limit with issues still open, or could not go on), lists what is still open
-(manufacturing findings, sizes out of tolerance, review comments, and any
-working value it used that the person should confirm), and offers **Use this
-version** or **Keep the previous one**. Using it builds the version through
-the same exact build as **Build exact model**, so it becomes the model only
-if that build's geometry check passes. When the loop needs a number nobody
-has given (a depth, a thickness), it asks; **Answer and continue** runs it
-again with the answer. Nothing is guessed on the person's behalf.
-
-Engineering's inspector shows each run's iteration timeline: the rendered
-views, the review with its issues, the measurements and checks, the DFM
-findings, the models and their cost, and the script changes from one
-iteration to the next.
-
-### Generating a concept
-
-**Generate a concept** (in More) draws a freeform concept sketch with an
-image model. It opens in the drawer; there is no separate studio. What the
-image is drawn from follows from what is there:
-
-| There is | Mode | What is sent |
-|---|---|---|
-| Only a description | From your description | The description, any constraints and a style |
-| Active references | From your references | Each reference for its role (below) |
-| A saved sketch | From your sketch | The strokes, drawn to an image, refined or completed |
-
-The panel asks for a description (the composer's draft fills it), a style
-(industrial sketch, marker render, line art or concept drawing), how many
-alternatives (one unless more are chosen: each is a paid image) and what to
-avoid. The person's strokes are never changed: the generated image is a
-separate layer under them.
-
-**A region.** Drawing a rectangle with the region tool selects the strokes in
-it and also becomes the region a generation may change. With *Change only the
-selected region* ticked, the description becomes the instruction for that
-region. The region is in the stage's sketch space: a generated image has its
-centre at the sketch origin and its shorter side spanning one sketch unit,
-so the region lands on the same pixels. A provider that takes an edit mask
-gets one; with any other, the new image is put back outside the region.
-Either way, the pixels outside the region, and inside any locked feature,
-are compared with what was there. When less than 90% of them are kept
-(`METAFORGE_SKETCH_PRESERVATION_THRESHOLD`), the proposal is marked *Check
-it* with what changed, and the activity overlay asks for a review rather
-than presenting it as done. Features to keep and things to avoid also go
-into the prompt.
-
-**Alternatives.** Every image is a proposal in the strip under the form,
-labelled *Generated concept · illustrative*, each card with its
-manufacturing note (*Manufacturing not assessed* until one is assessed). Each has **Accept**,
-**Reject**, **Compare** (pick two to see them side by side with the share of
-pixels that differ) and **Branch** (start a separate line of concepts from
-it). Nothing replaces the accepted concept until the person accepts one; the
-previous accepted concept stays in the line's history.
-
-**While it runs.** Clicks are debounced, so a burst of them sends one
-request. A new request on the same target (the sketch, or the sketch and the
-same region) replaces one still running, and an identical one joins it. The
-accepted concept stays on the stage during generation and when it fails. The
-activity overlay shows the real stages (queued, started, image received,
-completed) and no invented progress: no provider configured today streams
-partial images. A result that arrives after another concept was accepted is
-kept as history, marked stale, and cannot be accepted. The time to the first
-stored proposal is measured and recorded on it; nothing promises a fixed
-time.
-
-**Spend.** Past the project's hourly image limit
-(`METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`, 20 by default), the panel says how
-many images were made in the last hour and generates only when the person
-chooses **Generate anyway**. An agent uses `twin.generate_sketch`, which is
-held for approval like every paid image tool.
-
-A generated image is illustrative: never an editable sketch and never CAD.
-**Make editable** works on the person's own strokes. Turning a generated
-image into editable shapes is not built yet.
-
-**Manufacturing note.** Every concept carries a short, truthful note about
-how it might be made, from the project's
-[manufacturing context](twin_schema.md#manufacturing-context):
-*Manufacturing not assessed* when nothing informed it, or *Informed by: FDM
-(assumed), PLA (assumed) · Manufacturing not assessed* when a stated,
-decided or assumed process and material did. A first-time user never has to
-choose a process first: with none stated, MetaForge proposes candidates as
-assumptions. A concept asked for as *speculative* is labelled *Speculative
-concept* and the context is recorded but not applied. No concept is ever
-labelled verified or production-ready: no manufacturing check has run on an
-illustration.
+The CAD design loop ([how it works](architecture/design-flow-harness.md#cad-design-loop))
+writes a part's CadQuery, builds and checks it, renders it, has a vision
+model review it and revises it a few times at most. It is no longer started
+from Create: ask the assistant, or use Engineering's inspector, which shows
+each run's iteration timeline (the rendered views, the review with its
+issues, the measurements and checks, the DFM findings, the models and their
+cost, and the script changes from one iteration to the next) and its
+**Use this version** or **Keep the previous one**.
 
 ### Making a 3D concept
 
-**Make a 3D concept** turns the concept into an illustrative 3D model that can
-be turned around on the stage (correspondence level L0: approximate visual
-form, no CAD meaning). The gateway starts `twin.generate_concept_mesh` as its
-usual background job, from, in order:
+An illustrative 3D concept (correspondence level L0: approximate visual
+form, no CAD meaning) is made by `twin.generate_concept_mesh` as a
+background job, from the accepted generated concept, else the newest concept
+image, else the brief in words. Create has no button for it: ask the
+assistant (the tool is paid and held for approval, under the project's
+hourly mesh cap, `METAFORGE_AUTO_APPROVE_MESH_PER_HOUR`, 3 by default). The
+result is a GLB `render` labelled *AI 3D reference model, illustrative only*,
+shown in Develop as **Illustrative** · *3D Concept · illustrative*. The model
+records its source, who asked, from which surface, the project's policy mode
+and whether that policy alone would have approved it.
 
-1. the accepted generated concept (the head of the accepted concept line);
-2. else the newest concept image made by `twin.render_concept_image`;
-3. else the brief in words (intended use, appearance, size and fit,
-   materials).
-
-With none of these there is nothing to make it from and the stage says so.
-The job's progress is the activity overlay's operation; the button reads
-*Making a 3D concept…* until it ends, and the last finished artifact stays
-on the stage meanwhile. The result is a GLB `render` labelled *AI 3D
-reference model, illustrative only*, shown with the existing 3D viewer as
-**Illustrative** · *3D Concept · illustrative*. When the source image came
-from a block layout, the model is scaled to its envelope as before and the
-stage adds *Sized to the concept layout*.
-
-**Spend and approval.** It is a paid generation of about two and a half
-minutes. The person's click is the decision for one call, under the same
-rules as the held tool: a tool on the never-approved list always asks, and
-past the project's hourly mesh cap (`METAFORGE_AUTO_APPROVE_MESH_PER_HOUR`,
-3 by default) the stage says how many were made in the last hour and makes
-one only when the person chooses **Make it anyway**. An agent uses
-`twin.generate_concept_mesh`, which is held for approval; the Create route
-refuses an agent caller. The model records its source (`source_kind`, the
-source node and, for an accepted concept, its revision), who asked, from
-which surface, the project's policy mode and whether that policy alone would
-have approved it.
-
-### Working on the 3D concept one part at a time
-
-With a 3D concept on the stage, **Split into parts** asks the mesh provider to
-split it into parts (a paid step, about 40 credits). The split comes back as a
-new version beside the accepted one; the stage keeps showing the accepted
-concept until the person picks **Use this version** (or **Keep the previous
-one**), as with concept alternatives. **Show** puts a version on the stage
-without accepting it.
-
-The parts are then matched to the concept's components. The ones the gateway
-is sure of are filled in with how sure it is; the ones it is not sure of
-(including a left and right pair that look the same) say *Not sure: please
-choose*, and nothing is assumed for them. **Confirm parts** records the
-answers and the sure suggestions. Only confirmed parts carry their component,
-so after that selecting a part on the stage selects its component, the
-component's colour and finish apply to that part, and the DFM guidance and
-*Make it editable* can read the part's size as an estimate. When the model
-came back whole the stage says it could not be split.
-
-With a confirmed part selected, **Redo this part** makes just that part again
-from words or from a picture the person gives (an edited or cropped image),
-and **Seal this part** closes the part's open edges. Both are paid steps that
-ask before spending past the hourly cap, and each result is again a new
-version to accept or keep aside. Every other part stays exactly as it was.
-The model stays illustrative throughout. Engineering's inspector shows the
-split's provenance (provider, model, task, credits) and the part mapping.
+Splitting the concept into parts, matching the parts to components, and
+redoing or sealing one part are in Engineering's inspector (concept parts),
+with the split's provenance and the part mapping. Each result is a new
+version to accept or keep aside, and the model stays illustrative.
 
 ### Showing it as simple 3D parts
 
-**Show as simple 3D parts** (in **More**) draws the concept's block layout as
+**Show as simple 3D parts** (in Develop's **More**) draws the concept's block layout as
 a 3D model with one named part per component (correspondence level L1: parts
 identified, sizes estimated). It calls
 `POST /v1/twin/projects/{id}/structured-mesh`, which is free and answers at
-once, and the result takes the stage as **Preview** · *3D Preview · simple
-parts, sizes estimated*. An unchanged layout shows the model already made
-rather than a new one. With no concept sketch yet the stage says there is no
-layout to build from. It is also drawn once when a concept assembly is
+once, and the result is shown as **Preview** · *3D Preview · simple parts,
+sizes estimated*. An unchanged layout shows the model already made rather
+than a new one. With no concept sketch yet Develop says there is no layout
+to build from. It is also drawn once when a concept assembly is
 recorded. See [representation levels](twin_schema.md#representation-levels).
 
 ### Making a concept editable
 
-Once a concept is accepted (its parts are recorded with it), the primary
-action becomes **Make it editable**. It opens a short panel under the stage
-bar that asks for a proposal if there is none yet, then shows how the
+Once a concept is accepted (its parts are recorded with it), Develop's
+primary action becomes **Make it editable**. It opens a short panel under
+the model that asks for a proposal if there is none yet, then shows how the
 product would be built in plain words ("We'd build this as: the base: a
 round disc; the shade: a round rod, hollowed out"). There is no feature tree
 and no parameters here. The questions that need the person come next as
@@ -737,38 +714,6 @@ them. Engineering shows the same proposal in full under **Feature history
 estimated, confirmed or unknown status and source, the assumptions, the DFM
 strategy note with the rules that shaped it, and what it was made from. See
 [parametric reconstruction](twin_schema.md#parametric-reconstruction).
-
-### References and their roles
-
-Each added reference shows as a compact chip with its role and whether the
-next instruction includes it. The roles are:
-
-| Role | Used as |
-|---|---|
-| Inspiration | Mood, style and materials only; its shape is not copied |
-| Shape | Its overall shape and proportions are followed |
-| How it works | How the product is used or works |
-| Current design | The current design, kept recognisable |
-| Evidence | Verification evidence. Never sent to an image model |
-| Specification | Authoritative: its explicit values are stated facts |
-| Making rule | Authoritative: a manufacturing rule |
-
-Clicking the eye leaves a reference out of (or puts it back into) the next
-instruction and generation. The arrow opens the rest only when asked for:
-features to keep unchanged, and **Find facts**. Facts are candidates with a
-citation (the reference, the line or region, the file's hash) and an
-uncertainty. A value read off an image is always *estimated*, never
-measured; only an explicit value with a unit in a specification or making
-rule is *stated*. When two authoritative references state different values
-for the same thing (120 mm against 125 mm), the activity overlay asks the
-person to choose, naming both sources.
-
-Every change of role, inclusion or file is kept as a version of the
-reference. A reference must belong to the project and be a file type the
-uploads accept. Which references were sent to which external provider, and
-when, is recorded on the reference. An instruction carries its active
-references with their roles, the current sketch revision and the selected
-region.
 
 ## Conversation and instructions
 
@@ -838,9 +783,12 @@ each shows *Uploading*, *Added*, *Not supported* (with the reason) or
 
 ## The brief
 
-The first request becomes the brief's *Intended use*, in the person's words,
-and the first message asks the agent to state its assumptions and at most
-three short questions. The brief then holds:
+The brief is the creation's record of intent. It is no longer edited in a
+Create panel: the Imagine studio captures intent, and the handover maps the
+studio's ledger, requirements and assumptions into requirements and brief
+items with their source and verification method. The first request in the
+conversation still becomes the brief's *Intended use*, in the person's
+words. The brief holds:
 
 | Item | Records |
 |---|---|
@@ -854,21 +802,12 @@ three short questions. The brief then holds:
 | Success criteria | What a good result must achieve, one per line |
 | How it will be checked | How the physical result is evaluated |
 
-Each item is *Confirmed*, an *Assumption* (proposed, with a Confirm button)
-or *Open*. Only the first open questions are shown, so there is no
-questionnaire before work can start.
-
-**Measurements** carry an explicit unit and say whether they are
-*User-confirmed*, *Estimated* or *Unconfirmed*, and where they came from
-(typed, marked on a photo, sketch or model, with the known dimension that set
-the scale). A dimension marked *Critical* must be user-confirmed before a
-build can be released. A camera picture alone is never treated as a
-calibrated measurement.
-
-The brief saves itself as it is edited. A save that lands after a change made
-elsewhere (the Engineering view, an agent, another tab) is refused with
-`409` and the newer record, and the person chooses *Load the latest* or
-*Keep my version*.
+Each item is *Confirmed*, an *Assumption* or *Open*. **Measurements** carry
+an explicit unit and say whether they are *User-confirmed*, *Estimated* or
+*Unconfirmed*, and where they came from. A dimension marked *Critical* must
+be user-confirmed before a build can be released. A camera picture alone is
+never treated as a calibrated measurement. A write that lands after a change
+made elsewhere is refused with `409` and the newer record.
 
 ## Readiness
 
@@ -887,23 +826,43 @@ change that affects it shows up in Create at once with the reason.
 | Accepted product | Every required check passed and a person accepted the build |
 
 A finished design run is not readiness: it does not mean the product is
-manufacturable, safe for its use, or right for every process.
+manufacturable, safe for its use, or right for every process. Develop lists
+the blockers under **Needs attention**, and the rail's summaries come from
+the same state.
+
+## Check
+
+Check shows the twin's verification state, read only, with one primary
+action, **Run the checks**, which evaluates the interface contracts and the
+manufacturing checks again.
 
 ### Parts that must fit together
 
 When the project has [interface contracts](twin_schema.md#interface-contracts)
-(the [desk lamp golden path](examples/desk-lamp.md) seeds four), a short
-**Check** card under the readiness card lists each one in plain words with
-where it stands, for example *The circuit board must fit inside the base:
-not checked yet*. The words are *checked, it fits*, *does not fit yet*,
-*not checked yet* and *needs checking again after a change*; a fit is only
-claimed after a real check on real data. **Check now** runs the checks.
+(the [desk lamp golden path](examples/desk-lamp.md) seeds four), Check lists
+each one in plain words with where it stands, for example *The circuit board
+must fit inside the base: not checked yet*. The words are *checked, it
+fits*, *does not fit yet*, *not checked yet* and *needs checking again after
+a change*; a fit is only claimed after a real check on real data.
 Engineering's **Interfaces** tab shows the same contracts with their coupled
 parameters, agreements, status and the evidence of each check.
 
+### Manufacturing checks
+
+Check lists the open manufacturing (DFM) results by part, in plain words,
+with the overall status and its disclaimer; a result that blocks making says
+so. Selecting a part's name highlights it in the model (the shared component
+selection). The checks are heuristics on the best geometry each part has
+(see [DFM findings](twin_schema.md#dfm-findings)) until exact checks run on a
+validated model. Deciding on a suggestion (keep the design, try the
+suggested fix, explore another process) goes through the assistant or
+Engineering's **DFM** tab, which also has the rule profile and version,
+measured against limit, anchors, evidence, the verification items and the
+generated DFM report.
+
 ## Decisions
 
-The Decisions tab lists the project's pending approvals in plain words, each
+**Decisions** in the header lists the project's pending approvals in plain words, each
 labelled with the kind of commitment it is, so a design approval is never
 mistaken for spending or moving a machine: *Design approval*, *Spending*,
 *External file sharing*, *Physical machine action*, *Adding files* or *Process
@@ -912,13 +871,31 @@ item, a reason is asked for where the gateway requires one, and findings and
 *Full evidence in Engineering* are a click away. The approval rules are the
 gateway's own ([Approvals](approvals.md)); Create adds none.
 
-Releasing a build and accepting it are Create's own decisions, on the Make and
-Inspect tabs.
+Releasing a build and accepting it are Create's own decisions, in the Make
+stage.
 
-## Making it
+## Make
 
-Three routes: **Make at home**, **Use my workshop** and **Have it made**. The
-Make tab suggests a process from the brief and the model, says why (a metal
+Make shows the release checklist and the builds, with one primary action:
+**Plan the making**, or **Inspect the result** once the latest build has
+finished. Each opens in place, one at a time.
+
+**Release checklist.** Once a process with exact checks is chosen (today 3D
+printing), Make lists the manufacturing release checklist of the current
+revision (see [the release checklist](twin_schema.md#release-checklist)),
+each item passed, failed or not applicable, under one line saying how far
+the product is from being made. It reads **Ready for prototype** only when
+every required part has a validated exact model, the exact manufacturing
+analysis passed (or a person accepted its issues) and each part's STEP
+passed its round trip, and **Ready for production** only when, in addition,
+the physical verification is approved and the release is approved.
+Otherwise it reads *Not ready to make yet: 3 next steps*. It is never a
+percentage and never claims a readiness the checklist does not back.
+
+### Making it
+
+Three routes: **Make at home**, **Use my workshop** and **Have it made**.
+**Plan the making** suggests a process from the brief and the model, says why (a metal
 part suggests CNC machining, a single plastic part FDM printing), and allows
 any other. Home and workshop builds pick a registered machine from the machine
 library; a saved machine is not proof it is ready. For an external maker,
@@ -939,9 +916,9 @@ Build status moves *Released → Being made → Making finished*, or *Failed* or
 *Cancelled*. Estimates (time, material, cost) are shown with their basis, or
 the build says there is none yet.
 
-## Inspection and acceptance
+### Inspection and acceptance
 
-The **inspection plan** is set before making. The Inspect tab can turn the
+The **inspection plan** is set before making. **Inspect the result** can turn the
 success criteria into one check per line to start from. Each check records the
 feature, the acceptance condition or tolerance, the evidence needed, the method
 (camera observation, calibrated measurement, machine telemetry, operator
@@ -952,8 +929,8 @@ Evidence comes from the optional **camera** (pick a camera, live preview,
 positioning guidance, resolution, snapshots), from uploaded photos, or from
 measurements and notes. Nothing is recorded continuously: only the snapshots
 taken are kept, as files in the project. A camera that is refused or missing
-falls back to uploading photos. Leaving the tab ends the camera session; it is
-started again on purpose.
+falls back to uploading photos. Closing the inspection ends the camera
+session; it is started again on purpose.
 
 *Ask MetaForge to compare the evidence with the design* sends the agent the
 checks and the evidence, asking for an observation, a confidence and what is
@@ -980,15 +957,9 @@ links to files; the files stay in the twin), says that orders already placed
 with a manufacturer are not cancelled, and is refused while a build is
 released or being made: deleting never stops a machine.
 
-## Presentation mode
-
-**Present** fills the screen with the creation and adds a caption bar that
-steps through eight captions of the loop (Describe, Clarify, Design, Check,
-Approve, Make, Inspect, Improve or accept; arrow keys or the buttons; Esc
-leaves), lighting the milestone each belongs to and opening the tab that
-tells its story. In the offline sample workspace
-(`?demo=1`) the sample project is a complete creation with a delivered build
-waiting for its last check, so the whole loop can be shown without a gateway.
+In the offline sample workspace (`?demo=1`) the sample project is a complete
+creation with a delivered build waiting for its last check, so the whole
+loop can be shown without a gateway.
 
 ## Gateway API
 
@@ -1053,6 +1024,19 @@ The sketch layer uses these twin routes:
 | `POST /v1/twin/projects/{project_id}/cad-loops`, `GET ...` | Start the CAD design loop on a parametric sketch as a job (`409` with `spend_confirmation_required` past the hourly limit; refused for an agent); list the runs, newest first |
 | `GET .../cad-loops/{node_id}`, `POST .../cad-loops/{node_id}/decision` | One run with every iteration; **Use this version** (`accept`, an exact build; `409` when the model moved on) or **Keep the previous one** (`reject`), a person only |
 
+The Imagine stage uses these routes, under
+`/v1/twin/projects/{project_id}/imagine`:
+
+| Method and path | Does |
+|---|---|
+| `GET /studio` | The studio: `status` (`none`, `draft` or `handed_over`), `revision`, `config_ref`, `engine_url`, `config`, `updated_at` and the `handover` record |
+| `PUT /studio` | A new studio revision from a product config |
+| `POST /events` | One studio write, `{event_id, kind, data}`; idempotent per `event_id` |
+| `GET /handover` | The handover checklist, `{ready, items: [{id, label, status, detail}]}` |
+| `POST /handover` | Hand over (`{op_id}`); `409` with the missing items when not ready |
+| `POST /rework` | Reopen Imagine on a new revision (`{op_id, reason}`); dependent evidence is marked stale |
+| `GET /engine` | The studio's engine page, with the project's config embedded |
+
 "A person only" means a caller sending `X-MetaForge-Surface: agent` is
 refused with `403`. The full schemas are in the
 [gateway API reference](reference/gateway-api.md).
@@ -1075,13 +1059,17 @@ refused with `403`. The full schemas are in the
   width.
 
 - A 3D concept is one model from one image or text; the multiview source
-  (front, side, back) the tool supports is not offered from Create yet, and
-  the concept's manufacturing note is shown only when the concept record
-  carries one.
+  (front, side, back) the tool supports is not offered yet.
 - Readiness is read by polling every five seconds, not pushed.
 - Marking a dimension directly on a photo or the model, and calibrated camera
   measurement, are not built; measurements are typed, with their source.
 - Comparing two revisions side by side is in the Engineering view's revision
-  tools, not on the Create stage.
-- Finding manufacturers, quotes, orders and payment need a connector; the Make
-  tab says so rather than imitating one.
+  tools, not in Create.
+- Finding manufacturers, quotes, orders and payment need a connector; Make
+  says so rather than imitating one.
+- The studio frame loads its engine page by address, so it cannot send a
+  bearer token: on a gateway that requires sign-in the engine page has to be
+  reachable without one (for example through a short-lived signed address).
+- The studio snapshot (`fg:snapshot`) carries the `collections` the studio
+  route returns; a gateway that does not return them sends an empty snapshot,
+  and the page starts from its embedded config.
