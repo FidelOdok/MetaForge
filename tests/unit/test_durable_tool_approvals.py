@@ -515,6 +515,29 @@ def test_the_never_list() -> None:
     assert not policy_may_approve("twin.render_concept_image", "advise")
 
 
+def test_cadquery_writes_under_a_policy() -> None:
+    """FORGE-829: a boolean writes only its own result inside the work folder,
+    so ``auto`` approves it; a script and the exports can write elsewhere."""
+    assert not never_auto_approved("cadquery.boolean_operation")
+    assert policy_may_approve("cadquery.boolean_operation", "auto")
+    for mode in ("off", "advise", "auto_clean"):
+        assert not policy_may_approve("cadquery.boolean_operation", mode), mode
+
+    for tool in (
+        "cadquery.execute_script",
+        "cadquery.export_geometry",
+        "cadquery.export_sdf",
+        "cadquery.export_sdf_assembly",
+        "cadquery.export_urdf",
+        "cadquery.export_urdf_assembly",
+        "cadquery.export_usd",
+        "cadquery.export_usd_assembly",
+    ):
+        assert never_auto_approved(tool), tool
+        for mode in ("off", "advise", "auto_clean", "auto"):
+            assert not policy_may_approve(tool, mode), (tool, mode)
+
+
 @pytest.mark.asyncio
 class TestThePolicyDecidesHeldWrites:
     async def test_auto_clean_approves_a_render_and_holds_a_non_additive_write(

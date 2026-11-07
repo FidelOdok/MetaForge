@@ -15,6 +15,7 @@ from tool_registry.tools.cadquery.operations import (
     CadqueryNotAvailableError,
     CadqueryOperations,
     MissingJointLimitsError,
+    OutputPathError,
     ScriptSandboxError,
     UnsupportedJointTypeError,
     _build_assembly_sdf,
@@ -404,6 +405,154 @@ class TestExportGeometryStepBase64:
         ):
             result = ops.export_geometry("in.step", "stl", output_path)
         assert "step_base64" not in result
+
+
+class _FakeBooleanShape(_FakeSolid):
+    def union(self, _other):
+        return self
+
+    def cut(self, _other):
+        return self
+
+    def intersect(self, _other):
+        return self
+
+
+class _FakeBooleanImporters:
+    @staticmethod
+    def importStep(_input_file):  # noqa: N802
+        return _FakeBooleanShape()
+
+
+class _FakeBooleanCq(_FakeCq):
+    importers = _FakeBooleanImporters()
+
+
+def _patched_cq(fake):
+    return (
+        patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+        patch("tool_registry.tools.cadquery.operations.cq", fake),
+    )
+
+
+class TestBooleanOperationStaysInItsWorkFolder:
+    """FORGE-829: boolean_operation is producing because its one write, the
+    result, lands inside the work folder and never replaces a file."""
+
+    def _run(self, ops, **kwargs):
+        has, cq = _patched_cq(_FakeBooleanCq())
+        with has, cq:
+            return ops.boolean_operation("a.step", "b.step", "intersect", **kwargs)
+
+    def test_unnamed_result_goes_to_a_new_folder_each_call(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        first = Path(self._run(ops)["output_file"])
+        second = Path(self._run(ops)["output_file"])
+        assert first != second
+        assert first.exists() and second.exists()
+        for out in (first, second):
+            assert out.is_relative_to(tmp_path / "output" / "cadquery" / "boolean")
+            assert out.name == "a_intersect.step"
+
+    def test_named_path_inside_the_work_folder_is_written(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        target = tmp_path / "cuts" / "result.step"
+        result = self._run(ops, output_path=str(target))
+        assert result["output_file"] == str(target)
+        assert target.exists()
+
+    def test_relative_path_resolves_inside_the_work_folder(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        result = self._run(ops, output_path="cuts/rel.step")
+        assert Path(result["output_file"]) == tmp_path / "cuts" / "rel.step"
+        assert (tmp_path / "cuts" / "rel.step").exists()
+
+    @pytest.mark.parametrize("escape", ["../outside.step", "cuts/../../outside.step"])
+    def test_a_path_that_climbs_out_is_refused(self, tmp_path, escape):
+        work = tmp_path / "work"
+        work.mkdir()
+        ops = CadqueryOperations(work_dir=str(work))
+        with pytest.raises(OutputPathError, match="outside the adapter's work folder"):
+            self._run(ops, output_path=escape)
+        assert not (tmp_path / "outside.step").exists()
+
+    def test_an_absolute_path_elsewhere_is_refused(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        ops = CadqueryOperations(work_dir=str(work))
+        elsewhere = tmp_path / "other" / "x.step"
+        with pytest.raises(OutputPathError):
+            self._run(ops, output_path=str(elsewhere))
+        assert not elsewhere.exists()
+
+    def test_a_sibling_folder_sharing_the_prefix_is_refused(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        ops = CadqueryOperations(work_dir=str(work))
+        with pytest.raises(OutputPathError):
+            self._run(ops, output_path=str(tmp_path / "work-other" / "x.step"))
+
+    def test_the_work_folder_itself_is_refused(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        with pytest.raises(OutputPathError):
+            self._run(ops, output_path=str(tmp_path))
+
+    def test_a_symlink_out_of_the_work_folder_is_refused(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        link = work / "link"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("symlinks need privileges on this platform")
+        ops = CadqueryOperations(work_dir=str(work))
+        with pytest.raises(OutputPathError):
+            self._run(ops, output_path="link/x.step")
+        assert not (outside / "x.step").exists()
+
+    def test_an_existing_file_is_never_overwritten(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        existing = tmp_path / "keep.step"
+        existing.write_bytes(b"original")
+        with pytest.raises(OutputPathError, match="never overwritten"):
+            self._run(ops, output_path=str(existing))
+        assert existing.read_bytes() == b"original"
+
+
+class TestExecuteScriptOutputPathConfined:
+    """FORGE-829: the argument is confined. The script is not (see
+    test_the_script_itself_is_not_confined), so the tool stays destructive."""
+
+    def _run(self, ops, script, output_path):
+        has, cq = _patched_cq(_FakeCq())
+        with has, cq:
+            return ops.execute_script(script, output_path)
+
+    def test_output_path_outside_the_work_folder_is_refused(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        ops = CadqueryOperations(work_dir=str(work), sandbox_enabled=True)
+        with pytest.raises(OutputPathError):
+            self._run(ops, "result = cq.Workplane()", str(tmp_path / "x.step"))
+        assert not (tmp_path / "x.step").exists()
+
+    def test_relative_output_path_resolves_inside_the_work_folder(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        result = self._run(ops, "result = cq.Workplane()", "output/script.step")
+        assert Path(result["cad_file"]) == tmp_path / "output" / "script.step"
+
+    def test_the_script_itself_is_not_confined(self, tmp_path):
+        """Why execute_script stays destructive: the namespace's own
+        ``exporters`` writes wherever the script says."""
+        work = tmp_path / "work"
+        work.mkdir()
+        outside = tmp_path / "outside.step"
+        ops = CadqueryOperations(work_dir=str(work), sandbox_enabled=True)
+        script = f"result = cq.Workplane()\nexporters.export(result, {str(outside)!r})"
+        self._run(ops, script, "out.step")
+        assert outside.exists()
 
 
 class TestExecuteScriptSandboxedImport:

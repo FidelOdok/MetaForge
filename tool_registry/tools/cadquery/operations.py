@@ -15,6 +15,7 @@ import re
 import signal
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -98,6 +99,14 @@ class CadqueryNotAvailableError(RuntimeError):
 
 class ScriptSandboxError(RuntimeError):
     """Raised when a script violates sandbox restrictions."""
+
+
+class OutputPathError(ValueError):
+    """Raised when an ``output_path`` leaves the work folder or names an existing file.
+
+    FORGE-829: the adapter writes a caller-named ``output_path`` only inside
+    its own work folder, so a call cannot overwrite a file elsewhere.
+    """
 
 
 class ScriptTimeoutError(RuntimeError):
@@ -889,6 +898,36 @@ class CadqueryOperations:
         parent = Path(file_path).parent
         parent.mkdir(parents=True, exist_ok=True)
 
+    def _confined_output_path(self, output_path: str, tool: str) -> str:
+        """Return ``output_path`` as an absolute path inside the work folder.
+
+        FORGE-829. A relative path is taken relative to the work folder. The
+        path is resolved through any ``..`` and symlinks before it is
+        compared, so neither can lead out. A path outside the work folder, or
+        the work folder itself, raises :class:`OutputPathError`.
+        """
+        root = os.path.realpath(self.work_dir)
+        candidate = os.path.abspath(
+            output_path if os.path.isabs(output_path) else os.path.join(root, output_path)
+        )
+        resolved = os.path.realpath(candidate)
+        try:
+            inside = os.path.commonpath([root, resolved]) == root and resolved != root
+        except ValueError:  # different drives on Windows
+            inside = False
+        if not inside:
+            logger.warning(
+                "cadquery_output_path_refused",
+                tool=tool,
+                output_path=output_path,
+                work_dir=self.work_dir,
+            )
+            raise OutputPathError(
+                f"{tool}: output_path {output_path!r} is outside the adapter's work "
+                f"folder {self.work_dir!r}. Name a path inside it, or omit output_path."
+            )
+        return candidate
+
     def _get_shape_properties(self, shape: Any) -> dict[str, Any]:
         """Extract geometric properties from a CadQuery shape/Workplane.
 
@@ -1054,11 +1093,28 @@ class CadqueryOperations:
         operation: str,
         output_path: str = "",
     ) -> dict[str, Any]:
-        """Perform CSG boolean operation on two CAD models."""
+        """Perform CSG boolean operation on two CAD models.
+
+        FORGE-829: the only file this writes is its result, and only inside
+        the work folder, never over an existing file. Unnamed, the result goes
+        to a new folder of its own; a named ``output_path`` must be inside the
+        work folder and must not exist. The two inputs are only read. That is
+        why ``cadquery.boolean_operation`` is classified as producing.
+        """
         self._require_cadquery()
 
         with tracer.start_as_current_span("cadquery.boolean_operation") as span:
             span.set_attribute("operation", operation)
+
+            # Check the destination before any work, so a refused call costs nothing.
+            if output_path:
+                output_path = self._confined_output_path(output_path, "cadquery.boolean_operation")
+                if os.path.lexists(output_path):
+                    raise OutputPathError(
+                        f"cadquery.boolean_operation: output_path {output_path!r} already "
+                        "exists and is never overwritten. Name a new file, or omit "
+                        "output_path to write to a new folder."
+                    )
 
             start = time.monotonic()
 
@@ -1076,7 +1132,14 @@ class CadqueryOperations:
 
             if not output_path:
                 stem_a = Path(input_file_a).stem
-                output_path = os.path.join(self.work_dir, f"{stem_a}_{operation}.step")
+                output_path = os.path.join(
+                    self.work_dir,
+                    "output",
+                    "cadquery",
+                    "boolean",
+                    uuid.uuid4().hex,
+                    f"{stem_a}_{operation}.step",
+                )
             self._ensure_output_dir(output_path)
 
             _export_shape(result, output_path)
@@ -1978,6 +2041,14 @@ class CadqueryOperations:
         - Allowed namespace: cadquery, math, typing, functools.reduce
         - Max script size enforced
         - Timeout via signal.alarm() (inside Docker container)
+        - ``output_path`` is confined to the work folder (FORGE-829)
+
+        These checks are source-level and run in this process, so they are not
+        an isolation boundary: ``exporters``, ``cq.Shape.exportStep`` and the
+        rest of the CadQuery API write to any path a script names, and the
+        blocked-name check does not stop dunder attribute access. The real
+        boundary is the cadquery-adapter container (FORGE-829 records what it
+        can reach), which is why the tool stays destructive.
         """
         self._require_cadquery()
 
@@ -2006,7 +2077,12 @@ class CadqueryOperations:
             # import statements would raise a NameError at exec() time.
             script = _strip_sandbox_imports(script)
 
-            if not output_path:
+            # FORGE-829: the result file lands inside the work folder. This
+            # confines the argument only; the script itself can still write
+            # elsewhere (see the DESTRUCTIVE note in mcp_core/annotations.py).
+            if output_path:
+                output_path = self._confined_output_path(output_path, "cadquery.execute_script")
+            else:
                 output_path = os.path.join(self.work_dir, "script_result.step")
             self._ensure_output_dir(output_path)
 
