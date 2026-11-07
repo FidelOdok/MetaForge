@@ -4,7 +4,6 @@ import { render, screen, within } from '../../../test/test-utils';
 import * as api from '../../../api/endpoints/interfaceContracts';
 import type { ContractsResponse, InterfaceContractView } from '../../../api/endpoints/interfaceContracts';
 import { InterfaceContractsSection } from '../InterfaceContractsSection';
-import { FitTogetherSummary } from '../../create/FitTogetherSummary';
 
 const P = 'p1';
 
@@ -118,45 +117,6 @@ describe('Engineering: Interfaces', () => {
     await user.click(within(block).getByRole('button', { name: 'Agree for electronics' }));
     expect(agree).toHaveBeenCalledWith(P, 'IFC-CAD-EDA', 'electronics');
     await user.click(screen.getByRole('button', { name: 'Check now' }));
-    expect(check).toHaveBeenCalledWith(P);
-  });
-});
-
-describe('Create: Parts that must fit together', () => {
-  beforeEach(() => vi.restoreAllMocks());
-
-  it('says in plain words where each contract stands', async () => {
-    vi.spyOn(api, 'getContracts').mockResolvedValue(VIEW);
-    render(<FitTogetherSummary projectId={P} />);
-    expect(await screen.findByText('Parts that must fit together')).toBeInTheDocument();
-    expect(screen.getByTestId('fit-IFC-CAD-EDA')).toHaveTextContent(
-      'The circuit board must fit inside the base: does not fit yet',
-    );
-    expect(screen.getByTestId('fit-IFC-SIMULATION')).toHaveTextContent(
-      "The temperature check needs the lamp's shape, materials and LED heat: not checked yet",
-    );
-    // No engineering jargon in Create.
-    expect(screen.getByTestId('fit-together')).not.toHaveTextContent('IFC-');
-  });
-
-  it('reads stale as needing a new check, and shows nothing without contracts', async () => {
-    const stale = { ...CAD, status: 'stale' as const, latest_check: { ...CAD.latest_check!, stale: true } };
-    vi.spyOn(api, 'getContracts').mockResolvedValue({ project_id: P, contracts: [stale] });
-    const { unmount } = render(<FitTogetherSummary projectId={P} />);
-    expect(await screen.findByTestId('fit-IFC-CAD-EDA')).toHaveTextContent('needs checking again after a change');
-    unmount();
-    vi.spyOn(api, 'getContracts').mockResolvedValue({ project_id: P, contracts: [] });
-    render(<FitTogetherSummary projectId="p2" />);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(screen.queryByTestId('fit-together')).not.toBeInTheDocument();
-  });
-
-  it('checks on request', async () => {
-    vi.spyOn(api, 'getContracts').mockResolvedValue(VIEW);
-    const check = vi.spyOn(api, 'checkContracts').mockResolvedValue({ checks: [] });
-    const user = userEvent.setup();
-    render(<FitTogetherSummary projectId={P} />);
-    await user.click(await screen.findByRole('button', { name: 'Check now' }));
     expect(check).toHaveBeenCalledWith(P);
   });
 });

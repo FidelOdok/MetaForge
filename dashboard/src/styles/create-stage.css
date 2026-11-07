@@ -1,18 +1,11 @@
-/* ── Simplified Create stage: modes, drawer, collapsible panels ───────────
-   View shows the product; Sketch shows the paper. One drawer beside the
-   drawing holds the editable sketch, Generate, the plane or the references.
-   The conversation and the details collapse to a slim rail (VIEW-010).
-   Loaded after create.css, so these rules extend it.
+/* ── Create in four stages (FORGE-822) ─────────────────────────────────────
+   The rail is the navigation; each stage is one calm column beside the
+   conversation. Imagine holds the studio and the sketch paper (one drawer
+   beside the drawing for the editable sketch, Generate, the plane or the
+   references). Develop, Check and Make show the twin. The conversation
+   collapses to a slim rail (VIEW-010). Loaded after create.css.
    ─────────────────────────────────────────────────────────────────────── */
-.cv-body.is-chat-collapsed {
-  grid-template-columns: 44px minmax(0, 1fr) minmax(300px, 380px);
-}
-.cv-body.is-side-collapsed {
-  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) 44px;
-}
-.cv-body.is-chat-collapsed.is-side-collapsed {
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
-}
+
 .cv-rail {
   display: flex;
   flex-direction: column;
@@ -23,38 +16,8 @@
   border-radius: 10px;
   background: var(--cv-panel);
 }
-.cv-rail-chat {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-}
-.cv-rail-side {
-  grid-column: 3;
-  grid-row: 1 / span 2;
-}
-.cv-rail-tab {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--cv-muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-.cv-rail-tab:hover {
-  background: var(--cv-high);
-  color: var(--cv-text);
-}
-.cv-rail-tab .cv-count {
-  position: absolute;
-  top: -4px;
-  right: -6px;
-}
-.cv-chat,
-.cv-side {
+
+.cv-chat {
   position: relative;
 }
 .cv-collapse {
@@ -71,47 +34,6 @@
   font-size: 11px;
 }
 
-/* The stage's own bar: mode, maturity and status, the one next action. It is
-   a row of its own, so nothing here ever covers the drawing. */
-.cv-stage-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(17, 19, 25, 0.86);
-  color: #e2e2eb;
-}
-.cv-stage-bar .cv-stage-badges {
-  position: static;
-  flex: 1;
-  min-width: 0;
-  align-items: center;
-  pointer-events: auto;
-}
-.cv-mode-switch {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-}
-.cv-mode-switch button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #b4b4c2;
-  font-size: 12px;
-  cursor: pointer;
-}
-.cv-mode-switch button.is-on {
-  background: rgba(255, 90, 10, 0.18);
-  color: #fff;
-}
 .cv-maturity {
   padding: 3px 9px;
   border-radius: 999px;
@@ -133,27 +55,7 @@
 .cv-maturity.is-validated {
   box-shadow: inset 0 0 0 1px rgba(61, 214, 140, 0.8);
 }
-.cv-mfg-note {
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  color: #b4b4c2;
-  background: rgba(17, 19, 25, 0.72);
-}
-.cv-stage-next {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.cv-stage-bar .cv-chip-btn {
-  background: rgba(17, 19, 25, 0.8);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #e2e2eb;
-}
-.cv-stage-bar .cv-chip-btn.is-on {
-  border-color: var(--cv-accent);
-}
+
 .cv-primary {
   display: inline-flex;
   align-items: center;
@@ -174,18 +76,7 @@
   opacity: 0.6;
   cursor: default;
 }
-.cv-start {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.cv-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #b4b4c2;
-}
+
 .cv-more {
   position: relative;
 }
@@ -259,11 +150,7 @@
   display: flex;
   min-height: 0;
 }
-.cv-stage-body .cv-stage-canvas {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-}
+
 .cv-paper {
   position: relative;
   flex: 1;
@@ -272,32 +159,7 @@
     linear-gradient(90deg, var(--mf-sketch-grid) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--mf-sketch-paper);
 }
-.cv-trace {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  opacity: 0.22;
-  pointer-events: none;
-  user-select: none;
-}
-.cv-sketch-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.cv-sketch-overlay svg {
-  width: 100%;
-  height: 100%;
-}
-.cv-sketch-overlay path {
-  fill: none;
-  stroke: var(--mf-sketch-overlay);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
+
 .cv-drawer {
   display: flex;
   flex-direction: column;
@@ -357,10 +219,6 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-.cv-stage-body .cv-stage-working {
-  bottom: 16px;
-  pointer-events: none;
-}
 
 /* Docked in the drawer, the existing panels sit in flow. */
 .cv-drawer .sk-generate.is-docked {
@@ -385,35 +243,7 @@
   background: transparent;
 }
 
-@media (max-width: 1200px) {
-  .cv-body.is-chat-collapsed,
-  .cv-body.is-chat-collapsed.is-side-collapsed {
-    grid-template-columns: 44px minmax(0, 1fr);
-  }
-  .cv-body.is-side-collapsed {
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  }
-  .cv-rail-side {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    flex-direction: row;
-    justify-content: center;
-    margin-top: 12px;
-  }
-}
-
 @media (max-width: 760px) {
-  .cv-rail {
-    flex-direction: row;
-    justify-content: center;
-  }
-  .cv-rail-chat {
-    order: 3;
-  }
-  .cv-rail-side {
-    order: 2;
-    margin-top: 0;
-  }
   .cv-stage-body {
     flex-direction: column;
   }
@@ -431,84 +261,6 @@
   .cv-drawer-tab span {
     writing-mode: horizontal-tb;
   }
-}
-
-/* C3D slice 4: the manufacturing guidance badge and its suggestions. */
-.cv-dfm {
-  position: relative;
-}
-.cv-dfm-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  cursor: pointer;
-}
-.cv-dfm-badge[aria-expanded='true'] {
-  border-color: var(--cv-accent);
-}
-.cv-dfm-panel {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 4px);
-  z-index: 25;
-  width: min(360px, 80vw);
-  max-height: 420px;
-  overflow: auto;
-  padding: 8px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(17, 19, 25, 0.97);
-  color: #e2e2eb;
-  font-size: 12px;
-}
-.cv-dfm-intro {
-  margin: 0 0 6px;
-  color: #b4b4c2;
-}
-.cv-dfm-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.cv-dfm-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.cv-dfm-list li.is-on .cv-dfm-item,
-.cv-dfm-item:hover,
-.cv-dfm-item:focus-visible {
-  background: rgba(255, 255, 255, 0.08);
-}
-.cv-dfm-detail {
-  padding: 4px 8px 8px;
-}
-.cv-dfm-detail p {
-  margin: 0 0 6px;
-}
-.cv-dfm-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.cv-dfm-result {
-  margin-top: 6px;
-  color: #b4b4c2;
-}
-.cv-dfm-error {
-  color: #ff8a80;
 }
 
 /* C3D slice 5: a parametric component on the stage (L2 preview, L3 swap, handles). */
@@ -633,10 +385,6 @@
 }
 
 /* C3D slice 6: readiness only when the release checklist backs it. */
-.cv-readiness.is-production,
-.cv-readiness.is-prototype {
-  border-color: rgba(58, 157, 93, 0.7);
-}
 
 /* Spec 4B: "Make it editable" from an accepted concept, in plain words. */
 .cv-editable {
@@ -705,4 +453,462 @@
 .cv-editable-hint {
   font-size: 12px;
   color: #fbbf24;
+}
+
+/* ── Head: the name, then one compact status spot ─────────────────────── */
+.cv-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cv-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cv-decisions {
+  position: relative;
+}
+.cv-decisions .cv-count {
+  margin-left: 2px;
+}
+.cv-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: min(380px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--cv-line);
+  border-radius: 10px;
+  background: var(--cv-panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+.cv-popover-close {
+  float: right;
+}
+.cv-activity-slot {
+  position: relative;
+  z-index: 30;
+  min-width: 0;
+}
+.cv-activity-slot:not(:empty) {
+  width: min(340px, 60vw);
+}
+
+/* ── The rail: the four stages, and where the creation stands ─────────── */
+.cv-journey {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--cv-line);
+  border-radius: 12px;
+  background: var(--cv-panel);
+}
+.cv-journey-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cv-muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-journey-step:hover {
+  background: var(--cv-raised);
+  color: var(--cv-text);
+}
+.cv-journey-step.is-selected {
+  background: var(--cv-high);
+  color: var(--cv-text);
+  box-shadow: inset 0 -2px 0 var(--cv-accent);
+}
+.cv-journey-dot {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--cv-line);
+  font-size: 10px;
+}
+.cv-journey-step.is-done .cv-journey-dot {
+  background: var(--cv-ok);
+  border-color: var(--cv-ok);
+  color: var(--mf-c-111319);
+}
+.cv-journey-step.is-current .cv-journey-dot {
+  border-color: var(--cv-accent);
+  color: var(--cv-accent);
+}
+.cv-journey-step.is-active .cv-journey-dot {
+  animation: cv-pulse 1.6s ease-in-out infinite;
+}
+.cv-journey-text {
+  min-width: 0;
+}
+.cv-journey-label {
+  font-weight: 500;
+}
+.cv-journey-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Body: the conversation beside one column of stage content ────────── */
+.cv-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+.cv-body.is-chat-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+.cv-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-height: calc(100vh - 200px);
+  padding: 10px;
+  border: 1px solid var(--cv-line);
+  border-radius: 10px;
+  background: var(--cv-panel);
+}
+.cv-rail {
+  align-self: start;
+}
+.cv-main {
+  min-width: 0;
+}
+.cv-stage-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+}
+.cv-stage-col > .cv-card h3 {
+  margin: 0 0 8px;
+}
+.cv-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* One primary action, everything else in More. */
+.cv-stage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cv-stage-actions .cv-more-menu {
+  border-color: var(--cv-line);
+  background: var(--cv-panel);
+}
+.cv-stage-actions .cv-more-menu button {
+  color: var(--cv-text);
+}
+.cv-stage-actions .cv-more-menu button:hover,
+.cv-stage-actions .cv-more-menu button:focus-visible {
+  background: var(--cv-high);
+}
+.cv-stage-col .cv-stage-notice {
+  border: 1px solid var(--cv-line);
+  border-radius: 8px;
+  background: var(--cv-panel);
+  color: var(--cv-text);
+}
+.cv-stage-col .cv-stage-notice.is-error {
+  color: var(--cv-bad);
+}
+
+/* ── Imagine: Studio or Sketch, then the handover ─────────────────────── */
+.cv-seg {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--cv-line);
+  border-radius: 999px;
+  background: var(--cv-panel);
+}
+.cv-seg button {
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cv-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cv-seg button.is-on {
+  background: var(--cv-high);
+  color: var(--cv-text);
+}
+.cv-studio {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cv-studio-frame {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--cv-line);
+  border-radius: 12px;
+  background: var(--cv-panel);
+}
+.cv-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 48px 20px;
+  border: 1px dashed var(--cv-line);
+  border-radius: 12px;
+  text-align: center;
+}
+.cv-empty h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+.cv-empty p {
+  max-width: 46ch;
+  margin: 0;
+}
+.cv-handover {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.cv-handover h3 {
+  margin: 0;
+}
+.cv-handover > ul,
+.cv-handover-missing,
+.cv-reopen {
+  align-self: stretch;
+}
+.cv-handover-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.cv-handover-missing {
+  padding: 10px;
+  border: 1px solid var(--cv-bad);
+  border-radius: 8px;
+}
+.cv-handover-missing p {
+  margin: 0 0 6px;
+}
+.cv-reopen {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cv-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cv-checklist li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+.cv-checklist li.is-done svg {
+  color: var(--cv-ok);
+}
+.cv-checklist li.is-assumed svg {
+  color: var(--cv-warn);
+}
+.cv-checklist li.is-missing svg {
+  color: var(--cv-bad);
+}
+.cv-checklist-state {
+  color: var(--cv-muted);
+  font-size: 12px;
+}
+.cv-sketch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cv-sketch-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cv-sketch .cv-stage-body {
+  min-height: 480px;
+  border: 1px solid var(--cv-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* ── Develop: the twin's model, read only ─────────────────────────────── */
+.cv-twin-model {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--cv-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--mf-c-0c0e14);
+}
+.cv-twin-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cv-line);
+  background: var(--cv-panel);
+  color: var(--cv-muted);
+  font-size: 12px;
+}
+.cv-twin-label .cv-maturity {
+  background: var(--cv-raised);
+  color: var(--cv-text);
+}
+.cv-stage-canvas {
+  position: relative;
+  display: flex;
+  min-height: 420px;
+}
+.cv-stage-canvas > * {
+  flex: 1;
+}
+.cv-stage-working {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(17, 19, 25, 0.82);
+  color: #e2e2eb;
+  font-size: 12px;
+  pointer-events: none;
+}
+.cv-stage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  color: #9a9aaa;
+}
+.cv-stage-empty h2 {
+  margin: 0;
+  color: #e2e2eb;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+/* ── Make: what has been made ─────────────────────────────────────────── */
+.cv-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cv-outputs li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-journey-step.is-active .cv-journey-dot {
+    animation: none;
+  }
+}
+
+/* ── Phone width (375 px and up): one column, the stage first ─────────── */
+@media (max-width: 760px) {
+  .cv-body,
+  .cv-body.is-chat-collapsed {
+    display: flex;
+    flex-direction: column;
+  }
+  .cv-main {
+    order: 1;
+  }
+  .cv-chat,
+  .cv-rail {
+    order: 2;
+  }
+  .cv-status {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .cv-chat {
+    max-height: none;
+  }
+  .cv-rail {
+    flex-direction: row;
+    justify-content: center;
+    align-self: stretch;
+  }
+  .cv-journey-step {
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 2px;
+    text-align: center;
+  }
+  .cv-journey-summary {
+    display: none;
+  }
+  .cv-stage-canvas {
+    min-height: 300px;
+  }
+  .cv-sketch .cv-stage-body {
+    min-height: 360px;
+  }
+  .cv-checklist li {
+    grid-template-columns: 16px minmax(0, 1fr);
+  }
+  .cv-checklist-state {
+    grid-column: 2;
+  }
 }

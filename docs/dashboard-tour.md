@@ -83,18 +83,29 @@ sidebar entry; the page still opens from its address. The default landing page i
 ## `/create`: the Create view
 
 The nontechnical view of a project: describe a product, see it take shape,
-choose how to make it, inspect what comes out and improve it. The product on
-a stage in the middle takes most of the width, with a conversation on the
-left and readiness with the brief, decisions, making and inspection on the
-right; either side collapses to a slim rail. The stage has a View mode and a
-Sketch mode, one contextual drawer, one primary next action (such as **Make a
-3D concept**) and a More menu, and the journey reads Imagine, Develop, Check
-and Make. Opened from the **Create** nav item or the topbar switch. See
+choose how to make it, inspect what comes out and improve it. Create has four
+stages on one rail, **Imagine**, **Develop**, **Check** and **Make**, and the
+rail is its navigation: each stage is one calm column beside the
+conversation, with exactly one primary action and a single **More** menu.
+The header holds only the name and one status spot with **Decisions** and
+the activity card.
+
+- **Imagine** hosts the studio the assistant builds for the product, in a
+  sandboxed frame, with a **Studio** and **Sketch** tab, and the handover
+  checklist with **Hand over to engineering**. With no studio yet it says to
+  ask the assistant to start one.
+- **Develop** shows the twin's current model, read only, with its maturity
+  and representation level, what is running and what needs attention.
+- **Check** shows the interface contracts and the manufacturing (DFM)
+  results; **Make** shows the release checklist and the builds.
+
+Opened from the **Create** nav item or the topbar switch. See
 [The Create view](create-view.md) for the whole journey.
 
-- **Backed by:** `/v1/create/{project_id}`, plus `/v1/projects`,
-  `/v1/chat/threads`, `/v1/twin/nodes`, `/v1/approvals`, `/v1/uploads`,
-  `/v1/library/machines` and `/v1/twin/projects/{project_id}/concept-mesh`.
+- **Backed by:** `/v1/create/{project_id}`, `/v1/twin/projects/{project_id}/imagine`,
+  plus `/v1/projects`, `/v1/chat/threads`, `/v1/twin/nodes`, `/v1/approvals`,
+  `/v1/uploads`, `/v1/library/machines`, and the project's contracts, DFM
+  and release checklist routes.
 
 ## `/projects`: project workspace
 
@@ -364,7 +375,7 @@ turned: the viewer reads the up axis from the file itself when it says so,
 then from what the twin records about the model. A converted CAD model, the
 tessellation of an exact model, and STL or 3MF files are turned; an AI 3D
 concept, a structured mesh and other glTF files are already Y-up, as glTF
-defines, and are shown as they are. The Create stage makes the same
+defines, and are shown as they are. Create's Develop stage makes the same
 decision.
 
 The workplane is one plane, carrying the grid and receiving the model's

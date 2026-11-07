@@ -195,47 +195,30 @@ export function latestParametricSketch(nodes: TwinNode[]): { key: string; nodeId
   return newest ? { key: prop(newest, 'item_key'), nodeId: newest.id } : null;
 }
 
-/** The single primary next action (UXS-002, 16.2 item 5). `start` offers three equal entries. */
-export type PrimaryAction = 'start' | 'concept_3d' | 'reconstruct' | 'make_editable' | 'build_exact' | 'prepare_prototype';
+/** Develop's one primary action (UXS-002): what moves the twin's model forward next. */
+export type DevelopAction = 'build_exact' | 'reconstruct' | 'request_exact' | 'describe_change';
 
-export const PRIMARY_LABEL: Record<Exclude<PrimaryAction, 'start'>, string> = {
-  concept_3d: 'Make a 3D concept',
-  reconstruct: 'Make it editable',
-  make_editable: 'Make editable',
+export const DEVELOP_LABEL: Record<DevelopAction, string> = {
   build_exact: 'Build exact model',
-  prepare_prototype: 'Prepare prototype',
+  reconstruct: 'Make it editable',
+  request_exact: 'Ask for the exact model',
+  describe_change: 'Describe a change',
 };
 
-/** The three equivalent ways to start (16.2 item 1). */
-export const START_ACTIONS = ['Describe', 'Sketch it', 'Add reference'] as const;
-
-export interface StageFacts {
-  /** The brief has something in it, or the conversation has begun. */
-  described: boolean;
-  /** An accepted generated concept, a concept image or a concept render. */
-  hasConcept: boolean;
-  /** An AI 3D concept exists. */
-  hasConcept3d: boolean;
-  /** Strokes on the sketch layer. */
-  hasSketch: boolean;
-  /** The sketch was made editable (shapes, sizes and rules). */
-  hasEditable: boolean;
-  hasReferences: boolean;
-  /** A dimensioned model (CAD or PCB). */
+export interface DevelopFacts {
+  /** A dimensioned model (CAD or PCB) exists. */
   hasEngineering: boolean;
+  /** A parametric sketch exists, so the exact model can be built from it. */
+  hasParametricSketch: boolean;
   /** A concept was accepted (its parts are recorded): it can be made editable (spec 4B). */
-  conceptAccepted?: boolean;
+  conceptAccepted: boolean;
   /** The accepted concept's proposed features were accepted. */
-  editableFromConcept?: boolean;
+  editableFromConcept: boolean;
 }
 
-export function primaryActionFor(f: StageFacts): PrimaryAction {
-  if (f.hasEngineering) return 'prepare_prototype';
-  const begun = f.described || f.hasConcept || f.hasConcept3d || f.hasSketch || f.hasReferences;
-  if (!begun) return 'start';
-  // Spec 4B: once a concept is accepted, the next step is making it editable.
+export function developPrimary(f: DevelopFacts): DevelopAction {
+  if (f.hasEngineering) return 'describe_change';
+  if (f.hasParametricSketch) return 'build_exact';
   if (f.conceptAccepted && !f.editableFromConcept) return 'reconstruct';
-  if (!f.hasConcept3d) return 'concept_3d';
-  if (f.hasSketch && !f.hasEditable) return 'make_editable';
-  return 'build_exact';
+  return 'request_exact';
 }

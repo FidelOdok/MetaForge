@@ -36,8 +36,6 @@ const THEMES = {
   dark: block(tokens, ':root,:root.dark'),
   light: block(tokens, ':root[data-theme=light]'),
 };
-/** The View surface the saved-sketch overlay is drawn on (--mf-c-0a0b0f). */
-const VIEW_SURFACE = { dark: '#0a0b0f', light: '#f4f6f9' };
 
 /** Stroke, shape and handle tokens, with the opacity their rule draws them at. */
 const ON_PAPER: [token: string, opacity: number][] = [
@@ -70,10 +68,6 @@ describe('sketch contrast tokens', () => {
       // An accepted badge: its glyph on the accept colour.
       expect(contrastRatio(t['--mf-sketch-on-accept']!, t['--mf-sketch-accept']!)).toBeGreaterThanOrEqual(3);
     });
-
-    it(`keeps the saved-sketch overlay visible in View, ${theme} theme`, () => {
-      expect(contrastRatio(t['--mf-sketch-overlay']!, VIEW_SURFACE[theme])).toBeGreaterThanOrEqual(3);
-    });
   }
 
   it('draws every stroke, shape and handle through the tokens', () => {
@@ -94,16 +88,15 @@ describe('sketch contrast tokens', () => {
 
     const stage = read('create-stage.css');
     expect(rule(stage, '.cv-paper')).toContain('var(--mf-sketch-paper)');
-    expect(rule(stage, '.cv-sketch-overlay path')).toContain('stroke: var(--mf-sketch-overlay)');
     // No hard-coded near-white ink is left on the paper.
     expect(sketch).not.toMatch(/--sk-ink:\s*#/);
   });
 
-  it('keeps the reference and the trace faint', () => {
+  it('loads the sketch tokens, and never puts a view of the model under the paper', () => {
     const stage = read('create-stage.css');
-    const opacity = Number(rule(stage, '.cv-trace').match(/opacity:\s*([\d.]+)/)?.[1]);
-    expect(opacity).toBeGreaterThan(0);
-    expect(opacity).toBeLessThanOrEqual(0.3);
+    // Sketching lives in Imagine: no trace of the 3D view under the paper, no sketch over the model.
+    expect(stage).not.toContain('.cv-trace');
+    expect(stage).not.toContain('.cv-sketch-overlay');
     expect(read('../index.css')).toContain('@import "./styles/sketch-tokens.css";');
   });
 });

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../../test/test-utils';
 import { AutoGrowTextarea } from '../AutoGrowTextarea';
-import { ReadinessCard } from '../ReadinessCard';
 import { JourneyRail } from '../JourneyRail';
 import { ViewSwitch } from '../../layout/ViewSwitch';
 import { useProjectStore } from '../../../store/project-store';
@@ -18,40 +17,20 @@ describe('AutoGrowTextarea', () => {
   });
 });
 
-describe('ReadinessCard', () => {
-  it('names the state, the next action and each blocker with its action', async () => {
-    const onAction = vi.fn();
-    render(
-      <ReadinessCard
-        readiness={{
-          stage: 'checked_design',
-          stage_index: 2,
-          blockers: [{ id: 'route', message: 'No way of making it chosen', action: 'Choose home, workshop or a manufacturer' }],
-          next_action: 'Choose home, workshop or a manufacturer.',
-          has_concept: true,
-          has_engineering_model: true,
-        }}
-        onAction={onAction}
-      />,
-    );
-    expect(screen.getByRole('heading', { name: 'Checked design' })).toBeInTheDocument();
-    expect(screen.getByText('No way of making it chosen')).toBeInTheDocument();
-    expect(screen.getByText(/not proof it is safe/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Choose home, workshop or a manufacturer' }));
-    expect(onAction).toHaveBeenCalledWith('route');
-  });
-});
-
 describe('JourneyRail', () => {
-  it('shows four milestones as summaries and marks the current one', () => {
-    render(<JourneyRail milestone={2} summaries={{ Imagine: 'Concept on stage', Check: '2 to resolve' }} />);
-    const items = screen.getAllByRole('listitem');
-    expect(items.map((li) => li.querySelector('.cv-journey-label')?.textContent)).toEqual(['Imagine', 'Develop', 'Check', 'Make']);
-    expect(screen.getByText('Check').closest('li')).toHaveAttribute('aria-current', 'step');
-    expect(screen.getByText('Imagine').closest('li')).toHaveClass('is-done');
+  it('is the navigation of Create: four stages, where it stands, and the one on screen', async () => {
+    const onSelect = vi.fn();
+    render(
+      <JourneyRail milestone={2} selected={0} onSelect={onSelect} summaries={{ Imagine: 'Concept captured', Check: '2 to resolve' }} />,
+    );
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((t) => t.querySelector('.cv-journey-label')?.textContent)).toEqual(['Imagine', 'Develop', 'Check', 'Make']);
+    expect(screen.getByRole('tab', { name: /Imagine/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /Imagine/ })).toHaveClass('is-done');
+    expect(screen.getByRole('tab', { name: /Check/ })).toHaveAttribute('data-state', 'current');
     expect(screen.getByText('2 to resolve')).toBeInTheDocument();
-    // Summaries, not gates: nothing in the rail is a control.
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    await userEvent.click(screen.getByRole('tab', { name: /Make/ }));
+    expect(onSelect).toHaveBeenCalledWith(3);
   });
 });
 

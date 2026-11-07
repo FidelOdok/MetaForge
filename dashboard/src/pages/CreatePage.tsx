@@ -1,16 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import {
-  ChevronLeft,
-  ChevronRight,
-  ClipboardList,
-  Maximize2,
-  MessageSquare,
-  Minimize2,
-  PanelLeftClose,
-  PanelRightClose,
-  Wrench,
-} from 'lucide-react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { ChevronLeft, ClipboardCheck, MessageSquare, PanelLeftClose, X } from 'lucide-react';
 import { useProject } from '../hooks/use-projects';
 import { useCreation } from '../hooks/use-creation';
 import { useAppearanceSync } from '../hooks/use-appearance';
@@ -24,15 +14,14 @@ import { refusalOf } from '../api/endpoints/create';
 import { CreationsHome } from '../components/create/CreationsHome';
 import { CreateConversation } from '../components/create/CreateConversation';
 import { CreateComposer } from '../components/create/CreateComposer';
-import { ProductStage, defaultStageNode, isEngineering, isVisual } from '../components/create/ProductStage';
+import { defaultStageNode, isEngineering, isVisual } from '../components/create/ProductStage';
 import { JourneyRail } from '../components/create/JourneyRail';
-import { ReadinessCard } from '../components/create/ReadinessCard';
-import { FitTogetherSummary } from '../components/create/FitTogetherSummary';
-import { BriefPanel } from '../components/create/BriefPanel';
 import { DecisionsPanel } from '../components/create/DecisionsPanel';
-import { MakePanel } from '../components/create/MakePanel';
-import { InspectPanel } from '../components/create/InspectPanel';
-import { JOURNEY, STEP_MILESTONE, milestoneIndex, milestoneSummaries } from '../components/create/copy';
+import { DevelopStage } from '../components/create/DevelopStage';
+import { CheckStage } from '../components/create/CheckStage';
+import { MakeStage } from '../components/create/MakeStage';
+import { ImagineStage, type ImagineView } from '../components/create/imagine/ImagineStage';
+import { milestoneIndex, milestoneSummaries } from '../components/create/copy';
 import { ActivityOverlay } from '../components/activity/ActivityOverlay';
 import { useOperations } from '../hooks/use-operations';
 import { useOperationActions } from '../hooks/use-operation-actions';
@@ -40,28 +29,9 @@ import { exactChecksState } from '../lib/exact-checks';
 import '../styles/create.css';
 import '../styles/create-stage.css';
 
-const PANELS = ['brief', 'decisions', 'make', 'inspect', 'history'] as const;
-type Panel = (typeof PANELS)[number];
-const PANEL_LABEL: Record<Panel, string> = {
-  brief: 'Brief',
-  decisions: 'Decisions',
-  make: 'Make',
-  inspect: 'Inspect',
-  history: 'History',
-};
-
-/** Which side panel tells each journey step's story in presentation mode. */
-const STEP_PANEL: Panel[] = ['brief', 'brief', 'brief', 'decisions', 'decisions', 'make', 'inspect', 'inspect'];
-const STEP_CAPTION = [
-  'Describe it in your own words. Photos and sketches help.',
-  'MetaForge turns the request into a brief and asks only what matters now.',
-  'Designs appear on stage as they exist. A concept is labelled as a concept.',
-  'Checks run on the dimensioned model. Readiness says what is still in the way.',
-  'Each commitment is its own decision: the design, sharing, spending, the machine.',
-  'Choose home, workshop or a manufacturer, and release one exact revision.',
-  'Inspect what came out against the plan, with photos and measurements.',
-  'Accept it, or describe the correction and make it again in the same creation.',
-];
+/** The four stages, as they appear in the address (`?stage=`). */
+export const STAGE_IDS = ['imagine', 'develop', 'check', 'make'] as const;
+export type StageId = (typeof STAGE_IDS)[number];
 
 /** Route-mapped intents to the tools each may use. */
 function useIntentTools(): Record<Intent, string[]> {
@@ -81,11 +51,10 @@ export function CreatePage() {
   return projectId ? <CreateWorkspace projectId={projectId} /> : <CreationsHome />;
 }
 
+const COMPOSER = 'textarea[aria-label="Describe your product or ask for a change"]';
+
 function CreateWorkspace({ projectId }: { projectId: string }) {
   const [params, setParams] = useSearchParams();
-  const navigate = useNavigate();
-  const panel = (PANELS as readonly string[]).includes(params.get('panel') ?? '') ? (params.get('panel') as Panel) : 'brief';
-  const presenting = params.get('present') === '1';
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
 
   const project = useProject(projectId);
@@ -100,13 +69,12 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   const setDraft = useCreateStore((s) => s.setDraft);
   const setIntent = useCreateStore((s) => s.setIntent);
   const submit = useCreateStore((s) => s.submit);
+  const openDrawer = useCreateLayoutStore((s) => s.openDrawer);
   // Operations come from the gateway (FORGE-786) and are shared with
   // Engineering. While the project has any, `working` is derived from them,
-  // plus an instruction still on its way out (acknowledged before its
-  // operation exists). Without any, the local queue is the fallback.
+  // plus an instruction still on its way out. Without any, the local queue
+  // is the fallback.
   const operations = useOperations(projectId);
-  // FORGE-788: the overlay's cancel and retry call the gateway; a review
-  // opens the Decisions panel, Create's own approval flow.
   const operationAction = useOperationActions(projectId);
   const queueWorking = session.queue.some((i) => i.state === 'sending' || i.state === 'queued');
   const working = operations.known
@@ -114,6 +82,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
     : queueWorking;
   // CDE slice 6: exact geometry checks behind the preview, said in plain words.
   const engineeringChecks = exactChecksState(operations.operations.byId);
+  const [decisionsOpen, setDecisionsOpen] = useState(false);
 
   // Opening a creation makes it the workspace's project, so Engineering shows the same one.
   useEffect(() => {
@@ -139,74 +108,39 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   const history = useNodeVersionHistory(model?.id);
   const modelRevision = history.data?.length ? Math.max(...history.data.map((r) => r.revision)) : null;
 
-  const openPanel = useCallback(
-    (p: Panel, replace = false) => {
+  const milestone = milestoneIndex(view.data);
+  const summaries = useMemo(() => milestoneSummaries(view.data), [view.data]);
+  const requested = STAGE_IDS.indexOf(params.get('stage') as StageId);
+  const selected = requested >= 0 ? requested : Math.min(milestone, STAGE_IDS.length - 1);
+  const stageId = STAGE_IDS[selected];
+  const imagineView: ImagineView = params.get('imagine') === 'sketch' ? 'sketch' : 'studio';
+
+  const collapsed = useCreateLayoutStore((s) => s.collapsed);
+  const setCollapsed = useCreateLayoutStore((s) => s.setCollapsed);
+
+  const go = useCallback(
+    (stage: StageId, imagine?: ImagineView) => {
       const next = new URLSearchParams(params);
-      next.set('panel', p);
-      setParams(next, { replace });
+      next.set('stage', stage);
+      if (imagine) next.set('imagine', imagine);
+      setParams(next);
     },
     [params, setParams],
   );
 
-  const milestone = milestoneIndex(view.data);
-  const summaries = useMemo(() => milestoneSummaries(view.data), [view.data]);
-  const collapsed = useCreateLayoutStore((s) => s.collapsed);
-  const setCollapsed = useCreateLayoutStore((s) => s.setCollapsed);
-  const chatCollapsed = collapsed.chat && !presenting;
-  const sideCollapsed = collapsed.side && !presenting;
-
-  /** Describe: open the conversation and put the cursor in the composer. */
-  const focusComposer = useCallback(() => {
-    setCollapsed('chat', false);
-    window.setTimeout(() => {
-      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Describe your product or ask for a change"]')?.focus();
-    }, 0);
-  }, [setCollapsed]);
-
-  const showPanel = useCallback(
-    (p: Panel) => {
-      setCollapsed('side', false);
-      openPanel(p);
-    },
-    [openPanel, setCollapsed],
-  );
-
-  const [tourStep, setTourStep] = useState(0);
-  const root = useRef<HTMLDivElement>(null);
-
-  const setPresenting = (on: boolean) => {
-    const next = new URLSearchParams(params);
-    if (on) next.set('present', '1');
-    else next.delete('present');
-    setParams(next);
-    if (on) {
-      // A presentation tells the whole loop, from the first step.
-      setTourStep(0);
-      void root.current?.requestFullscreen?.().catch(() => undefined);
-    } else if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => undefined);
-    }
-  };
-
-  useEffect(() => {
-    if (!presenting) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') setTourStep((s) => Math.min(JOURNEY.length - 1, s + 1));
-      if (e.key === 'ArrowLeft') setTourStep((s) => Math.max(0, s - 1));
-      if (e.key === 'Escape') {
-        const next = new URLSearchParams(params);
-        next.delete('present');
-        setParams(next);
+  /** Open the conversation with a request ready to send, and put the cursor in it. */
+  const ask = useCallback(
+    (text: string, intent?: Intent) => {
+      if (text) {
+        const draft = useCreateStore.getState().session(projectId).draft.trim();
+        setDraft(projectId, draft ? `${text} ${draft}` : text);
       }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [presenting, params, setParams]);
-
-  useEffect(() => {
-    if (presenting) openPanel(STEP_PANEL[tourStep] ?? 'brief', true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presenting, tourStep]);
+      if (intent) setIntent(projectId, intent);
+      setCollapsed('chat', false);
+      window.setTimeout(() => document.querySelector<HTMLTextAreaElement>(COMPOSER)?.focus(), 0);
+    },
+    [projectId, setCollapsed, setDraft, setIntent],
+  );
 
   if (project.isError) {
     return (
@@ -221,17 +155,10 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   }
 
   const pendingCount = pending.data?.items.length ?? 0;
-  const blockerPanel = (id: string): Panel =>
-    id === 'approvals' || id.startsWith('wp:') || id === 'design:model'
-      ? 'decisions'
-      : id.startsWith('check:') || id === 'inspection_plan'
-        ? 'inspect'
-        : id.startsWith('measurement:')
-          ? 'brief'
-          : 'make';
+  const chatCollapsed = collapsed.chat;
 
   return (
-    <div ref={root} className={`cv-root ${presenting ? 'is-presenting' : ''}`}>
+    <div className="cv-root">
       <header className="cv-head">
         <div className="cv-title">
           <Link to="/create" className="cv-back" aria-label="All creations">
@@ -239,62 +166,55 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
           </Link>
           <h1>{project.data?.name ?? 'Loading…'}</h1>
         </div>
-        <JourneyRail milestone={presenting ? (STEP_MILESTONE[tourStep] ?? 0) : milestone} summaries={summaries} active={working} />
-        <div className="cv-head-actions">
-          <button
-            type="button"
-            className="cv-btn"
-            onClick={() => setPresenting(!presenting)}
-            aria-pressed={presenting}
-            title={presenting ? 'Leave presentation (Esc)' : 'Present this creation'}
-          >
-            {presenting ? <Minimize2 size={14} /> : <Maximize2 size={14} />} {presenting ? 'Exit' : 'Present'}
-          </button>
-          <button type="button" className="cv-btn" onClick={() => navigate(`/projects/${projectId}`)} title="The same creation, with every engineering detail">
-            <Wrench size={14} /> Engineering
-          </button>
-        </div>
-      </header>
-
-      {presenting && (
-        <div className="cv-tour" role="status">
-          <button type="button" className="cv-icon-btn" aria-label="Previous step" onClick={() => setTourStep((s) => Math.max(0, s - 1))} disabled={tourStep === 0}>
-            <ChevronLeft size={16} />
-          </button>
-          <p>
-            <strong>{JOURNEY[tourStep]}.</strong> {STEP_CAPTION[tourStep]}
-          </p>
-          <button
-            type="button"
-            className="cv-icon-btn"
-            aria-label="Next step"
-            onClick={() => setTourStep((s) => Math.min(JOURNEY.length - 1, s + 1))}
-            disabled={tourStep === JOURNEY.length - 1}
-          >
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      )}
-
-      <div className={`cv-body${chatCollapsed ? ' is-chat-collapsed' : ''}${sideCollapsed ? ' is-side-collapsed' : ''}`}>
-        {/*
-          The activity card has its own row above the stage, so the stage's
-          toolbars and panels (Generate, the editable sketch) are never under
-          it (ASVG-005). It comes first in the page so a keyboard reaches it
-          straight after the header (ASVG-012); the grid puts it over the stage.
-        */}
-        {!presenting && (
+        {/* One compact status spot: decisions waiting, and what is running. */}
+        <div className="cv-status" data-testid="create-status">
+          <div className="cv-decisions">
+            <button
+              type="button"
+              className="cv-chip-btn"
+              aria-expanded={decisionsOpen}
+              aria-haspopup="dialog"
+              aria-label={pendingCount > 0 ? `Decisions, ${pendingCount} waiting` : 'Decisions'}
+              onClick={() => setDecisionsOpen((o) => !o)}
+            >
+              <ClipboardCheck size={14} aria-hidden="true" /> Decisions
+              {pendingCount > 0 && (
+                <span className="cv-count" data-testid="decisions-badge" title={`${pendingCount} waiting for you`}>
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+            {decisionsOpen && (
+              <div className="cv-popover" role="dialog" aria-label="Decisions">
+                <button type="button" className="cv-icon-btn cv-popover-close" aria-label="Close decisions" onClick={() => setDecisionsOpen(false)}>
+                  <X size={14} />
+                </button>
+                <DecisionsPanel projectId={projectId} />
+              </div>
+            )}
+          </div>
           <div className="cv-activity-slot" data-testid="create-activity-slot">
             <ActivityOverlay
               projectId={projectId}
               className="act-dock-create"
               onAction={operationAction}
-              onApproval={() => showPanel('decisions')}
+              onApproval={() => setDecisionsOpen(true)}
             />
           </div>
-        )}
+        </div>
+      </header>
+
+      <JourneyRail
+        milestone={milestone}
+        selected={selected}
+        onSelect={(i) => go(STAGE_IDS[i] ?? "imagine")}
+        summaries={summaries}
+        active={working}
+      />
+
+      <div className={`cv-body${chatCollapsed ? ' is-chat-collapsed' : ''}`}>
         {chatCollapsed ? (
-          <aside className="cv-rail cv-rail-chat" aria-label="Conversation" data-testid="chat-rail">
+          <aside className="cv-rail" aria-label="Conversation" data-testid="chat-rail">
             <button type="button" className="cv-icon-btn" aria-label="Show the conversation" title="Show the conversation" onClick={() => setCollapsed('chat', false)}>
               <MessageSquare size={16} />
             </button>
@@ -306,142 +226,57 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
           </aside>
         ) : (
           <aside className="cv-chat" aria-label="Conversation">
-            {!presenting && (
-              <button
-                type="button"
-                className="cv-icon-btn cv-collapse"
-                aria-label="Collapse the conversation"
-                title="Collapse the conversation"
-                onClick={() => setCollapsed('chat', true)}
-              >
-                <PanelLeftClose size={14} />
-              </button>
-            )}
+            <button
+              type="button"
+              className="cv-icon-btn cv-collapse"
+              aria-label="Collapse the conversation"
+              title="Collapse the conversation"
+              onClick={() => setCollapsed('chat', true)}
+            >
+              <PanelLeftClose size={14} />
+            </button>
             <CreateConversation projectId={projectId} tools={tools} />
             <CreateComposer projectId={projectId} tools={tools} busy={working} />
           </aside>
         )}
 
-        <main className="cv-main">
-          <ProductStage
-            projectId={projectId}
-            nodes={projectNodes}
-            selectedId={session.selectedNodeId}
-            onSelect={(id) => selectNode(projectId, id)}
-            onDiscuss={(n) => {
-              selectNode(projectId, n.id);
-              const draft = useCreateStore.getState().session(projectId).draft;
-              setDraft(projectId, `About ${n.name}: ${draft}`);
-            }}
-            working={working}
-            presenting={presenting}
-            engineeringChecks={engineeringChecks}
-            facts={{
-              described: !!view.data && Object.values(view.data.creation.brief.items).some((i) => i && i.status !== 'missing'),
-              hasReferences: (view.data?.creation.brief.references.length ?? 0) > 0,
-            }}
-            onDescribe={focusComposer}
-            onBuildExact={() => {
-              setIntent(projectId, 'design');
-              setDraft(projectId, 'Build an exact, dimensioned model from the accepted concept.');
-              focusComposer();
-            }}
-            onPrepare={() => showPanel('make')}
-          />
-        </main>
-
-        {sideCollapsed ? (
-          <aside className="cv-rail cv-rail-side" aria-label="Details" data-testid="side-rail">
-            <button type="button" className="cv-icon-btn" aria-label="Show the details" title="Show the details" onClick={() => setCollapsed('side', false)}>
-              <ClipboardList size={16} />
-            </button>
-            {PANELS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                className="cv-rail-tab"
-                title={PANEL_LABEL[p]}
-                aria-label={p === 'decisions' && pendingCount > 0 ? `${PANEL_LABEL[p]}, ${pendingCount} waiting` : PANEL_LABEL[p]}
-                onClick={() => showPanel(p)}
-              >
-                {PANEL_LABEL[p].slice(0, 1)}
-                {p === 'decisions' && pendingCount > 0 && (
-                  <span className="cv-count" data-testid="decisions-badge">
-                    {pendingCount}
-                  </span>
-                )}
-              </button>
-            ))}
-          </aside>
-        ) : (
-        <aside className="cv-side" aria-label="Details">
-          {!presenting && (
-            <button
-              type="button"
-              className="cv-icon-btn cv-collapse"
-              aria-label="Collapse the details"
-              title="Collapse the details"
-              onClick={() => setCollapsed('side', true)}
-            >
-              <PanelRightClose size={14} />
-            </button>
-          )}
-          {view.data ? (
-            <ReadinessCard readiness={view.data.readiness} onAction={(id) => showPanel(blockerPanel(id))} />
-          ) : view.isError ? (
-            <p className="cv-error">Readiness could not be loaded: {refusalOf(view.error)}</p>
+        <main
+          className="cv-main"
+          id="cv-stage-panel"
+          role="tabpanel"
+          aria-labelledby={`cv-stage-tab-${selected}`}
+          data-stage={stageId}
+        >
+          {stageId === 'imagine' ? (
+            <ImagineStage
+              projectId={projectId}
+              nodes={projectNodes}
+              view={imagineView}
+              onView={(v) => go('imagine', v)}
+              onAskAssistant={() => ask('Start the Imagine studio for this product.', 'design')}
+            />
+          ) : stageId === 'develop' ? (
+            <DevelopStage
+              projectId={projectId}
+              nodes={projectNodes}
+              view={view.data}
+              selectedId={session.selectedNodeId}
+              onSelect={(id) => selectNode(projectId, id)}
+              working={working}
+              engineeringChecks={engineeringChecks}
+              onAsk={(text) => ask(text, text.startsWith('Build an exact') ? 'design' : undefined)}
+              onSketchFix={(fix) => {
+                openDrawer(projectId, fix);
+                go('imagine', 'sketch');
+              }}
+            />
+          ) : stageId === 'check' ? (
+            <CheckStage projectId={projectId} onAsk={(text) => ask(text)} />
           ) : (
-            <p className="cv-muted">Loading…</p>
+            <MakeStage projectId={projectId} view={view.data} model={model} modelRevision={modelRevision} onAsk={(text) => ask(text)} />
           )}
-          <FitTogetherSummary projectId={projectId} />
-          <div className="cv-tabs" role="tablist" aria-label="Creation details">
-            {PANELS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                role="tab"
-                id={`cv-tab-${p}`}
-                aria-selected={panel === p}
-                aria-controls="cv-tabpanel"
-                className={`cv-tab ${panel === p ? 'is-on' : ''}`}
-                onClick={() => openPanel(p)}
-              >
-                {PANEL_LABEL[p]}
-                {p === 'decisions' && pendingCount > 0 && (
-                  <span className="cv-count" data-testid="decisions-badge" title={`${pendingCount} waiting for you`}>
-                    {pendingCount}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-          <div id="cv-tabpanel" role="tabpanel" aria-labelledby={`cv-tab-${panel}`} className="cv-tabpanel">
-            {view.data &&
-              (panel === 'brief' ? (
-                <BriefPanel projectId={projectId} view={view.data} />
-              ) : panel === 'decisions' ? (
-                <DecisionsPanel projectId={projectId} />
-              ) : panel === 'make' ? (
-                <MakePanel projectId={projectId} view={view.data} model={model} modelRevision={modelRevision} />
-              ) : panel === 'inspect' ? (
-                <InspectPanel projectId={projectId} view={view.data} />
-              ) : (
-                <ol className="cv-history">
-                  {[...view.data.creation.history].reverse().map((h, i) => (
-                    <li key={`${h.at}-${i}`}>
-                      <time dateTime={h.at}>{new Date(h.at).toLocaleString()}</time>
-                      <span>{h.summary || h.change}</span>
-                      <span className="cv-muted">
-                        {h.actor} · {h.surface}
-                      </span>
-                    </li>
-                  ))}
-                  {view.data.creation.history.length === 0 && <li className="cv-muted">Nothing recorded yet.</li>}
-                </ol>
-              ))}
-          </div>
-        </aside>
-        )}
+          {view.isError && <p className="cv-error">Where the creation stands could not be loaded: {refusalOf(view.error)}</p>}
+        </main>
       </div>
     </div>
   );

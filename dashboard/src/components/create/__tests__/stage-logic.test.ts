@@ -3,59 +3,45 @@ import type { CreationView } from '../../../api/endpoints/create';
 import type { TwinNode } from '../../../types/twin';
 import { MILESTONES, milestoneIndex, milestoneSummaries } from '../copy';
 import {
+  DEVELOP_LABEL,
   NOT_ASSESSED,
-  PRIMARY_LABEL,
+  developPrimary,
   manufacturingNote,
   overclaims,
-  primaryActionFor,
   representationOf,
   truthfulLabel,
-  type StageFacts,
+  type DevelopFacts,
 } from '../stage-logic';
 
-const NONE: StageFacts = {
-  described: false,
-  hasConcept: false,
-  hasConcept3d: false,
-  hasSketch: false,
-  hasEditable: false,
-  hasReferences: false,
+const NONE: DevelopFacts = {
   hasEngineering: false,
+  hasParametricSketch: false,
+  conceptAccepted: false,
+  editableFromConcept: false,
 };
 
 function node(props: Record<string, string | number | boolean>, extra: Partial<TwinNode> = {}): TwinNode {
   return { id: 'n', name: 'n', type: 'work_product', domain: '', status: '', properties: props, updatedAt: '', ...extra } as TwinNode;
 }
 
-describe('primaryActionFor', () => {
-  it('offers the three equal entry actions before anything exists', () => {
-    expect(primaryActionFor(NONE)).toBe('start');
+describe('developPrimary', () => {
+  it('asks for the exact model when nothing dimensioned exists yet', () => {
+    expect(developPrimary(NONE)).toBe('request_exact');
   });
 
-  it('follows the state: 3D concept, make editable, exact model, prototype', () => {
-    expect(primaryActionFor({ ...NONE, described: true })).toBe('concept_3d');
-    expect(primaryActionFor({ ...NONE, hasConcept: true })).toBe('concept_3d');
-    expect(primaryActionFor({ ...NONE, hasSketch: true })).toBe('concept_3d');
-    expect(primaryActionFor({ ...NONE, hasConcept: true, hasConcept3d: true, hasSketch: true })).toBe('make_editable');
-    expect(primaryActionFor({ ...NONE, hasConcept3d: true, hasSketch: true, hasEditable: true })).toBe('build_exact');
-    expect(primaryActionFor({ ...NONE, hasConcept3d: true })).toBe('build_exact');
-    expect(primaryActionFor({ ...NONE, hasEngineering: true })).toBe('prepare_prototype');
-  });
-
-  it('offers to make an accepted concept editable until its features are accepted', () => {
-    expect(primaryActionFor({ ...NONE, hasConcept: true, conceptAccepted: true })).toBe('reconstruct');
-    expect(primaryActionFor({ ...NONE, hasConcept3d: true, hasSketch: true, conceptAccepted: true })).toBe('reconstruct');
-    expect(primaryActionFor({ ...NONE, hasConcept3d: true, conceptAccepted: true, editableFromConcept: true })).toBe('build_exact');
-    expect(primaryActionFor({ ...NONE, hasEngineering: true, conceptAccepted: true })).toBe('prepare_prototype');
+  it('follows the twin: make editable, build exact, then describe a change', () => {
+    expect(developPrimary({ ...NONE, conceptAccepted: true })).toBe('reconstruct');
+    expect(developPrimary({ ...NONE, conceptAccepted: true, editableFromConcept: true })).toBe('request_exact');
+    expect(developPrimary({ ...NONE, hasParametricSketch: true, conceptAccepted: true })).toBe('build_exact');
+    expect(developPrimary({ ...NONE, hasEngineering: true, hasParametricSketch: true })).toBe('describe_change');
   });
 
   it('labels each action in plain words', () => {
-    expect(PRIMARY_LABEL).toEqual({
-      concept_3d: 'Make a 3D concept',
-      reconstruct: 'Make it editable',
-      make_editable: 'Make editable',
+    expect(DEVELOP_LABEL).toEqual({
       build_exact: 'Build exact model',
-      prepare_prototype: 'Prepare prototype',
+      reconstruct: 'Make it editable',
+      request_exact: 'Ask for the exact model',
+      describe_change: 'Describe a change',
     });
   });
 });
@@ -141,6 +127,6 @@ describe('milestones', () => {
     expect(milestoneIndex(view('build_completed'))).toBe(3);
     expect(milestoneIndex(view('accepted_product'))).toBe(4);
     const s = milestoneSummaries(view('design_in_development', { has_concept: true, has_engineering_model: true, blockers: [{ id: 'x', message: '', action: '' }] }));
-    expect(s).toEqual({ Imagine: 'Concept on stage', Develop: 'Dimensioned model', Check: '1 to resolve', Make: 'Not yet' });
+    expect(s).toEqual({ Imagine: 'Concept captured', Develop: 'Dimensioned model', Check: '1 to resolve', Make: 'Not yet' });
   });
 });

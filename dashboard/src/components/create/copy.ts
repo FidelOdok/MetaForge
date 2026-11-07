@@ -12,64 +12,6 @@ import type { ApprovalKind } from '../../types/approvals';
 
 /** Plain words for everything the Create view shows. One place, so the tone stays the same. */
 
-export const STAGE_COPY: Record<Stage, { label: string; meaning: string }> = {
-  concept: { label: 'Concept', meaning: 'The idea is taking shape. Details can still change freely.' },
-  design_in_development: {
-    label: 'Design in development',
-    meaning: 'A dimensioned design exists and is still being worked on and checked.',
-  },
-  checked_design: { label: 'Checked design', meaning: 'The design checks are recorded. Next: decide how to make it.' },
-  ready_for_making: {
-    label: 'Ready for making',
-    meaning: 'A build is prepared and waiting for your release.',
-  },
-  released_for_making: {
-    label: 'Released for making',
-    meaning: 'You released one exact revision for making.',
-  },
-  build_completed: { label: 'Build completed', meaning: 'Making has ended. Now inspect what came out.' },
-  accepted_product: { label: 'Accepted product', meaning: 'The build met every required check and you accepted it.' },
-};
-
-export const JOURNEY = [
-  'Describe',
-  'Clarify',
-  'Design',
-  'Check',
-  'Approve',
-  'Make',
-  'Inspect',
-  'Improve or accept',
-] as const;
-
-/** Which journey step a creation is on, from its readiness and records. */
-export function journeyStep(view: CreationView | undefined): number {
-  if (!view) return 0;
-  const { readiness, creation } = view;
-  const latest = creation.builds[creation.builds.length - 1];
-  if (latest?.acceptance || latest?.status === 'failed') return 7;
-  switch (readiness.stage) {
-    case 'concept': {
-      const items = creation.brief.items;
-      const filled = Object.values(items).filter((i) => i && i.status !== 'missing').length;
-      if (filled === 0 && !readiness.has_concept) return 0;
-      const openAssumptions = creation.brief.assumptions.some((a) => a.status === 'open');
-      return openAssumptions || filled < 3 ? 1 : 2;
-    }
-    case 'design_in_development':
-      return readiness.blockers.some((b) => b.id === 'approvals') ? 4 : 3;
-    case 'checked_design':
-    case 'ready_for_making':
-      return 4;
-    case 'released_for_making':
-      return 5;
-    case 'build_completed':
-      return 6;
-    case 'accepted_product':
-      return 7;
-  }
-}
-
 /**
  * The four journey milestones Create shows (16.2 item 2). They summarise
  * where a creation stands; they are not gates and not pages. Concept, CAD,
@@ -79,9 +21,6 @@ export function journeyStep(view: CreationView | undefined): number {
  */
 export const MILESTONES = ['Imagine', 'Develop', 'Check', 'Make'] as const;
 export type Milestone = (typeof MILESTONES)[number];
-
-/** The milestone each of the eight detailed journey steps belongs to. */
-export const STEP_MILESTONE = [0, 0, 1, 2, 2, 3, 3, 3] as const;
 
 /** Where a creation is, as a milestone index; 4 means all four are done (accepted). */
 export function milestoneIndex(view: CreationView | undefined): number {
@@ -101,14 +40,14 @@ const STAGE_MILESTONE: Record<Stage, number> = {
 
 /** One short summary per milestone, from the same readiness and records. */
 export function milestoneSummaries(view: CreationView | undefined): Record<Milestone, string> {
-  if (!view) return { Imagine: 'Describe, sketch or add a reference', Develop: 'Not started', Check: 'Not yet', Make: 'Not yet' };
+  if (!view) return { Imagine: 'Studio and sketches', Develop: 'Not started', Check: 'Not yet', Make: 'Not yet' };
   const { readiness, creation } = view;
   const latest = creation.builds[creation.builds.length - 1];
   const index = STAGE_ORDER.indexOf(readiness.stage);
   const checked = index >= STAGE_ORDER.indexOf('checked_design');
   const open = readiness.blockers.length;
   return {
-    Imagine: readiness.has_concept ? 'Concept on stage' : 'Describe, sketch or add a reference',
+    Imagine: readiness.has_concept ? 'Concept captured' : 'Studio and sketches',
     Develop: readiness.has_engineering_model ? 'Dimensioned model' : 'Not started',
     Check: checked ? 'Checks recorded' : readiness.has_engineering_model && open ? `${open} to resolve` : 'Not yet',
     Make: latest ? BUILD_STATUS_COPY[latest.status] : readiness.stage === 'ready_for_making' ? 'Ready for making' : 'Not yet',
