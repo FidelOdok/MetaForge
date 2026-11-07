@@ -1164,6 +1164,21 @@ class MetricsRegistry:
         labels=["verdict"],
     )
 
+    # ── Imagine stage (FORGE-821) ──────────────────────────────────────
+
+    IMAGINE_STUDIO_TOTAL = MetricDefinition(
+        name="metaforge_imagine_studio_total",
+        type="counter",
+        description=(
+            "Imagine stage operations on a project's concept studio, by operation: "
+            "put (a new config revision), event (a browser write mapped into the twin), "
+            "handover, rework or engine (the engine page served), and by outcome: ok, "
+            "duplicate (an event id or op id seen before), refused (validation, a frozen "
+            "studio or an unready handover) or failed (a twin write raised) (FORGE-821)"
+        ),
+        labels=["operation", "outcome"],
+    )
+
     # ── Concept mesh (FORGE-778) ───────────────────────────────────────
 
     CONCEPT_MESH_TOTAL = MetricDefinition(
@@ -1755,6 +1770,7 @@ class MetricsRegistry:
             cls.INTERFACE_EDGE_TOTAL,
             cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
             cls.CONCEPT_MESH_TOTAL,
+            cls.IMAGINE_STUDIO_TOTAL,
             cls.MANUFACTURING_CONTEXT_WRITE_TOTAL,
             cls.MANUFACTURING_CONTEXT_INJECTION_TOTAL,
             cls.CHANGE_CLASSIFICATION_TOTAL,
@@ -2685,6 +2701,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CONCEPT_IMAGE_CRITIQUE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"verdict": verdict})
+
+    def record_imagine_studio(self, operation: str, outcome: str) -> None:
+        """Record one Imagine stage operation by operation and outcome (FORGE-821)."""
+        counter = self._instruments.get(MetricsRegistry.IMAGINE_STUDIO_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"operation": operation, "outcome": outcome})
 
     def record_concept_mesh(self, outcome: str, mode: str = "image") -> None:
         """Record one concept mesh generation outcome by mode (FORGE-778, FORGE-779)."""

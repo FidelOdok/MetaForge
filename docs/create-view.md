@@ -12,6 +12,9 @@ products in the digital twin, and its decisions are the project's approvals.
 The **Create / Engineering** switch in the topbar moves between the two views
 of the same records, so nothing is copied and nothing is lost on the way.
 
+Imagine's concept studio (formgraph), its browser-to-host bridge and the
+handover gate to Develop are described in [The Imagine stage](imagine-stage.md).
+
 ## Where it lives
 
 | | |

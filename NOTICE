@@ -12,6 +12,11 @@ repository, or at http://www.apache.org/licenses/LICENSE-2.0
 
 Third-party material
 
+three.js r128 (MIT, Copyright 2010-2021 three.js authors) is vendored under
+api_gateway/imagine/engine/vendor/; see LICENSE.three and MANIFEST.json
+there. The Imagine studio engine is formgraph 2.7.0 by idroneinnovations, a
+trading name of idroneimages ltd; see api_gateway/imagine/README.md.
+
 Reference datasheets cached under tests/fixtures/datasheets/ are
 excerpted for technical-reference testing only. Original vendor
 copyrights apply; see tests/fixtures/datasheets/README.md.

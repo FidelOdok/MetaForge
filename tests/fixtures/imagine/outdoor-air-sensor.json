@@ -1,0 +1,378 @@
+{
+  "$schema": "../skills/formgraph/data/product.schema.json",
+  "engine": "formgraph@1.2.0",
+  "product": {
+    "id": "outdoor-air-sensor",
+    "name": "Outdoor Air Sensor",
+    "brand": "idroneinnovations",
+    "brief": "Battery air temperature and humidity sensor for building sites. Reports over LTE every 30 minutes, lasts two weeks, recharged over USB-C, survives being knocked off a scaffold rail."
+  },
+  "scenarios": [
+    {
+      "id": "report",
+      "text": "Sends readings from a building site every half hour",
+      "requires": [
+        "interval",
+        "cov"
+      ]
+    },
+    {
+      "id": "fortnight",
+      "text": "Left on site for two weeks between charges",
+      "requires": [
+        "life"
+      ]
+    },
+    {
+      "id": "knock",
+      "text": "Knocked off a rail onto the deck",
+      "requires": [
+        "drop"
+      ]
+    },
+    {
+      "id": "charge",
+      "text": "Charged in a site cabin",
+      "requires": [
+        "touch",
+        "chgt",
+        "chgh"
+      ]
+    },
+    {
+      "id": "check",
+      "text": "A worker presses the button to see that it is alive",
+      "requires": [
+        "resp"
+      ]
+    }
+  ],
+  "requirements": [
+    {
+      "id": "interval",
+      "pri": "Must",
+      "values": {
+        "interval": 30
+      },
+      "source": "brief"
+    },
+    {
+      "id": "life",
+      "pri": "Must",
+      "values": {
+        "life": 14
+      },
+      "source": "brief, two weeks"
+    },
+    {
+      "id": "resp",
+      "pri": "Must",
+      "values": {
+        "resp": 0.5
+      },
+      "source": "typical user expectation"
+    },
+    {
+      "id": "cov",
+      "pri": "Must",
+      "values": {
+        "cov": "fair"
+      },
+      "source": "urban building sites"
+    },
+    {
+      "id": "acc",
+      "pri": "Should",
+      "values": {
+        "acc": 0.5
+      },
+      "source": "site monitoring practice"
+    },
+    {
+      "id": "drop",
+      "pri": "Must",
+      "values": {
+        "drop": 1.2
+      },
+      "source": "rail height"
+    },
+    {
+      "id": "touch",
+      "pri": "Must",
+      "values": {
+        "touch": 48
+      },
+      "source": "plastic touch limit, IEC 62368-1 style"
+    },
+    {
+      "id": "chgt",
+      "pri": "Must",
+      "source": "Li-ion charging limit"
+    },
+    {
+      "id": "chgh",
+      "pri": "Should",
+      "values": {
+        "chgh": 10
+      },
+      "source": "overnight charge"
+    },
+    {
+      "id": "ip",
+      "pri": "Should",
+      "values": {
+        "ip": "none"
+      },
+      "source": "mounted under cover; revisit if exposed"
+    }
+  ],
+  "form": {
+    "template": "enclosure",
+    "params": {
+      "W": 110,
+      "P": 0.618,
+      "H": 34,
+      "R": 18,
+      "F": 6,
+      "A": 1.5,
+      "t": 2.2,
+      "sn": 9,
+      "sw": 1.8,
+      "bn": 4,
+      "bd": 2.2,
+      "rt": 1.2,
+      "rh": 5
+    },
+    "features": [
+      "slots",
+      "bosses",
+      "ribs"
+    ]
+  },
+  "functions": [
+    "e_usbc",
+    "e_th",
+    "e_lte",
+    "e_btn",
+    "e_led"
+  ],
+  "power": {
+    "board": "mcu",
+    "battery": "c18650"
+  },
+  "process": {
+    "id": "im",
+    "material": "absfr",
+    "finish": "matte",
+    "fixings": "pt25",
+    "qty": 5000
+  },
+  "simulations": [
+    "fill",
+    "drop",
+    "thermal",
+    "press"
+  ],
+  "level": "simple",
+  "color": "graphite",
+  "programme": {
+    "phase": "define",
+    "markets": [
+      "UK",
+      "EU"
+    ],
+    "segment": "business",
+    "sector": "ict",
+    "start": "2026-11-09",
+    "ledger": [
+      {
+        "text": "Battery air temperature and humidity sensor",
+        "maps": [
+          "fn:e_th",
+          "req:acc"
+        ],
+        "status": "mapped"
+      },
+      {
+        "text": "for building sites",
+        "maps": [
+          "scenario:report",
+          "req:cov"
+        ],
+        "status": "mapped"
+      },
+      {
+        "text": "Reports over LTE every 30 minutes",
+        "maps": [
+          "fn:e_lte",
+          "req:interval"
+        ],
+        "status": "mapped"
+      },
+      {
+        "text": "lasts two weeks",
+        "maps": [
+          "req:life"
+        ],
+        "status": "mapped"
+      },
+      {
+        "text": "recharged over USB-C",
+        "maps": [
+          "fn:e_usbc",
+          "req:chgh",
+          "req:chgt"
+        ],
+        "status": "mapped"
+      },
+      {
+        "text": "survives being knocked off a scaffold rail",
+        "maps": [
+          "req:drop"
+        ],
+        "status": "mapped"
+      },
+      {
+        "text": "clips onto standard scaffold tube",
+        "maps": [
+          "custom:mount"
+        ],
+        "status": "custom"
+      },
+      {
+        "text": "site managers see readings on their phone",
+        "maps": [],
+        "status": "out-of-scope",
+        "note": "cloud dashboard is a separate project"
+      }
+    ],
+    "assumptions": [
+      {
+        "id": "cover",
+        "text": "Mounted under cover, so splash protection is not required",
+        "ref": "requirement ip"
+      },
+      {
+        "id": "coverage",
+        "text": "Urban building sites have fair LTE coverage",
+        "ref": "requirement cov"
+      },
+      {
+        "id": "rail",
+        "text": "Scaffold rail height of about 1.2 m sets the drop height",
+        "ref": "requirement drop"
+      }
+    ],
+    "customRequirements": [
+      {
+        "id": "mount",
+        "text": "The sensor shall clip onto a 48.3 mm scaffold tube without tools.",
+        "measure": "fits tube diameter",
+        "target": "48.3 mm",
+        "pri": "Must",
+        "verify": "demonstration",
+        "level": "acceptance",
+        "phase": "evt",
+        "source": "brief, scaffold use"
+      }
+    ],
+    "rationale": {
+      "process": "5,000 units a year makes moulding the cheapest route",
+      "material": "flame-retardant ABS because a Li-ion cell sits inside",
+      "board": "low-power MCU board for two weeks on one cell",
+      "battery": "18650 cell for capacity and the 2 A LTE peak",
+      "radio": "LTE works anywhere without site gateways",
+      "size": "smallest box that fits the cell, board and antenna under the DFM limits"
+    },
+    "tradeoffs": [
+      {
+        "question": "Clip or strap mounting?",
+        "options": [
+          "moulded clip",
+          "hook-and-loop strap"
+        ],
+        "criteria": [
+          "tool-free",
+          "theft resistance",
+          "cost"
+        ],
+        "chosen": "moulded clip",
+        "reason": "tool-free and part of the moulding"
+      }
+    ],
+    "human": {
+      "handheld": false,
+      "gloves": true,
+      "mount": "rail"
+    },
+    "software": {
+      "connected": true,
+      "app": false,
+      "display": false
+    },
+    "firmware": {
+      "os": "bare metal with a scheduler",
+      "ota": true,
+      "watchdog": true,
+      "secureBoot": true,
+      "signedUpdates": true,
+      "encryption": true,
+      "uniqueCredentials": true,
+      "secureStorage": true,
+      "vulnPolicy": "published on the support site",
+      "supportYears": 5,
+      "chargeInhibit": true
+    },
+    "budgets": {
+      "mass_g": 220,
+      "power_mW": 25,
+      "cost_gbp": 30
+    },
+    "business": {
+      "price": 79,
+      "margin": 0.4,
+      "variants": [
+        "Graphite",
+        "Signal orange"
+      ]
+    },
+    "lifecycle": {
+      "targetLifeYears": 5,
+      "spares": true
+    },
+    "sustainability": {
+      "carbon_kg": 4
+    },
+    "packaging": {
+      "padding_mm": 15
+    },
+    "production": {
+      "yield": 0.97
+    },
+    "flows": {
+      "setup": "Charge over USB-C, press the button to join the network, clip onto the rail",
+      "use": "Sends readings every 30 minutes, light flashes on each send",
+      "failure": "Light shows red when it cannot send; readings are kept and sent later",
+      "maintenance": "Recharge every two weeks; firmware updates over the air",
+      "disposal": "Return to the depot for WEEE recycling; cell removed separately"
+    }
+  },
+  "environment": {
+    "opMin": -10,
+    "opMax": 35,
+    "storeMin": -20,
+    "storeMax": 60,
+    "humidity": [
+      20,
+      95
+    ],
+    "condensing": true,
+    "sun": "partial",
+    "altitude_m": 500,
+    "salt": false,
+    "uvHours": 1200,
+    "vibration": "fixed",
+    "outdoor": true,
+    "ventMembrane": false
+  }
+}

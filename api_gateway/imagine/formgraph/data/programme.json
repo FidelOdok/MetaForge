@@ -1,0 +1,2301 @@
+{
+  "version": "1.2.0",
+  "phases": [
+    {
+      "id": "define",
+      "name": "Define",
+      "question": "What must it do, for whom, in which markets?"
+    },
+    {
+      "id": "concept",
+      "name": "Concept",
+      "question": "Does a design exist that meets the intent under the process rules?"
+    },
+    {
+      "id": "evt",
+      "name": "EVT",
+      "question": "Does the design work? Hand-built or soft-tooled units."
+    },
+    {
+      "id": "dvt",
+      "name": "DVT",
+      "question": "Does it meet every requirement and pass certification, built on production tooling?"
+    },
+    {
+      "id": "pvt",
+      "name": "PVT",
+      "question": "Can the factory build it at rate and yield?"
+    },
+    {
+      "id": "production",
+      "name": "Mass production",
+      "question": "Is it being built, shipped and supported?"
+    },
+    {
+      "id": "service",
+      "name": "In service / end of life",
+      "question": "Is it working in the field, repairable and recoverable at end of life?"
+    }
+  ],
+  "loops": [
+    {
+      "from": "evt",
+      "to": "concept",
+      "why": "fails: redesign"
+    },
+    {
+      "from": "dvt",
+      "to": "evt",
+      "why": "fails: redesign"
+    },
+    {
+      "from": "pvt",
+      "to": "dvt",
+      "why": "fails: fix process"
+    }
+  ],
+  "effort_rows": {
+    "product": {
+      "name": "Product / systems",
+      "effort": [
+        2,
+        2,
+        1,
+        1,
+        0,
+        1
+      ]
+    },
+    "id": {
+      "name": "Industrial design",
+      "effort": [
+        1,
+        2,
+        1,
+        1,
+        0,
+        0
+      ]
+    },
+    "mech": {
+      "name": "Mechanical",
+      "effort": [
+        0,
+        1,
+        2,
+        2,
+        1,
+        1
+      ]
+    },
+    "elec": {
+      "name": "Electronics",
+      "effort": [
+        0,
+        1,
+        2,
+        2,
+        1,
+        1
+      ]
+    },
+    "fw": {
+      "name": "Firmware / software",
+      "effort": [
+        0,
+        1,
+        2,
+        2,
+        1,
+        2
+      ]
+    },
+    "sim": {
+      "name": "Simulation",
+      "effort": [
+        0,
+        1,
+        2,
+        1,
+        0,
+        0
+      ]
+    },
+    "dfm": {
+      "name": "DFM / supply chain",
+      "effort": [
+        1,
+        1,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    "comp": {
+      "name": "Compliance",
+      "effort": [
+        1,
+        1,
+        1,
+        2,
+        1,
+        1
+      ]
+    },
+    "test": {
+      "name": "Test / reliability",
+      "effort": [
+        0,
+        1,
+        1,
+        2,
+        2,
+        1
+      ]
+    },
+    "quality": {
+      "name": "Quality / field",
+      "effort": [
+        0,
+        0,
+        0,
+        1,
+        2,
+        2
+      ]
+    }
+  },
+  "effort_notes": [
+    "Compliance and DFM start on day one. If you don't know the creepage distances or the moulding draft angle at concept stage, you redesign the PCB or enclosure at DVT, after tooling money is spent.",
+    "Mechanical, electronics and firmware run side by side, linked by interfaces (board outline and mounting holes, connector positions, heat load, pinout). Freeze those interfaces early so the teams can work in parallel.",
+    "Simulation is front-loaded, before prototypes exist. Physical test is back-loaded, to confirm what simulation predicted."
+  ],
+  "overlap_drivers": [
+    "Concurrent engineering maximises overlap: shared CAD and part libraries, early supplier involvement, cross-discipline design reviews.",
+    "Long-lead items pull decisions forward: injection-mould tooling takes 6 to 10 weeks and certification test slots are booked months ahead.",
+    "Software never really stops: with over-the-air updates, firmware keeps changing after launch."
+  ],
+  "vmodel": [
+    {
+      "left": "Requirements",
+      "right": "Acceptance / certification",
+      "level": "acceptance"
+    },
+    {
+      "left": "System architecture",
+      "right": "System validation",
+      "level": "system"
+    },
+    {
+      "left": "Subsystem design (mech, elec, firmware)",
+      "right": "Subsystem tests",
+      "level": "subsystem"
+    }
+  ],
+  "groups": [
+    {
+      "n": 1,
+      "name": "Product definition"
+    },
+    {
+      "n": 2,
+      "name": "Industrial and experience design"
+    },
+    {
+      "n": 3,
+      "name": "Mechanical engineering"
+    },
+    {
+      "n": 4,
+      "name": "Electrical and electronic engineering"
+    },
+    {
+      "n": 5,
+      "name": "Software in hardware"
+    },
+    {
+      "n": 6,
+      "name": "Simulation and analysis"
+    },
+    {
+      "n": 7,
+      "name": "Manufacturing and supply"
+    },
+    {
+      "n": 8,
+      "name": "Quality and reliability"
+    },
+    {
+      "n": 9,
+      "name": "Test and validation"
+    },
+    {
+      "n": 10,
+      "name": "Compliance and certification"
+    },
+    {
+      "n": 11,
+      "name": "Lifecycle and sustainability"
+    },
+    {
+      "n": 12,
+      "name": "Business and legal"
+    }
+  ],
+  "domains": [
+    {
+      "id": "pm",
+      "g": 1,
+      "row": "product",
+      "name": "Product management",
+      "scope": "market, user needs, requirements, roadmap, pricing",
+      "impl": "partial",
+      "hooks": [
+        "req",
+        "economics"
+      ]
+    },
+    {
+      "id": "research",
+      "g": 1,
+      "row": "product",
+      "name": "User research",
+      "scope": "interviews, observation, usability testing",
+      "impl": "tracked",
+      "hooks": []
+    },
+    {
+      "id": "syseng",
+      "g": 1,
+      "row": "product",
+      "name": "Systems engineering",
+      "scope": "requirements, architecture, interfaces, budgets, trade-offs, traceability",
+      "impl": "modelled",
+      "hooks": [
+        "req",
+        "interfaces",
+        "budgets",
+        "tradeoffs",
+        "vtrace"
+      ]
+    },
+    {
+      "id": "regstrat",
+      "g": 1,
+      "row": "comp",
+      "name": "Regulatory strategy",
+      "scope": "which standards and markets apply, from day one",
+      "impl": "modelled",
+      "hooks": [
+        "compliance"
+      ]
+    },
+    {
+      "id": "idesign",
+      "g": 2,
+      "row": "id",
+      "name": "Industrial design",
+      "scope": "form, proportion, ergonomics, brand language",
+      "impl": "partial",
+      "hooks": [
+        "form"
+      ]
+    },
+    {
+      "id": "cmf",
+      "g": 2,
+      "row": "id",
+      "name": "CMF",
+      "scope": "colour, material, finish",
+      "impl": "modelled",
+      "hooks": [
+        "cmf"
+      ]
+    },
+    {
+      "id": "hf",
+      "g": 2,
+      "row": "id",
+      "name": "Human factors and ergonomics",
+      "scope": "anthropometrics, reach, force, sightlines",
+      "impl": "partial",
+      "hooks": [
+        "ergo"
+      ]
+    },
+    {
+      "id": "ux",
+      "g": 2,
+      "row": "id",
+      "name": "UX and interaction design",
+      "scope": "physical controls, indicators, setup flows",
+      "impl": "partial",
+      "hooks": [
+        "feedback",
+        "behaviour"
+      ]
+    },
+    {
+      "id": "ui",
+      "g": 2,
+      "row": "id",
+      "name": "UI design",
+      "scope": "displays, companion apps",
+      "impl": "tracked",
+      "hooks": [],
+      "when": [
+        "screen"
+      ]
+    },
+    {
+      "id": "packaging",
+      "g": 2,
+      "row": "id",
+      "name": "Packaging design",
+      "scope": "protection, unboxing, shipping size and weight",
+      "impl": "modelled",
+      "hooks": [
+        "packaging"
+      ]
+    },
+    {
+      "id": "mechdesign",
+      "g": 3,
+      "row": "mech",
+      "name": "Mechanical design",
+      "scope": "parts, assemblies, joints, fasteners, tolerances",
+      "impl": "modelled",
+      "hooks": [
+        "dfm",
+        "tolerance"
+      ]
+    },
+    {
+      "id": "mechanisms",
+      "g": 3,
+      "row": "mech",
+      "name": "Mechanisms and kinematics",
+      "scope": "linkages, gears, cams, hinges, motion",
+      "impl": "tracked",
+      "hooks": [],
+      "when": [
+        "mechanism"
+      ]
+    },
+    {
+      "id": "struct",
+      "g": 3,
+      "row": "mech",
+      "name": "Structural analysis",
+      "scope": "stress, stiffness, fatigue, impact",
+      "impl": "modelled",
+      "hooks": [
+        "drop",
+        "press",
+        "modal"
+      ]
+    },
+    {
+      "id": "thermaleng",
+      "g": 3,
+      "row": "mech",
+      "name": "Thermal engineering",
+      "scope": "heat paths, heatsinks, airflow, cooling",
+      "impl": "modelled",
+      "hooks": [
+        "thermal",
+        "junction",
+        "environment"
+      ]
+    },
+    {
+      "id": "fluids",
+      "g": 3,
+      "row": "mech",
+      "name": "Fluids",
+      "scope": "airflow, pumps, sealing, pressure",
+      "impl": "partial",
+      "hooks": [
+        "ip"
+      ]
+    },
+    {
+      "id": "enclosure",
+      "g": 3,
+      "row": "mech",
+      "name": "Enclosure design",
+      "scope": "housings, ingress protection (IP rating), sealing, cable management",
+      "impl": "modelled",
+      "hooks": [
+        "ip",
+        "harness",
+        "dfm",
+        "environment"
+      ]
+    },
+    {
+      "id": "materials",
+      "g": 3,
+      "row": "mech",
+      "name": "Materials engineering",
+      "scope": "selection, testing, corrosion, ageing",
+      "impl": "partial",
+      "hooks": [
+        "material",
+        "environment"
+      ]
+    },
+    {
+      "id": "acoustics",
+      "g": 3,
+      "row": "mech",
+      "name": "Acoustics and vibration",
+      "scope": "noise, resonance, damping",
+      "impl": "partial",
+      "hooks": [
+        "modal"
+      ]
+    },
+    {
+      "id": "optics",
+      "g": 3,
+      "row": "mech",
+      "name": "Optics and lighting",
+      "scope": "lenses, light guides, diffusers, glare, colour",
+      "impl": "tracked",
+      "hooks": [],
+      "when": [
+        "light"
+      ]
+    },
+    {
+      "id": "circuit",
+      "g": 4,
+      "row": "elec",
+      "name": "Circuit design",
+      "scope": "analogue, digital, mixed-signal",
+      "impl": "partial",
+      "hooks": [
+        "elec"
+      ]
+    },
+    {
+      "id": "powerel",
+      "g": 4,
+      "row": "elec",
+      "name": "Power electronics",
+      "scope": "regulators, converters, motor drives, battery charging",
+      "impl": "modelled",
+      "hooks": [
+        "rails",
+        "brownout"
+      ]
+    },
+    {
+      "id": "battsys",
+      "g": 4,
+      "row": "elec",
+      "name": "Battery systems",
+      "scope": "cells, protection, capacity, safety",
+      "impl": "modelled",
+      "hooks": [
+        "battery"
+      ],
+      "when": [
+        "battery"
+      ]
+    },
+    {
+      "id": "pcb",
+      "g": 4,
+      "row": "elec",
+      "name": "PCB design",
+      "scope": "layout, stackup, routing, design rules",
+      "impl": "partial",
+      "hooks": [
+        "tracew",
+        "creepage"
+      ]
+    },
+    {
+      "id": "sipi",
+      "g": 4,
+      "row": "elec",
+      "name": "Signal and power integrity",
+      "scope": "high-speed signals, noise, decoupling",
+      "impl": "partial",
+      "hooks": [
+        "brownout",
+        "usbimp"
+      ]
+    },
+    {
+      "id": "rf",
+      "g": 4,
+      "row": "elec",
+      "name": "RF and antennas",
+      "scope": "radios, matching, range, certification",
+      "impl": "modelled",
+      "hooks": [
+        "rf"
+      ],
+      "when": [
+        "radio"
+      ]
+    },
+    {
+      "id": "sensact",
+      "g": 4,
+      "row": "elec",
+      "name": "Sensors and actuators",
+      "scope": "measurement chains, motors, solenoids, transducers",
+      "impl": "partial",
+      "hooks": [
+        "error"
+      ],
+      "when": [
+        "sensor"
+      ]
+    },
+    {
+      "id": "embedded",
+      "g": 4,
+      "row": "elec",
+      "name": "Embedded hardware",
+      "scope": "microcontrollers, processors, memory, peripherals",
+      "impl": "partial",
+      "hooks": [
+        "pins",
+        "junction"
+      ]
+    },
+    {
+      "id": "emc",
+      "g": 4,
+      "row": "elec",
+      "name": "EMC",
+      "scope": "emissions and immunity, shielding, filtering",
+      "impl": "partial",
+      "hooks": [
+        "emc"
+      ]
+    },
+    {
+      "id": "elsafety",
+      "g": 4,
+      "row": "elec",
+      "name": "Electrical safety",
+      "scope": "insulation, creepage and clearance, earthing, protection",
+      "impl": "modelled",
+      "hooks": [
+        "creepage"
+      ]
+    },
+    {
+      "id": "harness",
+      "g": 4,
+      "row": "elec",
+      "name": "Cabling and harnesses",
+      "scope": "wiring, connectors, strain relief",
+      "impl": "modelled",
+      "hooks": [
+        "harness"
+      ]
+    },
+    {
+      "id": "firmware",
+      "g": 5,
+      "row": "fw",
+      "name": "Firmware",
+      "scope": "drivers, state machines, real-time behaviour, low power",
+      "impl": "partial",
+      "hooks": [
+        "behaviour",
+        "fwexec"
+      ]
+    },
+    {
+      "id": "eos",
+      "g": 5,
+      "row": "fw",
+      "name": "Embedded operating systems",
+      "scope": "RTOS or embedded Linux",
+      "impl": "partial",
+      "hooks": [
+        "fwexec"
+      ]
+    },
+    {
+      "id": "ota",
+      "g": 5,
+      "row": "fw",
+      "name": "Bootloaders and over-the-air updates",
+      "scope": "boot path, update path, rollback",
+      "impl": "partial",
+      "hooks": [
+        "ota"
+      ],
+      "when": [
+        "connected"
+      ]
+    },
+    {
+      "id": "conn",
+      "g": 5,
+      "row": "fw",
+      "name": "Connectivity and protocols",
+      "scope": "Bluetooth, Wi-Fi, cellular, MQTT, cloud APIs",
+      "impl": "partial",
+      "hooks": [
+        "rf",
+        "protocol"
+      ],
+      "when": [
+        "connected"
+      ]
+    },
+    {
+      "id": "cloud",
+      "g": 5,
+      "row": "fw",
+      "name": "Cloud and backend",
+      "scope": "device management, data, accounts",
+      "impl": "tracked",
+      "hooks": [],
+      "when": [
+        "connected"
+      ]
+    },
+    {
+      "id": "app",
+      "g": 5,
+      "row": "fw",
+      "name": "Companion apps",
+      "scope": "mobile and web",
+      "impl": "tracked",
+      "hooks": [],
+      "when": [
+        "app"
+      ]
+    },
+    {
+      "id": "security",
+      "g": 5,
+      "row": "fw",
+      "name": "Security",
+      "scope": "secure boot, keys, encryption, vulnerability management",
+      "impl": "partial",
+      "hooks": [
+        "security"
+      ],
+      "when": [
+        "connected"
+      ]
+    },
+    {
+      "id": "dataan",
+      "g": 5,
+      "row": "fw",
+      "name": "Data and analytics",
+      "scope": "telemetry, diagnostics, fleet monitoring",
+      "impl": "tracked",
+      "hooks": [],
+      "when": [
+        "connected"
+      ]
+    },
+    {
+      "id": "fea",
+      "g": 6,
+      "row": "sim",
+      "name": "FEA",
+      "scope": "structural, modal, thermal",
+      "impl": "partial",
+      "hooks": [
+        "drop",
+        "press",
+        "modal"
+      ]
+    },
+    {
+      "id": "cfd",
+      "g": 6,
+      "row": "sim",
+      "name": "CFD",
+      "scope": "airflow and heat transfer",
+      "impl": "partial",
+      "hooks": [
+        "thermal"
+      ]
+    },
+    {
+      "id": "spice",
+      "g": 6,
+      "row": "sim",
+      "name": "Circuit simulation",
+      "scope": "SPICE, power, thermal",
+      "impl": "partial",
+      "hooks": [
+        "brownout"
+      ]
+    },
+    {
+      "id": "emsim",
+      "g": 6,
+      "row": "sim",
+      "name": "Electromagnetic simulation",
+      "scope": "antennas, EMC, signal integrity",
+      "impl": "partial",
+      "hooks": [
+        "rf",
+        "emc"
+      ],
+      "when": [
+        "radio"
+      ]
+    },
+    {
+      "id": "mbd",
+      "g": 6,
+      "row": "sim",
+      "name": "Multibody dynamics",
+      "scope": "mechanisms and motion",
+      "impl": "tracked",
+      "hooks": [],
+      "when": [
+        "mechanism"
+      ]
+    },
+    {
+      "id": "controls",
+      "g": 6,
+      "row": "sim",
+      "name": "Control systems",
+      "scope": "modelling, tuning, stability",
+      "impl": "tracked",
+      "hooks": [],
+      "when": [
+        "control"
+      ]
+    },
+    {
+      "id": "tolan",
+      "g": 6,
+      "row": "sim",
+      "name": "Tolerance analysis",
+      "scope": "stack-ups, statistical (Monte Carlo)",
+      "impl": "modelled",
+      "hooks": [
+        "tolerance"
+      ]
+    },
+    {
+      "id": "relpred",
+      "g": 6,
+      "row": "sim",
+      "name": "Reliability prediction",
+      "scope": "failure rates, MTBF, derating",
+      "impl": "modelled",
+      "hooks": [
+        "mtbf",
+        "derating"
+      ]
+    },
+    {
+      "id": "dfm",
+      "g": 7,
+      "row": "dfm",
+      "name": "DFM",
+      "scope": "design for each production process",
+      "impl": "modelled",
+      "hooks": [
+        "dfm"
+      ]
+    },
+    {
+      "id": "dfa",
+      "g": 7,
+      "row": "dfm",
+      "name": "DFA",
+      "scope": "design for assembly (part count, orientation, fastening)",
+      "impl": "modelled",
+      "hooks": [
+        "dfa"
+      ]
+    },
+    {
+      "id": "proceng",
+      "g": 7,
+      "row": "dfm",
+      "name": "Process engineering",
+      "scope": "moulding, machining, sheet metal, casting, 3D printing, finishing",
+      "impl": "partial",
+      "hooks": [
+        "dfm",
+        "fill"
+      ]
+    },
+    {
+      "id": "emfg",
+      "g": 7,
+      "row": "dfm",
+      "name": "Electronics manufacturing",
+      "scope": "PCB fabrication, assembly, soldering, programming",
+      "impl": "partial",
+      "hooks": [
+        "production"
+      ]
+    },
+    {
+      "id": "tooling",
+      "g": 7,
+      "row": "dfm",
+      "name": "Tooling and fixtures",
+      "scope": "moulds, jigs, test fixtures",
+      "impl": "partial",
+      "hooks": [
+        "schedule"
+      ]
+    },
+    {
+      "id": "sourcing",
+      "g": 7,
+      "row": "dfm",
+      "name": "Supply chain and sourcing",
+      "scope": "suppliers, quotes, lead times, second sources",
+      "impl": "partial",
+      "hooks": [
+        "supply"
+      ]
+    },
+    {
+      "id": "compeng",
+      "g": 7,
+      "row": "dfm",
+      "name": "Component engineering",
+      "scope": "part selection, lifecycle, obsolescence",
+      "impl": "partial",
+      "hooks": [
+        "bom",
+        "derating"
+      ]
+    },
+    {
+      "id": "costeng",
+      "g": 7,
+      "row": "dfm",
+      "name": "Cost engineering",
+      "scope": "BOM cost, unit cost, tooling amortisation",
+      "impl": "modelled",
+      "hooks": [
+        "cost"
+      ]
+    },
+    {
+      "id": "prodeng",
+      "g": 7,
+      "row": "dfm",
+      "name": "Production engineering",
+      "scope": "line setup, yield, cycle time, scale-up",
+      "impl": "partial",
+      "hooks": [
+        "production"
+      ]
+    },
+    {
+      "id": "logistics",
+      "g": 7,
+      "row": "dfm",
+      "name": "Logistics",
+      "scope": "packaging, shipping, warehousing, customs",
+      "impl": "partial",
+      "hooks": [
+        "packaging"
+      ]
+    },
+    {
+      "id": "qe",
+      "g": 8,
+      "row": "quality",
+      "name": "Quality engineering",
+      "scope": "inspection, process control, Cpk, first-article inspection",
+      "impl": "modelled",
+      "hooks": [
+        "cpk"
+      ]
+    },
+    {
+      "id": "releng",
+      "g": 8,
+      "row": "test",
+      "name": "Reliability engineering",
+      "scope": "life testing, accelerated ageing, failure analysis",
+      "impl": "partial",
+      "hooks": [
+        "mtbf",
+        "tests"
+      ]
+    },
+    {
+      "id": "riskan",
+      "g": 8,
+      "row": "quality",
+      "name": "Risk analysis",
+      "scope": "FMEA, fault trees, hazard analysis",
+      "impl": "modelled",
+      "hooks": [
+        "fmea"
+      ]
+    },
+    {
+      "id": "rca",
+      "g": 8,
+      "row": "quality",
+      "name": "Root cause analysis",
+      "scope": "8D, 5 whys",
+      "impl": "tracked",
+      "hooks": []
+    },
+    {
+      "id": "fieldq",
+      "g": 8,
+      "row": "quality",
+      "name": "Field quality",
+      "scope": "returns, warranty data, recalls",
+      "impl": "tracked",
+      "hooks": []
+    },
+    {
+      "id": "dvtest",
+      "g": 9,
+      "row": "test",
+      "name": "Design verification (DVT)",
+      "scope": "does it meet the requirements?",
+      "impl": "modelled",
+      "hooks": [
+        "tests",
+        "vtrace"
+      ]
+    },
+    {
+      "id": "envtest",
+      "g": 9,
+      "row": "test",
+      "name": "Environmental testing",
+      "scope": "temperature, humidity, ingress, salt spray",
+      "impl": "modelled",
+      "hooks": [
+        "tests",
+        "environment"
+      ]
+    },
+    {
+      "id": "mechtest",
+      "g": 9,
+      "row": "test",
+      "name": "Mechanical testing",
+      "scope": "drop, vibration, shock, cycle life",
+      "impl": "partial",
+      "hooks": [
+        "tests"
+      ]
+    },
+    {
+      "id": "eltest",
+      "g": 9,
+      "row": "test",
+      "name": "Electrical testing",
+      "scope": "functional, burn-in, hipot, insulation",
+      "impl": "partial",
+      "hooks": [
+        "tests"
+      ]
+    },
+    {
+      "id": "prodtest",
+      "g": 9,
+      "row": "test",
+      "name": "Production testing",
+      "scope": "end-of-line test, calibration",
+      "impl": "partial",
+      "hooks": [
+        "tests"
+      ]
+    },
+    {
+      "id": "usabtest",
+      "g": 9,
+      "row": "test",
+      "name": "Usability testing",
+      "scope": "observed use by representative users",
+      "impl": "tracked",
+      "hooks": [
+        "tests"
+      ]
+    },
+    {
+      "id": "fieldtrial",
+      "g": 9,
+      "row": "test",
+      "name": "Field trials and beta programmes",
+      "scope": "units in real use before launch",
+      "impl": "tracked",
+      "hooks": [
+        "tests"
+      ]
+    },
+    {
+      "id": "psafety",
+      "g": 10,
+      "row": "comp",
+      "name": "Product safety",
+      "scope": "for example IEC 62368, IEC 60598 (luminaires), IEC 60335 (household)",
+      "impl": "partial",
+      "hooks": [
+        "compliance"
+      ]
+    },
+    {
+      "id": "emcradio",
+      "g": 10,
+      "row": "comp",
+      "name": "EMC and radio",
+      "scope": "UKCA, CE, FCC, RED",
+      "impl": "partial",
+      "hooks": [
+        "compliance"
+      ]
+    },
+    {
+      "id": "envreg",
+      "g": 10,
+      "row": "comp",
+      "name": "Environmental",
+      "scope": "RoHS, REACH, WEEE, battery regulations",
+      "impl": "partial",
+      "hooks": [
+        "compliance"
+      ]
+    },
+    {
+      "id": "industry",
+      "g": 10,
+      "row": "comp",
+      "name": "Industry-specific",
+      "scope": "medical (ISO 13485, IEC 60601), automotive (ISO 26262), aviation and drones (CAA, EASA, DO-178 / DO-254)",
+      "impl": "tracked",
+      "hooks": [
+        "compliance"
+      ],
+      "when": [
+        "sector"
+      ]
+    },
+    {
+      "id": "funcsafety",
+      "g": 10,
+      "row": "comp",
+      "name": "Functional safety",
+      "scope": "IEC 61508 and risk-based safety design",
+      "impl": "tracked",
+      "hooks": [
+        "compliance"
+      ],
+      "when": [
+        "safety"
+      ]
+    },
+    {
+      "id": "cyber",
+      "g": 10,
+      "row": "comp",
+      "name": "Cybersecurity",
+      "scope": "UK PSTI, EN 18031, IEC 62443",
+      "impl": "partial",
+      "hooks": [
+        "security",
+        "compliance"
+      ],
+      "when": [
+        "connected"
+      ]
+    },
+    {
+      "id": "labelling",
+      "g": 10,
+      "row": "comp",
+      "name": "Labelling",
+      "scope": "markings, manuals, warnings",
+      "impl": "partial",
+      "hooks": [
+        "labels"
+      ]
+    },
+    {
+      "id": "service",
+      "g": 11,
+      "row": "quality",
+      "name": "Design for service and repair",
+      "scope": "access, spare parts, diagnostics",
+      "impl": "modelled",
+      "hooks": [
+        "repair"
+      ]
+    },
+    {
+      "id": "sustain",
+      "g": 11,
+      "row": "product",
+      "name": "Design for sustainability",
+      "scope": "materials, energy, carbon, recyclability",
+      "impl": "modelled",
+      "hooks": [
+        "carbon",
+        "recycle"
+      ]
+    },
+    {
+      "id": "eol",
+      "g": 11,
+      "row": "quality",
+      "name": "End of life",
+      "scope": "disassembly, take-back, recycling",
+      "impl": "partial",
+      "hooks": [
+        "recycle"
+      ]
+    },
+    {
+      "id": "cm",
+      "g": 11,
+      "row": "product",
+      "name": "Configuration and change management",
+      "scope": "revisions, ECOs, version control",
+      "impl": "modelled",
+      "hooks": [
+        "eco"
+      ]
+    },
+    {
+      "id": "docs",
+      "g": 11,
+      "row": "product",
+      "name": "Documentation",
+      "scope": "drawings, BOMs, manuals, design history, technical files",
+      "impl": "partial",
+      "hooks": [
+        "techfile"
+      ]
+    },
+    {
+      "id": "ipr",
+      "g": 12,
+      "row": "product",
+      "name": "Intellectual property",
+      "scope": "patents, design registration, freedom to operate",
+      "impl": "tracked",
+      "hooks": []
+    },
+    {
+      "id": "contracts",
+      "g": 12,
+      "row": "product",
+      "name": "Contracts and suppliers",
+      "scope": "NDAs, manufacturing agreements",
+      "impl": "tracked",
+      "hooks": []
+    },
+    {
+      "id": "liability",
+      "g": 12,
+      "row": "product",
+      "name": "Product liability and insurance",
+      "scope": "liability cover, recall cover",
+      "impl": "tracked",
+      "hooks": []
+    },
+    {
+      "id": "pricing",
+      "g": 12,
+      "row": "product",
+      "name": "Pricing and business model",
+      "scope": "unit economics, subscriptions, service",
+      "impl": "partial",
+      "hooks": [
+        "economics"
+      ]
+    }
+  ],
+  "disciplines": [
+    {
+      "name": "Mechanical",
+      "layers": [
+        {
+          "layer": "Geometry",
+          "items": "sketch (point, line, arc, spline), datums; extrude, revolve, sweep, loft; boolean, fillet, chamfer, shell, draft, pattern",
+          "impl": "partial",
+          "how": "Soft box profile, fillet, shell, draft and slot pattern are generated; sketching and other operations are not"
+        },
+        {
+          "layer": "Features",
+          "items": "holes, threads, bosses, ribs, slots, pockets, flanges, bends, hems",
+          "impl": "partial",
+          "how": "Holes, bosses, ribs and slots are modelled; threads come from the fixings choice; pockets, flanges, bends and hems are not modelled"
+        },
+        {
+          "layer": "Joints and assembly",
+          "items": "mates, degrees of freedom, fasteners, press and snap fits, halving joints, bearings, hinges, seals",
+          "impl": "partial",
+          "how": "Fasteners and lid seal are modelled; mates and other joints are tracked"
+        },
+        {
+          "layer": "Mechanisms",
+          "items": "link, joint, cam, gear, lever, spring, belt, screw, clutch",
+          "impl": "tracked",
+          "how": "Tracked when the product declares a mechanism"
+        },
+        {
+          "layer": "Tolerancing",
+          "items": "size and geometric tolerances (GD&T), fits, stack-ups",
+          "impl": "modelled",
+          "how": "Lid-to-shell fit stack-up by Monte Carlo with Cpk"
+        },
+        {
+          "layer": "Materials",
+          "items": "stiffness, strength, density, hardness, thermal conductivity and expansion, finish",
+          "impl": "modelled",
+          "how": "Catalogue grades feed every model"
+        },
+        {
+          "layer": "Loads",
+          "items": "force, moment, pressure, torque, preload, impact, fatigue cycles",
+          "impl": "partial",
+          "how": "Impact, press force and button cycles are modelled; others are tracked"
+        }
+      ]
+    },
+    {
+      "name": "Electronics",
+      "layers": [
+        {
+          "layer": "Circuit",
+          "items": "net, branch, R, L, C, sources, diode, transistor, op-amp, switch",
+          "impl": "tracked",
+          "how": "Circuit level is outside the page; SPICE runs are listed for the cloud"
+        },
+        {
+          "layer": "Blocks",
+          "items": "power supply, sensor front end, ADC/DAC, microcontroller, driver, radio, protection",
+          "impl": "modelled",
+          "how": "Function blocks with typed ports"
+        },
+        {
+          "layer": "Signals",
+          "items": "voltage level, current, frequency, rise time, impedance, noise, ground reference",
+          "impl": "partial",
+          "how": "Voltage, current and frequency are checked; impedance and rise time are listed as PCB constraints"
+        },
+        {
+          "layer": "Interfaces",
+          "items": "I2C, SPI, UART, CAN, USB, Ethernet, GPIO, PWM, analogue",
+          "impl": "partial",
+          "how": "I2C, SPI, UART, USB, GPIO and RF are typed ports"
+        },
+        {
+          "layer": "Schematic",
+          "items": "symbol, pin, net, net label, hierarchical sheet, bill of materials",
+          "impl": "partial",
+          "how": "Block graph and BOM; schematic capture is outside the page"
+        },
+        {
+          "layer": "PCB",
+          "items": "footprint, pad, track, via, stackup, plane, keep-out, creepage and clearance",
+          "impl": "partial",
+          "how": "Trace width, creepage and clearance and antenna keep-out are computed; layout is outside the page"
+        },
+        {
+          "layer": "Constraints",
+          "items": "trace width for current, impedance control, thermal relief, DRC, ERC",
+          "impl": "partial",
+          "how": "Trace width and ERC-style checks are computed; DRC is listed"
+        },
+        {
+          "layer": "Power and thermal",
+          "items": "dissipation, junction temperature, thermal resistance, efficiency, battery capacity",
+          "impl": "modelled",
+          "how": "Power budget, junction temperatures and battery life"
+        }
+      ]
+    },
+    {
+      "name": "Firmware and software",
+      "layers": [
+        {
+          "layer": "Logic",
+          "items": "state, transition, event, guard",
+          "impl": "modelled",
+          "how": "Behaviour model and virtual device"
+        },
+        {
+          "layer": "Execution",
+          "items": "task, interrupt, timer, queue, mutex, watchdog",
+          "impl": "partial",
+          "how": "Task and interrupt plan generated from the functions"
+        },
+        {
+          "layer": "Data",
+          "items": "variable, message, packet, protocol, configuration",
+          "impl": "partial",
+          "how": "Message and protocol plan from the radio and interval"
+        },
+        {
+          "layer": "Behaviour",
+          "items": "modes (idle, active, fault), failsafes, boot and update paths",
+          "impl": "modelled",
+          "how": "Modes, decisions, boot and OTA paths"
+        }
+      ]
+    },
+    {
+      "name": "Simulation and analysis",
+      "layers": [
+        {
+          "layer": "Common to all",
+          "items": "geometry, mesh, material model, boundary conditions, loads, solver, convergence, results field",
+          "impl": "partial",
+          "how": "Voxel heat model and routing grid in the browser; full meshes in the cloud"
+        },
+        {
+          "layer": "Structural (FEA)",
+          "items": "stress, strain, displacement, safety factor, modal frequency, buckling",
+          "impl": "partial",
+          "how": "Drop, press and first panel mode are estimated"
+        },
+        {
+          "layer": "Thermal",
+          "items": "conduction, convection, radiation, heat source, temperature field",
+          "impl": "modelled",
+          "how": "Lumped and 3D voxel models"
+        },
+        {
+          "layer": "Fluid (CFD)",
+          "items": "velocity, pressure, turbulence, inlet and outlet, wall",
+          "impl": "tracked",
+          "how": "Estimated cloud run"
+        },
+        {
+          "layer": "Electrical (SPICE)",
+          "items": "netlist, component model, DC, AC, transient, sweep",
+          "impl": "tracked",
+          "how": "Estimated cloud run"
+        },
+        {
+          "layer": "Electromagnetic",
+          "items": "field, port, impedance, radiation pattern",
+          "impl": "tracked",
+          "how": "Estimated cloud run; link budget in the browser"
+        },
+        {
+          "layer": "System and dynamics",
+          "items": "rigid body, mass, inertia, damping, controller, signal",
+          "impl": "tracked",
+          "how": "Tracked when the product has a control loop"
+        },
+        {
+          "layer": "Verification",
+          "items": "reference case, analytic check, mesh-independence study, correlation to physical test",
+          "impl": "modelled",
+          "how": "Verification status shown for every simulation"
+        }
+      ]
+    },
+    {
+      "name": "Manufacturing",
+      "layers": [
+        {
+          "layer": "Processes",
+          "items": "cut, form, mould, cast, machine, join, print, finish",
+          "impl": "partial",
+          "how": "Mould, machine and print with finishes"
+        },
+        {
+          "layer": "Process rules",
+          "items": "minimum wall, draft, bend radius, overhang, kerf, tool access, undercuts",
+          "impl": "partial",
+          "how": "Wall, draft, radii, tool access and undercuts are checked"
+        },
+        {
+          "layer": "Production",
+          "items": "tooling, fixtures, cycle time, yield, batch size, minimum order",
+          "impl": "partial",
+          "how": "Tooling cost and lead time, cycle time, yield and batch size"
+        },
+        {
+          "layer": "Quality",
+          "items": "tolerance, inspection point, first-article inspection, Cpk",
+          "impl": "modelled",
+          "how": "Inspection plan with Cpk targets"
+        },
+        {
+          "layer": "Cost",
+          "items": "material, labour, machine time, tooling amortised over volume",
+          "impl": "modelled",
+          "how": "Cost breakdown per process"
+        }
+      ]
+    },
+    {
+      "name": "Systems engineering",
+      "layers": [
+        {
+          "layer": "Requirement",
+          "items": "something the product must do, measurably",
+          "impl": "modelled",
+          "how": "Built-in and custom requirements"
+        },
+        {
+          "layer": "Function",
+          "items": "convert, store, transmit, control",
+          "impl": "modelled",
+          "how": "Function architecture"
+        },
+        {
+          "layer": "Architecture",
+          "items": "blocks and the interfaces between them",
+          "impl": "modelled",
+          "how": "Block graph and interface register"
+        },
+        {
+          "layer": "Interface",
+          "items": "mechanical, electrical, data or thermal boundary between two blocks",
+          "impl": "modelled",
+          "how": "Interface register with freeze status"
+        },
+        {
+          "layer": "Budget",
+          "items": "mass, power, cost, heat, error",
+          "impl": "modelled",
+          "how": "Five budgets against targets"
+        },
+        {
+          "layer": "Trade-off",
+          "items": "the decision between competing options, with its reasons",
+          "impl": "modelled",
+          "how": "Trade-off records with scores and reasons"
+        },
+        {
+          "layer": "Risk",
+          "items": "likelihood and impact of a failure (FMEA)",
+          "impl": "modelled",
+          "how": "FMEA with RPN"
+        },
+        {
+          "layer": "Traceability",
+          "items": "each requirement linked to a design element and a test",
+          "impl": "modelled",
+          "how": "V-model traceability matrix"
+        }
+      ]
+    },
+    {
+      "name": "Industrial design and human factors",
+      "layers": [
+        {
+          "layer": "Form",
+          "items": "mass, plane, line; proportion, rhythm, contrast; gesture and stance; edge language",
+          "impl": "partial",
+          "how": "Proportion, stance and edge language are scored"
+        },
+        {
+          "layer": "CMF",
+          "items": "colour, material, finish",
+          "impl": "modelled",
+          "how": "Colour, grade and finish"
+        },
+        {
+          "layer": "Human factors",
+          "items": "anthropometrics, reach, grip, force, sightlines",
+          "impl": "partial",
+          "how": "Grip, mass, button size and force, sightlines"
+        },
+        {
+          "layer": "Interaction",
+          "items": "affordances, feedback (light, sound, haptic), error tolerance",
+          "impl": "partial",
+          "how": "Feedback coverage per event"
+        },
+        {
+          "layer": "User flows",
+          "items": "setup, use, failure, maintenance, disposal",
+          "impl": "modelled",
+          "how": "Each flow linked to design items"
+        }
+      ]
+    },
+    {
+      "name": "Validation and compliance",
+      "layers": [
+        {
+          "layer": "Tests",
+          "items": "functional, environmental, drop and vibration, life and fatigue",
+          "impl": "modelled",
+          "how": "Generated test plan by phase"
+        },
+        {
+          "layer": "Safety",
+          "items": "electrical (insulation, creepage, Class I/II), thermal, mechanical (pinch points, sharp edges)",
+          "impl": "partial",
+          "how": "Creepage, touch temperature, edge radii"
+        },
+        {
+          "layer": "Compliance",
+          "items": "standards, test-house reports, UKCA / CE / EMC marking",
+          "impl": "modelled",
+          "how": "Applicable standards by market and function"
+        },
+        {
+          "layer": "Evidence",
+          "items": "test plans, reports, design history",
+          "impl": "modelled",
+          "how": "Evidence links and design history"
+        }
+      ]
+    },
+    {
+      "name": "Product and business",
+      "layers": [
+        {
+          "layer": "Business",
+          "items": "user needs and use cases, cost targets and unit economics, suppliers and lead times, lifecycle, variants and configurations",
+          "impl": "partial",
+          "how": "Scenarios, unit economics, lead times, variants"
+        }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "id": "t_func",
+      "name": "Functional test of every requirement",
+      "type": "functional",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": [
+        "*"
+      ]
+    },
+    {
+      "id": "t_interval",
+      "name": "Reporting interval and delivery check",
+      "type": "functional",
+      "phase": "evt",
+      "level": "subsystem",
+      "reqs": [
+        "interval"
+      ],
+      "when": [
+        "radio"
+      ]
+    },
+    {
+      "id": "t_resp",
+      "name": "Button response timing",
+      "type": "functional",
+      "phase": "evt",
+      "level": "subsystem",
+      "reqs": [
+        "resp"
+      ],
+      "when": [
+        "button"
+      ]
+    },
+    {
+      "id": "t_battlife",
+      "name": "Battery life measurement over a duty cycle",
+      "type": "electrical",
+      "phase": "evt",
+      "level": "subsystem",
+      "reqs": [
+        "life"
+      ],
+      "when": [
+        "battery"
+      ]
+    },
+    {
+      "id": "t_brown",
+      "name": "Cold brownout test at low charge",
+      "type": "electrical",
+      "phase": "evt",
+      "level": "subsystem",
+      "reqs": [
+        "life",
+        "cov"
+      ],
+      "when": [
+        "battery",
+        "radio"
+      ]
+    },
+    {
+      "id": "t_rf",
+      "name": "Radio range and conducted RF",
+      "type": "electrical",
+      "phase": "evt",
+      "level": "subsystem",
+      "reqs": [
+        "cov"
+      ],
+      "when": [
+        "radio"
+      ]
+    },
+    {
+      "id": "t_emcpre",
+      "name": "EMC pre-scan",
+      "type": "electrical",
+      "phase": "evt",
+      "level": "subsystem",
+      "reqs": []
+    },
+    {
+      "id": "t_usab",
+      "name": "Usability test with representative users",
+      "type": "usability",
+      "phase": "evt",
+      "level": "acceptance",
+      "reqs": [
+        "resp"
+      ]
+    },
+    {
+      "id": "t_temp",
+      "name": "Temperature cycling, operating and storage",
+      "type": "environmental",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_hum",
+      "name": "Damp heat (humidity)",
+      "type": "environmental",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_ingress",
+      "name": "Ingress test to IEC 60529",
+      "type": "environmental",
+      "phase": "dvt",
+      "level": "acceptance",
+      "reqs": [
+        "ip"
+      ],
+      "when": [
+        "sealed"
+      ]
+    },
+    {
+      "id": "t_salt",
+      "name": "Salt spray",
+      "type": "environmental",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": [],
+      "when": [
+        "salt"
+      ]
+    },
+    {
+      "id": "t_solar",
+      "name": "Solar radiation",
+      "type": "environmental",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": [
+        "touch",
+        "chgt"
+      ],
+      "when": [
+        "sun"
+      ]
+    },
+    {
+      "id": "t_uv",
+      "name": "UV exposure of the enclosure material",
+      "type": "environmental",
+      "phase": "dvt",
+      "level": "subsystem",
+      "reqs": [],
+      "when": [
+        "uv"
+      ]
+    },
+    {
+      "id": "t_lowpress",
+      "name": "Low pressure (altitude)",
+      "type": "environmental",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": [],
+      "when": [
+        "highalt"
+      ]
+    },
+    {
+      "id": "t_chgwin",
+      "name": "Charge temperature window",
+      "type": "electrical",
+      "phase": "evt",
+      "level": "subsystem",
+      "reqs": [
+        "chgt"
+      ],
+      "when": [
+        "charging"
+      ]
+    },
+    {
+      "id": "t_drop",
+      "name": "Drop test",
+      "type": "mechanical",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": [
+        "drop"
+      ]
+    },
+    {
+      "id": "t_vib",
+      "name": "Vibration, transport and use",
+      "type": "mechanical",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_shock",
+      "name": "Mechanical shock",
+      "type": "mechanical",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_cycle",
+      "name": "Button cycle life",
+      "type": "mechanical",
+      "phase": "dvt",
+      "level": "subsystem",
+      "reqs": [
+        "resp"
+      ],
+      "when": [
+        "button"
+      ]
+    },
+    {
+      "id": "t_charge",
+      "name": "Charging thermal test",
+      "type": "environmental",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": [
+        "touch",
+        "chgt",
+        "chgh"
+      ],
+      "when": [
+        "charging"
+      ]
+    },
+    {
+      "id": "t_life",
+      "name": "Accelerated life test",
+      "type": "reliability",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_ota",
+      "name": "OTA update and rollback test",
+      "type": "functional",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": [],
+      "when": [
+        "ota"
+      ]
+    },
+    {
+      "id": "t_sec",
+      "name": "Security assessment (PSTI, EN 18031, penetration)",
+      "type": "functional",
+      "phase": "dvt",
+      "level": "acceptance",
+      "reqs": [],
+      "when": [
+        "connected"
+      ]
+    },
+    {
+      "id": "t_62133",
+      "name": "Battery safety to IEC 62133-2",
+      "type": "certification",
+      "phase": "dvt",
+      "level": "acceptance",
+      "reqs": [
+        "chgt"
+      ],
+      "when": [
+        "battery"
+      ]
+    },
+    {
+      "id": "t_un383",
+      "name": "UN 38.3 transport test",
+      "type": "certification",
+      "phase": "dvt",
+      "level": "acceptance",
+      "reqs": [],
+      "when": [
+        "battery"
+      ]
+    },
+    {
+      "id": "t_emccert",
+      "name": "EMC and radio certification",
+      "type": "certification",
+      "phase": "dvt",
+      "level": "acceptance",
+      "reqs": [
+        "cov"
+      ]
+    },
+    {
+      "id": "t_safety",
+      "name": "Product safety assessment",
+      "type": "certification",
+      "phase": "dvt",
+      "level": "acceptance",
+      "reqs": [
+        "touch"
+      ]
+    },
+    {
+      "id": "t_corr",
+      "name": "Correlate simulations to physical tests",
+      "type": "verification",
+      "phase": "dvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_field",
+      "name": "Field trial or beta programme",
+      "type": "field",
+      "phase": "dvt",
+      "level": "acceptance",
+      "reqs": [
+        "*"
+      ]
+    },
+    {
+      "id": "t_hipot",
+      "name": "Hipot and insulation resistance",
+      "type": "electrical",
+      "phase": "pvt",
+      "level": "system",
+      "reqs": [],
+      "when": [
+        "mains"
+      ]
+    },
+    {
+      "id": "t_burnin",
+      "name": "Burn-in",
+      "type": "electrical",
+      "phase": "pvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_eol",
+      "name": "End-of-line functional test",
+      "type": "production",
+      "phase": "pvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_cal",
+      "name": "Sensor calibration",
+      "type": "production",
+      "phase": "pvt",
+      "level": "subsystem",
+      "reqs": [
+        "acc"
+      ],
+      "when": [
+        "sensor"
+      ]
+    },
+    {
+      "id": "t_fai",
+      "name": "First-article inspection",
+      "type": "quality",
+      "phase": "pvt",
+      "level": "system",
+      "reqs": []
+    },
+    {
+      "id": "t_cpk",
+      "name": "Process capability (Cpk) study",
+      "type": "quality",
+      "phase": "pvt",
+      "level": "system",
+      "reqs": []
+    }
+  ],
+  "standards": [
+    {
+      "id": "iec62368",
+      "name": "IEC 62368-1, ICT and AV equipment safety",
+      "area": "Product safety",
+      "when": [
+        "ict"
+      ],
+      "weeks": 6
+    },
+    {
+      "id": "iec60598",
+      "name": "IEC 60598, luminaires",
+      "area": "Product safety",
+      "when": [
+        "luminaire"
+      ],
+      "weeks": 6
+    },
+    {
+      "id": "iec60335",
+      "name": "IEC 60335, household appliances",
+      "area": "Product safety",
+      "when": [
+        "household"
+      ],
+      "weeks": 6
+    },
+    {
+      "id": "iec62133",
+      "name": "IEC 62133-2, secondary lithium cells and batteries",
+      "area": "Product safety",
+      "when": [
+        "battery"
+      ],
+      "weeks": 8
+    },
+    {
+      "id": "un383",
+      "name": "UN 38.3, lithium battery transport",
+      "area": "Product safety",
+      "when": [
+        "battery"
+      ],
+      "weeks": 6
+    },
+    {
+      "id": "emc",
+      "name": "EMC (EN 55032 emissions, EN 55035 immunity) for UKCA and CE",
+      "area": "EMC and radio",
+      "when": [
+        "ukeu"
+      ],
+      "weeks": 6
+    },
+    {
+      "id": "red",
+      "name": "Radio Equipment Directive and UK Radio Equipment Regulations",
+      "area": "EMC and radio",
+      "when": [
+        "radio",
+        "ukeu"
+      ],
+      "weeks": 10
+    },
+    {
+      "id": "redlte",
+      "name": "EN 301 908, cellular radio",
+      "area": "EMC and radio",
+      "when": [
+        "lte",
+        "ukeu"
+      ],
+      "weeks": 10
+    },
+    {
+      "id": "redsrd",
+      "name": "EN 300 220, short-range devices (LoRa)",
+      "area": "EMC and radio",
+      "when": [
+        "lora",
+        "ukeu"
+      ],
+      "weeks": 8
+    },
+    {
+      "id": "redgnss",
+      "name": "EN 303 413, GNSS receivers",
+      "area": "EMC and radio",
+      "when": [
+        "gnss",
+        "ukeu"
+      ],
+      "weeks": 6
+    },
+    {
+      "id": "fcc15",
+      "name": "FCC Part 15 (unintentional and intentional radiators)",
+      "area": "EMC and radio",
+      "when": [
+        "us"
+      ],
+      "weeks": 8
+    },
+    {
+      "id": "rohs",
+      "name": "RoHS",
+      "area": "Environmental",
+      "when": [
+        "ukeu"
+      ],
+      "weeks": 2
+    },
+    {
+      "id": "reach",
+      "name": "REACH",
+      "area": "Environmental",
+      "when": [
+        "ukeu"
+      ],
+      "weeks": 2
+    },
+    {
+      "id": "weee",
+      "name": "WEEE registration and marking",
+      "area": "Environmental",
+      "when": [
+        "ukeu"
+      ],
+      "weeks": 2
+    },
+    {
+      "id": "battreg",
+      "name": "Battery Regulation (EU) 2023/1542 and UK battery rules",
+      "area": "Environmental",
+      "when": [
+        "battery",
+        "ukeu"
+      ],
+      "weeks": 4
+    },
+    {
+      "id": "psti",
+      "name": "UK PSTI, consumer connectable product security",
+      "area": "Cybersecurity",
+      "when": [
+        "connected",
+        "consumer",
+        "uk"
+      ],
+      "weeks": 2
+    },
+    {
+      "id": "en18031",
+      "name": "EN 18031-1, radio equipment cybersecurity",
+      "area": "Cybersecurity",
+      "when": [
+        "radio",
+        "eu"
+      ],
+      "weeks": 4
+    },
+    {
+      "id": "iec62443",
+      "name": "IEC 62443, industrial automation security",
+      "area": "Cybersecurity",
+      "when": [
+        "connected",
+        "industrial"
+      ],
+      "weeks": 8
+    },
+    {
+      "id": "iec61508",
+      "name": "IEC 61508, functional safety",
+      "area": "Functional safety",
+      "when": [
+        "safety"
+      ],
+      "weeks": 16
+    },
+    {
+      "id": "iso13485",
+      "name": "ISO 13485 and IEC 60601, medical",
+      "area": "Industry-specific",
+      "when": [
+        "medical"
+      ],
+      "weeks": 26
+    },
+    {
+      "id": "iso26262",
+      "name": "ISO 26262, automotive functional safety",
+      "area": "Industry-specific",
+      "when": [
+        "automotive"
+      ],
+      "weeks": 26
+    },
+    {
+      "id": "aviation",
+      "name": "CAA and EASA rules, DO-178 / DO-254 where required",
+      "area": "Industry-specific",
+      "when": [
+        "aircraft"
+      ],
+      "weeks": 26
+    },
+    {
+      "id": "iec60529",
+      "name": "IEC 60529, ingress protection",
+      "area": "Product safety",
+      "when": [
+        "sealed"
+      ],
+      "weeks": 3
+    },
+    {
+      "id": "labels",
+      "name": "Markings, manual and warnings",
+      "area": "Labelling",
+      "when": [],
+      "weeks": 1
+    }
+  ],
+  "fit": {
+    "compute": 50,
+    "sense": 20,
+    "comm": 80,
+    "power": 40,
+    "ui": 25,
+    "conn": 10,
+    "battery": 100,
+    "cable": 8,
+    "enclosure": 2
+  },
+  "carbon_kg_per_kg": {
+    "abs": 3.1,
+    "absfr": 3.8,
+    "pcabsfr": 4.5,
+    "pc": 6.0,
+    "pp": 1.9,
+    "al6061": 9.0,
+    "al6082": 9.0,
+    "pom": 3.0,
+    "pa12": 7.0,
+    "pa12gb": 6.5
+  },
+  "carbon_fixed": {
+    "board": 1.2,
+    "module": 0.4,
+    "battery_per_wh": 0.09,
+    "harness_per_m": 0.05,
+    "assembly": 0.2
+  },
+  "lead_weeks": {
+    "im": 8,
+    "cnc": 2,
+    "sls": 1,
+    "pcb": 3,
+    "pcba": 4,
+    "module": 6,
+    "battery": 8,
+    "fixings": 2,
+    "connector": 4,
+    "cert_slot": 12
+  },
+  "phase_weeks": {
+    "define": 3,
+    "concept": 6,
+    "evt": 8,
+    "dvt": 10,
+    "pvt": 6
+  },
+  "anthropometrics": {
+    "grip_span_mm": [
+      65,
+      95
+    ],
+    "power_grip_mm": [
+      30,
+      50
+    ],
+    "one_hand_mass_g": 250,
+    "button_min_mm": 9,
+    "button_gloved_mm": 15,
+    "button_force_N": [
+      2.5,
+      5
+    ]
+  },
+  "techfile": [
+    "Requirements and traceability matrix",
+    "Drawings and 3D models",
+    "Bill of materials",
+    "Schematic and PCB files",
+    "Firmware release and version history",
+    "Risk assessment (FMEA)",
+    "Test plans and reports",
+    "Declaration of conformity",
+    "User manual and warnings",
+    "Labelling artwork",
+    "Design history and change log"
+  ],
+  "flows": [
+    {
+      "id": "setup",
+      "name": "Setup",
+      "ask": "How does a new user unbox, power on and connect it?"
+    },
+    {
+      "id": "use",
+      "name": "Use",
+      "ask": "What does everyday use look like?"
+    },
+    {
+      "id": "failure",
+      "name": "Failure",
+      "ask": "What does the user see when something goes wrong, and what can they do?"
+    },
+    {
+      "id": "maintenance",
+      "name": "Maintenance",
+      "ask": "How is it charged, cleaned, updated and repaired?"
+    },
+    {
+      "id": "disposal",
+      "name": "Disposal",
+      "ask": "How does it leave service: take-back, battery removal, recycling?"
+    }
+  ],
+  "rca_methods": [
+    "8D",
+    "5 whys"
+  ],
+  "meeting_point": "Every discipline's primitives meet at interfaces. A PCB's mounting holes are a mechanical interface, its heat output a thermal interface, its connector pinout an electrical interface, and the firmware's fault state a user interface. Most product failures happen at those boundaries rather than inside one discipline."
+}

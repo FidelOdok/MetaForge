@@ -247,6 +247,10 @@ READ_ONLY: frozenset[str] = frozenset(
         # FORGE-783: a slow tool's job record. Reading it changes nothing (a
         # client polls it, so holding it would hold every poll for a human).
         "twin.job_status",
+        # FORGE-821: the Imagine studio and its handover checklist; the
+        # handover itself is a person's decision on the REST route only.
+        "twin.imagine_get_studio",
+        "twin.imagine_handover_status",
         # FORGE-523: an item's revision history, read from REVISION_OF edges.
         "twin.item_history",
         "twin.rank_sensitivity",
@@ -434,6 +438,8 @@ ADDITIVE: frozenset[str] = frozenset(
         # export is kept on its revision as a status tag; nothing is removed.
         "twin.build_exact_cad",
         "twin.export_cad_step",
+        # FORGE-821: the next IMG-STUDIO revision; earlier ones are kept.
+        "twin.imagine_put_studio",
         # FORGE-687: a new design-files node (or the next revision of its
         # item); the files it reads on the workspace are not touched.
         "twin.record_design_files",

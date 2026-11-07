@@ -1,0 +1,422 @@
+{
+  "schemaVersion": 1,
+  "note": "Typical capabilities for common processes. Values are representative of published design guides and are marked source: default. A user's registry (~/.formgraph/machines.json) and researched suppliers override or extend these.",
+  "machines": [
+    {
+      "id": "sls-generic",
+      "name": "SLS printer, industrial (typical)",
+      "process": "sls",
+      "source": "default",
+      "buildVolume": [
+        330,
+        330,
+        550
+      ],
+      "materials": [
+        "pa12",
+        "pa12gb"
+      ],
+      "limits": {
+        "wallMin": 0.8,
+        "wallMax": 20,
+        "draft": 0,
+        "slotMin": 0.6,
+        "holeMin": 2.0,
+        "featureMin": 0.6,
+        "tolerance": 0.3
+      },
+      "finishes": [
+        "dyed",
+        "vapour"
+      ],
+      "leadDays": 5,
+      "qtyRange": [
+        1,
+        5000
+      ],
+      "ruleBase": "sls"
+    },
+    {
+      "id": "mjf-generic",
+      "name": "Multi Jet Fusion printer (typical)",
+      "process": "mjf",
+      "source": "default",
+      "buildVolume": [
+        380,
+        284,
+        380
+      ],
+      "materials": [
+        "pa12"
+      ],
+      "limits": {
+        "wallMin": 0.7,
+        "wallMax": 20,
+        "draft": 0,
+        "slotMin": 0.5,
+        "holeMin": 1.5,
+        "featureMin": 0.5,
+        "tolerance": 0.3
+      },
+      "finishes": [
+        "dyed",
+        "vapour"
+      ],
+      "leadDays": 5,
+      "qtyRange": [
+        1,
+        10000
+      ],
+      "ruleBase": "sls"
+    },
+    {
+      "id": "fdm-generic",
+      "name": "FDM printer, desktop (typical)",
+      "process": "fdm",
+      "source": "default",
+      "buildVolume": [
+        250,
+        210,
+        220
+      ],
+      "materials": [
+        "asa",
+        "petg"
+      ],
+      "limits": {
+        "wallMin": 1.2,
+        "wallMax": 20,
+        "draft": 0,
+        "slotMin": 1.0,
+        "holeMin": 2.5,
+        "featureMin": 0.8,
+        "tolerance": 0.4
+      },
+      "finishes": [
+        "dyed"
+      ],
+      "leadDays": 1,
+      "qtyRange": [
+        1,
+        50
+      ],
+      "note": "Prototype only; modelled on the printing rule book with wider limits",
+      "ruleBase": "sls"
+    },
+    {
+      "id": "cnc3-generic",
+      "name": "CNC mill, 3 axis (typical)",
+      "process": "cnc",
+      "source": "default",
+      "buildVolume": [
+        500,
+        400,
+        150
+      ],
+      "materials": [
+        "al6061",
+        "al6082",
+        "pom"
+      ],
+      "limits": {
+        "wallMin": 0.8,
+        "wallMax": 40,
+        "draft": 0,
+        "slotMin": 1.5,
+        "holeMin": 1.6,
+        "featureMin": 1.0,
+        "tolerance": 0.05,
+        "innerRadius": 1.5
+      },
+      "finishes": [
+        "asm",
+        "anod"
+      ],
+      "leadDays": 10,
+      "qtyRange": [
+        1,
+        3000
+      ],
+      "ruleBase": "cnc"
+    },
+    {
+      "id": "cnc5-generic",
+      "name": "CNC mill, 5 axis (typical)",
+      "process": "cnc",
+      "source": "default",
+      "buildVolume": [
+        650,
+        520,
+        450
+      ],
+      "materials": [
+        "al6061",
+        "al6082",
+        "pom"
+      ],
+      "limits": {
+        "wallMin": 0.6,
+        "wallMax": 40,
+        "draft": 0,
+        "slotMin": 1.0,
+        "holeMin": 1.0,
+        "featureMin": 0.8,
+        "tolerance": 0.02,
+        "innerRadius": 1.0
+      },
+      "finishes": [
+        "asm",
+        "anod"
+      ],
+      "leadDays": 15,
+      "qtyRange": [
+        1,
+        1000
+      ],
+      "ruleBase": "cnc"
+    },
+    {
+      "id": "im-generic",
+      "name": "Injection moulding press, 150 t (typical)",
+      "process": "im",
+      "source": "default",
+      "buildVolume": [
+        350,
+        350,
+        200
+      ],
+      "materials": [
+        "abs",
+        "absfr",
+        "pcabsfr",
+        "pc",
+        "pp"
+      ],
+      "limits": {
+        "wallMin": 1.2,
+        "wallMax": 3.5,
+        "draft": 1.0,
+        "slotMin": 1.0,
+        "holeMin": 1.6,
+        "featureMin": 0.8,
+        "tolerance": 0.1
+      },
+      "finishes": [
+        "gloss",
+        "matte",
+        "tex"
+      ],
+      "leadDays": 45,
+      "qtyRange": [
+        1000,
+        1000000
+      ],
+      "ruleBase": "im"
+    },
+    {
+      "id": "pcba-generic",
+      "name": "PCB assembly line, SMT (typical)",
+      "process": "pcba",
+      "source": "default",
+      "limits": {
+        "minPitch": 0.4,
+        "minPart": "0402",
+        "boardMax": [
+          250,
+          250
+        ]
+      },
+      "leadDays": 15,
+      "qtyRange": [
+        5,
+        1000000
+      ]
+    },
+    {
+      "id": "cfrp-tube-generic",
+      "name": "Carbon fibre tube, roll-wrapped, cut to length (typical)",
+      "process": "cfrp-tube",
+      "source": "default",
+      "materials": [
+        "cfrp"
+      ],
+      "maxLength": 1000,
+      "limits": {
+        "wallMin": 0.5,
+        "tolerance": 0.1
+      },
+      "leadDays": 5,
+      "qtyRange": [
+        1,
+        100000
+      ],
+      "price": {
+        "basis": "per metre",
+        "value": 25,
+        "currency": "GBP",
+        "source": "typical UK retail for about 22 mm OD"
+      }
+    },
+    {
+      "id": "cfrp-plate-generic",
+      "name": "CNC-cut carbon fibre plate (typical)",
+      "process": "cfrp-plate",
+      "source": "default",
+      "materials": [
+        "cfrp"
+      ],
+      "buildVolume": [
+        500,
+        400,
+        6
+      ],
+      "limits": {
+        "wallMin": 1.0,
+        "holeMin": 1.5,
+        "slotMin": 1.5,
+        "tolerance": 0.1
+      },
+      "leadDays": 7,
+      "qtyRange": [
+        1,
+        20000
+      ]
+    },
+    {
+      "id": "sheet-generic",
+      "name": "Laser cut and bent sheet metal (typical)",
+      "process": "sheet",
+      "source": "default",
+      "materials": [
+        "al5052",
+        "ss304"
+      ],
+      "buildVolume": [
+        1000,
+        500,
+        3
+      ],
+      "limits": {
+        "wallMin": 0.8,
+        "holeMin": 1.0,
+        "tolerance": 0.2
+      },
+      "leadDays": 7,
+      "qtyRange": [
+        1,
+        100000
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "id": "asa",
+      "process": "fdm",
+      "name": "ASA, UV stable",
+      "E": 2000,
+      "str": 45,
+      "k": 0.17,
+      "density": 1.07,
+      "costKg": 30,
+      "ul94": "HB",
+      "source": "typical FDM filament datasheet values"
+    },
+    {
+      "id": "petg",
+      "process": "fdm",
+      "name": "PETG",
+      "E": 2100,
+      "str": 50,
+      "k": 0.2,
+      "density": 1.27,
+      "costKg": 25,
+      "ul94": "HB",
+      "source": "typical FDM filament datasheet values"
+    },
+    {
+      "id": "cfrp",
+      "process": "cfrp-tube",
+      "name": "Carbon fibre, epoxy (roll-wrapped or plate)",
+      "E": 70000,
+      "str": 600,
+      "k": 5,
+      "density": 1.55,
+      "costKg": 60,
+      "ul94": "HB",
+      "source": "typical quasi-isotropic carbon/epoxy laminate values"
+    },
+    {
+      "id": "al5052",
+      "process": "sheet",
+      "name": "Aluminium 5052-H32 sheet",
+      "E": 70300,
+      "str": 193,
+      "k": 138,
+      "density": 2.68,
+      "costKg": 5,
+      "ul94": "metal",
+      "metal": true,
+      "source": "typical published 5052-H32 values"
+    },
+    {
+      "id": "ss304",
+      "process": "sheet",
+      "name": "Stainless steel 304 sheet",
+      "E": 193000,
+      "str": 215,
+      "k": 16,
+      "density": 8.0,
+      "costKg": 4,
+      "ul94": "metal",
+      "metal": true,
+      "source": "typical published 304 values"
+    }
+  ],
+  "processes": {
+    "mjf": {
+      "name": "Multi Jet Fusion",
+      "short": "MJF",
+      "ruleBase": "sls",
+      "materials": [
+        "pa12"
+      ]
+    },
+    "fdm": {
+      "name": "FDM printing",
+      "short": "FDM",
+      "ruleBase": "sls",
+      "materials": [
+        "asa",
+        "petg"
+      ]
+    },
+    "cfrp-tube": {
+      "name": "Carbon fibre tube",
+      "short": "CF tube",
+      "ruleBase": "cnc",
+      "materials": [
+        "cfrp"
+      ],
+      "shell": false
+    },
+    "cfrp-plate": {
+      "name": "CNC carbon fibre plate",
+      "short": "CF plate",
+      "ruleBase": "cnc",
+      "materials": [
+        "cfrp"
+      ],
+      "shell": false
+    },
+    "sheet": {
+      "name": "Sheet metal",
+      "short": "Sheet",
+      "ruleBase": "cnc",
+      "materials": [
+        "al5052",
+        "ss304"
+      ],
+      "shell": false
+    }
+  }
+}
