@@ -604,7 +604,8 @@
   gap: 16px;
   width: 100%;
   max-width: 920px;
-  margin: 0 auto;
+  /* Held to the conversation's edge, so switching stages does not move it. */
+  margin: 0;
 }
 .cv-stage-col > .cv-card h3 {
   margin: 0 0 8px;
@@ -672,12 +673,24 @@
   flex-direction: column;
   gap: 8px;
 }
+/* The studio takes the stage's full width (the column is not held to
+   920 px), and never more height than the window shows: the page asks for
+   a bounded height and scrolls inside the frame beyond it. */
+.cv-stage-col.is-wide {
+  max-width: none;
+}
+.cv-stage-col.is-wide > :not(.cv-studio) {
+  max-width: 920px;
+}
 .cv-studio-frame {
   display: block;
   width: 100%;
+  max-height: max(420px, calc(100vh - 140px));
+  max-height: max(420px, calc(100dvh - 140px));
   border: 1px solid var(--cv-line);
   border-radius: 12px;
-  background: var(--cv-panel);
+  background: var(--cv-bg);
+  overflow: hidden;
 }
 .cv-empty {
   display: flex;
@@ -832,11 +845,11 @@
   gap: 8px;
   padding: 40px 20px;
   text-align: center;
-  color: #9a9aaa;
+  color: var(--cv-muted);
 }
 .cv-stage-empty h2 {
   margin: 0;
-  color: #e2e2eb;
+  color: var(--cv-text);
   font-size: 18px;
   font-weight: 500;
 }

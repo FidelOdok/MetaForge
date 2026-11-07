@@ -246,7 +246,7 @@ The dashboard hosts the page in `<iframe sandbox="allow-scripts">`, without
 |---|---|---|
 | page to host | `fg:ready {engine}` | the engine booted |
 | page to host | `fg:write {collection, id, data, event_id}` | a write; the host forwards it to `POST /events` |
-| page to host | `fg:height {px}` | the page's height |
+| page to host | `fg:height {px}` | the height the page would like at its width (480 to 960 px); never the document's height |
 | page to host | `fg:select {component_id}` | a BOM line was selected |
 | page to host | `fg:download {name, mime, base64}` | a file to save (the sandbox cannot download) |
 | host to page | `fg:snapshot {collections}` | the twin-backed state of each collection |
@@ -263,6 +263,48 @@ copies can diverge cleanly.
 
 The host validates every message's origin and shape, forwards `fg:write` to
 `POST /events` and never executes anything from the page.
+
+### The engine hosted in Create
+
+Hosted, the engine marks its root `fg-hosted` and fits the frame rather than
+a browser window:
+
+- **Chrome.** The product name and logo, and the side-panel handles, are
+  hidden: Create shows the product, the stages, the Studio and Sketch tabs and
+  the theme. The bar keeps **Design** / **Programme**, **Simple** /
+  **Engineer** and the more menu. The 3D view's own first mode reads
+  **Model** (standalone it is **Studio**), so it is not confused with
+  Create's Studio tab.
+- **Layout.** At 900 px wide and more, the controls run down the left
+  (36%, at least 280 px) beside the 3D view, which is `min(560px, 60vh)` tall
+  with the panels under it; each part scrolls on its own and the frame's
+  height is the host's. Below 900 px everything stacks in one column, the 3D
+  view first at `clamp(300px, 70vw, 440px)`, and the page scrolls inside the
+  frame. Nothing scrolls sideways.
+- **3D view.** A `ResizeObserver` on the view resizes the renderer and the
+  camera's aspect. The camera frames the part's bounding box (its bounding
+  sphere fits both the view's height and width, with a 15% margin, along a
+  fixed three-quarter view), and frames it again whenever the view changes
+  size, until the person moves the camera.
+- **Height.** `fg:height` reports the height the page would like from its
+  width alone: the bar, the view (560 px wide, up to 440 px narrow) and room
+  for the panels, between 480 and 960 px. It never reports the document's
+  height, which follows the frame's own height and would grow the frame
+  without end.
+- **Only the configured product.** The shell's section and part names come
+  from the config: `form.label` when it is set, *Fuselage shell* for a
+  multirotor airframe, *Shell* otherwise; never the template's own words.
+  When the config sets no `form.params`, there is nothing of the product's
+  own to draw: the 3D view shows *No shape yet* (no part, no floor grid, no
+  dimensions or colour chips) until the person moves a size control in the
+  studio. The embedded `fg-config` is the only config read; a sandboxed frame
+  has no storage, so no earlier session's state can replace it.
+
+The engine's tests are `tests/unit/test_imagine.py` (static checks that run
+in CI) and `dashboard/e2e/imagine-engine.spec.ts`, which hosts the real engine
+files in a sandboxed frame in Chromium and checks the empty state, the
+labels, the bounding-box fit through a resize, the one-column layout and the
+bounded height (`npx playwright test imagine-engine`).
 
 ## Observability
 

@@ -43,6 +43,11 @@
 
     <section class="pane" id="viewPane" aria-label="3D viewport">
       <div id="view3d"></div>
+      <div class="vempty" id="viewEmpty" role="status" hidden>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 12.5 16 6l11 6.5v8L16 27 5 20.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="3 2.5"/></svg>
+        <b>No shape yet</b>
+        <p>This product's studio has no dimensions yet. Move a size control to start shaping it, or ask the assistant to set them.</p>
+      </div>
       <button type="button" class="edge edge-l" id="edgeL" aria-label="Hide controls" title="Hide controls ( [ )"><span class="chev"></span></button>
       <button type="button" class="edge edge-r" id="edgeR" aria-label="Hide panel" title="Hide panel ( ] )"><span class="chev"></span></button>
       <div class="ov tl">

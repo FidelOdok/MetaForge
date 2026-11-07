@@ -73,8 +73,25 @@ describe('Imagine', () => {
     getStudio.mockResolvedValue(studio());
     imagine();
     const frame = await screen.findByTestId('studio-frame');
-    expect(frame).toHaveAttribute('src', '/api/v1/twin/projects/proj-imagine/imagine/engine');
+    expect(frame).toHaveAttribute('src', '/api/v1/twin/projects/proj-imagine/imagine/engine?theme=light');
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+  });
+
+  it('gives the studio the full stage width; the sketch keeps the column', async () => {
+    getStudio.mockResolvedValue(studio());
+    const first = render(<ImagineStage projectId={P} nodes={[]} view="studio" onView={vi.fn()} />);
+    await screen.findByTestId('studio-frame');
+    expect(screen.getByTestId('imagine-stage')).toHaveClass('cv-stage-col', 'is-wide');
+    first.unmount();
+    render(<ImagineStage projectId={P} nodes={[]} view="sketch" onView={vi.fn()} />);
+    expect(screen.getByTestId('imagine-stage')).not.toHaveClass('is-wide');
+  });
+
+  it('keeps the column for the empty state', async () => {
+    getStudio.mockResolvedValue(studio({ status: 'none', revision: null, engine_url: null }));
+    imagine();
+    await screen.findByTestId('studio-empty');
+    expect(screen.getByTestId('imagine-stage')).not.toHaveClass('is-wide');
   });
 
   it('switches between Studio and Sketch', async () => {

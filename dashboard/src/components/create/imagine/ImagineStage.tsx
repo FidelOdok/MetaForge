@@ -34,7 +34,7 @@ export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, o
   const hasStudio = !!data && data.status !== 'none' && !!src;
 
   return (
-    <div className="cv-stage-col">
+    <div className={`cv-stage-col cv-imagine${view === 'studio' && hasStudio ? ' is-wide' : ''}`} data-testid="imagine-stage">
       <div className="cv-seg" role="tablist" aria-label="Imagine">
         <button type="button" role="tab" aria-selected={view === 'studio'} className={view === 'studio' ? 'is-on' : ''} onClick={() => onView('studio')}>
           Studio

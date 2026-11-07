@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '../../../../test/test-utils';
 import { useComponentSelection } from '../../../../store/component-selection-store';
+import { useThemeStore } from '../../../../store/theme-store';
+import { MAX_HEIGHT, MIN_HEIGHT, START_HEIGHT } from '../bridge';
 
 const postImagineEvent = vi.fn();
 vi.mock('../../../../api/endpoints/imagine', async (orig) => ({
@@ -30,6 +32,7 @@ function fromPage(data: unknown, source: unknown, origin = 'null') {
 beforeEach(() => {
   postImagineEvent.mockReset().mockResolvedValue({ accepted: true, mapped_to: [] });
   useComponentSelection.setState({ selected: {} });
+  useThemeStore.setState({ resolvedTheme: 'light' });
 });
 
 describe('StudioFrame', () => {
@@ -66,12 +69,27 @@ describe('StudioFrame', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be saved');
   });
 
-  it('resizes on fg:height, within bounds', () => {
+  it('starts at a sensible height and resizes on fg:height, within bounds', () => {
     const { el, win } = frame();
-    fromPage({ fg: 1, type: 'fg:height', px: 1234 }, win);
-    expect(el.style.height).toBe('1234px');
+    expect(el.style.height).toBe(`${START_HEIGHT}px`);
+    fromPage({ fg: 1, type: 'fg:height', px: 812 }, win);
+    expect(el.style.height).toBe('812px');
+    // A page asking for thousands of pixels is held to the bound; it scrolls inside.
+    fromPage({ fg: 1, type: 'fg:height', px: 3953 }, win);
+    expect(el.style.height).toBe(`${MAX_HEIGHT}px`);
     fromPage({ fg: 1, type: 'fg:height', px: 3 }, win);
-    expect(el.style.height).toBe('240px');
+    expect(el.style.height).toBe(`${MIN_HEIGHT}px`);
+    expect(MAX_HEIGHT).toBeLessThanOrEqual(1000);
+  });
+
+  it("gives the page Create's theme, and a new theme reloads it in that theme", () => {
+    useThemeStore.setState({ resolvedTheme: 'dark' });
+    const view = render(<StudioFrame projectId={P} src="/api/v1/engine?t=tok" collections={SNAPSHOT} readOnly={false} />);
+    const el = screen.getByTestId('studio-frame');
+    expect(el).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=dark');
+    act(() => useThemeStore.setState({ resolvedTheme: 'light' }));
+    expect(el).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=light');
+    view.unmount();
   });
 
   it('highlights a selected component through the shared selection', () => {

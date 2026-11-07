@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { newId, postImagineEvent } from '../../../api/endpoints/imagine';
 import { useComponentSelection } from '../../../store/component-selection-store';
+import { useThemeStore } from '../../../store/theme-store';
 import {
-  MIN_HEIGHT,
+  START_HEIGHT,
   clampHeight,
   parsePageMessage,
+  themedSrc,
   triggerDownload,
   writeToEvent,
   type HostMessage,
@@ -29,10 +31,16 @@ interface StudioFrameProps {
  * shapes. Writes go to the gateway as Imagine events; a selected part is
  * highlighted wherever the 3D view shows it; a download is handed to the
  * person as a file. Nothing the page sends is ever executed here.
+ *
+ * The frame takes the stage's full width. Its height is the one the page
+ * asks for, within bounds, and never more than the window shows (CSS); the
+ * page scrolls inside it beyond that. The page is given Create's theme.
  */
 export function StudioFrame({ projectId, src, collections, readOnly }: StudioFrameProps) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(640);
+  const [height, setHeight] = useState(START_HEIGHT);
+  const theme = useThemeStore((s) => s.resolvedTheme);
+  const frameSrc = useMemo(() => themedSrc(src, theme), [src, theme]);
   const [ready, setReady] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const select = useComponentSelection((s) => s.select);
@@ -102,10 +110,10 @@ export function StudioFrame({ projectId, src, collections, readOnly }: StudioFra
         ref={frame}
         className="cv-studio-frame"
         title="Imagine studio"
-        src={src}
+        src={frameSrc}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        style={{ height: Math.max(MIN_HEIGHT, height) }}
+        style={{ height }}
         data-testid="studio-frame"
       />
       {saveError && (
