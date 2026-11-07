@@ -46,6 +46,10 @@ class HandoverRecord(BaseModel):
     at: str
     by: str
     created: list[str] = Field(default_factory=list)
+    #: FORGE-824: set when an agent handed over for a person under the
+    #: owner's delegation (``by`` is then ``agent:<name>``, never the person).
+    agent: str | None = None
+    on_behalf_of: str | None = None
 
 
 class StudioResponse(BaseModel):

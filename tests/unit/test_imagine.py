@@ -20,6 +20,14 @@ from api_gateway.imagine import engine_page
 from api_gateway.imagine import routes as imagine_routes
 from api_gateway.imagine.service import ImagineService, sanitize
 from api_gateway.operations import publisher as ops
+from mcp_core.annotations import DESTRUCTIVE
+from mcp_core.context import McpCallContext, with_context
+from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
+    HumanAuthorityRequiredError,
+    never_auto_approved,
+    requires_human_authority,
+)
 from tests.unit.imagine_fixtures import base_config, full_config, mesh_glb
 from twin_core.api import InMemoryTwinAPI
 from twin_core.consistency.record_pins import record_staleness
@@ -565,3 +573,164 @@ def test_full_config_is_a_copy() -> None:
     a["product"]["name"] = "changed"
     assert b["product"]["name"] != "changed"
     assert copy.deepcopy(a) == a
+
+
+# ── FORGE-824: an agent hands over for a person, only under delegation ────
+#
+# The handover and the rework are a person's decisions. With the gateway
+# owner's METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY off (the default) the agent
+# surface is refused exactly as before. With it on, an agent may make them,
+# naming itself and the person it acts for, and the record says so.
+
+FLAG = "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY"
+AGENT = {
+    "X-MetaForge-Surface": "agent",
+    "X-MetaForge-Agent": "claude-code",
+    "X-MetaForge-On-Behalf-Of": "fidel",
+}
+_TOOLS = ("twin.imagine_handover", "twin.imagine_rework")
+
+
+@pytest.fixture(autouse=True)
+def _flag_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(FLAG, raising=False)
+
+
+async def test_flag_off_the_agent_is_refused_even_with_its_headers(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    res = await client.post(f"{BASE}/handover", json={"op_id": "h"}, headers=AGENT)
+    assert res.status_code == 403
+    res = await client.post(f"{BASE}/rework", json={"op_id": "r", "reason": "x"}, headers=AGENT)
+    assert res.status_code == 403
+
+
+@pytest.mark.parametrize("missing", ["X-MetaForge-Agent", "X-MetaForge-On-Behalf-Of"])
+async def test_flag_on_without_the_identity_headers_is_422(
+    missing: str, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(FLAG, "true")
+    await _put(client)
+    headers = {k: v for k, v in AGENT.items() if k != missing}
+    res = await client.post(f"{BASE}/handover", json={"op_id": "h"}, headers=headers)
+    assert res.status_code == 422, res.text
+    assert missing in res.text
+    res = await client.post(f"{BASE}/rework", json={"op_id": "r", "reason": "x"}, headers=headers)
+    assert res.status_code == 422
+
+
+async def test_flag_on_the_agent_hands_over_and_reworks_on_the_persons_behalf(
+    client: httpx.AsyncClient,
+    twin: InMemoryTwinAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(FLAG, "true")
+    published: list[str] = []
+    monkeypatch.setattr(
+        ImagineService, "_publish", lambda self, pid, what, message: published.append(message)
+    )
+    await _put(client)
+    await _make_ready(client, twin)
+    res = await client.post(f"{BASE}/handover", json={"op_id": "h1"}, headers=AGENT)
+    assert res.status_code == 200, res.text
+    handover = (await client.get(f"{BASE}/studio")).json()["handover"]
+    # Recorded as the agent's decision for that person, never as the person.
+    assert handover["by"] == "agent:claude-code"
+    assert handover["agent"] == "claude-code"
+    assert handover["on_behalf_of"] == "fidel"
+    # The operations log says the same.
+    assert any("decided by agent claude-code on behalf of fidel" in m for m in published)
+    res = await client.post(
+        f"{BASE}/rework", json={"op_id": "r1", "reason": "taller"}, headers=AGENT
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "draft"
+    assert "on behalf of fidel" in published[-1]
+
+
+async def test_a_persons_handover_is_unchanged(
+    client: httpx.AsyncClient, twin: InMemoryTwinAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(FLAG, "true")
+    await _put(client)
+    await _make_ready(client, twin)
+    assert (await client.post(f"{BASE}/handover", json={"op_id": "h1"})).status_code == 200
+    handover = (await client.get(f"{BASE}/studio")).json()["handover"]
+    assert handover["agent"] is None and handover["on_behalf_of"] is None
+    assert not handover["by"].startswith("agent:")
+
+
+# ── the MCP tools ────────────────────────────────────────────────────────
+
+
+def test_the_tools_are_human_authority_and_never_auto_approved() -> None:
+    for tool in _TOOLS:
+        assert requires_human_authority(tool)
+        assert never_auto_approved(tool)
+        assert tool in DESTRUCTIVE
+
+
+def _server(service: Any) -> Any:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    return TwinServer(twin=service.twin, imagine_studio=service)
+
+
+async def test_the_tools_are_registered_with_the_studio(service: Any) -> None:
+    assert set(_TOOLS) <= set(_server(service).tool_ids)
+
+
+async def test_flag_off_the_tool_is_refused(service: Any, client: httpx.AsyncClient) -> None:
+    await _put(client)
+    srv = _server(service)
+    with pytest.raises(ValueError, match="person's decision"):
+        await srv.imagine_handover({"project_id": PROJECT, "op_id": "h", APPROVED_BY_ARG: "fidel"})
+    with pytest.raises(ValueError, match="person's decision"):
+        await srv.imagine_rework(
+            {"project_id": PROJECT, "op_id": "r", "reason": "x", APPROVED_BY_ARG: "fidel"}
+        )
+
+
+async def test_the_tool_needs_the_approver_the_dispatcher_supplies(
+    service: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(FLAG, "true")
+    srv = _server(service)
+    with pytest.raises(HumanAuthorityRequiredError):
+        await srv.imagine_handover({"project_id": PROJECT, "op_id": "h"})
+    # The model cannot name the person itself.
+    with pytest.raises(Exception, match="approved_by"):
+        await srv.imagine_handover({"project_id": PROJECT, "op_id": "h", "approved_by": "fidel"})
+
+
+async def test_flag_on_the_tool_hands_over_for_the_approver(
+    service: Any,
+    client: httpx.AsyncClient,
+    twin: InMemoryTwinAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _put(client)
+    await _make_ready(client, twin)
+    monkeypatch.setenv(FLAG, "true")
+    srv = _server(service)
+    ctx = McpCallContext(actor_id="agent:claude_code", client="claude-code")
+    with with_context(ctx):
+        out = await srv.imagine_handover(
+            {"project_id": PROJECT, "op_id": "h1", APPROVED_BY_ARG: "user:fidel"}
+        )
+    assert out["handed_over"] is True
+    handover = (await srv.imagine_get_studio({"project_id": PROJECT}))["handover"]
+    assert handover["by"] == "agent:claude-code"
+    assert handover["on_behalf_of"] == "user:fidel"
+
+
+async def test_a_tool_handover_before_ready_names_what_is_missing(
+    service: Any, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _put(client)
+    monkeypatch.setenv(FLAG, "true")
+    with pytest.raises(ValueError, match="Missing"):
+        await _server(service).imagine_handover(
+            {"project_id": PROJECT, "op_id": "h1", APPROVED_BY_ARG: "fidel"}
+        )

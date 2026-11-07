@@ -842,7 +842,9 @@ def unmapped_disciplines(disciplines: tuple[str, ...] | list[str]) -> list[str]:
 # Create stage and the gateway resolves that stage's set here, so nothing
 # needs capping. A tool outside the set stays reachable through the harness's
 # own search_tools meta-tool. Promotion, approval and ordering tools are in no
-# set: those decisions belong to the person.
+# set: those decisions belong to the person. The Imagine handover and rework
+# are in the Imagine set because the owner may delegate them (FORGE-824);
+# without that they are refused.
 
 #: The Create view's stages, in order.
 CREATE_STAGES: tuple[str, ...] = ("imagine", "develop", "check", "make")
@@ -874,6 +876,10 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
     "imagine": _CREATE_READS
     | {
         "twin.imagine_put_studio",
+        # FORGE-824: a person's steps, refused unless the owner delegates
+        # human authority, and then held for an approval like any such step.
+        "twin.imagine_handover",
+        "twin.imagine_rework",
         "twin.state_manufacturing_context",
         "twin.generate_sketch",
         "twin.commit_design_sketch",

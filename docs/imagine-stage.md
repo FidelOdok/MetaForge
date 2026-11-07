@@ -17,7 +17,7 @@ its own copy; this one lives in `api_gateway/imagine/` (provenance in its
 |---|---|
 | Gateway | `/v1/twin/projects/{project_id}/imagine/...` (`api_gateway/imagine/`) |
 | Twin item | `IMG-STUDIO`, work product type `imagine_studio` (a definition: every config change or rework is its next revision) |
-| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_handover_status` |
+| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_handover_status`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
 | Engine | `api_gateway/imagine/engine/` (HTML, CSS and JS), three.js r128 vendored under `engine/vendor/` |
 
 ## Verification levels
@@ -86,8 +86,9 @@ tools:
 4. Call `twin.imagine_handover_status` and tell the person what to do in the
    studio and what is still missing.
 
-The agent never claims above V2 and never hands over: the handover is the
-person's, in the studio. After it, the playbook reads the handed-over records
+The agent never claims above V2 and does not hand over: the handover is the
+person's, in the studio, unless the owner delegates it (see
+[delegated to an agent](#delegated-to-an-agent)). After it, the playbook reads the handed-over records
 and starts Develop in order: the concept mesh, then exact CAD per made part
 with the DFM and manufacturing context, then electronics and firmware against
 the interface contracts. Approvals stay the person's.
@@ -133,6 +134,34 @@ The handover and the rework are a person's decisions: a request from an agent
 surface (`X-MetaForge-Surface: agent`) is refused with 403, as is an agent
 confirming an assumption. Both are idempotent per `op_id`. Each operation is
 published to the project's operations log (`job:imagine-...`).
+
+### Delegated to an agent
+
+When the gateway owner delegates human-authority decisions
+(`METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true`, default off; see
+[delegating approvals to an agent](approvals.md#delegating-approvals-to-an-agent)),
+an agent may hand over and rework, for fully autonomous runs (FORGE-824):
+
+- **REST.** `POST /handover` and `POST /rework` from the agent surface must
+  carry `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of`; without either
+  the call is a 422, as on the approvals API. With authentication on, the
+  person must be the authenticated principal (403 otherwise). With the flag
+  off nothing changes: 403.
+- **MCP.** `twin.imagine_handover {op_id}` and `twin.imagine_rework {op_id,
+  reason}` are always registered with the studio tools and are refused unless
+  the flag is on in the process the call lands in (the gateway, or the MCP
+  sidecar that serves the twin tools, so set it on both). They are
+  human-authority tools (`mcp_core/guardrails.py`, and destructive in
+  `mcp_core/annotations.py`): no project approval policy approves them, the
+  call is held for an approval, and the person it acted for is whoever
+  decided that approval, never a name the model supplies.
+
+The record says an agent decided, for that person, never that the person
+did: the handover (and rework) record carries `by: "agent:<name>"`, `agent`
+and `on_behalf_of`, and the operations log line ends *decided by agent
+<name> on behalf of <person>*. The `imagine_studio` playbook and the
+plugins' `/metaforge:imagine` command hand over once the checklist is ready
+only when this is allowed, and otherwise ask the person.
 
 ## Mapping into the twin
 

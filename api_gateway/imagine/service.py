@@ -1032,9 +1032,26 @@ class ImagineService:
         ready = all(i.status != "missing" for i in items)
         return HandoverChecklist(ready=ready, items=items)
 
-    async def handover(self, project_id: str, op_id: str, *, actor: str) -> HandoverResult:
+    async def handover(
+        self,
+        project_id: str,
+        op_id: str,
+        *,
+        actor: str,
+        agent: str | None = None,
+        on_behalf_of: str | None = None,
+    ) -> HandoverResult:
+        """Freeze the studio and seed the twin.
+
+        ``agent`` (FORGE-824) marks a handover an agent makes for a person
+        under the owner's delegation; see :func:`_delegation`.
+        """
         with tracer.start_as_current_span("imagine.handover") as span:
             span.set_attribute("project_id", project_id)
+            delegated = _delegation("handover", agent, on_behalf_of)
+            if delegated:
+                actor = delegated["by"]
+                span.set_attribute("imagine.agent", str(agent))
             async with self._lock(project_id):
                 head = await self._head(project_id)
                 if head is None:
@@ -1071,6 +1088,7 @@ class ImagineService:
                     "at": _now(),
                     "by": actor,
                     "created": created,
+                    **delegated,
                 }
                 await self._save(head)
             span.set_attribute("handover.created", len(created))
@@ -1078,10 +1096,16 @@ class ImagineService:
             self._publish(
                 project_id,
                 f"handover-{head.revision}",
-                f"Imagine handed over to Develop at {head.ref} ({len(created)} records)",
+                f"Imagine handed over to Develop at {head.ref} ({len(created)} records)"
+                + _delegated_note(delegated),
             )
             logger.info(
-                "imagine_handed_over", project_id=project_id, ref=head.ref, created=len(created)
+                "imagine_handed_over",
+                project_id=project_id,
+                ref=head.ref,
+                created=len(created),
+                agent=agent if delegated else None,
+                on_behalf_of=on_behalf_of if delegated else None,
             )
             return HandoverResult(revision=head.revision, created=created)
 
@@ -1270,10 +1294,21 @@ class ImagineService:
     # -- rework -----------------------------------------------------------
 
     async def rework(
-        self, project_id: str, op_id: str, reason: str, *, actor: str
+        self,
+        project_id: str,
+        op_id: str,
+        reason: str,
+        *,
+        actor: str,
+        agent: str | None = None,
+        on_behalf_of: str | None = None,
     ) -> StudioResponse:
         with tracer.start_as_current_span("imagine.rework") as span:
             span.set_attribute("project_id", project_id)
+            delegated = _delegation("rework", agent, on_behalf_of)
+            if delegated:
+                actor = delegated["by"]
+                span.set_attribute("imagine.agent", str(agent))
             async with self._lock(project_id):
                 head = await self._head(project_id)
                 if head is None:
@@ -1314,13 +1349,14 @@ class ImagineService:
                     "at": _now(),
                     "by": actor,
                     "stale": stale,
+                    **delegated,
                 }
                 await self._save(new)
             _count("rework", "ok")
             self._publish(
                 project_id,
                 f"rework-{new.revision}",
-                f"Imagine reopened at {new.ref}: {reason}"[:500],
+                (f"Imagine reopened at {new.ref}: {reason}" + _delegated_note(delegated))[:500],
             )
             logger.info(
                 "imagine_reworked",
@@ -1389,6 +1425,44 @@ class ImagineService:
             title="Imagine",
             message=message[:500],
         )
+
+
+def _delegation(what: str, agent: str | None, on_behalf_of: str | None) -> dict[str, Any]:
+    """The record of an agent deciding a person's step for them (FORGE-824).
+
+    The handover and the rework are a person's decisions. An agent may make
+    them only when the gateway owner delegates human-authority decisions
+    (``METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY``, read here, in the process the
+    call lands in), and only naming the person it acts for. The record says
+    an agent decided, for that person; it is never written as the person.
+    Empty for a person's own call.
+    """
+    if agent is None:
+        return {}
+    from api_gateway.approvals.service import (
+        AGENT_HUMAN_AUTHORITY_REASON,
+        agent_may_decide_human_authority,
+    )
+
+    if not agent_may_decide_human_authority():
+        _count(what, "refused")
+        raise ImagineError(
+            f"The Imagine {what} is a person's decision: " + AGENT_HUMAN_AUTHORITY_REASON, 403
+        )
+    agent = agent.strip()[:100]
+    person = (on_behalf_of or "").strip()[:200]
+    if not agent or not person:
+        _count(what, "refused")
+        raise ImagineError(
+            f"An agent's Imagine {what} must name the agent and the person it acts for.", 422
+        )
+    return {"by": f"agent:{agent}", "agent": agent, "on_behalf_of": person}
+
+
+def _delegated_note(delegated: dict[str, Any]) -> str:
+    if not delegated:
+        return ""
+    return f", decided by agent {delegated['agent']} on behalf of {delegated['on_behalf_of']}"
 
 
 def _key(contract: Any) -> str:

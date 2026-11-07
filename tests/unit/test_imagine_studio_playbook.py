@@ -60,7 +60,10 @@ def test_the_chat_agent_can_read_it_by_name() -> None:
     ):
         assert f"`{tool}`" in body, tool
     assert "## After handover" in body
-    assert "Never hand over" in body
+    # FORGE-824: hand over only under the owner's delegation, else ask.
+    assert "Hand over only when delegated" in body
+    assert "`twin.imagine_handover`" in body
+    assert "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY" in body
     assert "V2" in body
 
 

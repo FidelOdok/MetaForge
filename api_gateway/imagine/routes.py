@@ -96,6 +96,39 @@ def _require_person(request: Request, what: str) -> None:
         )
 
 
+def _person_or_delegate(request: Request, what: str) -> tuple[str, str | None, str | None]:
+    """(actor, agent, on_behalf_of) for a person's step (FORGE-824).
+
+    A person's call is theirs. The agent surface is refused (403) unless the
+    gateway owner delegates human-authority decisions
+    (``METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY``, docs/approvals.md); then the
+    call must name the agent and the person it acts for (422 otherwise, as
+    the approvals API), and is recorded as the agent's, for that person.
+    """
+    if not _is_agent(request):
+        return _actor(request), None, None
+    from api_gateway.approvals.routes import (
+        AGENT_HEADER,
+        ON_BEHALF_OF_HEADER,
+        resolve_agent_identity,
+    )
+    from api_gateway.approvals.service import agent_may_decide_human_authority
+    from api_gateway.auth.approver import approver_from_request
+
+    if not agent_may_decide_human_authority():
+        _require_person(request, what)
+    agent = (request.headers.get(AGENT_HEADER) or "").strip()[:100]
+    if not agent:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{AGENT_HEADER} is required with {SURFACE_HEADER}: agent",
+        )
+    on_behalf = (request.headers.get(ON_BEHALF_OF_HEADER) or "").strip() or None
+    person = resolve_agent_identity(approver_from_request(request), on_behalf)
+    logger.info("imagine_agent_delegated", what=what, agent=agent, on_behalf_of=person.actor_id)
+    return f"agent:{agent}", agent, str(person.actor_id)
+
+
 async def _call(name: str, project_id: str, fn: Callable[[], Awaitable[T]]) -> T:
     """Run one call, mapping refusals to their status and anything else to 502."""
     from twin_core.items import ItemError
@@ -207,23 +240,30 @@ async def get_handover(project_id: str) -> HandoverChecklist:
     responses={409: {"description": "Not ready: the missing checklist items"}},
 )
 async def post_handover(project_id: str, body: HandoverPost, request: Request) -> HandoverResult:
-    _require_person(request, "Handing Imagine over to Develop")
-    actor = _actor(request)
+    actor, agent, on_behalf_of = _person_or_delegate(request, "Handing Imagine over to Develop")
     return await _call(
         "handover",
         project_id,
-        lambda: get_service().handover(project_id, body.op_id, actor=actor),
+        lambda: get_service().handover(
+            project_id, body.op_id, actor=actor, agent=agent, on_behalf_of=on_behalf_of
+        ),
     )
 
 
 @router.post(f"{_BASE}/rework", response_model=StudioResponse)
 async def post_rework(project_id: str, body: ReworkPost, request: Request) -> StudioResponse:
-    _require_person(request, "Reworking Imagine")
-    actor = _actor(request)
+    actor, agent, on_behalf_of = _person_or_delegate(request, "Reworking Imagine")
     return await _call(
         "rework",
         project_id,
-        lambda: get_service().rework(project_id, body.op_id, body.reason, actor=actor),
+        lambda: get_service().rework(
+            project_id,
+            body.op_id,
+            body.reason,
+            actor=actor,
+            agent=agent,
+            on_behalf_of=on_behalf_of,
+        ),
     )
 
 

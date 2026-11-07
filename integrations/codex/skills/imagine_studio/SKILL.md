@@ -26,8 +26,15 @@ All three take `project_id` (defaults to the chat's project).
 1. **Nothing above V2.** The studio is captured (V0), consistent (V1) and
    screened (V2) at most. Never call a studio result analysed, verified or
    qualified. That needs real solvers and checks against exact CAD in Develop.
-2. **Never hand over.** No tool hands over. Tell the person what is missing and
-   that the "Hand over to engineering" button is theirs.
+2. **Hand over only when delegated.** The handover is the person's decision.
+   Only when the gateway owner lets agents decide a person's steps
+   (`METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true`, see docs/approvals.md) may
+   you call `twin.imagine_handover`, and only once
+   `twin.imagine_handover_status` says ready. It is recorded as your decision
+   on the person's behalf, never as theirs. Otherwise, or when the tool is
+   refused or missing, never hand over: tell the person what is missing and
+   that the "Hand over to engineering" button is theirs. `twin.imagine_rework`
+   follows the same rule.
 3. **No invented part numbers.** A part's order code, maker and datasheet come
    from a source you read, with the date you read it. When you have none, keep
    the placeholder and list the part as missing; never make one up.
@@ -164,6 +171,10 @@ what you read, or list it to the person as missing.
    ledger, pick between part options, generate a concept mesh, let the
    screening run); which checklist items are missing; that results are
    screening only (V2 at most); and that the handover button is theirs.
+7. **Delegated runs only:** when handover is allowed for agents (rule 2) and
+   the checklist is ready, call `twin.imagine_handover` with a fresh `op_id`
+   and say that you handed over on the person's behalf. Otherwise ask the
+   person to hand over.
 
 ## After handover
 
