@@ -261,12 +261,17 @@ def test_context_block_is_trailing_pair_on_both_paths() -> None:
 @pytest.mark.asyncio
 async def test_fragments_land_in_native_request(monkeypatch: pytest.MonkeyPatch) -> None:
     """The MET-566 verification: retrieved fragments must be in the message
-    list the provider actually receives, and the brief in its system prompt."""
+    list the provider actually receives, and the brief in its system prompt.
+
+    FORGE-825: the brief rides in the system suffix, after the cache
+    breakpoint, so the stable system text stays byte-identical across turns.
+    """
     monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "true")
     seen: dict[str, Any] = {}
 
     async def invoke(spec: ProviderSpec, request: dict) -> dict:
         seen["system"] = request.get("system", "")
+        seen["suffix"] = request.get("system_suffix", "")
         seen["messages"] = request.get("messages", [])
         return {"text": "done", "model": spec.model}
 
@@ -277,7 +282,8 @@ async def test_fragments_land_in_native_request(monkeypatch: pytest.MonkeyPatch)
         context_block="- [specs/alloy.md] The bracket alloy is 7075-T6.",
     )
     assert out == "done"
-    assert "[project context]\nProject X, id p-1" in seen["system"]
+    assert "[project context]\nProject X, id p-1" in seen["suffix"]
+    assert "Project X" not in seen["system"]
     joined = "\n".join(str(m.get("content")) for m in seen["messages"])
     assert "7075-T6" in joined and "[retrieved context]" in joined
 

@@ -544,6 +544,9 @@ def record_call(
             prompt_tokens=event.prompt_tokens,
             completion_tokens=event.completion_tokens,
             cached_input_tokens=event.cached_input_tokens,
+            # FORGE-825: a Claude cache write (first call of a prefix) next to
+            # the read, so the log shows whether a breakpoint took.
+            cache_write_tokens=tokens.cache_write if tokens else None,
             cost_usd=event.cost_usd,
         )
         if metrics is not None:
@@ -554,6 +557,7 @@ def record_call(
                 prompt=event.prompt_tokens,
                 completion=event.completion_tokens,
                 cached_input=event.cached_input_tokens,
+                cache_write=tokens.cache_write if tokens else None,
                 cost_usd=event.cost_usd,
             )
         store = _store

@@ -178,6 +178,7 @@ gateway that needs one; a local gateway started without auth does not.
 |---|---|
 | `/metaforge:use` | Pick the project for this session and summarise where it stands |
 | `/metaforge:status` | What is built, and which requirements are unverified |
+| `/metaforge:imagine` | Start the Imagine studio from what you said and report what the handover still needs; after you hand over, develop it, writing the CadQuery client side with `generate_cad_script` |
 | `/metaforge:design` | Design or revise a part, committed to the twin |
 | `/metaforge:fea` | Run a load case and record the evidence against the revision it came from |
 | `/metaforge:gate` | Review whether the project can be promoted |

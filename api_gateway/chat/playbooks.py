@@ -41,7 +41,9 @@ REPO = Path(__file__).resolve().parents[2]
 MAX_BODY_CHARS = 24000
 #: Workflows about connecting a client or driving a session from outside,
 #: which mean nothing in the dashboard.
-CLIENT_ONLY_WORKFLOWS = frozenset({"connect", "use", "drive", "doctor"})
+#: FORGE-824: ``imagine`` tells a client to write CAD itself; the chat reads the
+#: ``imagine_studio`` playbook instead.
+CLIENT_ONLY_WORKFLOWS = frozenset({"connect", "use", "drive", "doctor", "imagine"})
 
 # The plugin's session rules (mcp_core/plugin_hooks/metaforge_hook.py,
 # SESSION_RULES), as they apply to a person talking to the agent in the

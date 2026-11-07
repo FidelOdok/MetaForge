@@ -182,6 +182,31 @@ async def _manufacturing_lines(project: Any, twin: Any) -> str:
     )
 
 
+async def _imagine_line(project: Any, twin: Any) -> str | None:
+    """One line on the Imagine studio (FORGE-824). ``None`` when it cannot be read.
+
+    The chat's system prompt says what to do with no studio and after a
+    handover; this line is how it knows which case it is in, without a tool
+    call. It reads only the studio's head record.
+    """
+    try:
+        from api_gateway.imagine.service import ImagineService
+
+        studio = await ImagineService(twin).get_studio(str(project.id))
+    except Exception as exc:  # noqa: BLE001 -- the brief goes on without it
+        logger.debug("project_brief_imagine_unavailable", error=str(exc))
+        return None
+    if studio.status == "none":
+        return "\nImagine studio: not started (no studio config yet)."
+    if studio.status == "handed_over":
+        revision = studio.handover.revision if studio.handover else studio.revision
+        return f"\nImagine studio: handed over to engineering at revision {revision} (read only)."
+    return (
+        f"\nImagine studio: draft, revision {studio.revision}, not handed over. "
+        "Handover is the person's step in the studio."
+    )
+
+
 def _is_item_type(wp: Any) -> bool:
     from twin_core.items import is_definition
 
@@ -221,6 +246,9 @@ async def build_project_brief(
         # DFM-001: the chat agent works from the same manufacturing context as
         # every generator (the Create route and brief, decisions, flow context).
         lines.append(await _manufacturing_lines(project, twin))
+        imagine = await _imagine_line(project, twin)
+        if imagine:
+            lines.append(imagine)
 
     baseline = None
     if twin is not None:

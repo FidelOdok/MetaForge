@@ -135,4 +135,14 @@ describe('Imagine', () => {
     await userEvent.click(confirm);
     await waitFor(() => expect(postRework).toHaveBeenCalledWith(P, expect.stringMatching(/^rework-/), 'The battery must be swappable'));
   });
+
+  it('after handover, offers to start developing (FORGE-824)', async () => {
+    getStudio.mockResolvedValue(studio({ status: 'handed_over', revision: 3, handover: { revision: 3 } }));
+    const onStartDeveloping = vi.fn();
+    render(<ImagineStage projectId={P} nodes={[]} view="studio" onView={vi.fn()} onStartDeveloping={onStartDeveloping} />);
+    const start = await screen.findByRole('button', { name: 'Start developing' });
+    expect(screen.getByRole('button', { name: 'Reopen Imagine' })).toBeInTheDocument();
+    await userEvent.click(start);
+    expect(onStartDeveloping).toHaveBeenCalledTimes(1);
+  });
 });

@@ -22384,6 +22384,24 @@
             "title": "Content",
             "type": "string"
           },
+          "create_stage": {
+            "anyOf": [
+              {
+                "enum": [
+                  "imagine",
+                  "develop",
+                  "check",
+                  "make"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Create view stage of a design turn. When set, the gateway uses that stage's tool set and ignores `tools`.",
+            "title": "Create Stage"
+          },
           "graph_ref_label": {
             "anyOf": [
               {

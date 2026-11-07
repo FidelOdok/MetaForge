@@ -41,12 +41,13 @@ Install **one**. The manifest has no way to switch a server entry off, so two pa
 - `/metaforge:replan`
 - `/metaforge:gate`
 - `/metaforge:approvals`
+- `/metaforge:imagine`
 - `/metaforge:drive`
 - `/metaforge:doctor`
 
 ## Skills
 
-51 skills are bundled.
+52 skills are bundled.
 
 ## Agents
 

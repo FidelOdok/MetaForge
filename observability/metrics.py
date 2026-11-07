@@ -2561,8 +2561,13 @@ class MetricsCollector:
         completion: int | None,
         cached_input: int | None,
         cost_usd: float | None,
+        cache_write: int | None = None,
     ) -> None:
-        """Record one LLM call's tokens and cost (FORGE-476)."""
+        """Record one LLM call's tokens and cost (FORGE-476).
+
+        ``cache_write`` (FORGE-825) is the prompt tokens written to a provider
+        cache, counted as ``kind="cache_write"``.
+        """
         reported = prompt is not None or completion is not None
         calls = self._instruments.get(MetricsRegistry.LLM_CALLS_TOTAL.name)
         if calls is not None:
@@ -2582,6 +2587,7 @@ class MetricsCollector:
                 ("prompt", prompt),
                 ("completion", completion),
                 ("cached_input", cached_input),
+                ("cache_write", cache_write),
             ):
                 if count:
                     tokens.add(count, attributes={**base, "kind": kind})

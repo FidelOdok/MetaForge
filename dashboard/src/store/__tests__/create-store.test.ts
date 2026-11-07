@@ -32,6 +32,37 @@ describe('create store', () => {
     await waitFor(() => expect(useCreateStore.getState().session(P).queue).toHaveLength(0));
   });
 
+  it('sends a design turn with the stage on screen instead of tool ids (FORGE-825)', async () => {
+    const send = vi.spyOn(chat, 'sendTwinChatMessage').mockResolvedValue({} as never);
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());
+    const s = useCreateStore.getState();
+    s.setStage(P, 'check');
+    s.setIntent(P, 'design');
+    s.setDraft(P, 'Run the DFM checks');
+    s.submit(P, TOOLS);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0]![1].create_stage).toBe('check');
+    expect(send.mock.calls[0]![1].tools).toBeUndefined();
+    // A question in the same stage keeps sending its own (empty) tool list.
+    s.setIntent(P, 'ask');
+    s.setDraft(P, 'What did the checks find?');
+    s.submit(P, TOOLS);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]![1].create_stage).toBeUndefined();
+    expect(send.mock.calls[1]![1].tools).toEqual([]);
+  });
+
+  it('sends a stage request at once without touching the draft', async () => {
+    const send = vi.spyOn(chat, 'sendTwinChatMessage').mockResolvedValue({} as never);
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());
+    const s = useCreateStore.getState();
+    s.setDraft(P, 'half a thought');
+    expect(s.sendNow(P, 'Start the Imagine studio for this product.', 'design', TOOLS, 'imagine')).toBe(true);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0]![1].create_stage).toBe('imagine');
+    expect(useCreateStore.getState().session(P).draft).toBe('half a thought');
+  });
+
   it('sends the model the person chose, and nothing when they use the default', async () => {
     const send = vi.spyOn(chat, 'sendTwinChatMessage').mockResolvedValue({} as never);
     vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue(thread());

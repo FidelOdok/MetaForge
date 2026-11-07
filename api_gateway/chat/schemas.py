@@ -8,6 +8,7 @@ in ``models.py`` -- schemas here represent the HTTP contract.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -56,6 +57,16 @@ class SendMessageRequest(BaseModel):
     model: str | None = Field(default=None, description="Override model for this turn")
     tools: list[str] | None = Field(
         default=None, description="Enabled MCP tool ids for this turn (None = all available)"
+    )
+    #: FORGE-825: a design turn from the dashboard's Create view names its
+    #: stage, and the gateway resolves that stage's tool set
+    #: (``mcp_core.profiles.CREATE_STAGE_TOOLS``) instead of taking every id.
+    create_stage: Literal["imagine", "develop", "check", "make"] | None = Field(
+        default=None,
+        description=(
+            "Create view stage of a design turn. When set, the gateway uses that "
+            "stage's tool set and ignores `tools`."
+        ),
     )
     #: FORGE-788 (RT-001): an id the client chose for this turn, so it knows
     #: the turn's operation (``chat:<id>``) before the reply returns. Ignored

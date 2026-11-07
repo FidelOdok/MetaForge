@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitFor } from '@testing-library/react';
+import * as chat from '../../api/endpoints/twin-chat';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { act, render, screen, within } from '../../test/test-utils';
 import { opEvent } from '../../test/operation-fixtures';
 import { useOperationsStore } from '../../store/operations-store';
-import { CreatePage } from '../CreatePage';
+import { CreatePage, START_DEVELOP_TEXT, START_IMAGINE_TEXT } from '../CreatePage';
 import { useProject, useProjects } from '../../hooks/use-projects';
 import { useCreation } from '../../hooks/use-creation';
 import { useTwinNodes, useNodeVersionHistory } from '../../hooks/use-twin';
@@ -40,14 +42,30 @@ vi.mock('../../hooks/use-harness', () => ({
 }));
 vi.mock('../../hooks/use-twin-chat', () => ({
   useTwinChatThreads: vi.fn(() => ({ data: [] })),
-  useTwinChatThread: vi.fn(() => ({ data: undefined })),
+  useTwinChatThread: vi.fn(() => ({ data: undefined, refetch: vi.fn() })),
 }));
 // Each stage is covered on its own; here they only say which one is on screen.
 vi.mock('../../components/create/imagine/ImagineStage', () => ({
-  ImagineStage: ({ view, onView }: { view: string; onView: (v: 'studio' | 'sketch') => void }) => (
+  ImagineStage: ({
+    view,
+    onView,
+    onAskAssistant,
+    onStartDeveloping,
+  }: {
+    view: string;
+    onView: (v: 'studio' | 'sketch') => void;
+    onAskAssistant?: () => void;
+    onStartDeveloping?: () => void;
+  }) => (
     <section aria-label="Imagine stage" data-view={view}>
       <button type="button" onClick={() => onView('sketch')}>
         Sketch
+      </button>
+      <button type="button" onClick={onAskAssistant}>
+        Ask the assistant
+      </button>
+      <button type="button" onClick={onStartDeveloping}>
+        Start developing
       </button>
     </section>
   ),
@@ -217,6 +235,37 @@ describe('CreatePage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Show the conversation' }));
     expect(screen.getByLabelText('Describe your product or ask for a change')).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? '{}')).toEqual({ chat: false });
+  });
+
+  it('sends the Imagine request at once as a design turn with the Imagine tools (FORGE-824)', async () => {
+    const send = vi.spyOn(chat, 'sendTwinChatMessage').mockResolvedValue({} as never);
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue({ id: 't1' } as never);
+    useCreateStore.getState().setDraft(P, 'my own unsent words');
+    renderAt(`/create/${P}?stage=imagine`);
+    await userEvent.click(screen.getByRole('button', { name: 'Ask the assistant' }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const body = send.mock.calls[0]![1];
+    expect(body.content).toContain(START_IMAGINE_TEXT);
+    expect(body.content).toContain('Use only the explicitly selected tools');
+    expect(body.create_stage).toBe('imagine');
+    expect(body.tools).toBeUndefined();
+    // The person's draft is left alone.
+    expect(useCreateStore.getState().session(P).draft).toBe('my own unsent words');
+    send.mockRestore();
+  });
+
+  it('starts developing after handover: moves to Develop and sends a Develop design turn', async () => {
+    const send = vi.spyOn(chat, 'sendTwinChatMessage').mockResolvedValue({} as never);
+    vi.spyOn(chat, 'createTwinChatThread').mockResolvedValue({ id: 't1' } as never);
+    renderAt(`/create/${P}?stage=imagine`);
+    await userEvent.click(screen.getByRole('button', { name: 'Start developing' }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(window.location.search).toContain('stage=develop');
+    const body = send.mock.calls[0]![1];
+    expect(body.content).toContain(START_DEVELOP_TEXT);
+    expect(body.create_stage).toBe('develop');
+    expect(body.tools).toBeUndefined();
+    send.mockRestore();
   });
 
   it('shows waiting approvals as a badge on Decisions, never as a popup over the stage', () => {

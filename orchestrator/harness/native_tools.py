@@ -505,6 +505,7 @@ async def run_native_tools(
     invoke: Invoke = default_invoke,
     max_steps: int = 8,
     system: str = NATIVE_SYSTEM,
+    system_context: str | None = None,
     history: list[dict[str, Any]] | None = None,
     max_context_tokens: int | None = None,
     on_step: OnStep | None = None,
@@ -522,6 +523,11 @@ async def run_native_tools(
 
     ``project_id`` (FORGE-81), when given, is force-set on every call to a
     tool in ``_PROJECT_SCOPED_TOOLS`` — see ``_execute_calls``.
+
+    ``system_context`` (FORGE-825) is system text that may change between
+    turns (a project brief). It travels as the request's ``system_suffix``,
+    after the cache breakpoint on ``system``, so ``system`` and the tools stay
+    a byte-stable cached prefix.
 
     ``history`` is the prior conversation ([{role, content}], oldest first) so
     the model can answer with context from earlier turns; it is seeded ahead of
@@ -659,13 +665,19 @@ async def run_native_tools(
             # FORGE-478: the note rides as ``system_suffix`` so it never
             # mutates the cached system prefix on a truncating round.
             request: dict[str, Any] = {"system": system, "messages": messages, "tools": tools}
+            # FORGE-825: per-turn context (the project brief) rides after the
+            # cached prefix too, so a brief that changed since the last turn
+            # still lets the tools and the stable system text hit the cache.
+            suffix_parts = [system_context] if system_context else []
             if dropped_this_round:
-                request["system_suffix"] = (
+                suffix_parts.append(
                     f"NOTE: {len(dropped_this_round)} tool(s) were omitted from "
                     "your tool list this turn because the provider's tools-array cap was "
                     "exceeded. If a capability you need isn't in your list, call "
                     "search_tools with a relevant keyword before assuming it doesn't exist."
                 )
+            if suffix_parts:
+                request["system_suffix"] = "\n\n".join(suffix_parts)
             resp = await _model_call(request)
             _tally(resp)
             text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
