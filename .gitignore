@@ -125,3 +125,6 @@ evals/reports/
 
 # Vercel CLI local link/state
 .vercel/
+
+# FORGE-823: the cosign fallback private key. Only cosign.pub is committed.
+cosign.key

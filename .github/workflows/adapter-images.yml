@@ -254,13 +254,10 @@ jobs:
         if: env.PUBLISH == 'true'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          for attempt in 1 2 3; do
-            cosign sign --yes "${IMAGE}@${DIGEST}" && exit 0
-            echo "::warning::cosign sign failed (attempt $attempt)"
-            sleep $((attempt * 15))
-          done
-          exit 1
+          # Used only if keyless signing fails (Rekor down).
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: bash scripts/ci/sign_image.sh "${IMAGE}@${DIGEST}"
 
       # Only a signed digest is tagged. One source, so imagetools copies the
       # index as is and the tags name exactly the signed digest; checked.
@@ -351,13 +348,10 @@ jobs:
         if: env.PUBLISH == 'true'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          for attempt in 1 2 3; do
-            cosign sign --yes "${IMAGE}@${DIGEST}" && exit 0
-            echo "::warning::cosign sign failed (attempt $attempt)"
-            sleep $((attempt * 15))
-          done
-          exit 1
+          # Used only if keyless signing fails (Rekor down).
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: bash scripts/ci/sign_image.sh "${IMAGE}@${DIGEST}"
 
       - name: Tag the signed image
         if: env.PUBLISH == 'true'

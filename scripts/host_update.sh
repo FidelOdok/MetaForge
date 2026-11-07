@@ -15,8 +15,17 @@
 #   3. starts the stack without building, recreates every container whose
 #      image changed, and waits for health.
 #
+# Signatures: keyless (Sigstore, this repository's CI identity) is checked
+# first. If that fails and a pinned public key exists at PUBKEY, a key
+# signature is accepted instead; CI makes one only when Sigstore's public log
+# is down, so it has no transparency log entry (FORGE-823). PUBKEY is a file
+# the operator places on the host; it is never taken from the bundle.
+#
 # Usage: scripts/host_update.sh [--dir DIR] [--ref REF] [--no-verify]
 #   DIR defaults to $METAFORGE_HOST_DIR or ~/metaforge, REF to main.
+#   PUBKEY is $METAFORGE_COSIGN_PUBKEY or DIR/cosign.pub; when neither
+#   exists, only keyless signatures are accepted.
+#   Needs scripts/lib/ beside it (compose_settle.sh, verify_signature.sh).
 set -euo pipefail
 
 DIR="${METAFORGE_HOST_DIR:-$HOME/metaforge}"
@@ -28,6 +37,8 @@ IDENTITY="^https://github\\.com/${REPO}/\\.github/workflows/"
 
 # shellcheck source=lib/compose_settle.sh
 . "$(dirname "$0")/lib/compose_settle.sh"
+# shellcheck source=lib/verify_signature.sh
+. "$(dirname "$0")/lib/verify_signature.sh"
 ISSUER="https://token.actions.githubusercontent.com"
 
 while [ $# -gt 0 ]; do
@@ -35,7 +46,7 @@ while [ $# -gt 0 ]; do
     --dir) DIR="$2"; shift 2 ;;
     --ref) REF="$2"; shift 2 ;;
     --no-verify) VERIFY=0; shift ;;
-    -h|--help) sed -n 2,22p "$0"; exit 0 ;;
+    -h|--help) sed -n 2,28p "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -60,8 +71,14 @@ OUTPUT_DIRS=("evals/reports")
 
 log() { printf '\n== %s\n' "$*"; }
 
+# A relative key path is relative to where the script was started, not to the
+# deploy folder it is about to move into.
+PUBKEY="${METAFORGE_COSIGN_PUBKEY:-}"
+if [ -n "$PUBKEY" ] && [ "${PUBKEY#/}" = "$PUBKEY" ]; then PUBKEY="$PWD/$PUBKEY"; fi
+
 mkdir -p "$DIR"
 cd "$DIR"
+PUBKEY="${PUBKEY:-$PWD/cosign.pub}"
 if [ ! -f .env ]; then
   echo "no .env in $DIR: create it first (secrets, COMPOSE_PROFILES)" >&2
   exit 1
@@ -128,11 +145,7 @@ for img in $ours; do
     continue
   fi
   [ -x "$COSIGN" ] || { echo "cosign not found; install it or pass --no-verify" >&2; exit 1; }
-  "$COSIGN" verify --certificate-identity-regexp "$IDENTITY" \
-    --certificate-oidc-issuer "$ISSUER" "$digest" >/dev/null 2>"$tmp/cosign.err" \
-    || { echo "SIGNATURE CHECK FAILED for $digest; nothing restarted" >&2;
-         tail -3 "$tmp/cosign.err" >&2; exit 1; }
-  echo "verified  $digest"
+  verify_signature "$digest" || exit 1
 done
 
 log "start"

@@ -131,8 +131,9 @@ scripts/host_update.sh --dir ~/metaforge            # bundle from main
 scripts/host_update.sh --dir ~/metaforge --ref <sha> # bundle from a commit
 ```
 
-The script is the only file a host needs from the repository; copy it once.
-Each run:
+The script and the `scripts/lib/` folder beside it (`compose_settle.sh`,
+`verify_signature.sh`) are the only files a host needs from the repository;
+copy them once. Each run:
 
 1. Fetches the bundle for the ref and replaces the bundle files, leaving
    `.env` and any override alone.
@@ -148,6 +149,31 @@ Each run:
 
 To pin images to one build instead of `latest`, set `METAFORGE_GATEWAY_TAG`,
 `METAFORGE_ADAPTER_TAG` and `METAFORGE_DASHBOARD_TAG` in `.env`.
+
+### Accepting key-signed images
+
+When Sigstore's public transparency log is down, CI signs images with a
+fallback key instead of keylessly (see
+[Verifying the images](verifying-images.md#two-kinds-of-signature)). A host
+accepts those only if its operator has given it the public key:
+
+```bash
+# From a commit of the repository you trust, once it has a cosign.pub
+curl -fsSL -o ~/metaforge/cosign.pub \
+  https://raw.githubusercontent.com/FidelOdok/MetaForge/main/cosign.pub
+cat ~/metaforge/cosign.pub                  # compare with the copy you trust
+```
+
+The update looks for it at `cosign.pub` in the deploy folder, or wherever
+`METAFORGE_COSIGN_PUBKEY` points. It never takes the key from the bundle it
+fetches: a key that arrived alongside the images it vouches for would vouch
+for nothing, so placing it is a deliberate step, and so is replacing it when
+the key is rotated.
+
+With the key in place, each image is checked keylessly first, exactly as
+before; only if that fails is the key tried, and a pass prints
+`verified (key, no transparency log)  <digest>`. Without the key, a
+key-signed image fails with `SIGNATURE CHECK FAILED` and nothing restarts.
 
 ## Moving a host off a checkout
 
