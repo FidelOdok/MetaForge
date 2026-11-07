@@ -74,6 +74,7 @@ from mcp_core.guardrails import (
     Caller,
     HumanAuthorityRequiredError,
     decide,
+    human_authority_delegated,
     never_auto_approved,
     records_approver,
     reject_caller_supplied_approver,
@@ -2438,6 +2439,14 @@ class UnifiedMcpServer:
         if not decision.requires_approval:
             return None
 
+        # FORGE-827: a human-authority call from an agent that named itself
+        # and the person it acts for, where the owner delegates such
+        # decisions, is recorded as that agent's decision for the person and
+        # runs. It is never held on a prompt a headless client cannot answer.
+        delegated = await self._delegated_approval(tool_id, arguments, caller, call_id)
+        if delegated is not None:
+            return delegated
+
         mrtr = current_mrtr() if current_modern_request() is not None else None
         ledger = self._approval_ledger
         if (
@@ -2616,6 +2625,98 @@ class UnifiedMcpServer:
             window,
             where,
         )
+
+    async def _delegated_approval(
+        self, tool_id: str, arguments: dict[str, Any], caller: Caller, call_id: str
+    ) -> Approver | None:
+        """The person an agent decided a human-authority call for, or ``None`` to hold it.
+
+        FORGE-827. All of these must hold, or the call is held as before:
+
+        * the tool is human-authority (any other write keeps its own rules);
+        * this process delegates human authority
+          (``METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY``), and so does the gateway
+          that records it (it refuses otherwise);
+        * the MCP request named the agent (``X-MetaForge-Agent``) and the
+          person (``X-MetaForge-On-Behalf-Of``);
+        * a verified principal, when there is one, is that person.
+
+        The approver is the verified principal, else the person named,
+        unverified. The decision is written to the ledger on route
+        ``delegated`` with surface ``agent``, the agent and the person, the
+        same record ``forge approvals`` writes for an agent decision. This is
+        delegation, not policy: no project policy approves these tools.
+        """
+        if not requires_human_authority(tool_id) or not human_authority_delegated():
+            return None
+        from mcp_core.context import current_context
+
+        try:
+            ctx = current_context()
+        except Exception:  # noqa: BLE001 - no context: no agent named
+            return None
+        agent = (ctx.agent or "").strip()
+        person = (ctx.on_behalf_of or "").strip()
+        if not agent or not person:
+            logger.info(
+                "mcp_delegation_not_claimed",
+                tool_id=tool_id,
+                caller=caller.value,
+                agent=agent or None,
+                on_behalf_of=person or None,
+            )
+            return None
+        if ctx.actor_is_attributable:
+            actor = ctx.actor_id
+            if person not in {actor, actor.partition(":")[2]}:
+                logger.warning(
+                    "mcp_delegation_person_mismatch",
+                    tool_id=tool_id,
+                    actor=actor,
+                    on_behalf_of=person,
+                )
+                return None
+            approver = Approver(actor_id=actor, verified=True)
+        else:
+            approver = Approver(actor_id=person, verified=False)
+        ledger: Any = self._approval_ledger
+        record = getattr(ledger, "delegated_approval", None)
+        if record is None:
+            # Nowhere to write it down: running it would leave no record of
+            # who decided, so it is held for a person instead.
+            logger.warning("mcp_delegation_unrecordable", tool_id=tool_id)
+            return None
+        session = str(ctx.session_id) if ctx.session_is_stable else ""
+        project = _effective_project(arguments)
+        key, args_hash = approval_key(tool_id, arguments, session=session, project=project)
+        resolution = await record(
+            ApprovalAsk(
+                tool_id=tool_id,
+                arguments=arguments,
+                caller=caller,
+                reason="delegated to the agent by the gateway owner",
+                session_id=session or None,
+                project=project,
+                client=self._client_label(),
+                approval_key=key,
+                arguments_hash=args_hash,
+            ),
+            agent=agent,
+            on_behalf_of=person,
+            approver=approver,
+        )
+        if resolution is None or resolution.outcome is not ApprovalOutcome.APPROVED:
+            return None
+        logger.info(
+            "mcp_tool_call_delegated",
+            tool_id=tool_id,
+            caller=caller.value,
+            agent=agent,
+            on_behalf_of=person,
+            approval_id=resolution.approval_id,
+            approver_verified=resolution.approver.verified if resolution.approver else False,
+        )
+        return await self._approved(tool_id, caller, "delegated", resolution, 0.0, None, call_id)
 
     async def _hold_durably(
         self,

@@ -107,7 +107,7 @@ Earlier entries win on the same id. Search for at least two real suppliers for t
   "finishes": ["dyed"], "leadDays": 7, "qtyRange": [1, 5000] }
 ```
 
-A process the engine does not know (for example `mjf`, `fdm`) needs a `processes` entry with a `ruleBase` of im, cnc or sls, and its materials under `materials`.
+A process the engine does not know (for example `mjf`) needs a `processes` entry with a `ruleBase` of im, cnc, sls or fdm, and its materials under `materials`. `fdm` is built in (MetaForge): desktop FDM on a Bambu Lab P1S-class printer with its own rule book (whole perimeters, the closed top as a bridge, warping, screws in printed plastic), never the SLS rules. A library material named for its family, such as `prusament_petg` or `bambu_petg_cf`, screens as `petg` or `petgcf`.
 
 ## Options: everything the user can choose
 

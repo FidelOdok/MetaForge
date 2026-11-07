@@ -6617,6 +6617,113 @@
         "title": "DecisionRequest",
         "type": "object"
       },
+      "DelegatedApprovalRequest": {
+        "description": "A human-authority call an agent decides for a person.\n\nSent by the MCP server that took the call, never by the agent: the agent\nand the person come from the MCP request's ``X-MetaForge-Agent`` and\n``X-MetaForge-On-Behalf-Of`` headers, and the approver from the verified\nprincipal when there is one, else the person named, unverified.",
+        "properties": {
+          "agent": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Agent",
+            "type": "string"
+          },
+          "approval_key": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Key"
+          },
+          "approver": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Approver",
+            "type": "string"
+          },
+          "approver_verified": {
+            "default": false,
+            "title": "Approver Verified",
+            "type": "boolean"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "arguments_hash": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments Hash"
+          },
+          "caller": {
+            "default": "untrusted",
+            "title": "Caller",
+            "type": "string"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
+          "on_behalf_of": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "On Behalf Of",
+            "type": "string"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "agent",
+          "on_behalf_of",
+          "approver"
+        ],
+        "title": "DelegatedApprovalRequest",
+        "type": "object"
+      },
       "DeltaTransform": {
         "description": "Delta of a dragged group: translation (mm), or, additively,\na single-axis rotation or scale. Exactly one kind is populated per request,\nmatching whichever gizmo mode produced it on the client.",
         "properties": {
@@ -30064,6 +30171,48 @@
         ]
       }
     },
+    "/v1/chat/tool_approvals/delegated": {
+      "post": {
+        "description": "Record a human-authority call an agent decided for a person.\n\nThe MCP server calls this instead of holding the call on a client prompt\nwhen the owner delegates human authority and the agent named itself and\nthe person. A claim of ``approver_verified`` stands only when this request\nis authenticated, as for an inline answer.",
+        "operationId": "record_delegated_approval_v1_chat_tool_approvals_delegated_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DelegatedApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Delegated Approval",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
     "/v1/chat/tool_approvals/policy": {
       "post": {
         "description": "Approve a held call the project's policy covers, or say it does not.\n\nA ``phase.claim`` on an open task of the project's own client-mode run\nunder an ``auto`` policy is covered (see\n:mod:`api_gateway.approvals.claim_policy`), approved by\n``policy:auto:<who set it>``. Any other held write is decided by\n:mod:`api_gateway.approvals.tool_write_policy`, approved by\n``policy:<mode>:<project>``. A covered call is written to the ledger like\nany other, on route ``policy``; anything else records nothing and the\ncaller holds it for a person as before.",
@@ -42694,6 +42843,7 @@
     },
     "/v1/twin/projects/{project_id}/imagine/events": {
       "post": {
+        "description": "One studio write. A person's acceptance, from an agent, only under delegation.\n\nConfirming an assumption or a scenario is the person's statement. From\nthe agent surface it is refused (403) unless the owner delegates\nhuman-authority decisions; then it needs ``X-MetaForge-Agent`` and\n``X-MetaForge-On-Behalf-Of`` (422 without) and is recorded as the\nagent's acceptance for that person. An assumption so\nconfirmed is recorded as accepted: it stays an assumption.",
         "operationId": "post_event_v1_twin_projects__project_id__imagine_events_post",
         "parameters": [
           {

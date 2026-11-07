@@ -111,6 +111,16 @@ class McpCallContext(BaseModel):
     #: FORGE-746: the MCP client this call came from (``name version`` from its
     #: ``initialize``). Who a task was claimed by when no identity is signed in.
     client: str | None = Field(default=None, description="The MCP client, as `name version`.")
+    #: FORGE-827: an agent that names itself and the person it acts for, from
+    #: ``X-MetaForge-Agent`` and ``X-MetaForge-On-Behalf-Of`` on the MCP HTTP
+    #: request. Claims only: they let a human-authority call be decided as a
+    #: delegated approval when the owner turned that on
+    #: (``METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY``), and a verified principal
+    #: still has to be the person named.
+    agent: str | None = Field(default=None, description="The agent's name, as claimed.")
+    on_behalf_of: str | None = Field(
+        default=None, description="The person the agent acts for, as claimed."
+    )
     item_slots: tuple[ItemSlotClaim, ...] = Field(
         default=(),
         description=(
@@ -244,6 +254,10 @@ HEADER_CORRELATION = "X-MetaForge-Correlation"
 HEADER_RUN = "X-MetaForge-Run"
 HEADER_PHASE = "X-MetaForge-Phase"
 HEADER_MODEL = "X-MetaForge-Model"
+# FORGE-827: who an agent is and whom it acts for (the same headers the
+# approvals API reads for the agent surface).
+HEADER_AGENT = "X-MetaForge-Agent"
+HEADER_ON_BEHALF_OF = "X-MetaForge-On-Behalf-Of"
 _MAX_CLAIM_LENGTH = 200
 # FORGE-524: the phase's slots, as a JSON list of [item_type, name, item_key].
 HEADER_ITEM_SLOTS = "X-MetaForge-Item-Slots"
@@ -457,6 +471,8 @@ def context_to_headers(ctx: McpCallContext) -> dict[str, str]:
         (HEADER_RUN, ctx.run_id),
         (HEADER_PHASE, ctx.phase),
         (HEADER_MODEL, ctx.model),
+        (HEADER_AGENT, ctx.agent),
+        (HEADER_ON_BEHALF_OF, ctx.on_behalf_of),
     ):
         if value:
             headers[header] = value
@@ -530,6 +546,8 @@ def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
     fields["run_id"] = _claim(folded.get(HEADER_RUN.lower()))
     fields["phase"] = _claim(folded.get(HEADER_PHASE.lower()))
     fields["model"] = _claim(folded.get(HEADER_MODEL.lower()))
+    fields["agent"] = _claim(folded.get(HEADER_AGENT.lower()))
+    fields["on_behalf_of"] = _claim(folded.get(HEADER_ON_BEHALF_OF.lower()))
     fields["item_slots"] = decode_item_slots(folded.get(HEADER_ITEM_SLOTS.lower()))
     _apply_session_binding(fields, session)
     return McpCallContext(**fields)
@@ -557,9 +575,11 @@ __all__ = [
     "ENV_PROJECT",
     "ENV_SESSION",
     "HEADER_ACTOR",
+    "HEADER_AGENT",
     "HEADER_CORRELATION",
     "HEADER_ITEM_SLOTS",
     "HEADER_MODEL",
+    "HEADER_ON_BEHALF_OF",
     "HEADER_PHASE",
     "HEADER_PROJECT",
     "HEADER_RUN",

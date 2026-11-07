@@ -10,7 +10,6 @@ identical on both surfaces.
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import time
 from datetime import UTC, datetime
@@ -729,12 +728,10 @@ AGENT_HUMAN_AUTHORITY_REASON = (
 
 
 def agent_may_decide_human_authority() -> bool:
-    return os.environ.get(ALLOW_AGENT_HUMAN_AUTHORITY_ENV, "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    # One reading of the owner's switch, shared with the MCP server (FORGE-827).
+    from mcp_core.guardrails import human_authority_delegated
+
+    return human_authority_delegated()
 
 
 def for_caller(item: ApprovalItem, surface: str) -> ApprovalItem:

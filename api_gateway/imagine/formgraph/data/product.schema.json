@@ -209,6 +209,7 @@
           "e_btn",
           "e_led",
           "e_buzz",
+          "e_ldrv",
           "e_usbc"
         ]
       },

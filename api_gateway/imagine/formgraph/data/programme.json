@@ -2221,6 +2221,7 @@
     "im": 8,
     "cnc": 2,
     "sls": 1,
+    "fdm": 1,
     "pcb": 3,
     "pcba": 4,
     "module": 6,

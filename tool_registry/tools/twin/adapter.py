@@ -348,6 +348,11 @@ def _critique_assembly_properties() -> dict[str, Any]:
     }
 
 
+def _session_project() -> str | None:
+    """The MCP session's project, when the call itself names none (FORGE-827)."""
+    return session_of_call()[1]
+
+
 def _layout_assembly(layout: Any) -> dict[str, Any]:
     """The concept's own parts and joints, from its sketch layout (FORGE-776).
 
@@ -4120,7 +4125,9 @@ class TwinServer(McpToolServer):
             faces = iso_faces(layout, width, height)
         else:
             faces = ortho_faces(layout, view, width, height)
-        project_id = arguments.get("project_id")
+        # FORGE-827: the session's project when none is given, so a mesh made
+        # from this image inherits it and the Imagine checklist counts it.
+        project_id = arguments.get("project_id") or _session_project()
         domain = arguments.get("domain")
         with tracer.start_as_current_span("twin.render_concept_image") as span:
             span.set_attribute("concept_image.layout_source", conditioned_on["layout_source"])
@@ -5076,7 +5083,9 @@ class TwinServer(McpToolServer):
         name = arguments.get("name")
         if name is not None and (not isinstance(name, str) or not name.strip()):
             raise ValueError(f"{tool}: 'name' must be a non-empty string")
-        project_id = arguments.get("project_id")
+        # FORGE-827: the session's project when none is given, so a mesh an
+        # agent makes lands in the project and the Imagine checklist counts it.
+        project_id = arguments.get("project_id") or _session_project()
         domain = arguments.get("domain")
         # The generator validates these (and their combinations) before any
         # paid call; only what the caller gave is passed, so its defaults hold.
@@ -8474,6 +8483,58 @@ class TwinServer(McpToolServer):
             ),
             handler=self.imagine_rework,
         )
+        # FORGE-827: the person's acceptances, for an agent working for them
+        # under the same delegation, so a run need not stop for a click.
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_accept",
+                adapter_id="twin",
+                name="Imagine: Accept For The Person",
+                description=(
+                    "Accept the studio's open assumptions and confirm its inferred scenario "
+                    "tests for the person you act for, so the handover checklist can pass "
+                    "without a person clicking in the studio. Assumptions are accepted as "
+                    "assumptions (they stay assumed in the manufacturing context); "
+                    "scenarios are confirmed. The checklist then reads them as accepted by "
+                    "this agent on behalf of the person, never as confirmed by a person. "
+                    "Ids come from twin.imagine_handover_status and the studio config. "
+                    "Idempotent per op_id." + delegation_note
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        **project,
+                        "op_id": op_id,
+                        "assumptions": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Assumption ids to accept, e.g. ['a-drop'].",
+                        },
+                        "scenarios": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Scenario ids to confirm, e.g. ['knocked'].",
+                        },
+                    },
+                    "required": ["op_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "assumptions": {"type": "array", "items": {"type": "string"}},
+                        "scenarios": {"type": "array", "items": {"type": "string"}},
+                        "mapped_to": {"type": "array", "items": {"type": "string"}},
+                        "agent": {"type": "string"},
+                        "on_behalf_of": {"type": "string"},
+                        "checklist": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.imagine_accept,
+        )
 
     def _imagine_delegate(self, tool_id: str, arguments: dict[str, Any]) -> tuple[str, str]:
         """(agent, person) for a delegated Imagine step (FORGE-824).
@@ -8488,7 +8549,9 @@ class TwinServer(McpToolServer):
                 tool_id, "no approver reached the tool, so nothing ran"
             )
         ctx = current_context()
-        agent = str(ctx.client or ctx.actor_id or "agent")
+        # FORGE-827: the name the agent gave (X-MetaForge-Agent) first, then
+        # the MCP client, then the actor.
+        agent = str(ctx.agent or ctx.client or ctx.actor_id or "agent")
         return agent, person.strip()
 
     async def imagine_handover(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -8521,6 +8584,34 @@ class TwinServer(McpToolServer):
         except Exception as exc:
             raise ValueError(f"{tool_id}: {_imagine_refusal(exc)}") from exc
         return dict(studio.model_dump(mode="json"))
+
+    async def imagine_accept(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool_id = "twin.imagine_accept"
+        pid = self._imagine_project(arguments, tool_id)
+        op_id = str(arguments.get("op_id") or "").strip()
+        if not op_id:
+            raise ValueError(f"{tool_id}: 'op_id' is required")
+        lists: dict[str, list[str]] = {}
+        for field in ("assumptions", "scenarios"):
+            raw = arguments.get(field) or []
+            if not isinstance(raw, list) or not all(isinstance(v, str) and v.strip() for v in raw):
+                raise ValueError(f"{tool_id}: '{field}' must be a list of ids")
+            lists[field] = [v.strip() for v in raw]
+        if not lists["assumptions"] and not lists["scenarios"]:
+            raise ValueError(f"{tool_id}: name at least one assumption or scenario")
+        agent, person = self._imagine_delegate(tool_id, arguments)
+        try:
+            result = await self._imagine_studio.accept(
+                pid,
+                op_id,
+                assumptions=lists["assumptions"],
+                scenarios=lists["scenarios"],
+                agent=agent,
+                on_behalf_of=person,
+            )
+        except Exception as exc:
+            raise ValueError(f"{tool_id}: {_imagine_refusal(exc)}") from exc
+        return dict(result.model_dump(mode="json"))
 
     async def imagine_get_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
         pid = self._imagine_project(arguments, "twin.imagine_get_studio")

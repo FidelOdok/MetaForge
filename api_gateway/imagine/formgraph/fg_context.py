@@ -221,7 +221,7 @@ def validate_context(cfg, ctx, cat, E, W):
             E.append(f'{where} needs "id" and "process".')
             continue
         if m['process'] not in cat['processes'] and m['process'] not in procs and m['process'] != 'pcba':
-            E.append(f'{where}: process "{m["process"]}" is unknown; add it under "processes" with a ruleBase of im, cnc or sls.')
+            E.append(f'{where}: process "{m["process"]}" is unknown; add it under "processes" with a ruleBase of {", ".join(cat["processes"])}.')
         if not m.get('source'):
             E.append(f'{where} needs a "source": user, default or a link.')
         bv = m.get('buildVolume')
@@ -241,7 +241,7 @@ def validate_context(cfg, ctx, cat, E, W):
 
     # options
     opts = (ctx.get('options') or {}).get('decisions', []) or []
-    mat_ids = {m['id'] for m in mats} | {m for p in cat['processes'].values() for m in p['materials']}
+    mat_ids = known_materials(mats, cat, opts)
     seen_roles = set()
     for i, d in enumerate(opts):
         where = f'context option "{d.get("id", i)}"'
@@ -384,6 +384,26 @@ def validate_context(cfg, ctx, cat, E, W):
         W.append('every scenario test is inferred; confirm them with the user.')
 
 
+def known_materials(mats, cat, uses=()):
+    """Material ids the context may name (MetaForge, FORGE-827).
+
+    The context's own materials, every catalogue material, and any library
+    material named for a catalogue family (prusament_petg screens as petg).
+    ``uses`` are the option decisions or candidates that name materials.
+    """
+    from .build_page import resolve_material
+
+    ids = {m['id'] for m in mats} | {m for p in cat['processes'].values() for m in p['materials']}
+    named = set()
+    for u in uses or ():
+        if isinstance(u, dict):
+            named |= set(u.get('candidates') or []) if u.get('kind') == 'material' else {u.get('material')}
+    for n in named:
+        if isinstance(n, str) and n not in ids and any(resolve_material(p, n) for p in cat['processes'].values()):
+            ids.add(n)
+    return ids
+
+
 MFG_SHAPES = {'tube', 'plate', 'block'}
 MFG_FROM = {'airframe.arm', 'airframe.hinge', 'airframe.leg', 'airframe.motor_mount', 'airframe.battery_tray', 'airframe.gimbal_mount'}
 JOINS = {'screw', 'bolt', 'rivet', 'snap', 'bond', 'clamp', 'press', 'none'}
@@ -396,7 +416,7 @@ def validate_manufacturing(ctx, machines, mats, cat, E, W):
     if mf.get('schemaVersion') != SCHEMA_VERSION:
         E.append(f'context/manufacturing.json: schemaVersion must be {SCHEMA_VERSION}.')
     mid = {m['id']: m for m in machines}
-    mat_ids = {m['id'] for m in mats} | {m for p in cat['processes'].values() for m in p['materials']}
+    mat_ids = known_materials(mats, cat, [c for p in mf.get('parts', []) or [] for c in p.get('candidates') or []])
     ids = set()
     for i, p in enumerate(mf.get('parts', []) or []):
         where = f'made part "{p.get("id", i)}"'

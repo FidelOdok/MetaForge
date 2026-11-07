@@ -59,6 +59,32 @@ Each `PUT` is the next `IMG-STUDIO` revision. The person's earlier choices,
 scenarios and confirmations carry over. A handed-over studio refuses a `PUT`
 until a person reworks it.
 
+### The catalogue
+
+The processes are `im` (injection moulding), `cnc`, `sls` and `fdm`. `fdm`
+is desktop FDM on a Bambu Lab P1S-class printer (0.4 mm nozzle, 0.2 mm
+layers, 256 x 256 x 256 mm, enclosed chamber) with `petg`, `pla`, `petgcf`
+and `asa`, finishes `asp`, `fine` and `sanded`, and the insert and
+thread-forming fixings. It has its own screening rules, never the SLS ones:
+walls of 1.2 mm or more in whole perimeters of a 0.42 mm line, the closed top
+printed face down because it bridges only about 20 mm, a warp check on the
+footprint (150 mm for ASA and filled grades, 220 mm otherwise), heat-set
+inserts rather than thread-forming screws for repeat assembly, slots at least
+two lines wide, and holes that print undersize. Cost is filament plus machine
+time, with no tooling. The default `fdm-generic` machine uses the FDM rule
+book, and a context can no longer replace a built-in process with a
+`ruleBase` stand-in.
+
+A library material named for its family, such as `prusament_petg`,
+`bambu-petg-cf` or `polymaker_asa`, is accepted for `fdm`: the page screens
+it with its family's figures (`petg`, `petgcf`, `asa`; the longest match
+wins) and the validator warns that it did. The stored config, and so the
+manufacturing context Develop reads, keep the name given.
+
+The functions include `e_ldrv`, a constant-current buck LED driver dimmed by
+PWM from the board, for a product whose main light is a high-power LED (a
+lamp). `e_led` stays a status light.
+
 ## From a prompt
 
 The chat builds the studio from what the person says. The
@@ -132,8 +158,12 @@ write that fails returns 502 and the event can be retried with the same
 
 The handover and the rework are a person's decisions: a request from an agent
 surface (`X-MetaForge-Surface: agent`) is refused with 403, as is an agent
-confirming an assumption. Both are idempotent per `op_id`. Each operation is
-published to the project's operations log (`job:imagine-...`).
+confirming an assumption or a scenario, unless the owner delegates (below).
+Both are idempotent per `op_id`. Each operation is published to the project's
+operations log (`job:imagine-...`). An agent-surface scenario event that does
+not confirm is stored as the agent's (`by: agent`), so it never reads as the
+person's own scenario. `agent` and `on_behalf_of` in any event body are
+dropped: only the delegated path sets them.
 
 ### Delegated to an agent
 
@@ -147,21 +177,58 @@ an agent may hand over and rework, for fully autonomous runs:
   the call is a 422, as on the approvals API. With authentication on, the
   person must be the authenticated principal (403 otherwise). With the flag
   off nothing changes: 403.
-- **MCP.** `twin.imagine_handover {op_id}` and `twin.imagine_rework {op_id,
-  reason}` are always registered with the studio tools and are refused unless
-  the flag is on in the process the call lands in (the gateway, or the MCP
-  sidecar that serves the twin tools, so set it on both). They are
-  human-authority tools (`mcp_core/guardrails.py`, and destructive in
-  `mcp_core/annotations.py`): no project approval policy approves them, the
-  call is held for an approval, and the person it acted for is whoever
-  decided that approval, never a name the model supplies.
+- **MCP.** `twin.imagine_handover {op_id}`, `twin.imagine_rework {op_id,
+  reason}` and `twin.imagine_accept {op_id, assumptions, scenarios}` are
+  always registered with the studio tools and are refused unless the flag is
+  on in the process the call lands in (the gateway, or the MCP sidecar that
+  serves the twin tools, so set it on both). They are human-authority tools
+  (`mcp_core/guardrails.py`, and destructive in `mcp_core/annotations.py`):
+  no project approval policy approves them. An agent whose MCP connection
+  sends `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of` gets a delegated
+  approval on the ledger and the call runs at once, with no prompt; without
+  them the call is held for a person (see
+  [delegated holds through MCP](approvals.md#delegated-holds-through-mcp)).
+  The person it acted for comes from that approval, never from a name the
+  model supplies.
+
+**Acceptance without a person.** `twin.imagine_accept` accepts the studio's
+open assumptions and confirms its inferred scenario tests for the person the
+agent acts for. An unknown id is refused with the ids the studio has. Each is
+an ordinary studio event, idempotent per `op_id` and id:
+
+- an assumption is recorded as **accepted**, never confirmed: it stays an
+  assumption, the manufacturing context field it names stays `assumed`, and
+  its `assumption` entity carries `accepted_by_agent` and `on_behalf_of`;
+- a scenario is confirmed and marked `by: agent` with the agent and the
+  person; its scenario requirement's source reads *agent <name> on behalf of
+  <person>*.
+
+The checklist then counts them (assumptions read `assumed`, scenarios
+`done`), and each item's detail says so: *a-drop, a-qty accepted by agent
+claude-code-e2e on behalf of fidel; not confirmed by a person*. The REST
+equivalent is `POST /events` with `assumption_confirmed` (`confirmed` or
+`accepted`) or `scenario` with `confirmed: true` from the agent surface:
+403 with the flag off, 422 without both headers, and with authentication on
+the person must be the authenticated principal. An agent's "confirm" of an
+assumption is recorded as an acceptance there too.
+
+**The concept mesh without a person.** The checklist's `concept_assembly`
+item needs an illustrative concept mesh in the project. An agent makes one
+with `twin.render_concept_image` and then `twin.generate_concept_mesh` from
+that image (a job; poll `twin.job_status`). Both are illustrative writes, so
+a project policy of `auto_clean` or `auto` approves them within the spend cap
+(3 meshes an hour by default). Both default to the MCP session's project when
+the call names none, and a mesh made from a concept image inherits the
+image's project, so the checklist counts the agent's mesh like a person's.
 
 The record says an agent decided, for that person, never that the person
 did: the handover (and rework) record carries `by: "agent:<name>"`, `agent`
 and `on_behalf_of`, and the operations log line ends *decided by agent
 <name> on behalf of <person>*. The `imagine_studio` playbook and the
-plugins' `/metaforge:imagine` command hand over once the checklist is ready
-only when this is allowed, and otherwise ask the person.
+plugins' `/metaforge:imagine` command, in a delegated run, carry on without
+stopping: accept, make the concept mesh, hand over once the checklist is
+ready, then Develop, Check and Make, recording each delegated decision with
+`twin.record_decision`. Without delegation they ask the person.
 
 ## Mapping into the twin
 
@@ -186,8 +253,10 @@ kind of record (`api_gateway/imagine/twin_bridge.py`):
 
 1. `ledger`: the intent ledger is complete, every statement reviewed.
 2. `assumptions`: each assumption confirmed, or explicitly accepted as an
-   assumption (then the item reads `assumed`).
-3. `scenarios`: every scenario test confirmed by a person.
+   assumption (then the item reads `assumed`; an agent's acceptance is named
+   in the detail).
+3. `scenarios`: every scenario test confirmed by a person, or by a delegated
+   agent for them (named in the detail, never as the person's).
 4. `requirements`: each requirement has a source and a verification method
    (`assumed` when the catalogue's default method is used).
 5. `parts`: one chosen part per function, each with a source, a retrieved

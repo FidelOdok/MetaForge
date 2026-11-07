@@ -35,6 +35,7 @@ from api_gateway.imagine import engine_page
 from api_gateway.imagine.schemas import (
     COLLECTION_KINDS,
     KIND_COLLECTIONS,
+    AcceptResult,
     EventAccepted,
     HandoverChecklist,
     HandoverItem,
@@ -69,6 +70,10 @@ _FORBIDDEN_KEYS = frozenset(
         "qualified",
     }
 )
+#: Keys that say an agent decided for a person (FORGE-827). Only the
+#: delegated path sets them; anything a browser or an undelegated caller
+#: sends under these names is dropped.
+_DELEGATION_KEYS = frozenset({"agent", "on_behalf_of", "delegated_by"})
 _MAX_EVENT_BYTES = 256 * 1024
 _VERIFY = ("test", "analysis", "inspection", "demonstration")
 _CATALOGUE_VERIFY = "analysis"
@@ -322,7 +327,13 @@ def _requirements(config: dict[str, Any], collections: dict[str, Any]) -> list[d
             "priority": "Should",
             "verify": "demonstration",
             "verify_defaulted": False,
-            "source": "person, Imagine studio" if s.get("by") == "user" else "inferred",
+            "source": (
+                "person, Imagine studio"
+                if s.get("by") == "user"
+                else f"agent {s['agent']} on behalf of {s['on_behalf_of']}, Imagine studio"
+                if s.get("agent") and s.get("on_behalf_of")
+                else "inferred"
+            ),
             "acceptance": ", ".join(str(x) for x in s.get("requires") or []),
         }
     return list(out.values())
@@ -542,11 +553,28 @@ class ImagineService:
     # -- events -----------------------------------------------------------
 
     async def post_event(
-        self, project_id: str, event: ImagineEvent, *, actor: str
+        self,
+        project_id: str,
+        event: ImagineEvent,
+        *,
+        actor: str,
+        delegated: dict[str, Any] | None = None,
+        from_agent: bool = False,
     ) -> EventAccepted:
+        """Map one studio write into the twin.
+
+        ``delegated`` (FORGE-827) is set when an agent accepts an assumption
+        or confirms a scenario for a person under the owner's delegation (see
+        :func:`_delegation`). The write then names the agent and the person,
+        and an assumption the agent "confirms" is recorded as accepted: it
+        stays an assumption, never a person's statement. ``from_agent`` marks
+        any other write from the agent surface, so a scenario it touches is
+        not read as the person's.
+        """
         with tracer.start_as_current_span("imagine.event") as span:
             span.set_attribute("project_id", project_id)
             span.set_attribute("event.kind", event.kind)
+            span.set_attribute("imagine.delegated", bool(delegated))
             if len(json.dumps(event.data, default=str)) > _MAX_EVENT_BYTES:
                 _count("event", "refused")
                 raise ImagineError("The event is too large (256 KB at most).", 413)
@@ -573,6 +601,11 @@ class ImagineService:
                 doc_id = str(data.get("id") or event.event_id)[:128]
                 collection = KIND_COLLECTIONS[event.kind]
                 previous = head.state["collections"][collection].get(doc_id)
+                data = {k: v for k, v in data.items() if k not in _DELEGATION_KEYS}
+                if delegated:
+                    data = _delegated_write(event.kind, data, previous, delegated)
+                elif from_agent and event.kind == "scenario":
+                    data["by"] = "agent"
                 head.state["collections"][collection][doc_id] = data
                 try:
                     mapped = await self._map(project_id, head, event.kind, doc_id, data, actor)
@@ -600,6 +633,11 @@ class ImagineService:
                     "at": _now(),
                     "by": actor,
                     "revision": head.revision,
+                    **(
+                        {"agent": delegated["agent"], "on_behalf_of": delegated["on_behalf_of"]}
+                        if delegated
+                        else {}
+                    ),
                 }
                 await self._save(head)
             _count("event", "ok")
@@ -609,6 +647,8 @@ class ImagineService:
                 kind=event.kind,
                 event_id=event.event_id,
                 mapped_to=mapped,
+                agent=delegated["agent"] if delegated else None,
+                on_behalf_of=delegated["on_behalf_of"] if delegated else None,
             )
             return EventAccepted(mapped_to=mapped)
 
@@ -730,6 +770,9 @@ class ImagineService:
                     "affects": assumption.get("ref"),
                     "status": status,
                     "confirmed_by": actor if confirmed else None,
+                    # FORGE-827: accepted by an agent for a person, never by them.
+                    "accepted_by_agent": data.get("agent"),
+                    "on_behalf_of": data.get("on_behalf_of"),
                     "verification_level": MAX_LEVEL,
                 },
                 reason="assumption reviewed in the Imagine studio",
@@ -861,11 +904,14 @@ class ImagineService:
         asm = [a for a in _programme(config).get("assumptions") or [] if isinstance(a, dict)]
         unconfirmed: list[str] = []
         accepted: list[str] = []
+        by_agent: dict[str, list[str]] = {}
         for a in asm:
             ev = cols["assumptions"].get(str(a.get("id"))) or {}
             if ev.get("confirmed") is True:
                 continue
             (accepted if ev.get("accepted") is True else unconfirmed).append(str(a.get("id")))
+            if ev.get("accepted") is True and ev.get("agent"):
+                by_agent.setdefault(_agent_label(ev), []).append(str(a.get("id")))
         if unconfirmed:
             add(
                 "assumptions",
@@ -878,7 +924,7 @@ class ImagineService:
                 "assumptions",
                 "Assumptions confirmed or accepted",
                 "assumed",
-                "Accepted as assumptions: " + ", ".join(accepted[:10]),
+                "Accepted as assumptions: " + ", ".join(accepted[:10]) + _by_agent_note(by_agent),
             )
         else:
             add(
@@ -893,6 +939,10 @@ class ImagineService:
         inferred = [
             str(s["id"]) for s in scen if s.get("by") != "user" and s.get("confirmed") is not True
         ]
+        scen_by_agent: dict[str, list[str]] = {}
+        for s in scen:
+            if s.get("confirmed") is True and s.get("agent"):
+                scen_by_agent.setdefault(_agent_label(s), []).append(str(s["id"]))
         if not scen:
             add("scenarios", "Scenario tests confirmed", "missing", "No scenario tests yet.")
         elif inferred:
@@ -903,7 +953,12 @@ class ImagineService:
                 "Inferred, not yet confirmed by a person: " + ", ".join(inferred[:10]),
             )
         else:
-            add("scenarios", "Scenario tests confirmed", "done", f"{len(scen)} confirmed.")
+            add(
+                "scenarios",
+                "Scenario tests confirmed",
+                "done",
+                f"{len(scen)} confirmed." + _by_agent_note(scen_by_agent),
+            )
 
         # 4. requirements with source and verification method
         reqs = [r for r in _requirements(config, cols) if not r["name"].startswith("img_scenario")]
@@ -1031,6 +1086,99 @@ class ImagineService:
 
         ready = all(i.status != "missing" for i in items)
         return HandoverChecklist(ready=ready, items=items)
+
+    async def accept(
+        self,
+        project_id: str,
+        op_id: str,
+        *,
+        assumptions: list[str],
+        scenarios: list[str],
+        agent: str,
+        on_behalf_of: str,
+    ) -> AcceptResult:
+        """Accept assumptions and confirm scenarios for a person (FORGE-827).
+
+        Only under the owner's delegation (:func:`_delegation`, 403 without
+        it). Each is an ordinary studio event, idempotent per ``op_id`` and
+        id, recorded as the agent's for the person: an assumption is
+        accepted (it stays an assumption), a scenario is confirmed. The
+        checklist then reads them as done, and its detail says an agent
+        accepted them, never that a person confirmed them.
+        """
+        with tracer.start_as_current_span("imagine.accept") as span:
+            span.set_attribute("project_id", project_id)
+            span.set_attribute("imagine.agent", agent)
+            delegated = _delegation("acceptance", agent, on_behalf_of)
+            if not assumptions and not scenarios:
+                _count("acceptance", "refused")
+                raise ImagineError("Name at least one assumption or scenario to accept.", 422)
+            head = await self._head(project_id)
+            if head is None:
+                _count("acceptance", "refused")
+                raise ImagineError("No studio yet: an agent puts a config first.", 404)
+            config = head.state.get("config") or {}
+            known_asm = {
+                str(a.get("id"))
+                for a in _programme(config).get("assumptions") or []
+                if isinstance(a, dict)
+            }
+            known_scen = {str(x["id"]) for x in _scenarios(config, head.state["collections"])}
+            unknown = [a for a in assumptions if a not in known_asm] + [
+                x for x in scenarios if x not in known_scen
+            ]
+            if unknown:
+                _count("acceptance", "refused")
+                raise ImagineError(
+                    "Not in the studio config: " + ", ".join(unknown[:10]),
+                    422,
+                    {"known_assumptions": sorted(known_asm), "known_scenarios": sorted(known_scen)},
+                )
+            mapped: list[str] = []
+            for kind, ids in (("assumption_confirmed", assumptions), ("scenario", scenarios)):
+                for item_id in ids:
+                    event = ImagineEvent(
+                        event_id=f"{op_id}:{kind[:4]}:{item_id}"[:128],
+                        kind=kind,  # type: ignore[arg-type]
+                        data={"id": item_id, "accepted": True}
+                        if kind == "assumption_confirmed"
+                        else {"id": item_id, "confirmed": True},
+                    )
+                    out = await self.post_event(
+                        project_id, event, actor=delegated["by"], delegated=delegated
+                    )
+                    mapped.extend(out.mapped_to)
+            _count("acceptance", "ok")
+            self._publish(
+                project_id,
+                f"accept-{_slug(op_id, 24)}",
+                "Imagine: "
+                + ", ".join(
+                    bit
+                    for bit in (
+                        f"assumptions {', '.join(assumptions)} accepted" if assumptions else "",
+                        f"scenarios {', '.join(scenarios)} confirmed" if scenarios else "",
+                    )
+                    if bit
+                )
+                + _delegated_note(delegated),
+            )
+            logger.info(
+                "imagine_accepted_by_agent",
+                project_id=project_id,
+                assumptions=assumptions,
+                scenarios=scenarios,
+                agent=delegated["agent"],
+                on_behalf_of=delegated["on_behalf_of"],
+            )
+            return AcceptResult(
+                assumptions=list(assumptions),
+                scenarios=list(scenarios),
+                mapped_to=mapped,
+                agent=delegated["agent"],
+                on_behalf_of=delegated["on_behalf_of"],
+                checklist=await self.checklist(project_id),
+            )
 
     async def handover(
         self,
@@ -1457,6 +1605,39 @@ def _delegation(what: str, agent: str | None, on_behalf_of: str | None) -> dict[
             f"An agent's Imagine {what} must name the agent and the person it acts for.", 422
         )
     return {"by": f"agent:{agent}", "agent": agent, "on_behalf_of": person}
+
+
+def _delegated_write(
+    kind: str, data: dict[str, Any], previous: dict[str, Any] | None, delegated: dict[str, Any]
+) -> dict[str, Any]:
+    """An agent's acceptance for a person, as the studio stores it (FORGE-827).
+
+    An assumption the agent confirms or accepts is accepted: it stays an
+    assumption, so the manufacturing context keeps it ``assumed``. A scenario
+    keeps what the studio already had and is confirmed, marked ``by: agent``.
+    Both name the agent and the person.
+    """
+    who = {"agent": delegated["agent"], "on_behalf_of": delegated["on_behalf_of"]}
+    if kind == "assumption_confirmed":
+        out = {k: v for k, v in data.items() if k != "confirmed"}
+        if data.get("confirmed") is True or data.get("accepted") is True:
+            out["accepted"] = True
+        return {**out, **who}
+    if kind == "scenario":
+        return {**(previous or {}), **data, "by": "agent", **who}
+    return {**data, **who}
+
+
+def _agent_label(doc: dict[str, Any]) -> str:
+    return f"agent {doc.get('agent')} on behalf of {doc.get('on_behalf_of')}"
+
+
+def _by_agent_note(by_agent: dict[str, list[str]]) -> str:
+    """What the checklist says about items an agent accepted (FORGE-827)."""
+    if not by_agent:
+        return ""
+    parts = [f"{', '.join(ids[:10])} accepted by {who}" for who, ids in by_agent.items()]
+    return " (" + "; ".join(parts) + "; not confirmed by a person)"
 
 
 def _delegated_note(delegated: dict[str, Any]) -> str:

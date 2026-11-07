@@ -189,6 +189,42 @@ class InProcessApprovalLedger:
             approval_id=answer.id,
         )
 
+    async def delegated_approval(
+        self, ask: ApprovalAsk, *, agent: str, on_behalf_of: str, approver: Approver
+    ) -> ApprovalResolution | None:
+        """Record a human-authority call an agent decided for a person (FORGE-827)."""
+        from api_gateway.chat.tool_approvals import DelegatedApprovalRequest, approve_delegated
+
+        try:
+            run = approve_delegated(
+                DelegatedApprovalRequest(
+                    tool=ask.tool_id,
+                    arguments=ask.arguments,
+                    caller=ask.caller.value,
+                    session_id=ask.session_id,
+                    project=ask.project,
+                    client=ask.client,
+                    agent=agent,
+                    on_behalf_of=on_behalf_of,
+                    approver=approver.actor_id,
+                    approver_verified=approver.verified,
+                    approval_key=ask.approval_key,
+                    arguments_hash=ask.arguments_hash,
+                ),
+                verified=approver.verified,
+            )
+        except Exception as exc:  # noqa: BLE001 - no record means a person decides
+            logger.info("mcp_delegated_approval_unavailable", tool_id=ask.tool_id, error=str(exc))
+            return None
+        return ApprovalResolution(
+            outcome=ApprovalOutcome.APPROVED,
+            approver=Approver(
+                actor_id=str(run.approved_by or approver.actor_id),
+                verified=run.approver_verified,
+            ),
+            approval_id=run.id,
+        )
+
     async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
         try:
             run = create_hold(

@@ -135,3 +135,15 @@ class ReworkResult(BaseModel):
     #: Records the impact path marked stale because they were for the
     #: handed-over revision.
     stale: list[str] = Field(default_factory=list)
+
+
+class AcceptResult(BaseModel):
+    """``twin.imagine_accept``: what an agent accepted for a person (FORGE-827)."""
+
+    assumptions: list[str] = Field(default_factory=list)
+    scenarios: list[str] = Field(default_factory=list)
+    mapped_to: list[str] = Field(default_factory=list)
+    agent: str
+    on_behalf_of: str
+    #: The handover checklist after the acceptance.
+    checklist: HandoverChecklist

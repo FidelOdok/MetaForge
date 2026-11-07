@@ -43,7 +43,15 @@ const PROC={
   sls:{id:'sls',name:'SLS printing',short:'SLS',mat:'PA12',density:1.01,mech:{E:1700,str:48,k:0.25},
     wall:[0.8,20],draft:0,innerR:()=>0,topInnerR:()=>0,slotMin:0.6,gapMin:()=>0.8,
     rib:()=>[0.8,20],ribHMax:(t,rt)=>15*rt,holeMin:2.0,holeMax:()=>10,env:[330,330,550],
-    finishes:[{id:'dyed',name:'Dyed',draft:0,rough:.92},{id:'vapour',name:'Vapour smoothed',draft:0,rough:.42}]}
+    finishes:[{id:'dyed',name:'Dyed',draft:0,rough:.92},{id:'vapour',name:'Vapour smoothed',draft:0,rough:.42}]},
+  /* Desktop FDM (FORGE-827): a Bambu Lab P1S-class machine, 0.4 mm nozzle, 0.2 mm layers,
+     256 x 256 x 256 mm, enclosed chamber. Walls are whole perimeters of a 0.42 mm line;
+     no draft; a closed top bridges about 20 mm before it sags; holes print undersize. */
+  fdm:{id:'fdm',name:'FDM printing',short:'FDM',mat:'PETG',density:1.27,mech:{E:1700,str:38,k:0.2},
+    wall:[1.2,10],draft:0,innerR:()=>0,topInnerR:()=>0,slotMin:1.0,gapMin:()=>1.2,
+    rib:()=>[0.8,20],ribHMax:(t,rt)=>10*rt,holeMin:2.0,holeMax:()=>10,env:[256,256,256],
+    line:0.42,layer:0.2,bridge:20,
+    finishes:[{id:'asp',name:'As printed, 0.2 mm layers',draft:0,rough:.9},{id:'fine',name:'Fine, 0.12 mm layers',draft:0,rough:.6},{id:'sanded',name:'Sanded and primed',draft:0,rough:.35}]}
 };
 const CMF=[{id:'graphite',name:'Graphite',hex:'#30343B'},{id:'arctic',name:'Arctic white',hex:'#E4E6E8'},{id:'signal',name:'Signal orange',hex:'#DD5F2A'},{id:'cobalt',name:'Cobalt',hex:'#33529F'}];
 
@@ -87,6 +95,10 @@ const EB={
   e_led:{name:'Status LED and light pipe',cat:'ui',ins:[['io','gpio']],cur:{transmit:5},dims:[4,5,4],mass:0.1,cost:0.12,open:'led',place:'ceil',only:'ceil',pref:'plusx',func:'Shows a status light'},
   e_buzz:{name:'Buzzer',cat:'ui',ins:[['io','gpio']],cur:{alert:20},dims:[9,4,9],mass:1,cost:0.6,open:'sound',place:'ceil',only:'ceil',pref:'plusx',func:'Makes a sound'}
 };
+/* FORGE-827: a constant-current buck LED driver for a high-power LED (a lamp's light
+   engine), dimmed by PWM from the board. Typical catalogue values; the nominated part's
+   datasheet sets the real ones in the BOM. */
+EB.e_ldrv={name:'Constant-current LED driver (buck)',cat:'power',ins:[['vin','pwr'],['io','gpio']],inV:{vin:[4.5,36]},cur:{sleep:0.05,transmit:300},dims:[12,3,10],mass:0.6,cost:0.9,place:'floor',func:'Drives a high-power LED'};
 EB.e_ext={name:'External power input',cat:'power',ins:[],outs:[['vext','pwr']],out:{vext:{v:[6.0,8.4],imax:3000}},dims:[8,4,6],mass:1,cost:0.5,place:'floor',func:'Powered from outside'};
 EB.e_ldo={name:'3.3 V regulator',cat:'power',ins:[['vin','pwr']],outs:[['v33','pwr']],inV:{vin:[3.6,16]},out:{v33:{v:[3.3,3.3],imax:500}},conv:'ldo',iq:0.05,dims:[5,2,5],mass:0.2,cost:0.35,place:'floor'};
 const PL={vext:'Power in',vbus:'USB 5 V',usb:'USB data',bat:'Battery',v33:'3.3 V out',vsys:'Battery out',vin:'Power in',v5:'5 V out',vcc:'Power',vbat:'Battery power',i2c:'I2C',uart:'UART',spi:'SPI',gpio:'GPIO',io:'GPIO',rf:'RF'};
@@ -257,10 +269,12 @@ function costs0(s){
   const stock=(s.W+6)*(s.D+6)*(s.H+3)/1000,removed=Math.max(0,stock-Vc);
   const minutes=12+removed/7+slotN*1.0+bossN*0.8+(s.ribs?4:0);const unitCNC=stock*matFor('cnc').density/1000*matFor('cnc').costKg+minutes*1.25;
   const bbox=s.W*s.D*s.H/1000;const unitSLS=Vc*0.62*(matFor('sls').costKg||1)+bbox*0.035+3.5;
+  const mf=matFor('fdm'),gFDM=Vc*(mf.density||1.25)*1.1,hFDM=Vc/(8*3600/1000)+0.25;const unitFDM=gFDM/1000*(mf.costKg||22)+hFDM*1.5+2;
   return{
     im:{tool,at:q=>unitIM+tool/q},
     cnc:{tool:180,at:q=>unitCNC*(q>=500?0.82:q>=50?0.92:1)+180/q},
-    sls:{tool:0,at:q=>unitSLS*(q>=1000?0.8:q>=100?0.9:1)}
+    sls:{tool:0,at:q=>unitSLS*(q>=1000?0.8:q>=100?0.9:1)},
+    fdm:{tool:0,at:q=>unitFDM*(q>=50?0.92:1)}
   };
 }
 
@@ -315,6 +329,25 @@ function solve(){
 }
 
 /* ---------------- DFM report ---------------- */
+const isFDM=P=>P.id==='fdm'||P.base==='fdm';
+/* FDM screening rules (FORGE-827): perimeters, the closed top as a bridge, warping, and
+   screws in printed plastic. Preliminary guidance for a P1S-class printer, V2 at most. */
+function fdmRules(s,t,d,P,add){
+  const line=P.line||0.42,lines=t/line,frac=lines-Math.floor(lines);
+  add({label:'Wall in whole perimeters',val:`${fmt(lines,1)} lines of ${fmt(line,2)} mm`,lim:'a whole number of lines',st:frac<0.25||frac>0.75?'pass':'warn',role:'wall',target:Math.max(3,Math.round(lines))*line,
+    why:'A wall between whole perimeters is filled with thin gap-fill lines, which are weak and slow.'});
+  const span=Math.max(0,Math.min(s.W,s.D)-2*t),br=P.bridge||20;
+  add({label:'Print orientation',val:`closed top spans ${fmt(span,0)} mm`,lim:`top face on the bed; bridges about ${br} mm`,st:span<=br?'pass':'warn',
+    why:'Printed opening up, the closed top would need support inside the shell. Print it top face down, opening up, so every wall rises from the bed.'});
+  const M=matOf(),big=Math.max(s.W,s.D),warp=/asa|abs|cf/i.test(M.id)?150:220;
+  add({label:'Warp risk',val:`${fmt(big,0)} mm footprint in ${M.name}`,lim:`up to ${warp} mm without a brim`,st:big<=warp?'pass':'warn',
+    why:'Long flat bases lift at the corners as they cool. Use a brim and the closed chamber, and round the base corners.'});
+  const f=fastOf();
+  if(s.bosses&&s.bosses.n)add({label:'Screws in printed plastic',val:f.name.split(',')[0],lim:'heat-set inserts for repeat assembly',st:f.insert?'pass':'warn',
+    why:'A thread-forming screw cuts printed layers; after a few assemblies it strips. Heat-set inserts hold.'});
+  if(s.slots&&s.slots.n)add({label:'Slot width in lines',val:fmt(s.slots.w/line,1)+' lines',lim:'at least 2 lines',st:s.slots.w>=2*line?'pass':'fail',role:'slotW',target:2*line});
+  add({label:'Hole size as printed',val:'holes print about 0.1 to 0.2 mm small',lim:'size holes up or ream them',st:'pass'});
+}
 function report(s,roles){
   const P=PROC[S.proc],fin=finishOf(),R=[],d=derive(s),t=s.t;
   const add=o=>R.push(o);
@@ -332,6 +365,7 @@ function report(s,roles){
     if(P.id==='cnc'&&d.ri>0){const tool=2*Math.min(d.ri,6),depth=s.H-t,r=depth/tool;
       add({label:'Pocket depth to tool Ø',val:fmt(r,1)+' : 1',lim:'max 4 : 1',st:r<=4?'pass':r<=6?'warn':'fail',role:'R',target:t+Math.min(6,depth/8)});}
     if(P.id==='sls'&&Math.max(s.W,s.D)>200&&t<1.5)add({label:'Warp risk on large panels',val:fmt(t,2)+' mm wall',lim:'min 1.5 mm over 200 mm',st:'warn',role:'wall',target:1.5});
+    if(isFDM(P))fdmRules(s,t,d,P,add);
   }
   const dmin=P.draft+fin.draft;
   if(dmin>0)add({label:'Draft angle'+(fin.draft?' for '+fin.name:''),val:fmt(s.A,1)+'°',lim:`min ${fmt(dmin,1)}°`,st:s.A>=dmin-1e-6?'pass':(s.A>=dmin*0.5?'warn':'fail'),role:'draft',target:dmin});
@@ -835,7 +869,12 @@ const MATS={
        {id:'al6082',name:'Aluminium 6082-T6',E:70000,str:260,k:180,density:2.70,costKg:7.0,ul94:'metal',metal:true},
        {id:'pom',name:'Acetal, POM-C',E:2800,str:60,k:0.31,density:1.41,costKg:9,ul94:'HB'}],
   sls:[{id:'pa12',name:'PA12',E:1700,str:48,k:0.25,density:1.01,costKg:1.0,ul94:'HB'},
-       {id:'pa12gb',name:'PA12, glass bead filled',E:3200,str:30,k:0.3,density:1.3,costKg:1.15,ul94:'HB'}]
+       {id:'pa12gb',name:'PA12, glass bead filled',E:3200,str:30,k:0.3,density:1.3,costKg:1.15,ul94:'HB'}],
+  /* Typical printed values in the layer plane (XY); across layers is weaker. */
+  fdm:[{id:'petg',name:'PETG',E:1700,str:38,k:0.2,density:1.27,costKg:22,ul94:'HB'},
+       {id:'pla',name:'PLA',E:2700,str:45,k:0.13,density:1.24,costKg:20,ul94:'HB'},
+       {id:'petgcf',name:'PETG-CF, carbon fibre filled',E:3100,str:42,k:0.25,density:1.3,costKg:32,ul94:'HB'},
+       {id:'asa',name:'ASA',E:1900,str:36,k:0.17,density:1.07,costKg:25,ul94:'HB'}]
 };
 const UL={'metal':4,'V-0':3,'V-1':2,'V-2':1,'HB':0};
 const BOARDS={
@@ -851,10 +890,10 @@ const BATTS={
   p103450:{name:'Li-ion pouch, 103450, 2.0 Ah',shape:'box',t:10,w:34,L:50,mass:38,heat:0.3,cost:4.0,cap:2000,imax:2000,rint:0.12}
 };
 const FASTS={
-  pt25:{name:'Thread-forming screw for plastics, Ø2.5 × 8',procs:['im','sls'],hole:2.0,pcbHole:2.0,cost:0.04,mass:0.4},
-  pt30:{name:'Thread-forming screw for plastics, Ø3.0 × 10',procs:['im','sls'],hole:2.4,pcbHole:2.0,cost:0.05,mass:0.6},
-  ins25:{name:'M2.5 heat-set insert + M2.5 × 6 screw',procs:['im','sls'],hole:3.6,pcbHole:3.6,insert:true,cost:0.15,mass:0.7},
-  ins30:{name:'M3 heat-set insert + M3 × 8 screw',procs:['im','sls'],hole:4.0,pcbHole:3.6,insert:true,cost:0.17,mass:0.9},
+  pt25:{name:'Thread-forming screw for plastics, Ø2.5 × 8',procs:['im','sls','fdm'],hole:2.0,pcbHole:2.0,cost:0.04,mass:0.4},
+  pt30:{name:'Thread-forming screw for plastics, Ø3.0 × 10',procs:['im','sls','fdm'],hole:2.4,pcbHole:2.0,cost:0.05,mass:0.6},
+  ins25:{name:'M2.5 heat-set insert + M2.5 × 6 screw',procs:['im','sls','fdm'],hole:3.6,pcbHole:3.6,insert:true,cost:0.15,mass:0.7},
+  ins30:{name:'M3 heat-set insert + M3 × 8 screw',procs:['im','sls','fdm'],hole:4.0,pcbHole:3.6,insert:true,cost:0.17,mass:0.9},
   tap25:{name:'M2.5 tapped hole + M2.5 × 6 screw',procs:['cnc'],hole:2.05,pcbHole:2.05,cost:0.03,mass:0.3},
   tap30:{name:'M3 tapped hole + M3 × 8 screw',procs:['cnc'],hole:2.5,pcbHole:2.05,cost:0.04,mass:0.5}
 };
@@ -2130,7 +2169,7 @@ function progSummary(){const M=PM||progCompute();if(!M)return null;return{phase:
 /* ================= Environment: where the product lives ================= */
 const ENVD={opMin:0,opMax:40,storeMin:-20,storeMax:60,humidity:[10,90],condensing:false,sun:'none',altitude_m:1000,salt:false,chemicals:[],uvHours:0,vibration:'fixed',outdoor:false,ventMembrane:false};
 const ENV=Object.assign({},ENVD,(PCFG.environment&&PCFG.environment.outdoor)?{outdoor:true}:{},CFG.environment||{});
-const MATENV={abs:[-20,80],absfr:[-20,80],pcabsfr:[-30,95],pc:[-40,120],pp:[0,100],al6061:[-100,150],al6082:[-100,150],pom:[-40,100],pa12:[-40,95],pa12gb:[-30,110]};
+const MATENV={abs:[-20,80],absfr:[-20,80],pcabsfr:[-30,95],pc:[-40,120],pp:[0,100],al6061:[-100,150],al6082:[-100,150],pom:[-40,100],pa12:[-40,95],pa12gb:[-30,110],pla:[-20,50],petg:[-20,65],petgcf:[-20,70],asa:[-30,85]};
 const ALPHA={graphite:0.9,cobalt:0.8,signal:0.6,arctic:0.3};
 const VIBP={fixed:{f:0,name:'fixed mount',test:'IEC 60068-2-6 sine sweep 10 to 150 Hz, 1 g',shock:'IEC 60068-2-27, 15 g, 11 ms half-sine'},
   handheld:{f:100,name:'handheld',test:'IEC 60068-2-64 random 5 to 200 Hz, 1 g rms',shock:'IEC 60068-2-27, 30 g, 11 ms half-sine'},
@@ -2160,9 +2199,9 @@ function envModel(s){
   ck({id:'matcold',label:`${M.name} in the cold`,val:`down to ${fmt(lo,0)} °C`,lim:`impact-tough to ${mr[0]} °C`,st:lo>=mr[0]?'pass':lo>=mr[0]-10?'warn':'fail',fix:lo<mr[0]?altMat(m=>(MATENV[m.id]||[-20])[0]<=lo):null,lines:['mat','shell']});
   ck({id:'mathot',label:`${M.name} in the heat`,val:`up to ${fmt(hiS,0)} °C`,lim:`softens near ${mr[1]} °C`,st:hiS<=mr[1]-15?'pass':hiS<=mr[1]-5?'warn':'fail',fix:hiS>mr[1]-15?altMat(m=>(MATENV[m.id]||[0,80])[1]-15>=hiS):null,lines:['mat','shell']});
   const uv=ENV.uvHours||(ENV.outdoor&&ENV.sun!=='none'?1500:0);
-  if(uv>0){const poor=['abs','absfr','pp','pom'].includes(S.mat),fair=['pc','pcabsfr','pa12','pa12gb'].includes(S.mat);
+  if(uv>0){const poor=['abs','absfr','pp','pom','pla'].includes(S.mat),fair=['pc','pcabsfr','pa12','pa12gb','petg','petgcf'].includes(S.mat);
     ck({id:'uv',label:'Sunlight (UV)',val:`about ${uv.toLocaleString('en-GB')} h a year`,lim:poor?'this grade yellows and turns brittle':fair?'needs a UV-stabilised grade':M.metal?'metal, unaffected':'check the grade datasheet',
-      st:poor?'fail':fair?(uv>2000?'warn':'pass'):'pass',fix:poor?altMat(m=>!['abs','absfr','pp','pom'].includes(m.id)):null,lines:['mat']});}
+      st:poor?'fail':fair?(uv>2000?'warn':'pass'):'pass',fix:poor?altMat(m=>!['abs','absfr','pp','pom','pla'].includes(m.id)):null,lines:['mat']});}
   if(ENV.salt){if(M.metal)ck({id:'corr',label:'Salt corrosion',val:finishOf().name,lim:'anodised or coated aluminium',st:S.finish==='asm'?'fail':'pass',fix:S.finish==='asm'?{act:'finish',finish:'anod',label:'Anodise'}:null,lines:['shell']});
     ck({id:'corrfix',label:'Fixings in salt air',val:fastOf().name.split(',')[0],lim:'stainless or coated fixings',st:'warn',lines:['lidfix'],why:'specify A2 or A4 stainless when nominating the part number'});}
   if((ENV.chemicals||[]).length){const bad=['pc','pcabsfr'].includes(S.mat)&&ENV.chemicals.some(c=>/solvent|alcohol|clean|fuel|oil/i.test(c));

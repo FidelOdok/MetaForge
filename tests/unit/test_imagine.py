@@ -734,3 +734,222 @@ async def test_a_tool_handover_before_ready_names_what_is_missing(
         await _server(service).imagine_handover(
             {"project_id": PROJECT, "op_id": "h1", APPROVED_BY_ARG: "fidel"}
         )
+
+
+# ── FORGE-827: an agent accepts assumptions and confirms scenarios for a person ──
+
+
+def _inferred_config() -> dict[str, Any]:
+    """The full config with its scenarios inferred, as an agent writes them."""
+    cfg = full_config()
+    cfg["scenarios"] = [{k: v for k, v in s.items() if k != "by"} for s in cfg["scenarios"]]
+    return cfg
+
+
+async def _ready_but_acceptance(client: httpx.AsyncClient, twin: InMemoryTwinAPI) -> None:
+    """Everything the checklist needs, except the person's acceptances."""
+    await _put(client, _inferred_config())
+    cfg = full_config()
+    for i, row in enumerate(cfg["programme"]["ledger"]):
+        res = await _event(client, "ledger", {"id": f"l{i}", "index": i, "status": row["status"]})
+        assert res.status_code == 200, res.text
+    res = await _event(
+        client,
+        "screening",
+        {"id": "latest", "engine": "formgraph@2.0.0", "rule_version": "x", "rules": []},
+    )
+    assert res.status_code == 200, res.text
+    await _add_mesh(twin)
+
+
+def _items(check: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {i["id"]: i for i in check["items"]}
+
+
+def test_the_accept_tool_is_human_authority() -> None:
+    assert requires_human_authority("twin.imagine_accept")
+    assert never_auto_approved("twin.imagine_accept")
+
+
+async def test_flag_off_the_accept_tool_is_refused(service: Any, client: httpx.AsyncClient) -> None:
+    await _put(client, _inferred_config())
+    with pytest.raises(ValueError, match="person's decision"):
+        await _server(service).imagine_accept(
+            {
+                "project_id": PROJECT,
+                "op_id": "a1",
+                "assumptions": ["cover"],
+                APPROVED_BY_ARG: "fidel",
+            }
+        )
+
+
+async def test_the_accept_tool_needs_the_approver_the_dispatcher_supplies(
+    service: Any, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _put(client, _inferred_config())
+    monkeypatch.setenv(FLAG, "true")
+    with pytest.raises(HumanAuthorityRequiredError):
+        await _server(service).imagine_accept(
+            {"project_id": PROJECT, "op_id": "a1", "assumptions": ["cover"]}
+        )
+
+
+async def test_an_agent_accepts_for_the_person_and_hands_over(
+    service: Any,
+    client: httpx.AsyncClient,
+    twin: InMemoryTwinAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _ready_but_acceptance(client, twin)
+    before = _items((await client.get(f"{BASE}/handover")).json())
+    assert before["assumptions"]["status"] == "missing"
+    assert before["scenarios"]["status"] == "missing"
+    monkeypatch.setenv(FLAG, "true")
+    srv = _server(service)
+    scenarios = [s["id"] for s in _inferred_config()["scenarios"]]
+    ctx = McpCallContext(actor_id="agent:x", agent="claude-code-e2e", client="claude-code 2")
+    with with_context(ctx):
+        out = await srv.imagine_accept(
+            {
+                "project_id": PROJECT,
+                "op_id": "a1",
+                "assumptions": ["cover", "coverage", "rail"],
+                "scenarios": scenarios,
+                APPROVED_BY_ARG: "fidel",
+            }
+        )
+    assert out["agent"] == "claude-code-e2e" and out["on_behalf_of"] == "fidel"
+    items = _items(out["checklist"])
+    # Accepted, not confirmed: the assumptions stay assumptions.
+    assert items["assumptions"]["status"] == "assumed"
+    assert "accepted by agent claude-code-e2e on behalf of fidel" in items["assumptions"]["detail"]
+    assert "not confirmed by a person" in items["assumptions"]["detail"]
+    assert items["scenarios"]["status"] == "done"
+    assert "accepted by agent claude-code-e2e on behalf of fidel" in items["scenarios"]["detail"]
+    assert "not confirmed by a person" in items["scenarios"]["detail"]
+    assert out["checklist"]["ready"] is True, items
+    studio = (await client.get(f"{BASE}/studio")).json()
+    assert studio["collections"]["assumptions"]["cover"].get("confirmed") is not True
+    assert studio["collections"]["scenarios"]["knock"]["by"] == "agent"
+    with with_context(ctx):
+        handed = await srv.imagine_handover(
+            {"project_id": PROJECT, "op_id": "h1", APPROVED_BY_ARG: "fidel"}
+        )
+    assert handed["handed_over"] is True
+
+
+async def test_the_accept_tool_refuses_an_unknown_id(
+    service: Any, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _put(client, _inferred_config())
+    monkeypatch.setenv(FLAG, "true")
+    with pytest.raises(ValueError, match="nope"):
+        await _server(service).imagine_accept(
+            {"project_id": PROJECT, "op_id": "a1", "scenarios": ["nope"], APPROVED_BY_ARG: "f"}
+        )
+
+
+async def test_rest_flag_off_an_agent_cannot_confirm_a_scenario(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client, _inferred_config())
+    res = await client.post(
+        f"{BASE}/events",
+        json={"event_id": "s1", "kind": "scenario", "data": {"id": "knock", "confirmed": True}},
+        headers=AGENT,
+    )
+    assert res.status_code == 403
+
+
+async def test_rest_flag_on_without_the_person_is_422(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(FLAG, "true")
+    await _put(client, _inferred_config())
+    headers = {k: v for k, v in AGENT.items() if k != "X-MetaForge-On-Behalf-Of"}
+    res = await client.post(
+        f"{BASE}/events",
+        json={"event_id": "s1", "kind": "scenario", "data": {"id": "knock", "confirmed": True}},
+        headers=headers,
+    )
+    assert res.status_code == 422
+
+
+async def test_rest_flag_on_the_agent_accepts_for_the_person(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(FLAG, "true")
+    await _put(client, _inferred_config())
+    res = await client.post(
+        f"{BASE}/events",
+        json={"event_id": "s1", "kind": "scenario", "data": {"id": "knock", "confirmed": True}},
+        headers=AGENT,
+    )
+    assert res.status_code == 200, res.text
+    res = await client.post(
+        f"{BASE}/events",
+        json={
+            "event_id": "a1",
+            "kind": "assumption_confirmed",
+            "data": {"id": "cover", "confirmed": True},
+        },
+        headers=AGENT,
+    )
+    assert res.status_code == 200, res.text
+    studio = (await client.get(f"{BASE}/studio")).json()
+    knock = studio["collections"]["scenarios"]["knock"]
+    assert knock["agent"] == "claude-code" and knock["on_behalf_of"] == "fidel"
+    cover = studio["collections"]["assumptions"]["cover"]
+    # An agent's "confirm" is an acceptance: never a person's statement.
+    assert cover.get("confirmed") is not True and cover["accepted"] is True
+    assert cover["on_behalf_of"] == "fidel"
+
+
+async def test_a_browser_cannot_claim_an_agent_accepted(client: httpx.AsyncClient) -> None:
+    await _put(client, _inferred_config())
+    res = await _event(
+        client,
+        "assumption_confirmed",
+        {"id": "cover", "accepted": True, "agent": "x", "on_behalf_of": "y"},
+    )
+    assert res.status_code == 200, res.text
+    cover = (await client.get(f"{BASE}/studio")).json()["collections"]["assumptions"]["cover"]
+    assert "agent" not in cover and "on_behalf_of" not in cover
+
+
+async def test_an_agent_made_concept_mesh_lands_in_the_sessions_project(
+    service: Any, client: httpx.AsyncClient, twin: InMemoryTwinAPI
+) -> None:
+    """The concept mesh path without a person: the checklist sees the agent's mesh."""
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    seen: list[dict[str, Any]] = []
+
+    async def generator(**call: Any) -> dict[str, Any]:
+        seen.append(call)
+        await _add_mesh(twin)  # what the real generator records for call["project_id"]
+        return {"node_id": "n1", "task_id": "t1", "format": "glb"}
+
+    await _put(client)
+    srv = TwinServer(twin=twin, concept_mesh_generator=generator)
+    with with_context(McpCallContext(project_id=UUID(PROJECT))):
+        await srv.generate_concept_mesh({"prompt": "a desk lamp", "wait": True})
+    assert seen[0]["project_id"] == PROJECT
+    items = _items((await client.get(f"{BASE}/handover")).json())
+    assert items["concept_assembly"]["status"] == "done"
+    assert "concept mesh exists" in items["concept_assembly"]["detail"]
+
+
+async def test_an_undelegated_agent_scenario_edit_is_not_the_persons(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client, _inferred_config())
+    res = await client.post(
+        f"{BASE}/events",
+        json={"event_id": "s1", "kind": "scenario", "data": {"id": "knock", "text": "Dropped"}},
+        headers={"X-MetaForge-Surface": "agent"},
+    )
+    assert res.status_code == 200, res.text
+    items = _items((await client.get(f"{BASE}/handover")).json())
+    assert "knock" in items["scenarios"]["detail"]
