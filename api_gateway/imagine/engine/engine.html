@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Formgraph Studio</title>
+<link rel="stylesheet" href="{{asset:engine.css}}">
+</head>
+<body>
+<div id="app">
+  <header class="bar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 12.5 16 6l11 6.5v8L16 27 5 20.5z" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/><path d="M5 12.5 16 19l11-6.5M16 19v8" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" opacity=".55"/></svg>
+      <div><b id="fgName">Formgraph Studio</b><small id="fgSub" hidden></small></div>
+    </div>
+    <div class="seg" role="group" aria-label="View"><button type="button" data-pview="design" aria-pressed="true">Design</button><button type="button" data-pview="prog" aria-pressed="false">Programme</button></div>
+    <div class="seg" role="group" aria-label="Detail level"><button type="button" data-level="simple" aria-pressed="true">Simple</button><button type="button" data-level="eng" aria-pressed="false">Engineer</button></div>
+    <div class="more"><button type="button" class="ibtn" aria-haspopup="true" aria-expanded="false" aria-label="More options">⋯</button><div class="menu" hidden><button class="mi" id="reset" type="button">Reset to generated design</button></div></div>
+  </header>
+
+  <main>
+    <section class="pane" id="graphPane" aria-label="Parameter graph">
+      <div id="quick" aria-label="Design controls"></div>
+      <div class="gtools">
+        <div class="seg gtab" role="group" aria-label="Graph"><button type="button" data-gtab="form" aria-pressed="true">Form</button><button type="button" data-gtab="elec" aria-pressed="false">Electronics</button></div>
+        <span class="lbl">Add</span>
+        <button type="button" data-add="slider">Slider</button>
+        <button type="button" data-add="math">Math</button>
+        <button type="button" data-add="softbox">Soft box</button>
+        <button type="button" data-add="shell">Shell</button>
+        <button type="button" data-add="slots">Slots</button>
+        <button type="button" data-add="bosses">Bosses</button>
+        <button type="button" data-add="ribs">Ribs</button>
+        <select id="eAdd" aria-label="Add a part" hidden></select>
+        <span class="sp"></span>
+        <button type="button" id="fit">Fit graph</button>
+      </div>
+      <div id="canvas">
+        <div id="world"><svg id="wires"><path id="tempWire" class="wire temp" style="display:none"/></svg><div id="nodes"></div></div>
+        <div class="hint">Drag from an output dot to an input dot to wire parameters. Drag a wire off an input to disconnect it. Scroll or pinch to zoom, drag the background to pan. Select a slider to edit its range.</div>
+      </div>
+    </section>
+
+    <section class="pane" id="viewPane" aria-label="3D viewport">
+      <div id="view3d"></div>
+      <button type="button" class="edge edge-l" id="edgeL" aria-label="Hide controls" title="Hide controls ( [ )"><span class="chev"></span></button>
+      <button type="button" class="edge edge-r" id="edgeR" aria-label="Hide panel" title="Hide panel ( ] )"><span class="chev"></span></button>
+      <div class="ov tl">
+        <div class="seg" role="group" aria-label="View mode">
+          <button type="button" data-view="studio" aria-pressed="true">Studio</button>
+          <button type="button" class="eng" data-view="draft" aria-pressed="false">Draft analysis</button>
+          <button type="button" class="eng" data-view="section" aria-pressed="false">Section</button>
+          <button type="button" data-view="sim" aria-pressed="false">Simulate</button>
+        </div>
+        <button type="button" class="chipbtn" id="devBtn" aria-pressed="false">Try it</button>
+        <div class="more"><button type="button" class="chipbtn ibtn" aria-haspopup="true" aria-expanded="false" aria-label="More view options">⋯</button><div class="menu" hidden><button type="button" class="mi" id="flip" aria-pressed="false">Underside view</button><button type="button" class="mi" id="frame">Frame the part</button></div></div>
+        <div class="dims" id="dims">…</div>
+      </div>
+      <div class="ov bl"><div class="cmf" id="cmf"><span>Colour</span></div></div>
+      <div class="ov br"><div class="legend" id="legend" hidden></div></div>
+      <div class="simp" id="simp" hidden>
+        <div id="simTabs" role="group" aria-label="Product test"></div>
+        <div class="simhead"><b id="simTitle"></b><button class="btn pri" type="button" id="simRun">Run</button></div>
+        <div class="sio" id="simIn"></div>
+        <div class="srs" id="simOut"></div>
+        <div class="cbar" id="cbar"><span id="cbMin"></span><i></i><span id="cbMax"></span></div>
+        <p class="note eng" id="simNote"></p>
+      </div>
+      <div class="devp" id="devp" hidden aria-label="Try it">
+        <div class="dhead"><b>Try it</b><span id="dClock">Day 1, 00:00</span><span id="dMiniSoc" class="minonly"></span><button class="round sm" type="button" id="dMin" aria-label="Minimise" title="Minimise">–</button><button class="x" type="button" id="devClose" aria-label="Close">×</button></div>
+        <div class="dstate"><span id="dState" data-state="sleep">Asleep</span></div>
+        <div class="dbatt"><div class="dbar"><i id="dSoc"></i></div><div class="dnums"><span id="dSocT"></span><span id="dLife"></span></div></div>
+        <canvas id="dChart" aria-label="Battery over the last 7 days"></canvas>
+        <div class="dctl"><button class="round pri" type="button" id="dPlay" aria-label="Play">▶</button>
+          <div class="seg sm" id="dSpeedSeg" role="group" aria-label="Speed"><button type="button" data-speed="60" title="1 minute per second">1 min</button><button type="button" data-speed="3600" title="1 hour per second">1 h</button><button type="button" data-speed="21600" title="6 hours per second">6 h</button><button type="button" data-speed="86400" title="1 day per second">1 day</button></div>
+          <button class="round" type="button" id="dReset" aria-label="Restart" title="Restart">↺</button></div>
+        <div class="dact"><button class="act" type="button" id="dBtn"><i class="ic"></i>Press</button><button class="act" type="button" id="dUsb" aria-pressed="false"><i class="ic ic-usb"></i><span>Plug in</span></button></div>
+        <div class="drow"><span>Signal</span><div class="seg sm" id="dCovSeg" role="group" aria-label="Signal"><button type="button" data-cov="good">Good</button><button type="button" data-cov="fair">Fair</button><button type="button" data-cov="poor">Poor</button></div></div>
+        <p class="dlast" id="dLast"></p>
+        <p class="dhint">You can also click the button and the USB-C port on the model.</p>
+        <details class="dmore"><summary>Activity</summary><ul class="dlog" id="dLog"></ul></details>
+        <details class="dmore" id="dDecBox"><summary id="dDecSum">Decisions</summary><div id="dDec" class="dec"></div></details>
+      </div>
+    </section>
+
+    <aside class="pane" id="dfm" aria-label="Design for manufacturing">
+      <section class="blk" id="kqBlk" hidden><div class="lbl">Key questions</div><div id="kqBody"></div></section>
+      <section class="blk" id="misBlk" hidden><div class="lbl">Mission</div><div id="misBody"></div></section>
+      <section class="blk" id="gateBlk"><div class="lbl">Readiness</div><div id="partReady"></div><div class="gates" id="gates"></div><div class="vsub" id="gateMsg"></div>
+        <div class="xrow"><button class="btn" type="button" id="cpPack">Copy validation pack</button></div></section>
+      <section class="blk" id="reqBlk"><div id="scen" hidden></div><div id="asmBox" hidden></div><div class="lbl">Requirements</div><ul id="reqList"></ul><ul id="creqList" class="creq" hidden></ul></section>
+      <section class="blk" id="valBlk"><div class="lbl">Validation in the background</div><div id="valBody"></div></section>
+      <section class="blk">
+        <div class="lbl">Manufacturing process</div>
+        <div class="pseg" id="procSeg"></div>
+        <div class="frow eng"><label for="finish">Finish</label><select id="finish"></select></div>
+        <div class="frow"><label for="qty">Volume</label><select id="qty">
+          <option value="50">50 units</option><option value="500">500 units</option><option value="5000" selected>5,000 units</option><option value="50000">50,000 units</option></select></div>
+        <label class="tog eng"><input type="checkbox" id="constrain" checked><span>Hold parameters inside DFM limits. Red bands on sliders show values the process cannot make.</span></label>
+      </section>
+      <section class="blk" id="compBlk">
+        <div class="lbl">What it does and what goes inside</div>
+        <div class="funcs" id="funcs" role="group" aria-label="Functions"></div>
+        <div id="ratBox" class="eng" hidden></div>
+        <div class="frow"><label for="boardSel">Board</label><select id="boardSel"></select></div>
+        <div class="cf" id="customBox" hidden>
+          <label>Length mm<input data-cf="L" type="number" step="0.5"></label><label>Width mm<input data-cf="W" type="number" step="0.5"></label><label>Height mm<input data-cf="H" type="number" step="0.5"></label><label>Power W<input data-cf="P" type="number" step="0.1"></label><label>Mass g<input data-cf="M" type="number" step="1"></label>
+        </div>
+        <div class="frow"><label for="battSel">Battery</label><select id="battSel"></select></div>
+        <div class="frow"><label for="matSel">Material</label><select id="matSel"></select></div>
+        <div class="frow eng"><label for="fastSel">Fixings</label><select id="fastSel"></select></div>
+        
+        <label class="tog eng"><input type="checkbox" id="bomDrive"><span>Drive the thermal and drop tests from the BOM</span></label>
+      </section>
+      <section class="blk" id="afBlk" hidden><div class="lbl">Airframe and CAD</div><div id="afBody"></div></section>
+      <section class="blk" id="mfgBlk" hidden><div class="lbl">Made parts</div><div id="mfgBody"></div></section>
+      <section class="blk" id="refBlk" hidden><div class="lbl">References</div><div id="refBody"></div></section>
+      <section class="blk" id="optBlk" hidden><div class="lbl">Options</div><div id="optBody"></div></section>
+      <section class="blk" id="dfaBlk" hidden><div class="lbl">Assembly</div><ul id="dfaList" class="rlist"></ul></section>
+      <section class="blk" id="mdlBlk" hidden><div class="lbl">Models and scenarios</div><div id="mdlBody"></div></section>
+      <section class="blk" id="ctxBlk" hidden><div class="lbl">Context</div><div id="ctxBody"></div></section>
+      <section class="blk" id="envBlk"><div class="lbl">Where it lives</div><p class="note" id="envSum"></p><ul id="envList" class="rlist"></ul></section>
+      <section class="blk" id="verdictBlk"><div class="lbl">Manufacturing verdict</div><div id="verdict" class="verdict"></div></section>
+      <section class="blk"><div class="lbl">Product tests</div><ul id="testList"></ul></section>
+      <section class="blk" id="elecBlk"><div class="lbl">Electronics and wiring</div><div id="elecSum"></div><ul id="elecList" class="rlist"></ul>
+        <p class="note simple-only">Only items that need attention are shown.</p><div class="tw eng"><table id="wireT"></table></div></section>
+      <section class="blk"><div class="lbl">Checks</div><ul id="rules"></ul><p class="note simple-only">Only checks that need attention are shown. Switch to Engineer to see every check.</p></section>
+      <section class="blk" id="bomBlk"><div class="lbl">Bill of materials</div><div id="bomBody"></div></section>
+      <section class="blk eng"><div class="lbl">Part</div><dl id="metrics"></dl></section>
+      <section class="blk eng"><div class="lbl">Unit cost by process</div><div class="tw"><table id="costT"></table></div>
+        <p class="note">Rough GBP estimate per unit including tooling or setup spread over the run. Use it to compare routes, not to quote.</p></section>
+      <section class="blk eng"><div class="lbl">Hand off</div>
+        <div class="xrow">
+          <button class="btn" type="button" id="cpSpec">Copy build spec</button>
+          <button class="btn" type="button" id="cpReport">Copy DFM report</button>
+          <button class="btn" type="button" id="cpGraph">Copy graph</button>
+          <button class="btn" type="button" id="ldGraph">Load graph</button>
+        </div>
+        <div id="ioBox" hidden><textarea id="io" aria-label="Graph JSON" spellcheck="false"></textarea>
+          <div class="xrow" style="margin-top:6px"><button class="btn pri" type="button" id="ioApply">Load pasted graph</button><button class="btn" type="button" id="ioClose">Close</button></div></div>
+        <div class="foot">idroneinnovations is a trading name of idroneimages ltd.</div>
+      </section>
+    </aside>
+  </main>
+  <section id="progView" hidden aria-label="Programme"></section>
+</div>
+
+<script id="fg-config" type="application/json">{}</script>
+<script id="fg-assets" type="application/json">{"gltf":"{{asset:GLTFExporter.js}}"}</script>
+<script src="{{asset:three.min.js}}"></script>
+<script src="{{asset:OrbitControls.js}}"></script>
+<script src="{{asset:engine.js}}"></script>
+</body>
+</html>

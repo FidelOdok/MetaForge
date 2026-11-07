@@ -1,0 +1,858 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://idroneinnovations.com/schemas/formgraph/product-1.json",
+  "title": "Formgraph product config",
+  "description": "One product intent environment, composed only of Formgraph primitives. The page builder checks catalogue ids and cross-rules that a schema cannot express.",
+  "type": "object",
+  "required": [
+    "engine",
+    "product",
+    "form",
+    "process",
+    "power",
+    "functions",
+    "requirements"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "engine": {
+      "type": "string",
+      "pattern": "^formgraph@1(\\.\\d+){0,2}$",
+      "description": "Engine major version this config targets."
+    },
+    "product": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,48}$",
+          "description": "Stable slug. Also the browser storage key."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60
+        },
+        "brand": {
+          "type": "string",
+          "default": "idroneinnovations"
+        },
+        "brief": {
+          "type": "string",
+          "description": "The original brief, kept for traceability."
+        },
+        "owner": {
+          "type": "string"
+        }
+      }
+    },
+    "scenarios": {
+      "description": "Primitive: Scenario. Plain-language situations, each proved by requirements.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "requirements": {
+      "description": "Primitive: Requirement. Requirements not listed are set to Off.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "pri"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "enum": [
+              "interval",
+              "life",
+              "resp",
+              "cov",
+              "acc",
+              "drop",
+              "touch",
+              "chgt",
+              "chgh",
+              "ip"
+            ]
+          },
+          "pri": {
+            "enum": [
+              "Must",
+              "Should",
+              "Off"
+            ]
+          },
+          "values": {
+            "type": "object"
+          },
+          "source": {
+            "type": "string",
+            "description": "Where the number came from: the brief, a standard, a typical use case."
+          }
+        }
+      }
+    },
+    "decisions": {
+      "description": "Primitive: Decision. Behaviour in situations the requirements do not cover.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "usbbusy": {
+          "enum": [
+            "finish",
+            "now"
+          ]
+        },
+        "lowbusy": {
+          "enum": [
+            "finish",
+            "abort"
+          ]
+        },
+        "btnbusy": {
+          "enum": [
+            "queue",
+            "ignore"
+          ]
+        },
+        "nosignal": {
+          "enum": [
+            "store",
+            "forever"
+          ]
+        }
+      }
+    },
+    "form": {
+      "description": "Primitives: Form op, Feature, Parameter.",
+      "type": "object",
+      "required": [
+        "template"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "template": {
+          "enum": [
+            "enclosure"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "ranges": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "slots",
+              "bosses",
+              "ribs"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "functions": {
+      "description": "Primitive: Block. Support blocks (charger, antenna) are added automatically.",
+      "type": "array",
+      "items": {
+        "enum": [
+          "e_th",
+          "e_imu",
+          "e_gnss",
+          "e_lte",
+          "e_lora",
+          "e_btn",
+          "e_led",
+          "e_buzz",
+          "e_usbc"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "power": {
+      "type": "object",
+      "required": [
+        "board",
+        "battery"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "board": {
+          "type": "string"
+        },
+        "battery": {
+          "type": "string"
+        },
+        "custom": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "L": {
+              "type": "number"
+            },
+            "W": {
+              "type": "number"
+            },
+            "H": {
+              "type": "number"
+            },
+            "P": {
+              "type": "number"
+            },
+            "M": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "process": {
+      "description": "Context for Limits: process rule book, material, finish, volume.",
+      "type": "object",
+      "required": [
+        "id",
+        "material"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "enum": [
+            "im",
+            "cnc",
+            "sls"
+          ]
+        },
+        "material": {
+          "type": "string"
+        },
+        "finish": {
+          "type": "string"
+        },
+        "fixings": {
+          "type": "string"
+        },
+        "qty": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "simulations": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "fill",
+          "drop",
+          "thermal",
+          "press"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "nominations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Part numbers already known, keyed by BOM line id."
+    },
+    "catalogue": {
+      "description": "Optional catalogue extensions: extra materials, boards, batteries, fixings or blocks.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "materials": {
+          "type": "object"
+        },
+        "boards": {
+          "type": "object"
+        },
+        "batteries": {
+          "type": "object"
+        },
+        "fixings": {
+          "type": "object"
+        },
+        "blocks": {
+          "type": "object"
+        }
+      }
+    },
+    "level": {
+      "enum": [
+        "simple",
+        "eng"
+      ]
+    },
+    "color": {
+      "enum": [
+        "graphite",
+        "arctic",
+        "signal",
+        "cobalt"
+      ]
+    },
+    "ambient": {
+      "type": "number",
+      "description": "Ambient temperature in C for thermal checks."
+    },
+    "programme": {
+      "description": "Programme records from the hardware design guide: phases, intent ledger, assumptions, custom requirements, markets, rationale, trade-offs, risks, budgets, firmware, business and lifecycle.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "phase": {
+          "enum": [
+            "define",
+            "concept",
+            "evt",
+            "dvt",
+            "pvt",
+            "production",
+            "service"
+          ]
+        },
+        "markets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "UK, EU, US drive the standards list"
+        },
+        "segment": {
+          "enum": [
+            "consumer",
+            "business",
+            "industrial"
+          ]
+        },
+        "sector": {
+          "enum": [
+            "ict",
+            "industrial",
+            "luminaire",
+            "household",
+            "medical",
+            "automotive",
+            "aircraft"
+          ]
+        },
+        "environment": {
+          "type": "object",
+          "properties": {
+            "outdoor": {
+              "type": "boolean"
+            }
+          }
+        },
+        "mains": {
+          "type": "boolean"
+        },
+        "safetyFunction": {
+          "type": "boolean"
+        },
+        "mechanism": {
+          "type": "boolean"
+        },
+        "control": {
+          "type": "boolean"
+        },
+        "start": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "ledger": {
+          "type": "array",
+          "description": "Every statement of the brief, mapped or flagged",
+          "items": {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "maps": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "status": {
+                "enum": [
+                  "unreviewed",
+                  "mapped",
+                  "custom",
+                  "unrepresentable",
+                  "out-of-scope"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "text"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "customRequirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "text"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string",
+                "description": "EARS sentence"
+              },
+              "measure": {
+                "type": "string"
+              },
+              "target": {},
+              "pri": {
+                "enum": [
+                  "Must",
+                  "Should"
+                ]
+              },
+              "verify": {
+                "enum": [
+                  "test",
+                  "analysis",
+                  "inspection",
+                  "demonstration"
+                ]
+              },
+              "level": {
+                "enum": [
+                  "subsystem",
+                  "system",
+                  "acceptance"
+                ]
+              },
+              "phase": {
+                "enum": [
+                  "define",
+                  "concept",
+                  "evt",
+                  "dvt",
+                  "pvt",
+                  "production",
+                  "service"
+                ]
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Why: process, material, board, battery, radio, size"
+        },
+        "tradeoffs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "question": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "criteria": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "chosen": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "cause": {
+                "type": "string"
+              },
+              "S": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "O": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "D": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "mitigation": {
+                "type": "string"
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "a": {
+                "type": "string"
+              },
+              "b": {
+                "type": "string"
+              },
+              "what": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "human": {
+          "type": "object",
+          "properties": {
+            "handheld": {
+              "type": "boolean"
+            },
+            "gloves": {
+              "type": "boolean"
+            },
+            "mount": {
+              "type": "string"
+            }
+          }
+        },
+        "software": {
+          "type": "object",
+          "properties": {
+            "connected": {
+              "type": "boolean"
+            },
+            "app": {
+              "type": "boolean"
+            },
+            "display": {
+              "type": "boolean"
+            }
+          }
+        },
+        "firmware": {
+          "type": "object",
+          "properties": {
+            "os": {
+              "type": "string"
+            },
+            "ota": {
+              "type": "boolean"
+            },
+            "watchdog": {
+              "type": "boolean"
+            },
+            "secureBoot": {
+              "type": "boolean"
+            },
+            "signedUpdates": {
+              "type": "boolean"
+            },
+            "encryption": {
+              "type": "boolean"
+            },
+            "uniqueCredentials": {
+              "type": "boolean"
+            },
+            "secureStorage": {
+              "type": "boolean"
+            },
+            "vulnPolicy": {
+              "type": "string"
+            },
+            "supportYears": {
+              "type": "number"
+            },
+            "chargeInhibit": {
+              "type": "boolean",
+              "description": "firmware stops charging outside 0 to 45 C cell temperature"
+            }
+          }
+        },
+        "budgets": {
+          "type": "object",
+          "properties": {
+            "mass_g": {
+              "type": "number"
+            },
+            "power_mW": {
+              "type": "number"
+            },
+            "cost_gbp": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "business": {
+          "type": "object",
+          "properties": {
+            "price": {
+              "type": "number"
+            },
+            "margin": {
+              "type": "number"
+            },
+            "variants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "targetLifeYears": {
+              "type": "number"
+            },
+            "spares": {
+              "type": "boolean"
+            }
+          }
+        },
+        "sustainability": {
+          "type": "object",
+          "properties": {
+            "carbon_kg": {
+              "type": "number"
+            }
+          }
+        },
+        "packaging": {
+          "type": "object",
+          "properties": {
+            "padding_mm": {
+              "type": "number"
+            }
+          }
+        },
+        "production": {
+          "type": "object",
+          "properties": {
+            "yield": {
+              "type": "number"
+            }
+          }
+        },
+        "supply": {
+          "type": "object",
+          "properties": {
+            "secondSources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "flows": {
+          "type": "object",
+          "properties": {
+            "setup": {
+              "type": "string"
+            },
+            "use": {
+              "type": "string"
+            },
+            "failure": {
+              "type": "string"
+            },
+            "maintenance": {
+              "type": "string"
+            },
+            "disposal": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "environment": {
+      "description": "Primitive: Environment. Where the product lives; drives thermal extremes, the charge window, cold battery, material range, UV, corrosion, condensation, altitude, vibration and IEC 60068 test conditions.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "opMin": {
+          "type": "number"
+        },
+        "opMax": {
+          "type": "number"
+        },
+        "storeMin": {
+          "type": "number"
+        },
+        "storeMax": {
+          "type": "number"
+        },
+        "humidity": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "condensing": {
+          "type": "boolean"
+        },
+        "sun": {
+          "enum": [
+            "none",
+            "partial",
+            "full"
+          ]
+        },
+        "altitude_m": {
+          "type": "number",
+          "minimum": -500,
+          "maximum": 10000
+        },
+        "salt": {
+          "type": "boolean"
+        },
+        "chemicals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "uvHours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "vibration": {
+          "enum": [
+            "fixed",
+            "handheld",
+            "vehicle",
+            "aircraft"
+          ]
+        },
+        "outdoor": {
+          "type": "boolean"
+        },
+        "ventMembrane": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

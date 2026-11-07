@@ -20,6 +20,7 @@ decides what each of the provider's two failure classes means over HTTP.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 
 import structlog
@@ -31,7 +32,7 @@ from api_gateway.auth.provider import AuthProvider, AuthUnavailable, InvalidToke
 
 logger = structlog.get_logger(__name__)
 
-__all__ = ["AuthMiddleware", "PUBLIC_PATHS", "PUBLIC_PREFIXES"]
+__all__ = ["AuthMiddleware", "PUBLIC_GET_PATTERNS", "PUBLIC_PATHS", "PUBLIC_PREFIXES"]
 
 #: Paths reachable without a credential.
 #:
@@ -55,6 +56,16 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
 #: handed to a person's browser, or to ``curl``, would need the token the
 #: link exists to avoid.
 PUBLIC_PREFIXES: tuple[str, ...] = ("/v1/links/",)
+
+#: GET paths that carry their own credential, by pattern (FORGE-821). The
+#: Imagine engine page is framed in a sandboxed iframe, which cannot send a
+#: bearer token: its route checks the short-lived signed ``t`` that
+#: ``GET .../imagine/studio`` put in ``engine_url``
+#: (``api_gateway.imagine.engine_token``). Its assets are the engine's own
+#: scripts and stylesheet and carry no project data.
+PUBLIC_GET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/v1/twin/projects/[0-9a-fA-F-]{36}/imagine/engine(/assets/[A-Za-z0-9_.-]+)?$"),
+)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -102,6 +113,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return True
         path = request.url.path
         if path.startswith(PUBLIC_PREFIXES):
+            return True
+        if request.method in ("GET", "HEAD") and any(p.match(path) for p in PUBLIC_GET_PATTERNS):
             return True
         return path.rstrip("/") in PUBLIC_PATHS or path in PUBLIC_PATHS
 

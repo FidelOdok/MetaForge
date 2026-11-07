@@ -322,6 +322,18 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "version); proposed until every owning domain agrees by a recorded decision."
         ),
     ),
+    TwinTypeSpec(
+        "imagine_studio",
+        TwinTypeKind.DEFINITION,
+        "work_product:imagine_studio",
+        key_prefix="IMG",
+        description=(
+            "The Imagine stage's concept studio (IMG-STUDIO): the formgraph product config "
+            "an agent generated, the person's choices, scenarios, assumptions, ledger and "
+            "V2 screening results, and the handover to Develop. Every config change or "
+            "rework is the next revision; a handed-over revision is read-only."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",

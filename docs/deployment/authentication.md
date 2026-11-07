@@ -124,6 +124,13 @@ Everything except a short allow-list: `/health`, `/docs`,
 `/docs/oauth2-redirect`, `/redoc`, `/openapi.json`, and `OPTIONS` preflight
 requests.
 
+Two kinds of route carry a credential of their own instead of a bearer token
+and check it themselves: signed links under `/v1/links/`, and the Imagine
+engine page (`GET /v1/twin/projects/{id}/imagine/engine` and its
+`/engine/assets/{name}`), which an iframe loads and which takes the
+short-lived signed `t` that `GET .../imagine/studio` puts in `engine_url`.
+See [The Imagine stage](../imagine-stage.md#authentication-and-the-engine-url).
+
 Enforcement is middleware, not a per-route dependency, so a route added later is
 protected by default without its author doing anything. That is the opposite of
 the pattern elsewhere in the codebase, where protection is opt-in and easy to

@@ -1,0 +1,530 @@
+{
+  "schemaVersion": 1,
+  "region": "UK",
+  "note": "Real UK suppliers researched from their own pages on 2026-11-06. Lead times are often best-case figures and most prices are quote only; ask for quotes. Product context and the user registry override these by id.",
+  "machines": [
+    {
+      "id": "uk-3dprintuk-sls",
+      "name": "3DPRINTUK, SLS PA12",
+      "process": "sls",
+      "source": "https://www.3dprint-uk.co.uk/sls-pa12-pa2200-nylon/",
+      "buildVolume": [
+        236,
+        186,
+        300
+      ],
+      "materials": [
+        "pa12"
+      ],
+      "limits": {
+        "wallMin": 1.0,
+        "holeMin": 2.0,
+        "tolerance": 0.3
+      },
+      "finishes": [
+        "dyed"
+      ],
+      "leadDays": 2,
+      "qtyRange": [
+        1,
+        5000
+      ],
+      "notes": "Wall: natural 1 mm, shotpeen 1.5 mm, polished 2 mm. Hole minimum depends on depth: 1 mm for under 2 mm deep, 2 mm for 2 to 5 mm, 3 mm for 5 to 10 mm, 4 mm for 10 mm+. Gap: tight fit 0.15 mm, smooth fit 0.25 mm, per surface (double for diameters). Tolerance: expected 0.1 mm or 0.1%, guaranteed 0.3 mm or 0.3%. Build size: machines page and the PA12 'maximum part size' say 236 x 186 x 300 (EOS Formiga P110); the PA12 page 'max print size' says 286 x 186 x 300, so the pages disagree. Lead time in working days: Express 2-4, Economy 6-12 (estimate), Trade about 12-22; not guaranteed. Hole minimum taken as 2 mm because the screw holes are 2 to 5 mm deep.",
+      "region": "UK",
+      "location": "London",
+      "supplier": "3DPRINTUK",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "EOS",
+          "model": "Formiga P110 / P100",
+          "count": 12
+        },
+        {
+          "make": "EOS",
+          "model": "P396"
+        }
+      ],
+      "machineSource": "https://www.3dprint-uk.co.uk/machines-maximums-and-minimums/"
+    },
+    {
+      "id": "uk-3dprintuk-mjf",
+      "name": "3DPRINTUK, MJF PA12",
+      "process": "mjf",
+      "source": "https://www.3dprint-uk.co.uk/hp-mjf-pa12-nylon-material",
+      "materials": [
+        "pa12"
+      ],
+      "limits": {
+        "wallMin": 1.0,
+        "holeMin": 1.0,
+        "slotMin": 0.15,
+        "tolerance": 0.3
+      },
+      "notes": "Min wall 1 mm natural (1.5 shot peen, 2 polished). Min hole 1 mm applies to depth under 2 mm; 2 mm for 2-5 mm depth, 3 mm for 5-10 mm, 4 mm+ for over 10 mm; powder may not clear holes longer than 30 mm. Gap 0.15 mm tight fit / 0.25 mm smooth fit, per surface (double for diameters). Tolerance: expected 0.1 mm or 0.1%, guaranteed 0.3 mm or 0.3% (0.3 recorded). Parts over 10 mm thick are hollowed to 4 mm walls. Lead time from https://www.3dprint-uk.co.uk/lead-times: Express 2-4 working days, Economy 6-12 working days (estimates), trade accounts 12-22 working days. They note MJF PA12 warps more than SLS PA12.",
+      "qtyRange": [
+        1,
+        5000
+      ],
+      "buildVolume": [
+        350,
+        350,
+        255
+      ],
+      "leadDays": 2,
+      "region": "UK",
+      "location": "London",
+      "supplier": "3DPRINTUK",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "HP",
+          "model": "Jet Fusion 5210 Pro",
+          "count": 10
+        }
+      ],
+      "machineSource": "https://www.3dprint-uk.co.uk/machines-maximums-and-minimums/"
+    },
+    {
+      "id": "uk-3dpeople-sls",
+      "name": "3D People, SLS PA12",
+      "process": "sls",
+      "source": "https://www.3dpeople.uk/pa12-nylon-sls/#design-guide",
+      "buildVolume": [
+        335,
+        285,
+        445
+      ],
+      "materials": [
+        "pa12"
+      ],
+      "limits": {
+        "wallMin": 1.0,
+        "holeMin": 1.5
+      },
+      "finishes": [
+        "dyed"
+      ],
+      "leadDays": 2,
+      "qtyRange": [
+        1,
+        5000
+      ],
+      "notes": "Hole: through holes 1.5 mm min plus 1 mm per 10 mm depth; blind holes 2 mm min plus 2 mm per 10 mm depth. Gap: 0.5 mm min integrated clearance for parts printed together; 0.2 mm free fit / 0.1 mm close fit for parts assembled after printing. Tolerance null: the tolerance page loads values by script and showed placeholders only. Max build 335 x 285 x 445 mm is from the general design guide (all technologies), not stated on the PA12 SLS page. Lead time 'From 2 working days'; no upper figure published.",
+      "region": "UK",
+      "location": "London",
+      "supplier": "3D People",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "3D Systems",
+          "model": "ProX 6100",
+          "count": 2,
+          "notes": "at least two"
+        }
+      ],
+      "machineSource": "https://www.3dpeople.uk/sls-3d-printing/"
+    },
+    {
+      "id": "uk-protolabs-mjf",
+      "name": "Protolabs, MJF PA12",
+      "process": "mjf",
+      "source": "https://www.protolabs.com/en-gb/services/3d-printing/multi-jet-fusion/",
+      "materials": [
+        "pa12"
+      ],
+      "limits": {
+        "tolerance": 0.25
+      },
+      "notes": "No absolute minimum wall stated: 2.5-4.0 mm is 'ideal', 1.5 mm minimum if vapour smoothed. Minimum feature size 0.5 mm, layer 80 um. Tolerance +/-0.25 mm plus +/-0.002 mm/mm. Suggested max 200 x 200 x 200 mm to limit warping. Lead time 'as fast as 1 day' (no range). The page gives the Telford address as the contact but does not say MJF parts are printed in the UK; may be made at a European plant. Min hole and gap not on the page.",
+      "qtyRange": [
+        1,
+        5000
+      ],
+      "buildVolume": [
+        284,
+        380,
+        380
+      ],
+      "leadDays": 1,
+      "region": "UK",
+      "location": "Telford",
+      "supplier": "Protolabs",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "HP",
+          "model": "Jet Fusion 5600",
+          "count": 2,
+          "notes": "at the European 3D printing centre, which may not be Telford"
+        }
+      ],
+      "machineSource": "https://engineering-update.co.uk/?p=6245"
+    },
+    {
+      "id": "uk-protolabs-im",
+      "name": "Protolabs, injection moulding",
+      "process": "im",
+      "source": "https://www.protolabs.com/en-gb/services/injection-moulding/",
+      "materials": [
+        "abs",
+        "absfr",
+        "pcabsfr",
+        "pc",
+        "pp"
+      ],
+      "limits": {},
+      "notes": "Moulds produced in 1-15 days (stated in days, not weeks); standard part lead time 'as fast as 15 days or less'; moulds from GBP 995; tolerance +/-0.08 mm plus resin tolerance. Max part 480 x 980 mm, depth 101 mm from parting line at 3 deg draft; max volume 966,837 mm3; projected area 112,903 mm2. Prototyping suited to under 2,000 parts, on-demand production with no MOQ. Moulding in Telford per the page. Aluminium tooling, so for 2,000 a year a production steel tool elsewhere may be cheaper per part. No minimum wall or draft number on the page read.",
+      "qtyRange": [
+        500,
+        1000000
+      ],
+      "buildVolume": [
+        480,
+        980,
+        101
+      ],
+      "region": "UK",
+      "location": "Telford",
+      "supplier": "Protolabs",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "ARBURG",
+          "model": "Allrounder (Golden Edition and S series), 40 to 500 t"
+        }
+      ],
+      "machineSource": "https://engineering-update.co.uk/?p=6245"
+    },
+    {
+      "id": "uk-rutland-im",
+      "name": "Rutland Plastics, injection moulding",
+      "process": "im",
+      "source": "https://www.rutlandplastics.co.uk/",
+      "materials": [
+        "abs",
+        "absfr",
+        "pcabsfr",
+        "pc",
+        "pp"
+      ],
+      "limits": {},
+      "notes": "Home and tooling pages read: 30 moulding machines including a 2,400-tonne Engel (largest stated), in-house toolroom (40+ machines), low-volume / pre-production and multi-cavity stack tools, partner tools in European steel, 7 million parts a year. Tooling lead time not stated. Materials and design-guideline pages (https://rutlandplastics.co.uk/design-guidelines/, https://www.rutlandplastics.co.uk/services/moulding/plastic-materials/) returned HTTP 429 so materials (PC/ABS), min wall and draft are null. A search snippet (not read as a page) said 50 t to 1,700 t presses and parts up to 1.5 m / 48 kg, which conflicts with the 2,400 t figure on the site. They offer a free downloadable design guide (form required).",
+      "qtyRange": [
+        500,
+        1000000
+      ],
+      "region": "UK",
+      "location": "Oakham",
+      "supplier": "Rutland Plastics",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "Engel",
+          "model": "2,400 t press (model not named), 30 machines on site"
+        }
+      ],
+      "machineSource": "https://www.rutlandplastics.co.uk/"
+    },
+    {
+      "id": "uk-protolabs-cnc",
+      "name": "Protolabs, CNC machining",
+      "process": "cnc",
+      "source": "https://www.protolabs.com/en-gb/services/cnc-machining/cnc-milling/",
+      "materials": [
+        "al6082"
+      ],
+      "limits": {
+        "wallMin": 1.0,
+        "holeMin": 0.5,
+        "tolerance": 0.1,
+        "featureMin": 0.5
+      },
+      "buildVolume": [
+        559,
+        356,
+        95
+      ],
+      "leadDays": 1,
+      "notes": "Halesfield 8, Telford TF7 4QN. 6061 not mentioned; 6082 and 7075 named. wallMin is nominal 1 mm; regions may go to 0.5 mm if nominal is above 1 mm. holeMin 0.5 mm is for soft metals (1.2 mm hard metals). featureMin 0.5 is minimum recessed-text stroke width. Tolerance typically +/- 0.1 mm. Max size 559 x 356 x 95 mm is labelled 'Max size for Aluminium'; another size 254 x 178 x 95 is also listed. Minimum part size 6.35 x 6.35 mm. leadDays 1 is the published 'as fast as 1 day', a best case, not a typical figure; finished parts 'as fast as 6 days'. Note the 95 mm Z limit.",
+      "region": "UK",
+      "location": "Telford",
+      "supplier": "Protolabs",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "Haas",
+          "model": "VM-3 and VF-2YT, over 130 Haas machines on site"
+        }
+      ],
+      "machineSource": "https://engineering-update.co.uk/?p=6245"
+    },
+    {
+      "id": "uk-geomiq-cnc",
+      "name": "Geomiq, CNC machining",
+      "process": "cnc",
+      "source": "https://geomiq.com/cnc-machining/",
+      "materials": [
+        "al6082"
+      ],
+      "limits": {
+        "wallMin": 0.8,
+        "tolerance": 0.125,
+        "featureMin": 0.1
+      },
+      "buildVolume": [
+        1500,
+        800,
+        800
+      ],
+      "leadDays": 5,
+      "notes": "Location is doubtful: the page gives no town; London is inferred from a 020 phone number and 'CNC machining London' wording. Geomiq is a manufacturing platform, so the machining shop may not be in London or the UK. wallMin 0.8 for metals (absolute minimum 0.6). holeMin null: page gives minimum tool diameter 2.5 mm, not a hole size. featureMin 0.1 is the stated 'smallest feature size'. Tolerance +/- 0.125 mm (also quoted as +/- 0.127 mm). Turning up to D800 x 1000 mm. leadDays 5 is 'from as little as 5 days'. 6061 not listed. Xometry UK was tried but returned HTTP 403.",
+      "region": "UK",
+      "location": "London (platform)",
+      "supplier": "Geomiq",
+      "retrieved": "2026-11-06",
+      "machine": null,
+      "method": "marketplace of partner machine shops (over 4,000 CNC machines, makes not named)",
+      "machineSource": "https://geomiq.com/"
+    },
+    {
+      "id": "uk-easycomposites-tube",
+      "name": "Easy Composites, carbon fibre tube",
+      "process": "cfrp-tube",
+      "source": "https://www.easycomposites.co.uk/carbon-fibre-tube",
+      "materials": [
+        "cfrp"
+      ],
+      "limits": {
+        "wallMin": 0.5
+      },
+      "maxLength": 2000,
+      "leadDays": 1,
+      "price": {
+        "basis": "per metre (from)",
+        "value": 17.95,
+        "currency": "GBP",
+        "source": "https://www.easycomposites.co.uk/carbon-fibre-tube (22mm(20mm) Woven Finish Roll Wrapped Carbon Fibre Tube, From £17.95 /M)"
+      },
+      "notes": "Location from https://www.easycomposites.co.uk/contact-us (39 Park Hall Business Village, Stoke on Trent, ST3 5XA). Listing shows OD/ID; wall is derived as (OD-ID)/2, so the 22/20 tube is 1.0 mm wall; the nearest 1.5 mm wall is 25/22. Prices are 'From' per metre; the header says 'excluding VAT' but the VAT toggle default could not be confirmed. Lengths offered are fixed 1000 mm and 2000 mm; no cut-to-length service is mentioned, so maxLength is 2000 from the listing. leadDays 1 is based on 'Order by 1pm (Mon-Fri) for same day dispatch'; that is dispatch, not delivery. Tolerance not published on the listing page. Listing is paginated (32 of 42 shown), so other sizes may exist.",
+      "region": "UK",
+      "location": "Stoke-on-Trent",
+      "supplier": "Easy Composites",
+      "retrieved": "2026-11-06",
+      "machine": null,
+      "method": "sells roll-wrapped prepreg tube (5 to 60 mm OD) and pultruded tube (0.5 to 12 mm OD); does not say whether it makes them",
+      "machineSource": "https://www.easycomposites.co.uk/roll-wrapped-carbon-fibre-tube"
+    },
+    {
+      "id": "uk-cft-tube",
+      "name": "Carbon Fibre Tubes Ltd, carbon fibre tube",
+      "process": "cfrp-tube",
+      "source": "https://www.carbonfibretubes.co.uk/standard-tubing",
+      "materials": [
+        "cfrp"
+      ],
+      "limits": {
+        "wallMin": 1.0
+      },
+      "maxLength": 2500,
+      "notes": "Company is in Fareham, Hampshire (Unit 31, Fareham Industrial Park, PO16 8XG per https://www.carbonfibretubes.co.uk/contact), not Rotherham as the brief suggested. Standard range is 12 round tubes, all 2500 mm long; 10 mm OD is 1.0 mm wall, all others 1.5 mm. 22/19 (1.5 mm wall) is the direct match for the target. Custom tubing up to 500 mm OD and 5 m long per the homepage. leadDays null: page only says 'the majority of our stock tubing is available to be delivered within days'. Cut-to-length not mentioned. Price and tolerance not published. Clearwater Composites (suggested in the brief) was not used: not confirmed as a UK supplier.",
+      "region": "UK",
+      "location": "Fareham",
+      "supplier": "Carbon Fibre Tubes Ltd",
+      "retrieved": "2026-11-06",
+      "machine": null,
+      "method": "roll-wrapped prepreg on platen rolling presses and CNC tape winders, cured out of autoclave",
+      "machineSource": "https://www.carbonfibretubes.co.uk/composite-tube-manufacture/"
+    },
+    {
+      "id": "uk-arcangels-plate",
+      "name": "The Arc Angels, carbon fibre plate",
+      "process": "cfrp-plate",
+      "source": "https://the-arc-angels.co.uk/shop/index.php?route=product%2Fproduct&product_id=396",
+      "materials": [
+        "cfrp"
+      ],
+      "limits": {
+        "holeMin": 1.0,
+        "slotMin": 1.0,
+        "featureMin": 0.5
+      },
+      "buildVolume": [
+        100,
+        100,
+        3
+      ],
+      "price": {
+        "basis": "per part from (100x100 mm stock, includes toolpath setup, sheet and cutting)",
+        "value": 66.77,
+        "currency": "GBP",
+        "source": "https://the-arc-angels.co.uk/shop/index.php?route=product%2Fproduct&product_id=396 (£80.12 inc tax, £66.77 ex tax)"
+      },
+      "notes": "Address from the contact page: Lower Pithayne Farm Buildings, Yarcombe, Honiton, Devon, EX14 9AB. featureMin 0.5 is the minimum internal radius as published ('Internal Radii minimum 0.5mm diameter'). Stock 100x100 mm with a 4 mm border and 4 mm spacing between parts; a 150x150 mm variant also exists (product_id=397, not read in full). Only 3 mm thickness listed. Tolerance and lead time not stated (product shows 'Pre-Order'). Small hobby/robotics scale shop: suitable for prototypes, doubtful for 2,000/yr volume. Machines not named on its pages.",
+      "region": "UK",
+      "location": "Honiton",
+      "supplier": "The Arc Angels",
+      "retrieved": "2026-11-06",
+      "machine": null
+    },
+    {
+      "id": "uk-carbontech-plate",
+      "name": "Carbon Technology Ltd, carbon fibre plate",
+      "process": "cfrp-plate",
+      "source": "https://www.carbon-technology.com/",
+      "materials": [
+        "cfrp"
+      ],
+      "buildVolume": [
+        820,
+        625,
+        50
+      ],
+      "maxLength": 3600,
+      "notes": "Unit 13 Riverside, Bridge Lane, Warrington WA1 4BA. Published sheet sizes are 820 x 625 mm and 3600 x 225 mm (maxLength 3600 is from the second). Page lists 'Composite Parts Machining and Bonding' including 'machining of ... carbon sheets and tubes' but does not explicitly say CNC, and gives no hole, feature, tolerance or lead time. Alternative considered: Nitro Composites, Farndon, Cheshire (https://nitrocomposites.co.uk/pages/computer-numerical-control-machining-cnc) offers 3-axis CNC flat-sheet cutting with an instant quote, but its quote page returned HTTP 429 on every attempt so no numbers could be read. Carbon Cut UK (Oxfordshire, https://www.carboncutuk.com/) also cuts plate from DXF but publishes no limits. Machines not named on its pages.",
+      "region": "UK",
+      "location": "Warrington",
+      "supplier": "Carbon Technology Ltd",
+      "retrieved": "2026-11-06",
+      "machine": null
+    },
+    {
+      "id": "uk-andover-sheet",
+      "name": "Andover Laser, laser cut and bent sheet",
+      "process": "sheet",
+      "source": "https://www.andoverlaser.co.uk/",
+      "materials": [
+        "al5251",
+        "al5083",
+        "ss304"
+      ],
+      "buildVolume": [
+        3000,
+        1500,
+        15
+      ],
+      "maxLength": 3000,
+      "leadDays": 1,
+      "notes": "Unit 4 Brunel Gate, West Portway, Andover SP10 3SL. Grades and thicknesses from https://www.andoverlaser.co.uk/materials (aluminium 0.5 to 15 mm, stainless 0.5 to 20 mm). Max processing size 3000 x 1500 mm; bending and folding up to 3 m long. leadDays 1 from 'next-day delivery for orders placed before 10am'; unclear whether this applies to bent parts. Minimum flange, bend radius, minimum hole and numeric tolerance are not published; ask the supplier (01264 527 017). 6082 not listed (other grades on request). Thickness up to 15 mm in aluminium. Machines not named on its pages.",
+      "region": "UK",
+      "location": "Andover",
+      "supplier": "Andover Laser",
+      "retrieved": "2026-11-06",
+      "machine": null
+    },
+    {
+      "id": "uk-lasered-sheet",
+      "name": "Lasered Components, laser cut and bent sheet",
+      "process": "sheet",
+      "source": "https://lasered.co.uk/",
+      "materials": [
+        "al5251",
+        "ss304"
+      ],
+      "limits": {
+        "tolerance": 0.25
+      },
+      "buildVolume": [
+        2980,
+        1480,
+        8
+      ],
+      "maxLength": 2980,
+      "notes": "6 Crittall Drive, Braintree CM7 2RT. Company name taken as shown on the site; registered name not checked. Tolerance +/- 0.25 mm is for laser cutting, not bending. Max sheet 3000 x 1500 mm, max part 2980 x 1480 mm 'with some exceptions'. Folding lengths 1530 to 2980 mm (TruBend). Grades, minimum flange, bend radius, minimum hole and lead time not published. Aluminium grade not stated; 5251 assumed as the common UK sheet grade.",
+      "region": "UK",
+      "location": "Braintree",
+      "supplier": "Lasered Components",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "Trumpf",
+          "model": "TruLaser 5030 fiber (12 and 24 kW)"
+        },
+        {
+          "make": "Trumpf",
+          "model": "TruBend 5130, 5170 and 7050 press brakes"
+        }
+      ],
+      "machineSource": "https://lasered.co.uk/laser-cutting-technology/"
+    },
+    {
+      "id": "uk-ipfl-fdm",
+      "name": "IPFL, FDM printing",
+      "process": "fdm",
+      "source": "https://www.ipfl.co.uk/3d-printing/",
+      "materials": [
+        "abs",
+        "asa",
+        "pa12"
+      ],
+      "limits": {
+        "featureMin": 1.0
+      },
+      "buildVolume": [
+        914,
+        610,
+        914
+      ],
+      "leadDays": 1,
+      "notes": "Nazeing, Waltham Abbey, Essex EN9 2HB. Industrial Stratasys-class FDM (ABS, ASA, PC, ULTEM). featureMin 1 mm is the FDM 'minimum feature size' (SLA 0.6 mm, MJF 0.8 mm). Tolerance is published as a percentage, not mm, so limits.tolerance is null. leadDays 1 from 'as little as 24 hours', a best case. The FDM detail page https://www.ipfl.co.uk/3d-printing-services/fdm/ looks garbled (lists 'Minimum Feature Size: 127 - 330 mm', 'Tolerances: 1 mm', 'Layer Height: +/- 0.2 %') and was not used for values. Minimum wall not stated. A design-guide PDF exists but was not read (web pages only).",
+      "region": "UK",
+      "location": "Waltham Abbey",
+      "supplier": "IPFL",
+      "retrieved": "2026-11-06",
+      "machine": [
+        {
+          "make": "Stratasys",
+          "model": "Fortus (914 x 610 x 914 mm build, model not named)"
+        },
+        {
+          "make": "Stratasys",
+          "model": "J850 Pro (PolyJet)"
+        }
+      ],
+      "machineSource": "https://www.ipfl.co.uk/3d-printing-services/fdm/"
+    },
+    {
+      "id": "uk-harktech-fdm",
+      "name": "Hark Tech, FDM printing",
+      "process": "fdm",
+      "source": "https://harktech.co.uk/help/small-fdm-print-jobs-basingstoke",
+      "materials": [
+        "asa",
+        "petg",
+        "abs"
+      ],
+      "buildVolume": [
+        350,
+        350,
+        350
+      ],
+      "price": {
+        "basis": "per job from",
+        "value": 4,
+        "currency": "GBP",
+        "source": "https://harktech.co.uk/help/small-fdm-print-jobs-basingstoke (priced per job, from £4)"
+      },
+      "notes": "Small desktop-printer bureau (Bambu A1 256 x 256 x 256 mm, Creality K2 Plus 350 x 350 x 350 mm). Minimum wall not given; the page says walls below about 1.5 mm are at the edge of FDM. No tolerance published. Lead time not fixed: quotes 'within a few working days', plus spool delivery time if material must be ordered. Fine for jigs, not for production parts. No SLA offered. Registered company name not stated on the page. Machines not named on its pages.",
+      "region": "UK",
+      "location": "Basingstoke",
+      "supplier": "Hark Tech",
+      "retrieved": "2026-11-06",
+      "machine": null
+    }
+  ],
+  "materials": [
+    {
+      "id": "al5251",
+      "process": "sheet",
+      "name": "Aluminium 5251-H22 sheet",
+      "E": 70000,
+      "str": 120,
+      "k": 134,
+      "density": 2.69,
+      "costKg": 5,
+      "ul94": "metal",
+      "metal": true,
+      "source": "typical published 5251 values"
+    }
+  ]
+}

@@ -452,6 +452,7 @@ class TwinServer(McpToolServer):
         harness_estimate_getter: Any = None,
         item_history_reader: Any = None,
         design_files_recorder: Any = None,
+        imagine_studio: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -779,6 +780,12 @@ class TwinServer(McpToolServer):
         # from the adapter workspace kept as schematic / pcb_layout / gerber /
         # pick_and_place / pinmap / firmware_source work products.
         self._design_files_recorder = design_files_recorder
+        # FORGE-821: an injected Imagine service (api_gateway.imagine) with
+        # get_studio / put_studio / checklist. When present the three
+        # twin.imagine_* tools are registered, so an agent can write the
+        # per-product formgraph config. Same injection seam as every
+        # recorder above; None keeps tool_registry free of api_gateway.
+        self._imagine_studio = imagine_studio
         # FORGE-275: an injected async ``get(*, work_product_id) -> dict``
         # (make_harness_estimate_getter) -- derives a per-joint cumulative
         # cable-length estimate along the real base->follower kinematic
@@ -920,6 +927,8 @@ class TwinServer(McpToolServer):
             self._register_item_history()
         if design_files_recorder is not None:
             self._register_record_design_files()
+        if imagine_studio is not None:
+            self._register_imagine_tools()
         self._add_item_arguments()
 
     def _add_item_arguments(self) -> None:
@@ -8280,6 +8289,153 @@ class TwinServer(McpToolServer):
         if not work_product_id or not isinstance(work_product_id, str):
             raise ValueError("twin.get_harness_estimate: 'work_product_id' is required")
         return await self._harness_estimate_getter(work_product_id=work_product_id)
+
+    # ------------------------------------------------------------------
+    # twin.imagine_* (FORGE-821): the Imagine stage's formgraph studio
+    # ------------------------------------------------------------------
+
+    def _imagine_project(self, arguments: dict[str, Any], tool: str) -> str:
+        raw = arguments.get("project_id") or current_context().project_id
+        if not raw:
+            raise ValueError(f"{tool}: 'project_id' is required")
+        try:
+            return str(UUID(str(raw)))
+        except ValueError as exc:
+            raise ValueError(f"{tool}: 'project_id' must be a UUID") from exc
+
+    def _register_imagine_tools(self) -> None:
+        project = {
+            "project_id": {
+                "type": "string",
+                "description": "The project (UUID). Defaults to the session's project.",
+            }
+        }
+        studio_out = {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "status": {"type": "string", "enum": ["none", "draft", "handed_over"]},
+                "revision": {"type": "integer"},
+                "config_ref": {"type": ["string", "null"]},
+                "engine_url": {"type": "string"},
+                "config": {"type": ["object", "null"]},
+                "collections": {"type": "object"},
+                "warnings": {"type": "array", "items": {"type": "string"}},
+            },
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_get_studio",
+                adapter_id="twin",
+                name="Imagine: Get Studio",
+                description=(
+                    "Read the project's Imagine studio (IMG-STUDIO): its status (none, draft "
+                    "or handed_over), revision, the formgraph product config, and what the "
+                    "person did in the browser (choices, scenarios, context edits, confirmed "
+                    "assumptions, requirement status, ledger review, screening results). "
+                    "Read it before writing a new config so the person's choices carry over. "
+                    "Reads only."
+                ),
+                capability="twin_imagine",
+                input_schema={"type": "object", "properties": project},
+                output_schema=studio_out,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.imagine_get_studio,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_put_studio",
+                adapter_id="twin",
+                name="Imagine: Put Studio",
+                description=(
+                    "Write the per-product formgraph config for the Imagine studio as the "
+                    "next IMG-STUDIO revision. The config is checked with the formgraph "
+                    "rules (engine formgraph@2, product, form, process, power, functions, "
+                    "requirements, plus programme, environment, scenarios and view); the "
+                    "product context (real parts with datasheet, retrieved date, interfaces "
+                    "and a geometry envelope, options, models, scenarios, packed references) "
+                    "goes inline as config.context, never as a folder path. Errors refuse "
+                    "the write and are returned; warnings say what the page will flag. A "
+                    "handed-over studio is read-only until a person reworks it. Nothing an "
+                    "agent writes here is above V0 to V2 (captured, consistent, screened)."
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        **project,
+                        "config": {
+                            "type": "object",
+                            "description": "The formgraph product config.",
+                        },
+                    },
+                    "required": ["config"],
+                },
+                output_schema=studio_out,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.imagine_put_studio,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_handover_status",
+                adapter_id="twin",
+                name="Imagine: Handover Status",
+                description=(
+                    "The checklist that gates Imagine to Develop: ledger complete, "
+                    "assumptions confirmed or accepted, scenario tests confirmed, "
+                    "requirements with a source and a verification method, one chosen part "
+                    "per function (source, date, interfaces, 3D envelope), manufacturing "
+                    "context, concept assembly with an illustrative concept mesh, proposed "
+                    "interface contracts and V2 screening results. Each item is done, "
+                    "missing or assumed. Reads only: the handover itself is a person's "
+                    "decision in the dashboard."
+                ),
+                capability="twin_imagine",
+                input_schema={"type": "object", "properties": project},
+                output_schema={
+                    "type": "object",
+                    "properties": {"ready": {"type": "boolean"}, "items": {"type": "array"}},
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.imagine_handover_status,
+        )
+
+    async def imagine_get_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        pid = self._imagine_project(arguments, "twin.imagine_get_studio")
+        studio = await self._imagine_studio.get_studio(pid)
+        return dict(studio.model_dump(mode="json"))
+
+    async def imagine_put_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        pid = self._imagine_project(arguments, "twin.imagine_put_studio")
+        config = arguments.get("config")
+        if not isinstance(config, dict):
+            raise ValueError("twin.imagine_put_studio: 'config' must be an object")
+        actor = str(current_context().actor_id or "agent")
+        try:
+            studio = await self._imagine_studio.put_studio(pid, config, actor=actor)
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            if isinstance(detail, dict) and detail.get("errors"):
+                raise ValueError(
+                    "twin.imagine_put_studio: the config does not pass the formgraph checks: "
+                    + "; ".join(str(e) for e in detail["errors"][:20])
+                ) from exc
+            message = getattr(exc, "message", None)
+            if message:
+                raise ValueError(f"twin.imagine_put_studio: {message}") from exc
+            raise
+        return dict(studio.model_dump(mode="json"))
+
+    async def imagine_handover_status(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        pid = self._imagine_project(arguments, "twin.imagine_handover_status")
+        check = await self._imagine_studio.checklist(pid)
+        return dict(check.model_dump(mode="json"))
 
     # ------------------------------------------------------------------
     # twin.item_history (FORGE-523)

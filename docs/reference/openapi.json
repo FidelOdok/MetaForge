@@ -7549,6 +7549,29 @@
         "title": "Estimate",
         "type": "object"
       },
+      "EventAccepted": {
+        "properties": {
+          "accepted": {
+            "default": true,
+            "title": "Accepted",
+            "type": "boolean"
+          },
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "mapped_to": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mapped To",
+            "type": "array"
+          }
+        },
+        "title": "EventAccepted",
+        "type": "object"
+      },
       "Evidence": {
         "properties": {
           "check_id": {
@@ -10626,6 +10649,137 @@
         "title": "HandoffRequest",
         "type": "object"
       },
+      "HandoverChecklist": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HandoverItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "items"
+        ],
+        "title": "HandoverChecklist",
+        "type": "object"
+      },
+      "HandoverItem": {
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "done",
+              "missing",
+              "assumed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "status"
+        ],
+        "title": "HandoverItem",
+        "type": "object"
+      },
+      "HandoverPost": {
+        "additionalProperties": false,
+        "properties": {
+          "op_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id"
+        ],
+        "title": "HandoverPost",
+        "type": "object"
+      },
+      "HandoverRecord": {
+        "description": "The handover that froze a studio revision.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "created": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Created",
+            "type": "array"
+          },
+          "op_id": {
+            "title": "Op Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "op_id",
+          "revision",
+          "at",
+          "by"
+        ],
+        "title": "HandoverRecord",
+        "type": "object"
+      },
+      "HandoverResult": {
+        "properties": {
+          "created": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Created",
+            "type": "array"
+          },
+          "handed_over": {
+            "default": true,
+            "title": "Handed Over",
+            "type": "boolean"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "HandoverResult",
+        "type": "object"
+      },
       "HarnessEstimateResponse": {
         "properties": {
           "joints": {
@@ -11254,6 +11408,43 @@
           "diameter"
         ],
         "title": "Hole",
+        "type": "object"
+      },
+      "ImagineEvent": {
+        "additionalProperties": false,
+        "description": "``POST /events``: one browser write, idempotent per ``event_id``.",
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "event_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "choice",
+              "scenario",
+              "context_edit",
+              "assumption_confirmed",
+              "requirement",
+              "ledger",
+              "screening"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "kind",
+          "data"
+        ],
+        "title": "ImagineEvent",
         "type": "object"
       },
       "ImpactListResponse": {
@@ -20982,6 +21173,29 @@
         "title": "RevisionStateResponse",
         "type": "object"
       },
+      "ReworkPost": {
+        "additionalProperties": false,
+        "properties": {
+          "op_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Op Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "reason"
+        ],
+        "title": "ReworkPost",
+        "type": "object"
+      },
       "Ros2LaunchRequest": {
         "properties": {
           "default_urdf_path": {
@@ -25560,6 +25774,125 @@
           "label"
         ],
         "title": "StructuredMeshResponse",
+        "type": "object"
+      },
+      "StudioPut": {
+        "additionalProperties": false,
+        "description": "``PUT /studio``: a formgraph product config.",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          }
+        },
+        "required": [
+          "config"
+        ],
+        "title": "StudioPut",
+        "type": "object"
+      },
+      "StudioResponse": {
+        "description": "``GET``/``PUT /studio``.",
+        "properties": {
+          "collections": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "title": "Collections",
+            "type": "object"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "config_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Ref"
+          },
+          "engine_url": {
+            "title": "Engine Url",
+            "type": "string"
+          },
+          "handover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HandoverRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "stale": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stale",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "none",
+              "draft",
+              "handed_over"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id",
+          "status",
+          "revision",
+          "engine_url"
+        ],
+        "title": "StudioResponse",
         "type": "object"
       },
       "SubmitRequest": {
@@ -42210,6 +42543,403 @@
         "summary": "Record Verification",
         "tags": [
           "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/engine": {
+      "get": {
+        "operationId": "get_engine_v1_twin_projects__project_id__imagine_engine_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "T"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The engine page"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Engine",
+        "tags": [
+          "imagine"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/engine/assets/{name}": {
+      "get": {
+        "operationId": "get_engine_asset_v1_twin_projects__project_id__imagine_engine_assets__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/css": {},
+              "text/javascript": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Engine Asset",
+        "tags": [
+          "imagine"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/events": {
+      "post": {
+        "operationId": "post_event_v1_twin_projects__project_id__imagine_events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImagineEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Event",
+        "tags": [
+          "imagine"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/handover": {
+      "get": {
+        "operationId": "get_handover_v1_twin_projects__project_id__imagine_handover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverChecklist"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Handover",
+        "tags": [
+          "imagine"
+        ]
+      },
+      "post": {
+        "operationId": "post_handover_v1_twin_projects__project_id__imagine_handover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandoverPost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Not ready: the missing checklist items"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Handover",
+        "tags": [
+          "imagine"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/rework": {
+      "post": {
+        "operationId": "post_rework_v1_twin_projects__project_id__imagine_rework_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReworkPost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Rework",
+        "tags": [
+          "imagine"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/studio": {
+      "get": {
+        "operationId": "get_studio_v1_twin_projects__project_id__imagine_studio_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Studio",
+        "tags": [
+          "imagine"
+        ]
+      },
+      "put": {
+        "operationId": "put_studio_v1_twin_projects__project_id__imagine_studio_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Studio",
+        "tags": [
+          "imagine"
         ]
       }
     },

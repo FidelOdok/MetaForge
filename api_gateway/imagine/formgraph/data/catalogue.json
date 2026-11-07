@@ -1,0 +1,549 @@
+{
+  "engine": "formgraph@2.0.0",
+  "templates": {
+    "enclosure": {
+      "name": "Soft-shell enclosure",
+      "description": "Rounded box with top fillet and draft, shelled, open face closed by a flat lid.",
+      "params": {
+        "W": {
+          "name": "Width",
+          "unit": "mm",
+          "default": 110,
+          "range": [
+            40,
+            300
+          ]
+        },
+        "P": {
+          "name": "Proportion (depth / width)",
+          "unit": "",
+          "default": 0.618,
+          "range": [
+            0.2,
+            1.2
+          ]
+        },
+        "H": {
+          "name": "Height",
+          "unit": "mm",
+          "default": 32,
+          "range": [
+            8,
+            120
+          ]
+        },
+        "R": {
+          "name": "Corner radius",
+          "unit": "mm",
+          "default": 18,
+          "range": [
+            1,
+            100
+          ]
+        },
+        "F": {
+          "name": "Top fillet",
+          "unit": "mm",
+          "default": 8,
+          "range": [
+            0,
+            40
+          ]
+        },
+        "A": {
+          "name": "Draft",
+          "unit": "deg",
+          "default": 1.5,
+          "range": [
+            0,
+            8
+          ]
+        },
+        "t": {
+          "name": "Wall",
+          "unit": "mm",
+          "default": 2.2,
+          "range": [
+            0.4,
+            6
+          ]
+        },
+        "sn": {
+          "name": "Slot count",
+          "unit": "",
+          "default": 9,
+          "range": [
+            0,
+            30
+          ],
+          "feature": "slots"
+        },
+        "sw": {
+          "name": "Slot width",
+          "unit": "mm",
+          "default": 1.8,
+          "range": [
+            0.3,
+            6
+          ],
+          "feature": "slots"
+        },
+        "bn": {
+          "name": "Bosses",
+          "unit": "",
+          "default": 4,
+          "range": [
+            0,
+            6
+          ],
+          "feature": "bosses"
+        },
+        "bd": {
+          "name": "Screw hole",
+          "unit": "mm",
+          "default": 2.2,
+          "range": [
+            0.6,
+            8
+          ],
+          "feature": "bosses"
+        },
+        "rt": {
+          "name": "Rib thickness",
+          "unit": "mm",
+          "default": 1.2,
+          "range": [
+            0.3,
+            6
+          ],
+          "feature": "ribs"
+        },
+        "rh": {
+          "name": "Rib height",
+          "unit": "mm",
+          "default": 5,
+          "range": [
+            1,
+            30
+          ],
+          "feature": "ribs"
+        }
+      },
+      "features": [
+        "slots",
+        "bosses",
+        "ribs"
+      ]
+    }
+  },
+  "processes": {
+    "im": {
+      "name": "Injection moulding",
+      "materials": {
+        "abs": "ABS, general purpose (UL94 HB)",
+        "absfr": "ABS, flame retardant (UL94 V-0)",
+        "pcabsfr": "PC/ABS, flame retardant (UL94 V-0)",
+        "pc": "Polycarbonate (UL94 V-2)",
+        "pp": "Polypropylene (UL94 HB)"
+      },
+      "finishes": {
+        "gloss": "Gloss, SPI A-2",
+        "matte": "Matte, SPI C-1 (+0.5 deg draft)",
+        "tex": "Texture, MT-11020 (+1.5 deg draft)"
+      },
+      "fixings": [
+        "pt25",
+        "pt30",
+        "ins25",
+        "ins30"
+      ]
+    },
+    "cnc": {
+      "name": "CNC machining",
+      "materials": {
+        "al6061": "Aluminium 6061-T6 (metal)",
+        "al6082": "Aluminium 6082-T6 (metal)",
+        "pom": "Acetal, POM-C (UL94 HB)"
+      },
+      "finishes": {
+        "asm": "As machined",
+        "anod": "Bead blast and anodise"
+      },
+      "fixings": [
+        "tap25",
+        "tap30"
+      ]
+    },
+    "sls": {
+      "name": "SLS printing",
+      "materials": {
+        "pa12": "PA12 (UL94 HB)",
+        "pa12gb": "PA12, glass bead filled (UL94 HB)"
+      },
+      "finishes": {
+        "dyed": "Dyed",
+        "vapour": "Vapour smoothed"
+      },
+      "fixings": [
+        "pt25",
+        "pt30",
+        "ins25",
+        "ins30"
+      ]
+    }
+  },
+  "fixings": {
+    "pt25": "Thread-forming screw for plastics, 2.5 x 8 (2.0 mm hole)",
+    "pt30": "Thread-forming screw for plastics, 3.0 x 10 (2.4 mm hole)",
+    "ins25": "M2.5 heat-set insert and screw (3.6 mm hole)",
+    "ins30": "M3 heat-set insert and screw (4.0 mm hole)",
+    "tap25": "M2.5 tapped hole and screw (2.05 mm hole)",
+    "tap30": "M3 tapped hole and screw (2.5 mm hole)"
+  },
+  "boards": {
+    "none": {
+      "name": "No board"
+    },
+    "mcu": {
+      "name": "Low-power MCU board",
+      "vin": "3.0 to 3.6 V",
+      "sleep_mA": 0.01,
+      "active_mA": 40,
+      "size": "40 x 25 x 4 mm"
+    },
+    "rpiz2w": {
+      "name": "Raspberry Pi Zero 2 W",
+      "vin": "5 V",
+      "sleep_mA": 100,
+      "active_mA": 300,
+      "size": "65 x 30 x 5 mm",
+      "wireless": "built-in Wi-Fi and Bluetooth: radio rules apply"
+    },
+    "rpi4": {
+      "name": "Raspberry Pi 4 Model B",
+      "vin": "5 V",
+      "sleep_mA": 540,
+      "active_mA": 1200,
+      "size": "85 x 56 x 16 mm",
+      "wireless": "built-in Wi-Fi and Bluetooth: radio rules apply"
+    },
+    "custom": {
+      "name": "Custom PCB",
+      "needs": "power.custom {L, W, H, P, M}"
+    }
+  },
+  "batteries": {
+    "none": {
+      "name": "No battery, powered over USB"
+    },
+    "c18650": {
+      "name": "Li-ion cell, 18650, 3.5 Ah",
+      "capacity_mAh": 3500,
+      "peak_mA": 8000,
+      "size": "18.6 x 65.2 mm"
+    },
+    "p103450": {
+      "name": "Li-ion pouch, 103450, 2.0 Ah",
+      "capacity_mAh": 2000,
+      "peak_mA": 2000,
+      "size": "10 x 34 x 50 mm"
+    }
+  },
+  "functions": {
+    "e_th": {
+      "name": "Measures temperature and humidity",
+      "block": "Temperature and humidity sensor",
+      "bus": "I2C"
+    },
+    "e_imu": {
+      "name": "Senses motion",
+      "block": "Motion sensor",
+      "bus": "I2C"
+    },
+    "e_gnss": {
+      "name": "Knows its location",
+      "block": "GNSS receiver",
+      "bus": "UART",
+      "needs": "sky view, non-metal top"
+    },
+    "e_lte": {
+      "name": "Reports over LTE",
+      "block": "LTE-M / NB-IoT module",
+      "bus": "UART",
+      "radio": true,
+      "peak_mA": 2000
+    },
+    "e_lora": {
+      "name": "Reports over LoRa",
+      "block": "LoRa module",
+      "bus": "SPI",
+      "radio": true,
+      "peak_mA": 130
+    },
+    "e_btn": {
+      "name": "Has a button",
+      "block": "Push button",
+      "bus": "GPIO",
+      "opening": true
+    },
+    "e_led": {
+      "name": "Shows a status light",
+      "block": "Status LED and light pipe",
+      "bus": "GPIO",
+      "opening": true
+    },
+    "e_buzz": {
+      "name": "Makes a sound",
+      "block": "Buzzer",
+      "bus": "GPIO",
+      "opening": true
+    },
+    "e_usbc": {
+      "name": "Charges over USB-C",
+      "block": "USB-C receptacle",
+      "bus": "USB"
+    },
+    "e_ext": {
+      "name": "Powered from outside",
+      "block": "External power input",
+      "bus": "PWR",
+      "note": "Power comes from another system, for example an aircraft's flight pack. Set its voltage range with a context part."
+    }
+  },
+  "support_blocks": {
+    "e_chg": "Charger and 3.3 V regulator (added automatically with a battery or USB-C)",
+    "e_boost": "5 V boost converter (added by the page's fix when a 5 V board runs from a battery)",
+    "e_ant": "Flexible PCB antenna (added automatically with a radio)",
+    "e_ldo": {
+      "name": "3.3 V regulator",
+      "added": "automatically when power comes from outside and there is no battery"
+    }
+  },
+  "requirements": {
+    "interval": {
+      "text": "The device shall send a reading every [interval] minutes.",
+      "values": {
+        "interval": "number"
+      },
+      "default_pri": "Must",
+      "proved_by": "wiring path and behaviour model"
+    },
+    "life": {
+      "text": "The device shall run at least [life] days between charges.",
+      "values": {
+        "life": "number"
+      },
+      "default_pri": "Must",
+      "proved_by": "power budget, week-of-use Monte Carlo"
+    },
+    "resp": {
+      "text": "When the button is pressed, the device shall respond within [resp] s.",
+      "values": {
+        "resp": "number"
+      },
+      "default_pri": "Must",
+      "proved_by": "behaviour model"
+    },
+    "cov": {
+      "text": "While in [cov] mobile coverage, the device shall deliver its readings.",
+      "values": {
+        "cov": [
+          "good",
+          "fair",
+          "poor"
+        ]
+      },
+      "default_pri": "Must",
+      "proved_by": "link budget"
+    },
+    "acc": {
+      "text": "The device shall measure air temperature to +/-[acc] C.",
+      "values": {
+        "acc": "number"
+      },
+      "default_pri": "Should",
+      "proved_by": "self-heating estimate, 3D heat model"
+    },
+    "drop": {
+      "text": "If dropped from [drop] m, the enclosure shall not crack.",
+      "values": {
+        "drop": "number"
+      },
+      "default_pri": "Must",
+      "proved_by": "drop model"
+    },
+    "touch": {
+      "text": "While charging, the outer surface shall stay below [touch] C.",
+      "values": {
+        "touch": "number"
+      },
+      "default_pri": "Must",
+      "proved_by": "thermal model, 3D heat model"
+    },
+    "chgt": {
+      "text": "While charging, the battery shall stay inside its 45 C charging limit.",
+      "values": {},
+      "default_pri": "Must",
+      "proved_by": "thermal model, 3D heat model"
+    },
+    "chgh": {
+      "text": "The device shall charge fully within [chgh] h.",
+      "values": {
+        "chgh": "number"
+      },
+      "default_pri": "Should",
+      "proved_by": "charge model"
+    },
+    "ip": {
+      "text": "The enclosure shall resist [ip].",
+      "values": {
+        "ip": [
+          "none",
+          "ip54",
+          "ip67"
+        ]
+      },
+      "default_pri": "Should",
+      "proved_by": "aperture rules"
+    }
+  },
+  "simulations": {
+    "fill": "Mould fill (moulding only)",
+    "drop": "Drop test",
+    "thermal": "Thermal",
+    "press": "Press test"
+  },
+  "background_jobs": {
+    "route": "Harness routing",
+    "week": "Week of use, 2,000 runs",
+    "tol": "Brownout, worst case",
+    "heat3d": "3D heat, use and charging"
+  },
+  "colors": [
+    "graphite",
+    "arctic",
+    "signal",
+    "cobalt"
+  ],
+  "levels": [
+    "simple",
+    "eng"
+  ],
+  "priorities": [
+    "Must",
+    "Should",
+    "Off"
+  ],
+  "decisions": {
+    "usbbusy": [
+      "finish",
+      "now"
+    ],
+    "lowbusy": [
+      "finish",
+      "abort"
+    ],
+    "btnbusy": [
+      "queue",
+      "ignore"
+    ],
+    "nosignal": [
+      "store",
+      "forever"
+    ]
+  },
+  "environment": {
+    "fields": {
+      "opMin": "C",
+      "opMax": "C",
+      "storeMin": "C",
+      "storeMax": "C",
+      "humidity": "[min, max] %RH",
+      "condensing": "true or false",
+      "sun": [
+        "none",
+        "partial",
+        "full"
+      ],
+      "altitude_m": "metres",
+      "salt": "true or false",
+      "chemicals": "list of words",
+      "uvHours": "hours of direct sun a year",
+      "vibration": [
+        "fixed",
+        "handheld",
+        "vehicle",
+        "aircraft"
+      ],
+      "outdoor": "true or false",
+      "ventMembrane": "true or false"
+    },
+    "defaults": {
+      "opMin": 0,
+      "opMax": 40,
+      "storeMin": -20,
+      "storeMax": 60,
+      "humidity": [
+        10,
+        90
+      ],
+      "condensing": false,
+      "sun": "none",
+      "altitude_m": 1000,
+      "salt": false,
+      "chemicals": [],
+      "uvHours": 0,
+      "vibration": "fixed",
+      "outdoor": false,
+      "ventMembrane": false
+    },
+    "material_range_C": {
+      "abs": [
+        -20,
+        80
+      ],
+      "absfr": [
+        -20,
+        80
+      ],
+      "pcabsfr": [
+        -30,
+        95
+      ],
+      "pc": [
+        -40,
+        120
+      ],
+      "pp": [
+        0,
+        100
+      ],
+      "al6061": [
+        -100,
+        150
+      ],
+      "al6082": [
+        -100,
+        150
+      ],
+      "pom": [
+        -40,
+        100
+      ],
+      "pa12": [
+        -40,
+        95
+      ],
+      "pa12gb": [
+        -30,
+        110
+      ]
+    },
+    "sun_absorptance": {
+      "graphite": 0.9,
+      "cobalt": 0.8,
+      "signal": 0.6,
+      "arctic": 0.3
+    }
+  }
+}

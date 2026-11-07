@@ -57,6 +57,8 @@ def test_definitions_are_the_versioned_types() -> None:
         "feature_history_proposal",
         # A typed, versioned agreement between domains (lamp golden path).
         "interface_contract",
+        # FORGE-821: the Imagine stage's concept studio.
+        "imagine_studio",
     }
 
 
