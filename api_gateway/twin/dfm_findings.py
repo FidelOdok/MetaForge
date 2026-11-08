@@ -616,6 +616,11 @@ def _machine_context(profile_value: Any) -> MachineContext | None:
                 if label.strip().lower() == wanted or wanted in label.strip().lower():
                     found = entry
                     break
+        if found is None and wanted:
+            # A name worded differently from the library label ("Bambu P1S").
+            from api_gateway.twin.manufacturing_tools import find_machine
+
+            found = find_machine(wanted)
         if found is None:
             return None
         if isinstance(found, MachineInstance):

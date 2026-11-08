@@ -722,7 +722,9 @@ run stopped there. Now, when all of these hold, the call is not held:
 - the tool is human-authority (`twin.attempt_promotion`,
   `twin.approve_design_loop`, `twin.approve_engineering_change`,
   `twin.confirm_sketch_reading`, `twin.imagine_handover`,
-  `twin.imagine_rework`, `twin.imagine_accept`);
+  `twin.imagine_rework`, `twin.imagine_accept`), or one that records the
+  approving person (`twin.state_manufacturing_context`, see
+  [stating the manufacturing context](#stating-the-manufacturing-context));
 - `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY` is true in the MCP server that
   decides the hold, and in the gateway that records it (the gateway refuses
   with 403 otherwise, and the call is held);
@@ -755,6 +757,31 @@ Everything else is unchanged. With the flag off, or without
 A destructive tool that is not human-authority keeps its own rules: a person,
 or the project's approval policy. This is delegation by the owner, not
 policy: no approval policy ever approves a human-authority tool, in any mode.
+
+### Stating the manufacturing context
+
+`twin.state_manufacturing_context` is not human-authority: without a person an
+agent's values are assumptions, and the fields that are never assumed (the
+machine or supplier, target cost, lead time) are refused. That stopped a
+headless run at DFM: with no machine stated, no part could be assessed against
+a machine's limits. Under the same delegation (the flag, both headers, the
+person-mismatch guard), the call is recorded as a delegated approval like the
+tools above, and the dispatcher hands the tool the agent as well as the
+person. The agent may then state what only the person could:
+
+- the never-assumed fields of a proposal, and every field of a `user_stated`
+  call, are recorded `user_stated` with provenance source `mcp_delegated`,
+  actor `agent:<name>`, `on_behalf_of` the person and route `delegated`;
+- the other fields of a proposal stay assumptions;
+- a machine named in `machine_or_supplier_profile` ("Bambu Lab P1S") that the
+  machine library holds is linked by `machine_id`, so DFM assesses each part
+  against that machine's limits; a name the library does not hold is
+  recorded as stated.
+
+The record names the agent and the person, never the person alone, and never
+an assumption. With the flag off, or without either header, the call keeps
+its rules: held for a person, or approved by the project's policy, and the
+never-assumed fields are refused.
 
 ### Delegating a release to an agent
 

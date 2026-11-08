@@ -2143,6 +2143,18 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         from api_gateway.twin.dfm_findings import register as register_dfm
 
         register_dfm()
+        # DFM reads the selected machine's limits from this process's machine
+        # library, which outside the gateway starts empty: a machine stated in
+        # the manufacturing context ("Bambu Lab P1S") then found nothing and
+        # every machine limit read as unknown. The seed's published models are
+        # loaded here too (idempotent; never overwrites an entry).
+        try:
+            from api_gateway.library.routes import get_machine_library
+            from twin_core.library.machine_seed import seed_machine_library
+
+            seed_machine_library(get_machine_library())
+        except Exception as exc:  # noqa: BLE001 - a seed failure must not stop the sidecar
+            logger.warning("mcp_machine_seed_failed", error=str(exc))
         return make_dfm_service(twin)
 
     _try("dfm_service", _dfm_service)

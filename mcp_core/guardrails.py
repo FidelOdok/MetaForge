@@ -405,6 +405,19 @@ def records_approver(tool_id: str) -> bool:
     return tool_id in APPROVER_RECORDED
 
 
+def delegable_human_authority(tool_id: str) -> bool:
+    """May an agent decide this call for a person under the human-authority flag?
+
+    The human-authority tools, and the tools that record the approving person
+    (:data:`APPROVER_RECORDED`): with :data:`ALLOW_AGENT_HUMAN_AUTHORITY_ENV`
+    on, an agent that names itself and the person it acts for states what
+    only that person could state, such as the machine in the manufacturing
+    context. The tool records the agent and the person, never the person
+    alone. The release steps are not here; they have their own flag.
+    """
+    return requires_human_authority(tool_id) or records_approver(tool_id)
+
+
 # -- What a project's approval policy may decide (FORGE-780) -----------------
 
 #: Writes that only illustrate: a concept sketch, image or mesh, a check of

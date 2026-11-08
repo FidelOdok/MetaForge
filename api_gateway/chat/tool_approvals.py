@@ -794,17 +794,19 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
 
     Refused (403) unless this process delegates human authority too, so a
     sidecar with the flag on cannot have a gateway that keeps it off record
-    the decision. Refused (422) for a tool that is not human-authority: any
-    other write keeps its own rules (a person, or the project's policy). The
+    the decision. Refused (422) for a tool that is neither human-authority
+    nor one that records the approving person (the manufacturing context
+    statement): any other write keeps its own rules (a person, or the
+    project's policy). The
     record is the same one ``forge approvals`` writes for an agent decision:
     surface ``agent``, the agent, the person, unverified unless a verified
     principal is that person; on route ``delegated``.
     """
     from api_gateway.approvals.schemas import DecisionRecord
     from mcp_core.guardrails import (
+        delegable_human_authority,
         human_authority_delegated,
         release_delegated,
-        requires_human_authority,
         requires_release_delegation,
     )
 
@@ -833,7 +835,7 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
                 "(METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY is off)"
             ),
         )
-    elif not requires_human_authority(body.tool):
+    elif not delegable_human_authority(body.tool):
         raise HTTPException(
             status_code=422,
             detail=f"'{body.tool}' is not a human-authority tool; it is not delegated",
