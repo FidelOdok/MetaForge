@@ -389,7 +389,7 @@ In every mode:
   `session_id`. So a tool with no `project_id` argument, such as
   `cadquery.execute_script`, called with a handle bound to a project at
   `auto`, is decided by that project's policy, and a handle for another
-  project is decided by that other project's policy (FORGE-831). With no
+  project is decided by that other project's policy. With no
   argument, no handle and no session scope it names no project and is held.
 - Never approved by a policy: human-authority tools, destructive tools, and
   project, flow, run, approval, review, phase, session, library and vendor

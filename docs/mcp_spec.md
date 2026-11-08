@@ -260,7 +260,7 @@ caller they ride on a handle instead:
   session's scope; only an explicit `project_id` argument outranks it. The
   tool, the approval policy, a delegated decision and the approval key all
   see that project, so a tool with no `project_id` argument is decided by the
-  policy of the project the handle names (FORGE-831). A handshake client that
+  policy of the project the handle names. A handshake client that
   does not keep `Mcp-Session-Id` may pass a handle the same way; it is taken
   out and honoured, though only `2026-07-28` callers are minted one.
 - A handle is a session id, not a credential: it carries scope, never
