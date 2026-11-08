@@ -213,6 +213,13 @@ class _UnwrappingBridge:
 # ---------------------------------------------------------------------------
 
 
+def _is_board(wp: Any) -> bool:
+    """A revision that is a board's 3D export (``kicad.export_3d``), not a made part."""
+    from twin_core.dfm.release_checklist import is_board_body
+
+    return is_board_body(dict(getattr(wp, "metadata", None) or {}))
+
+
 def _bbox(raw: Any) -> list[float] | None:
     if not isinstance(raw, dict):
         return None
@@ -581,18 +588,25 @@ class ExactCadService:
 
     # -- validity --------------------------------------------------------
 
-    async def _validate(self, step: bytes, *, expect_solid: bool = True) -> dict[str, Any]:
-        """The adapter's verdict, or ``not_evaluated`` when it could not run."""
+    async def _validate(
+        self, step: bytes, *, expect_solid: bool = True, board: bool = False
+    ) -> dict[str, Any]:
+        """The adapter's verdict, or ``not_evaluated`` when it could not run.
+
+        ``board``: the STEP is a board's 3D export, a compound of many solids
+        placed as one body; it is judged as one (``cadquery.validate_shape``
+        with ``board``), not as a single made part.
+        """
         started = time.monotonic()
+        args: dict[str, Any] = {
+            "step_base64": base64.b64encode(step).decode("ascii"),
+            "expect_solid": expect_solid,
+        }
+        if board:
+            args["board"] = True
         try:
             result = _data(
-                await self._bridge.invoke(
-                    "cadquery.validate_shape",
-                    {
-                        "step_base64": base64.b64encode(step).decode("ascii"),
-                        "expect_solid": expect_solid,
-                    },
-                ),
+                await self._bridge.invoke("cadquery.validate_shape", args),
                 "cadquery.validate_shape",
             )
         except Exception as exc:  # noqa: BLE001 - no evidence is not a pass
@@ -619,6 +633,7 @@ class ExactCadService:
     @staticmethod
     def _validity_record(result: dict[str, Any], *, base: str | None) -> dict[str, Any]:
         keep = (
+            "body",
             "is_valid",
             "solid_count",
             "closed_solid_count",
@@ -809,7 +824,11 @@ class ExactCadService:
                 ],
             )
 
-            result = await self._validate(step)
+            # A board's 3D export (kicad.export_3d) is a compound of the board
+            # and every component model, placed in an assembly as one body.
+            board = _is_board(head)
+            span.set_attribute("exact.board", board)
+            result = await self._validate(step, board=board)
             validity = self._validity_record(result, base=ref)
             outcome = validity["outcome"]
             span.set_attribute("validity.outcome", outcome)
@@ -1129,7 +1148,7 @@ class ExactCadService:
             _record("record_cad_artifact_duration", "step_export", time.monotonic() - started)
 
             rt_started = time.monotonic()
-            reimport = await self._validate(written)
+            reimport = await self._validate(written, board=_is_board(wp))
             outcome, findings = compare_round_trip(exported.get("source"), reimport)
             if reimport.get("outcome") == ValidityOutcome.NOT_EVALUATED.value:
                 outcome = ValidityOutcome.NOT_EVALUATED.value

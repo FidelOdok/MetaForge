@@ -86,14 +86,25 @@ def _bridge_for(*, pre_volume: float, result_volume: float) -> _FakeBridge:
 
 
 class _WritingBridge(_FakeBridge):
-    """Also writes the declared output_path so perform_boolean_op can read it back."""
+    """Writes the result as the adapter does: into a folder of its own, returned as output_file.
+
+    The gateway names no output_path, because a folder it made may not be
+    writable by the adapter's uid.
+    """
 
     async def invoke(self, tool_id: str, params: dict) -> dict:
         result = await super().invoke(tool_id, params)
         if tool_id == "cadquery.boolean_operation":
             from pathlib import Path
 
-            Path(params["output_path"]).write_bytes(b"ISO-10303-21; result")
+            assert "output_path" not in params
+            # input_file_a is <workspace>/_boolean_cut/<id>/a.step
+            workspace = Path(params["input_file_a"]).parents[2]
+            out = workspace / "output" / "cadquery" / "boolean" / uuid4().hex / "a_subtract.step"
+            out.parent.mkdir(parents=True)
+            out.write_bytes(b"ISO-10303-21; result")
+            self.written = out
+            result = {**result, "output_file": str(out)}
         return result
 
 
@@ -168,6 +179,53 @@ class TestPerformBooleanOp:
         )
 
         assert list((tmp_path / "_boolean_cut").iterdir()) == []
+        # The adapter's own result folder is removed too, and nothing else.
+        assert not bridge.written.parent.exists()
+        assert (tmp_path / "output" / "cadquery" / "boolean").is_dir()
+
+    async def test_result_is_read_from_the_path_the_adapter_returns(self, tmp_path) -> None:
+        twin = InMemoryTwinAPI.create()
+        target_id, cutter_id = await _seed_pair(twin, tmp_path)
+        bridge = _WritingBridge(_bridge_for(pre_volume=1000.0, result_volume=800.0).responses)
+        recorder = _fake_recorder(str(uuid4()))
+
+        await boolean_ops.perform_boolean_op(
+            twin=twin,
+            bridge=bridge,
+            recorder=recorder,
+            target_node_id=target_id,
+            cutter_node_id=cutter_id,
+            operation="subtract",
+            workspace_dir=tmp_path,
+        )
+
+        import base64
+
+        committed = base64.b64decode(recorder.calls[0]["step_base64"])
+        assert committed == b"ISO-10303-21; result"
+
+    async def test_no_output_file_from_the_adapter_commits_nothing(self, tmp_path) -> None:
+        twin = InMemoryTwinAPI.create()
+        target_id, cutter_id = await _seed_pair(twin, tmp_path)
+        # The adapter answered but names a file that is not there.
+        responses = _bridge_for(pre_volume=1000.0, result_volume=800.0).responses
+        responses["cadquery.boolean_operation"] = {
+            **responses["cadquery.boolean_operation"],
+            "output_file": str(tmp_path / "output" / "missing.step"),
+        }
+        recorder = _fake_recorder(str(uuid4()))
+
+        with pytest.raises(boolean_ops.BooleanOpError, match="could not be read"):
+            await boolean_ops.perform_boolean_op(
+                twin=twin,
+                bridge=_FakeBridge(responses),
+                recorder=recorder,
+                target_node_id=target_id,
+                cutter_node_id=cutter_id,
+                operation="subtract",
+                workspace_dir=tmp_path,
+            )
+        assert recorder.calls == []
 
     async def test_no_overlap_raises_and_commits_nothing(self, tmp_path) -> None:
         twin = InMemoryTwinAPI.create()

@@ -108,12 +108,16 @@ async def perform_boolean_op(
         cutter = await _get_node(twin, cutter_node_id, "cutter")
 
         root = workspace_dir or Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
+        # The scratch folder holds the two inputs, which the adapter only
+        # reads. The result is not written here: this folder belongs to this
+        # process's user, which the adapter's (uid 1000) may not be, so the
+        # adapter writes the result into a folder of its own and returns it.
         scratch = root / "_boolean_cut" / str(uuid4())
         scratch.mkdir(parents=True, exist_ok=True)
+        result_path: Path | None = None
         try:
             target_path = scratch / "a.step"
             cutter_path = scratch / "b.step"
-            result_path = scratch / "result.step"
 
             target_content, _ = resolve_work_product_blob(target)
             cutter_content, _ = resolve_work_product_blob(cutter)
@@ -135,9 +139,18 @@ async def perform_boolean_op(
                     "input_file_a": str(target_path),
                     "input_file_b": str(cutter_path),
                     "operation": operation,
-                    "output_path": str(result_path),
                 },
             )
+            output_file = result.get("output_file")
+            if isinstance(output_file, str) and output_file:
+                from api_gateway.twin.design_files_recorder import resolve_in_workspace
+
+                try:
+                    result_path = resolve_in_workspace(output_file, root)
+                except ValueError as exc:
+                    raise BooleanOpError(
+                        f"cadquery.boolean_operation's output could not be read: {exc}"
+                    ) from exc
             result_volume = result.get("result_volume")
             result_area = result.get("result_area")
 
@@ -154,12 +167,15 @@ async def perform_boolean_op(
             ):
                 raise NoOverlapError("Cutter does not intersect the target — nothing was committed")
 
-            if not result_path.exists():
+            if result_path is None or not result_path.is_file():
                 raise BooleanOpError("cadquery.boolean_operation produced no output file")
+            step_bytes = result_path.read_bytes()
+            if not step_bytes:
+                raise BooleanOpError("cadquery.boolean_operation produced an empty output file")
 
             import base64
 
-            step_b64 = base64.b64encode(result_path.read_bytes()).decode("ascii")
+            step_b64 = base64.b64encode(step_bytes).decode("ascii")
             name = result_name or f"{target.name} {operation}"
 
             rec = await recorder(
@@ -220,3 +236,11 @@ async def perform_boolean_op(
             }
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
+            if result_path is not None:
+                # The adapter's result and, once empty, its folder: scratch,
+                # so best effort. Never a tree: only what this call made.
+                for remove in (result_path.unlink, result_path.parent.rmdir):
+                    try:
+                        remove()
+                    except OSError:
+                        break

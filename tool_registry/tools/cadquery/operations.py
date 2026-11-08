@@ -74,13 +74,14 @@ except ImportError:
     HAS_CADQUERY = False
 
 
-def _export_shape(obj: Any, output_path: str) -> None:
+def _export_shape(obj: Any, output_path: str, tool: str = "cadquery export") -> None:
     """Export ``obj`` to ``output_path``; a STEP keeps its solids as solids.
 
     ``cq.exporters.export`` can write a shelled solid as a bare shell (see
     :func:`validity.step_shape`), which then reads back with no solid and
     fails the validity check, so STEP goes through :func:`validity.write_step`.
-    Every other format is unchanged.
+    Every other format is unchanged. The file must exist and be non-empty
+    afterwards (:func:`require_written`).
     """
     if output_path.lower().endswith((".step", ".stp")):
         from tool_registry.tools.cadquery.validity import write_step
@@ -88,6 +89,65 @@ def _export_shape(obj: Any, output_path: str) -> None:
         write_step(cq, obj, output_path)
     else:
         cq.exporters.export(obj, output_path)
+    require_written(output_path, tool)
+
+
+class OutputWriteError(RuntimeError):
+    """An export reported no error but left no file, or an empty one.
+
+    OCCT's STEP writers return a status instead of raising, and CadQuery's
+    ``Assembly.save`` and ``Shape.exportStep`` ignore it, so a folder this
+    process cannot write into used to produce a "created" log line and no
+    file. Every export now checks what it wrote.
+    """
+
+
+def _write_problem(folder: str) -> str:
+    """Why this process may not be able to write into ``folder``, or ``""``."""
+    if not os.path.isdir(folder):
+        return f"the folder {folder!r} does not exist"
+    if not os.access(folder, os.W_OK):
+        try:
+            st = os.stat(folder)
+            owner = f" (owned by uid {st.st_uid}, mode {oct(st.st_mode & 0o7777)})"
+        except OSError:
+            owner = ""
+        uid = os.getuid() if hasattr(os, "getuid") else "?"
+        return f"the folder {folder!r}{owner} is not writable by this adapter (uid {uid})"
+    return ""
+
+
+def require_written(path: str, tool: str) -> int:
+    """The size of ``path``; raise :class:`OutputWriteError` if it is missing or empty."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = -1
+    if size > 0:
+        return size
+    folder = os.path.dirname(os.path.abspath(path))
+    why = _write_problem(folder) or (
+        "the file is empty" if size == 0 else "the writer raised no error but left no file"
+    )
+    logger.error("cadquery_output_not_written", tool=tool, output_path=path, reason=why)
+    raise OutputWriteError(
+        f"{tool}: the output {path!r} was not written: {why}. Omit output_path to let the "
+        "adapter write into a new folder of its own and return its path."
+    )
+
+
+def require_writable_folder(path: str, tool: str) -> None:
+    """Refuse, before any work, an output path whose folder this process cannot write."""
+    why = _write_problem(os.path.dirname(os.path.abspath(path)))
+    if why:
+        logger.error("cadquery_output_folder_not_writable", tool=tool, output_path=path, reason=why)
+        raise OutputWriteError(
+            f"{tool}: cannot write {path!r}: {why}. Omit output_path to let the adapter "
+            "write into a new folder of its own and return its path."
+        )
+
+
+_ASSEMBLY_TOOL = "cadquery.create_assembly"
 
 
 class CadqueryNotAvailableError(RuntimeError):
@@ -1099,7 +1159,7 @@ class CadqueryOperations:
                 props["mass_kg"] = round(
                     props["volume_mm3"] * _MM3_TO_M3 * resolve_density_kg_m3(material), 6
                 )
-            _export_shape(workplane, output_path)
+            _export_shape(workplane, output_path, "cadquery.create_parametric")
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
@@ -1232,7 +1292,7 @@ class CadqueryOperations:
                 )
             self._ensure_output_dir(output_path)
 
-            _export_shape(result, output_path)
+            _export_shape(result, output_path, "cadquery.boolean_operation")
             props = self._get_shape_properties(result)
 
             elapsed = time.monotonic() - start
@@ -1349,7 +1409,7 @@ class CadqueryOperations:
                 write_step(cq, shape, output_path)
             else:
                 cq.exporters.export(shape, output_path, exportType=output_format.upper())
-            file_size = os.path.getsize(output_path)
+            file_size = require_written(output_path, "cadquery.export_geometry")
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
@@ -1491,6 +1551,7 @@ class CadqueryOperations:
                 exportType=mesh_format.upper(),
                 **_stl_export_kwargs(mesh_format, mesh_tolerance, mesh_angular_tolerance),
             )
+            require_written(mesh_path, "cadquery.export_urdf")
             mesh_uri = mesh_uri_prefix + os.path.basename(mesh_path)
 
             urdf_xml = _build_single_link_urdf(
@@ -1617,6 +1678,7 @@ class CadqueryOperations:
                     exportType=mesh_format.upper(),
                     **_stl_export_kwargs(mesh_format, mesh_tolerance, mesh_angular_tolerance),
                 )
+                require_written(mesh_path, "cadquery.export_urdf_assembly")
                 mesh_files.append(mesh_path)
                 color_rgba = part.get("color_rgba")
                 links.append(
@@ -1721,6 +1783,7 @@ class CadqueryOperations:
                 exportType=mesh_format.upper(),
                 **_stl_export_kwargs(mesh_format, mesh_tolerance, mesh_angular_tolerance),
             )
+            require_written(mesh_path, "cadquery.export_sdf")
             resolved_mesh_uri = mesh_uri or os.path.basename(mesh_path)
 
             sdf_xml = _build_single_link_sdf(
@@ -1825,6 +1888,7 @@ class CadqueryOperations:
                     exportType=mesh_format.upper(),
                     **_stl_export_kwargs(mesh_format, mesh_tolerance, mesh_angular_tolerance),
                 )
+                require_written(mesh_path, "cadquery.export_sdf_assembly")
                 mesh_files.append(mesh_path)
                 links.append(
                     {
@@ -1918,6 +1982,7 @@ class CadqueryOperations:
                 exportType="STL",
                 **_stl_export_kwargs("stl", mesh_tolerance, mesh_angular_tolerance),
             )
+            require_written(mesh_path, "cadquery.export_usd")
 
             points, face_vertex_indices, face_vertex_counts = parse_stl_mesh(mesh_path)
 
@@ -2021,6 +2086,7 @@ class CadqueryOperations:
                     exportType="STL",
                     **_stl_export_kwargs("stl", mesh_tolerance, mesh_angular_tolerance),
                 )
+                require_written(mesh_path, "cadquery.export_usd_assembly")
                 mesh_files.append(mesh_path)
                 points, face_vertex_indices, face_vertex_counts = parse_stl_mesh(mesh_path)
                 links.append(
@@ -2319,7 +2385,16 @@ class CadqueryOperations:
                 mm; rx, ry, rz in degrees, applied about the part's own origin in X then
                 Y then Z order, before the translation).
             constraints: Assembly constraints (name, type, args).
-            output_path: Output STEP file path.
+            output_path: Output STEP file path, inside the work folder. Omitted,
+                the assembly is written to a new folder this process creates
+                (``output/cadquery/assembly/<id>/assembly.step``), and the
+                path is returned as ``assembly_file``. A caller that shares the
+                work folder as another user should omit it: a folder that
+                caller made may not be writable here.
+
+        The file must exist and be non-empty after the write, or
+        :class:`OutputWriteError` is raised; "created" is never logged
+        without it.
 
         FORGE-547: ``interference_check_passed`` used to be ``True`` whatever
         the parts did, and rotations were dropped. Every pair of placed parts
@@ -2332,9 +2407,22 @@ class CadqueryOperations:
         with tracer.start_as_current_span("cadquery.create_assembly") as span:
             start = time.monotonic()
 
-            if not output_path:
-                output_path = os.path.join(self.work_dir, "assembly.step")
+            # Check the destination before any work. Unnamed, the assembly goes
+            # to a new folder this process creates, so it can always write it;
+            # a named path must be inside the work folder.
+            if output_path:
+                output_path = self._confined_output_path(output_path, _ASSEMBLY_TOOL)
+            else:
+                output_path = os.path.join(
+                    self.work_dir,
+                    "output",
+                    "cadquery",
+                    "assembly",
+                    uuid.uuid4().hex,
+                    "assembly.step",
+                )
             self._ensure_output_dir(output_path)
+            require_writable_folder(output_path, _ASSEMBLY_TOOL)
 
             assy = cq.Assembly()
             total_volume = 0.0
@@ -2365,6 +2453,8 @@ class CadqueryOperations:
             span.set_attribute("assembly.interferences", len(interferences))
 
             assy.save(output_path)
+            # Assembly.save ignores the STEP writer's status: check the file.
+            size = require_written(output_path, _ASSEMBLY_TOOL)
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
@@ -2379,6 +2469,7 @@ class CadqueryOperations:
             # actually supplies one (never fabricated).
             result: dict[str, Any] = {
                 "assembly_file": output_path,
+                "file_size_bytes": size,
                 "part_count": len(parts),
                 "total_volume": round(total_volume, 2),
                 "volume_mm3": round(total_volume, 2),
@@ -2393,6 +2484,7 @@ class CadqueryOperations:
                 "Assembly created",
                 part_count=len(parts),
                 output_path=output_path,
+                file_size_bytes=size,
                 total_volume_mm3=round(total_volume, 2),
                 mass_kg=result.get("mass_kg"),
                 duration_s=round(elapsed, 3),
@@ -2509,7 +2601,7 @@ class CadqueryOperations:
                 props["mass_kg"] = round(
                     props["volume_mm3"] * _MM3_TO_M3 * resolve_density_kg_m3(material), 6
                 )
-            _export_shape(enclosure, output_path)
+            _export_shape(enclosure, output_path, "cadquery.generate_enclosure")
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))

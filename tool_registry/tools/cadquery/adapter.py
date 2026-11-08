@@ -1020,7 +1020,12 @@ class CadqueryServer(McpToolServer):
                         },
                         "output_path": {
                             "type": "string",
-                            "description": "Output STEP file path",
+                            "description": (
+                                "Output STEP file path inside the adapter's work folder. "
+                                "Omit it to have the adapter write into a new folder of "
+                                "its own; the path is returned as assembly_file. The "
+                                "call fails if the file is not written."
+                            ),
                         },
                         "material": {
                             "type": "string",
@@ -1287,6 +1292,7 @@ class CadqueryServer(McpToolServer):
         _measures = {
             "outcome": {"type": "string", "enum": ["pass", "warn", "fail", "not_evaluated"]},
             "findings": {"type": "array", "items": {"type": "object"}},
+            "body": {"type": "string", "enum": ["part", "board"]},
             "is_valid": {"type": ["boolean", "null"]},
             "solid_count": {"type": "integer"},
             "closed_solid_count": {"type": "integer"},
@@ -1307,7 +1313,11 @@ class CadqueryServer(McpToolServer):
                     "least one solid when one is expected, every solid closed, every "
                     "solid's volume above zero, and no free edges on a solid. Returns "
                     "outcome pass, warn, fail or not_evaluated with one finding per "
-                    "check; a check that could not run is never a pass. Read-only."
+                    "check; a check that could not run is never a pass. With board "
+                    "true the STEP is a board's 3D export (kicad.export_3d), a compound "
+                    "of many solids placed as one body: it needs a solid with a volume, "
+                    "and BRepCheck, closed solids and free edges are recorded as info "
+                    "findings. Read-only."
                 ),
                 capability="cad_analysis",
                 input_schema={
@@ -1316,6 +1326,11 @@ class CadqueryServer(McpToolServer):
                         "step_base64": {"type": "string", "description": "The STEP file, base64."},
                         "expect_solid": {"type": "boolean", "default": True},
                         "expect_single_solid": {"type": "boolean", "default": False},
+                        "board": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Judge it as a board's 3D export (a compound).",
+                        },
                     },
                     "required": ["step_base64"],
                 },
@@ -1553,6 +1568,7 @@ class CadqueryServer(McpToolServer):
             work_dir=self.config.work_dir,
             expect_solid=bool(arguments.get("expect_solid", True)),
             expect_single_solid=bool(arguments.get("expect_single_solid", False)),
+            board=bool(arguments.get("board", False)),
         )
 
     async def export_step(self, arguments: dict[str, Any]) -> dict[str, Any]:

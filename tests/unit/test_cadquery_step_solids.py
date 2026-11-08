@@ -147,6 +147,8 @@ def test_the_adapter_routes_step_through_write_step(
     seen: list[str] = []
     monkeypatch.setattr(validity_module, "write_step", lambda _cq, _o, p: seen.append(p) or 1)
     monkeypatch.setattr(operations_module, "cq", _StubCq)
+    # The stub writer writes nothing; the written-file check is tested on its own.
+    monkeypatch.setattr(operations_module, "require_written", lambda _p, _t: 1)
     operations_module._export_shape(object(), "/w/out.step")  # noqa: SLF001
     operations_module._export_shape(object(), "/w/out.STP")  # noqa: SLF001
     assert seen == ["/w/out.step", "/w/out.STP"]

@@ -313,8 +313,14 @@ class FitCad:
     async def invoke_tool(self, tool_id: str, params: dict[str, Any]) -> dict[str, Any]:
         self.calls.append((tool_id, params))
         if tool_id == "cadquery.create_assembly":
-            Path(params["output_path"]).write_bytes(STEP)
-            return {"assembly_file": params["output_path"], "interferences": []}
+            # As the adapter does: no output_path from the gateway, so it
+            # writes into a folder of its own and returns the path.
+            assert "output_path" not in params
+            workspace = Path(params["parts"][0]["file"]).parents[2]
+            out = workspace / "output" / "cadquery" / "assembly" / str(len(self.calls))
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "assembly.step").write_bytes(STEP)
+            return {"assembly_file": str(out / "assembly.step"), "interferences": []}
         assert tool_id == "cadquery.check_interference"
         bodies = [
             Body(p["name"], "", matrix_from(p["matrix"]), box=self.boxes[Path(p["file"]).stem])
