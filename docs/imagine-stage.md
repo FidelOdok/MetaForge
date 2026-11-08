@@ -233,7 +233,13 @@ ready, then Develop, Check and Make, recording each delegated decision with
 **After the handover, to a release.** Check and Make use tools that take a
 reference, never file bytes:
 
-1. Measure each validated part with `twin.evaluate_dfm` (it measures every
+1. State the machine the parts are made on with
+   `twin.state_manufacturing_context` (`machine_or_supplier_profile`, for
+   example "Bambu Lab P1S"). A delegated agent states it for the person; a
+   machine the library holds is linked, so DFM assesses each part against
+   its limits
+   ([stating the manufacturing context](approvals.md#stating-the-manufacturing-context)).
+   Then measure each validated part with `twin.evaluate_dfm` (it measures every
    part with no exact analysis yet) or `twin.measure_dfm` with its
    `item_key`; the gateway reads the STEP from the twin
    ([measuring by reference](twin_schema.md#dfm-by-reference)).

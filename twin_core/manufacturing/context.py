@@ -216,6 +216,13 @@ class Provenance(BaseModel):
     actor: str = Field("", max_length=200)
     #: What it points at: a decision node id, a run id, a library entry.
     ref: str | None = Field(None, max_length=300)
+    #: The person an agent stated this for, when the gateway owner delegates
+    #: human authority to agents. ``actor`` is then ``agent:<name>``: the
+    #: value is the agent's statement on that person's behalf, never the
+    #: person's own.
+    on_behalf_of: str | None = Field(None, max_length=200)
+    #: How the statement was authorised: ``delegated`` for the above.
+    route: str | None = Field(None, max_length=40)
 
 
 class ContextField(BaseModel):

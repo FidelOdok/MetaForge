@@ -4489,7 +4489,12 @@ class TwinServer(McpToolServer):
                     "target_cost, lead_time and machine_or_supplier_profile are never "
                     "assumed. statement 'user_stated': only when a person approved this "
                     "call (the approver is recorded, never a name you supply); otherwise "
-                    "refused. A decision comes only from twin.record_decision. Writes the "
+                    "refused. Where the gateway owner delegates human authority and the "
+                    "request names the agent and the person it acts for, the agent states "
+                    "those fields (and a user_stated call) for that person, recorded as "
+                    "the agent's statement on their behalf; a machine the library holds "
+                    "is linked so DFM reads its limits. "
+                    "A decision comes only from twin.record_decision. Writes the "
                     "conflict rule refuses are returned and kept. print_orientation is "
                     "{build_direction: [x, y, z], rotation_deg} or an axis such as '+Z'; "
                     "exact FDM DFM reads it. Changing process, material, quantity, machine, "
@@ -4653,6 +4658,10 @@ class TwinServer(McpToolServer):
                 # Set by the dispatcher when a person approved this call; a
                 # client-supplied value was stripped before it got here.
                 approved_by=arguments.get(APPROVED_BY_ARG),
+                # Set by the dispatcher beside the approver when the owner
+                # delegates human authority and the agent named itself and the
+                # person: the value is then the agent's, stated for the person.
+                delegated_agent=arguments.get(DELEGATED_AGENT_ARG),
                 notes=dict(notes or {}),
                 change_reason=str(reason or "")[:300],
                 expected_revision=expected,

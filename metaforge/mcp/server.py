@@ -77,6 +77,7 @@ from mcp_core.guardrails import (
     HumanAuthorityRequiredError,
     ReleaseNotDelegatedError,
     decide,
+    delegable_human_authority,
     human_authority_delegated,
     never_auto_approved,
     records_approver,
@@ -2686,7 +2687,8 @@ class UnifiedMcpServer:
 
         FORGE-827. All of these must hold, or the call is held as before:
 
-        * the tool is human-authority (any other write keeps its own rules);
+        * the tool is human-authority, or records the approving person
+          (any other write keeps its own rules);
         * this process delegates human authority
           (``METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY``), and so does the gateway
           that records it (it refuses otherwise);
@@ -2700,6 +2702,12 @@ class UnifiedMcpServer:
         same record ``forge approvals`` writes for an agent decision. This is
         delegation, not policy: no project policy approves these tools.
 
+        A tool that records the approving person (``APPROVER_RECORDED``, the
+        manufacturing context statement) is delegated by the human-authority
+        flag too, and carries the agent in :data:`DELEGATED_AGENT_ARG`, so a
+        value only a person could state is recorded as the agent's, for that
+        person.
+
         FORGE-834: the release steps (``twin.create_baseline``,
         ``twin.approve_release``) follow the same rules under their own flag,
         ``METAFORGE_ALLOW_AGENT_RELEASE``. The human-authority flag does not
@@ -2711,7 +2719,7 @@ class UnifiedMcpServer:
         if release:
             if not release_delegated():
                 return None
-        elif not requires_human_authority(tool_id) or not human_authority_delegated():
+        elif not delegable_human_authority(tool_id) or not human_authority_delegated():
             return None
         from mcp_core.context import current_context
 
@@ -2784,10 +2792,13 @@ class UnifiedMcpServer:
         approved = await self._approved(
             tool_id, caller, "delegated", resolution, 0.0, None, call_id
         )
-        if release:
+        if release or records_approver(tool_id):
             # The tool reads the agent from here, set only on this path, so a
-            # release step records who decided it: the agent, for the person.
+            # release step, or a statement only the person could make (the
+            # machine in the manufacturing context), records who decided it:
+            # the agent, for the person.
             arguments[DELEGATED_AGENT_ARG] = agent
+        if release:
             logger.info(
                 "mcp_release_delegated",
                 tool_id=tool_id,

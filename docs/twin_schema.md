@@ -2011,11 +2011,12 @@ rule refused (`refused_fields`), which assumptions went stale
 #### Fields, authority and provenance
 
 `twin_core/manufacturing/context.py` holds the record. Each field is a value
-with an `authority` and a `provenance` (`source`, `at`, `actor`, `ref`):
+with an `authority` and a `provenance` (`source`, `at`, `actor`, `ref`, and
+for a delegated statement `on_behalf_of` and `route`):
 
 | Authority | Meaning |
 |-----------|---------|
-| `user_stated` | a person said so: the Create brief or route, `PUT .../manufacturing-context`, or a design flow proposal's stated context |
+| `user_stated` | a person said so: the Create brief or route, `PUT .../manufacturing-context`, or a design flow proposal's stated context; or an agent said so for a person, where the gateway owner delegates human authority (actor `agent:<name>`, `on_behalf_of` the person, route `delegated`) |
 | `decision` | a `manufacturing_route` (and its `process_ranking`) design decision recorded outside a design-flow run, or one a run's gate approved |
 | `assumption` | proposed by MetaForge, or by an agent; shown as "may change", never as a constraint |
 | `unknown` | not known; listed as a gap |
@@ -2027,7 +2028,7 @@ with an `authority` and a `provenance` (`source`, `at`, `actor`, `ref`):
 | `process_candidates`, `selected_process` | candidate processes and the chosen one |
 | `material_candidates`, `selected_material` | candidate materials and the chosen one |
 | `quantity`, `target_cost`, `lead_time` | commercial targets; a cost is `{amount, currency, text}` and an amount needs its currency, a lead time is `{days, text}` |
-| `machine_or_supplier_profile` | `{machine, machine_id, supplier, description}` as stated |
+| `machine_or_supplier_profile` | `{machine, machine_id, supplier, description}` as stated. Through `twin.state_manufacturing_context`, a bare name is the machine, and a machine the machine library holds is linked by `machine_id` with its library name, so DFM reads its limits |
 | `dimensional_envelope`, `tolerances`, `finish`, `assembly`, `fastening` | dimensional, appearance and joining requirements |
 | `applicable_rules`, `evidence` | rule profile and validation provenance |
 | `print_orientation` | how the part sits on the build plate for an additive process: `{build_direction: [x, y, z], rotation_deg}`, the direction the layers stack along in the part's own frame (scaled to unit length) and an optional turn about it in degrees. Stated as a vector or an axis name (`+Z`, `-Y`). `user_stated` or `assumption`, never `decision`. Exact FDM DFM reads it (see [exact DFM](#exact-dfm)); a component's own record holds its own orientation |
@@ -2157,6 +2158,19 @@ twin write). The write takes `fields`, `notes`, `change_reason`,
   project policy's automatic approval (which names no person), the call is
   refused with the reason. The tool is not a human-authority tool: a
   service or a local session can still propose.
+- delegated: where the gateway owner delegates human authority
+  (`METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY`) and the MCP request names the
+  agent and the person (`X-MetaForge-Agent`, `X-MetaForge-On-Behalf-Of`, the
+  person matching a verified principal), the call is recorded as a delegated
+  approval and the dispatcher hands the tool the agent too (the reserved
+  `__delegated_agent__` argument, stripped from whatever a client sends). The
+  never-assumed fields of a proposal, and every field of a `user_stated`
+  call, are then stored `user_stated` with source `mcp_delegated`, actor
+  `agent:<name>`, `on_behalf_of` the person and route `delegated`; the
+  result's `stated_by`, `on_behalf_of` and `route` say the same. Other
+  proposal fields stay assumptions. Without the flag or either header the
+  rules above apply unchanged (see
+  [stating the manufacturing context](approvals.md#stating-the-manufacturing-context)).
 
 A `decision` never comes from this tool; it comes from `twin.record_decision`
 with a `manufacturing_route`, as above.
