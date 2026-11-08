@@ -207,6 +207,101 @@ def test_an_existing_output_path_is_never_overwritten() -> None:
     assert "never overwritten" in error, error
 
 
+# -- outputs the adapter writes for the gateway --------------------------------
+#
+# The gateway and the MCP sidecar run as root and share /workspace with the
+# adapter (uid 1000). A folder they create there is root's, mode 0755: the
+# adapter can read what is in it but not write into it. An assembly the
+# gateway asked to be written into such a folder used to log "Assembly
+# created" over an empty folder. CADQUERY_ISOLATION_LIVE_AS_GATEWAY is a
+# command prefix that runs a command as root on the same /workspace volume,
+# as the gateway does (CI: docker run --user 0 --volumes-from the adapter).
+
+AS_GATEWAY = shlex.split(os.environ.get("CADQUERY_ISOLATION_LIVE_AS_GATEWAY", ""))
+needs_gateway = pytest.mark.skipif(
+    not AS_GATEWAY, reason="needs CADQUERY_ISOLATION_LIVE_AS_GATEWAY (see above)"
+)
+
+
+def _tool(tool_id: str, arguments: dict[str, Any], timeout: float = 180) -> tuple[Any, str]:
+    """Call any tool; return (data, error message)."""
+    import httpx
+
+    body = {
+        "jsonrpc": "2.0",
+        "id": uuid.uuid4().hex,
+        "method": "tool/call",
+        "params": {"tool_id": tool_id, "arguments": arguments},
+    }
+    response = httpx.post(URL, json=body, timeout=timeout)
+    payload = response.json()
+    if "error" in payload:
+        err = payload["error"]
+        return {}, f"{err.get('message', '')} {json.dumps(err.get('data', ''))}"
+    return payload["result"]["data"], ""
+
+
+def _as_gateway(script: str) -> None:
+    done = subprocess.run(  # noqa: S603
+        [*AS_GATEWAY, "sh", "-c", script], capture_output=True, text=True, timeout=120, check=False
+    )
+    assert done.returncode == 0, done.stderr
+
+
+@needs_gateway
+def test_an_assembly_of_gateway_staged_parts_is_written_where_the_adapter_can() -> None:
+    parts = []
+    for size in (10, 20):
+        data, error = _script(f"result = cq.Workplane().box({size}, {size}, 5)")
+        assert not error, error
+        parts.append(data["cad_file"])
+    run = uuid.uuid4().hex[:12]
+    staged = f"/workspace/_staged_work_products/{run}"
+    gateway_folder = f"/workspace/_assemblies/{run}"
+    _as_gateway(
+        f"mkdir -p {staged} {gateway_folder} && "
+        f"cp {parts[0]} {staged}/base.step && cp {parts[1]} {staged}/cover.step"
+    )
+    owner = _in_container("stat", "-c", "%u %a", gateway_folder).stdout.split()
+    assert owner == ["0", "755"], owner
+    placed = [
+        {"name": "base", "file": f"{staged}/base.step"},
+        {"name": "cover", "file": f"{staged}/cover.step", "location": {"z": 5}},
+    ]
+
+    # What the gateway does now: no output_path; the adapter picks the folder.
+    data, error = _tool("cadquery.create_assembly", {"parts": placed})
+    assert not error, error
+    written = data["assembly_file"]
+    assert written.startswith("/workspace/output/cadquery/assembly/"), written
+    assert _in_container("test", "-s", written).returncode == 0
+    assert data["file_size_bytes"] > 0
+
+    # What it did before: a folder the adapter cannot write. Now an error.
+    target = f"{gateway_folder}/desk-lamp-assembly.step"
+    _, error = _tool("cadquery.create_assembly", {"parts": placed, "output_path": target})
+    assert "not writable by this adapter" in error, error
+    assert not _exists(target)
+
+
+def test_a_board_sized_step_validates_as_one_compound_body() -> None:
+    """A KiCad board export is a few MB of STEP: over aiohttp's 1 MiB default."""
+    data, error = _script(
+        # About 0.8 KB of base64 per box (CI measured 900 boxes at 0.7 MB).
+        "result = cq.Workplane('XY').rarray(3, 3, 70, 70).box(2, 2, 1.6, combine=False)",
+        timeout=240,
+    )
+    assert not error, error
+    step_b64 = data["step_base64"]
+    assert len(step_b64) > 1.5 * 1024 * 1024, len(step_b64)  # over the old 1 MiB
+
+    out, error = _tool("cadquery.validate_shape", {"step_base64": step_b64, "board": True})
+    assert not error, error
+    assert out["outcome"] == "pass", out["findings"]
+    assert out["body"] == "board"
+    assert out["solid_count"] == 4900
+
+
 def test_the_adapter_is_still_healthy() -> None:
     import httpx
 

@@ -103,6 +103,7 @@ class FakeCad:
         self.validate_raises = False
         self.reimport_volume: float | None = None
         self.on_execute: Any = None
+        self.board_validations = 0
 
     def _measures(self) -> dict[str, Any]:
         return {"solid_count": 1, "volume_mm3": 1000.0, "bounding_box": dict(BOX_BBOX)}
@@ -138,6 +139,10 @@ class FakeCad:
             }
             if "EXPORTED" in text and self.reimport_volume is not None:
                 out["volume_mm3"] = self.reimport_volume
+            if params.get("board"):
+                # A board's 3D export, judged as one compound body (validity.classify).
+                self.board_validations += 1
+                out = {**out, "outcome": "pass", "body": "board", "solid_count": 214}
             return out
         if tool_id == "cadquery.export_step":
             body = base64.b64decode(params["step_base64"]).decode()
@@ -428,6 +433,48 @@ async def test_without_a_source_the_head_is_validated_in_place(h: Harness) -> No
     again = await h.service.build(project_id=PROJECT, item_key=v1["item_key"])
     assert again["already_validated"] is True
     assert len(h.cad.calls) == calls
+
+
+async def test_a_board_3d_export_is_validated_as_one_compound_body(h: Harness) -> None:
+    """A board's 3D export (kicad.export_3d) is many solids placed as one body.
+
+    Judged as a single made part it never validated, so it stayed
+    exact_ready and twin.export_cad_step refused it.
+    """
+    content = _step("board")
+    exact_cad_module._cache_put(content)  # noqa: SLF001
+    board = dict(
+        await h.record(
+            step_base64=_b64(content),
+            name="Driver PCB 3D model",
+            project_id=PROJECT,
+            source_tool="kicad.export_3d",
+            extra_metadata={"board_ref": "PCB-DRIVER@1"},
+        )
+    )
+    h.cad.validity = "fail"  # what the single-part rules said of a board
+    job = await h.run_build(board["item_key"])
+    assert job.status == "succeeded", job.error
+    head = await h.node(board["node_id"])
+    assert head.metadata["geometry_state"] == "validated"
+    validity = head.metadata["validity"]
+    assert validity["body"] == "board"
+    assert validity["solid_count"] == 214
+    assert h.cad.board_validations == 1
+
+    # And its STEP exports, re-imported as a board too.
+    reply = await h.service.start_export(node_id=board["node_id"], session_id="s")
+    done = await h.runner.wait(reply["job_id"], 5.0)
+    assert done.status == "succeeded", done.error
+    assert h.cad.board_validations == 2
+
+
+async def test_a_made_part_is_not_validated_as_a_board(h: Harness) -> None:
+    v1 = await h.part()
+    h.cad.validity = "fail"
+    job = await h.run_build(v1["item_key"])
+    assert job.status == "failed"
+    assert h.cad.board_validations == 0
 
 
 async def test_a_build_behind_the_head_ends_stale_before_any_work(h: Harness) -> None:

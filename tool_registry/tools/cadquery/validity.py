@@ -24,6 +24,7 @@ kernel.
 from __future__ import annotations
 
 import base64
+import math
 import os
 import re
 import tempfile
@@ -43,6 +44,9 @@ PASS = "pass"
 WARN = "warn"
 FAIL = "fail"
 NOT_EVALUATED = "not_evaluated"
+#: A finding recorded for the reader that does not decide the verdict (a
+#: board's 3D export: see :func:`classify`).
+INFO = "info"
 
 #: ``CADQUERY_STEP_SCHEMA`` value -> OCCT ``write.step.schema`` value.
 STEP_SCHEMAS: dict[str, str] = {"AP214": "AP214IS", "AP242": "AP242DIS"}
@@ -50,7 +54,7 @@ STEP_SCHEMA_ENV = "CADQUERY_STEP_SCHEMA"
 DEFAULT_STEP_SCHEMA = "AP214"
 KERNEL = "OCCT via CadQuery"
 
-_RANK = {PASS: 0, NOT_EVALUATED: 1, WARN: 2, FAIL: 3}
+_RANK = {PASS: 0, INFO: 0, NOT_EVALUATED: 1, WARN: 2, FAIL: 3}
 
 
 def configured_schema(env: dict[str, str] | None = None) -> str:
@@ -79,9 +83,20 @@ def _finding(check: str, outcome: str, detail: str) -> dict[str, str]:
 
 
 def classify(
-    measures: dict[str, Any], *, expect_solid: bool = True, expect_single_solid: bool = False
+    measures: dict[str, Any],
+    *,
+    expect_solid: bool = True,
+    expect_single_solid: bool = False,
+    board: bool = False,
 ) -> tuple[str, list[dict[str, str]]]:
     """``(outcome, findings)`` from a shape's measures. Pure.
+
+    ``board``: the STEP is a board's 3D export (``kicad.export_3d``), a
+    compound of many solids (the board and every component model) placed in
+    an assembly as one body. It needs at least one solid with a volume; the
+    component models KiCad ships are often open shells or carry free edges,
+    which say nothing about the board, so those checks are recorded as
+    ``info`` findings and do not decide the verdict.
 
     ``measures`` keys: ``is_valid`` (bool or None when BRepCheck could not
     run), ``solid_count``, ``closed_solid_count``, ``solid_volumes_mm3``
@@ -90,6 +105,8 @@ def classify(
     ``warn``; else anything not evaluated is ``not_evaluated``; only a full
     set of passing checks is ``pass``.
     """
+    if board:
+        return _classify_board(measures)
     findings: list[dict[str, str]] = []
     is_valid = measures.get("is_valid")
     if is_valid is None:
@@ -142,6 +159,55 @@ def classify(
 
     outcome = max((f["outcome"] for f in findings), key=lambda o: _RANK[o], default=NOT_EVALUATED)
     return outcome, findings
+
+
+def _classify_board(measures: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+    """:func:`classify` for a board's 3D export. Pure."""
+    solids = int(measures.get("solid_count") or 0)
+    closed = int(measures.get("closed_solid_count") or 0)
+    volumes = [float(v) for v in measures.get("solid_volumes_mm3") or []]
+    total = sum(v for v in volumes if v > 0.0)
+    findings: list[dict[str, str]] = []
+    if solids == 0:
+        findings.append(_finding("solids", FAIL, "a board's 3D export with no solid in it"))
+    elif not total > 0.0:
+        findings.append(_finding("solids", FAIL, f"{solids} solid(s), none with a volume"))
+    else:
+        findings.append(
+            _finding(
+                "solids",
+                PASS,
+                f"board 3D export: {solids} solid(s) in a compound, placed as one body "
+                f"(total {total:.3f} mm3)",
+            )
+        )
+    is_valid = measures.get("is_valid")
+    if is_valid is not None:
+        findings.append(
+            _finding(
+                "brep_check",
+                INFO,
+                "BRepCheck_Analyzer reports "
+                + ("a valid shape" if is_valid else "an invalid shape")
+                + "; not decisive for a board's 3D export",
+            )
+        )
+    if solids:
+        findings.append(
+            _finding("closed", INFO, f"{closed} of {solids} solid(s) closed; not decisive")
+        )
+    free = measures.get("free_edge_count")
+    if free is not None:
+        findings.append(
+            _finding("free_edges", INFO, f"{int(free)} free edge(s) on the solids; not decisive")
+        )
+    outcome = max((f["outcome"] for f in findings), key=lambda o: _RANK[o], default=NOT_EVALUATED)
+    return outcome, findings
+
+
+def _finite(value: float) -> float | None:
+    """``value``, or ``None`` when it is NaN or infinite (JSON has neither)."""
+    return value if math.isfinite(value) else None
 
 
 def _require_cq() -> Any:
@@ -297,7 +363,9 @@ def measure(shape: Any) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001 - counts as not closed
             logger.warning("cadquery_closed_check_failed", error=str(exc))
         try:
-            volumes.append(float(solid.Volume()))
+            volume = _finite(float(solid.Volume()))
+            if volume is not None:
+                volumes.append(volume)
         except Exception as exc:  # noqa: BLE001 - volume unknown
             logger.warning("cadquery_volume_failed", error=str(exc))
         if free_total is not None:
@@ -312,7 +380,7 @@ def measure(shape: Any) -> dict[str, Any]:
     out["free_edge_count"] = free_total
     try:
         bb = shape.BoundingBox()
-        out["bounding_box"] = {
+        box = {
             "min_x": bb.xmin,
             "min_y": bb.ymin,
             "min_z": bb.zmin,
@@ -320,6 +388,9 @@ def measure(shape: Any) -> dict[str, Any]:
             "max_y": bb.ymax,
             "max_z": bb.zmax,
         }
+        # A void box is +/- infinity, which JSON cannot carry.
+        finite = all(math.isfinite(float(v)) for v in box.values())
+        out["bounding_box"] = box if finite else None
     except Exception:  # noqa: BLE001 - an empty shape has no box
         out["bounding_box"] = None
     return out
@@ -341,11 +412,17 @@ def validate_step(
     work_dir: str,
     expect_solid: bool = True,
     expect_single_solid: bool = False,
+    board: bool = False,
 ) -> dict[str, Any]:
-    """Read a STEP and judge its B-Rep. See the module docstring."""
+    """Read a STEP and judge its B-Rep. See the module docstring.
+
+    ``board``: judge it as a board's 3D export (:func:`classify`).
+    """
     content = _decode(step_base64)
     started = time.monotonic()
     with tracer.start_as_current_span("cadquery.validate_shape") as span:
+        span.set_attribute("validity.board", board)
+        span.set_attribute("step.size_bytes", len(content))
         try:
             cq = _require_cq()
         except Exception as exc:  # noqa: BLE001 - no kernel: nothing was checked
@@ -372,7 +449,10 @@ def validate_step(
             else:
                 measures = measure(shape)
                 outcome, findings = classify(
-                    measures, expect_solid=expect_solid, expect_single_solid=expect_single_solid
+                    measures,
+                    expect_solid=expect_solid,
+                    expect_single_solid=expect_single_solid,
+                    board=board,
                 )
         finally:
             try:
@@ -387,11 +467,14 @@ def validate_step(
             outcome=outcome,
             solids=measures.get("solid_count"),
             free_edges=measures.get("free_edge_count"),
+            board=board,
+            size_bytes=len(content),
             duration_s=duration,
         )
         return {
             "outcome": outcome,
             "findings": findings,
+            "body": "board" if board else "part",
             **measures,
             "kernel": KERNEL,
             "duration_s": duration,

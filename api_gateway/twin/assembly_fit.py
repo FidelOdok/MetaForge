@@ -36,8 +36,6 @@ from __future__ import annotations
 
 import base64
 import os
-import re
-import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -64,7 +62,6 @@ ASSEMBLY_TOOL = "cadquery.create_assembly"
 FIT_TOOL = "cadquery.check_interference"
 CONTRACT_KEY = "IFC-CAD-EDA"
 _STAGE_SUBDIR = "_staged_work_products"
-_OUTPUT_SUBDIR = "_assemblies"
 MAX_PARTS = 60
 
 
@@ -90,10 +87,6 @@ def _pid(project_id: str | UUID) -> UUID:
         return project_id if isinstance(project_id, UUID) else UUID(str(project_id))
     except ValueError as exc:
         raise AssemblyFitError(f"project id {project_id!r} is not a UUID") from exc
-
-
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "assembly"
 
 
 def _meta(node: Any) -> dict[str, Any]:
@@ -371,10 +364,12 @@ class AssemblyFitService:
                     }
                 )
 
-            out_dir = self._root() / _OUTPUT_SUBDIR / uuid.uuid4().hex[:12]
-            out_dir.mkdir(parents=True, exist_ok=True)
-            output = out_dir / f"{_slug(name)}.step"
-            args: dict[str, Any] = {"parts": adapter_parts, "output_path": str(output)}
+            # No output_path: the adapter writes into a folder it creates
+            # inside its own work folder and returns the path. A folder made
+            # here belongs to this process's user (root in the gateway and
+            # sidecar images), which the adapter (uid 1000) cannot write into;
+            # the adapter used to log "Assembly created" over an empty folder.
+            args: dict[str, Any] = {"parts": adapter_parts}
             if material:
                 args["material"] = material
             try:
@@ -384,14 +379,20 @@ class AssemblyFitService:
                 _metric("record_assembly_build", "failed")
                 raise AssemblyFitError(f"{ASSEMBLY_TOOL} failed: {exc}", 502) from exc
             data = built.get("data", built) if isinstance(built, dict) else {}
-            written = Path(str(data.get("assembly_file") or output))
+            written = data.get("assembly_file") if isinstance(data, dict) else None
+            if not isinstance(written, str) or not written:
+                _metric("record_assembly_build", "failed")
+                raise AssemblyFitError(f"{ASSEMBLY_TOOL} returned no assembly_file", 502)
             try:
                 from api_gateway.twin.design_files_recorder import resolve_in_workspace
 
-                step = resolve_in_workspace(str(written), self._root()).read_bytes()
+                step = resolve_in_workspace(written, self._root()).read_bytes()
             except (OSError, ValueError) as exc:
                 _metric("record_assembly_build", "failed")
                 raise AssemblyFitError(f"the assembly STEP could not be read: {exc}", 502) from exc
+            if not step:
+                _metric("record_assembly_build", "failed")
+                raise AssemblyFitError(f"the assembly STEP {written!r} is empty", 502)
             _metric("record_assembly_build", "built")
             logger.info(
                 "assembly_built",

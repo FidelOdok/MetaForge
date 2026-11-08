@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from typing import TYPE_CHECKING, Any
 
 from mcp_core.client import Transport
 from mcp_core.context import context_to_headers, current_context
+from mcp_core.protocol import TOOL_EXECUTION_ERROR, McpError
 from mcp_core.service_auth import HEADER_SERVICE_KEY
 
 if TYPE_CHECKING:
     from tool_registry.mcp_server.server import McpToolServer
+
+
+def _is_json(text: str) -> bool:
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
 
 
 class LoopbackTransport(Transport):
@@ -109,7 +119,17 @@ class HttpTransport(Transport):
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=self._timeout),
         ) as resp:
-            return await resp.text()
+            text: str = await resp.text()
+            if resp.status >= 400 and not _is_json(text):
+                # A proxy or the HTTP server itself answered (a 413 for a
+                # body over its limit, a 502, ...), not the MCP server: say
+                # so, instead of failing later on "Invalid JSON".
+                raise McpError(
+                    TOOL_EXECUTION_ERROR,
+                    f"{self._base_url}/mcp answered HTTP {resp.status} without a JSON-RPC "
+                    f"response: {text.strip()[:300] or '(empty body)'}",
+                )
+            return text
 
     async def connect(self) -> None:
         """Mark transport as connected."""

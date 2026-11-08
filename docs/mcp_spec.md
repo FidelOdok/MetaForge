@@ -1173,7 +1173,7 @@ ENTRYPOINT ["python", "server.py"]
 | `cadquery.get_properties` | `cad_analysis` | Geometric properties (volume, area, center of mass, bounding box, inertia) |
 | `cadquery.export_geometry` | `cad_export` | Export to STEP/STL/OBJ/BREP/AMF/SVG |
 | `cadquery.execute_script` | `cad_scripting` | Run a CadQuery Python script in an OS-isolated child process (see below) |
-| `cadquery.create_assembly` | `cad_assembly` | Multi-part assembly from STEP files with constraints |
+| `cadquery.create_assembly` | `cad_assembly` | Multi-part assembly from STEP files with constraints. Without `output_path` it writes into a new folder under its work folder and returns the path as `assembly_file`; a named path must be inside the work folder. Fails if the file is not written |
 | `cadquery.generate_enclosure` | `cad_enclosure` | PCB enclosure from board dimensions and connector cutouts |
 
 #### Script isolation
@@ -1432,7 +1432,9 @@ handling file bytes. Each takes `project_id`.
   joints?: [{name, type: revolute | fixed | slider, parent?, child | moving,
   axis_point, axis_dir, min_deg?, max_deg?, steps?}], material?, item_key?,
   change_reason?}`. Stages each part revision's STEP, builds the assembly
-  with `cadquery.create_assembly` over MCP and commits it through the geometry
+  with `cadquery.create_assembly` over MCP (no `output_path`: the adapter
+  writes into a folder of its own and returns `assembly_file`, which the
+  gateway reads) and commits it through the geometry
   recorder as the next revision of an `assembly` item, keeping the layout
   (`metadata.assembly_layout`). Returns the commit result with `item_ref`,
   the `layout` and the build's `interferences`. A board is placed as the

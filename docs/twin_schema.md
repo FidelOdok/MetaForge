@@ -2642,7 +2642,20 @@ board as its source): that cad_model records `board_ref` (`PCB-...@n`) and
 `source_work_product_ids`. Like any CAD item, the assembly revision and the
 board's 3D export are validated and exported for the release
 (`twin.build_exact_cad`, `twin.export_cad_step`), but neither needs a DFM
-analysis. The assembly revision keeps its layout:
+analysis. A board's 3D export is a compound of many solids (the board and
+every component model) placed as one body, so it is validated as one: see
+[exact CAD, validity and STEP](#exact-cad-validity-and-step).
+
+The gateway stages each part's STEP on the shared adapter workspace, which
+the adapter only reads, and names no output path for the assembly: the
+CadQuery adapter writes it into a new folder of its own under its work folder
+(`output/cadquery/assembly/<id>/assembly.step`) and returns that path as
+`assembly_file`, which the gateway reads back. The gateway and the MCP
+sidecar run as root and the adapter as uid 1000, so a folder the gateway made
+is one the adapter cannot write into. `cadquery.create_assembly` checks the
+file it wrote: a folder it cannot write is refused before the build, and a
+missing or empty file after it is an error, never "created". The assembly
+revision keeps its layout:
 
 ```
 metadata.assembly_layout: {
@@ -3520,6 +3533,19 @@ with `project_id`, optional `base_revision`, and `design_ir` or `script`):
 With neither `design_ir` nor `script`, the current head is validated in
 place (its own STEP is checked and, on a pass, its state becomes
 `validated`). A head already validated answers at once with no adapter work.
+
+A board's 3D export (a cad_model `kicad.export_3d` made, with a `board_ref`)
+is not a made part: it is a compound of the board and every component model,
+placed in an assembly as one body. It is checked with `cadquery.validate_shape`
+`board: true`: it passes with at least one solid with a volume, and the
+validity record says `body: "board"` with its `solid_count`. BRepCheck,
+closed solids and free edges are still measured and recorded as `info`
+findings, since the component models KiCad ships are often open shells, but
+they do not decide the verdict. Its STEP export is re-imported the same way.
+The adapter reads requests up to `CADQUERY_MAX_REQUEST_MB` (256 MiB by
+default), so a board of several MB of STEP, sent as base64, reaches it; a
+request over the limit is answered with a JSON-RPC error that names the
+limit.
 
 From a parametric sketch: `item_key` may name an approved
 `parametric_sketch` (`PSK-*`). Its chosen feature (`feature_id`, default the

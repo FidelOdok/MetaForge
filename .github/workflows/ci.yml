@@ -178,13 +178,17 @@ jobs:
       - name: Start it as docker-compose.yml does
         run: docker compose up -d --no-build --wait --wait-timeout 180 cadquery-adapter
       - run: pip install pytest httpx
-      - name: Attack the script runner
+      - name: Attack the script runner, and write outputs for the gateway
         env:
           CADQUERY_ISOLATION_LIVE_URL: http://localhost:8101/mcp
           CADQUERY_ISOLATION_LIVE_EXEC: docker compose exec -T cadquery-adapter
-        run: >-
-          pytest tests/integration/test_cadquery_isolation_live.py -v --noconftest
-          -p no:cacheprovider -W ignore::pytest.PytestConfigWarning
+        # The gateway and the MCP sidecar run as root on the same /workspace
+        # volume: CADQUERY_ISOLATION_LIVE_AS_GATEWAY makes folders there as
+        # they do, so the tests see what the adapter (uid 1000) can write.
+        run: |
+          export CADQUERY_ISOLATION_LIVE_AS_GATEWAY="docker run --rm --user 0 --volumes-from $(docker compose ps -q cadquery-adapter) --entrypoint env ghcr.io/fidelodok/metaforge-cadquery-adapter:ci"
+          pytest tests/integration/test_cadquery_isolation_live.py -v --noconftest \
+            -p no:cacheprovider -W ignore::pytest.PytestConfigWarning
       - name: The runner's own tests, inside the image
         run: >-
           docker run --rm --user 1000 --tmpfs /tmp:size=1g -e HOME=/tmp

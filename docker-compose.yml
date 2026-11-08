@@ -1204,6 +1204,9 @@ services:
       - METAFORGE_ENV=docker
       - CADQUERY_WORK_DIR=/workspace
       - CADQUERY_HTTP_PORT=8101
+      # The largest request the adapter reads, in MiB: a board's 3D export is
+      # several MB of STEP sent as base64 (aiohttp's own default is 1 MiB).
+      - CADQUERY_MAX_REQUEST_MB=${CADQUERY_MAX_REQUEST_MB:-256}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - CADQUERY_RUNNER_ROOT=/run/cadquery-runner
       - CADQUERY_RUNNER_UIDS=61000-61003
