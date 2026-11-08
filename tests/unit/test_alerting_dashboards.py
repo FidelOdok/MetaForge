@@ -142,7 +142,8 @@ class TestAlertingRules:
         # + 1 Imagine studio twin writes failing (ImagineStudioTwinWritesFailing, FORGE-821).
         # + 2 CadQuery script runner timeouts and refusals (FORGE-830).
         # + 1 CadQuery scripts stopped at the memory limit (FORGE-832).
-        assert len(rules) == 92
+        # + 1 FEA on a committed CAD item failing (ItemFeaFailures, FORGE-833).
+        assert len(rules) == 93
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -226,7 +227,8 @@ class TestAlertingRules:
         # + 1 Imagine studio twin writes failing (FORGE-821).
         # + 2 CadQuery script runner timeouts and refusals (FORGE-830).
         # + 1 CadQuery scripts stopped at the memory limit (FORGE-832).
-        assert len(warnings) == 75
+        # + 1 FEA on a committed CAD item failing (FORGE-833).
+        assert len(warnings) == 76
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -333,6 +335,8 @@ class TestAlertingRules:
                 # FORGE-466: the sidecar cannot close holds it opened, so
                 # stale entries sit on the Approvals page until expired.
                 "ToolApprovalHoldCloseFailing",
+                # FORGE-833: FEA on a committed CAD item failing.
+                "ItemFeaFailures",
                 # FORGE-470: an iteration loop converged with no approval
                 # workflow, so it stopped BLOCKED instead of merging.
                 "IterationGateNoApprovalWorkflow",
