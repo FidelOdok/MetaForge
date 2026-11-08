@@ -247,7 +247,7 @@ When the studio reads `handed_over` and the person asks to proceed:
          again while `measured` lists a `deferred` line). For one part,
          `twin.measure_dfm` with its `item_key` (for example `CAD-LAMP-HEAD@2`).
          The gateway reads the STEP from the twin: never pass STEP text to
-         `cadquery.dfm_measure`. Read the result with `twin.get_dfm_report`.
+         the CadQuery measuring tool. Read the result with `twin.get_dfm_report`.
       2. **Resolve the concept's components.** The concept assembly's
          components (`CMP-...`) stay illustrative until you say what became
          of them. `twin.get_release_checklist` names any that block "every
