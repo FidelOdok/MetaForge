@@ -28,9 +28,18 @@ RUN uv python install 3.11 \
     && rm -rf /root/.cache
 
 WORKDIR /app
-COPY mcp_core/ ./mcp_core/
-COPY tool_registry/ ./tool_registry/
-COPY observability/ ./observability/
+# Shared code: only the modules this adapter imports, so a change elsewhere
+# in these packages neither rebuilds the image nor busts its layer cache.
+# Keep in step with this adapter's list in .github/adapter-image-filters.yml;
+# CI imports every module of the adapter inside the built image.
+COPY mcp_core/*.py ./mcp_core/
+COPY observability/*.py ./observability/
+COPY observability/audit/ ./observability/audit/
+COPY observability/slo/ ./observability/slo/
+COPY tool_registry/*.py ./tool_registry/
+COPY tool_registry/mcp_server/ ./tool_registry/mcp_server/
+COPY tool_registry/tools/__init__.py ./tool_registry/tools/
+COPY tool_registry/tools/openfoam/ ./tool_registry/tools/openfoam/
 COPY tool_registry/tools/openfoam/entrypoint.py ./entrypoint.py
 
 # Same uid as the other adapters, so the shared adapter-workspace volume is

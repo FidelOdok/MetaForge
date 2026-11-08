@@ -10,7 +10,12 @@ published to GitHub Container Registry and signed:
 | Image | Published by |
 |---|---|
 | `metaforge-gateway` (also runs the MCP server and both workers) | `release.yml`, every push to `main` |
-| `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter`, `-slicer-adapter`, `-render-adapter`, `-openfoam-adapter`, `-firmware-adapter` | `adapter-images.yml`, when their code changes |
+| `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter`, `-blender-adapter`, `-slicer-adapter`, `-render-adapter`, `-openfoam-adapter`, `-firmware-adapter` | `adapter-images.yml`, when their inputs change (see [When an image is rebuilt](#when-an-image-is-rebuilt)) |
+| `metaforge-occt`, `metaforge-dashboard` | `adapter-images.yml`, when their folder changes |
+| `metaforge-seaweedfs` (the object store) | `mirror-images.yml`: the signed upstream release, copied and re-signed as ours |
+
+Each is tagged `:latest` and `:<commit sha>`. So a host keeps a small deploy
+folder and updates by pulling, never by building.
 
 The OpenFOAM adapter is opt-in. Its image is about 4 GB, so it runs only
 under the `cfd` compose profile: add `cfd` to `COMPOSE_PROFILES` in the host's `.env`
@@ -22,11 +27,80 @@ and ESP32 toolchains, ESP-IDF, Renode and Espressif QEMU, about 5.5 GB, so it ru
 the `firmware` compose profile: add `firmware` to `COMPOSE_PROFILES` to have the update pull
 and start it. Until then the gateway lists `firmware.build` and `firmware.run_emulated`, and
 a call says the adapter is not running.
-| `metaforge-occt`, `metaforge-dashboard` | `adapter-images.yml`, when their code changes |
-| `metaforge-seaweedfs` (the object store) | `mirror-images.yml`: the signed upstream release, copied and re-signed as ours |
 
-Each is tagged `:latest` and `:<commit sha>`. So a host keeps a small deploy
-folder and updates by pulling, never by building.
+## When an image is rebuilt
+
+`adapter-images.yml` runs on a push to `main` that touches `mcp_core/`,
+`tool_registry/`, `observability/`, `tools/occt-converter/` or `dashboard/`,
+but it rebuilds only the images whose own inputs changed. Its first job reads
+`.github/adapter-image-filters.yml`, which lists for each image:
+
+- its own folder, which holds its Dockerfile;
+- the shared modules its Dockerfile copies, and no others;
+- the CI files: the workflow, the filter file, the cosign installer and the
+  import smoke test. A change to any of them rebuilds every image.
+
+Each tool adapter copies only the shared code it imports: the top-level
+modules of `mcp_core/` (not the harness plugin files beside them), the Python
+modules of `observability/` (not its Grafana, Prometheus and Loki
+configuration), the top of `tool_registry/`, `tool_registry/mcp_server/` and
+its own folder. The FreeCAD and CalculiX adapters also carry
+`tool_registry/tools/cadquery/`, for its material table.
+
+| A change to | Rebuilds |
+|---|---|
+| one adapter's folder, for example `tool_registry/tools/kicad/` | that adapter |
+| `tool_registry/tools/cadquery/` | cadquery, freecad and calculix |
+| a top-level module of `mcp_core/` or `tool_registry/`, `tool_registry/mcp_server/`, or a Python module of `observability/` | every tool adapter |
+| a tool folder no image carries, such as `tool_registry/tools/twin/`, or `mcp_core/plugin_*`, or the observability stack's configuration | nothing |
+| `tools/occt-converter/` or `dashboard/` | that image |
+
+An image that is not rebuilt keeps its previous signed `:latest`, so a host
+pulling `latest` is unaffected.
+
+Before an image is signed, CI runs it once and imports every module of the
+adapter with the image's own interpreter (`scripts/adapter_import_smoke.py`).
+A module that needs shared code the image does not carry fails the build
+there, rather than on a host. When an adapter starts importing another shared
+module, add it to the adapter's `COPY` lines and to its list in the filter
+file; a unit test checks that every file a Dockerfile copies is in its list.
+
+A pull request that changes the workflow, the filter file or a Dockerfile
+builds the affected images and runs the same import check, and pushes
+nothing.
+
+To rebuild by hand, run the workflow from the Actions tab: `images` takes
+`all` or a comma-separated list of filter keys, such as `kicad,firmware`. A
+publish job that failed is not retried by the next push unless that push
+changes its inputs too, so re-run the failed job or dispatch that image.
+
+### Layer cache
+
+Each image's layers are cached in GHCR beside it, under the tag `:buildcache`,
+with every stage's layers kept (`mode=max`). The gateway image in
+`release.yml` uses the same scheme. The Dockerfiles put the heavy, rarely
+changing steps first (system packages, tool downloads, Python dependencies)
+and the shared-code `COPY` lines last, so a code change rebuilds only the last
+few layers: the tool downloads (Freerouting, Renode, Espressif QEMU, Blender)
+do not run again. The tool downloads pin a version and a SHA-256 and retry on
+any HTTP error, a 504 from GitHub's release downloads included. When
+`github.com/.../releases/download` stays down, the Freerouting, Renode and
+Espressif QEMU downloads (and cosign's) fetch the same release asset through
+the GitHub API instead; the checksum is checked either way.
+
+`:buildcache` is a build cache, not an image: it is unsigned and cannot be run.
+Never point a host at it.
+
+### Signing order
+
+A published image is pushed by digest only, with no tag. CI then runs the
+import check against that digest, signs the digest with cosign, and only then
+points `:latest` and `:<commit sha>` at it, checking that the tag names exactly
+the signed digest. If any step before the tag fails, `:latest` still names the
+previous signed image, so `host_update.sh` never meets an unsigned `:latest`.
+cosign itself is installed before the build, pinned to a version and a
+SHA-256, with retries; when GitHub's release downloads are down it is taken
+from the cosign project's own image on GHCR, pinned by digest.
 
 ## The deploy folder
 

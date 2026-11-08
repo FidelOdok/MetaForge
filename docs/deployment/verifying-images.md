@@ -75,6 +75,17 @@ cosign verify \
 Pin that digest in your compose file, and you are running a specific set of
 bytes you verified, not whatever `:latest` means next week.
 
+### Tags move only after signing
+
+CI pushes each image by digest, signs that digest, and only then points
+`:latest` and `:<commit sha>` at it. A build whose signing fails leaves both
+tags on the previous signed image, so a tag never names an unsigned digest.
+See [Signing order](image-only-host.md#signing-order).
+
+Each package also has a `:buildcache` tag. It holds CI's layer cache, not an
+image: it is not signed and cannot be run, so `cosign verify` on it fails by
+design. Do not pull it.
+
 ## Read the bill of materials
 
 Each image carries an SBOM and build provenance as attestations. The SBOM is the

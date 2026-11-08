@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL -o /tmp/blender.tar.xz \
+RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o /tmp/blender.tar.xz \
         "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
     && echo "${BLENDER_SHA256}  /tmp/blender.tar.xz" | sha256sum -c - \
     && mkdir -p /opt/blender \
@@ -63,9 +63,18 @@ RUN ln -s /opt/blender/blender /usr/local/bin/blender && blender --version
 COPY --from=deps /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=deps /usr/local/bin /usr/local/bin
 
-COPY mcp_core/ ./mcp_core/
-COPY tool_registry/ ./tool_registry/
-COPY observability/ ./observability/
+# Shared code: only the modules this adapter imports, so a change elsewhere
+# in these packages neither rebuilds the image nor busts its layer cache.
+# Keep in step with this adapter's list in .github/adapter-image-filters.yml;
+# CI imports every module of the adapter inside the built image.
+COPY mcp_core/*.py ./mcp_core/
+COPY observability/*.py ./observability/
+COPY observability/audit/ ./observability/audit/
+COPY observability/slo/ ./observability/slo/
+COPY tool_registry/*.py ./tool_registry/
+COPY tool_registry/mcp_server/ ./tool_registry/mcp_server/
+COPY tool_registry/tools/__init__.py ./tool_registry/tools/
+COPY tool_registry/tools/blender/ ./tool_registry/tools/blender/
 COPY tool_registry/tools/blender/BLENDER_NOTICE.md /opt/blender/METAFORGE_NOTICE.md
 
 # ubuntu:24.04 ships a "ubuntu" user and group at uid/gid 1000; remove them

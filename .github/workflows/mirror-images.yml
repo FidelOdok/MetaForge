@@ -47,7 +47,12 @@ jobs:
             # Who upstream says signed it: SeaweedFS's own release workflow.
             identity: '^https://github\.com/seaweedfs/seaweedfs/\.github/workflows/'
     steps:
-      - uses: sigstore/cosign-installer@v3
+      - uses: actions/checkout@v4
+
+      # Pinned, checksummed and retried; first, so a failed install stops the
+      # job before anything is copied or tagged.
+      - name: Install cosign
+        uses: ./.github/actions/install-cosign
 
       - name: Verify the upstream signature
         env:
@@ -89,4 +94,12 @@ jobs:
         env:
           IMAGE: ghcr.io/fidelodok/metaforge-${{ matrix.name }}
           DIGEST: ${{ steps.copy.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        # The copy is already tagged, so a transient Fulcio or Rekor failure
+        # here would leave the tag unsigned (a host refuses it): retried.
+        run: |
+          for attempt in 1 2 3; do
+            cosign sign --yes "${IMAGE}@${DIGEST}" && exit 0
+            echo "::warning::cosign sign failed (attempt $attempt)"
+            sleep $((attempt * 15))
+          done
+          exit 1

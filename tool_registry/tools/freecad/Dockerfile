@@ -51,10 +51,20 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
     "opentelemetry-api>=1.20" \
     "aiohttp>=3.9"
 
-# Copy adapter source code (only what the adapter needs)
-COPY mcp_core/ ./mcp_core/
-COPY tool_registry/ ./tool_registry/
-COPY observability/ ./observability/
+# Shared code: only the modules this adapter imports, so a change elsewhere
+# in these packages neither rebuilds the image nor busts its layer cache.
+# Keep in step with this adapter's list in .github/adapter-image-filters.yml;
+# CI imports every module of the adapter inside the built image.
+# The cadquery folder is here for its material table (cadquery.materials).
+COPY mcp_core/*.py ./mcp_core/
+COPY observability/*.py ./observability/
+COPY observability/audit/ ./observability/audit/
+COPY observability/slo/ ./observability/slo/
+COPY tool_registry/*.py ./tool_registry/
+COPY tool_registry/mcp_server/ ./tool_registry/mcp_server/
+COPY tool_registry/tools/__init__.py ./tool_registry/tools/
+COPY tool_registry/tools/freecad/ ./tool_registry/tools/freecad/
+COPY tool_registry/tools/cadquery/ ./tool_registry/tools/cadquery/
 
 # Copy entrypoint
 COPY tool_registry/tools/freecad/entrypoint.py ./entrypoint.py

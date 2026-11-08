@@ -2,18 +2,39 @@ name: adapter-images
 
 # Builds and publishes the tool-adapter images that bake code in (FORGE-513).
 #
-# The freecad and calculix adapters copy mcp_core/, tool_registry/ and
+# The adapters copy shared modules from mcp_core/, tool_registry/ and
 # observability/ into the image, so a fix in those packages only reaches the
 # adapter after a rebuild. Building them on fidel-dev took the box offline
 # twice (SSH and ICMP); building here keeps that load off the dev host, which
 # then only pulls.
 #
-# Images: ghcr.io/fidelodok/metaforge-<adapter>:latest and :<commit sha>.
+# Images: ghcr.io/fidelodok/metaforge-<adapter>-adapter:latest and :<commit sha>.
 #
 # FORGE-593: every image a MetaForge host runs is published here (the gateway
 # comes from release.yml), so a host can run with no checkout at all and
-# update by pulling: all five tool adapters, the OCCT converter and the
-# production dashboard.
+# update by pulling: the tool adapters, the OCCT converter and the production
+# dashboard.
+#
+# FORGE-838, three changes:
+#
+# * Only what changed is rebuilt. The `changes` job reads
+#   .github/adapter-image-filters.yml, which lists for each image its own
+#   folder, the shared modules its Dockerfile copies and these CI files. An
+#   image whose inputs did not change keeps its previous signed :latest.
+# * Layers are cached in GHCR, not in the Actions cache. Each image has a
+#   `:buildcache` tag beside `:latest` holding every layer of every stage
+#   (mode=max). The Actions cache is 10 GB for the whole repository; twelve
+#   images that carry CAD, FEA and EDA stacks evicted each other from it, so
+#   the KiCad job fetched Freerouting again although it sits in an early layer.
+# * Nothing is tagged before it is signed. The image is pushed by digest only,
+#   smoke-tested, signed, and only then tagged :latest and :<sha>. A failure
+#   anywhere before the tag leaves the previous signed :latest in place; a
+#   host verifies signatures by digest and refused the unsigned :latest that
+#   the old push-then-sign order left behind when cosign failed to install.
+#
+# On a pull request that touches this workflow, the filter file or a
+# Dockerfile, the affected images are built and smoke-tested without pushing
+# anything: no image, no cache, no signature.
 
 on:
   push:
@@ -25,15 +46,95 @@ on:
       - "tools/occt-converter/**"
       - "dashboard/**"
       - ".github/workflows/adapter-images.yml"
+      - ".github/adapter-image-filters.yml"
+      - ".github/actions/install-cosign/**"
+      - "scripts/adapter_import_smoke.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/adapter-images.yml"
+      - ".github/adapter-image-filters.yml"
+      - ".github/actions/install-cosign/**"
+      - "scripts/adapter_import_smoke.py"
+      - "tool_registry/tools/*/Dockerfile"
+      - "tools/occt-converter/Dockerfile"
+      - "dashboard/Dockerfile"
   workflow_dispatch:
+    inputs:
+      images:
+        description: >-
+          Images to rebuild, comma separated (keys of
+          .github/adapter-image-filters.yml, e.g. "kicad,firmware"), or "all".
+        required: false
+        default: all
 
+# A pull request's newer push replaces its older run. Runs on main are never
+# cancelled as a whole, because each one may be the only run that rebuilds a
+# given image; the per-image concurrency on the publish jobs orders them.
 concurrency:
-  group: adapter-images-${{ github.ref }}
+  group: adapter-images-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: pick the images to build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      adapters: ${{ steps.pick.outputs.adapters }}
+      services: ${{ steps.pick.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Changed paths
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: .github/adapter-image-filters.yml
+
+      - name: Pick
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          CHANGED: ${{ steps.filter.outputs.changes }}
+          REQUESTED: ${{ inputs.images }}
+        run: |
+          set -euo pipefail
+          all=$(grep -oE '^[a-z][a-z0-9_-]*:' .github/adapter-image-filters.yml | tr -d ':' | jq -R . | jq -cs .)
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ -z "$REQUESTED" ] || [ "$REQUESTED" = "all" ]; then
+              keys="$all"
+            else
+              keys=$(jq -cn --arg r "$REQUESTED" --argjson all "$all" \
+                '[$r | split(",")[] | gsub("\\s"; "") | select(length > 0)]
+                 | (map(select(. as $k | $all | index($k) | not))) as $bad
+                 | if ($bad | length) > 0 then error("unknown images: \($bad | join(", "))") else . end')
+            fi
+          else
+            # Keys starting with "_" hold shared path lists, not images.
+            keys=$(jq -c '[.[] | select(startswith("_") | not)]' <<<"${CHANGED:-[]}")
+          fi
+          adapters=$(jq -c '[.[] | select(. != "occt" and . != "dashboard")]' <<<"$keys")
+          services=$(jq -c '[.[]
+            | {occt: {image: "metaforge-occt", context: "tools/occt-converter"},
+               dashboard: {image: "metaforge-dashboard", context: "dashboard"}}[.]
+            | select(. != null)]' <<<"$keys")
+          echo "adapters=$adapters" >> "$GITHUB_OUTPUT"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Images to build"
+            echo "adapters: \`$adapters\`"
+            echo
+            echo "services: \`$(jq -c 'map(.image)' <<<"$services")\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish:
     name: publish ${{ matrix.adapter }}
+    needs: changes
+    if: needs.changes.outputs.adapters != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -43,12 +144,34 @@ jobs:
       # rather than at workflow level so a job that does not publish cannot
       # mint a signing identity.
       id-token: write
+    # One build of an image at a time on main, newest last, so :latest ends on
+    # the newest commit. A pull request's newer push cancels its older build.
+    concurrency:
+      group: adapter-image-${{ matrix.adapter }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     strategy:
       fail-fast: false
       matrix:
-        adapter: [freecad, calculix, cadquery, kicad, spice, blender, openfoam, firmware, slicer, render]
+        adapter: ${{ fromJSON(needs.changes.outputs.adapters) }}
+    env:
+      IMAGE: ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
+
+      # The CAD, CFD, EDA and firmware images are several GB each, and the
+      # smoke test needs the image in the local store besides the build cache.
+      - name: Free disk space
+        if: contains(fromJSON('["freecad","kicad","blender","openfoam","firmware"]'), matrix.adapter)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      # Before the build, so a failed install can never follow a push.
+      - name: Install cosign
+        if: env.PUBLISH == 'true'
+        uses: ./.github/actions/install-cosign
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -59,16 +182,15 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # Pushed by digest only: no tag moves until the image is signed.
       - name: Build + push
         id: build
+        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: tool_registry/tools/${{ matrix.adapter }}/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter:latest
-            ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter:${{ github.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           # These images carry a whole CAD or FEA stack, so the SBOM is worth
           # more here than on the gateway: it is the only practical way to
           # answer "does our FreeCAD image ship the thing in this advisory".
@@ -76,43 +198,115 @@ jobs:
           sbom: true
           build-args: |
             METAFORGE_BUILD_SHA=${{ github.sha }}
-          cache-from: type=gha,scope=${{ matrix.adapter }}-adapter
-          cache-to: type=gha,mode=max,scope=${{ matrix.adapter }}-adapter
+          # The Actions-cache scope is read only, for the first build after
+          # the move to the registry cache.
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE }}:buildcache
+            type=gha,scope=${{ matrix.adapter }}-adapter
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
+
+      # A pull request builds into the local store and pushes nothing. No
+      # attestations here: the local store cannot hold them, and nothing is
+      # published to attest.
+      - name: Build (pull request, no push)
+        if: env.PUBLISH != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tool_registry/tools/${{ matrix.adapter }}/Dockerfile
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:pr
+          provenance: false
+          sbom: false
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE }}:buildcache
+            type=gha,scope=${{ matrix.adapter }}-adapter
+
+      # Every module the adapter ships must import with only the shared code
+      # its Dockerfile copies. Runs the image's own interpreter (the
+      # entrypoint's, or the command's when the entrypoint is a wrapper).
+      - name: Import smoke test
+        env:
+          ADAPTER: ${{ matrix.adapter }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = "true" ]; then
+            ref="${IMAGE}@${DIGEST}"
+            docker pull -q "$ref"
+          else
+            ref="${IMAGE}:pr"
+          fi
+          ep=$(docker image inspect "$ref" --format '{{json .Config.Entrypoint}}' | jq -r '.[0] // empty')
+          case "$(basename "${ep:-none}")" in
+            python*) py="$ep" ;;
+            *) py=$(docker image inspect "$ref" --format '{{json .Config.Cmd}}' | jq -r '.[0]') ;;
+          esac
+          echo "interpreter: $py"
+          docker run --rm -i --network none --entrypoint "$py" "$ref" - "$ADAPTER" \
+            < scripts/adapter_import_smoke.py
 
       # Sign with Sigstore, keyless (FORGE-585). See the matching step in
       # release.yml for why this is cosign rather than `docker trust`, and why
       # it signs a digest rather than a tag.
-      - uses: sigstore/cosign-installer@v3
-
       - name: Sign the pushed image
+        if: env.PUBLISH == 'true'
         env:
-          IMAGE: ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        run: |
+          for attempt in 1 2 3; do
+            cosign sign --yes "${IMAGE}@${DIGEST}" && exit 0
+            echo "::warning::cosign sign failed (attempt $attempt)"
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      # Only a signed digest is tagged. One source, so imagetools copies the
+      # index as is and the tags name exactly the signed digest; checked.
+      - name: Tag the signed image
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" --tag "${IMAGE}:${GITHUB_SHA}" "${IMAGE}@${DIGEST}"
+          tagged=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')
+          if [ "$tagged" != "$DIGEST" ]; then
+            echo "${IMAGE}:latest is $tagged, not the signed $DIGEST" >&2
+            exit 1
+          fi
 
   # FORGE-593: the two images that are not tool adapters, so they do not fit
   # the matrix above (different build contexts and service names). Built,
-  # attested and signed exactly as the adapters are.
+  # attested, signed and tagged exactly as the adapters are.
   publish-services:
     name: publish ${{ matrix.image }}
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
       packages: write
       id-token: write
+    concurrency:
+      group: adapter-image-${{ matrix.image }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - image: metaforge-occt
-            context: tools/occt-converter
-            file: tools/occt-converter/Dockerfile
-          - image: metaforge-dashboard
-            context: dashboard
-            file: dashboard/Dockerfile
+        include: ${{ fromJSON(needs.changes.outputs.services) }}
+    env:
+      IMAGE: ghcr.io/fidelodok/${{ matrix.image }}
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install cosign
+        if: env.PUBLISH == 'true'
+        uses: ./.github/actions/install-cosign
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -125,25 +319,56 @@ jobs:
 
       - name: Build + push
         id: build
+        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          push: true
-          tags: |
-            ghcr.io/fidelodok/${{ matrix.image }}:latest
-            ghcr.io/fidelodok/${{ matrix.image }}:${{ github.sha }}
+          file: ${{ matrix.context }}/Dockerfile
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
           build-args: |
             METAFORGE_BUILD_SHA=${{ github.sha }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE }}:buildcache
+            type=gha,scope=${{ matrix.image }}
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
-      - uses: sigstore/cosign-installer@v3
+      - name: Build (pull request, no push)
+        if: env.PUBLISH != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE }}:buildcache
+            type=gha,scope=${{ matrix.image }}
 
       - name: Sign the pushed image
+        if: env.PUBLISH == 'true'
         env:
-          IMAGE: ghcr.io/fidelodok/${{ matrix.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        run: |
+          for attempt in 1 2 3; do
+            cosign sign --yes "${IMAGE}@${DIGEST}" && exit 0
+            echo "::warning::cosign sign failed (attempt $attempt)"
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      - name: Tag the signed image
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" --tag "${IMAGE}:${GITHUB_SHA}" "${IMAGE}@${DIGEST}"
+          tagged=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')
+          if [ "$tagged" != "$DIGEST" ]; then
+            echo "${IMAGE}:latest is $tagged, not the signed $DIGEST" >&2
+            exit 1
+          fi

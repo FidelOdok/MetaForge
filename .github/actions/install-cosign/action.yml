@@ -1,0 +1,62 @@
+name: Install cosign
+description: >-
+  Install a pinned cosign release, checked by SHA-256, retrying transient
+  download failures, with a second source when GitHub release downloads are
+  down.
+
+# Replaces sigstore/cosign-installer in the publishing workflows. The installer
+# fetched cosign from a GitHub release download with one plain curl, so a 504
+# from the release CDN failed the job (curl exit 22), and in adapter-images.yml
+# it failed after the image had already been pushed as :latest. Here:
+#
+#   * the version is pinned, and the binary is checked against the SHA-256 in
+#     that release's cosign_checksums.txt;
+#   * curl retries every error, 504 included, with a delay, then tries the
+#     same asset through the GitHub API;
+#   * if both still fail, cosign comes from the project's own
+#     image on GHCR (a different service), pinned by digest, so its bytes are
+#     fixed just as the checksum fixes the release binary's.
+#
+# To bump: take the new version's cosign-linux-amd64 line from its
+# cosign_checksums.txt, that asset's id (gh api
+# repos/sigstore/cosign/releases/tags/<version>), and the index digest of
+# ghcr.io/sigstore/cosign/cosign at the same version.
+
+runs:
+  using: composite
+  steps:
+    - name: Install cosign
+      shell: bash
+      env:
+        COSIGN_VERSION: v2.5.2
+        COSIGN_SHA256: bcfeae05557a9f313ee4392d2f335d0ff69ebbfd232019e3736fb04999fe1734
+        # The same release asset through the GitHub API, a different front end
+        # from github.com/.../releases/download (it kept serving during 504s).
+        COSIGN_ASSET_ID: "264862470"
+        COSIGN_IMAGE: ghcr.io/sigstore/cosign/cosign@sha256:23d07b53d59a1233e1ab5e7d082cf4182fc90067d2f86a662ba3003215cb0c95
+      run: |
+        set -euo pipefail
+        dest="${RUNNER_TEMP}/cosign-${COSIGN_VERSION}"
+        mkdir -p "$dest"
+        fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 "$@"; }
+        url="https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+        api="https://api.github.com/repos/sigstore/cosign/releases/assets/${COSIGN_ASSET_ID}"
+        if { fetch -o "$dest/cosign" "$url" \
+             || fetch -H "Accept: application/octet-stream" -o "$dest/cosign" "$api"; } \
+           && echo "${COSIGN_SHA256}  $dest/cosign" | sha256sum -c -; then
+          echo "cosign ${COSIGN_VERSION} from its release asset"
+        else
+          echo "::warning::cosign release download failed; using ${COSIGN_IMAGE}"
+          rm -f "$dest/cosign"
+          for attempt in 1 2 3; do
+            docker pull -q "$COSIGN_IMAGE" && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 10
+          done
+          cid=$(docker create "$COSIGN_IMAGE")
+          docker cp "$cid:/ko-app/cosign" "$dest/cosign"
+          docker rm "$cid" >/dev/null
+        fi
+        chmod +x "$dest/cosign"
+        echo "$dest" >> "$GITHUB_PATH"
+        "$dest/cosign" version

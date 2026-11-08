@@ -1,0 +1,99 @@
+# What rebuilds which image, read by dorny/paths-filter in adapter-images.yml.
+#
+# One key per published image: the tool adapters by name, then `occt` and
+# `dashboard`. Keys starting with `_` only hold shared path lists and are
+# never built. An image is rebuilt when a path in its list changed:
+#
+#   * its own folder (which holds its Dockerfile);
+#   * the shared modules its Dockerfile copies, and no others;
+#   * the CI files below, which rebuild every image.
+#
+# Keep each list in step with the COPY lines of that Dockerfile. The image's
+# import smoke test (scripts/adapter_import_smoke.py) fails the build when an
+# adapter starts importing a module its image does not carry, and
+# tests/unit/test_adapter_image_filters.py checks each list covers its own
+# folder and the shared modules.
+
+_ci: &ci
+  - .github/workflows/adapter-images.yml
+  - .github/adapter-image-filters.yml
+  - .github/actions/install-cosign/**
+  - scripts/adapter_import_smoke.py
+
+# What every tool adapter Dockerfile copies besides its own folder: the MCP
+# core (top-level modules only; mcp_core/plugin_* is the harness plugin, which
+# no adapter reads), the Python half of observability (not its Grafana,
+# Prometheus and Loki config), the top of tool_registry (its __init__ imports
+# registry, execution_engine and friends) and the MCP server the adapters run.
+_shared: &shared
+  - mcp_core/*.py
+  - observability/*.py
+  - observability/audit/**
+  - observability/slo/**
+  - tool_registry/*.py
+  - tool_registry/mcp_server/**
+  - tool_registry/tools/__init__.py
+
+# freecad and calculix read the material table in tool_registry.tools.cadquery
+# (cadquery.materials), so they carry the cadquery folder too.
+freecad:
+  - *ci
+  - *shared
+  - tool_registry/tools/freecad/**
+  - tool_registry/tools/cadquery/**
+
+calculix:
+  - *ci
+  - *shared
+  - tool_registry/tools/calculix/**
+  - tool_registry/tools/cadquery/**
+
+cadquery:
+  - *ci
+  - *shared
+  - tool_registry/tools/cadquery/**
+
+kicad:
+  - *ci
+  - *shared
+  - tool_registry/tools/kicad/**
+
+spice:
+  - *ci
+  - *shared
+  - tool_registry/tools/spice/**
+
+blender:
+  - *ci
+  - *shared
+  - tool_registry/tools/blender/**
+
+openfoam:
+  - *ci
+  - *shared
+  - tool_registry/tools/openfoam/**
+
+firmware:
+  - *ci
+  - *shared
+  - tool_registry/tools/firmware/**
+
+slicer:
+  - *ci
+  - *shared
+  - tool_registry/tools/slicer/**
+
+render:
+  - *ci
+  - *shared
+  - tool_registry/tools/render/**
+
+# The two images that are not tool adapters: their build context is their own
+# folder, so nothing outside it can change them.
+occt:
+  - *ci
+  - tools/occt-converter/**
+
+dashboard:
+  - *ci
+  - dashboard/**
