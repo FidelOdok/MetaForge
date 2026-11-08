@@ -105,7 +105,10 @@ def test_writing_outside_the_private_folder_is_refused(runner, tmp_path, where):
         target_dir = REPO_ROOT / "tool_registry"
     target = target_dir / "pwned-by-script.txt"
     script = ESCAPE + f"B['open']({str(target)!r}, 'w').write('x')"
-    with pytest.raises(ScriptRunError, match="Permission denied"):
+    # A checkout the test can write: Landlock refuses ("Permission denied").
+    # Mounted read-only (CI runs these inside the image too): EROFS comes first.
+    refused = "Permission denied" if os.access(target_dir, os.W_OK) else "Read-only file system"
+    with pytest.raises(ScriptRunError, match=refused):
         runner.run(script, ".step", 10)
     assert not target.exists()
     if importlib.util.find_spec("cadquery") is not None:
