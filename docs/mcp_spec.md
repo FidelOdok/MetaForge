@@ -256,6 +256,13 @@ caller they ride on a handle instead:
   callers. A call that passes the handle runs as that session: its project
   scope and session record apply. The argument is taken out before the tool
   sees it. A value that is not a handle is refused with `-32602`.
+- The handle's project is the call's project, ahead of the transport
+  session's scope; only an explicit `project_id` argument outranks it. The
+  tool, the approval policy, a delegated decision and the approval key all
+  see that project, so a tool with no `project_id` argument is decided by the
+  policy of the project the handle names (FORGE-831). A handshake client that
+  does not keep `Mcp-Session-Id` may pass a handle the same way; it is taken
+  out and honoured, though only `2026-07-28` callers are minted one.
 - A handle is a session id, not a credential: it carries scope, never
   authority, exactly as `X-MetaForge-Session` does. That header still works
   for any client that sends it, and handshake clients keep `Mcp-Session-Id`.

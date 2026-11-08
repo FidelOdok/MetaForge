@@ -228,7 +228,12 @@ WORKFLOWS: dict[str, tuple[str, str]] = {
         "Start the Imagine studio for this product, then develop it after handover",
         "Start or update the active project's Imagine studio, following the "
         "`imagine_studio` skill.\n\n"
-        "Call `twin.imagine_get_studio` first. With no studio, or a draft, build "
+        "Call `session.start` with the project first. If your client does not "
+        "keep the MCP session (a headless run, or a 2026-07-28 client), pass the "
+        "`session_handle` it returns as the `metaforge_session` argument on "
+        "every later call, so each call stays in the project and its approval "
+        "policy applies, including to tools with no `project_id` argument.\n\n"
+        "Then call `twin.imagine_get_studio`. With no studio, or a draft, build "
         "the formgraph config from what the person said, using the skill's "
         "skeleton and rules, asking at most three questions. Write it with "
         "`twin.imagine_put_studio`. A refusal lists every failed check: fix all "

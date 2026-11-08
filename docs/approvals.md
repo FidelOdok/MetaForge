@@ -378,9 +378,19 @@ In every mode:
 
 - `METAFORGE_AUTO_APPROVE_MAX` is the ceiling: a project at `auto` under a cap
   of `auto_clean` is decided as `auto_clean`.
-- Only the call's own project counts. A call whose `project_id` (argument, else
-  the session's project) is another project, or that names none, is decided by
-  a person.
+- Only the call's own project counts. A call whose project is another
+  project, or that has none, is decided by a person. The sidecar resolves the
+  call's project before any hold, policy, delegation or approval-key decision,
+  in this order: an explicit `project_id` argument; then the project the
+  `metaforge_session` handle is bound to (the handle `session.start` or
+  `project.open` returned); then the transport session's own scope
+  (`Mcp-Session-Id` or `X-MetaForge-Session`). The policy request it sends
+  (`POST /v1/chat/tool_approvals/policy`) carries that `project` and the
+  `session_id`. So a tool with no `project_id` argument, such as
+  `cadquery.execute_script`, called with a handle bound to a project at
+  `auto`, is decided by that project's policy, and a handle for another
+  project is decided by that other project's policy (FORGE-831). With no
+  argument, no handle and no session scope it names no project and is held.
 - Never approved by a policy: human-authority tools, destructive tools, and
   project, flow, run, approval, review, phase, session, library and vendor
   tools. `phase.claim` keeps its own narrower rule, below. See
