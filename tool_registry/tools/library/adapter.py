@@ -424,18 +424,27 @@ class LibraryServer(McpToolServer):
             return await self._library.machine_limits(str(arguments["machine_id"]))
 
     async def register_machine(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from tool_registry.tools.library.catalog_tools import library_author, with_authority
+
         with tracer.start_as_current_span("library.register_machine"):
-            data = dict(arguments)
-            result = await self._library.register_machine(data, "mcp")
-            logger.info("library_machine_registered", machine=result.get("machine", {}).get("id"))
-            return result
+            by, data = library_author(arguments)
+            result = await self._library.register_machine(data, by)
+            logger.info(
+                "library_machine_registered",
+                machine=result.get("machine", {}).get("id"),
+                by=by,
+            )
+            return with_authority(result, by)
 
     async def update_machine(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from tool_registry.tools.library.catalog_tools import library_author, with_authority
+
         with tracer.start_as_current_span("library.update_machine"):
             machine_id = str(arguments["machine_id"])
             changes = arguments.get("changes") or {}
             if not isinstance(changes, dict):
                 raise ValueError("changes must be an object")
-            result = await self._library.update_machine(machine_id, changes, "mcp")
-            logger.info("library_machine_updated", machine=machine_id)
-            return result
+            by, _clean = library_author(arguments)
+            result = await self._library.update_machine(machine_id, changes, by)
+            logger.info("library_machine_updated", machine=machine_id, by=by)
+            return with_authority(result, by)

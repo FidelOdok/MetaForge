@@ -266,7 +266,7 @@ class TestBootstrapToolRegistry:
         # + cadquery.describe_faces (CDE slice 9),
         # + cadquery.dfm_measure (C3D slice 6),
         # + render.model_views (the browser render adapter).
-        assert len(tools) == 125
+        assert len(tools) == 126
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

@@ -698,7 +698,9 @@ An agent decision without `X-MetaForge-On-Behalf-Of` is a 422.
 and a decision attempt is a 403. The gateway owner can delegate them by setting
 `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true` on the gateway (default off).
 The compose stack passes it from `.env` to both the gateway and the MCP
-sidecar, which decide the calls that land on them.
+sidecar, which decide the calls that land on them. Over MCP the same flag lets
+an agent decide an upload it staged itself and register or update library
+entries, see [an agent's own uploads and library entries](#an-agents-own-uploads-and-library-entries).
 
 The same flag delegates the Imagine handover, rework and acceptance. With
 it on, `POST .../imagine/handover` and `.../imagine/rework` accept the agent
@@ -782,6 +784,40 @@ The record names the agent and the person, never the person alone, and never
 an assumption. With the flag off, or without either header, the call keeps
 its rules: held for a person, or approved by the project's policy, and the
 never-assumed fields are refused.
+
+### An agent's own uploads and library entries
+
+Two more steps stopped a headless run for a person nobody could reach: the
+upload the agent staged itself (an approval of kind `upload`), and a library
+registration such as a standard ISO 4762 M4x35 screw, which was held on a
+client prompt. `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY` now reaches both, under
+the same conditions as [delegated holds through MCP](#delegated-holds-through-mcp)
+(the flag in the MCP server and the gateway, both headers, the person-mismatch
+guard):
+
+| Step | Tool | What happens | What is recorded |
+|------|------|--------------|------------------|
+| The agent's own upload | `files.decide_upload` (`upload_id`, `decision` approve or reject, `reason` to reject) | Decides the upload through the approvals service with surface `agent`. Refused for an upload another agent or a person staged: the upload's `agent` (the `X-MetaForge-Agent` it was staged with) must be the caller's. | The upload's `decision` carries `agent` and `on_behalf_of`, `approver_verified` is `false`, and each imported work product's metadata has `approved_by_agent`. The Approvals page shows it as decided through the agent for the person. |
+| Library writes | `library.register_*`, `library.update_*` (components, materials, processes, appearances, ergonomic limits, machines) | Not held: it runs at once. | The entry's history records the change as `agent <agent> on behalf of <person>`, and every history version and tool result carries an `authority`: `{kind: delegated, agent, on_behalf_of, verified_by_person: false}`. Anything else reads `{kind: recorded, by, verified_by_person: false}`. |
+
+Each call is first recorded on the ledger as a delegated approval (route
+`delegated`, surface `agent`, the agent and the person). `files.decide_upload`
+exists only for a delegated agent: with the flag off, or without both headers,
+it is refused at once rather than held, because a person decides an upload
+directly in the dashboard, with `forge approvals` or with `approvals.decide`.
+Through `/v1/approvals`, an agent caller with the flag on may decide an upload
+item as before; the decision now records the agent and the person on the
+upload too.
+
+What does not change:
+
+- With the flag off, a library write is held for a person exactly as before.
+- No approval policy approves these, in any mode, `auto` included: the
+  library tools stay on the never-auto-approved list, and `files.decide_upload`
+  is destructive.
+- `library.dispatch_job` (a print on a real machine), `library.record_job_result`
+  and `vendor.place_order` (spends money) are never delegated by any flag.
+  The gateway refuses to record a delegated approval for them with 422.
 
 ### Delegating a release to an agent
 

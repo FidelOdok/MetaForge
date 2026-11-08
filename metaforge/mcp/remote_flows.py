@@ -86,13 +86,18 @@ class _Gateway:
         self._client = client
         self._timeout = timeout
 
-    async def request(self, method: str, path: str, *, json: Any = None) -> Any:
+    async def request(
+        self, method: str, path: str, *, json: Any = None, headers: dict[str, str] | None = None
+    ) -> Any:
         url = f"{self._base}{path}"
         owned = self._client is None
         http = self._client or httpx.AsyncClient(timeout=self._timeout)
         try:
             try:
-                response = await http.request(method, url, json=json)
+                if headers:
+                    response = await http.request(method, url, json=json, headers=headers)
+                else:
+                    response = await http.request(method, url, json=json)
             except httpx.HTTPError as exc:
                 # Unreachable is not "refused": say which, so an operator can
                 # tell a gateway that is down from one that said no.

@@ -13,6 +13,7 @@ Generate a KiCad schematic, board and routing from a circuit description (Phase 
 - `kicad.generate_schematic` -- schematic + ERC + netlist check
 - `kicad.generate_pcb` -- footprints, nets, outline, rules, placement
 - `kicad.autoroute_pcb` -- Freerouting, pour, DRC with schematic parity
+- `kicad.edit_pcb` -- an existing board moved, rotated or re-holed, then re-routed (a copy)
 
 ## Input
 
@@ -25,6 +26,6 @@ Generate a KiCad schematic, board and routing from a circuit description (Phase 
 
 ## Limitations
 
-- Placement is deterministic and connectivity-clustered: a reviewable start, not an optimum
+- A component's `placement` (position, rotation, side, edge mount) is honoured; the rest is deterministic and connectivity-clustered: a reviewable start, not an optimum
 - No impedance control, length matching or high-speed rules
 - Symbols and footprints must exist in the installed KiCad libraries

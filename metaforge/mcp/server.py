@@ -62,6 +62,7 @@ from mcp_core.guardrails import (
     DELEGATED_AGENT_ARG,
     DELEGATED_ONLY_TOOLS,
     REQUIRE_PART_COLOURS_ARG,
+    UPLOAD_DECISION_TOOLS,
     ApprovalAsk,
     ApprovalGateFn,
     ApprovalHandedOffError,
@@ -75,11 +76,13 @@ from mcp_core.guardrails import (
     ApproverArgumentRejectedError,
     Caller,
     HumanAuthorityRequiredError,
+    NotDelegatedError,
     ReleaseNotDelegatedError,
     decide,
-    delegable_human_authority,
+    delegable_library_write,
     human_authority_delegated,
     never_auto_approved,
+    owner_delegable,
     records_approver,
     reject_caller_supplied_approver,
     release_delegated,
@@ -2471,23 +2474,28 @@ class UnifiedMcpServer:
                 **self._service_log_fields(),
             )
         if tool_id in DELEGATED_ONLY_TOOLS:
-            # FORGE-834: a delegated agent's release approval, or nothing. No
-            # hold: a person who approved one would still not make it run.
+            # FORGE-834: a delegated agent's release approval (or its decision
+            # on its own upload), or nothing. No hold: a person who approved
+            # one would still not make it run.
             delegated_only = await self._delegated_approval(tool_id, arguments, caller, call_id)
             if delegated_only is None:
+                release = requires_release_delegation(tool_id)
+                flag_on = release_delegated() if release else human_authority_delegated()
                 logger.info(
-                    "mcp_release_not_delegated",
+                    "mcp_release_not_delegated" if release else "mcp_call_not_delegated",
                     tool_id=tool_id,
                     caller=caller.value,
-                    release_flag=release_delegated(),
+                    flag=flag_on,
                 )
-                raise ReleaseNotDelegatedError(
-                    tool_id,
-                    "the owner's release flag is off"
-                    if not release_delegated()
+                detail = (
+                    "the owner's flag is off"
+                    if not flag_on
                     else "the request did not name the agent and the person it acts for, "
-                    "or the person is not the signed-in principal",
+                    "or the person is not the signed-in principal"
                 )
+                if release:
+                    raise ReleaseNotDelegatedError(tool_id, detail)
+                raise NotDelegatedError(tool_id, detail)
             return delegated_only
         if not decision.requires_approval:
             return None
@@ -2708,6 +2716,13 @@ class UnifiedMcpServer:
         value only a person could state is recorded as the agent's, for that
         person.
 
+        The same flag delegates a library register or update
+        (``library.register_*``, ``library.update_*``) and an agent's decision
+        on its own upload (``files.decide_upload``); each carries the agent in
+        :data:`DELEGATED_AGENT_ARG`, so the library entry and the upload record
+        say "agent X on behalf of Y". ``library.dispatch_job`` and
+        ``vendor.place_order`` are never delegated (``NEVER_DELEGATED``).
+
         FORGE-834: the release steps (``twin.create_baseline``,
         ``twin.approve_release``) follow the same rules under their own flag,
         ``METAFORGE_ALLOW_AGENT_RELEASE``. The human-authority flag does not
@@ -2719,7 +2734,7 @@ class UnifiedMcpServer:
         if release:
             if not release_delegated():
                 return None
-        elif not delegable_human_authority(tool_id) or not human_authority_delegated():
+        elif not owner_delegable(tool_id) or not human_authority_delegated():
             return None
         from mcp_core.context import current_context
 
@@ -2792,11 +2807,16 @@ class UnifiedMcpServer:
         approved = await self._approved(
             tool_id, caller, "delegated", resolution, 0.0, None, call_id
         )
-        if release or records_approver(tool_id):
+        if (
+            release
+            or records_approver(tool_id)
+            or delegable_library_write(tool_id)
+            or tool_id in UPLOAD_DECISION_TOOLS
+        ):
             # The tool reads the agent from here, set only on this path, so a
-            # release step, or a statement only the person could make (the
-            # machine in the manufacturing context), records who decided it:
-            # the agent, for the person.
+            # release step, a statement only the person could make (the
+            # machine in the manufacturing context), a library entry or an
+            # upload decision records who decided it: the agent, for the person.
             arguments[DELEGATED_AGENT_ARG] = agent
         if release:
             logger.info(

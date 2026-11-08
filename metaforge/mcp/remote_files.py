@@ -41,6 +41,13 @@ def public_base() -> str:
     return (PUBLIC_BASE.get() or "http://localhost:8765").rstrip("/")
 
 
+def _agent_header(request: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str] | None]:
+    """The request without ``agent``, and the header that names it to the gateway."""
+    body = {k: v for k, v in request.items() if k != "agent"}
+    agent = str(request.get("agent") or "").strip()
+    return body, ({"X-MetaForge-Agent": agent[:100]} if agent else None)
+
+
 class RemoteFilesService:
     supports_local_paths = False
 
@@ -57,14 +64,36 @@ class RemoteFilesService:
         return f"{public_base()}{path}"
 
     async def stage_inline(self, request: dict[str, Any]) -> dict[str, Any]:
+        body, headers = _agent_header(request)
         result: dict[str, Any] = await self._gateway.request(
-            "POST", "/v1/uploads/inline", json=request
+            "POST", "/v1/uploads/inline", json=body, headers=headers
         )
         return result
 
     async def request_upload(self, request: dict[str, Any]) -> dict[str, Any]:
+        body, headers = _agent_header(request)
         result: dict[str, Any] = await self._gateway.request(
-            "POST", "/v1/uploads/link", json=request
+            "POST", "/v1/uploads/link", json=body, headers=headers
+        )
+        return result
+
+    async def decide_upload(
+        self, upload_id: str, decision: str, reason: str, agent: str, on_behalf_of: str
+    ) -> dict[str, Any]:
+        """Decide through ``/v1/approvals`` as the agent, for the person.
+
+        The gateway applies its own rule: an agent decides an upload only when
+        it too delegates human authority (403 otherwise).
+        """
+        result: dict[str, Any] = await self._gateway.request(
+            "POST",
+            f"/v1/approvals/{urlquote(f'upload:{upload_id}', safe=':')}/decision",
+            json={"decision": decision, "reason": reason},
+            headers={
+                "X-MetaForge-Surface": "agent",
+                "X-MetaForge-Agent": agent[:100],
+                "X-MetaForge-On-Behalf-Of": on_behalf_of[:200],
+            },
         )
         return result
 

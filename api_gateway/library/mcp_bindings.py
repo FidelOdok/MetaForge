@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from api_gateway.library.routes import get_machine_library
+from api_gateway.library.routes import get_machine_library, history_with_authority
 from twin_core.library.machines import MachineLibraryError, MachineNotFoundError
 
 
@@ -26,7 +26,10 @@ class LocalMachineLibrary:
             machine = library.get(machine_id)
         except MachineNotFoundError as exc:
             raise ValueError(f"machine '{machine_id}' not found") from exc
-        return {"machine": machine.as_dict(), "history": library.history(machine_id)}
+        return {
+            "machine": machine.as_dict(),
+            "history": history_with_authority(library.history(machine_id)),
+        }
 
     async def register_machine(self, data: dict[str, Any], by: str) -> dict[str, Any]:
         return {"machine": get_machine_library().register(data, by=by).as_dict()}
@@ -94,7 +97,10 @@ class LocalMachineLibrary:
             entry = catalog.get(ref, kind)
         except CatalogNotFoundError as exc:
             raise ValueError(f"no {kind} '{ref}'") from exc
-        return {"entry": entry.as_dict(), "history": catalog.history(entry.id)}
+        return {
+            "entry": entry.as_dict(),
+            "history": history_with_authority(catalog.history(entry.id)),
+        }
 
     async def register_entry(self, kind: str, data: dict[str, Any], by: str) -> dict[str, Any]:
         from api_gateway.library.catalog_routes import get_catalog

@@ -399,7 +399,7 @@ def change_item(p: DesignChangeProposal, *, base_revision: str | None = None) ->
 
 
 def _twin_of(app: Any) -> Any | None:
-    return getattr(app.state, "twin", None)
+    return getattr(getattr(app, "state", None), "twin", None)
 
 
 def _loop_item(winner: Any) -> ApprovalItem:
@@ -626,6 +626,8 @@ def upload_item(upload: StagedUpload) -> ApprovalItem:
             approver=upload.decision.approver,
             approver_verified=upload.decision.approver_verified,
             surface=_surface(upload.decision.surface),
+            on_behalf_of=upload.decision.on_behalf_of,
+            agent=upload.decision.agent,
             decided_at=upload.decision.decided_at,
         )
         if upload.decision
@@ -678,7 +680,14 @@ def _upload_items() -> list[ApprovalItem]:
 
 
 async def _decide_upload(
-    app: Any, upload_id: str, decision: str, reason: str, approver: Approver, surface: str
+    app: Any,
+    upload_id: str,
+    decision: str,
+    reason: str,
+    approver: Approver,
+    surface: str,
+    agent: str | None = None,
+    on_behalf_of: str | None = None,
 ) -> None:
     store = upload_routes.get_upload_store()
     upload = store.get(upload_id)
@@ -692,6 +701,8 @@ async def _decide_upload(
                 approver=approver.label,
                 approver_verified=approver.verified,
                 surface=surface,
+                agent=agent,
+                on_behalf_of=on_behalf_of,
             )
         else:
             upload_service.reject(
@@ -701,6 +712,8 @@ async def _decide_upload(
                 approver=approver.label,
                 approver_verified=approver.verified,
                 surface=surface,
+                agent=agent,
+                on_behalf_of=on_behalf_of,
             )
     except upload_service.UploadError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -980,7 +993,16 @@ async def decide(
         elif kind == "design_loop":
             await design_loop_routes.approve_loop(raw, label, audit)
         elif kind == "upload":
-            await _decide_upload(app, raw, decision, reason, approver, surface)
+            await _decide_upload(
+                app,
+                raw,
+                decision,
+                reason,
+                approver,
+                surface,
+                agent=agent if surface == "agent" else None,
+                on_behalf_of=on_behalf_of,
+            )
         elif kind == "sketch":
             await twin_routes.approve_sketch_node(UUID(raw), label, audit)
         elif kind == "parametric_sketch":

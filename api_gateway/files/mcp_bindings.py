@@ -119,6 +119,35 @@ class LocalFilesService:
             "lifetime_s": lifetime,
         }
 
+    async def decide_upload(
+        self, upload_id: str, decision: str, reason: str, agent: str, on_behalf_of: str
+    ) -> dict[str, Any]:
+        """Decide through the approvals service as the agent, for the person.
+
+        The same call ``/v1/approvals`` makes, with surface ``agent``: it is
+        refused (403) unless this process delegates human authority.
+        """
+        from fastapi import HTTPException
+
+        from api_gateway.approvals import service as approvals
+        from mcp_core.guardrails import Approver
+
+        try:
+            item = await approvals.decide(
+                None,
+                f"upload:{upload_id}",
+                decision=decision,
+                reason=reason,
+                to_phase="",
+                approver=Approver(actor_id=on_behalf_of, verified=False),
+                surface="agent",
+                on_behalf_of=on_behalf_of,
+                agent=agent,
+            )
+        except HTTPException as exc:
+            raise ValueError(str(exc.detail)) from exc
+        return item.model_dump()
+
     async def upload_status(self, upload_id: str) -> dict[str, Any]:
         try:
             return get_upload_store().get(upload_id).model_dump()

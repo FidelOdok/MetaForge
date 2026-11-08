@@ -347,6 +347,7 @@ PROFILES: dict[str, frozenset[str]] = {
         "kicad.generate_schematic",
         "kicad.generate_pcb",
         "kicad.autoroute_pcb",
+        "kicad.edit_pcb",
         "kicad.export_3d",
         "kicad.render_pcb",
         "kicad.update_components",
@@ -366,6 +367,8 @@ PROFILES: dict[str, frozenset[str]] = {
         # A KiCad project or a datasheet in, fabrication files out.
         "files.import",
         "files.request_upload",
+        # Refused unless the owner delegates human authority to the agent.
+        "files.decide_upload",
         "files.link",
     },
     # Assemblies and robot descriptions, through to a simulator.
@@ -925,7 +928,9 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         "twin.measure_dfm",
         "kicad.generate_schematic",
         "kicad.generate_pcb",
-        "kicad.run_erc",
+        # kicad.generate_schematic runs ERC itself, and Check carries kicad.run_erc;
+        # its place here went to editing a board without an upload.
+        "kicad.edit_pcb",
         "kicad.run_drc",
         "component.search_parametric",
         "twin.record_component_selection",

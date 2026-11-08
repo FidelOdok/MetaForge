@@ -561,6 +561,9 @@ PRODUCING: frozenset[str] = frozenset(
         "kicad.generate_schematic",
         "kicad.generate_pcb",
         "kicad.autoroute_pcb",
+        # Copies the board and its project to a new folder, edits and re-routes
+        # the copy; the board it was given is never changed.
+        "kicad.edit_pcb",
         # FORGE-684: a new file each (3D model, render, schematic revision).
         "kicad.export_3d",
         "kicad.render_pcb",
@@ -685,6 +688,11 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # is a person's decision (or a delegated agent's for the person) that
         # moves the release forward, the same family. Never policy-approved.
         "twin.accept_release_finding",
+        # An agent deciding its own staged upload for a person, under the
+        # owner's human-authority delegation only (guardrails.
+        # UPLOAD_DECISION_TOOLS): approving imports the files into the twin,
+        # rejecting discards them. Never policy-approved.
+        "files.decide_upload",
         "twin.execute_revalidation_plan",
         "twin.mark_engineering_change_rolled_back",
         "twin.reject_engineering_change",
