@@ -162,6 +162,45 @@ def human_authority_delegated() -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+#: The owner's switch that lets an agent fix the release baseline and decide
+#: the manufacturing release approval for a person (FORGE-834). Separate from
+#: :data:`ALLOW_AGENT_HUMAN_AUTHORITY_ENV`: delegating human-authority steps
+#: does not delegate a release, and the reverse. Read where the call lands.
+ALLOW_AGENT_RELEASE_ENV = "METAFORGE_ALLOW_AGENT_RELEASE"
+
+#: The release steps an owner may delegate to an agent (FORGE-834).
+#:
+#: ``twin.create_baseline`` fixes the configuration and advances every member
+#: to ``baselined``; ``twin.approve_release`` approves the project's
+#: manufacturing release approval. Neither is ever approved by a policy (see
+#: :func:`never_auto_approved`). With the release flag on, a call from an
+#: agent that names itself and the person it acts for is recorded as that
+#: agent's decision for the person and runs.
+RELEASE_DELEGATED_TOOLS: frozenset[str] = frozenset(
+    {"twin.create_baseline", "twin.approve_release"}
+)
+
+#: Release tools that exist only for a delegated agent. A person approves a
+#: release with ``twin.approve_engineering_entity`` or in the dashboard, so
+#: this one is refused outright unless the call is delegated.
+DELEGATED_ONLY_TOOLS: frozenset[str] = frozenset({"twin.approve_release"})
+
+
+def release_delegated() -> bool:
+    """Whether the owner delegates the release baseline and approval to agents, here.
+
+    Off by default. It is never a policy approval: :func:`never_auto_approved`
+    is unaffected, and :func:`human_authority_delegated` does not imply it.
+    """
+    raw = os.environ.get(ALLOW_AGENT_RELEASE_ENV, "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def requires_release_delegation(tool_id: str) -> bool:
+    """Is this a release step only a person, or an agent the owner delegates, decides?"""
+    return tool_id in RELEASE_DELEGATED_TOOLS
+
+
 #: Tools that write, but write *bookkeeping about the agent's own work* —
 #: not design state (FORGE-407).
 #:
@@ -321,7 +360,13 @@ CALLER_SUPPLIED_APPROVER_ARGS: frozenset[str] = frozenset({"decided_by", "approv
 #: neither set nor clear it.
 REQUIRE_PART_COLOURS_ARG = "__require_part_colours__"
 
-_RESERVED_ARGS = frozenset({APPROVED_BY_ARG, REQUIRE_PART_COLOURS_ARG})
+#: Reserved argument key (FORGE-834): the dispatcher sets it to the agent's
+#: name on a release step it delegated, beside :data:`APPROVED_BY_ARG` (the
+#: person the agent acted for). Its presence is what tells a release tool the
+#: call was delegated, so a client can neither set nor clear it.
+DELEGATED_AGENT_ARG = "__delegated_agent__"
+
+_RESERVED_ARGS = frozenset({APPROVED_BY_ARG, REQUIRE_PART_COLOURS_ARG, DELEGATED_AGENT_ARG})
 
 
 def strip_reserved_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -408,6 +453,7 @@ def never_auto_approved(tool_id: str) -> bool:
     """
     return (
         requires_human_authority(tool_id)
+        or requires_release_delegation(tool_id)
         or tool_id in DESTRUCTIVE
         or tool_id.startswith(POLICY_ADMIN_PREFIXES)
     )
@@ -641,6 +687,25 @@ class HumanAuthorityRequiredError(RuntimeError):
             f"{tool_id} records a human decision and none was established: {detail}. "
             "The approver's identity comes from whoever answers the approval, never "
             "from a tool argument."
+        )
+
+
+class ReleaseNotDelegatedError(HumanAuthorityRequiredError):
+    """A delegated-only release step was called without a delegation (FORGE-834).
+
+    ``twin.approve_release`` exists for an agent the owner delegates release
+    to. Anyone else is refused at once, rather than held for a person whose
+    approval of the hold still would not let the tool run.
+    """
+
+    def __init__(self, tool_id: str, detail: str) -> None:
+        self.tool_id = tool_id
+        RuntimeError.__init__(
+            self,
+            f"{tool_id} is decided only by an agent the owner delegates release to "
+            f"({ALLOW_AGENT_RELEASE_ENV}=true, with X-MetaForge-Agent and "
+            f"X-MetaForge-On-Behalf-Of on the request): {detail}. A person approves "
+            "the release with twin.approve_engineering_entity or in the dashboard.",
         )
 
 

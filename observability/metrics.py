@@ -699,7 +699,10 @@ class MetricsRegistry:
     # FORGE-780: one durable tool approval reaching an outcome: ``held``,
     # ``approved_late_honoured`` (an identical retry ran on an approval),
     # ``auto_approved`` (a project policy approved it), ``cap_held`` (a
-    # policy would have, but the spend cap was reached), ``expired``.
+    # policy would have, but the spend cap was reached), ``expired``,
+    # ``delegated`` (an agent decided a human-authority call for a person) and
+    # ``delegated_release`` (an agent fixed the release baseline or approved
+    # the release for a person, FORGE-834).
     TOOL_APPROVAL_TOTAL = MetricDefinition(
         name="metaforge_tool_approval_total",
         type="counter",

@@ -975,8 +975,10 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         "twin.evaluate_dfm",
         "twin.resolve_concept_component",
         # The release approval request (entity_type release_approval); its
-        # approval is the person's.
+        # approval is the person's, or a delegated agent's for the person
+        # when the owner sets METAFORGE_ALLOW_AGENT_RELEASE.
         "twin.record_engineering_entity",
+        "twin.approve_release",
         "twin.create_baseline",
         "twin.create_release_package",
         "twin.generate_test_plan",

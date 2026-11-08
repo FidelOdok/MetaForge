@@ -404,6 +404,110 @@ class ReleasePathService:
                 },
             }
 
+    # -- the release approval, for a delegated agent (FORGE-834) --------------
+
+    async def approve_release(
+        self,
+        project_id: str | UUID,
+        *,
+        agent: str,
+        on_behalf_of: str,
+        reason: str,
+        entity_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Approve the project's release approval as ``agent`` acting for ``on_behalf_of``.
+
+        Reached only through ``twin.approve_release`` on a call the MCP
+        dispatcher delegated under ``METAFORGE_ALLOW_AGENT_RELEASE``. The
+        release rules stay: while any other checklist item the release gate
+        reads is open, nothing is approved and each blocker is named. The
+        entity's metadata says the agent approved it for the person; it never
+        names the person as the approver.
+        """
+        from twin_core.dfm.release_checklist import manufacturing_checklist
+        from twin_core.models.enums import AuthorityState
+
+        tool = "twin.approve_release"
+        pid = _pid(project_id)
+        with tracer.start_as_current_span("release_path.approve_release") as span:
+            span.set_attribute("project.id", str(pid))
+            span.set_attribute("release.agent", agent)
+            checklist = await manufacturing_checklist(self._twin, pid)
+            blockers = checklist.gate_blockers() if checklist is not None else []
+            if blockers:
+                _metric(tool, "blocked")
+                logger.info(
+                    "release_approval_refused_blocked",
+                    project_id=str(pid),
+                    agent=agent,
+                    on_behalf_of=on_behalf_of,
+                    blockers=blockers,
+                )
+                raise ReleasePathError(
+                    "the release cannot be approved while the release checklist has open "
+                    "items: " + "; ".join(blockers),
+                    409,
+                )
+            entities = await self._twin.list_engineering_entities(
+                project_id=pid, entity_type="release_approval"
+            )
+            if entity_id is not None:
+                target = next((e for e in entities if str(e.id) == entity_id), None)
+                if target is None:
+                    _metric(tool, "not_found")
+                    raise ReleasePathError(f"no release_approval {entity_id} on this project", 404)
+            else:
+                pending = [
+                    e
+                    for e in entities
+                    if str(getattr(e.authority, "value", e.authority))
+                    not in ("approved", "baselined")
+                ]
+                if not pending:
+                    _metric(tool, "not_found")
+                    raise ReleasePathError(
+                        "no release approval waiting: record one first with "
+                        "twin.record_engineering_entity (entity_type release_approval)",
+                        404,
+                    )
+                target = max(pending, key=lambda e: e.created_at)
+            approved_by = f"agent:{agent}"
+            metadata = dict(target.metadata or {})
+            metadata.update(
+                {
+                    "approved_by": approved_by,
+                    "agent": agent,
+                    "on_behalf_of": on_behalf_of,
+                    "approval_route": "delegated",
+                    "approval_reason": reason,
+                    "delegation": "METAFORGE_ALLOW_AGENT_RELEASE",
+                }
+            )
+            updated = await self._twin.update_engineering_entity(
+                target.id,
+                {"authority": AuthorityState.APPROVED, "metadata": metadata},
+                expected_revision=target.revision,
+            )
+            after = await manufacturing_checklist(self._twin, pid)
+            item = after.item("approvals").as_dict() if after is not None else None
+            _metric(tool, "ok")
+            logger.info(
+                "release_approval_delegated",
+                project_id=str(pid),
+                node_id=str(updated.id),
+                agent=agent,
+                on_behalf_of=on_behalf_of,
+                revision=updated.revision,
+            )
+            return {
+                "node_id": str(updated.id),
+                "authority": updated.authority.value,
+                "revision": updated.revision,
+                "approved_by": approved_by,
+                "on_behalf_of": on_behalf_of,
+                "checklist_item": item,
+            }
+
 
 def make_release_path_service(twin: Any) -> ReleasePathService:
     """The service ``twin.resolve_concept_component`` and ``twin.run_item_fea`` call."""

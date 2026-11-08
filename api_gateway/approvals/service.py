@@ -734,13 +734,35 @@ def agent_may_decide_human_authority() -> bool:
     return human_authority_delegated()
 
 
+AGENT_RELEASE_REASON = (
+    "this approval fixes or approves a manufacturing release; agents may not decide it "
+    "unless the gateway owner sets METAFORGE_ALLOW_AGENT_RELEASE=true"
+)
+
+
+def agent_refusal(item: ApprovalItem) -> str | None:
+    """Why an agent may not decide this item, or ``None`` when it may.
+
+    Human-authority kinds need the human-authority flag (FORGE-510). A held
+    release step (``twin.create_baseline``, ``twin.approve_release``) needs
+    the release flag (FORGE-834); the human-authority flag does not cover it.
+    """
+    from mcp_core.guardrails import release_delegated, requires_release_delegation
+
+    if item.kind in HUMAN_AUTHORITY_KINDS and not agent_may_decide_human_authority():
+        return AGENT_HUMAN_AUTHORITY_REASON
+    tool = str((item.detail or {}).get("tool") or "")
+    if item.kind == "tool_call" and requires_release_delegation(tool) and not release_delegated():
+        return AGENT_RELEASE_REASON
+    return None
+
+
 def for_caller(item: ApprovalItem, surface: str) -> ApprovalItem:
     """The item as an agent caller may act on it: human-authority kinds are not decidable."""
-    if (
-        surface != "agent"
-        or item.kind not in HUMAN_AUTHORITY_KINDS
-        or agent_may_decide_human_authority()
-    ):
+    if surface != "agent":
+        return item
+    refusal = agent_refusal(item)
+    if refusal is None:
         return item
     return item.model_copy(
         update={
@@ -749,7 +771,7 @@ def for_caller(item: ApprovalItem, surface: str) -> ApprovalItem:
             "not_decidable_reason": (
                 item.not_decidable_reason
                 if item.status != "pending" and item.not_decidable_reason
-                else AGENT_HUMAN_AUTHORITY_REASON
+                else refusal
             ),
         }
     )
@@ -886,12 +908,9 @@ async def decide(
     """
     kind, raw = split_id(item_id)
     current = await get_item(app, item_id)  # 404 first, and the not-decidable check
-    if (
-        surface == "agent"
-        and current.kind in HUMAN_AUTHORITY_KINDS
-        and not agent_may_decide_human_authority()
-    ):
-        raise HTTPException(status_code=403, detail=AGENT_HUMAN_AUTHORITY_REASON)
+    refusal = agent_refusal(current) if surface == "agent" else None
+    if refusal is not None:
+        raise HTTPException(status_code=403, detail=refusal)
     if current.status != "pending":
         raise HTTPException(
             status_code=409,

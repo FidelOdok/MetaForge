@@ -756,6 +756,57 @@ A destructive tool that is not human-authority keeps its own rules: a person,
 or the project's approval policy. This is delegation by the owner, not
 policy: no approval policy ever approves a human-authority tool, in any mode.
 
+### Delegating a release to an agent
+
+The last two steps of a release are a person's: fixing the configuration
+baseline (`twin.create_baseline`, which advances every member's authority to
+`baselined`) and approving the manufacturing release (the `release_approval`
+entity the release checklist's "Manufacturing release approved" item reads).
+Neither is human-authority, so `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY` does not
+reach them, and the baseline is destructive, so no approval policy approves it.
+A fully autonomous run therefore stopped at the baseline.
+
+The owner can delegate both with a separate switch,
+`METAFORGE_ALLOW_AGENT_RELEASE=true` (default off). Set it where the call
+lands: the gateway, and the MCP sidecar. The compose stack passes it from
+`.env` to both. The human-authority flag alone does not delegate a release,
+and the release flag does not delegate human-authority steps.
+
+With the flag on, and the MCP request naming the agent in
+`X-MetaForge-Agent` and the person in `X-MetaForge-On-Behalf-Of` (the person
+must be the verified principal when there is one):
+
+| Step | Tool | What happens | What is recorded |
+|------|------|--------------|------------------|
+| Baseline | `twin.create_baseline` (`project_id`, `reason`) | Not held: it runs at once. | The baseline's `approved_by` is `agent:<agent> on behalf of <person>` and its `reason` names the agent, the person and the release flag. An `approved_by` argument is ignored. |
+| Release approval | `twin.approve_release` (`project_id`, `reason`, optional `entity_id`) | Approves the project's newest `release_approval` that is not approved yet (record it first with `twin.record_engineering_entity`). | The entity's `authority` becomes `approved`, its metadata says `approved_by: agent:<agent>` and `on_behalf_of: <person>`, and the checklist item passes with the detail "approved by agent `<agent>` on behalf of `<person>`". |
+
+Each call is first recorded on the ledger as a delegated approval, the same
+record as [delegated holds through MCP](#delegated-holds-through-mcp): route
+`delegated`, surface `agent`, the agent and the person, and the reason
+"decided by the agent for the person it acts for: the gateway owner delegates
+the release baseline and approval (METAFORGE_ALLOW_AGENT_RELEASE)". It is never
+recorded as the person's own decision.
+
+The release rules stay as they are. `twin.approve_release` refuses, naming each
+blocker, while any other item of the manufacturing release checklist that the
+release gate reads (every component exact, DFM, verification, STEP round trip)
+is open, and `twin.create_release_package` still needs the whole G8 gate,
+baseline and approval included.
+
+`twin.approve_release` exists only for a delegated agent. With the flag off,
+or without both headers, or with a person who is not the principal, it is
+refused at once (no hold), and `twin.create_baseline` is held for a person
+exactly as before. The gateway refuses to record a delegated release with 403
+while its own flag is off, and with 422 when the agent or the person is
+missing. An agent deciding a held `twin.create_baseline` through
+`/v1/approvals` or `approvals.decide` gets 403 unless the release flag is on.
+No approval policy approves either tool, in any mode: this is delegation by
+the owner, not policy.
+
+A person still approves a release with `twin.approve_engineering_entity` or
+in the dashboard.
+
 ## Observability
 
 `metaforge_approval_decision_total{kind, decision, surface, outcome}` counts
@@ -766,15 +817,21 @@ already closed, not a fault.
 `metaforge_tool_approval_total{outcome}` counts durable tool approvals:
 `held`, `approved` (answered while the call waited), `approved_late_honoured`
 (an identical retry ran on it), `rejected`, `auto_approved`, `cap_held`,
-`delegated` (an agent decided a human-authority call for a person) and
-`expired`. The gateway logs the same as `tool_approval_held`,
+`delegated` (an agent decided a human-authority call for a person),
+`delegated_release` (an agent fixed the baseline or approved the release for
+a person) and `expired`. The gateway logs the same as `tool_approval_held`,
 `tool_approval_approved_late_honoured`, `tool_approval_auto_approved`,
-`tool_approval_cap_held`, `tool_approval_delegated` and
-`tool_approval_expired`; the sidecar logs
+`tool_approval_cap_held`, `tool_approval_delegated`,
+`tool_approval_delegated_release` (and `tool_approval_release_not_delegated`
+when its release flag is off) and `tool_approval_expired`; the sidecar logs
 `mcp_tool_call_held_for_approval` (with `durable=true` and the arguments
 hash), `mcp_tool_call_handed_off`, `mcp_tool_approval_approved_late_honoured`,
-`mcp_tool_call_delegated`, and `mcp_delegation_not_claimed` or
-`mcp_delegation_person_mismatch` when a delegation was not taken.
+`mcp_tool_call_delegated`, `mcp_release_delegated`, `mcp_release_not_delegated`
+(a refused `twin.approve_release`), and `mcp_delegation_not_claimed` or
+`mcp_delegation_person_mismatch` when a delegation was not taken. The tools log
+`twin_baseline_delegated`, `release_approval_delegated` and
+`release_approval_refused_blocked`, and count `twin.approve_release` calls in
+`metaforge_release_path_call_total{tool, outcome}`.
 The `ToolApprovalsMostlyExpiring` alert fires when more than half of the holds
 in six hours expire undecided.
 

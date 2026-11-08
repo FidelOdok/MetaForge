@@ -132,6 +132,26 @@ def _authority(entity: Any) -> str:
     return str(getattr(a, "value", a) or "")
 
 
+def _approvals_detail(approved: list[Any]) -> str:
+    """The approvals item's detail: who approved, and for whom when an agent did.
+
+    FORGE-834: an approval a delegated agent made reads "approved by agent X
+    on behalf of Y", never as the person's own approval.
+    """
+    if not approved:
+        return "no approved release approval"
+    out = f"{len(approved)} release approval(s) approved"
+    delegated = []
+    for a in approved:
+        meta = getattr(a, "metadata", None) or {}
+        agent, person = meta.get("agent"), meta.get("on_behalf_of")
+        if meta.get("approval_route") == "delegated" and agent and person:
+            delegated.append(f"approved by agent {agent} on behalf of {person}")
+    if delegated:
+        out += ": " + "; ".join(delegated)
+    return out
+
+
 def _accepted(finding: dict[str, Any]) -> bool:
     d = finding.get("decision")
     return isinstance(d, dict) and d.get("decision") == "keep_design" and bool(d.get("by"))
@@ -435,11 +455,7 @@ async def manufacturing_checklist(
                 id="approvals",
                 label=ITEM_LABELS["approvals"],
                 status="pass" if approved else "fail",
-                detail=(
-                    f"{len(approved)} release approval(s) approved"
-                    if approved
-                    else "no approved release approval"
-                ),
+                detail=_approvals_detail(approved),
                 blockers=[] if approved else ["no approved manufacturing release approval"],
                 next_steps=[] if approved else ["Ask a reviewer to approve the release"],
             )

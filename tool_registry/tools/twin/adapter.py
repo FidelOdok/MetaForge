@@ -25,8 +25,10 @@ import structlog
 from mcp_core.context import current_context
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
+    DELEGATED_AGENT_ARG,
     REQUIRE_PART_COLOURS_ARG,
     HumanAuthorityRequiredError,
+    ReleaseNotDelegatedError,
     reject_caller_supplied_approver,
 )
 from mcp_core.live_events import publish_live_event
@@ -148,6 +150,22 @@ def _item_kwargs(arguments: dict[str, Any]) -> dict[str, Any]:
         for name in ("item_key", "supersedes", "change_reason")
         if isinstance(arguments.get(name), str) and arguments[name].strip()
     }
+
+
+def _release_delegate(arguments: dict[str, Any]) -> tuple[str, str] | None:
+    """(agent, person) for a release step the dispatcher delegated, else ``None``.
+
+    FORGE-834. Both values are reserved arguments the dispatcher sets only
+    when the owner's release flag is on and the request named the agent and
+    the person; a client cannot supply either.
+    """
+    agent = arguments.get(DELEGATED_AGENT_ARG)
+    person = arguments.get(APPROVED_BY_ARG)
+    if not isinstance(agent, str) or not agent.strip():
+        return None
+    if not isinstance(person, str) or not person.strip():
+        return None
+    return agent.strip(), person.strip()
 
 
 def _depends_on_property(inferred: str, extra: str = "") -> dict[str, Any]:
@@ -8179,6 +8197,92 @@ class TwinServer(McpToolServer):
             ),
             handler=self.run_item_fea,
         )
+        # FORGE-834: the manufacturing release approval, decided by an agent
+        # the owner delegates release to. Never held, never policy-approved.
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.approve_release",
+                adapter_id="twin",
+                name="Approve Release (delegated agent)",
+                description=(
+                    "Approve the project's manufacturing release approval (the "
+                    "release_approval entity recorded with twin.record_engineering_entity) "
+                    "as an agent acting for a person, so the release checklist's "
+                    "'Manufacturing release approved' passes. Only for a delegated agent: "
+                    "refused unless the owner sets METAFORGE_ALLOW_AGENT_RELEASE=true and "
+                    "the request names the agent (X-MetaForge-Agent) and the person "
+                    "(X-MetaForge-On-Behalf-Of), who must be the signed-in principal when "
+                    "there is one. Refused, with each blocker named, while any other "
+                    "release checklist item (components exact, DFM, verification, STEP "
+                    "round trip) is open. Recorded as 'approved by agent <name> on behalf "
+                    "of <person>', never as the person. No approval policy approves it. "
+                    "A person approves a release with twin.approve_engineering_entity."
+                ),
+                capability="twin_dfm",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "entity_id": {
+                            "type": "string",
+                            "description": (
+                                "The release_approval entity to approve. Omit to approve "
+                                "the project's newest one that is not approved yet."
+                            ),
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why the release is approved now.",
+                        },
+                    },
+                    "required": ["project_id", "reason"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "authority": {"type": "string"},
+                        "approved_by": {"type": "string"},
+                        "on_behalf_of": {"type": "string"},
+                        "checklist_item": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.approve_release,
+        )
+
+    async def approve_release(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.approve_release"
+        project_id = self._project_arg(tool, arguments)
+        reason = arguments.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"{tool}: 'reason' is required")
+        entity_id = arguments.get("entity_id")
+        if entity_id is not None and (not isinstance(entity_id, str) or not entity_id.strip()):
+            raise ValueError(f"{tool}: 'entity_id' must be a node id")
+        delegated = _release_delegate(arguments)
+        if delegated is None:
+            # The dispatcher refuses first; this is the tool's own guard for a
+            # path that reaches it without a delegation (a local session).
+            raise ReleaseNotDelegatedError(tool, "this call was not delegated")
+        agent, person = delegated
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("project.id", project_id)
+            span.set_attribute("release.agent", agent)
+            try:
+                result: dict[str, Any] = await self._release_path.approve_release(
+                    project_id,
+                    agent=agent,
+                    on_behalf_of=person,
+                    reason=reason.strip(),
+                    entity_id=entity_id.strip() if isinstance(entity_id, str) else None,
+                )
+            except ValueError as exc:
+                span.record_exception(exc)
+                raise ValueError(f"{tool}: {exc}") from exc
+        return result
 
     async def resolve_concept_component(self, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = "twin.resolve_concept_component"
@@ -8336,7 +8440,13 @@ class TwinServer(McpToolServer):
                     "is reported. This is the 'configuration baseline fixed' "
                     "check twin_core.consistency.gates.evaluate_g8_release "
                     "requires (and, through it, twin.create_release_package) -- "
-                    "a project with zero baselines can never pass G8."
+                    "a project with zero baselines can never pass G8. No approval "
+                    "policy ever approves it. When the owner sets "
+                    "METAFORGE_ALLOW_AGENT_RELEASE=true and the request names the "
+                    "agent (X-MetaForge-Agent) and the person (X-MetaForge-On-Behalf-Of), "
+                    "it is not held: it runs as the agent's decision for that person, "
+                    "approved_by is recorded as 'agent:<name> on behalf of <person>' "
+                    "and any approved_by argument is ignored."
                 ),
                 capability="twin_evaluate",
                 input_schema={
@@ -8349,7 +8459,11 @@ class TwinServer(McpToolServer):
                         "approved_by": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Who approved this baseline (at least one name).",
+                            "description": (
+                                "Who approved this baseline (at least one name). "
+                                "Required unless the call is a delegated agent's, "
+                                "whose record names the agent and the person instead."
+                            ),
                         },
                         "reason": {
                             "type": "string",
@@ -8360,7 +8474,7 @@ class TwinServer(McpToolServer):
                             "description": ("Optional label. Defaults to 'Baseline <timestamp>'."),
                         },
                     },
-                    "required": ["project_id", "approved_by", "reason"],
+                    "required": ["project_id", "reason"],
                 },
                 output_schema={
                     "type": "object",
@@ -8385,13 +8499,34 @@ class TwinServer(McpToolServer):
         project_id = arguments.get("project_id")
         if not project_id or not isinstance(project_id, str):
             raise ValueError("twin.create_baseline: 'project_id' is required")
-        approved_by = arguments.get("approved_by")
-        if not approved_by or not isinstance(approved_by, list):
-            raise ValueError("twin.create_baseline: 'approved_by' is required (non-empty array)")
         reason = arguments.get("reason")
         if not reason or not isinstance(reason, str):
             raise ValueError("twin.create_baseline: 'reason' is required")
         name = arguments.get("name")
+        delegated = _release_delegate(arguments)
+        if delegated is not None:
+            # FORGE-834: an agent the owner delegates release to fixed this
+            # baseline for a person. The record names both, never the person
+            # alone, and whatever approved_by the model wrote is not used.
+            agent, person = delegated
+            logger.info(
+                "twin_baseline_delegated",
+                project_id=project_id,
+                agent=agent,
+                on_behalf_of=person,
+            )
+            return await self._baseline_creator(
+                project_id=project_id,
+                approved_by=[f"agent:{agent} on behalf of {person}"],
+                reason=(
+                    f"{reason} (fixed by agent {agent} on behalf of {person}; the owner "
+                    "delegates the release baseline, METAFORGE_ALLOW_AGENT_RELEASE)"
+                ),
+                name=name if isinstance(name, str) else None,
+            )
+        approved_by = arguments.get("approved_by")
+        if not approved_by or not isinstance(approved_by, list):
+            raise ValueError("twin.create_baseline: 'approved_by' is required (non-empty array)")
         return await self._baseline_creator(
             project_id=project_id,
             approved_by=[str(a) for a in approved_by],

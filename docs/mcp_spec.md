@@ -1412,7 +1412,18 @@ handling file bytes. Each takes `project_id`.
   ([release packages](twin_schema.md#release-packages)). The baseline is
   destructive (it advances existing records) and the release approval it
   needs (`twin.record_engineering_entity`, `entity_type: release_approval`)
-  is approved by a person, so both wait for one.
+  is approved by a person, so both wait for one, unless the owner delegates
+  the release.
+- `twin.approve_release` (destructive, delegated only): `{project_id, reason,
+  entity_id?}`. Approves the newest unapproved `release_approval` as the
+  agent acting for the person. It runs only when the owner sets
+  `METAFORGE_ALLOW_AGENT_RELEASE=true` and the request carries
+  `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of`; then
+  `twin.create_baseline` also runs without a hold, recorded as
+  `agent:<agent> on behalf of <person>`. Otherwise it is refused at once
+  with `human_authority_required`, and refused with the blockers named while
+  another release checklist item is open. No policy approves either tool.
+  See [delegating a release to an agent](approvals.md#delegating-a-release-to-an-agent).
 
 Observability: `metaforge_release_path_call_total{tool, outcome}`, the
 `ItemFeaFailures` alert, and spans `twin.measure_dfm`,
