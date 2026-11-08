@@ -812,9 +812,12 @@ class TestPluginVersion:
         build_claude_code_local()
         build_claude_code_cloud()
         build_codex(default_gateway_url=DEFAULT_GATEWAY_URL)
-        assert content_digest() == read_version_lock()["content_digest"], (
+        digest = content_digest()
+        # The full digest, so a lock cut on another OS can be checked against it.
+        assert digest == read_version_lock()["content_digest"], (
             "plugin content changed but the version was not bumped: "
-            "run `python scripts/build_integrations.py` and commit the result"
+            "run `python scripts/build_integrations.py` and commit the result "
+            f"(content digest here: {digest})"
         )
 
     def test_next_version_bumps_the_patch(self) -> None:
