@@ -71,7 +71,7 @@ class TestTheAgentCannotApproveItsOwnCall:
         from mcp_core.annotations import ADDITIVE, DESTRUCTIVE, READ_ONLY
 
         known = READ_ONLY | ADDITIVE | DESTRUCTIVE
-        from mcp_core.guardrails import HUMAN_AUTHORITY_TOOLS
+        from mcp_core.guardrails import HUMAN_AUTHORITY_TOOLS, RELEASE_DELEGATED_TOOLS
 
         # A tool whose name says "approve" is acceptable only when the
         # approver comes from the approval record rather than from the
@@ -84,7 +84,10 @@ class TestTheAgentCannotApproveItsOwnCall:
         # `approver`. FORGE-393 had fixed promotion and guarded `ect.approve`
         # against a *blank* approver, which is not the same as guarding it
         # against a supplied one.
-        exempt = HUMAN_AUTHORITY_TOOLS | {
+        # A delegated release step (FORGE-834) is the same: the agent and the
+        # person come from the dispatcher's delegation record, never from an
+        # argument, and an undelegated call is refused.
+        exempt = HUMAN_AUTHORITY_TOOLS | RELEASE_DELEGATED_TOOLS | {
             # Advances an entity's authority state; the actor is the twin's
             # own `created_by` convention, not a claim about who signed off.
             "twin.approve_engineering_entity",
