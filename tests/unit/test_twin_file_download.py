@@ -204,6 +204,26 @@ def test_design_files_view_on_the_node_response() -> None:
     assert routes._wp_to_response(_wp()).designFiles is None
 
 
+def test_design_files_view_tolerates_scalar_list_fields() -> None:
+    """A G-code node records ``layers`` as a layer count. The node still lists,
+    with no layers, instead of failing GET /v1/twin/nodes for the project."""
+    wp = _wp(
+        metadata={
+            "design_files": {"base.gcode": "k1"},
+            "layers": 734,
+            "files": "base.gcode",
+            "preview_files": 3,
+            "build_outputs": None,
+            "source_work_product_ids": {"id": "x"},
+        },
+        fmt="gcode",
+    )
+    view = routes._wp_to_response(wp).designFiles
+    assert view is not None
+    assert view["layers"] == [] and view["previews"] == [] and view["sources"] == []
+    assert view["files"] == [{"path": "base.gcode"}]
+
+
 async def test_download_named_file_falls_back_to_primary_blob(monkeypatch) -> None:
     """The URDF itself is fetchable through this same route (same filename
     as GET /nodes/{id}/file), not just its meshes — one base URL serves

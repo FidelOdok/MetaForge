@@ -746,18 +746,31 @@ def _resolve_blob(wp: WorkProduct) -> tuple[bytes, str]:
         raise
 
 
+def _entries(meta: dict[str, Any], key: str, kind: type) -> list[Any]:
+    """The ``kind`` entries of a list field, or none when the field is not a list.
+
+    Metadata is written by agents as well as by the platform, so a field can
+    hold something else under the same name: a slicer records ``layers`` as a
+    layer count. One such node must not fail the whole project listing.
+    """
+    value = meta.get(key)
+    if not isinstance(value, list):
+        return []
+    return [v for v in value if isinstance(v, kind)]
+
+
 def _design_files_view(meta: dict[str, Any]) -> dict[str, Any] | None:
     """The file list, previews, layers and build output of a design-files node."""
     if not isinstance(meta.get("design_files"), dict):
         return None
-    files = [f for f in meta.get("files") or [] if isinstance(f, dict)]
+    files = _entries(meta, "files", dict)
     return {
         "files": files or [{"path": p} for p in meta["design_files"]],
-        "previews": [p for p in meta.get("preview_files") or [] if isinstance(p, str)],
+        "previews": _entries(meta, "preview_files", str),
         "previewError": meta.get("preview_error"),
-        "layers": [r for r in meta.get("layers") or [] if isinstance(r, dict)],
-        "buildOutputs": [p for p in meta.get("build_outputs") or [] if isinstance(p, str)],
-        "sources": [s for s in meta.get("source_work_product_ids") or [] if isinstance(s, str)],
+        "layers": _entries(meta, "layers", dict),
+        "buildOutputs": _entries(meta, "build_outputs", str),
+        "sources": _entries(meta, "source_work_product_ids", str),
     }
 
 
