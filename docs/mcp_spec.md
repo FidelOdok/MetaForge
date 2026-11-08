@@ -1427,10 +1427,61 @@ handling file bytes. Each takes `project_id`.
   another release checklist item is open. No policy approves either tool.
   See [delegating a release to an agent](approvals.md#delegating-a-release-to-an-agent).
 
-Observability: `metaforge_release_path_call_total{tool, outcome}`, the
-`ItemFeaFailures` alert, and spans `twin.measure_dfm`,
-`twin.dfm.exact.measure`, `twin.resolve_concept_component` and
-`twin.run_item_fea`.
+- `twin.build_assembly` (producing, same injection): `{project_id, name,
+  parts: [{item_key, name?, location?: {x, y, z, rx, ry, rz}, board_ref?}],
+  joints?: [{name, type: revolute | fixed | slider, parent?, child | moving,
+  axis_point, axis_dir, min_deg?, max_deg?, steps?}], material?, item_key?,
+  change_reason?}`. Stages each part revision's STEP, builds the assembly
+  with `cadquery.create_assembly` over MCP and commits it through the geometry
+  recorder as the next revision of an `assembly` item, keeping the layout
+  (`metadata.assembly_layout`). Returns the commit result with `item_ref`,
+  the `layout` and the build's `interferences`. A board is placed as the
+  cad_model `kicad.export_3d` made of it (committed with
+  `twin.commit_geometry`, `source_tool: kicad.export_3d`), which records its
+  `board_ref`.
+- `twin.check_assembly` (additive, same injection): `{project_id, assembly:
+  ASM-... | ASM-...@n | node id, checks?: {clearances, hole_patterns,
+  outlines, connectors, stacks, seats, joints, allowed_overlaps,
+  interference_tolerance_mm3}}`. Measures the placed parts with
+  `cadquery.check_interference` (read only) and records an `assembly_check`
+  pinned to the assembly and every part revision. Returns `{node_id,
+  assembly_ref, outcome: passed | issues_found | incomplete, counts,
+  open_findings, checks, derived, checklist_item, depends_on}`; each finding
+  has a stable `id`, a `severity` and the `parts` involved. See
+  [design for assembly](twin_schema.md#design-for-assembly).
+- `twin.accept_release_finding` (destructive, human authority, release
+  delegated): `{project_id, item: eda_checks | assembly_dfa, targets,
+  reason}`. Accepts a failing ERC or DRC (`PCB-...@n:drc`, `SCH-...@n:erc`)
+  or open assembly findings (their ids) for the release, as an approved
+  `waiver` pinned to the revisions it is about. Held for a person, whose
+  approval names the approver; with `METAFORGE_ALLOW_AGENT_RELEASE=true` and
+  the agent and person headers it runs as the agent's decision for the
+  person (`approved_by: agent:<name>`, `on_behalf_of`). A caller cannot name
+  the approver; an unknown or no longer failing target is refused. No policy
+  approves it.
+- `twin.record_design_files` takes `source_ref` (`CAD-...@n`, `PCB-...@n`,
+  `FW-...@n`; a bare key pins the current revision) and returns the pin it
+  recorded as `source_ref`. Without it the pin comes from the sources, or for
+  G-code from the `source.json` `slicer.slice` writes beside it. The release
+  checklist's `outputs_current` and `twin.create_release_package` refuse an
+  output made from an older revision or with no source
+  ([output source pins](twin_schema.md#output-source-pins)).
+- `twin.render_work_product` records nothing unless `store: true`: looking at
+  a part never changes the twin.
+
+The release checklist (`twin.get_release_checklist`) now also holds
+`eda_checks`, `assembly_dfa` and `outputs_current`, and G8 requires them
+([the release checklist](twin_schema.md#release-checklist)).
+
+Observability: `metaforge_release_path_call_total{tool, outcome}`,
+`metaforge_assembly_build_total{outcome}`,
+`metaforge_assembly_check_total{outcome}`,
+`metaforge_assembly_finding_total{check, severity}` and
+`metaforge_release_finding_accepted_total{item, route}`; the
+`ItemFeaFailures` and `AssemblyCheckFailures` alerts; and spans
+`twin.measure_dfm`, `twin.dfm.exact.measure`, `twin.resolve_concept_component`,
+`twin.run_item_fea`, `twin.build_assembly`, `twin.check_assembly` and
+`twin.accept_release_finding`.
 
 ### Twin adapter: one home for requirements
 

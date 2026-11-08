@@ -142,6 +142,10 @@ HUMAN_AUTHORITY_TOOLS: frozenset[str] = frozenset(
         # person's statement about their product. An agent makes it only
         # under the same delegation, and the record names the agent.
         "twin.imagine_accept",
+        # Accepting a failing ERC/DRC or an assembly finding for the release:
+        # the person is the content. A delegated agent decides it only under
+        # the release flag (RELEASE_DELEGATED_TOOLS), recorded for the person.
+        "twin.accept_release_finding",
     }
 )
 
@@ -176,8 +180,13 @@ ALLOW_AGENT_RELEASE_ENV = "METAFORGE_ALLOW_AGENT_RELEASE"
 #: :func:`never_auto_approved`). With the release flag on, a call from an
 #: agent that names itself and the person it acts for is recorded as that
 #: agent's decision for the person and runs.
+#:
+#: ``twin.accept_release_finding`` accepts a failing ERC/DRC or an assembly
+#: finding for the release. It is also a human-authority tool: without the
+#: release flag it is held for a person, and the person who approves the hold
+#: is the one recorded.
 RELEASE_DELEGATED_TOOLS: frozenset[str] = frozenset(
-    {"twin.create_baseline", "twin.approve_release"}
+    {"twin.create_baseline", "twin.approve_release", "twin.accept_release_finding"}
 )
 
 #: Release tools that exist only for a delegated agent. A person approves a

@@ -251,7 +251,21 @@ reference, never file bytes:
    It is the agent's own design decision, so a project policy approves it.
 3. Run the structural load cases with `twin.run_item_fea` (mesh, then solve)
    and record each result with `twin.record_document`.
-4. Record the fabrication outputs, then `twin.create_baseline`, a
+4. Run `kicad.run_erc` and `kicad.run_drc` and record each result with
+   `twin.record_evidence`, pinned to the schematic or board revision it
+   checked (`depends_on: ["PCB-...@n"]`): the release needs a passing ERC
+   and DRC on the current revisions.
+5. Put the product together and check it fits: commit each board's
+   `kicad.export_3d` STEP with `twin.commit_geometry`, build the assembly with
+   `twin.build_assembly` (every part and board at its placement, each hinge a
+   revolute joint with its limits), and check it with `twin.check_assembly`
+   (overlaps, hole patterns, the board outline in its pocket, edge
+   connectors, washer and fastener stacks, joint sweeps, seated parts). Fix
+   each high and medium finding
+   ([design for assembly](twin_schema.md#design-for-assembly)).
+6. Record the fabrication outputs, each with its `source_ref` (the revision
+   it was made from: an output made from an older revision blocks the
+   release), then `twin.create_baseline`, a
    `release_approval` request with `twin.record_engineering_entity`, and
    `twin.create_release_package`. The baseline and the approval wait for the
    person: neither is a human-authority tool, so the human-authority
@@ -261,6 +275,10 @@ reference, never file bytes:
    baseline, approves the release with `twin.approve_release` and creates the
    package, each recorded as its decision on the person's behalf
    ([delegating a release](approvals.md#delegating-a-release-to-an-agent)).
+   A failing ERC, DRC or assembly finding that is truly acceptable is
+   accepted with `twin.accept_release_finding` and a reason: held for the
+   person, or, under the same release switch, recorded as the agent's
+   decision for them ([the release checklist](twin_schema.md#release-checklist)).
 
 ## Mapping into the twin
 

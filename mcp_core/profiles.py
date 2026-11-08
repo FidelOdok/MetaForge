@@ -945,7 +945,6 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         # the CAD parts that realise them.
         "twin.resolve_concept_component",
         "twin.constraint_violations",
-        "constraint.validate",
         "twin.what_verifies",
         "twin.evaluate_metric",
         # The FEA chain on a CAD item (mesh, then solve) in one call.
@@ -953,9 +952,13 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         "calculix.check_mesh_convergence",
         "calculix.run_fea",
         "calculix.run_thermal",
-        "calculix.extract_results",
-        "calculix.validate_mesh",
         "freecad.generate_mesh",
+        # Design for assembly: each board's 3D model committed as a body, the
+        # parts and boards put together, and the fit checked.
+        "kicad.export_3d",
+        "twin.commit_geometry",
+        "twin.build_assembly",
+        "twin.check_assembly",
         "spice.run_simulation",
         "power.check_budget",
         "kicad.run_erc",
@@ -979,19 +982,24 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         # when the owner sets METAFORGE_ALLOW_AGENT_RELEASE.
         "twin.record_engineering_entity",
         "twin.approve_release",
+        # A failing ERC/DRC or an assembly finding accepted for the release:
+        # the person's, or a delegated agent's for the person.
+        "twin.accept_release_finding",
+        "twin.check_assembly",
         "twin.create_baseline",
         "twin.create_release_package",
         "twin.generate_test_plan",
         "twin.create_bringup_checklist",
         "twin.export_cad_step",
-        "cadquery.export_geometry",
         "kicad.export_gerber",
         "kicad.export_drill",
         "kicad.export_pos",
         "kicad.export_bom",
         "firmware.build",
         "slicer.slice",
-        "slicer.list_profiles",
+        # Each fabrication output recorded with the revision it was made from
+        # (source_ref), so the release can tell a current output from a stale one.
+        "twin.record_design_files",
         "cost.estimate_manufacturing",
         "vendor.list_connectors",
         "vendor.quote",

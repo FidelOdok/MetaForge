@@ -19,6 +19,15 @@ reads the twin and says, item by item, what is resolved and what blocks:
     An approved build or manufacturing release approval is on record.
 ``step_round_trip``
     Every CAD item's head is validated with a round-trip-passed STEP.
+``eda_checks``
+    Every schematic and board has a passing ERC or DRC on its current
+    revision (:mod:`twin_core.dfm.release_fit`).
+``assembly_dfa``
+    A product of more than one part, or with a board, has a checked assembly
+    of the current revisions with no open high or medium finding.
+``outputs_current``
+    Every fabrication output names the revision it was made from, and that
+    revision is the current one.
 
 **Applies** only when the project is made by a process whose profile has
 exact checks (today FDM) or has an exact DFM analysis; for anything else
@@ -45,13 +54,23 @@ tracer = get_tracer("twin_core.dfm.release_checklist")
 ItemStatus = Literal["pass", "fail", "not_applicable"]
 
 #: Items a prototype needs; production needs every item.
-PROTOTYPE_ITEMS: tuple[str, ...] = ("components_exact", "dfm", "step_round_trip")
+PROTOTYPE_ITEMS: tuple[str, ...] = (
+    "components_exact",
+    "dfm",
+    "step_round_trip",
+    "eda_checks",
+    "assembly_dfa",
+    "outputs_current",
+)
 ITEM_ORDER: tuple[str, ...] = (
     "components_exact",
     "dfm",
     "verification",
     "approvals",
     "step_round_trip",
+    "eda_checks",
+    "assembly_dfa",
+    "outputs_current",
 )
 ITEM_LABELS: dict[str, str] = {
     "components_exact": "Every required component has a validated exact model",
@@ -59,9 +78,20 @@ ITEM_LABELS: dict[str, str] = {
     "verification": "Physical and supplier verification recorded and approved",
     "approvals": "Manufacturing release approved",
     "step_round_trip": "STEP export of each CAD revision passed its round trip",
+    "eda_checks": "ERC and DRC pass on the released schematic and board revisions",
+    "assembly_dfa": "Assembly checked (DFA)",
+    "outputs_current": "Fabrication outputs made from the released revisions",
 }
 #: The release gate's own release approval check covers ``approvals``.
-GATE_ITEMS: tuple[str, ...] = ("components_exact", "dfm", "verification", "step_round_trip")
+GATE_ITEMS: tuple[str, ...] = (
+    "components_exact",
+    "dfm",
+    "verification",
+    "step_round_trip",
+    "eda_checks",
+    "assembly_dfa",
+    "outputs_current",
+)
 
 APPROVED_AUTHORITIES = frozenset({"approved", "baselined"})
 
@@ -336,6 +366,37 @@ async def _current_sets(twin: Any, pid: UUID) -> tuple[dict[str, tuple[dict[str,
     return current, applies
 
 
+def is_board_body(metadata: dict[str, Any]) -> bool:
+    """A cad_model that is a board's 3D export (``kicad.export_3d``), not a made part."""
+    author = str(metadata.get("authored_by") or metadata.get("source_tool") or "")
+    return author.startswith("kicad.") or bool(metadata.get("board_ref"))
+
+
+async def _no_process_component_ids(twin: Any, pid: UUID) -> set[str]:
+    """``item:KEY`` of every CAD item no manufacturing process makes on its own.
+
+    An assembly is made of its parts, and a board's 3D export is made by the
+    board house from the board files: neither has a DFM analysis of its own.
+    """
+    from twin_core.items import list_items, supports_items
+
+    if not supports_items(twin):
+        return set()
+    out: set[str] = set()
+    try:
+        for item_type in ("assembly", "cad_model"):
+            for item in await list_items(twin, project_id=pid, item_type=item_type):
+                node = await twin.graph.get_node(item.head_node_id) if item.head_node_id else None
+                meta = dict(getattr(node, "metadata", None) or {})
+                if meta.get("component_id"):
+                    continue
+                if item_type == "assembly" or is_board_body(meta):
+                    out.add(f"item:{item.key}")
+    except Exception as exc:  # noqa: BLE001 - unreadable items exclude nothing
+        logger.debug("checklist_no_process_items_unavailable", error=str(exc))
+    return out
+
+
 async def manufacturing_checklist(
     twin: Any, project_id: UUID | str
 ) -> ManufacturingChecklist | None:
@@ -404,8 +465,13 @@ async def manufacturing_checklist(
             )
         )
 
-        # dfm
-        items.append(evaluate_dfm_item(comps, sets))
+        # dfm: an assembly is made of its parts and a board's 3D export by the
+        # board house, so neither has an analysis of its own (the DFM
+        # gathering skips both); the assembly's fit is the assembly item.
+        no_process = await _no_process_component_ids(twin, pid)
+        items.append(
+            evaluate_dfm_item([c for c in comps if c["component_id"] not in no_process], sets)
+        )
 
         # verification
         open_items: list[str] = []
@@ -484,6 +550,10 @@ async def manufacturing_checklist(
                 or ([] if readiness_ else ["Build the engineering geometry"]),
             )
         )
+        # The board checks, the assembly fit and the outputs' sources.
+        from twin_core.dfm.release_fit import fit_items
+
+        items.extend(await fit_items(twin, pid))
         refs = sorted({f"{r.item_key}@{r.head_revision}" for r in readiness_})
         out = ManufacturingChecklist(project_id=str(pid), items=items, revision_refs=refs)
         span.set_attribute("checklist.applies", True)

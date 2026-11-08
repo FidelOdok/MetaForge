@@ -97,9 +97,14 @@ async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, An
     Item-tracked files (CAD parts and assemblies) are their head revision,
     ``KEY@n``; an analysis model is left out. Other files are the newest of
     each type and name. Each row carries the node id, format and content hash,
-    so the package pins exactly the bytes it was cut from.
+    so the package pins exactly the bytes it was cut from, and its
+    ``source_ref``: the revision it was made from (a design file is its own).
+    A fabrication output carries ``source_status`` too (``current``,
+    ``stale``, ``unpinned`` or ``not_required``); one made again from the
+    current revision supersedes the older ones and they are left out.
     """
-    from twin_core.items import list_items, supports_items
+    from twin_core.dfm.release_fit import OUTPUT_KINDS, output_sources
+    from twin_core.items import item_for_node, list_items, supports_items
 
     rows: list[dict[str, Any]] = []
     heads: set[str] = set()
@@ -129,9 +134,32 @@ async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, An
                         "format": str(getattr(node, "format", "") or ""),
                         "content_hash": str(getattr(node, "content_hash", "") or ""),
                         "geometry_state": meta.get("geometry_state"),
+                        "source_ref": f"{item.key}@{item.head_revision}",
                     }
                 )
+    try:
+        outputs = await output_sources(twin, project_id)
+    except Exception as exc:  # noqa: BLE001 - a manifest lists what it can read
+        logger.warning("release_manifest_outputs_unavailable", error=str(exc))
+        outputs = []
+    for out in outputs:
+        if out.status == "superseded":
+            continue
+        rows.append(
+            {
+                "kind": out.kind,
+                "ref": out.ref,
+                "name": out.name,
+                "node_id": out.node_id,
+                "format": out.format,
+                "content_hash": out.content_hash,
+                "source_ref": out.source_ref,
+                "source_status": out.status,
+            }
+        )
     for wp_type in MANIFEST_TYPES:
+        if wp_type.value in OUTPUT_KINDS:
+            continue  # listed with their sources above
         try:
             nodes = await twin.list_work_products(project_id=project_id, work_product_type=wp_type)
         except Exception as exc:  # noqa: BLE001
@@ -143,17 +171,47 @@ async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, An
                 continue  # CAD is listed by item head above, never a superseded revision
             newest[str(getattr(node, "name", "") or node.id)] = node
         for name, node in sorted(newest.items()):
+            own = None
+            if supports_items(twin):
+                try:
+                    found = await item_for_node(twin, node.id)
+                except Exception as exc:  # noqa: BLE001 - an unknown item pins nothing
+                    logger.debug("release_manifest_item_lookup_failed", error=str(exc))
+                    found = None
+                if found is not None:
+                    if found[0].head_node_id not in (None, node.id):
+                        continue  # an older revision of a design file
+                    own = f"{found[0].key}@{found[1]}"
             rows.append(
                 {
                     "kind": wp_type.value,
-                    "ref": None,
+                    "ref": own,
                     "name": name,
                     "node_id": str(node.id),
                     "format": str(getattr(node, "format", "") or ""),
                     "content_hash": str(getattr(node, "content_hash", "") or ""),
+                    # A design file (schematic, board, firmware, pin map) is
+                    # its own source: its build outputs live in its revision.
+                    "source_ref": own,
                 }
             )
     return rows
+
+
+def stale_outputs(rows: list[dict[str, Any]]) -> list[str]:
+    """One line per fabrication output in a manifest not made from the current revision."""
+    out = []
+    for r in rows:
+        status = r.get("source_status")
+        label = r.get("ref") or r.get("name")
+        if status == "stale":
+            out.append(
+                f"{label} ({r['kind']}) was made from {r.get('source_ref')}, "
+                "not the current revision"
+            )
+        elif status == "unpinned":
+            out.append(f"{label} ({r['kind']}) does not say which revision it was made from")
+    return out
 
 
 def manifest_digest(rows: list[dict[str, Any]]) -> str:
@@ -163,7 +221,7 @@ def manifest_digest(rows: list[dict[str, Any]]) -> str:
 
     lines = sorted(
         json.dumps(
-            {k: r.get(k) for k in ("kind", "ref", "name", "node_id", "content_hash")},
+            {k: r.get(k) for k in ("kind", "ref", "name", "node_id", "content_hash", "source_ref")},
             sort_keys=True,
         )
         for r in rows
@@ -224,6 +282,10 @@ def _record_refusal(gate: Any) -> None:
         elif check.id == "release_approved":
             blocker = "approvals"
         break
+    _record_blocker(blocker)
+
+
+def _record_blocker(blocker: str) -> None:
     try:
         from observability.metrics import collector_for
 
@@ -281,6 +343,16 @@ def make_release_package_creator(
                 )
 
             snapshot = await _snapshot(twin, pid)
+            # Every fabrication output must be made from the released revision,
+            # whether or not the manufacturing checklist applies to the project.
+            stale = stale_outputs(snapshot["design_files"])
+            if stale:
+                _record_blocker("outputs_current")
+                raise ValueError(
+                    "twin.create_release_package: fabrication outputs are not made from the "
+                    "released revisions -- " + "; ".join(stale) + ". Make them again from the "
+                    "current revision and record each with twin.record_design_files (source_ref)."
+                )
 
             existing = await twin.list_engineering_entities(
                 project_id=pid, entity_type="release_package"

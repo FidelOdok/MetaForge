@@ -266,32 +266,67 @@ When the studio reads `handed_over` and the person asks to proceed:
          call. Check convergence with `calculix.check_mesh_convergence` and
          record the result with `twin.record_document` using its
          `record_with` arguments. `calculix.run_thermal` for heat.
+      4. **ERC and DRC on the released revisions.** Run `kicad.run_erc` on the
+         schematic and `kicad.run_drc` on the board, and record each result with
+         `twin.record_evidence`: `producer.tool` the KiCad tool, `result` its
+         output, `depends_on` the revision it checked (for example
+         `PCB-LAMP-DRIVER@2`). The release needs a passing ERC and DRC on the
+         current revision of every schematic and board; a new revision needs
+         them again.
+      5. **Put it together and check it fits (DFA).** A product with more than
+         one part, or a board inside a part, needs a checked assembly:
+         1. Commit each board's 3D model: `kicad.export_3d`, then
+            `twin.commit_geometry` with `source_tool: kicad.export_3d` and the
+            board as its source, so it records which `PCB-...@n` it is.
+         2. `twin.build_assembly`: every part and board by `item_key` with its
+            `location` (mm and degrees), and each hinge as a `revolute` joint
+            with its axis and `min_deg`/`max_deg`. Like a part, the assembly
+            revision is then validated and exported (`twin.build_exact_cad`,
+            `twin.export_cad_step`); the checklist's STEP item names it.
+         3. `twin.check_assembly` with what the design has: `hole_patterns`
+            (the board's mounting holes against the bosses or cover holes),
+            `outlines` (the board in its pocket or lip), `connectors` (each
+            edge connector's face against the board edge and its slot),
+            `stacks` (a tongue and its washers in a clevis gap; standard
+            washers and screws by `standard` and `size`), `seats` (a diffuser
+            in its seat, with its `retention`). It also checks overlaps and
+            sweeps each joint through its limits. Fix every high and medium
+            finding and check again.
    5. **Make.**
       1. `twin.get_release_checklist` again; fix what it still names.
       2. Fabrication outputs: `kicad.export_gerber`, `kicad.export_drill`,
          `kicad.export_pos`, `kicad.export_bom`, `firmware.build`,
-         `slicer.slice`, each recorded with `twin.record_design_files` so the
-         package can pin it.
-      3. **Baseline.** `twin.create_baseline` (with a `reason`) pins the
+         `slicer.slice`, each recorded with `twin.record_design_files` and its
+         `source_ref` (the `CAD-...@n`, `PCB-...@n` or `FW-...@n` it was made
+         from) so the package can pin it. An output made from an older
+         revision blocks the release: make it again from the current one.
+      3. **Accepting a failing check.** A failing ERC or DRC, or an assembly
+         finding, that is truly acceptable is the person's to accept with
+         `twin.accept_release_finding` (the checklist item, the targets it
+         names and a reason). Outputs are never accepted.
+      4. **Baseline.** `twin.create_baseline` (with a `reason`) pins the
          current revision of every requirement, entity and item. It changes
          existing records, so it waits for the person, unless the release is
          delegated (below).
-      4. **Release approval.** `twin.record_engineering_entity` with
+      5. **Release approval.** `twin.record_engineering_entity` with
          `entity_type: release_approval`. Approving it is the person's,
          unless the release is delegated.
-      5. **Release package.** `twin.create_release_package` once the
+      6. **Release package.** `twin.create_release_package` once the
          checklist, the baseline and the approval pass. It pins a manifest of
          every current design file (STEPs, Gerbers, drill, position and BOM
-         files, firmware, G-code) with a `manifest_sha256`, and marks the CAD
+         files, firmware, G-code), each with its `source_ref`, with a
+         `manifest_sha256`, and marks the CAD
          heads released. Refused with every failing check named otherwise.
 
       **Delegated release.** The release is delegated only when the gateway
       owner sets `METAFORGE_ALLOW_AGENT_RELEASE=true` (a separate switch from
       `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY`, see docs/approvals.md) and your
       connection names you and the person (`X-MetaForge-Agent`,
-      `X-MetaForge-On-Behalf-Of`). Then do steps 3 to 5 without stopping:
+      `X-MetaForge-On-Behalf-Of`). Then do steps 3 to 6 without stopping:
       `twin.create_baseline` runs at once and is recorded as yours on the
-      person's behalf; record the release approval request, then approve it
+      person's behalf; accept a failing check with
+      `twin.accept_release_finding` only when it is truly acceptable, with a
+      reason; record the release approval request, then approve it
       with `twin.approve_release` (`project_id`, a `reason`), which is refused
       with each blocker named while any other checklist item is open; then
       `twin.create_release_package`. Otherwise, or when either tool is held,

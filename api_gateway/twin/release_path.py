@@ -18,6 +18,9 @@ chain a structural check needs. This service backs two tools for that:
     exact CAD service's bridge, never directly.
 
 Measuring DFM by reference is ``twin.measure_dfm`` (:mod:`api_gateway.twin.dfm_exact`).
+Building and checking the assembly, and accepting a failing ERC/DRC or an
+assembly finding for the release, is :mod:`api_gateway.twin.assembly_fit`
+(``assembly_fit`` on this service).
 """
 
 from __future__ import annotations
@@ -166,6 +169,13 @@ class ReleasePathService:
         self._twin = twin
         self._cad = cad_service
         self._workspace = workspace_dir
+        from api_gateway.twin.assembly_fit import AssemblyFitService
+
+        #: ``twin.build_assembly``, ``twin.check_assembly`` and
+        #: ``twin.accept_release_finding`` (design for assembly, the release waivers).
+        self.assembly_fit = AssemblyFitService(
+            twin, cad_service=cad_service, workspace_dir=workspace_dir
+        )
 
     def _cad_service(self) -> Any:
         if self._cad is not None:

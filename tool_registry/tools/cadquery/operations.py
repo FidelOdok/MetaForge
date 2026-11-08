@@ -2589,3 +2589,131 @@ def _pairwise_interferences(assy: Any, names: list[str]) -> list[dict[str, Any]]
             if volume > _INTERFERENCE_TOLERANCE_MM3:
                 found.append({"part_a": name_a, "part_b": name_b, "volume_mm3": round(volume, 3)})
     return found
+
+
+# ---------------------------------------------------------------------------
+# Design for assembly: overlaps, gaps and poses of placed parts
+# ---------------------------------------------------------------------------
+
+#: Most parts and poses one ``cadquery.check_interference`` call measures.
+MAX_FIT_PARTS = 60
+MAX_FIT_POSES = 240
+
+
+def _matrix_location(matrix: list[float]) -> Any:
+    """A CadQuery Location from a 3 x 4 row-major placement matrix."""
+    from OCP.gp import gp_Trsf  # type: ignore[import-not-found]
+
+    trsf = gp_Trsf()
+    trsf.SetValues(*[float(v) for v in matrix])
+    return cq.Location(trsf)
+
+
+def _boxes_apart(a: Any, b: Any) -> bool:
+    box_a, box_b = a.BoundingBox(), b.BoundingBox()
+    return bool(
+        box_a.xmax < box_b.xmin
+        or box_b.xmax < box_a.xmin
+        or box_a.ymax < box_b.ymin
+        or box_b.ymax < box_a.ymin
+        or box_a.zmax < box_b.zmin
+        or box_b.zmax < box_a.zmin
+    )
+
+
+def _overlap_rows(
+    placed: dict[str, Any], tolerance: float, pairs: list[list[str]] | None = None
+) -> list[dict[str, Any]]:
+    names = list(placed)
+    wanted = {tuple(sorted(p)) for p in pairs or []}
+    rows: list[dict[str, Any]] = []
+    for i, name_a in enumerate(names):
+        for name_b in names[i + 1 :]:
+            if wanted and tuple(sorted((name_a, name_b))) not in wanted:
+                continue
+            a, b = placed[name_a], placed[name_b]
+            if _boxes_apart(a, b):
+                continue
+            volume = float(a.intersect(b).Volume())
+            if volume > tolerance:
+                rows.append({"part_a": name_a, "part_b": name_b, "volume_mm3": round(volume, 4)})
+    return rows
+
+
+def check_fit(
+    parts: list[dict[str, Any]],
+    *,
+    tolerance_mm3: float = _INTERFERENCE_TOLERANCE_MM3,
+    distance_pairs: list[list[str]] | None = None,
+    poses: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Overlaps and gaps between placed parts, and overlaps in extra poses.
+
+    Each part is ``{name, file, matrix}`` (``matrix``: 12 numbers, a 3 x 4
+    row-major placement) or ``{name, file, location}`` (as
+    ``cadquery.create_assembly`` takes it). A pose moves some parts
+    (``{id, matrices: {name: matrix}, pairs?}``) and reports the overlaps in
+    that pose, between the given pairs only when ``pairs`` is set. Reads the
+    STEP files; writes nothing.
+    """
+    if cq is None:
+        raise RuntimeError("CadQuery is not installed")
+    if len(parts) > MAX_FIT_PARTS:
+        raise ValueError(f"at most {MAX_FIT_PARTS} parts in one check")
+    if poses and len(poses) > MAX_FIT_POSES:
+        raise ValueError(f"at most {MAX_FIT_POSES} poses in one check")
+    with tracer.start_as_current_span("cadquery.check_interference") as span:
+        start = time.monotonic()
+        base: dict[str, Any] = {}
+        placed: dict[str, Any] = {}
+        for part in parts:
+            name = str(part["name"])
+            if name in base:
+                raise ValueError(f"part name {name!r} is given twice")
+            imported = cq.importers.importStep(str(part["file"]))
+            solids = imported.vals()
+            shape = solids[0] if len(solids) == 1 else cq.Compound.makeCompound(solids)
+            base[name] = shape
+            location = (
+                _matrix_location(part["matrix"])
+                if part.get("matrix") is not None
+                else _part_location(part.get("location") or {})
+            )
+            placed[name] = shape.moved(location)
+        result: dict[str, Any] = {
+            "interferences": _overlap_rows(placed, tolerance_mm3),
+            "distances": [],
+            "poses": [],
+            "tolerance_mm3": tolerance_mm3,
+        }
+        for a, b in distance_pairs or []:
+            if a not in placed or b not in placed:
+                raise ValueError(f"distance pair {a!r}, {b!r} names a part not given")
+            gap = round(float(placed[a].distance(placed[b])), 4)
+            result["distances"].append({"part_a": a, "part_b": b, "distance_mm": gap})
+        for pose in poses or []:
+            moved = dict(placed)
+            for name, matrix in (pose.get("matrices") or {}).items():
+                if name not in base:
+                    raise ValueError(f"pose {pose.get('id')!r} moves {name!r}, a part not given")
+                moved[name] = base[name].moved(_matrix_location(matrix))
+            result["poses"].append(
+                {
+                    "id": str(pose.get("id")),
+                    "interferences": _overlap_rows(moved, tolerance_mm3, pose.get("pairs")),
+                }
+            )
+        elapsed = round(time.monotonic() - start, 3)
+        span.set_attribute("fit.parts", len(parts))
+        span.set_attribute("fit.poses", len(poses or []))
+        span.set_attribute("fit.interferences", len(result["interferences"]))
+        span.set_attribute("operation.duration_s", elapsed)
+        logger.info(
+            "fit_checked",
+            parts=len(parts),
+            poses=len(poses or []),
+            interferences=len(result["interferences"]),
+            duration_s=elapsed,
+        )
+        result["duration_s"] = elapsed
+        return result

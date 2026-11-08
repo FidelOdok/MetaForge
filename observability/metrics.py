@@ -1503,6 +1503,50 @@ class MetricsRegistry:
         labels=["tool", "outcome"],
     )
 
+    # ── Design for assembly and the release waivers ─────────────────────
+
+    ASSEMBLY_BUILD_TOTAL = MetricDefinition(
+        name="metaforge_assembly_build_total",
+        type="counter",
+        description=(
+            "twin.build_assembly calls by outcome (built, failed: cadquery.create_assembly "
+            "or reading its STEP failed, unavailable: no CAD adapter)"
+        ),
+        labels=["outcome"],
+    )
+
+    ASSEMBLY_CHECK_TOTAL = MetricDefinition(
+        name="metaforge_assembly_check_total",
+        type="counter",
+        description=(
+            "twin.check_assembly runs by outcome (passed, issues_found, incomplete, refused: "
+            "a bad request or no placements, failed: cadquery.check_interference failed, "
+            "unavailable: no CAD adapter)"
+        ),
+        labels=["outcome"],
+    )
+
+    ASSEMBLY_FINDING_TOTAL = MetricDefinition(
+        name="metaforge_assembly_finding_total",
+        type="counter",
+        description=(
+            "Design-for-assembly findings recorded, by check (revisions, interference, "
+            "clearance, hole_pattern, outline_fit, connector, stack, motion, seat) and "
+            "severity (high, medium, low)"
+        ),
+        labels=["check", "severity"],
+    )
+
+    RELEASE_FINDING_ACCEPTED_TOTAL = MetricDefinition(
+        name="metaforge_release_finding_accepted_total",
+        type="counter",
+        description=(
+            "Failing release checks accepted with twin.accept_release_finding, by checklist "
+            "item (eda_checks, assembly_dfa) and route (person, delegated)"
+        ),
+        labels=["item", "route"],
+    )
+
     # ── Parametric reconstruction from an accepted concept (spec 4B) ─────
 
     RECONSTRUCTION_PROPOSAL_TOTAL = MetricDefinition(
@@ -2941,6 +2985,30 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.RELEASE_PATH_CALL_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"tool": tool, "outcome": outcome})
+
+    def record_assembly_build(self, outcome: str) -> None:
+        """Record one twin.build_assembly call by its outcome."""
+        counter = self._instruments.get(MetricsRegistry.ASSEMBLY_BUILD_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_assembly_check(self, outcome: str) -> None:
+        """Record one twin.check_assembly run by its outcome."""
+        counter = self._instruments.get(MetricsRegistry.ASSEMBLY_CHECK_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_assembly_finding(self, check: str, severity: str) -> None:
+        """Record one design-for-assembly finding."""
+        counter = self._instruments.get(MetricsRegistry.ASSEMBLY_FINDING_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"check": check, "severity": severity})
+
+    def record_release_finding_accepted(self, item: str, route: str) -> None:
+        """Record one failing release check accepted for the release."""
+        counter = self._instruments.get(MetricsRegistry.RELEASE_FINDING_ACCEPTED_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"item": item, "route": route})
 
     def record_reconstruction_proposal(self, outcome: str) -> None:
         """Record one feature history proposal outcome (spec 4B)."""
