@@ -62,3 +62,22 @@ async def test_local_paths_are_refused_away_from_the_local_plugin() -> None:
     assert "files.import_local" not in FilesServer(files).tool_ids
     with pytest.raises(ValueError, match="local plugin"):
         await files.stage_local({"paths": ["a.step"]})
+
+
+async def test_the_agent_is_named_to_the_gateway_on_staging_and_deciding() -> None:
+    from mcp_core.context import McpCallContext, with_context
+
+    seen: list[httpx.Request] = []
+    reply = {"id": "u1", "upload_id": "u1", "approval_id": "upload:u1", "path": "/x"}
+    files = _service(seen, reply)
+    with with_context(McpCallContext(agent="claude-code-e2e", on_behalf_of="fidel")):
+        await FilesServer(files).request_upload({})
+    assert seen[0].headers["X-MetaForge-Agent"] == "claude-code-e2e"
+    assert "agent" not in json.loads(seen[0].content)
+    await files.decide_upload("u1", "approve", "", "claude-code-e2e", "fidel")
+    decide = seen[1]
+    assert decide.url.path == "/v1/approvals/upload:u1/decision"
+    assert decide.headers["X-MetaForge-Surface"] == "agent"
+    assert decide.headers["X-MetaForge-Agent"] == "claude-code-e2e"
+    assert decide.headers["X-MetaForge-On-Behalf-Of"] == "fidel"
+    assert json.loads(decide.content) == {"decision": "approve", "reason": ""}

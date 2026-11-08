@@ -8,7 +8,12 @@ checks, not by this code:
 - ``kicad.generate_schematic`` -- then ERC, and the netlist KiCad exports from
   it compared net by net with the circuit;
 - ``kicad.generate_pcb`` -- footprints, nets, outline, rules and placement
-  (pcbnew, in a worker under the system Python);
+  (pcbnew, in a worker under the system Python), honouring each component's
+  ``placement`` (position, rotation, side, edge mount) and the board's
+  ``mounting_holes``;
+- ``kicad.edit_pcb`` -- an existing board changed by an ordered list of
+  operations (move, rotate, place, mounting holes, strip routing) in a new
+  folder, then re-routed as ``kicad.autoroute_pcb`` routes;
 - ``kicad.autoroute_pcb`` -- Freerouting on a copy, then DRC with schematic
   parity: unrouted connections, errors and mismatches are reported, and the
   verdict is ``pass`` only when all three are zero.
@@ -94,11 +99,21 @@ def register_generation_tools(server: KicadServer) -> None:
                 "height_mm, layers, clearance_mm, track_mm, power nets and track width, "
                 "via sizes, ground_pour net, mounting_holes_mm). Footprints come from the "
                 "installed KiCad libraries with their pads on the circuit's nets; the "
-                "outline, design rules and net classes are set; connectors go on the left "
-                "edge and every other part next to its best-connected neighbour (a "
-                "deterministic starting point for review, not an optimal placement). The "
-                "schematic is generated alongside (or `schematic_file` given) and each "
-                "footprint is linked to its symbol. Unplaceable parts are listed."
+                "outline, design rules and net classes are set. A component's `placement` "
+                "is honoured: `position` {x_mm, y_mm} from the board's top-left corner (x "
+                "right, y DOWN), `rotation_deg` (KiCad, counter-clockwise), `side` "
+                "top|bottom, and for a connector `edge_mount` {edge: +x|-x|+y|-y, "
+                "overhang_mm}: the footprint is turned so its mating side faces that edge "
+                "(from the footprint's PCB Edge marker, else its pad and body geometry) and "
+                "its mouth sits overhang_mm beyond the edge (0 flush). `board."
+                "mounting_holes` [{position, drill_mm}] puts holes where given instead of "
+                "the four corners. Every other part is auto-placed: connectors on the left "
+                "edge, the rest next to their best-connected neighbour (a deterministic "
+                "starting point for review, not an optimal placement). The schematic is "
+                "generated alongside (or `schematic_file` given) and each footprint is "
+                "linked to its symbol. Unplaceable parts are listed; placements report "
+                "board_x_mm, board_y_mm, rotation_deg, side and, for an edge mount, the "
+                "measured overhang. To change a board afterwards use kicad.edit_pcb."
             ),
             capability="pcb_generation",
             input_schema={
@@ -117,6 +132,92 @@ def register_generation_tools(server: KicadServer) -> None:
             resource_limits=ResourceLimits(max_memory_mb=2048, max_cpu_seconds=300),
         ),
         handler=lambda args: generate_pcb_tool(server, args),
+    )
+    server.register_tool(
+        manifest=ToolManifest(
+            tool_id="kicad.edit_pcb",
+            adapter_id="kicad",
+            name="Edit PCB",
+            description=(
+                "Change an existing board without uploading a file: the board (and its "
+                "project, so schematic parity still runs) is copied to a new folder of the "
+                "adapter workspace, an ordered list of `operations` is applied, and the "
+                "result is re-routed with Freerouting and checked by DRC as "
+                "kicad.autoroute_pcb does. Operations (positions in mm from the board's "
+                "top-left corner, x right, y DOWN): {op: move, ref, position, "
+                "rotation_deg?}; {op: rotate, ref, rotation_deg}; {op: place, ref, "
+                "position?, rotation_deg?, side?, edge_mount?: {edge: +x|-x|+y|-y, "
+                "overhang_mm}} (the same rules as a generate_pcb placement); {op: "
+                "set_mounting_hole, ref?, position, drill_mm?} (moves H<n>, or adds one); "
+                "{op: remove_mounting_hole, ref}; {op: strip_routing}. With reroute "
+                "(default true) the old tracks, vias and outer pours are stripped first "
+                "and the ground pour net is reused. The input file is never changed. "
+                "Record the new board with twin.record_design_files (work_product_type "
+                "pcb_layout, the board's item_key) to make it the next PCB revision."
+            ),
+            capability="pcb_generation",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "pcb_file": {"type": "string", "description": "Board to edit (copied)"},
+                    "operations": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "op": {
+                                    "type": "string",
+                                    "enum": [
+                                        "move",
+                                        "rotate",
+                                        "place",
+                                        "set_mounting_hole",
+                                        "remove_mounting_hole",
+                                        "strip_routing",
+                                    ],
+                                },
+                                "ref": {"type": "string"},
+                                "position": {
+                                    "type": "object",
+                                    "properties": {
+                                        "x_mm": {"type": "number"},
+                                        "y_mm": {"type": "number"},
+                                    },
+                                    "required": ["x_mm", "y_mm"],
+                                },
+                                "rotation_deg": {"type": "number"},
+                                "side": {"type": "string", "enum": ["top", "bottom"]},
+                                "edge_mount": {
+                                    "type": "object",
+                                    "properties": {
+                                        "edge": {
+                                            "type": "string",
+                                            "enum": ["+x", "-x", "+y", "-y"],
+                                        },
+                                        "overhang_mm": {"type": "number"},
+                                    },
+                                    "required": ["edge"],
+                                },
+                                "drill_mm": {"type": "number", "exclusiveMinimum": 0},
+                            },
+                            "required": ["op"],
+                        },
+                    },
+                    "reroute": {"type": "boolean", "default": True},
+                    "passes": {"type": "integer", "minimum": 1, "maximum": 200, "default": 30},
+                    "ground_pour": {
+                        "type": "string",
+                        "description": "Net to pour after routing; default: the pour it had",
+                    },
+                },
+                "required": ["pcb_file", "operations"],
+            },
+            output_schema={"type": "object"},
+            phase=2,
+            resource_limits=ResourceLimits(max_memory_mb=4096, max_cpu_seconds=900),
+        ),
+        handler=lambda args: edit_pcb_tool(server, args),
     )
     server.register_tool(
         manifest=ToolManifest(
@@ -256,6 +357,7 @@ async def generate_pcb_tool(server: KicadServer, arguments: dict[str, Any]) -> d
             "nets": result["nets"],
             "placements": result["placements"],
             "unplaced": result["unplaced"],
+            "placement_warnings": result.get("placement_warnings", []),
         }
         if schematic is not None:
             out["schematic"] = {
@@ -269,58 +371,139 @@ async def generate_pcb_tool(server: KicadServer, arguments: dict[str, Any]) -> d
                     "warnings",
                 )
             }
-        logger.info("pcb_generated", circuit=circuit.name, unplaced=len(result["unplaced"]))
+        fixed = sum(1 for p in result["placements"] if p.get("fixed"))
+        span.set_attribute("kicad.placements.fixed", fixed)
+        logger.info(
+            "pcb_generated",
+            circuit=circuit.name,
+            unplaced=len(result["unplaced"]),
+            fixed_placements=fixed,
+            placement_warnings=len(out["placement_warnings"]),
+        )
         return out
 
 
 async def autoroute_pcb_tool(server: KicadServer, arguments: dict[str, Any]) -> dict[str, Any]:
     src = Path(server._existing(str(arguments.get("pcb_file") or ""), "board"))
-    passes = int(arguments.get("passes", 30))
-    if not 1 <= passes <= 200:
-        raise ValueError("passes must be 1..200")
+    passes = _passes(arguments)
     with tracer.start_as_current_span("kicad.autoroute_pcb") as span:
         folder = _new_folder(server, f"{src.stem}-routed")
         _copy_project(src, folder)
+        result = await _route(server, folder / src.name, passes, arguments.get("ground_pour"))
+        span.set_attribute("kicad.route.unrouted", int(result.get("unrouted") or 0))
+        return result
+
+
+async def edit_pcb_tool(server: KicadServer, arguments: dict[str, Any]) -> dict[str, Any]:
+    src = Path(server._existing(str(arguments.get("pcb_file") or ""), "board"))
+    operations = arguments.get("operations")
+    if not isinstance(operations, list) or not operations:
+        raise ValueError("operations must be a non-empty list")
+    reroute = bool(arguments.get("reroute", True))
+    passes = _passes(arguments)
+    with tracer.start_as_current_span("kicad.edit_pcb") as span:
+        span.set_attribute("kicad.edit.operations", len(operations))
+        folder = _new_folder(server, f"{src.stem}-edited")
+        _copy_project(src, folder)
         board = folder / src.name
-        routed = await _worker(
+        edited = await _worker(
             server,
             {
-                "action": "route",
+                "action": "edit",
                 "pcb_path": str(board),
-                "router_cmd": server.config.router_cmd,
-                "passes": passes,
-                "ground_pour": arguments.get("ground_pour"),
-                "timeout_s": server.config.max_route_time,
+                "operations": operations,
+                "strip_routing": reroute,
+                "footprint_root": server.config.footprint_dir,
             },
-            timeout=server.config.max_route_time + 120,
         )
-        if not routed.get("ok"):
-            return {
-                "verdict": "not_established",
-                "pcb_file": str(board),
-                "reason": "; ".join(routed.get("errors") or ["routing failed"]),
-                "log_tail": routed.get("log_tail", ""),
-            }
-        parity = (folder / f"{board.stem}.kicad_sch").exists()
-        drc = await server._execute_drc(str(board), "all", None, schematic_parity=parity)
-        unrouted = int(drc.get("unconnected_items", 0))
-        issues = drc.get("schematic_parity", [])
-        verdict = "pass" if (unrouted == 0 and drc.get("errors", 0) == 0 and not issues) else "fail"
-        span.set_attribute("kicad.route.unrouted", unrouted)
-        logger.info("pcb_routed", board=str(board), unrouted=unrouted, verdict=verdict)
-        return {
-            "verdict": verdict,
+        if not edited.get("ok"):
+            raise ValueError("; ".join(edited.get("errors") or ["board edit failed"]))
+        out: dict[str, Any] = {
             "pcb_file": str(board),
             "project_dir": str(folder),
-            "tracks": routed["tracks"],
-            "vias": routed["vias"],
-            "track_length_mm": routed["track_length_mm"],
-            "router_time_s": routed["router_time_s"],
-            "unrouted": unrouted,
-            "drc": {k: drc.get(k) for k in ("errors", "warnings", "violations")},
-            "schematic_parity_checked": parity,
-            "schematic_parity": issues,
+            "source_pcb_file": str(src),
+            "applied": edited["applied"],
+            "placements": edited["placements"],
+            "overlaps": edited["overlaps"],
+            "beyond_board_edge": edited["beyond_board_edge"],
+            "routing_stripped": edited["routing_stripped"],
+            "routed": None,
+            "next": (
+                "record this board with twin.record_design_files (work_product_type "
+                "pcb_layout, file_path pcb_file, the board's item_key) so it becomes the "
+                "next PCB revision"
+            ),
         }
+        if reroute:
+            stripped = edited.get("routing_stripped") or {}
+            pour = arguments.get("ground_pour") or next(iter(stripped.get("pour_nets") or []), None)
+            out["routed"] = await _route(server, board, passes, pour)
+            out["verdict"] = out["routed"]["verdict"]
+        else:
+            out["verdict"] = "pass" if not edited["overlaps"] else "fail"
+        span.set_attribute("kicad.edit.overlaps", len(edited["overlaps"]))
+        logger.info(
+            "pcb_edited",
+            board=str(board),
+            source=str(src),
+            operations=len(operations),
+            overlaps=len(edited["overlaps"]),
+            rerouted=reroute,
+            verdict=out["verdict"],
+        )
+        return out
+
+
+def _passes(arguments: dict[str, Any]) -> int:
+    passes = int(arguments.get("passes", 30))
+    if not 1 <= passes <= 200:
+        raise ValueError("passes must be 1..200")
+    return passes
+
+
+async def _route(
+    server: KicadServer, board: Path, passes: int, ground_pour: str | None
+) -> dict[str, Any]:
+    """Route ``board`` in place with Freerouting, then DRC with parity when it can."""
+    folder = board.parent
+    routed = await _worker(
+        server,
+        {
+            "action": "route",
+            "pcb_path": str(board),
+            "router_cmd": server.config.router_cmd,
+            "passes": passes,
+            "ground_pour": ground_pour,
+            "timeout_s": server.config.max_route_time,
+        },
+        timeout=server.config.max_route_time + 120,
+    )
+    if not routed.get("ok"):
+        return {
+            "verdict": "not_established",
+            "pcb_file": str(board),
+            "reason": "; ".join(routed.get("errors") or ["routing failed"]),
+            "log_tail": routed.get("log_tail", ""),
+        }
+    parity = (folder / f"{board.stem}.kicad_sch").exists()
+    drc = await server._execute_drc(str(board), "all", None, schematic_parity=parity)
+    unrouted = int(drc.get("unconnected_items", 0))
+    issues = drc.get("schematic_parity", [])
+    verdict = "pass" if (unrouted == 0 and drc.get("errors", 0) == 0 and not issues) else "fail"
+    logger.info("pcb_routed", board=str(board), unrouted=unrouted, verdict=verdict)
+    return {
+        "verdict": verdict,
+        "pcb_file": str(board),
+        "project_dir": str(folder),
+        "tracks": routed["tracks"],
+        "vias": routed["vias"],
+        "track_length_mm": routed["track_length_mm"],
+        "router_time_s": routed["router_time_s"],
+        "unrouted": unrouted,
+        "drc": {k: drc.get(k) for k in ("errors", "warnings", "violations")},
+        "schematic_parity_checked": parity,
+        "schematic_parity": issues,
+    }
 
 
 # -- helpers ------------------------------------------------------------------------

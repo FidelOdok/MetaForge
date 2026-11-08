@@ -15,11 +15,26 @@ reported instead of passing silently (FORGE-699).
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-__all__ = ["Board", "Circuit", "Component", "Net", "symbol_matches_part", "symbol_substitutions"]
+__all__ = [
+    "Board",
+    "Circuit",
+    "Component",
+    "EdgeMount",
+    "MountingHole",
+    "Net",
+    "Placement",
+    "Position",
+    "symbol_matches_part",
+    "symbol_substitutions",
+]
+
+#: A board edge, in KiCad's board frame: x to the right, y DOWN, so ``-y`` is
+#: the top edge as the board is drawn and ``+y`` the bottom one.
+Edge = Literal["+x", "-x", "+y", "-y"]
 
 _LIB_ID = re.compile(r"^[A-Za-z0-9_.+\-]+:[^:\s][^:]*$")
 _REF = re.compile(r"^[A-Za-z#]+[A-Za-z0-9_]*$")
@@ -41,6 +56,64 @@ GENERIC_SYMBOL_LIBS = frozenset(
 )
 _MPN_KEYS = frozenset({"mpn", "manufacturer_part_number", "mfr_pn", "part_number"})
 _PART_NUMBER = re.compile(r"^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9][A-Za-z0-9_.+/\-]{3,}$")
+
+
+class Position(BaseModel):
+    """A point on the board in mm, from the board's top-left corner (x right, y down)."""
+
+    x_mm: float
+    y_mm: float
+
+
+class EdgeMount(BaseModel):
+    """Put a connector on a board edge with its mating side facing out."""
+
+    edge: Edge = Field(
+        ...,
+        description=(
+            "The board edge the connector's mouth faces: +x right, -x left, +y bottom, "
+            "-y top (KiCad's y runs down)"
+        ),
+    )
+    overhang_mm: float = Field(
+        default=0.0,
+        ge=-20,
+        le=20,
+        description=(
+            "How far the mouth sits beyond the board edge: 0 flush, positive proud, "
+            "negative set back"
+        ),
+    )
+
+
+class Placement(BaseModel):
+    """Where a footprint goes. Anything left out is chosen by the auto-placer."""
+
+    position: Position | None = Field(
+        default=None,
+        description=(
+            "The footprint's anchor in mm from the board's top-left corner (x right, y "
+            "down). With edge_mount, only the coordinate along that edge is used"
+        ),
+    )
+    rotation_deg: float | None = Field(
+        default=None,
+        description=(
+            "KiCad orientation in degrees, counter-clockwise as drawn. With edge_mount it "
+            "overrides the rotation worked out from the footprint"
+        ),
+    )
+    side: Literal["top", "bottom"] = "top"
+    edge_mount: EdgeMount | None = None
+
+
+class MountingHole(BaseModel):
+    """A mounting hole at a given place, instead of the four corner holes."""
+
+    position: Position
+    drill_mm: float | None = Field(
+        default=None, gt=0, description="Drill; the board's mounting_holes_mm, else 3.2"
+    )
 
 
 class Component(BaseModel):
@@ -66,6 +139,13 @@ class Component(BaseModel):
             "own (e.g. Sensor_Motion:BMI160 for a BMI270): how its pin numbers were "
             "checked against the part's datasheet. Without it the substitution is "
             "reported as unconfirmed"
+        ),
+    )
+    placement: Placement | None = Field(
+        default=None,
+        description=(
+            "Board placement hints for kicad.generate_pcb: position, rotation_deg, side, "
+            "edge_mount. A part without one is auto-placed"
         ),
     )
 
@@ -130,6 +210,13 @@ class Board(BaseModel):
     mounting_holes_mm: float | None = Field(
         default=None, gt=0, description="Add four corner mounting holes of this drill"
     )
+    mounting_holes: list[MountingHole] = Field(
+        default_factory=list,
+        description=(
+            "Mounting holes at given positions (H1, H2, ... in this order). When given, "
+            "they replace the four corner holes"
+        ),
+    )
     inner_planes: list[str] = Field(
         default_factory=list,
         description=(
@@ -181,6 +268,19 @@ class Circuit(BaseModel):
                 if node in seen:
                     raise ValueError(f"{node} is on both {seen[node]} and {net.name}")
                 seen[node] = net.name
+        if self.board is not None:
+            w, h = self.board.width_mm, self.board.height_mm
+            for comp in self.components:
+                pos = comp.placement.position if comp.placement else None
+                if pos is not None and not (0 <= pos.x_mm <= w and 0 <= pos.y_mm <= h):
+                    raise ValueError(
+                        f"{comp.ref}: position ({pos.x_mm}, {pos.y_mm}) is outside the "
+                        f"{w} x {h} mm board"
+                    )
+            for i, hole in enumerate(self.board.mounting_holes, start=1):
+                p = hole.position
+                if not (0 <= p.x_mm <= w and 0 <= p.y_mm <= h):
+                    raise ValueError(f"mounting hole {i}: ({p.x_mm}, {p.y_mm}) is off the board")
         return self
 
     def net_of(self) -> dict[str, str]:

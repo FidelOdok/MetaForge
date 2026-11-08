@@ -73,6 +73,10 @@ class UploadDecision(BaseModel):
     approver_verified: bool = False
     surface: str = "unknown"
     decided_at: str = Field(default_factory=now_iso)
+    #: An agent that decided for a person under the owner's delegation, and
+    #: that person; ``None`` for a person's own decision.
+    agent: str | None = None
+    on_behalf_of: str | None = None
 
 
 class StagedUpload(BaseModel):

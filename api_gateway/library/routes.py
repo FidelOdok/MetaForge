@@ -44,6 +44,20 @@ def get_machine_library() -> SqliteMachineLibrary:
     return _library
 
 
+def history_with_authority(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each version with the authority its author carries.
+
+    A change an agent made for a person under the owner's delegation is
+    ``delegated`` (the agent and the person); anything else is ``recorded``.
+    Neither is ever verified by a person.
+    """
+    from mcp_core.guardrails import delegated_authority
+
+    return [
+        {**h, "authority": delegated_authority(str(h.get("changed_by") or ""))} for h in history
+    ]
+
+
 def init_machine_library(library: SqliteMachineLibrary | None) -> None:
     """Install ``library`` (the lifespan), or ``None`` to start over (tests)."""
     global _library  # noqa: PLW0603
@@ -82,7 +96,10 @@ async def get_machine(machine_id: str) -> dict[str, Any]:
         machine = library.get(machine_id)
     except MachineNotFoundError as exc:
         raise _not_found(machine_id) from exc
-    return {"machine": machine.as_dict(), "history": library.history(machine_id)}
+    return {
+        "machine": machine.as_dict(),
+        "history": history_with_authority(library.history(machine_id)),
+    }
 
 
 @router.get("/machines/{machine_id}/limits")

@@ -1426,6 +1426,19 @@ handling file bytes. Each takes `project_id`.
   with `human_authority_required`, and refused with the blockers named while
   another release checklist item is open. No policy approves either tool.
   See [delegating a release to an agent](approvals.md#delegating-a-release-to-an-agent).
+- `files.decide_upload` (destructive, delegated only): `{upload_id,
+  decision: approve | reject, reason?}`. Decides an upload the calling agent
+  staged itself (`files.import`, `files.request_upload`; the upload keeps the
+  `X-MetaForge-Agent` it was staged with), as that agent for the person. It
+  runs only when the owner sets `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true`
+  and the request carries both agent headers; otherwise it is refused at
+  once with `human_authority_required`, and an upload another agent or a
+  person staged is refused by name. Under the same flag and headers,
+  `library.register_*` and `library.update_*` run without the hold and the
+  entry records `agent <agent> on behalf of <person>` with an `authority` of
+  `delegated`, never verified by the person. `library.dispatch_job` and
+  `vendor.place_order` are never delegated, and no policy approves any of
+  these. See [an agent's own uploads and library entries](approvals.md#an-agents-own-uploads-and-library-entries).
 
 - `twin.build_assembly` (producing, same injection): `{project_id, name,
   parts: [{item_key, name?, location?: {x, y, z, rx, ry, rz}, board_ref?}],
@@ -1523,7 +1536,7 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 | Base Image | `python:3.11-slim` (Debian trixie) + KiCad 9 (`kicad`, `kicad-symbols`, `kicad-footprints`, STEP models for the common families from `kicad-packages3d`), OpenJDK 25, Freerouting 2.5.0 (pinned, checksummed) |
 | Transport | HTTP JSON-RPC on port 8103 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_KICAD_URL` |
 | Phase 1 Tools | Read-only: `kicad.run_erc`, `kicad.run_drc`, `kicad.export_bom`, `kicad.export_netlist`, `kicad.get_pin_mapping`, `kicad.export_gerber`, `kicad.export_drill`, `kicad.export_pos` |
-| Phase 2 Tools | Write (a new project folder each, never the caller's files): `kicad.generate_schematic`, `kicad.generate_pcb`, `kicad.autoroute_pcb`, `kicad.export_3d`, `kicad.render_pcb`, `kicad.update_components` |
+| Phase 2 Tools | Write (a new project folder each, never the caller's files): `kicad.generate_schematic`, `kicad.generate_pcb`, `kicad.edit_pcb`, `kicad.autoroute_pcb`, `kicad.export_3d`, `kicad.render_pcb`, `kicad.update_components` |
 
 **Phase 1 tools (read-only)**:
 
@@ -1539,10 +1552,43 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
 | `kicad.generate_schematic` | `schematic_generation` | Circuit (components as KiCad symbol and footprint lib_ids, nets as `REF.PIN`) to a schematic of library symbols joined by global labels; then ERC and KiCad's exported netlist compared with the circuit. Returns `verdict`, `erc`, `netlist_check`, `power_flags`, `no_connects`, the file |
-| `kicad.generate_pcb` | `pcb_generation` | Circuit with a `board` to a placed `.kicad_pcb` (pcbnew worker), pad nets from the schematic's netlist, footprints linked to symbols. A 4-layer board may name `inner_planes` (In1/In2) and `hole_clearance_mm`; a component may name its own 3D `model`. Returns `placements`, `unplaced` |
+| `kicad.generate_pcb` | `pcb_generation` | Circuit with a `board` to a placed `.kicad_pcb` (pcbnew worker), pad nets from the schematic's netlist, footprints linked to symbols. A 4-layer board may name `inner_planes` (In1/In2) and `hole_clearance_mm`; a component may name its own 3D `model`. A component's `placement` is honoured (see below), and `board.mounting_holes` puts holes where given. Returns `placements`, `unplaced`, `placement_warnings` |
+| `kicad.edit_pcb` | `pcb_generation` | An existing board, copied with its project to a new folder and changed by an ordered list of `operations`, then re-routed and checked by DRC as `kicad.autoroute_pcb` does (`reroute`, default true). Returns `applied`, `placements`, `overlaps`, `beyond_board_edge`, `routing_stripped`, `routed`, `verdict` |
 | `kicad.autoroute_pcb` | `pcb_autoroute` | Plane-net pads fanned out to locked vias first, then Freerouting over Specctra DSN/SES on a copy, ground pour, then DRC with schematic parity. Returns `unrouted`, `drc`, `schematic_parity`, tracks, vias; `pass` only when all are zero |
 | `kicad.export_3d` | `pcb_3d_export` | Board as STEP or GLB with the library's 3D models; `missing_models` lists components left out, `complete` false then |
 | `kicad.render_pcb` | `pcb_render` | Ray-traced PNG, `view` top, bottom or iso; `inline` returns base64 |
+
+**Board placement.** Positions are in mm from the board outline's top-left
+corner, x to the right and y down (KiCad's frame), so edge `-y` is the top
+edge as the board is drawn and `+y` the bottom one. A component's
+`placement` in `kicad.generate_pcb`, and a `place` operation in
+`kicad.edit_pcb`, take:
+
+| Field | Meaning |
+|-------|---------|
+| `position` | `{x_mm, y_mm}`: the footprint's anchor. With `edge_mount`, only the coordinate along that edge is used; without it the part is centred on the edge |
+| `rotation_deg` | KiCad orientation, counter-clockwise as drawn. With `edge_mount`, it overrides the rotation worked out from the footprint |
+| `side` | `top` (default) or `bottom` (the footprint is flipped) |
+| `edge_mount` | `{edge: +x, -x, +y or -y, overhang_mm}`: the footprint is turned so its mating side faces that edge, and its fab outline (else its courtyard) reaches `overhang_mm` beyond it: 0 flush, positive proud, negative set back. The mating side is the side nearest the footprint's "PCB Edge" marker on a user layer (KiCad's USB-C, USB and other edge receptacles carry one), else the side the body reaches furthest beyond its pads. The result is measured on the turned footprint, and a part whose mating side cannot be told is refused by name: give `rotation_deg` |
+
+A part with no `position` or `edge_mount` is auto-placed, at the side and
+rotation given. Fixed parts are placed where they were put even when they
+overlap, and the overlap is listed.
+
+`kicad.edit_pcb` operations, applied in order:
+
+| `op` | Fields | Effect |
+|------|--------|--------|
+| `move` | `ref`, `position`, optional `rotation_deg` | Moves the footprint's anchor |
+| `rotate` | `ref`, `rotation_deg` | Sets its orientation |
+| `place` | `ref`, any of `position`, `rotation_deg`, `side`, `edge_mount` | As a placement above |
+| `set_mounting_hole` | optional `ref`, `position`, optional `drill_mm` | Moves `H<n>`, or adds the next hole; a new drill replaces the hole |
+| `remove_mounting_hole` | `ref` | Removes a mounting hole (never a part with a net) |
+| `strip_routing` | | Removes every track and via and the outer-layer pours; inner planes stay |
+
+The edited board is a new file; record it with `twin.record_design_files`
+(`work_product_type: pcb_layout`, the board's `item_key`) to make it the next
+`PCB-...@n`.
 | `kicad.update_components` | `component_update` | Value, footprint, fields by reference into a new revision, then ERC; a footprint change sets `board_stale` |
 
 ### SPICE Adapter (`tool_registry/tools/spice/`)

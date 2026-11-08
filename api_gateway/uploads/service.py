@@ -272,8 +272,14 @@ async def approve(
     approver: str | None,
     approver_verified: bool = False,
     surface: str = "unknown",
+    agent: str | None = None,
+    on_behalf_of: str | None = None,
 ) -> StagedUpload:
-    """Import every accepted file, then drop the staged bytes."""
+    """Import every accepted file, then drop the staged bytes.
+
+    ``agent`` names an agent that decided for ``on_behalf_of`` under the
+    owner's delegation; the decision and each imported file record both.
+    """
     if upload.status != "pending":
         raise UploadError(f"upload {upload.id} is {upload.status}; nothing was recorded", 409)
     with tracer.start_as_current_span("uploads.approve") as span:
@@ -296,6 +302,7 @@ async def approve(
                         "upload_path": entry.name,
                         "upload_source": upload.source,
                         "approved_by": approver,
+                        **({"approved_by_agent": agent} if agent else {}),
                     },
                 )
                 entry.work_product_id = result.id
@@ -315,11 +322,19 @@ async def approve(
             approver_verified=approver_verified,
             surface=surface,
             decided_at=now_iso(),
+            agent=agent,
+            on_behalf_of=on_behalf_of if agent else None,
         )
         store.discard_files(upload.id)
         imported = sum(1 for f in upload.files if f.work_product_id)
         span.set_attribute("upload.imported", imported)
-        logger.info("upload_approved", upload_id=upload.id, imported=imported, approver=approver)
+        logger.info(
+            "upload_approved",
+            upload_id=upload.id,
+            imported=imported,
+            approver=approver,
+            agent=agent,
+        )
         return store.save(upload)
 
 
@@ -331,6 +346,8 @@ def reject(
     approver: str | None,
     approver_verified: bool = False,
     surface: str = "unknown",
+    agent: str | None = None,
+    on_behalf_of: str | None = None,
 ) -> StagedUpload:
     """Discard the staged files; the record stays, with who said no and why."""
     if upload.status not in ("pending", "open"):
@@ -343,7 +360,9 @@ def reject(
         approver_verified=approver_verified,
         surface=surface,
         decided_at=now_iso(),
+        agent=agent,
+        on_behalf_of=on_behalf_of if agent else None,
     )
     store.discard_files(upload.id)
-    logger.info("upload_rejected", upload_id=upload.id, approver=approver)
+    logger.info("upload_rejected", upload_id=upload.id, approver=approver, agent=agent)
     return store.save(upload)

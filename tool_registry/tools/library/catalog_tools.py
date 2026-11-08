@@ -4,6 +4,11 @@ Registered on the same ``library`` adapter as the machine tools. Reads are
 read-only; ``register_*`` and ``update_*`` are additive writes held for the
 person. The service is the same object the machine tools use (in-process in
 the gateway, over HTTP from the sidecar).
+
+Where the owner delegates human authority, an agent's register or update for
+a person runs without the hold, and the change is recorded as
+``agent X on behalf of Y`` (:func:`library_author`): delegated, never as
+checked by that person.
 """
 
 from __future__ import annotations
@@ -11,8 +16,19 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
+import structlog
+
+from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
+    DELEGATED_AGENT_ARG,
+    delegated_authority,
+    delegated_label,
+    strip_reserved_arguments,
+)
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
+
+logger = structlog.get_logger(__name__)
 
 tracer = get_tracer("tool_registry.tools.library.catalog_tools")
 
@@ -185,6 +201,25 @@ class CatalogService(Protocol):
 Register = Callable[..., None]
 
 
+def library_author(arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Who a library write is recorded as, and the arguments without the reserved keys.
+
+    ``agent X on behalf of Y`` when the dispatcher delegated the call (it sets
+    the agent and the person, and a client can set neither), else ``mcp``.
+    """
+    agent = arguments.get(DELEGATED_AGENT_ARG)
+    person = arguments.get(APPROVED_BY_ARG)
+    clean = strip_reserved_arguments(arguments)
+    if agent:
+        return delegated_label(str(agent), str(person or "unknown")), clean
+    return "mcp", clean
+
+
+def with_authority(result: dict[str, Any], by: str) -> dict[str, Any]:
+    """The service's result, saying who made the change and with what authority."""
+    return {**result, "recorded_by": by, "authority": delegated_authority(by)}
+
+
 def _limits() -> ResourceLimits:
     return ResourceLimits(max_memory_mb=128, max_cpu_seconds=10, max_disk_mb=1)
 
@@ -239,13 +274,19 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             return await service.get_entry(kind, str(args["ref"]))
 
         async def register_(args: dict[str, Any], kind: str = kind) -> dict[str, Any]:
-            return await service.register_entry(kind, dict(args), "mcp")
+            by, data = library_author(args)
+            result = await service.register_entry(kind, data, by)
+            logger.info("library_entry_registered_over_mcp", kind=kind, by=by)
+            return with_authority(result, by)
 
         async def update_(args: dict[str, Any], kind: str = kind) -> dict[str, Any]:
-            changes = args.get("changes") or {}
+            by, data = library_author(args)
+            changes = data.get("changes") or {}
             if not isinstance(changes, dict):
                 raise ValueError("changes must be an object")
-            return await service.update_entry(kind, str(args["ref"]), changes, "mcp")
+            result = await service.update_entry(kind, str(data["ref"]), changes, by)
+            logger.info("library_entry_updated_over_mcp", kind=kind, by=by)
+            return with_authority(result, by)
 
         tool(
             f"library.list_{plural}",

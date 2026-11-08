@@ -13,6 +13,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from api_gateway.library.routes import history_with_authority
 from observability.tracing import get_tracer
 from twin_core.library.catalog import CatalogError, CatalogNotFoundError, SqliteCatalog
 
@@ -60,7 +61,7 @@ def _get(kind: str, ref: str) -> dict[str, Any]:
         entry = catalog.get(ref, kind)
     except CatalogNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"no {kind} '{ref}'") from exc
-    return {"entry": entry.as_dict(), "history": catalog.history(entry.id)}
+    return {"entry": entry.as_dict(), "history": history_with_authority(catalog.history(entry.id))}
 
 
 def _register(kind: str, body: dict[str, Any], request: Request) -> dict[str, Any]:

@@ -36,6 +36,7 @@ Not for:
 | Schematic | `kicad.generate_schematic` | pcb_design |
 | Board | `kicad.generate_pcb` | pcb_design |
 | Routing | `kicad.autoroute_pcb` | pcb_design |
+| Edit a board | `kicad.edit_pcb` | pcb_design |
 | 3D model, renders | `kicad.export_3d`, `kicad.render_pcb` | pcb_design |
 | Change a part | `kicad.update_components` | pcb_design |
 | Fabrication files | `kicad.export_gerber`, `kicad.export_drill`, `kicad.export_pos` | pcb_design, electronics |
@@ -105,7 +106,18 @@ Ask for anything missing; do not choose parts, values or the board yourself.
 2. **Board.** With a `board`, call `kicad.generate_pcb` with the circuit and
    the `schematic_file`. Footprints are linked to their symbols. `unplaced`
    lists parts that did not fit: ask for a bigger board or fewer parts;
-   never shrink clearances to make them fit.
+   never shrink clearances to make them fit. Fix the parts the product
+   places with a `placement` on the component: `position` (`x_mm`, `y_mm`
+   from the board's top-left corner, y down), `rotation_deg`, `side`
+   (`top` or `bottom`), and for a connector that faces a slot in the housing
+   `edge_mount` (`{edge: "+x" | "-x" | "+y" | "-y", overhang_mm}`: the mouth
+   faces that edge, flush at 0). `board.mounting_holes` (`[{position,
+   drill_mm}]`) puts the holes over the housing's bosses. Read
+   `placement_warnings` and each edge mount's `faces` and `overhang_mm`.
+   To change a board later, call `kicad.edit_pcb` with the `pcb_file` and
+   `operations` (`move`, `rotate`, `place`, `set_mounting_hole`,
+   `remove_mounting_hole`, `strip_routing`): it edits and re-routes a copy,
+   so the board never has to be downloaded and uploaded again.
 3. **Routing.** Call `kicad.autoroute_pcb` with the `pcb_file` and the
    ground net as `ground_pour`. It routes a copy and returns `unrouted`,
    `drc` (errors, warnings), `schematic_parity`, tracks and vias. `pass`

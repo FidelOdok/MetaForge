@@ -241,6 +241,37 @@ When the studio reads `handed_over` and the person asks to proceed:
       `kicad.generate_schematic` for the board and `twin.create_firmware_scaffold`
       for the firmware. A change that breaks a contract is a proposal to the
       person, not an edit.
+      - **Place the board's parts where the product needs them.** Give
+        `kicad.generate_pcb` a `placement` on each component that must sit
+        somewhere: `position` (`x_mm`, `y_mm` from the board's top-left
+        corner, y running down), `rotation_deg`, `side` (`top` or `bottom`).
+        For a connector that must face a slot in the housing, give
+        `edge_mount` instead: `{edge: "+x" | "-x" | "+y" | "-y", overhang_mm}`
+        turns it so its mouth faces that edge and sits `overhang_mm` beyond
+        it (0 flush). Put mounting holes where the bosses are with
+        `board.mounting_holes` (`[{position, drill_mm}]`). Every other part
+        is auto-placed. Check each placement's `edge_mount.faces` and
+        `overhang_mm` in the result.
+      - **Change a board with `kicad.edit_pcb`, never with an upload.** Give
+        it the board's `pcb_file` and an ordered list of `operations`
+        (`move`, `rotate`, `place` with the same placement fields,
+        `set_mounting_hole`, `remove_mounting_hole`, `strip_routing`). It
+        edits a copy, re-routes it and runs DRC. Record the new board with
+        `twin.record_design_files` (`work_product_type: pcb_layout`, the
+        board's `item_key`), so it becomes the next `PCB-...@n`. Do not
+        download a board, edit the file and send it back with
+        `files.request_upload`.
+      - **Standard parts in the library.** Look a fastener or other standard
+        part up with `library.standard_part` or `library.list_components`
+        first; register a missing one with `library.register_component`
+        (`origin: standard`, its `standard` and `size`, for example ISO 4762
+        M4x35). In a delegated run (rule 2) the registration runs at once
+        and the entry records it as yours on the person's behalf, never as
+        checked by them. Otherwise it waits for the person.
+      - **Your own upload, delegated.** When an upload is the only way in,
+        a delegated run decides the upload it staged itself with
+        `files.decide_upload` (`upload_id`, `decision`). It never decides an
+        upload someone else staged.
    4. **Check.**
       1. **Measure each part by reference.** `twin.evaluate_dfm` measures every
          validated part that has no exact analysis yet (up to 12 a call; call

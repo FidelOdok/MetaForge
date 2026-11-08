@@ -189,10 +189,28 @@ RELEASE_DELEGATED_TOOLS: frozenset[str] = frozenset(
     {"twin.create_baseline", "twin.approve_release", "twin.accept_release_finding"}
 )
 
-#: Release tools that exist only for a delegated agent. A person approves a
-#: release with ``twin.approve_engineering_entity`` or in the dashboard, so
-#: this one is refused outright unless the call is delegated.
-DELEGATED_ONLY_TOOLS: frozenset[str] = frozenset({"twin.approve_release"})
+#: An agent deciding its own staged upload, under the human-authority flag.
+#: A person decides an upload in the dashboard, ``forge approvals`` or
+#: ``approvals.decide``; this tool exists only for a delegated agent.
+UPLOAD_DECISION_TOOLS: frozenset[str] = frozenset({"files.decide_upload"})
+
+#: Tools that exist only for a delegated agent, refused outright otherwise. A
+#: person approves a release with ``twin.approve_engineering_entity`` or in the
+#: dashboard, and decides an upload there too, so holding one of these for a
+#: person would ask for an approval that still would not let it run.
+DELEGATED_ONLY_TOOLS: frozenset[str] = frozenset({"twin.approve_release", *UPLOAD_DECISION_TOOLS})
+
+#: Library writes an owner may delegate under the human-authority flag:
+#: registering or updating a library entry (a standard fastener, a material,
+#: a machine). The entry records the agent and the person it acted for, so
+#: nobody reads it as checked by that person.
+LIBRARY_DELEGATED_PREFIXES: tuple[str, ...] = ("library.register_", "library.update_")
+
+#: Never delegated, under any flag: they act in the physical world or spend
+#: money. A person decides each one.
+NEVER_DELEGATED: frozenset[str] = frozenset(
+    {"library.dispatch_job", "library.record_job_result", "vendor.place_order"}
+)
 
 
 def release_delegated() -> bool:
@@ -412,6 +430,65 @@ APPROVER_RECORDED: frozenset[str] = frozenset({"twin.state_manufacturing_context
 def records_approver(tool_id: str) -> bool:
     """Does this tool record the approving person when one approved the call?"""
     return tool_id in APPROVER_RECORDED
+
+
+def delegable_library_write(tool_id: str) -> bool:
+    """A library register or update an agent may make for a person under the flag."""
+    return tool_id.startswith(LIBRARY_DELEGATED_PREFIXES) and tool_id not in NEVER_DELEGATED
+
+
+def owner_delegable(tool_id: str) -> bool:
+    """May an agent run this call for a person under the human-authority flag?
+
+    The human-authority tools and those that record the approving person
+    (:func:`delegable_human_authority`), the library registers and updates
+    (:func:`delegable_library_write`), and an agent's decision on its own
+    upload (:data:`UPLOAD_DECISION_TOOLS`). Never :data:`NEVER_DELEGATED`, and
+    never the release steps, which have their own flag. Delegation is not
+    policy: :func:`never_auto_approved` is unaffected by any of this.
+    """
+    if tool_id in NEVER_DELEGATED:
+        return False
+    return (
+        delegable_human_authority(tool_id)
+        or delegable_library_write(tool_id)
+        or tool_id in UPLOAD_DECISION_TOOLS
+    )
+
+
+#: How a delegated library change names who made it, in the entry's history.
+_DELEGATED_PREFIX = "agent "
+_DELEGATED_JOIN = " on behalf of "
+
+
+def delegated_label(agent: str, person: str) -> str:
+    """``agent X on behalf of Y``: the author of a change an agent made for a person.
+
+    At most 100 characters, the length a library history keeps.
+    """
+    a = " ".join(agent.split())[:40] or "unknown"
+    p = " ".join(person.split())[:40] or "unknown"
+    return f"{_DELEGATED_PREFIX}{a}{_DELEGATED_JOIN}{p}"
+
+
+def delegated_authority(by: str) -> dict[str, Any]:
+    """The authority a recorded author carries.
+
+    ``delegated`` for :func:`delegated_label`'s form, naming the agent and the
+    person; ``recorded`` for anything else (a name, ``mcp``, ``unknown``).
+    Neither is ever ``verified_by_person``: a library change records who
+    asked for it, and nobody checked it on the person's behalf.
+    """
+    text = str(by or "")
+    if text.startswith(_DELEGATED_PREFIX) and _DELEGATED_JOIN in text:
+        agent, _, person = text[len(_DELEGATED_PREFIX) :].partition(_DELEGATED_JOIN)
+        return {
+            "kind": "delegated",
+            "agent": agent,
+            "on_behalf_of": person,
+            "verified_by_person": False,
+        }
+    return {"kind": "recorded", "by": text or "unknown", "verified_by_person": False}
 
 
 def delegable_human_authority(tool_id: str) -> bool:
@@ -728,6 +805,25 @@ class ReleaseNotDelegatedError(HumanAuthorityRequiredError):
             f"({ALLOW_AGENT_RELEASE_ENV}=true, with X-MetaForge-Agent and "
             f"X-MetaForge-On-Behalf-Of on the request): {detail}. A person approves "
             "the release with twin.approve_engineering_entity or in the dashboard.",
+        )
+
+
+class NotDelegatedError(HumanAuthorityRequiredError):
+    """A delegated-only tool that is not a release step, called without a delegation.
+
+    ``files.decide_upload`` exists for an agent the owner delegates human
+    authority to. Anyone else is refused at once: a person decides the upload
+    itself in the dashboard, ``forge approvals`` or ``approvals.decide``.
+    """
+
+    def __init__(self, tool_id: str, detail: str) -> None:
+        self.tool_id = tool_id
+        RuntimeError.__init__(
+            self,
+            f"{tool_id} runs only for an agent the owner delegates human authority to "
+            f"({ALLOW_AGENT_HUMAN_AUTHORITY_ENV}=true, with X-MetaForge-Agent and "
+            f"X-MetaForge-On-Behalf-Of on the request): {detail}. A person decides an "
+            "upload in the dashboard, with forge approvals or with approvals.decide.",
         )
 
 

@@ -27505,6 +27505,17 @@
       },
       "UploadDecision": {
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
           "approver": {
             "anyOf": [
               {
@@ -27532,6 +27543,17 @@
             ],
             "title": "Decision",
             "type": "string"
+          },
+          "on_behalf_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Behalf Of"
           },
           "reason": {
             "default": "",

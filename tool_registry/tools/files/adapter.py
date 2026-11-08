@@ -5,7 +5,10 @@ client); ``files.request_upload`` returns a signed link that takes any size,
 from ``curl`` or a browser page (Claude Code, Codex, or a person following a
 link from a chat-only client); ``files.import_local`` reads the project
 folder (the local plugin only). Every way in stages the files: they reach
-the twin only once a person approves the upload in ``/v1/approvals``.
+the twin only once a person approves the upload in ``/v1/approvals``. Where
+the owner delegates human authority, ``files.decide_upload`` lets the agent
+that staged an upload decide it for the person it acts for, recorded as that
+agent's decision for that person; nobody else gets the tool to run.
 
 Out: ``files.read`` returns a file's content (small files), ``files.link``
 a signed download link (any size), ``files.save_local`` writes into the
@@ -31,6 +34,7 @@ from typing import Any, Protocol
 import structlog
 
 from mcp_core.context import current_context
+from mcp_core.guardrails import APPROVED_BY_ARG, DELEGATED_AGENT_ARG, NotDelegatedError
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import (
     ResourceLimits,
@@ -89,6 +93,10 @@ class FilesService(Protocol):
     async def request_upload(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
     async def upload_status(self, upload_id: str) -> dict[str, Any]: ...
+
+    async def decide_upload(
+        self, upload_id: str, decision: str, reason: str, agent: str, on_behalf_of: str
+    ) -> dict[str, Any]: ...
 
     async def list_files(self, work_product_id: str) -> dict[str, Any]: ...
 
@@ -197,6 +205,25 @@ class FilesServer(McpToolServer):
             ["upload_id"],
             self.upload_status,
             tool_id="files.upload_status",
+        )
+        self._tool(
+            "Decide My Upload",
+            "Approve or reject an upload this agent staged (files.import or "
+            "files.request_upload), for the person it acts for. Runs only where the "
+            "gateway owner delegates human authority to agents "
+            "(METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY) and the request names the agent and "
+            "the person (X-MetaForge-Agent, X-MetaForge-On-Behalf-Of); it is never "
+            "approved by a project policy. Refused for an upload another agent or a "
+            "person staged. The decision is recorded as this agent's, for that person, "
+            "never as the person's own.",
+            {
+                "upload_id": {"type": "string", "description": "Or the approval id upload:<id>"},
+                "decision": {"type": "string", "enum": ["approve", "reject"]},
+                "reason": {"type": "string", "description": "Required to reject"},
+            },
+            ["upload_id", "decision"],
+            self.decide_upload,
+            tool_id="files.decide_upload",
         )
         self._tool(
             "List Work Product Files",
@@ -315,6 +342,11 @@ class FilesServer(McpToolServer):
     def _who() -> str:
         return current_context().actor_id
 
+    @staticmethod
+    def _agent() -> str | None:
+        """The agent the MCP request named (X-MetaForge-Agent), kept on the upload."""
+        return (current_context().agent or "").strip()[:100] or None
+
     def _awaiting(self, upload: dict[str, Any]) -> dict[str, Any]:
         approval_id = f"upload:{upload.get('id') or upload.get('upload_id')}"
         return {
@@ -333,6 +365,7 @@ class FilesServer(McpToolServer):
                     "project_id": _project(arguments),
                     "description": arguments.get("description") or "",
                     "requested_by": self._who(),
+                    "agent": self._agent(),
                 }
             )
             return self._awaiting(upload)
@@ -345,6 +378,7 @@ class FilesServer(McpToolServer):
                 "expected_bytes": int(arguments.get("expected_bytes") or 0),
                 "lifetime_s": arguments.get("lifetime_s"),
                 "requested_by": self._who(),
+                "agent": self._agent(),
             }
         )
         url = self._files.absolute(str(result.pop("path")))
@@ -363,6 +397,56 @@ class FilesServer(McpToolServer):
 
     async def upload_status(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return await self._files.upload_status(str(arguments.get("upload_id") or ""))
+
+    async def decide_upload(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """An agent's decision on its own upload, for the person, under delegation.
+
+        The dispatcher sets the agent and the person only on a delegated call
+        (a client can set neither), so their absence means the call was not
+        delegated and nothing is decided.
+        """
+        agent = str(arguments.get(DELEGATED_AGENT_ARG) or "").strip()
+        person = str(arguments.get(APPROVED_BY_ARG) or "").strip()
+        if not agent or not person:
+            raise NotDelegatedError("files.decide_upload", "this call was not delegated")
+        upload_id = str(arguments.get("upload_id") or "").strip().removeprefix("upload:")
+        decision = str(arguments.get("decision") or "")
+        if decision not in ("approve", "reject"):
+            raise ValueError("decision must be approve or reject")
+        reason = str(arguments.get("reason") or "")
+        with tracer.start_as_current_span("files.decide_upload") as span:
+            span.set_attribute("upload.id", upload_id)
+            span.set_attribute("upload.decision", decision)
+            upload = await self._files.upload_status(upload_id)
+            staged_by = str(upload.get("agent") or "")
+            if staged_by != agent:
+                logger.warning(
+                    "upload_decision_not_own",
+                    upload_id=upload_id,
+                    agent=agent,
+                    staged_by=staged_by or None,
+                )
+                raise ValueError(
+                    f"upload {upload_id} was "
+                    + (f"staged by agent {staged_by!r}" if staged_by else "not staged by an agent")
+                    + f", not by {agent!r}: an agent decides only its own uploads, and a "
+                    "person decides this one"
+                )
+            item = await self._files.decide_upload(upload_id, decision, reason, agent, person)
+            logger.info(
+                "upload_decided_by_delegated_agent",
+                upload_id=upload_id,
+                decision=decision,
+                agent=agent,
+                on_behalf_of=person,
+            )
+            return {
+                "approval_id": f"upload:{upload_id}",
+                "status": item.get("status"),
+                "decision": item.get("decision"),
+                "recorded_as": f"agent {agent} on behalf of {person}",
+                "upload": await self._files.upload_status(upload_id),
+            }
 
     async def list_files(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return await self._files.list_files(str(arguments.get("work_product_id") or ""))
