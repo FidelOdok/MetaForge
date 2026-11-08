@@ -58,6 +58,16 @@ rather than asking again.
 
 ## Procedure
 
+**Shortcut for a committed CAD item.** `twin.run_item_fea` runs steps 1 to 3
+in one call: give the part's `item_key` (for example `CAD-ARM@2`) and a
+`load_case` (`material`, the `fixed` and `loaded` surfaces as a mesh surface
+name or `{axis, side}`, and `force_n`; or `analysis_type: modal` with
+`num_modes`). The gateway reads the STEP, meshes it with
+`freecad.generate_mesh` and solves with `calculix.run_fea`, and returns the
+surfaces it used and the `twin.record_document` arguments for step 6. Still
+check the surfaces it picked, the warnings and convergence. Use the steps
+below when you need control over the mesh or the surface choice.
+
 ### 1. Find the geometry and stage it
 
 1. Find the part's CAD work product: read `metaforge://twin/brief/<project_id>`

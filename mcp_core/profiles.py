@@ -269,6 +269,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "calculix.run_fea",
         "calculix.run_thermal",
         "calculix.validate_mesh",
+        # Mesh then solve on a committed CAD item, in one call.
+        "twin.run_item_fea",
         "cadquery.get_properties",
         "freecad.generate_mesh",
         "freecad.list_named_faces",
@@ -918,7 +920,9 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         "twin.get_dfm_report",
         "cadquery.execute_script",
         "cadquery.get_properties",
-        "cadquery.dfm_measure",
+        # Measures a committed revision by reference: cadquery.dfm_measure
+        # takes the STEP as base64 text, which an agent cannot pass.
+        "twin.measure_dfm",
         "kicad.generate_schematic",
         "kicad.generate_pcb",
         "kicad.run_erc",
@@ -936,11 +940,17 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         "twin.evaluate_dfm",
         "twin.get_dfm_report",
         "twin.get_dfm_findings",
-        "cadquery.dfm_measure",
+        "twin.measure_dfm",
+        # Retire or map the concept's components, so the checklist counts
+        # the CAD parts that realise them.
+        "twin.resolve_concept_component",
         "twin.constraint_violations",
         "constraint.validate",
         "twin.what_verifies",
         "twin.evaluate_metric",
+        # The FEA chain on a CAD item (mesh, then solve) in one call.
+        "twin.run_item_fea",
+        "calculix.check_mesh_convergence",
         "calculix.run_fea",
         "calculix.run_thermal",
         "calculix.extract_results",
@@ -962,8 +972,13 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
     | {
         "twin.get_release_checklist",
         "twin.get_dfm_report",
-        "twin.create_release_package",
+        "twin.evaluate_dfm",
+        "twin.resolve_concept_component",
+        # The release approval request (entity_type release_approval); its
+        # approval is the person's.
+        "twin.record_engineering_entity",
         "twin.create_baseline",
+        "twin.create_release_package",
         "twin.generate_test_plan",
         "twin.create_bringup_checklist",
         "twin.export_cad_step",

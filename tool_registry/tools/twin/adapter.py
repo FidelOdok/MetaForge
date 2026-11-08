@@ -458,8 +458,14 @@ class TwinServer(McpToolServer):
         item_history_reader: Any = None,
         design_files_recorder: Any = None,
         imagine_studio: Any = None,
+        release_path_service: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
+        # The release path: resolving the concept's components and a load case
+        # on a committed CAD item by reference
+        # (api_gateway.twin.release_path.ReleasePathService). Injected, so
+        # this adapter stays free of api_gateway imports.
+        self._release_path = release_path_service
         self._twin = twin
         # ``query_cypher`` rejects mutating Cypher unless this flag is
         # explicitly set at adapter construction. Kept on the adapter
@@ -916,6 +922,8 @@ class TwinServer(McpToolServer):
             self._register_select_concept()
         if component_selector is not None:
             self._register_select_component()
+        if release_path_service is not None:
+            self._register_release_path_tools()
         if release_package_creator is not None:
             self._register_create_release_package()
         if baseline_creator is not None:
@@ -4280,7 +4288,12 @@ class TwinServer(McpToolServer):
                     "confidence, the rule id and profile version and a suggested fix. An "
                     "unknown input is reported as not assessed, never as a pass. Status is "
                     "issues_found, preliminary_guidance, analysis_pending or not_assessed: "
-                    "never analysis_passed. Changes no design."
+                    "never analysis_passed. With measure (default true), each component "
+                    "whose best geometry is a validated exact CAD revision and that has no "
+                    "current exact analysis is then measured by reference (the gateway reads "
+                    "the STEP from the twin, as twin.measure_dfm does; never pass STEP text), "
+                    "so wall, hole and overhang are assessed and an exact set can reach "
+                    "analysis_passed; 'measured' lists what it measured. Changes no design."
                 ),
                 capability="twin_dfm",
                 input_schema={
@@ -4292,6 +4305,13 @@ class TwinServer(McpToolServer):
                             "items": {"type": "string"},
                             "description": "Components (CMP-...) to check (def every one).",
                         },
+                        "measure": {
+                            "type": "boolean",
+                            "description": (
+                                "Measure validated CAD revisions that have no exact analysis "
+                                "yet (def true; at most 12 per call, call again for the rest)."
+                            ),
+                        },
                     },
                     "required": ["project_id"],
                 },
@@ -4300,6 +4320,67 @@ class TwinServer(McpToolServer):
                 resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
             ),
             handler=self.evaluate_dfm,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.measure_dfm",
+                adapter_id="twin",
+                name="Measure DFM By Reference",
+                description=(
+                    "Measure one committed CAD revision for manufacturing by reference: "
+                    "name it by item_key (KEY or KEY@n, e.g. CAD-LAMP-HEAD@2) or node_id, "
+                    "and the gateway reads its STEP from the twin and runs "
+                    "cadquery.dfm_measure over MCP (wall thickness, holes and pins, "
+                    "overhang faces, build-volume extents along the build direction). The "
+                    "exact checks of the component's process (today FDM) are stored as its "
+                    "exact dfm_finding_set, which twin.evaluate_dfm, twin.get_dfm_report "
+                    "and the release checklist read. Use this instead of passing STEP "
+                    "text to cadquery.dfm_measure. The revision must be validated (L3); "
+                    "measured: false with the reason when its process has no exact "
+                    "checks. build_direction overrides the manufacturing context's print "
+                    "orientation (else +Z). Changes no design."
+                ),
+                capability="twin_dfm",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "item_key": {
+                            "type": "string",
+                            "description": "The CAD item, KEY (its head) or KEY@n.",
+                        },
+                        "node_id": {
+                            "type": "string",
+                            "description": "Or the CAD revision's work product id.",
+                        },
+                        "build_direction": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "The print's up direction in model coordinates.",
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "measured": {"type": "boolean"},
+                        "item_ref": {"type": "string"},
+                        "component_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "complete": {"type": "boolean"},
+                        "findings": {"type": "integer"},
+                        "not_assessed": {"type": "array", "items": {"type": "string"}},
+                        "finding_set_id": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=120),
+            ),
+            handler=self.measure_dfm,
         )
         self.register_tool(
             manifest=ToolManifest(
@@ -4584,9 +4665,46 @@ class TwinServer(McpToolServer):
             not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)
         ):
             raise ValueError(f"{tool}: 'component_ids' must be a list of strings")
+        measure = arguments.get("measure", True)
+        if not isinstance(measure, bool):
+            raise ValueError(f"{tool}: 'measure' must be true or false")
         with tracer.start_as_current_span(tool) as span:
             span.set_attribute("dfm.components_requested", len(ids or []))
-            result: dict[str, Any] = await self._dfm_service.evaluate(project_id.strip(), ids)
+            span.set_attribute("dfm.measure", measure)
+            result: dict[str, Any] = await self._dfm_service.evaluate(
+                project_id.strip(), ids, measure=measure
+            )
+        return result
+
+    async def measure_dfm(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.measure_dfm"
+        project_id = self._project_arg(tool, arguments)
+        item_key = arguments.get("item_key")
+        node_id = arguments.get("node_id")
+        if item_key is not None and not isinstance(item_key, str):
+            raise ValueError(f"{tool}: 'item_key' must be a string")
+        if node_id is not None and not isinstance(node_id, str):
+            raise ValueError(f"{tool}: 'node_id' must be a string")
+        if not (item_key or "").strip() and not (node_id or "").strip():
+            raise ValueError(f"{tool}: name the CAD revision with 'item_key' or 'node_id'")
+        direction = arguments.get("build_direction")
+        if direction is not None and not (
+            isinstance(direction, list)
+            and len(direction) == 3
+            and all(isinstance(v, int | float) and not isinstance(v, bool) for v in direction)
+        ):
+            raise ValueError(f"{tool}: 'build_direction' is three numbers")
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("item.key", item_key or node_id or "")
+            try:
+                result: dict[str, Any] = await self._dfm_service.measure(
+                    project_id,
+                    item_key=(item_key or "").strip() or None,
+                    node_id=(node_id or "").strip() or None,
+                    build_direction=[float(v) for v in direction] if direction else None,
+                )
+            except ValueError as exc:
+                raise ValueError(f"{tool}: {exc}") from exc
         return result
 
     async def get_dfm_findings(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -7898,6 +8016,236 @@ class TwinServer(McpToolServer):
         return result
 
     # ------------------------------------------------------------------
+    # The release path: twin.resolve_concept_component, twin.run_item_fea
+    # ------------------------------------------------------------------
+
+    def _register_release_path_tools(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.resolve_concept_component",
+                adapter_id="twin",
+                name="Resolve Concept Component",
+                description=(
+                    "Say what became of a concept component (CMP-...) from the concept "
+                    "assembly once engineering has built the product, so the release "
+                    "checklist's 'every required component has a validated exact model' "
+                    "can pass. action realised_by with item_keys: the CAD items (parts or "
+                    "assemblies, KEY) that realise it; several parts may realise one "
+                    "component, those items become the required components in its place, "
+                    "and it reads as mature as the least mature of them. action retired: "
+                    "it is no longer part of the product (an illustrative placeholder, or "
+                    "superseded by a decision). action restored: undo, it is required "
+                    "again. Every call needs a reason and is recorded as a design decision "
+                    "(newest wins, earlier ones stay in the log); nothing is deleted and "
+                    "no geometry changes. Find the component ids with "
+                    "twin.get_release_checklist or the concept assembly decision."
+                ),
+                capability="twin_dfm",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "component_id": {
+                            "type": "string",
+                            "description": "The concept component, CMP-...",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["realised_by", "retired", "restored"],
+                        },
+                        "item_keys": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "realised_by only: the CAD item keys that realise it.",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why, in a sentence (recorded with the decision).",
+                        },
+                    },
+                    "required": ["project_id", "component_id", "action", "reason"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "component_id": {"type": "string"},
+                        "action": {"type": "string"},
+                        "item_keys": {"type": "array", "items": {"type": "string"}},
+                        "decision_node_id": {"type": "string"},
+                        "components_exact": {"type": "object"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.resolve_concept_component,
+        )
+        surface = {
+            "description": (
+                "A mesh surface set name (e.g. 'Surface3', as the result's mesh.surfaces "
+                "lists them) or {axis: x|y|z, side: min|max}: the largest flat surface at "
+                "that end of the part."
+            ),
+            "type": ["string", "object"],
+            "properties": {
+                "axis": {"type": "string", "enum": ["x", "y", "z"]},
+                "side": {"type": "string", "enum": ["min", "max"]},
+            },
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.run_item_fea",
+                adapter_id="twin",
+                name="Run FEA On A CAD Item",
+                description=(
+                    "Structural analysis of a committed CAD revision in one call: the FEA "
+                    "chain CalculiX needs. Name the revision by item_key (KEY or KEY@n) or "
+                    "node_id; the gateway reads its STEP from the twin, meshes it with "
+                    "freecad.generate_mesh (tetrahedra; element_size from the part's size "
+                    "unless given), picks the fixed and loaded surfaces, and solves with "
+                    "calculix.run_fea. load_case: name, analysis_type static_stress "
+                    "(fixed, loaded, force_n [Fx,Fy,Fz] N) or modal (fixed, num_modes), "
+                    "and material ({name} from the material library, or "
+                    "{youngs_modulus_mpa, poissons_ratio}). Returns the mesh and its "
+                    "surfaces, the surfaces used, the solver result (max von Mises, "
+                    "frequencies, warnings) and record_with: the twin.record_document "
+                    "arguments that pin the result to this revision. Check convergence "
+                    "with calculix.check_mesh_convergence before treating it as evidence."
+                ),
+                capability="twin_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "item_key": {
+                            "type": "string",
+                            "description": "The CAD item, KEY (its head) or KEY@n.",
+                        },
+                        "node_id": {
+                            "type": "string",
+                            "description": "Or the CAD revision's work product id.",
+                        },
+                        "load_case": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "analysis_type": {
+                                    "type": "string",
+                                    "enum": ["static_stress", "modal"],
+                                },
+                                "material": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "youngs_modulus_mpa": {"type": "number"},
+                                        "poissons_ratio": {"type": "number"},
+                                    },
+                                },
+                                "fixed": surface,
+                                "loaded": surface,
+                                "force_n": {
+                                    "type": "array",
+                                    "items": {"type": "number"},
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                },
+                                "num_modes": {"type": "integer"},
+                            },
+                            "required": ["material", "fixed"],
+                        },
+                        "element_size": {
+                            "type": "number",
+                            "description": "Target element size in mm (def: largest extent / 40).",
+                        },
+                        "element_order": {"type": "integer", "enum": [1, 2]},
+                    },
+                    "required": ["project_id", "load_case"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "item_ref": {"type": "string"},
+                        "validated": {"type": "boolean"},
+                        "mesh": {"type": "object"},
+                        "fixed_surface": {"type": "string"},
+                        "loaded_surface": {"type": ["string", "null"]},
+                        "result": {"type": "object"},
+                        "warnings": {"type": "array", "items": {"type": "string"}},
+                        "record_with": {"type": "object"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=900),
+            ),
+            handler=self.run_item_fea,
+        )
+
+    async def resolve_concept_component(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.resolve_concept_component"
+        project_id = self._project_arg(tool, arguments)
+        component_id = arguments.get("component_id")
+        action = arguments.get("action")
+        reason = arguments.get("reason")
+        keys = arguments.get("item_keys")
+        if not isinstance(component_id, str) or not component_id.strip():
+            raise ValueError(f"{tool}: 'component_id' is required (CMP-...)")
+        if not isinstance(action, str) or not action.strip():
+            raise ValueError(f"{tool}: 'action' is realised_by, retired or restored")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"{tool}: 'reason' is required")
+        if keys is not None and (
+            not isinstance(keys, list) or not all(isinstance(k, str) for k in keys)
+        ):
+            raise ValueError(f"{tool}: 'item_keys' must be a list of strings")
+        ctx = current_context()
+        agent = str(ctx.agent or ctx.client or ctx.actor_id or "agent")
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("component.id", component_id)
+            span.set_attribute("resolution.action", action)
+            try:
+                result: dict[str, Any] = await self._release_path.resolve_concept_component(
+                    project_id,
+                    component_id=component_id.strip(),
+                    action=action.strip(),
+                    reason=reason,
+                    item_keys=[k.strip() for k in keys] if keys else None,
+                    actor=agent if agent.startswith(("agent:", "user:")) else f"agent:{agent}",
+                    on_behalf_of=str(ctx.on_behalf_of or ""),
+                )
+            except ValueError as exc:
+                raise ValueError(f"{tool}: {exc}") from exc
+        return result
+
+    async def run_item_fea(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.run_item_fea"
+        project_id = self._project_arg(tool, arguments)
+        item_key = arguments.get("item_key")
+        node_id = arguments.get("node_id")
+        load_case = arguments.get("load_case")
+        if not isinstance(load_case, dict):
+            raise ValueError(f"{tool}: 'load_case' is required (an object)")
+        size = arguments.get("element_size")
+        if size is not None and (
+            isinstance(size, bool) or not isinstance(size, int | float) or size <= 0
+        ):
+            raise ValueError(f"{tool}: 'element_size' is a positive number of mm")
+        order = arguments.get("element_order", 1)
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("item.key", str(item_key or node_id or ""))
+            try:
+                result: dict[str, Any] = await self._release_path.run_item_fea(
+                    project_id,
+                    load_case=dict(load_case),
+                    item_key=item_key.strip() if isinstance(item_key, str) else None,
+                    node_id=node_id.strip() if isinstance(node_id, str) else None,
+                    element_size=float(size) if size else None,
+                    element_order=int(order) if isinstance(order, int) else 1,
+                )
+            except ValueError as exc:
+                raise ValueError(f"{tool}: {exc}") from exc
+        return result
+
+    # ------------------------------------------------------------------
     # twin.create_release_package (FORGE-299)
     # ------------------------------------------------------------------
 
@@ -7908,19 +8256,21 @@ class TwinServer(McpToolServer):
                 adapter_id="twin",
                 name="Create Release Package",
                 description=(
-                    "Bundles a project's current hierarchy/BOM/evidence/decision "
-                    "node ids into one new release_package entity -- a versioned "
-                    "snapshot, never a deep copy of the referenced items' content. "
-                    "Gated at creation time on twin_core.consistency.gates."
-                    "evaluate_g8_release(...) returning PASSED (a real, pre-"
-                    "existing but previously purely-advisory check: baseline "
-                    "fixed, no stale evidence, verification coverage complete, "
-                    "waivers approved, a release_approval entity approved) -- "
-                    "raises with the failing check(s) named if not. Includes a "
-                    "simple count-delta diff against the immediately-prior "
-                    "release_package for the same project, if any. Drawings are "
-                    "always an empty list (FORGE-293 not yet shipped); this is "
-                    "not a full structural diff, only counts."
+                    "The release package (the Make stage's last step): one new "
+                    "release_package entity that pins the project's current state -- "
+                    "a manifest of every current design file (each CAD item's head "
+                    "STEP, Gerbers, drill, position and BOM files, firmware, slicer "
+                    "G-code, by KEY@n or node id with its content hash, and one "
+                    "manifest_sha256 over them) plus the hierarchy, BOM, evidence and "
+                    "decision node ids. A snapshot of references, never a copy of the "
+                    "files. Refused, with every failing check named, unless the G8 "
+                    "release gate passes: the manufacturing release checklist "
+                    "(twin.get_release_checklist) resolved, a baseline fixed "
+                    "(twin.create_baseline), no stale evidence, verification complete, "
+                    "waivers approved and a release_approval entity "
+                    "(twin.record_engineering_entity) approved by a person. On success "
+                    "each validated CAD head is marked released. Includes a count delta "
+                    "against the previous package; drawings are always an empty list."
                 ),
                 capability="twin_evaluate",
                 input_schema={
@@ -7974,10 +8324,13 @@ class TwinServer(McpToolServer):
                 adapter_id="twin",
                 name="Create Baseline",
                 description=(
-                    "Creates an agreed, approved reference configuration: pins "
-                    "the current revision of every Constraint and "
-                    "EngineeringEntity currently recorded for the project, and "
-                    "advances each one's authority to 'baselined'. Real "
+                    "The release baseline (Make stage, before the release package): "
+                    "creates an agreed, approved reference configuration: pins "
+                    "the current revision of every Constraint, "
+                    "EngineeringEntity and item (each CAD part, board and firmware "
+                    "item, KEY@n) recorded for the project, and "
+                    "advances each one's authority to 'baselined'. It changes "
+                    "existing records, so it waits for a person's approval. Real "
                     "optimistic-concurrency guarantee -- if any member changed "
                     "underneath this call, nothing is created and the conflict "
                     "is reported. This is the 'configuration baseline fixed' "

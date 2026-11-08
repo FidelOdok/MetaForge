@@ -213,6 +213,33 @@ describe('selectors', () => {
     expect(activeOperations(s).map((o) => o.operation_id).sort()).toEqual(['b', 'c']);
   });
 
+  it('clears a failed chat reply once a later reply completes, and keeps every other failure', () => {
+    const s = mergeSnapshot(
+      EMPTY_OPERATIONS,
+      snapshotResponse([
+        opSnapshot({ operation_id: 'chat:old', kind: 'chat', state: 'failed', updated_at: '2026-11-04T10:00:00Z' }),
+        opSnapshot({ operation_id: 'job:fea', kind: 'job', state: 'failed', updated_at: '2026-11-04T10:00:01Z' }),
+        opSnapshot({ operation_id: 'chat:new', kind: 'chat', state: 'completed', updated_at: '2026-11-04T10:05:00Z' }),
+      ]),
+    );
+    const ids = sortedOperations(s).map((o) => o.operation_id);
+    expect(ids).not.toContain('chat:old');
+    // A job that failed is not fixed by a chat reply: it stays.
+    expect(ids).toEqual(['job:fea', 'chat:new']);
+  });
+
+  it('keeps a failed chat reply while no later reply has completed', () => {
+    const s = mergeSnapshot(
+      EMPTY_OPERATIONS,
+      snapshotResponse([
+        opSnapshot({ operation_id: 'chat:done', kind: 'chat', state: 'completed', updated_at: '2026-11-04T09:00:00Z' }),
+        opSnapshot({ operation_id: 'chat:failed', kind: 'chat', state: 'failed', updated_at: '2026-11-04T10:00:00Z' }),
+        opSnapshot({ operation_id: 'chat:running', kind: 'chat', state: 'running', updated_at: '2026-11-04T10:01:00Z' }),
+      ]),
+    );
+    expect(sortedOperations(s).map((o) => o.operation_id)).toEqual(['chat:failed', 'chat:running', 'chat:done']);
+  });
+
   it('marks decisions and failures as urgent', () => {
     expect(isUrgent(opEvent({ type: 'review_required', state: 'waiting_for_user' }))).toBe(true);
     expect(isUrgent(opEvent({ type: 'failed', state: 'failed' }))).toBe(true);

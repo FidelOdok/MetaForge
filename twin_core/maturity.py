@@ -79,6 +79,9 @@ class ComponentMaturity:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     #: What the next level needs, in plain words.
     next_step: str | None = None
+    #: How a concept component was resolved (``realised_by`` CAD items, or
+    #: ``retired``), from :mod:`twin_core.component_resolution`; else ``None``.
+    resolution: dict[str, Any] | None = None
 
     def claim(
         self, level: Maturity, kind: str, *, node_id: Any = None, ref: Any = None, detail: str = ""
@@ -104,6 +107,7 @@ class ComponentMaturity:
             "maturity": self.maturity.value,
             "evidence": self.evidence,
             "next_step": self.next_step,
+            "resolution": self.resolution,
         }
 
 
@@ -260,6 +264,8 @@ async def compute_maturity(twin: Any, project_id: UUID | str) -> dict[str, Any]:
                     )
 
         checks = await _check_results(twin, pid)
+        #: Item key -> the component ids its CAD head was claimed for.
+        item_components: dict[str, list[str]] = {}
         if supports_items(twin):
             for item_type in ("cad_model", "assembly"):
                 for item in await list_items(twin, project_id=pid, item_type=item_type):
@@ -282,6 +288,7 @@ async def compute_maturity(twin: Any, project_id: UUID | str) -> dict[str, Any]:
                         targets.append((f"item:{item.key}", item.name))
                     state = geometry_state_of("cad_model", meta) or GeometryState.EXACT_READY
                     results = checks.get(ref, [])
+                    item_components[item.key] = [cid for cid, _n in targets]
                     for cid, name in targets:
                         _claim_cad(ensure(cid, name), item.head_node_id, ref, state, results)
 
@@ -300,9 +307,18 @@ async def compute_maturity(twin: Any, project_id: UUID | str) -> dict[str, Any]:
                         detail="editable sketch with dimensions and constraints",
                     )
 
+        resolved = await _apply_resolutions(twin, pid, comps, item_components)
+        if resolved and has_assembly and not any(c.required for c in comps.values()):
+            # Every concept component was retired: the product is what was
+            # built, so each made CAD part is required in their place.
+            for c in comps.values():
+                if c.resolution is None and any(e["kind"] == "cad_revision" for e in c.evidence):
+                    c.required = True
+
         out = sorted(comps.values(), key=lambda c: (not c.required, c.name.lower()))
         for c in out:
-            c.next_step = _NEXT.get(c.maturity)
+            if c.next_step is None:
+                c.next_step = _NEXT.get(c.maturity)
         agg = aggregate(out)
         span.set_attribute("maturity.components", len(out))
         span.set_attribute("maturity.product", str(agg["maturity"]))
@@ -319,6 +335,80 @@ async def compute_maturity(twin: Any, project_id: UUID | str) -> dict[str, Any]:
             "product": agg,
             "has_assembly": has_assembly,
         }
+
+
+async def _apply_resolutions(
+    twin: Any,
+    pid: UUID,
+    comps: dict[str, ComponentMaturity],
+    item_components: dict[str, list[str]],
+) -> bool:
+    """Apply each concept component's current resolution, in place; whether any applied.
+
+    ``retired``: the component is no longer required. ``realised_by``: the
+    components of the realising CAD items become required in its place, and
+    the concept component reads as mature as the least mature of them. A
+    realisation whose items have no CAD head (yet, or any more) leaves the
+    component required, and says which items are missing.
+    """
+    from twin_core.component_resolution import current_resolutions
+
+    resolutions = await current_resolutions(twin, pid)
+    applied = False
+    for cid, res in resolutions.items():
+        comp = comps.get(cid)
+        if comp is None:
+            continue
+        applied = True
+        action = res.get("action")
+        if action == "retired":
+            comp.required = False
+            comp.resolution = res
+            comp.evidence.append(
+                {
+                    "maturity": comp.maturity.value,
+                    "kind": "retired",
+                    "node_id": res.get("decision_node_id"),
+                    "ref": None,
+                    "detail": f"retired: {res.get('reason') or ''}"[:300],
+                }
+            )
+            comp.next_step = "none: retired from the product"
+            continue
+        if action != "realised_by":
+            continue
+        keys = [str(k) for k in res.get("item_keys") or []]
+        missing = [k for k in keys if k not in item_components]
+        realising = [
+            comps[c] for k in keys for c in item_components.get(k, []) if c != cid and c in comps
+        ]
+        comp.resolution = {**res, "missing_items": missing}
+        if missing or not realising:
+            comp.evidence.append(
+                {
+                    "maturity": comp.maturity.value,
+                    "kind": "realised_by",
+                    "node_id": res.get("decision_node_id"),
+                    "ref": None,
+                    "detail": "realised by "
+                    + ", ".join(keys)
+                    + (f", but {', '.join(missing)} has no CAD revision" if missing else ""),
+                }
+            )
+            continue
+        for other in realising:
+            other.required = True
+        floor = min(realising, key=lambda c: rank(c.maturity)).maturity
+        comp.required = False
+        comp.claim(
+            floor,
+            "realised_by",
+            node_id=res.get("decision_node_id"),
+            ref=", ".join(keys),
+            detail=f"realised by {', '.join(keys)} (as mature as the least of them)",
+        )
+        comp.next_step = "check the parts that realise it"
+    return applied
 
 
 def _claim_cad(

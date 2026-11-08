@@ -90,12 +90,15 @@ export function MakeStage({ projectId, view, model, modelRevision, onAsk }: Make
           <>
             <p className="cv-muted">{readinessText(data.readiness)}</p>
             {items.length > 0 && (
-              <ul className="cv-blockers">
+              <ul className="cv-blockers cv-checklist">
                 {items.map((item) => (
-                  <li key={item.id}>
+                  // The icon keeps its own column and the text wraps beside it.
+                  // A wrapping row moved a long item's text to the next line and
+                  // left its icon alone on a row with no label.
+                  <li key={item.id} data-testid={`release-item-${item.id}`}>
                     <ItemIcon status={item.status} />
-                    <span>
-                      {item.label}
+                    <span className="cv-checklist-text">
+                      {item.label || item.id}
                       {item.detail && <span className="cv-muted"> · {item.detail}</span>}
                     </span>
                   </li>

@@ -417,6 +417,116 @@ async def schedule_for_component(
         return None
 
 
+#: How many components one ``twin.evaluate_dfm`` call measures before it
+#: stops and says how many it left: each measurement reads a STEP and runs the
+#: adapter, so a large assembly is measured over several calls.
+MEASURE_LIMIT = 12
+
+
+async def measure(
+    twin: Any,
+    project_id: str | UUID,
+    *,
+    item_key: str | None = None,
+    node_id: str | None = None,
+    build_direction: list[float] | None = None,
+    service: Any = None,
+) -> dict[str, Any]:
+    """Measure one committed, validated CAD revision by reference, now.
+
+    The STEP is read from the twin (never passed through the caller), sent to
+    ``cadquery.dfm_measure`` over MCP, and the exact checks of the
+    component's process are stored as its exact ``dfm_finding_set``, which
+    ``twin.evaluate_dfm`` and the release checklist then read. Refused (409)
+    for a revision that is not validated; ``scheduled: false`` with the
+    reason when the process has no exact checks.
+    """
+    if not item_key and not node_id:
+        raise ExactDfmError("name the CAD revision: item_key (KEY or KEY@n) or node_id")
+    with tracer.start_as_current_span("twin.dfm.exact.measure") as span:
+        span.set_attribute("item.key", item_key or "")
+        out = await schedule(
+            twin,
+            project_id,
+            item_key=item_key,
+            node_id=node_id,
+            trigger="measure",
+            build_direction=build_direction,
+            wait=True,
+            mark_pending=False,
+            service=service,
+        )
+        if not out.get("scheduled"):
+            return {"measured": False, **out}
+        result = dict(out.get("result") or {})
+        logger.info(
+            "dfm_exact_measured_by_reference",
+            item_ref=result.get("item_ref"),
+            status=result.get("status"),
+        )
+        return {"measured": True, **result}
+
+
+async def measure_missing(
+    twin: Any,
+    project_id: str | UUID,
+    evaluated: list[Any],
+    *,
+    limit: int = MEASURE_LIMIT,
+    service: Any = None,
+) -> list[dict[str, Any]]:
+    """Measure each evaluated component whose best geometry is a validated revision
+    and that has no current exact analysis yet. Never raises.
+
+    ``evaluated`` is :func:`~api_gateway.twin.dfm_findings.evaluate_project`'s
+    result. Returns one line per component it tried (measured, skipped with
+    the reason, or the error), and a final ``deferred`` line when it stopped at
+    ``limit``.
+    """
+    pid = _pid(project_id)
+    out: list[dict[str, Any]] = []
+    todo = []
+    for g, _node, fs, _created in evaluated:
+        if g.geometry.level != "exact" or fs.kind == "exact":
+            continue
+        refs = [r for r in g.geometry.geometry_refs if "@" in r and not r.startswith("node:")]
+        if refs:
+            todo.append((g, refs[0]))
+    if todo and _service(service) is None:
+        # Nothing could be measured: say so, and leave the heuristic sets as
+        # they are rather than storing an incomplete exact set for each.
+        return [
+            {
+                "status": "not_measured",
+                "reason": "the CAD adapter is not available",
+                "item_refs": [ref for _g, ref in todo],
+            }
+        ]
+    for g, ref in todo[:limit]:
+        line: dict[str, Any] = {"component_id": g.component_id, "item_ref": ref}
+        try:
+            result = await measure(twin, pid, item_key=ref, service=service)
+            if result.get("measured"):
+                line.update(status=result.get("status"), complete=result.get("complete"))
+            else:
+                line.update(status="not_measured", reason=result.get("reason"))
+        except (ExactDfmError, ExactMeasureFailedError) as exc:
+            line.update(status="failed", reason=str(exc)[:300])
+        except Exception as exc:  # noqa: BLE001 - the heuristic sets are already stored
+            logger.warning("dfm_exact_measure_missing_failed", item_ref=ref, error=str(exc))
+            line.update(status="failed", reason=str(exc)[:300])
+        out.append(line)
+    if len(todo) > limit:
+        out.append(
+            {
+                "status": "deferred",
+                "reason": f"{len(todo) - limit} more component(s) to measure: call again",
+                "item_refs": [ref for _g, ref in todo[limit:]],
+            }
+        )
+    return out
+
+
 def register() -> None:
     """Hook exact DFM onto exact CAD validation and register the job retry."""
     from api_gateway.twin.exact_cad import register_validated_listener

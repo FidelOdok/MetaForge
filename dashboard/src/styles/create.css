@@ -418,6 +418,20 @@
 .cv-blockers svg {
   color: var(--cv-warn);
 }
+/* The release checklist: icon in its own column, text wrapping beside it. */
+.cv-checklist li {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.cv-checklist li > svg {
+  flex: none;
+  margin-top: 3px;
+}
+.cv-checklist-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 .cv-count {
   min-width: 18px;

@@ -20293,6 +20293,14 @@
             "title": "Decision Ids",
             "type": "array"
           },
+          "design_files": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Design Files",
+            "type": "array"
+          },
           "drawing_ids": {
             "items": {
               "type": "string"
@@ -20313,6 +20321,17 @@
             },
             "title": "Hierarchy Node Ids",
             "type": "array"
+          },
+          "manifest_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifest Sha256"
           }
         },
         "required": [

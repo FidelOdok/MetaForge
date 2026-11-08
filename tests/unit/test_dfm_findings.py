@@ -648,9 +648,14 @@ async def test_routes_round_trip(twin: InMemoryTwinAPI, client: TestClient) -> N
     assert history.status_code == 200 and "history" in history.json()
 
 
-async def test_the_mcp_tools_evaluate_and_read(twin: InMemoryTwinAPI) -> None:
+async def test_the_mcp_tools_evaluate_and_read(
+    twin: InMemoryTwinAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api_gateway.twin import exact_cad
     from tool_registry.tools.twin.adapter import TwinServer
 
+    # No CAD adapter in this process, whatever an earlier test bound.
+    monkeypatch.setattr(exact_cad, "_service", None)
     server = TwinServer(twin=twin, dfm_service=dfm.make_dfm_service(twin))
     assert {"twin.evaluate_dfm", "twin.get_dfm_findings"} <= set(server.tool_ids)
     await _project(twin, wall=0.5)

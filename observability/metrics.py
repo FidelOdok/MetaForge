@@ -1489,6 +1489,17 @@ class MetricsRegistry:
         labels=["blocker"],
     )
 
+    RELEASE_PATH_CALL_TOTAL = MetricDefinition(
+        name="metaforge_release_path_call_total",
+        type="counter",
+        description=(
+            "Calls of the release path tools (twin.resolve_concept_component, "
+            "twin.run_item_fea), by tool and outcome (realised_by, retired, restored, "
+            "refused, solved, mesh_failed, solve_failed, no_step, unavailable)"
+        ),
+        labels=["tool", "outcome"],
+    )
+
     # ── Parametric reconstruction from an accepted concept (spec 4B) ─────
 
     RECONSTRUCTION_PROPOSAL_TOTAL = MetricDefinition(
@@ -2921,6 +2932,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.MANUFACTURING_RELEASE_REFUSED_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"blocker": blocker})
+
+    def record_release_path_call(self, tool: str, outcome: str) -> None:
+        """Record one release path tool call by its outcome."""
+        counter = self._instruments.get(MetricsRegistry.RELEASE_PATH_CALL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool": tool, "outcome": outcome})
 
     def record_reconstruction_proposal(self, outcome: str) -> None:
         """Record one feature history proposal outcome (spec 4B)."""

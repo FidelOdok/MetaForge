@@ -69,6 +69,108 @@ _SNAPSHOT_LIST_KEYS = (
 )
 
 
+#: The work product types a release package's file manifest lists: what a
+#: maker needs (CAD, board fabrication and assembly files, firmware, slicer
+#: output, BOM) and nothing that only illustrates.
+MANIFEST_TYPES: tuple[WorkProductType, ...] = (
+    WorkProductType.CAD_MODEL,
+    WorkProductType.SCHEMATIC,
+    WorkProductType.PCB_LAYOUT,
+    WorkProductType.GERBER,
+    WorkProductType.PICK_AND_PLACE,
+    WorkProductType.MANUFACTURING_FILE,
+    WorkProductType.BOM,
+    WorkProductType.FIRMWARE_SOURCE,
+    WorkProductType.PINMAP,
+    WorkProductType.GCODE,
+)
+
+
+def _created_key(node: Any) -> str:
+    stamp = getattr(node, "created_at", None)
+    return stamp.isoformat() if stamp is not None else ""
+
+
+async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, Any]]:
+    """The current design files a release pins, one row per file. Never raises.
+
+    Item-tracked files (CAD parts and assemblies) are their head revision,
+    ``KEY@n``; an analysis model is left out. Other files are the newest of
+    each type and name. Each row carries the node id, format and content hash,
+    so the package pins exactly the bytes it was cut from.
+    """
+    from twin_core.items import list_items, supports_items
+
+    rows: list[dict[str, Any]] = []
+    heads: set[str] = set()
+    if supports_items(twin):
+        for item_type in ("cad_model", "assembly"):
+            try:
+                items = await list_items(twin, project_id=project_id, item_type=item_type)
+            except Exception as exc:  # noqa: BLE001 - a manifest lists what it can read
+                logger.warning("release_manifest_items_unavailable", error=str(exc))
+                items = []
+            for item in items:
+                if item.head_node_id is None:
+                    continue
+                node = await twin.get_work_product(item.head_node_id)
+                if node is None:
+                    continue
+                meta = dict(getattr(node, "metadata", None) or {})
+                if str(meta.get("model_role") or "") == "analysis":
+                    continue
+                heads.add(str(node.id))
+                rows.append(
+                    {
+                        "kind": item_type,
+                        "ref": f"{item.key}@{item.head_revision}",
+                        "name": item.name,
+                        "node_id": str(node.id),
+                        "format": str(getattr(node, "format", "") or ""),
+                        "content_hash": str(getattr(node, "content_hash", "") or ""),
+                        "geometry_state": meta.get("geometry_state"),
+                    }
+                )
+    for wp_type in MANIFEST_TYPES:
+        try:
+            nodes = await twin.list_work_products(project_id=project_id, work_product_type=wp_type)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("release_manifest_type_unavailable", type=wp_type.value, error=str(exc))
+            continue
+        newest: dict[str, Any] = {}
+        for node in sorted(nodes, key=_created_key):
+            if str(node.id) in heads or wp_type is WorkProductType.CAD_MODEL:
+                continue  # CAD is listed by item head above, never a superseded revision
+            newest[str(getattr(node, "name", "") or node.id)] = node
+        for name, node in sorted(newest.items()):
+            rows.append(
+                {
+                    "kind": wp_type.value,
+                    "ref": None,
+                    "name": name,
+                    "node_id": str(node.id),
+                    "format": str(getattr(node, "format", "") or ""),
+                    "content_hash": str(getattr(node, "content_hash", "") or ""),
+                }
+            )
+    return rows
+
+
+def manifest_digest(rows: list[dict[str, Any]]) -> str:
+    """One sha256 over the manifest rows, independent of their order. Pure."""
+    import hashlib
+    import json
+
+    lines = sorted(
+        json.dumps(
+            {k: r.get(k) for k in ("kind", "ref", "name", "node_id", "content_hash")},
+            sort_keys=True,
+        )
+        for r in rows
+    )
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
 async def _snapshot(twin: Any, project_id: UUID) -> dict[str, Any]:
     hierarchy_nodes = await twin.list_hierarchy_nodes(project_id=project_id)
     bom_items = await twin.list_bom_items(project_id=project_id)
@@ -76,6 +178,7 @@ async def _snapshot(twin: Any, project_id: UUID) -> dict[str, Any]:
     decisions = await twin.list_work_products(
         project_id=project_id, work_product_type=WorkProductType.DESIGN_DECISION
     )
+    files = await design_file_manifest(twin, project_id)
     return {
         "hierarchy_node_ids": [str(n.id) for n in hierarchy_nodes],
         "bom_item_ids": [str(i.id) for i in bom_items],
@@ -84,6 +187,9 @@ async def _snapshot(twin: Any, project_id: UUID) -> dict[str, Any]:
         # FORGE-293 (2D technical drawings) hasn't shipped -- always empty,
         # never fabricated, until that capability exists to snapshot.
         "drawing_ids": [],
+        # The design files a maker needs, pinned by revision and content hash.
+        "design_files": files,
+        "manifest_sha256": manifest_digest(files),
     }
 
 
@@ -190,7 +296,8 @@ def make_release_package_creator(
             diff = _count_diff(prior, snapshot)
 
             statement = (
-                f"Release package: {len(snapshot['hierarchy_node_ids'])} hierarchy nodes, "
+                f"Release package: {len(snapshot['design_files'])} design files, "
+                f"{len(snapshot['hierarchy_node_ids'])} hierarchy nodes, "
                 f"{len(snapshot['bom_item_ids'])} BOM items, "
                 f"{len(snapshot['evidence_ids'])} evidence, "
                 f"{len(snapshot['decision_ids'])} decisions"
@@ -257,7 +364,11 @@ def make_release_package_lister(twin: Any) -> Any:
                 "created_at": e.created_at.isoformat(),
                 "title": e.title,
                 "statement": e.statement,
-                "snapshot": {k: e.metadata.get(k, []) for k in _SNAPSHOT_LIST_KEYS},
+                "snapshot": {
+                    **{k: e.metadata.get(k, []) for k in _SNAPSHOT_LIST_KEYS},
+                    "design_files": e.metadata.get("design_files", []),
+                    "manifest_sha256": e.metadata.get("manifest_sha256"),
+                },
                 "diff_from_previous": e.metadata.get("diff_from_previous"),
                 "gate_status": e.metadata.get("gate_status"),
             }

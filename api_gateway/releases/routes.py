@@ -15,7 +15,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
 
@@ -49,6 +49,12 @@ class ReleaseSnapshot(BaseModel):
     evidence_ids: list[str]
     decision_ids: list[str]
     drawing_ids: list[str]
+    #: The design files the release pins: ``{kind, ref, name, node_id,
+    #: format, content_hash}`` per file. Empty on a package cut before the
+    #: manifest existed.
+    design_files: list[dict[str, Any]] = Field(default_factory=list)
+    #: One sha256 over the manifest rows; ``None`` on an older package.
+    manifest_sha256: str | None = None
 
 
 class ReleaseDiff(BaseModel):

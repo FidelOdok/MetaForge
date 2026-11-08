@@ -1378,6 +1378,47 @@ There is deliberately no handover or rework tool: both are a person's
 decisions, taken in the dashboard (`POST .../imagine/handover`, `POST
 .../imagine/rework`, refused to an agent surface).
 
+### Twin adapter: the release path
+
+These tools let an agent take a validated design to a release without
+handling file bytes. Each takes `project_id`.
+
+- `twin.measure_dfm` (additive, registered with the DFM tools): `{item_key |
+  node_id, build_direction?}`. The gateway reads the committed revision's
+  STEP from the twin and calls `cadquery.dfm_measure` itself, then stores the
+  exact `dfm_finding_set`. Returns `{measured, item_ref, component_id, status,
+  complete, findings, not_assessed, finding_set_id}`, or `measured: false`
+  with `reason`. `twin.evaluate_dfm` takes `measure` (default true) and does
+  the same for every validated part that has no exact analysis yet, listing
+  them under `measured`. `cadquery.dfm_measure` still takes `step_base64`
+  for a STEP that is not in the twin.
+- `twin.resolve_concept_component` (additive, registered when the gateway
+  injects `release_path_service`): `{component_id, action: realised_by |
+  retired | restored, item_keys?, reason}`. Records a design decision; the
+  maturity and the release checklist read the newest one. Returns the
+  resolution, its `decision_node_id` and the checklist's `components_exact`
+  status. See [resolving concept components](twin_schema.md#concept-component-resolution).
+- `twin.run_item_fea` (producing, same injection): `{item_key | node_id,
+  load_case: {name, analysis_type: static_stress | modal, material, fixed,
+  loaded, force_n, num_modes}, element_size?, element_order?}`. Reads the
+  STEP, meshes it with `freecad.generate_mesh` and solves with
+  `calculix.run_fea`, both over MCP. `fixed` and `loaded` are a surface set
+  name or `{axis, side}` (the largest flat surface at that end). Returns the
+  mesh and its surfaces, the surfaces used, the solver result and
+  `record_with`, the `twin.record_document` arguments that pin it to the
+  revision.
+- `twin.create_baseline` and `twin.create_release_package` close the path.
+  The package now pins a `design_files` manifest with a `manifest_sha256`
+  ([release packages](twin_schema.md#release-packages)). The baseline is
+  destructive (it advances existing records) and the release approval it
+  needs (`twin.record_engineering_entity`, `entity_type: release_approval`)
+  is approved by a person, so both wait for one.
+
+Observability: `metaforge_release_path_call_total{tool, outcome}`, the
+`ItemFeaFailures` alert, and spans `twin.measure_dfm`,
+`twin.dfm.exact.measure`, `twin.resolve_concept_component` and
+`twin.run_item_fea`.
+
 ### Twin adapter: one home for requirements
 
 Requirement values live only in the constraint set (`twin.record_constraint_set`).

@@ -107,7 +107,10 @@ so the keyboard reaches its controls before the rail and the stage.
 
 - **One at a time.** The card shows one primary operation: a decision waiting
   for the person first, then a failure, then live work. Any other live
-  operations collapse into a counter such as *+2*.
+  operations collapse into a counter such as *+2*. A chat reply that failed
+  stops showing once a later reply has completed: the person sent the message
+  again and got an answer. Every other failure (a build, a check, a job)
+  stays until it is dismissed or retried.
 - **Plain status.** The status is one of *Queued*, *Working*, *Checking*,
   *Waiting for a decision*, *Ready*, *Needs attention* or *Unable to
   complete*, with the current step and the elapsed time. The time runs from
@@ -760,9 +763,9 @@ cut by the provider's 128-tool cap:
 | Stage | Tools beyond the shared reads |
 |---|---|
 | Imagine | the studio (`twin.imagine_put_studio`), sketches, concept images and their critique, the 3D concept mesh and its parts, the manufacturing context, intent and constraint records, web search |
-| Develop | concept parts (segment, redo, seal), `twin.design_cad_loop` and its reader, exact CAD, CadQuery, geometry commit and placement, DFM findings, KiCad schematic and board with ERC and DRC, component search and selection, the firmware scaffold and build, design files |
-| Check | DFM evaluation and report, constraints and contracts, CalculiX, SPICE, the power budget, ERC and DRC, firmware static checks, the release checklist read, evidence and documents |
-| Make | the release checklist, release package, baseline, test plan, bring-up checklist, STEP and fabrication exports, the firmware build, slicing, cost estimates and vendor quotes and handoffs |
+| Develop | concept parts (segment, redo, seal), `twin.design_cad_loop` and its reader, exact CAD, CadQuery, geometry commit and placement, DFM findings and measuring a part by reference (`twin.measure_dfm`), KiCad schematic and board with ERC and DRC, component search and selection, the firmware scaffold and build, design files |
+| Check | DFM evaluation (which measures validated parts by reference) and report, resolving the concept's components (`twin.resolve_concept_component`), constraints and contracts, a load case on a CAD item (`twin.run_item_fea`), CalculiX and mesh convergence, SPICE, the power budget, ERC and DRC, firmware static checks, the release checklist read, evidence and documents |
+| Make | the release checklist, DFM evaluation, resolving the concept's components, the release approval request (`twin.record_engineering_entity`), release package, baseline, test plan, bring-up checklist, STEP and fabrication exports, the firmware build, slicing, cost estimates and vendor quotes and handoffs |
 
 Every stage shares the reads a turn needs wherever it is: the project, a
 node, a thread, a query, `twin.job_status`, `twin.get_manufacturing_context`,
@@ -938,6 +941,13 @@ passed its round trip, and **Ready for production** only when, in addition,
 the physical verification is approved and the release is approved.
 Otherwise it reads *Not ready to make yet: 3 next steps*. It is never a
 percentage and never claims a readiness the checklist does not back.
+
+Each row keeps its status icon in its own column and wraps its label and
+detail beside it, so a long detail never leaves an icon alone on a line.
+An illustrative concept component that blocks the first item is resolved
+with `twin.resolve_concept_component` (the CAD parts that realise it, or
+retired); the item's detail then names it as resolved
+(see [resolving concept components](twin_schema.md#concept-component-resolution)).
 
 ### Making it
 
