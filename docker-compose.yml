@@ -49,6 +49,9 @@ services:
       - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-1800}
       - METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR=${METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR:-20}
       - METAFORGE_AUTO_APPROVE_MESH_PER_HOUR=${METAFORGE_AUTO_APPROVE_MESH_PER_HOUR:-3}
+      # cadquery.execute_script runs isolated, so an auto policy may approve it, up
+      # to this many per project per hour.
+      - METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR=${METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR:-60}
       # FORGE-788: a slow tool job called through mcp-http runs there, so the
       # operations view cancels or retries it by relaying to the sidecar, with
       # the same key a client presents. Unset, such a job is not cancellable.
@@ -568,6 +571,9 @@ services:
       - METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=${METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY:-false}
       - METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR=${METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR:-20}
       - METAFORGE_AUTO_APPROVE_MESH_PER_HOUR=${METAFORGE_AUTO_APPROVE_MESH_PER_HOUR:-3}
+      # cadquery.execute_script runs isolated, so an auto policy may approve it, up
+      # to this many per project per hour.
+      - METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR=${METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR:-60}
       # FORGE-647: the key the sidecar presents when it posts a live assembly
       # placement to the gateway. Empty on a gateway with no key, as for the worker.
       - METAFORGE_GATEWAY_API_KEY=${METAFORGE_GATEWAY_API_KEY:-}
@@ -1164,18 +1170,46 @@ services:
     stdin_open: true
     ports:
       - "8101:8101"
+    # Every cadquery.execute_script script runs in a child process isolated by
+    # the OS (tool_registry/tools/cadquery/script_runner.py): a uid of its own
+    # from CADQUERY_RUNNER_UIDS, resource limits, Landlock (writes only its
+    # private folder under /run/cadquery-runner, cannot read /workspace) and
+    # seccomp (no network sockets, no new processes). The adapter itself keeps
+    # /workspace writable because its other tools (create_*, boolean, export_*)
+    # write their results there; a script child cannot reach it.
     volumes:
       - adapter-workspace:/workspace
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+      # mode 1733: a runner uid may create its own folder here but not list others.
+      - /run/cadquery-runner:size=512m,mode=1733,uid=1000,gid=1000
+    # The image starts as root only to drop to uid 1000 keeping CAP_SETUID and
+    # CAP_SETGID, which the runner needs to start each child as its own uid.
+    # Nothing else: no CAP_KILL, no CAP_SYS_ADMIN, no Docker socket.
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
     environment:
       - METAFORGE_ENV=docker
       - CADQUERY_WORK_DIR=/workspace
       - CADQUERY_HTTP_PORT=8101
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - CADQUERY_RUNNER_ROOT=/run/cadquery-runner
+      - CADQUERY_RUNNER_UIDS=61000-61003
+      - CADQUERY_RUNNER_REQUIRE=uid,landlock,seccomp
     deploy:
       resources:
         limits:
-          memory: 2G
+          # The adapter plus script children, each capped at 2 GB of address space.
+          memory: 3G
           cpus: '2'
+          # Every process and thread of the container, script children included.
+          pids: 512
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')"]
       interval: 30s

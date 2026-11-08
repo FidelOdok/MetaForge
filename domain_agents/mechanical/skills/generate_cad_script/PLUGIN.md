@@ -97,9 +97,10 @@ revision of it, not a new part. Confirm that with the user.
 Call `cadquery.execute_script` with:
 
 - `script`: the script text
-- `output_path`: a distinct STEP path for this part, e.g.
-  output/sensor_mount_bracket.step. If you leave it out, every call writes the
-  same shared script_result.step and the next run overwrites yours.
+- `output_path`: a new STEP path for this part, e.g.
+  output/sensor_mount_bracket.step. A file is never overwritten: a path that
+  already exists is refused, so name a new one for each attempt (or leave it
+  out, and each call writes to a new folder of its own).
 - `timeout`: only if the user's geometry is known to be heavy
 
 Read the result: `cad_file`, `script_text` (what actually ran, after import
@@ -231,7 +232,8 @@ the finish is the person's choice:
   carry the name or the material colour, use the FreeCAD path.
 - `cadquery.execute_script` exports whatever format `output_path` ends in,
   but only STEP can be committed. Keep the .step extension.
-- The sandbox has no file access, so a script cannot load an existing part.
+- The script runs in an isolated process with no file access outside its own
+  folder and no network, so a script cannot load an existing part.
 - MetaForge checks that the script runs and measures the result. It does not
   check manufacturability, tolerances or strength; those are other skills
   (`check_manufacturability`, `check_tolerance`, `run_fea`).

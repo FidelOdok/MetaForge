@@ -1510,3 +1510,42 @@ groups:
             error; this alert is about the checker itself. Each contract keeps
             showing its last recorded check, marked stale once its inputs move.
             Check the gateway logs (interface_contract_check_failed).
+
+  # CadQuery isolated script runner (tool_registry/tools/cadquery/script_runner.py).
+  - name: metaforge_cadquery_runner
+    rules:
+      - alert: CadqueryScriptTimeoutsSpiking
+        expr: >-
+          sum(increase(metaforge_cadquery_script_limit_total{limit="timeout"}[30m]))
+          / clamp_min(sum(increase(metaforge_cadquery_script_run_total[30m])), 1) > 0.25
+          and sum(increase(metaforge_cadquery_script_limit_total{limit="timeout"}[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CadQuery scripts keep running into their timeout"
+          description: >-
+            More than a quarter of the last half hour's cadquery.execute_script runs
+            were killed at their wall-clock deadline, at least five of them. Each
+            run is killed cleanly, so nothing is left running, but the agent gets
+            no geometry back. Either an agent keeps writing scripts that do not
+            finish (a loop, a very heavy boolean) or the adapter is starved of CPU.
+            Read the cadquery_script_run log events (outcome=timeout) and the
+            cadquery-adapter container's CPU; CADQUERY_RUNNER_STARTUP_GRACE_S and
+            the tool's timeout argument set the deadline.
+      - alert: CadqueryScriptRunnerRefusing
+        expr: >-
+          sum(increase(metaforge_cadquery_script_run_total{outcome="isolation_unavailable"}[15m])) >= 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The CadQuery script runner refuses to run scripts"
+          description: >-
+            cadquery.execute_script refused at least three scripts in fifteen
+            minutes because an isolation layer it requires (uid switch, Landlock or
+            seccomp) could not be applied, so no script ran. Check that the
+            cadquery-adapter container still has cap_add SETUID and SETGID, that
+            the host kernel offers Landlock (/sys/kernel/security/lsm), and the
+            cadquery_script_run and cadquery_runner_uid_switch_unavailable log
+            events. CADQUERY_RUNNER_REQUIRE lists the layers that must hold.

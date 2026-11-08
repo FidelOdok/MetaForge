@@ -98,7 +98,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 2 interface contract checks and violations (lamp golden path).
         # + 6 CAD design loop runs, iterations, renders, verdicts, calls and spend.
         # + 1 Imagine studio operations (FORGE-821).
-        assert len(all_metrics) == 161
+        # + 3 CadQuery isolated script runner runs, durations and limit stops.
+        assert len(all_metrics) == 164
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -142,6 +143,7 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.gate_review_metrics())
             + len(MetricsRegistry.supervisor_metrics())
             + len(MetricsRegistry.operation_metrics())
+            + len(MetricsRegistry.cadquery_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 
@@ -172,6 +174,7 @@ class TestMetricsRegistryGroupedAccess:
             MetricsRegistry.gate_review_metrics(),
             MetricsRegistry.supervisor_metrics(),
             MetricsRegistry.operation_metrics(),
+            MetricsRegistry.cadquery_metrics(),
         ]
         grouped = {m.name for group in groups for m in group}
         registered = {m.name for m in MetricsRegistry.all_metrics()}

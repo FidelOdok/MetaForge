@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import time
+import uuid
 from typing import Any
 
 import structlog
@@ -84,7 +85,11 @@ class GenerateCadScriptHandler(SkillBase[GenerateCadScriptInput, GenerateCadScri
             span.set_attribute("backend.resolved", backend)
 
             wp_tag = input_data.work_product_id or "new"
-            output_path = f"output/script_{wp_tag}.{input_data.output_format}"
+            # A new name per run: cadquery.execute_script never overwrites a file,
+            # so a second run for the same work product must not reuse the path.
+            output_path = (
+                f"output/script_{wp_tag}_{uuid.uuid4().hex[:12]}.{input_data.output_format}"
+            )
 
             script_text = script
             try:

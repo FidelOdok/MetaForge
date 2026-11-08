@@ -2,7 +2,8 @@
 # Usage:  docker build -f tool_registry/tools/cadquery/Dockerfile -t metaforge/cadquery-adapter .
 #
 # Provides CadQuery (Pythonic CAD on OpenCascade) for parametric CAD generation,
-# boolean operations, geometry analysis, export, and LLM-generated script execution.
+# boolean operations, geometry analysis, export, and LLM-generated script execution
+# (each script in its own OS-isolated child process, see script_runner.py).
 # Much lighter than FreeCAD (~300-500MB vs ~1-2GB) with a fluent Python API.
 
 # -- Stage 1: dependencies -------------------------------------------------
@@ -20,7 +21,9 @@ RUN pip install --no-cache-dir -r /build/requirements.txt \
     && pip install --no-cache-dir \
         pydantic>=2.0 \
         structlog>=24.0 \
-        opentelemetry-api>=1.20
+        opentelemetry-api>=1.20 \
+        opentelemetry-sdk>=1.20 \
+        opentelemetry-exporter-otlp-proto-grpc>=1.20
 
 # -- Stage 2: runtime ------------------------------------------------------
 FROM python:3.11-slim AS runtime
@@ -53,20 +56,35 @@ COPY tool_registry/ ./tool_registry/
 COPY observability/ ./observability/
 
 COPY tool_registry/tools/cadquery/entrypoint.py ./entrypoint.py
+COPY --chmod=0755 tool_registry/tools/cadquery/start.sh /usr/local/bin/cadquery-start
 
-RUN mkdir -p /workspace /tmp/cadquery
+RUN mkdir -p /workspace /tmp/cadquery /run/cadquery-runner
 
-# Non-root user for security
+# The adapter runs as uid 1000 (cadquery-start drops to it). /app stays owned
+# by root, so neither the adapter nor a script child can change the code.
+# /run/cadquery-runner holds each script child's private folder: a child of a
+# runner uid may create its folder there (sticky, 1733) but not list it.
 RUN groupadd --gid 1000 metaforge \
     && useradd --uid 1000 --gid metaforge --shell /bin/bash --create-home metaforge \
-    && chown -R metaforge:metaforge /workspace /tmp/cadquery /app
+    && chown -R metaforge:metaforge /workspace /tmp/cadquery \
+    && chown metaforge:metaforge /run/cadquery-runner \
+    && chmod 1733 /run/cadquery-runner
 
-USER metaforge
+# Started as root only so cadquery-start can keep CAP_SETUID and CAP_SETGID for
+# the script runner while it drops to uid 1000 (see start.sh).
+USER root
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV METAFORGE_ENV=docker
 ENV CADQUERY_WORK_DIR=/workspace
+# The isolated script runner (script_runner.py): a private folder per run under
+# this path, one uid per concurrent run, and every isolation layer required.
+ENV CADQUERY_RUNNER_ROOT=/run/cadquery-runner
+ENV CADQUERY_RUNNER_UIDS=61000-61003
+ENV CADQUERY_RUNNER_REQUIRE=uid,landlock,seccomp
+# The root file system is read-only under compose; caches go to /tmp.
+ENV XDG_CACHE_HOME=/tmp/.cache
 
 WORKDIR /workspace
 
@@ -75,4 +93,5 @@ EXPOSE 8101
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')" || exit 1
 
+ENTRYPOINT ["/usr/local/bin/cadquery-start"]
 CMD ["python", "/app/entrypoint.py"]

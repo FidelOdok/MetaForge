@@ -50,6 +50,7 @@ TOOLS = (
     "twin.render_concept_image",
     "twin.generate_concept_mesh",
     "cadquery.create_parametric",
+    "cadquery.execute_script",
     "project.update",
     "project.create",
     "twin.attempt_promotion",
@@ -497,6 +498,19 @@ async def test_the_next_reply_says_a_held_call_was_approved(gateway: httpx.Async
 # -- the project's policy decides held writes ---------------------------------
 
 
+def test_the_script_cap_defaults_to_60_and_is_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api_gateway.approvals.tool_write_policy import hourly_cap
+
+    monkeypatch.delenv("METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR", raising=False)
+    assert hourly_cap("cadquery.execute_script") == 60
+    monkeypatch.setenv("METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR", "5")
+    assert hourly_cap("cadquery.execute_script") == 5
+    monkeypatch.setenv("METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR", "lots")
+    assert hourly_cap("cadquery.execute_script") == 60
+
+
 def test_the_never_list() -> None:
     for tool in (
         "twin.attempt_promotion",
@@ -517,14 +531,23 @@ def test_the_never_list() -> None:
 
 def test_cadquery_writes_under_a_policy() -> None:
     """FORGE-829: a boolean writes only its own result inside the work folder,
-    so ``auto`` approves it; a script and the exports can write elsewhere."""
-    assert not never_auto_approved("cadquery.boolean_operation")
-    assert policy_may_approve("cadquery.boolean_operation", "auto")
-    for mode in ("off", "advise", "auto_clean"):
-        assert not policy_may_approve("cadquery.boolean_operation", mode), mode
+    so ``auto`` approves it. FORGE-830: a script runs in an OS-isolated child
+    and its one write is its result, so ``auto`` approves it too. The exports
+    overwrite caller-named paths and stay with a person."""
+    for tool in ("cadquery.boolean_operation", "cadquery.execute_script"):
+        assert not never_auto_approved(tool), tool
+        assert policy_may_approve(tool, "auto"), tool
+        for mode in ("off", "advise", "auto_clean"):
+            assert not policy_may_approve(tool, mode), (tool, mode)
+
+    from api_gateway.approvals.tool_write_policy import RATE_CAPS, SPEND_CAPS, hourly_cap
+
+    # Unpaid, so not a spend cap, but capped per project per hour all the same.
+    assert "cadquery.execute_script" not in SPEND_CAPS
+    assert RATE_CAPS["cadquery.execute_script"] == ("METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR", 60)
+    assert hourly_cap("cadquery.boolean_operation") is None
 
     for tool in (
-        "cadquery.execute_script",
         "cadquery.export_geometry",
         "cadquery.export_sdf",
         "cadquery.export_sdf_assembly",
@@ -638,6 +661,39 @@ class TestThePolicyDecidesHeldWrites:
         assert _ran_ok(first)
         assert _held(second)
         assert len(ran) == 1
+
+    async def test_auto_approves_a_script_up_to_its_hourly_cap(
+        self, gateway: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-830: ``auto`` runs an isolated script unattended, but only
+        ``METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR`` of them per project per
+        hour; past that a person decides, and the hold says why."""
+        monkeypatch.setenv("METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR", "2")
+        await _policy("auto")
+        ran: list[tuple[str, dict[str, Any]]] = []
+        async with gateway as http:
+            server = await _server(http, ran)
+            calls = [
+                await _call(server, "cadquery.execute_script", script=f"result = {i}")
+                for i in range(3)
+            ]
+            entries = await _entries(http)
+        assert [_ran_ok(c) for c in calls[:2]] == [True, True]
+        data = _held(calls[2])
+        assert "hourly cap" in data["note"]
+        assert "METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR" in data["note"]
+        assert [tool for tool, _ in ran] == ["cadquery.execute_script"] * 2
+        approved = [e for e in entries if e["approved_by"]]
+        assert [e["approved_by"] for e in approved] == [f"policy:auto:{PROJECT}"] * 2
+
+    async def test_auto_clean_holds_a_script(self, gateway: httpx.AsyncClient) -> None:
+        await _policy("auto_clean")
+        ran: list[tuple[str, dict[str, Any]]] = []
+        async with gateway as http:
+            server = await _server(http, ran)
+            response = await _call(server, "cadquery.execute_script", script="result = 1")
+        assert ran == []
+        assert _held(response)
 
     async def test_another_projects_policy_does_not_apply(self, gateway: httpx.AsyncClient) -> None:
         await _policy("auto", project=OTHER)
