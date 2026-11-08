@@ -179,8 +179,11 @@ class TestTheCosignInstallerSurvivesA504:
         assert "sha256sum -c" in run
 
     def test_the_download_is_retried_on_any_error(self) -> None:
-        _, run = self._env_and_run()
+        env, run = self._env_and_run()
         assert "--retry-all-errors" in run and "--retry " in run
+        # Then the same asset through the GitHub API, a different front end.
+        assert str(env["COSIGN_ASSET_ID"]).isdigit()
+        assert "releases/assets/${COSIGN_ASSET_ID}" in run
 
     def test_the_fallback_image_is_pinned_by_digest(self) -> None:
         env, _ = self._env_and_run()

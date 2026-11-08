@@ -83,7 +83,10 @@ changing steps first (system packages, tool downloads, Python dependencies)
 and the shared-code `COPY` lines last, so a code change rebuilds only the last
 few layers: the tool downloads (Freerouting, Renode, Espressif QEMU, Blender)
 do not run again. The tool downloads pin a version and a SHA-256 and retry on
-any HTTP error, a 504 from GitHub's release downloads included.
+any HTTP error, a 504 from GitHub's release downloads included. When
+`github.com/.../releases/download` stays down, the Freerouting, Renode and
+Espressif QEMU downloads (and cosign's) fetch the same release asset through
+the GitHub API instead; the checksum is checked either way.
 
 `:buildcache` is a build cache, not an image: it is unsigned and cannot be run.
 Never point a host at it.

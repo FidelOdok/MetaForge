@@ -46,16 +46,23 @@ RUN pip install --no-cache-dir "platformio==${PLATFORMIO_VERSION}"
 
 # Release downloads are fetched to a file, checked against the SHA-256 GitHub
 # records for that release asset, then unpacked. curl retries every error, so
-# a 504 from the release download waits and tries again instead of failing
-# the build. Bump a version and its checksum together.
+# a 504 from the release download waits and tries again; if that route stays
+# down, the same asset is fetched through the GitHub API (a different front
+# end, which kept serving during the 504s). Bump a version, its checksum and
+# its asset id together.
 ARG RENODE_SHA256=4ba7c68b59e2447f188ef4b4b112fcccd2802582c460beedceb63b84e5605a5f
+ARG RENODE_ASSET_ID=548566122
 ARG ESP_QEMU_SHA256=0eecb2a34a5586c0e59110f77b9343b7b336e82fdb0e1a30e1dc1bab8a547e35
+ARG ESP_QEMU_ASSET_ID=398764611
 
 # Renode (the portable build carries its own .NET runtime). Owned by the
 # runtime user in the same layer it is unpacked in.
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
-RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o /tmp/renode.tar.gz \
-        "https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable.tar.gz" \
+RUN fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$@"; } \
+    && { fetch -o /tmp/renode.tar.gz \
+           "https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable.tar.gz" \
+         || fetch -H "Accept: application/octet-stream" -o /tmp/renode.tar.gz \
+           "https://api.github.com/repos/renode/renode/releases/assets/${RENODE_ASSET_ID}"; } \
     && echo "${RENODE_SHA256}  /tmp/renode.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/renode.tar.gz -C /opt \
     && rm /tmp/renode.tar.gz \
@@ -65,8 +72,11 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o /tmp/renode.tar.g
 
 # Espressif's QEMU fork, xtensa build (the ESP32).
 RUN mkdir -p /opt/esp-qemu \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o /tmp/esp-qemu.tar.xz \
-        "https://github.com/espressif/qemu/releases/download/${ESP_QEMU_TAG}/qemu-xtensa-softmmu-${ESP_QEMU_BUILD}-x86_64-linux-gnu.tar.xz" \
+    && fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$@"; } \
+    && { fetch -o /tmp/esp-qemu.tar.xz \
+           "https://github.com/espressif/qemu/releases/download/${ESP_QEMU_TAG}/qemu-xtensa-softmmu-${ESP_QEMU_BUILD}-x86_64-linux-gnu.tar.xz" \
+         || fetch -H "Accept: application/octet-stream" -o /tmp/esp-qemu.tar.xz \
+           "https://api.github.com/repos/espressif/qemu/releases/assets/${ESP_QEMU_ASSET_ID}"; } \
     && echo "${ESP_QEMU_SHA256}  /tmp/esp-qemu.tar.xz" | sha256sum -c - \
     && tar -xJf /tmp/esp-qemu.tar.xz -C /opt/esp-qemu \
     && rm /tmp/esp-qemu.tar.xz \

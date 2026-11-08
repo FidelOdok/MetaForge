@@ -183,6 +183,23 @@ class TestToolDownloadsRetryAndAreChecked:
             assert "--retry-all-errors" in call and "--retry " in call, call
 
     @pytest.mark.parametrize(
+        ("adapter", "assets"),
+        [("kicad", ["FREEROUTING"]), ("firmware", ["RENODE", "ESP_QEMU"])],
+    )
+    def test_github_downloads_fall_back_to_the_api_route(
+        self, adapter: str, assets: list[str]
+    ) -> None:
+        """github.com/<o>/<r>/releases/download kept answering 504 for longer
+        than any retry window; the API route to the same asset kept serving."""
+        text = (REPO_ROOT / "tool_registry" / "tools" / adapter / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        for name in assets:
+            assert re.search(rf"ARG {name}_ASSET_ID=\d+\b", text), name
+            assert f"/releases/assets/${{{name}_ASSET_ID}}" in text, name
+        assert 'Accept: application/octet-stream"' in text
+
+    @pytest.mark.parametrize(
         ("adapter", "checksums"),
         [
             ("kicad", ["FREEROUTING_SHA256"]),

@@ -77,12 +77,19 @@ ENV KICAD9_3DMODEL_DIR=/usr/share/kicad/3dmodels
 # through KiCad's Specctra export/import. Pinned and checksummed. Its native
 # freerouting-cli build crashes mid-route (a GraalVM serialization error), so
 # the jar runs on the JRE above. curl retries every error, so a 504 from the
-# GitHub release download waits and tries again instead of failing the build.
+# GitHub release download waits and tries again; if that route stays down, the
+# same release asset is fetched through the GitHub API (a different front end,
+# which kept serving during the 504s). The checksum holds either way. Bump the
+# version, checksum and asset id together.
 ARG FREEROUTING_VERSION=2.5.0
 ARG FREEROUTING_SHA256=f6f51bb02245e8e717f9359bd260cc9c5c0b1bc0acc8b7cb2cd5b8ffeb5de3c7
+ARG FREEROUTING_ASSET_ID=613070298
 RUN mkdir -p /opt/freerouting \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o /opt/freerouting/freerouting.jar \
-        "https://github.com/freerouting/freerouting/releases/download/v${FREEROUTING_VERSION}/freerouting-${FREEROUTING_VERSION}.jar" \
+    && fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$@"; } \
+    && { fetch -o /opt/freerouting/freerouting.jar \
+           "https://github.com/freerouting/freerouting/releases/download/v${FREEROUTING_VERSION}/freerouting-${FREEROUTING_VERSION}.jar" \
+         || fetch -H "Accept: application/octet-stream" -o /opt/freerouting/freerouting.jar \
+           "https://api.github.com/repos/freerouting/freerouting/releases/assets/${FREEROUTING_ASSET_ID}"; } \
     && echo "${FREEROUTING_SHA256}  /opt/freerouting/freerouting.jar" | sha256sum -c -
 
 # Copy Python packages from deps stage
