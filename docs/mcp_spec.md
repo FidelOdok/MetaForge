@@ -1199,7 +1199,7 @@ pipe; the adapter writes it to the work folder itself.
 | `CADQUERY_RUNNER_UIDS` | `61000-61003` | The uid pool: one uid per concurrent run; concurrency is the smaller of the pool and `CADQUERY_RUNNER_MAX_CONCURRENT` |
 | `CADQUERY_RUNNER_MAX_CONCURRENT` | `2` | Script children running at once; the container's 6G memory limit is sized for two |
 | `CADQUERY_RUNNER_REQUIRE` | `uid,landlock,seccomp` | Layers that must hold; a missing one refuses the run |
-| `CADQUERY_RUNNER_MEMORY_MB` | `2048` | Memory one child may really use: private writable memory on `RLIMIT_DATA`, not address space (FORGE-832). Falls back to address space on a kernel whose `RLIMIT_DATA` does not count `mmap` |
+| `CADQUERY_RUNNER_MEMORY_MB` | `2048` | Memory one child may really use: private writable memory on `RLIMIT_DATA`, not address space. Falls back to address space on a kernel whose `RLIMIT_DATA` does not count `mmap` |
 | `CADQUERY_RUNNER_ADDRESS_SPACE_MB` | `16384` | Address-space backstop (`RLIMIT_AS`) of one child. OCCT and glibc reserve address space they never touch, so it is set far above the memory budget |
 | `CADQUERY_RUNNER_MAX_FILE_MB` | `64` | Largest file the child may write (its console log included) |
 | `CADQUERY_RUNNER_MAX_OUTPUT_MB` | `64` | Largest result the adapter accepts |

@@ -450,7 +450,7 @@ checks on every change):
 | Wall clock | The adapter kills every process of the run's uid at the script's `timeout` plus a start-up allowance (`CADQUERY_RUNNER_STARTUP_GRACE_S`, 15 s), then removes the private folder. | An infinite loop and a long sleep are killed; afterwards no process of a runner uid is left and the runner folder is empty. |
 | Private folder | `/run/cadquery-runner/run-<random>` on a tmpfs, mode 0700, created by the child itself. The folder above it is mode 1733: a runner uid may create its folder but not list the others. | |
 
-**Why memory is bounded on `RLIMIT_DATA`, not address space (FORGE-832).**
+**Why memory is bounded on `RLIMIT_DATA`, not address space.**
 The runner first capped address space (`RLIMIT_AS`) at 2 GB, and 28 of 50
 ordinary desk-lamp parts failed with the memory limit on a 16-CPU host. OCCT
 starts one worker thread per CPU and glibc gives every thread that allocates
