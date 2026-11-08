@@ -1223,13 +1223,15 @@ for what each layer stops, how it was verified, and what is not isolated.
 
 #### Adapter images are built in CI
 
-The freecad and calculix adapters copy `mcp_core/`, `tool_registry/` and
-`observability/` into their images, so a fix in those packages reaches an
-adapter only after a rebuild. The `adapter-images` workflow builds both on
-every push to `main` that touches those paths (and on manual dispatch) and
-publishes `ghcr.io/fidelodok/metaforge-<freecad|calculix>-adapter:latest` and
-`:<commit sha>`. `docker-compose.yml` names those images directly, so a dev
-host pulls them:
+The tool adapters copy the shared modules they import from `mcp_core/`,
+`tool_registry/` and `observability/` into their images, so a fix in those
+modules reaches an adapter only after a rebuild. The `adapter-images` workflow
+rebuilds an adapter on a push to `main` that changes its own folder or a
+shared module it copies (and on manual dispatch), and publishes
+`ghcr.io/fidelodok/metaforge-<adapter>-adapter:latest` and `:<commit sha>`.
+Which change rebuilds which image is set out in
+[When an image is rebuilt](deployment/image-only-host.md#when-an-image-is-rebuilt).
+`docker-compose.yml` names those images directly, so a dev host pulls them:
 
 ```bash
 docker compose pull freecad-adapter calculix-adapter

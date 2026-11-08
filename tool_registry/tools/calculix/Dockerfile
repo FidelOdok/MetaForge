@@ -45,10 +45,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
 
-# Copy adapter source code
-COPY mcp_core/ ./mcp_core/
-COPY tool_registry/ ./tool_registry/
-COPY observability/ ./observability/
+# Shared code: only the modules this adapter imports, so a change elsewhere
+# in these packages neither rebuilds the image nor busts its layer cache.
+# Keep in step with this adapter's list in .github/adapter-image-filters.yml;
+# CI imports every module of the adapter inside the built image.
+# The cadquery folder is here for its material table (cadquery.materials).
+COPY mcp_core/*.py ./mcp_core/
+COPY observability/*.py ./observability/
+COPY observability/audit/ ./observability/audit/
+COPY observability/slo/ ./observability/slo/
+COPY tool_registry/*.py ./tool_registry/
+COPY tool_registry/mcp_server/ ./tool_registry/mcp_server/
+COPY tool_registry/tools/__init__.py ./tool_registry/tools/
+COPY tool_registry/tools/calculix/ ./tool_registry/tools/calculix/
+COPY tool_registry/tools/cadquery/ ./tool_registry/tools/cadquery/
 
 # Create working directory for solver operations
 RUN mkdir -p /workspace /tmp/calculix

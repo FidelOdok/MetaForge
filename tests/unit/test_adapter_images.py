@@ -30,16 +30,25 @@ yaml = pytest.importorskip("yaml")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = REPO_ROOT / "docker-compose.yml"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "adapter-images.yml"
+#: The workflow builds an image when a path in its list here changed; its keys
+#: are the images it publishes (FORGE-838), so this test follows CI.
+FILTERS = REPO_ROOT / ".github" / "adapter-image-filters.yml"
+#: Filter keys that are images but not tool adapters.
+SERVICE_KEYS = {"occt": "metaforge-occt", "dashboard": "metaforge-dashboard"}
 
 
 def _services() -> dict:
     return yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
 
 
+def _image_keys() -> list[str]:
+    data = yaml.safe_load(FILTERS.read_text(encoding="utf-8"))
+    return [k for k in data if not k.startswith("_")]
+
+
 def _published_adapters() -> list[str]:
-    """The matrix in the workflow, so this test follows CI rather than a copy."""
-    data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return list(data["jobs"]["publish"]["strategy"]["matrix"]["adapter"])
+    """The adapter images the workflow can build, from its filter file."""
+    return [k for k in _image_keys() if k not in SERVICE_KEYS]
 
 
 def _adapter_services() -> dict:
@@ -101,10 +110,14 @@ class TestUnpublishedAdaptersCannotReachARegistry:
 class TestEveryHostImageIsPublished:
     """FORGE-593: a host runs with no checkout, so nothing it runs is built there."""
 
-    def _service_images(self) -> dict[str, str]:
-        data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-        include = data["jobs"]["publish-services"]["strategy"]["matrix"]["include"]
-        return {row["image"]: row["context"] for row in include}
+    def _service_images(self) -> set[str]:
+        return {SERVICE_KEYS[k] for k in _image_keys() if k in SERVICE_KEYS}
+
+    def test_the_workflow_maps_each_service_key_to_its_image(self) -> None:
+        """The `changes` job turns a filter key into the image it publishes."""
+        text = WORKFLOW.read_text(encoding="utf-8")
+        for key, image in SERVICE_KEYS.items():
+            assert f'{key}: {{image: "{image}"' in text, f"no mapping for {key} -> {image}"
 
     def test_every_tool_adapter_is_published(self) -> None:
         published = set(_published_adapters())

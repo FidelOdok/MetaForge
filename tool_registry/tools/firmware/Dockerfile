@@ -44,19 +44,32 @@ RUN groupadd --gid 1000 metaforge \
 COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 RUN pip install --no-cache-dir "platformio==${PLATFORMIO_VERSION}"
 
+# Release downloads are fetched to a file, checked against the SHA-256 GitHub
+# records for that release asset, then unpacked. curl retries every error, so
+# a 504 from the release download waits and tries again instead of failing
+# the build. Bump a version and its checksum together.
+ARG RENODE_SHA256=4ba7c68b59e2447f188ef4b4b112fcccd2802582c460beedceb63b84e5605a5f
+ARG ESP_QEMU_SHA256=0eecb2a34a5586c0e59110f77b9343b7b336e82fdb0e1a30e1dc1bab8a547e35
+
 # Renode (the portable build carries its own .NET runtime). Owned by the
 # runtime user in the same layer it is unpacked in.
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
-RUN curl -fsSL "https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable.tar.gz" \
-        | tar -xz -C /opt \
+RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o /tmp/renode.tar.gz \
+        "https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable.tar.gz" \
+    && echo "${RENODE_SHA256}  /tmp/renode.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/renode.tar.gz -C /opt \
+    && rm /tmp/renode.tar.gz \
     && mv /opt/renode_${RENODE_VERSION}* /opt/renode \
     && chown -R metaforge:metaforge /opt/renode \
     && ln -s /opt/renode/renode /usr/local/bin/renode
 
 # Espressif's QEMU fork, xtensa build (the ESP32).
 RUN mkdir -p /opt/esp-qemu \
-    && curl -fsSL "https://github.com/espressif/qemu/releases/download/${ESP_QEMU_TAG}/qemu-xtensa-softmmu-${ESP_QEMU_BUILD}-x86_64-linux-gnu.tar.xz" \
-        | tar -xJ -C /opt/esp-qemu \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o /tmp/esp-qemu.tar.xz \
+        "https://github.com/espressif/qemu/releases/download/${ESP_QEMU_TAG}/qemu-xtensa-softmmu-${ESP_QEMU_BUILD}-x86_64-linux-gnu.tar.xz" \
+    && echo "${ESP_QEMU_SHA256}  /tmp/esp-qemu.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/esp-qemu.tar.xz -C /opt/esp-qemu \
+    && rm /tmp/esp-qemu.tar.xz \
     && ln -s /opt/esp-qemu/qemu/bin/qemu-system-xtensa /usr/local/bin/qemu-system-xtensa
 
 # FreeRTOS kernel sources, compiled into a build whose project carries a
@@ -97,9 +110,18 @@ RUN printf '%s\n' \
     && rm /tmp/warm.resc
 
 WORKDIR /app
-COPY --chown=metaforge:metaforge mcp_core/ ./mcp_core/
-COPY --chown=metaforge:metaforge tool_registry/ ./tool_registry/
-COPY --chown=metaforge:metaforge observability/ ./observability/
+# Shared code: only the modules this adapter imports, so a change elsewhere
+# in these packages neither rebuilds the image nor busts its layer cache.
+# Keep in step with this adapter's list in .github/adapter-image-filters.yml;
+# CI imports every module of the adapter inside the built image.
+COPY --chown=metaforge:metaforge mcp_core/*.py ./mcp_core/
+COPY --chown=metaforge:metaforge observability/*.py ./observability/
+COPY --chown=metaforge:metaforge observability/audit/ ./observability/audit/
+COPY --chown=metaforge:metaforge observability/slo/ ./observability/slo/
+COPY --chown=metaforge:metaforge tool_registry/*.py ./tool_registry/
+COPY --chown=metaforge:metaforge tool_registry/mcp_server/ ./tool_registry/mcp_server/
+COPY --chown=metaforge:metaforge tool_registry/tools/__init__.py ./tool_registry/tools/
+COPY --chown=metaforge:metaforge tool_registry/tools/firmware/ ./tool_registry/tools/firmware/
 COPY --chown=metaforge:metaforge tool_registry/tools/firmware/entrypoint.py ./entrypoint.py
 
 ENV PYTHONUNBUFFERED=1 \

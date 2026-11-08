@@ -42,6 +42,10 @@ PUBLISHING_JOBS = [
     (".github/workflows/adapter-images.yml", "publish-services"),
 ]
 
+#: The cosign installer every publishing job uses (FORGE-838).
+INSTALL_COSIGN = "./.github/actions/install-cosign"
+INSTALL_COSIGN_ACTION = REPO_ROOT / ".github" / "actions" / "install-cosign" / "action.yml"
+
 
 def _job(workflow: str, name: str) -> dict:
     data = yaml.safe_load((REPO_ROOT / workflow).read_text(encoding="utf-8"))
@@ -71,8 +75,46 @@ class TestEveryPublishedImageIsSigned:
             f"{workflow}:{job_name} cannot request an OIDC token, so cosign cannot sign"
         )
 
-    def test_cosign_is_installed(self, workflow: str, job_name: str) -> None:
-        _step_with(_job(workflow, job_name), uses_prefix="sigstore/cosign-installer")
+    def test_cosign_is_installed_before_anything_is_pushed(
+        self, workflow: str, job_name: str
+    ) -> None:
+        """FORGE-838: the pinned, retrying installer, ahead of the build. A
+        cosign install that 504'd after the push left an unsigned image."""
+        job = _job(workflow, job_name)
+        uses = [str(s.get("uses", "")) for s in _steps(job)]
+        assert INSTALL_COSIGN in uses, f"{workflow}:{job_name} does not use {INSTALL_COSIGN}"
+        assert not any(u.startswith("sigstore/cosign-installer") for u in uses), (
+            "sigstore/cosign-installer downloads cosign with one unretried curl"
+        )
+        build = next(i for i, u in enumerate(uses) if u.startswith("docker/build-push-action"))
+        assert uses.index(INSTALL_COSIGN) < build
+
+    def test_nothing_is_tagged_until_it_is_signed(self, workflow: str, job_name: str) -> None:
+        """FORGE-838: push by digest, sign, then tag. Tagging in the build step
+        moved :latest to an image a host would refuse when signing failed."""
+        job = _job(workflow, job_name)
+        build = _step_with(job, uses_prefix="docker/build-push-action")
+        with_ = build.get("with", {})
+        assert "tags" not in with_, f"{workflow}:{job_name} tags the image as it pushes"
+        assert with_.get("push") is not True, with_
+        outputs = str(with_.get("outputs", ""))
+        assert "push-by-digest=true" in outputs and "push=true" in outputs, outputs
+        names = [s.get("name") for s in _steps(job)]
+        assert names.index("Sign the pushed image") < names.index("Tag the signed image")
+        tag = _step_with(job, name="Tag the signed image")
+        assert "@${DIGEST}" in tag["run"] and "imagetools create" in tag["run"]
+        assert "steps.build.outputs.digest" in tag["env"]["DIGEST"]
+        # The tags must name the very digest that was signed.
+        assert "exit 1" in tag["run"] and "Manifest.Digest" in tag["run"]
+
+    def test_layers_are_cached_in_the_registry(self, workflow: str, job_name: str) -> None:
+        """FORGE-838: the Actions cache's 10 GB could not hold every image, so
+        layers that never change were rebuilt and re-downloaded."""
+        with_ = _step_with(_job(workflow, job_name), uses_prefix="docker/build-push-action")["with"]
+        assert "type=registry" in str(with_.get("cache-from", ""))
+        cache_to = str(with_.get("cache-to", ""))
+        assert cache_to.startswith("type=registry") and ":buildcache" in cache_to
+        assert "mode=max" in cache_to
 
     def test_the_signature_covers_a_digest_not_a_tag(self, workflow: str, job_name: str) -> None:
         """The assertion this whole file exists for.
@@ -119,3 +161,33 @@ class TestNoDeadSigningScheme:
         text = (REPO_ROOT / workflow).read_text(encoding="utf-8")
         for dead in ("docker trust sign", "DOCKER_CONTENT_TRUST=1"):
             assert dead not in text, f"{workflow} uses {dead!r}, which stops working 2026-12-08"
+
+
+class TestTheCosignInstallerSurvivesA504:
+    """FORGE-838: GitHub release downloads returned 504 three runs in a row and
+    failed a different set of publishing jobs each time."""
+
+    def _env_and_run(self) -> tuple[dict, str]:
+        data = yaml.safe_load(INSTALL_COSIGN_ACTION.read_text(encoding="utf-8"))
+        (step,) = data["runs"]["steps"]
+        return step["env"], step["run"]
+
+    def test_the_version_and_its_checksum_are_pinned(self) -> None:
+        env, run = self._env_and_run()
+        assert str(env["COSIGN_VERSION"]).startswith("v")
+        assert len(str(env["COSIGN_SHA256"])) == 64
+        assert "sha256sum -c" in run
+
+    def test_the_download_is_retried_on_any_error(self) -> None:
+        _, run = self._env_and_run()
+        assert "--retry-all-errors" in run and "--retry " in run
+
+    def test_the_fallback_image_is_pinned_by_digest(self) -> None:
+        env, _ = self._env_and_run()
+        assert "@sha256:" in str(env["COSIGN_IMAGE"])
+
+    def test_the_mirror_uses_it_too(self) -> None:
+        job = _job(".github/workflows/mirror-images.yml", "mirror")
+        uses = [str(s.get("uses", "")) for s in _steps(job)]
+        assert INSTALL_COSIGN in uses
+        assert not any(u.startswith("sigstore/cosign-installer") for u in uses)

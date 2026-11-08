@@ -171,7 +171,10 @@ jobs:
           load: true
           push: false
           tags: ghcr.io/fidelodok/metaforge-cadquery-adapter:ci
-          cache-from: type=gha,scope=cadquery-adapter
+          # The layer cache adapter-images.yml writes on main (read only here).
+          cache-from: |
+            type=registry,ref=ghcr.io/fidelodok/metaforge-cadquery-adapter:buildcache
+            type=gha,scope=cadquery-adapter
       - name: Start it as docker-compose.yml does
         run: docker compose up -d --no-build --wait --wait-timeout 180 cadquery-adapter
       - run: pip install pytest httpx
