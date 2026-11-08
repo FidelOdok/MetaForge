@@ -30,6 +30,7 @@ import httpx
 import structlog
 
 from observability.tracing import get_tracer
+from orchestrator.harness.providers import caching
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.knowledge.openrouter_lightrag")
@@ -139,6 +140,21 @@ def build_openrouter_llm_model_func(
             "X-Title": config.x_title,
         }
 
+    def _cache_marked(model: str, messages: list[dict[str, str]]) -> list[dict[str, Any]]:
+        """Mark the system prompt as Claude's cache breakpoint.
+
+        Claude behind OpenRouter caches only where ``cache_control`` says so.
+        LightRAG sends the same long extraction instructions as the system
+        prompt for every chunk, so the breakpoint goes on that stable block and
+        not on the request's end, which would pay a cache write per chunk and
+        never read one back. Other models cache automatically or not at all and
+        keep the plain string.
+        """
+        if not caching.is_claude_model(model) or not messages or messages[0]["role"] != "system":
+            return list(messages)
+        marked = caching.openai_claude_system_message(messages[0]["content"], None)
+        return [marked, *messages[1:]] if marked else list(messages)
+
     def _messages(
         prompt: str,
         system_prompt: str | None,
@@ -163,7 +179,7 @@ def build_openrouter_llm_model_func(
                 "model": model,
                 "temperature": config.temperature,
                 "max_tokens": config.max_tokens,
-                "messages": messages,
+                "messages": _cache_marked(model, messages),
             },
             headers=_headers(),
         )

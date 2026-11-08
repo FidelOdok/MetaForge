@@ -45,6 +45,16 @@ not the harness key.
 | **Property extraction** (`openrouter_property_llm.py`) | `PROPERTY_EXTRACTION_MODEL` | Reads typed values, with citations, out of datasheets (`knowledge.extract`, BOM population). Without it only the deterministic extraction tier runs. |
 | **Component search by intent** | the same client as property extraction | `component.search_intent`: turns a goal such as "step 12 V down to 5 V for a flight controller" into parametric search bounds |
 
+When the LightRAG model is a Claude model, its system prompt, which carries the
+extraction instructions LightRAG repeats for every chunk, goes out marked with
+`cache_control`. Claude behind OpenRouter caches only where it is told, so
+without the marker every chunk paid for those instructions in full. The
+breakpoint sits on that stable block, never on the end of the request: there it
+would pay a cache write per chunk and never read one back. Other models get the
+plain string. The property-extraction and consolidation clients are left
+unmarked: their system prompts are a few dozen tokens, below the size Claude
+caches at all.
+
 The LightRAG UI container (`lightrag-ui`, the `lightrag` compose profile) is
 separate: it uses a **local Ollama** model and embeddings, not OpenRouter.
 

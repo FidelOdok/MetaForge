@@ -219,3 +219,65 @@ def test_an_empty_model_env_falls_back_to_the_default(monkeypatch):
 
     assert cfg.primary_model == DEFAULT_PRIMARY_MODEL
     assert cfg.fallback_model == DEFAULT_FALLBACK_MODEL
+
+
+@pytest.mark.asyncio
+async def test_claude_primary_marks_the_system_prompt_as_the_cache_breakpoint():
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content.decode()))
+        return _ok_response("ok")
+
+    func = build_openrouter_llm_model_func(_config(), client=_client(handler))
+    for chunk in ("chunk one", "chunk two"):
+        await func(chunk, system_prompt="Long extraction instructions.")
+
+    first, second = (b["messages"] for b in bodies)
+    assert first[0] == {
+        "role": "system",
+        "content": [
+            {
+                "type": "text",
+                "text": "Long extraction instructions.",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+    }
+    # The marked prefix is byte-identical per chunk, so chunk two reads chunk one's cache.
+    assert first[0] == second[0]
+    # The varying chunk stays unmarked, and no top-level breakpoint follows it.
+    assert first[-1] == {"role": "user", "content": "chunk one"}
+    assert all("cache_control" not in b for b in bodies)
+
+
+@pytest.mark.asyncio
+async def test_fallback_model_keeps_a_plain_system_string():
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        bodies.append(body)
+        if body["model"] == DEFAULT_PRIMARY_MODEL:
+            return _ok_response("", status=429)
+        return _ok_response("recovered")
+
+    func = build_openrouter_llm_model_func(_config(), client=_client(handler))
+    assert await func("chunk", system_prompt="Instructions.") == "recovered"
+
+    assert bodies[1]["model"] == DEFAULT_FALLBACK_MODEL
+    assert bodies[1]["messages"][0] == {"role": "system", "content": "Instructions."}
+
+
+@pytest.mark.asyncio
+async def test_no_system_prompt_sends_no_breakpoint():
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content.decode()))
+        return _ok_response("ok")
+
+    func = build_openrouter_llm_model_func(_config(), client=_client(handler))
+    await func("just a prompt")
+
+    assert bodies[0]["messages"] == [{"role": "user", "content": "just a prompt"}]
