@@ -1531,8 +1531,8 @@ class MetricsRegistry:
         type="counter",
         description=(
             "Design-for-assembly findings recorded, by check (revisions, interference, "
-            "clearance, hole_pattern, outline_fit, connector, stack, motion, seat) and "
-            "severity (high, medium, low)"
+            "clearance, hole_pattern, outline_fit, connector, stack, fastener, motion, seat) "
+            "and severity (high, medium, low)"
         ),
         labels=["check", "severity"],
     )
@@ -1542,9 +1542,20 @@ class MetricsRegistry:
         type="counter",
         description=(
             "Failing release checks accepted with twin.accept_release_finding, by checklist "
-            "item (eda_checks, assembly_dfa) and route (person, delegated)"
+            "item (eda_checks, assembly_dfa, design_files_released) and route (person, "
+            "delegated)"
         ),
         labels=["item", "route"],
+    )
+
+    RELEASE_DESIGN_FILE_EXCLUDED_TOTAL = MetricDefinition(
+        name="metaforge_release_design_file_excluded_total",
+        type="counter",
+        description=(
+            "Schematics and boards left out of a release manifest, by kind (schematic, "
+            "pcb_layout) and reason (orphan: not a revision of any item)"
+        ),
+        labels=["kind", "reason"],
     )
 
     # ── Parametric reconstruction from an accepted concept (spec 4B) ─────
@@ -1894,6 +1905,12 @@ class MetricsRegistry:
             cls.DFM_SLICER_CHECK_TOTAL,
             cls.DFM_REPORT_TOTAL,
             cls.MANUFACTURING_RELEASE_REFUSED_TOTAL,
+            cls.RELEASE_PATH_CALL_TOTAL,
+            cls.ASSEMBLY_BUILD_TOTAL,
+            cls.ASSEMBLY_CHECK_TOTAL,
+            cls.ASSEMBLY_FINDING_TOTAL,
+            cls.RELEASE_FINDING_ACCEPTED_TOTAL,
+            cls.RELEASE_DESIGN_FILE_EXCLUDED_TOTAL,
             cls.RECONSTRUCTION_PROPOSAL_TOTAL,
             cls.RECONSTRUCTION_FEATURE_ACCEPTED_TOTAL,
             cls.RECONSTRUCTION_LLM_PASS_TOTAL,
@@ -3009,6 +3026,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.RELEASE_FINDING_ACCEPTED_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"item": item, "route": route})
+
+    def record_release_design_file_excluded(self, kind: str, reason: str) -> None:
+        """Record one schematic or board left out of a release manifest."""
+        counter = self._instruments.get(MetricsRegistry.RELEASE_DESIGN_FILE_EXCLUDED_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind, "reason": reason})
 
     def record_reconstruction_proposal(self, outcome: str) -> None:
         """Record one feature history proposal outcome (spec 4B)."""

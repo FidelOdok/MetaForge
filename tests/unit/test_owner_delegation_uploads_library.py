@@ -290,9 +290,7 @@ async def test_flag_on_a_library_update_runs_too(
     library, files, vendor = _Library(), _Files(), []
     async with gateway as http:
         server = await _server(http, library, files, vendor)
-        await _call(
-            server, "library.update_component", {"ref": "co_1", "changes": {"notes": "x"}}
-        )
+        await _call(server, "library.update_component", {"ref": "co_1", "changes": {"notes": "x"}})
     assert library.writes == [
         ("update", "component", {"notes": "x"}, f"agent {AGENT} on behalf of fidel")
     ]

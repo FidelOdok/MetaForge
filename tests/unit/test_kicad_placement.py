@@ -134,7 +134,9 @@ class Footprint:
     def GetCourtyard(self, layer: int) -> Poly:  # noqa: N802
         own = B_CRTYD if self.flipped else F_CRTYD
         x1, y1, x2, y2 = self.body_local
-        return Poly(self._box((x1 - 0.25, y1 - 0.25, x2 + 0.25, y2 + 0.25)) if layer == own else None)
+        return Poly(
+            self._box((x1 - 0.25, y1 - 0.25, x2 + 0.25, y2 + 0.25)) if layer == own else None
+        )
 
     def GetBoundingBox(self, *_: Any) -> Box:  # noqa: N802
         return self._box(self.body_local)
@@ -540,7 +542,13 @@ def test_a_bad_placement_is_refused(change: dict[str, Any], message: str) -> Non
 def test_a_hole_off_the_board_is_refused() -> None:
     with pytest.raises(ValueError, match="off the board"):
         Circuit.model_validate(
-            {**BASE, "board": {**BASE["board"], "mounting_holes": [{"position": {"x_mm": -1, "y_mm": 1}}]}}
+            {
+                **BASE,
+                "board": {
+                    **BASE["board"],
+                    "mounting_holes": [{"position": {"x_mm": -1, "y_mm": 1}}],
+                },
+            }
         )
 
 

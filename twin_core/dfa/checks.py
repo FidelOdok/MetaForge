@@ -20,13 +20,24 @@ each with a severity and the part revisions involved:
     stated clearance per side. High.
 ``connector``
     An edge connector's mating face is within ``max_setback_mm`` of its
-    board's edge, and it reaches its slot: its face within ``max_gap_mm`` of
-    the slot, centred within the tolerance and facing it. Medium.
+    board's edge (medium), and its plug can mate through its slot
+    (:mod:`twin_core.dfa.connectors`): the connector's mating axis in the
+    assembly, from its footprint's rotation on the board and the board's
+    placement or given, within a few degrees of the slot's opening normal;
+    and the plug envelope (a USB-C plug's overmold by default) passes the
+    slot's aperture to seat. A plug that cannot mate is high.
 ``stack``
     A stack of parts (a tongue and its washers in a clevis, washers under a
     screw head) fits the gap it goes in, and a fastener is long enough for
     its grip. Thicknesses of standard washers, nuts and screw lengths come
     from the standard part tables. High.
+``fastener``
+    Each bought fastener in the assembly (a screw or a pin by designation,
+    :mod:`twin_core.dfa.fasteners`) sits in its holes, its shank fits each
+    hole (clearance, tapped, thread-forming or press), its length suits the
+    stack and its head the counterbore or face. A hole pattern or a revolute
+    joint with no fastener on it is an "unfastened joint" (medium) unless it
+    is a press fit or a snap.
 ``motion``
     A revolute joint with stated limits is swept in steps and every sample
     checked for interference between the moving and the fixed bodies.
@@ -50,11 +61,28 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import structlog
 
 from observability.tracing import get_tracer
+from twin_core.dfa.connectors import (
+    PlugEnvelope,
+    footprint_mating_axis,
+    known_footprint,
+    plug_envelope,
+)
+from twin_core.dfa.fasteners import (
+    DEFAULT_JOINT_AXIS_TOLERANCE_MM,
+    DEFAULT_PLACEMENT_TOLERANCE_MM,
+    DesignationLookup,
+    FastenerSpec,
+    FastenerSpecError,
+    exempt,
+    fastener_issues,
+    on_axis,
+    parse_fastener,
+)
 from twin_core.dfa.geometry import (
     DEFAULT_TOLERANCE_MM3,
     Body,
@@ -89,8 +117,9 @@ CHECK_LABELS: dict[str, str] = {
     "clearance": "Stated minimum gaps are kept",
     "hole_pattern": "Hole patterns line up",
     "outline_fit": "Outlines fit their pockets",
-    "connector": "Edge connectors reach their slots",
+    "connector": "Edge connectors face their slots and the plug can mate",
     "stack": "Fastener and washer stacks fit their gaps",
+    "fastener": "Fasteners fit their holes and every joint is fastened",
     "motion": "Joints move through their range without collision",
     "seat": "Seated parts fit and are retained",
 }
@@ -107,6 +136,8 @@ DEFAULT_MOTION_STEPS = 12
 MAX_MOTION_STEPS = 72
 #: A connector facing more than this many degrees off its slot does not reach it.
 MAX_CONNECTOR_ANGLE_DEG = 5.0
+#: Where a mating axis came from, for the finding.
+AXIS_GIVEN = "given"
 
 
 class AssemblySpecError(ValueError):
@@ -295,6 +326,8 @@ class HolePatternSpec:
     #: The fastener axis in part ``a``'s frame.
     axis: Vec = (0.0, 0.0, 1.0)
     source: str = ""
+    #: How the joint is held when not by fasteners: ``press_fit`` or ``snap``.
+    retention: str | None = None
 
 
 @dataclass
@@ -312,18 +345,32 @@ class OutlineSpec:
 class ConnectorSpec:
     board: str
     name: str
+    #: The centre of the connector's mating face, in the board's frame.
     face: Vec | None = None
+    #: The mating axis: the way the mouth faces, out of the board, in the
+    #: board's frame (given as ``direction`` or ``mating_axis``, or derived
+    #: from the footprint).
     direction: Vec | None = None
+    #: Where ``direction`` came from: ``given`` or the footprint it was read off.
+    axis_source: str = ""
     #: The board outline in the board's frame, ``[[xmin, ymin], [xmax, ymax]]``.
     board_outline: tuple[tuple[float, float], tuple[float, float]] | None = None
     edge_setback_mm: float | None = None
     max_setback_mm: float = DEFAULT_MAX_SETBACK_MM
     slot_part: str | None = None
+    #: The centre of the slot's aperture on the enclosure's outer face, and
+    #: the way the opening faces (out of the enclosure), in the slot part's frame.
     slot_center: Vec | None = None
     slot_normal: Vec | None = None
+    #: The aperture: width in the board's plane, height across it (mm).
+    slot_size_mm: tuple[float, float] | None = None
     max_gap_mm: float = DEFAULT_MAX_GAP_MM
     tolerance_mm: float = DEFAULT_SLOT_TOLERANCE_MM
     source: str = ""
+    #: The plug that mates with it; ``None`` when the footprint is not a plug socket.
+    plug: PlugEnvelope | None = None
+    footprint: str | None = None
+    reference: str | None = None
 
 
 @dataclass
@@ -368,6 +415,8 @@ class JointSpec:
     min_deg: float | None = None
     max_deg: float | None = None
     steps: int = DEFAULT_MOTION_STEPS
+    #: How it is held when not by a pin or screw: ``press_fit`` or ``snap``.
+    retention: str | None = None
 
 
 @dataclass
@@ -381,6 +430,9 @@ class AssemblySpec:
     stacks: list[StackSpec] = field(default_factory=list)
     seats: list[SeatSpec] = field(default_factory=list)
     joints: list[JointSpec] = field(default_factory=list)
+    fasteners: list[FastenerSpec] = field(default_factory=list)
+    #: How far a fastener may sit off a hole's centre (mm).
+    fastener_tolerance_mm: float = DEFAULT_PLACEMENT_TOLERANCE_MM
 
 
 #: ``(family, size, length_mm) -> library entry``; ``twin_core.library.standard_parts``.
@@ -391,6 +443,86 @@ def _standard_lookup() -> StandardPartLookup:
     from twin_core.library.standard_parts import build_standard_part
 
     return build_standard_part
+
+
+def _designation_lookup() -> DesignationLookup:
+    from twin_core.library.standard_parts import standard_part_by_designation
+
+    return standard_part_by_designation
+
+
+def _size(raw: Any, where: str) -> tuple[float, float]:
+    w, h = _pair(raw, where)
+    if w <= 0 or h <= 0:
+        raise AssemblySpecError(f"{where} must be positive")
+    return w, h
+
+
+def _connector(
+    c: dict[str, Any], resolve: Callable[[str], str], where: str, board_outline: Any
+) -> ConnectorSpec:
+    footprint = str(c["footprint"]) if c.get("footprint") else None
+    axis_raw = c.get("mating_axis") if c.get("mating_axis") is not None else c.get("direction")
+    direction: Vec | None = None
+    axis_source = ""
+    if axis_raw is not None:
+        direction = _vec_of(axis_raw, f"{where}.mating_axis")
+        axis_source = AXIS_GIVEN
+    elif footprint is not None or c.get("mating_side") is not None:
+        rotation = _num(c, "rotation_deg", where, 0.0)
+        try:
+            direction = footprint_mating_axis(
+                footprint, rotation, c.get("side"), c.get("mating_side")
+            )
+        except ValueError as exc:
+            raise AssemblySpecError(f"{where}: {exc}") from exc
+        if direction is not None:
+            axis_source = f"footprint {footprint or 'mating_side'} at {rotation:g} degrees" + (
+                " on the bottom" if str(c.get("side") or "").lower().startswith("b") else ""
+            )
+    if direction is not None:
+        try:
+            direction = unit(direction)
+        except ValueError as exc:
+            raise AssemblySpecError(f"{where}.mating_axis: {exc}") from exc
+    row = known_footprint(footprint)
+    plug_kind = c.get("plug") or (row.plug if row is not None else None)
+    plug: PlugEnvelope | None = None
+    if plug_kind or c.get("plug_envelope_mm") is not None or c.get("slot_size_mm") is not None:
+        try:
+            plug = plug_envelope(
+                str(plug_kind) if plug_kind else None,
+                c.get("plug_envelope_mm"),
+                c.get("plug_shell_mm"),
+            )
+        except ValueError as exc:
+            raise AssemblySpecError(f"{where}: {exc}") from exc
+    return ConnectorSpec(
+        board=resolve(str(c.get("board"))),
+        name=str(c.get("name") or c.get("reference") or "connector"),
+        face=_vec_of(c["face"], f"{where}.face") if c.get("face") is not None else None,
+        direction=direction,
+        axis_source=axis_source,
+        board_outline=board_outline,
+        edge_setback_mm=_opt_num(c, "edge_setback_mm", where),
+        max_setback_mm=_num(c, "max_setback_mm", where, DEFAULT_MAX_SETBACK_MM),
+        slot_part=resolve(str(c["slot_part"])) if c.get("slot_part") else None,
+        slot_center=_vec_of(c["slot_center"], f"{where}.slot_center")
+        if c.get("slot_center") is not None
+        else None,
+        slot_normal=_vec_of(c["slot_normal"], f"{where}.slot_normal")
+        if c.get("slot_normal") is not None
+        else None,
+        slot_size_mm=_size(c["slot_size_mm"], f"{where}.slot_size_mm")
+        if c.get("slot_size_mm") is not None
+        else None,
+        max_gap_mm=_num(c, "max_gap_mm", where, DEFAULT_MAX_GAP_MM),
+        tolerance_mm=_num(c, "tolerance_mm", where, DEFAULT_SLOT_TOLERANCE_MM),
+        source=str(c.get("source") or ""),
+        plug=plug,
+        footprint=footprint,
+        reference=str(c["reference"]) if c.get("reference") else None,
+    )
 
 
 def _spec_value(entry: dict[str, Any], *names: str) -> float | None:
@@ -420,20 +552,34 @@ def parse_spec(
     resolve: Callable[[str], str],
     *,
     standard_part: StandardPartLookup | None = None,
+    designation: DesignationLookup | None = None,
 ) -> AssemblySpec:
     """Read a check specification; part references go through ``resolve``.
 
     ``resolve`` turns what the caller wrote (a part's name in the assembly, or
     its ``KEY``/``KEY@n``) into the body name, and raises ``AssemblySpecError``
-    for a part that is not in the assembly.
+    for a part that is not in the assembly. ``designation`` turns a fastener's
+    designation into its standard part entry.
     """
     raw = raw or {}
     if not isinstance(raw, dict):
         raise AssemblySpecError("checks must be an object")
     lookup = standard_part or _standard_lookup()
+    by_designation = designation or _designation_lookup()
     spec = AssemblySpec(
-        tolerance_mm3=_num(raw, "interference_tolerance_mm3", "checks", DEFAULT_TOLERANCE_MM3)
+        tolerance_mm3=_num(raw, "interference_tolerance_mm3", "checks", DEFAULT_TOLERANCE_MM3),
+        fastener_tolerance_mm=_num(
+            raw, "fastener_tolerance_mm", "checks", DEFAULT_PLACEMENT_TOLERANCE_MM
+        ),
     )
+    for i, f in enumerate(_list(raw, "fasteners")):
+        try:
+            spec.fasteners.append(parse_fastener(f, resolve, by_designation, f"fasteners[{i}]", i))
+        except FastenerSpecError as exc:
+            raise AssemblySpecError(str(exc)) from exc
+    names = [f.name for f in spec.fasteners]
+    if len(set(names)) != len(names):
+        raise AssemblySpecError("fasteners: each needs its own name")
     for i, o in enumerate(_list(raw, "allowed_overlaps")):
         where = f"allowed_overlaps[{i}]"
         reason = str(o.get("reason") or "").strip()
@@ -460,6 +606,7 @@ def parse_spec(
                 tolerance_mm=_num(h, "tolerance_mm", where, DEFAULT_HOLE_TOLERANCE_MM),
                 axis=_vec_of(h.get("axis") or [0, 0, 1], f"{where}.axis"),
                 source=str(h.get("source") or ""),
+                retention=str(h["retention"]) if h.get("retention") else None,
             )
         )
     for i, o in enumerate(_list(raw, "outlines")):
@@ -488,29 +635,7 @@ def parse_spec(
                 _pair(outline[0], f"{where}.board_outline[0]"),
                 _pair(outline[1], f"{where}.board_outline[1]"),
             )
-        spec.connectors.append(
-            ConnectorSpec(
-                board=resolve(str(c.get("board"))),
-                name=str(c.get("name") or "connector"),
-                face=_vec_of(c["face"], f"{where}.face") if c.get("face") is not None else None,
-                direction=_vec_of(c["direction"], f"{where}.direction")
-                if c.get("direction") is not None
-                else None,
-                board_outline=board_outline,
-                edge_setback_mm=_opt_num(c, "edge_setback_mm", where),
-                max_setback_mm=_num(c, "max_setback_mm", where, DEFAULT_MAX_SETBACK_MM),
-                slot_part=resolve(str(c["slot_part"])) if c.get("slot_part") else None,
-                slot_center=_vec_of(c["slot_center"], f"{where}.slot_center")
-                if c.get("slot_center") is not None
-                else None,
-                slot_normal=_vec_of(c["slot_normal"], f"{where}.slot_normal")
-                if c.get("slot_normal") is not None
-                else None,
-                max_gap_mm=_num(c, "max_gap_mm", where, DEFAULT_MAX_GAP_MM),
-                tolerance_mm=_num(c, "tolerance_mm", where, DEFAULT_SLOT_TOLERANCE_MM),
-                source=str(c.get("source") or ""),
-            )
-        )
+        spec.connectors.append(_connector(c, resolve, where, board_outline))
     for i, s in enumerate(_list(raw, "stacks")):
         where = f"stacks[{i}]"
         items: list[StackItem] = []
@@ -614,6 +739,7 @@ def parse_joint(j: dict[str, Any], resolve: Callable[[str], str], where: str) ->
         min_deg=lo,
         max_deg=hi,
         steps=steps,
+        retention=str(j["retention"]) if j.get("retention") else None,
     )
 
 
@@ -860,9 +986,84 @@ def _setback(c: ConnectorSpec) -> float | None:
     return max(dot(p, d) for p in corners) - dot(c.face, d)
 
 
+def _cross(a: Vec, b: Vec) -> Vec:
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _aperture_axes(normal: Vec, board_up: Vec) -> tuple[Vec, Vec]:
+    """The slot's width direction (in the board's plane) and height direction."""
+    w = _cross(normal, board_up)
+    if norm(w) < 1e-6:  # a slot facing the board's normal: width along the board's X
+        w = _cross(normal, (0.0, 1.0, 0.0)) if abs(normal[1]) < 0.9 else (1.0, 0.0, 0.0)
+    w = unit(w)
+    return w, unit(_cross(w, normal))
+
+
+def _words(v: Vec) -> str:
+    return "[" + ", ".join(f"{x:.2f}".rstrip("0").rstrip(".") or "0" for x in v) + "]"
+
+
+def _plug_issues(
+    c: ConnectorSpec, plug: PlugEnvelope, d: Vec, n: Vec, board_up: Vec
+) -> tuple[list[tuple[str, str]], dict[str, Any]]:
+    """``(severity, words)`` for a plug that cannot pass the slot, and the measures."""
+    assert c.slot_size_mm is not None
+    sw, sh = c.slot_size_mm
+    w_dir, h_dir = _aperture_axes(n, board_up)
+    off_w, off_h = dot(d, w_dir), dot(d, h_dir)
+    entry = dot(d, n)
+
+    def margin(w: float, h: float) -> tuple[float, float]:
+        return (sw / 2 - (abs(off_w) + w / 2), sh / 2 - (abs(off_h) + h / 2))
+
+    shell = margin(plug.shell_width_mm, plug.shell_height_mm)
+    over = margin(plug.width_mm, plug.height_mm)
+    values: dict[str, Any] = {
+        "entry_mm": _r(entry),
+        "offset_mm": [_r(off_w), _r(off_h)],
+        "slot_size_mm": [sw, sh],
+        "plug": plug.as_dict(),
+        "overmold_margin_mm": [_r(over[0]), _r(over[1])],
+        "shell_margin_mm": [_r(shell[0]), _r(shell[1])],
+    }
+    issues: list[tuple[str, str]] = []
+    if min(shell) < -1e-9:
+        issues.append(
+            (
+                "high",
+                f"the plug's {plug.shell_width_mm:g} x {plug.shell_height_mm:g} mm shell does not "
+                f"pass the {sw:g} x {sh:g} mm slot"
+                + (
+                    f" ({_r(off_w):g}, {_r(off_h):g} mm off centre)"
+                    if abs(off_w) + abs(off_h)
+                    else ""
+                ),
+            )
+        )
+    elif min(over) < -1e-9 and entry > c.max_gap_mm:
+        issues.append(
+            (
+                "high",
+                f"the receptacle sits {entry:.2f} mm behind the outer face and the plug's "
+                f"{plug.width_mm:g} x {plug.height_mm:g} mm overmold does not pass the {sw:g} x "
+                f"{sh:g} mm slot, so the plug stops {entry:.2f} mm short of mating",
+            )
+        )
+    elif entry > plug.depth_mm:
+        issues.append(
+            (
+                "medium",
+                f"the receptacle sits {entry:.2f} mm behind the outer face, deeper than the "
+                f"plug's {plug.depth_mm:g} mm overmold",
+            )
+        )
+    return issues, values
+
+
 def check_connectors(bodies: dict[str, Body], spec: AssemblySpec, required: bool) -> CheckResult:
     findings: list[Finding] = []
     ran = 0
+    notes: list[str] = []
     for c in spec.connectors:
         board = bodies[c.board]
         setback = _setback(c)
@@ -880,65 +1081,109 @@ def check_connectors(bodies: dict[str, Body], spec: AssemblySpec, required: bool
                         values={"setback_mm": _r(setback), "max_setback_mm": c.max_setback_mm},
                     )
                 )
-        if c.slot_part and c.slot_center is not None and c.face is not None:
+        if not c.slot_part:
+            continue
+        slot = bodies[c.slot_part]
+        pair = [board.ref, slot.ref]
+        facing = unit(apply_dir(board.matrix, c.direction)) if c.direction else None
+        normal = unit(apply_dir(slot.matrix, c.slot_normal)) if c.slot_normal is not None else None
+        # The mating axis against the slot's opening.
+        if facing is not None and normal is not None:
             ran += 1
-            slot = bodies[c.slot_part]
-            face_w = apply(board.matrix, c.face)
-            centre_w = apply(slot.matrix, c.slot_center)
-            facing = unit(apply_dir(board.matrix, c.direction)) if c.direction else None
-            normal = (
-                unit(apply_dir(slot.matrix, c.slot_normal)) if c.slot_normal is not None else facing
-            )
-            d = sub(centre_w, face_w)
-            issues: list[str] = []
-            values: dict[str, Any] = {}
-            if normal is not None:
-                gap = abs(dot(d, normal))
-                along = dot(d, normal)
-                lateral = norm(
-                    (d[0] - along * normal[0], d[1] - along * normal[1], d[2] - along * normal[2])
-                )
-                values.update({"gap_mm": _r(gap), "offset_mm": _r(lateral)})
-                if gap > c.max_gap_mm:
-                    issues.append(
-                        f"its face is {gap:g} mm from the slot (at most {c.max_gap_mm:g})"
-                    )
-                if lateral > c.tolerance_mm:
-                    issues.append(
-                        f"it is {lateral:g} mm off the slot centre (at most {c.tolerance_mm:g})"
-                    )
-                if facing is not None:
-                    angle = math.degrees(math.acos(max(-1.0, min(1.0, abs(dot(facing, normal))))))
-                    values["angle_deg"] = _r(angle)
-                    if angle > MAX_CONNECTOR_ANGLE_DEG:
-                        issues.append(f"it faces {angle:.0f} degrees away from the slot")
-            else:
-                dist = norm(d)
-                values["distance_mm"] = _r(dist)
-                if dist > c.max_gap_mm:
-                    issues.append(f"its face is {dist:g} mm from the slot centre")
-            if issues:
-                pair = [board.ref, slot.ref]
+            angle = math.degrees(math.acos(max(-1.0, min(1.0, dot(facing, normal)))))
+            if angle > MAX_CONNECTOR_ANGLE_DEG:
                 findings.append(
                     Finding(
-                        id=_fid("connector", pair, f"{c.name}:slot"),
+                        id=_fid("connector", pair, f"{c.name}:axis"),
                         check="connector",
-                        severity="medium",
-                        message=f"{c.name} on {c.board} does not reach its slot in "
-                        f"{c.slot_part}: " + "; ".join(issues),
+                        severity="high",
+                        message=f"{c.name} on {c.board} faces {_words(facing)} in the assembly "
+                        f"but its slot in {c.slot_part} opens to {_words(normal)}: {angle:.0f} "
+                        "degrees apart, so a plug through the slot cannot mate",
                         parts=pair,
-                        values={**values, "source": c.source},
+                        values={
+                            "angle_deg": _r(angle),
+                            "max_angle_deg": MAX_CONNECTOR_ANGLE_DEG,
+                            "mating_axis": [_r(v) for v in facing],
+                            "slot_normal": [_r(v) for v in normal],
+                            "axis_source": c.axis_source,
+                            "source": c.source,
+                        },
                     )
                 )
-    return _result(
+        elif facing is None and normal is not None:
+            notes.append(
+                f"{c.name}: no mating axis (give mating_axis, or the footprint and its "
+                "rotation_deg)"
+            )
+        elif normal is None and facing is not None and c.slot_center is None:
+            notes.append(f"{c.name}: no slot_normal to check the mating axis against")
+        # The plug through the slot.
+        if c.slot_center is None or c.face is None:
+            continue
+        ran += 1
+        face_w = apply(board.matrix, c.face)
+        centre_w = apply(slot.matrix, c.slot_center)
+        d = sub(centre_w, face_w)
+        n = normal or facing
+        severity: Severity = "medium"
+        issues: list[str] = []
+        values: dict[str, Any] = {}
+        if n is not None and c.slot_size_mm is not None and c.plug is not None:
+            board_up = unit(apply_dir(board.matrix, (0.0, 0.0, 1.0)))
+            plug_issues, values = _plug_issues(c, c.plug, d, n, board_up)
+            if any(s == "high" for s, _w in plug_issues):
+                severity = "high"
+            issues = [w for _s, w in plug_issues]
+        elif n is not None:
+            along = dot(d, n)
+            gap = abs(along)
+            lateral = norm((d[0] - along * n[0], d[1] - along * n[1], d[2] - along * n[2]))
+            values.update({"gap_mm": _r(gap), "offset_mm": _r(lateral)})
+            if gap > c.max_gap_mm:
+                issues.append(f"its face is {gap:g} mm from the slot (at most {c.max_gap_mm:g})")
+            if lateral > c.tolerance_mm:
+                issues.append(
+                    f"it is {lateral:g} mm off the slot centre (at most {c.tolerance_mm:g})"
+                )
+            if c.slot_size_mm is None:
+                notes.append(f"{c.name}: no slot_size_mm, so the plug envelope was not checked")
+        else:
+            dist = norm(d)
+            values["distance_mm"] = _r(dist)
+            if dist > c.max_gap_mm:
+                issues.append(f"its face is {dist:g} mm from the slot centre")
+        if issues:
+            findings.append(
+                Finding(
+                    id=_fid("connector", pair, f"{c.name}:slot"),
+                    check="connector",
+                    severity=severity,
+                    message=f"{c.name} on {c.board} "
+                    + (
+                        "cannot mate through its slot in "
+                        if severity == "high"
+                        else "does not reach its slot in "
+                    )
+                    + f"{c.slot_part}: "
+                    + "; ".join(issues),
+                    parts=pair,
+                    values={**values, "source": c.source},
+                )
+            )
+    result = _result(
         "connector",
         findings,
         required,
         ran,
-        f"{len(spec.connectors)} connector(s) at the board edge and on their slots",
-        "no connector given: pass connectors with the face, its direction and the board outline "
-        "(or edge_setback_mm), and the slot",
+        f"{len(spec.connectors)} connector(s) at the board edge, facing their slots",
+        "no connector given: pass connectors with the board, the footprint and its rotation_deg "
+        "(or mating_axis), the face, and the slot (slot_part, slot_center, slot_normal, "
+        "slot_size_mm)" + (f"; {'; '.join(notes)}" if notes else ""),
     )
+    if notes and result.status != "not_assessed":
+        result.detail += "; not checked: " + "; ".join(notes)
+    return result
 
 
 def check_stacks(bodies: dict[str, Body], spec: AssemblySpec, required: bool) -> CheckResult:
@@ -1004,6 +1249,108 @@ def check_stacks(bodies: dict[str, Body], spec: AssemblySpec, required: bool) ->
         f"{len(spec.stacks)} stack(s) fit",
         "no fastener or washer stack given",
     )
+
+
+def _joint_axis(bodies: dict[str, Body], j: JointSpec) -> tuple[Vec, Vec]:
+    frame: Matrix | None = bodies[j.parent].matrix if j.parent else None
+    point = apply(frame, j.axis_point) if frame else j.axis_point
+    direction = apply_dir(frame, j.axis_dir) if frame else j.axis_dir
+    return point, unit(direction)
+
+
+def check_fasteners(bodies: dict[str, Body], spec: AssemblySpec, required: bool) -> CheckResult:
+    """Each fastener in its holes, and every hole pattern and hinge fastened."""
+    findings: list[Finding] = []
+    notes: list[str] = []
+    frames = {name: b.matrix for name, b in bodies.items()}
+    ran = 0
+    for f in spec.fasteners:
+        ran += 1
+        issues, why = fastener_issues(f, frames, spec.fastener_tolerance_mm)
+        notes.extend(why)
+        parts = sorted({bodies[h.part].ref for h in f.holes if h.part in bodies})
+        for issue in issues:
+            findings.append(
+                Finding(
+                    id=_fid("fastener", parts, f"{f.name}:{issue.what}"),
+                    check="fastener",
+                    severity=cast(Severity, issue.severity),
+                    message=issue.message,
+                    parts=parts,
+                    values={
+                        **issue.values,
+                        "fastener": f.name,
+                        "designation": f.designation,
+                    },
+                )
+            )
+    # Joints left with nothing holding them.
+    for h in spec.hole_patterns:
+        ran += 1
+        if exempt(h.retention):
+            continue
+        ba = bodies[h.a]
+        axis = unit(apply_dir(ba.matrix, h.axis))
+        loose = [
+            p
+            for p in h.holes_a
+            if on_axis(spec.fasteners, apply(ba.matrix, p), axis, h.tolerance_mm + 0.2) is None
+        ]
+        if loose:
+            pair = [ba.ref, bodies[h.b].ref]
+            findings.append(
+                Finding(
+                    id=_fid("fastener", pair, "unfastened"),
+                    check="fastener",
+                    severity="medium",
+                    message=f"unfastened joint: {len(loose)} of {len(h.holes_a)} holes between "
+                    f"{h.a} and {h.b} have no fastener (add the screws to twin.build_assembly's "
+                    "fasteners, or mark the joint retention press_fit or snap)",
+                    parts=pair,
+                    values={
+                        "unfastened_holes": [[_r(v) for v in p] for p in loose],
+                        "holes": len(h.holes_a),
+                        "source": h.source,
+                    },
+                )
+            )
+    for j in spec.joints:
+        if j.joint_type != "revolute":
+            continue
+        ran += 1
+        if exempt(j.retention):
+            continue
+        point, direction = _joint_axis(bodies, j)
+        if on_axis(spec.fasteners, point, direction, DEFAULT_JOINT_AXIS_TOLERANCE_MM) is None:
+            refs = sorted(
+                {bodies[m].ref for m in j.moving} | ({bodies[j.parent].ref} if j.parent else set())
+            )
+            findings.append(
+                Finding(
+                    id=_fid("fastener", refs, f"{j.name}:unfastened"),
+                    check="fastener",
+                    severity="medium",
+                    message=f"unfastened joint: {j.name} has no pin or screw on its axis (add a "
+                    "pin such as 'ISO 2338 4x30' to twin.build_assembly's fasteners, or mark "
+                    "the joint retention snap)",
+                    parts=refs,
+                    values={
+                        "axis_point": [_r(v) for v in point],
+                        "axis_dir": [_r(v) for v in direction],
+                    },
+                )
+            )
+    result = _result(
+        "fastener",
+        findings,
+        required,
+        ran,
+        f"{len(spec.fasteners)} fastener(s) fit their holes; every joint is fastened",
+        "no fastener, hole pattern or hinge",
+    )
+    if notes and result.status != "not_assessed":
+        result.detail += "; not checked: " + "; ".join(notes)
+    return result
 
 
 def check_seats(bodies: dict[str, Body], spec: AssemblySpec, required: bool) -> CheckResult:
@@ -1171,6 +1518,7 @@ async def run_checks(
         "outline_fit": bool(spec.outlines),
         "connector": bool(spec.connectors),
         "stack": bool(spec.stacks),
+        "fastener": bool(spec.fasteners),
         "seat": bool(spec.seats),
         "motion": any(j.min_deg is not None and j.max_deg is not None for j in spec.joints),
     }
@@ -1194,6 +1542,7 @@ async def run_checks(
             check_outlines(by_name, spec, "outline_fit" in need),
             check_connectors(by_name, spec, "connector" in need),
             check_stacks(by_name, spec, "stack" in need),
+            check_fasteners(by_name, spec, "fastener" in need),
             check_motion(by_name, measured, spec, "motion" in need),
             check_seats(by_name, spec, "seat" in need),
         ]

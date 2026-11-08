@@ -7963,7 +7963,12 @@ class TwinServer(McpToolServer):
                     "bought part's OpenUSD package with a GLB preview; its licence, "
                     "attribution and mass are read from the folder, not from metadata), or "
                     "'gcode' (slicer.slice's output folder, or one .gcode file; sources: the "
-                    "part it was sliced from; library.dispatch_job can then send it). "
+                    "part it was sliced from; library.dispatch_job can then send it), or "
+                    "'bom' (a bill of materials, CSV or JSON: kicad.export_bom's file for a "
+                    "board, with source_ref the PCB-...@n it lists; or the assembly's "
+                    "mechanical and purchased parts, every fastener by designation with its "
+                    "quantity, with source_ref the ASM-...@n; the release needs both, and an "
+                    "empty BOM fails it). "
                     "Recording the same name again is that item's next revision. "
                     "source_node_ids are what it was made from (the BOM for a schematic, the "
                     "schematic for a board, the board for gerbers and placement, the pinmap "
@@ -7989,6 +7994,7 @@ class TwinServer(McpToolServer):
                                 "firmware_source",
                                 "purchased_model",
                                 "gcode",
+                                "bom",
                             ],
                         },
                         "file_path": {
@@ -8013,8 +8019,8 @@ class TwinServer(McpToolServer):
                             "type": "string",
                             "description": (
                                 "The revision this was made from: CAD-...@n for G-code or a "
-                                "STEP, PCB-...@n for Gerbers, drill and placement, FW-...@n "
-                                "for firmware."
+                                "STEP, PCB-...@n for Gerbers, drill, placement and the board "
+                                "BOM, ASM-...@n for the assembly BOM, FW-...@n for firmware."
                             ),
                         },
                     },
@@ -8347,7 +8353,76 @@ class TwinServer(McpToolServer):
                 "min_deg": {"type": "number"},
                 "max_deg": {"type": "number"},
                 "steps": {"type": "integer", "minimum": 2, "maximum": 72},
+                "retention": {
+                    "type": "string",
+                    "description": "snap or press_fit when no pin holds it; otherwise a "
+                    "fastener on its axis is expected.",
+                },
             },
+        }
+        _hole = {
+            "type": "object",
+            "description": "A hole the fastener goes through, in order from its head.",
+            "properties": {
+                "part": {"type": "string", "description": "The part (its name or item key)."},
+                "diameter_mm": {"type": "number"},
+                "fit": {
+                    "type": "string",
+                    "enum": ["clearance", "tapped", "thread_forming", "press"],
+                    "description": "clearance (passes through), tapped, thread_forming (a "
+                    "pilot in plastic), press (a pin held by interference).",
+                },
+                "length_mm": {
+                    "type": "number",
+                    "description": "Thickness it clamps along the axis (clearance holes; "
+                    "each member a pin joins).",
+                },
+                "depth_mm": {"type": "number", "description": "Usable depth of a blind hole."},
+                "center": {**_xyz, "description": "A point on the hole axis, part's frame."},
+                "axis": {**_xyz, "description": "Hole axis, part's frame (default +Z)."},
+                "counterbore": {
+                    "type": "object",
+                    "properties": {
+                        "diameter_mm": {"type": "number"},
+                        "depth_mm": {"type": "number"},
+                    },
+                },
+                "face_diameter_mm": {
+                    "type": "number",
+                    "description": "The face or boss the head bears on.",
+                },
+                "flush": {
+                    "type": "boolean",
+                    "description": "The head must sit in the counterbore.",
+                },
+            },
+            "required": ["part", "diameter_mm"],
+        }
+        _fastener = {
+            "type": "object",
+            "properties": {
+                "designation": {
+                    "type": "string",
+                    "description": "As library.standard_part reads it: 'ISO 4762 M4x25', "
+                    "'M2.5x6' (a screw), 'ISO 2338 4x30' (a pin).",
+                },
+                "name": {"type": "string"},
+                "location": {
+                    **_location,
+                    "description": "Where the underside of the head (a pin's end) sits; the "
+                    "shank runs along the fastener's own -Z. x, y, z in mm, rx, ry, rz in "
+                    "degrees.",
+                },
+                "holes": {"type": "array", "items": _hole},
+                "washers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Washers under the head, e.g. ['ISO 7089 M4'].",
+                },
+                "nut": {"type": "string", "description": "e.g. 'ISO 4032 M4'."},
+                "min_engagement_mm": {"type": "number"},
+            },
+            "required": ["designation", "location"],
         }
         self.register_tool(
             manifest=ToolManifest(
@@ -8362,10 +8437,17 @@ class TwinServer(McpToolServer):
                     "of it, committed with twin.commit_geometry (source_tool kicad.export_3d, "
                     "source_node_ids the board), which records which PCB revision it is. Give "
                     "the joints (revolute with axis and min_deg/max_deg) so "
-                    "twin.check_assembly can sweep them. The revision keeps each body's "
-                    "revision, placement and the joints. Next: twin.check_assembly. The "
-                    "release checklist's 'Assembly checked (DFA)' needs an assembly of every "
-                    "part and board at its current revision."
+                    "twin.check_assembly can sweep them. Put the bought parts that join them "
+                    "in fasteners: each screw or hinge pin by designation (as "
+                    "library.standard_part reads it: 'ISO 4762 M2.5x8', 'M2.5x6', 'ISO 2338 "
+                    "4x30'), its location (the underside of the head, shank along its -Z), the "
+                    "holes it goes through in order (part, diameter_mm, fit, length_mm, "
+                    "center, counterbore) and any washers and nut; they go into the STEP and "
+                    "are checked in their holes, and the assembly BOM must list them. The "
+                    "revision keeps each body's revision, placement, the joints and the "
+                    "fasteners. Next: twin.check_assembly. The release checklist's 'Assembly "
+                    "checked (DFA)' needs an assembly of every part and board at its current "
+                    "revision."
                 ),
                 capability="cad_assembly",
                 input_schema={
@@ -8398,6 +8480,7 @@ class TwinServer(McpToolServer):
                             },
                         },
                         "joints": {"type": "array", "items": _joint},
+                        "fasteners": {"type": "array", "items": _fastener},
                         "material": {"type": "string"},
                         "item_key": {
                             "type": "string",
@@ -8435,18 +8518,32 @@ class TwinServer(McpToolServer):
                     "[{a, b, min_gap_mm}], hole_patterns [{a, holes_a, b, holes_b, "
                     "tolerance_mm}] (positions in each part's own frame), outlines "
                     "[{part, size_mm, host, opening_mm, clearance_mm}], connectors [{board, "
-                    "name, face, direction, board_outline or edge_setback_mm, "
-                    "max_setback_mm, slot_part, slot_center, slot_normal, max_gap_mm}], "
-                    "stacks [{name, gap_mm, items: [{thickness_mm} or {standard: iso7089, "
-                    "size: M4, count}], fastener}], seats [{part, seat_part, "
-                    "part_diameter_mm, seat_diameter_mm, retention}], joints (default: the "
-                    "assembly's own, each revolute swept through its limits), "
-                    "allowed_overlaps [{a, b, reason}]. With a board in the assembly the "
-                    "hole pattern and outline are required; they come from IFC-CAD-EDA and "
-                    "the parts' metadata (mounting_holes, mounting_bosses, dimensions, "
-                    "internal_envelope) when not given. Each finding has a severity (high, "
-                    "medium, low) and the parts involved; open high and medium findings "
-                    "block the release until fixed or accepted (twin.accept_release_finding)."
+                    "name, reference (J1: footprint, rotation and side read from the board "
+                    "file), footprint and rotation_deg and side, or mating_axis (the way the "
+                    "mouth faces, board's frame), face (centre of the mating face, board's "
+                    "frame), board_outline or edge_setback_mm, slot_part, slot_center (the "
+                    "aperture's centre on the outer face) and slot_normal (the way it opens, "
+                    "out of the part) in the slot part's frame, slot_size_mm [width in the "
+                    "board's plane, height], plug (usb_c, the default), plug_envelope_mm "
+                    "[w, h, depth] (default USB-C overmold 12.35 x 6.5 x 20)}]; a mating axis "
+                    "more than 5 degrees off the slot, or a plug that cannot pass the slot to "
+                    "seat, is high. stacks [{name, gap_mm, items: [{thickness_mm} or "
+                    "{standard: iso7089, size: M4, count}], fastener}], fasteners (default: "
+                    "the assembly's own from twin.build_assembly; each in its holes, shank "
+                    "against hole, length against the stack, head against the counterbore "
+                    "or face), seats [{part, seat_part, part_diameter_mm, seat_diameter_mm, "
+                    "retention}], joints (default: the assembly's own, each revolute swept "
+                    "through its limits), allowed_overlaps [{a, b, reason}]. A hole pattern "
+                    "or a revolute joint with no fastener on it is an unfastened joint "
+                    "(medium) unless its retention is press_fit or snap. With a board in the "
+                    "assembly the hole pattern and outline are required; they come from "
+                    "IFC-CAD-EDA and the parts' metadata (mounting_holes, mounting_bosses, "
+                    "dimensions, internal_envelope) when not given. An edge connector found "
+                    "in the board file (a USB-C receptacle) makes the connector check "
+                    "required; its slot comes from a part's connector_slots when recorded. "
+                    "Each finding has a severity (high, medium, low) and the parts involved; "
+                    "open high and medium findings block the release until fixed or "
+                    "accepted (twin.accept_release_finding)."
                 ),
                 capability="cad_assembly",
                 input_schema={
@@ -8488,8 +8585,11 @@ class TwinServer(McpToolServer):
                 name="Accept Release Finding",
                 description=(
                     "Accept, for the release, a failing ERC or DRC (item eda_checks, targets "
-                    "'PCB-...@n:drc' or 'SCH-...@n:erc') or open assembly findings (item "
+                    "'PCB-...@n:drc' or 'SCH-...@n:erc'), open assembly findings (item "
                     "assembly_dfa, targets the finding ids twin.check_assembly returned), "
+                    "or a stray design file left out of the package (item "
+                    "design_files_released, targets the node ids the checklist names: a "
+                    "board or schematic that is not a revision of any item), "
                     "with a reason. A person's decision: held for their approval, or, when "
                     "the owner sets METAFORGE_ALLOW_AGENT_RELEASE=true and the request names "
                     "the agent and the person (X-MetaForge-Agent, X-MetaForge-On-Behalf-Of), "
@@ -8503,7 +8603,10 @@ class TwinServer(McpToolServer):
                     "type": "object",
                     "properties": {
                         "project_id": {"type": "string", "description": "Project UUID."},
-                        "item": {"type": "string", "enum": ["eda_checks", "assembly_dfa"]},
+                        "item": {
+                            "type": "string",
+                            "enum": ["eda_checks", "assembly_dfa", "design_files_released"],
+                        },
                         "targets": {"type": "array", "items": {"type": "string"}, "minItems": 1},
                         "reason": {"type": "string", "description": "Why it is acceptable."},
                     },
@@ -8541,9 +8644,13 @@ class TwinServer(McpToolServer):
         if joints is not None and not isinstance(joints, list):
             raise ValueError(f"{tool}: 'joints' must be a list")
         material = arguments.get("material")
+        fasteners = arguments.get("fasteners")
+        if fasteners is not None and not isinstance(fasteners, list):
+            raise ValueError(f"{tool}: 'fasteners' must be a list")
         if self._geometry_recorder is None:
             raise ValueError(f"{tool}: geometry commits are not available on this server")
         with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("assembly.fasteners", len(fasteners or []))
             try:
                 prepared: dict[str, Any] = await self._assembly_fit().prepare_assembly(
                     project_id,
@@ -8551,6 +8658,7 @@ class TwinServer(McpToolServer):
                     parts=parts if isinstance(parts, list) else [],
                     joints=joints,
                     material=material if isinstance(material, str) and material else None,
+                    fasteners=fasteners,
                 )
             except ValueError as exc:
                 span.record_exception(exc)
@@ -8600,7 +8708,7 @@ class TwinServer(McpToolServer):
         targets = arguments.get("targets")
         reason = arguments.get("reason")
         if not isinstance(item, str) or not item.strip():
-            raise ValueError(f"{tool}: 'item' is eda_checks or assembly_dfa")
+            raise ValueError(f"{tool}: 'item' is eda_checks, assembly_dfa or design_files_released")
         if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
             raise ValueError(f"{tool}: 'targets' is a list of strings")
         if not isinstance(reason, str) or not reason.strip():

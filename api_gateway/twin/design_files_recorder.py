@@ -15,6 +15,12 @@ adapter wrote on the shared workspace as one work product:
 ``purchased_model``       a bought part's model as ``simready.import``
                           wrote it: a GLB preview, the OpenUSD layers,
                           the licence and ``simready.json`` (FORGE-711)
+``gcode``                 slicer output for one printer
+``bom``                   a bill of materials (CSV or JSON): the board's
+                          (``kicad.export_bom``, pinned to ``PCB-...@n``)
+                          or the assembly's mechanical and purchased
+                          parts (pinned to ``ASM-...@n``); its lines are
+                          kept as ``metadata.bom_lines``
 ========================  ==============================================
 
 Each is a versioned definition (registry rows ``SCH``/``PCB``/``GBR``/``PNP``/
@@ -143,7 +149,99 @@ KINDS: dict[str, _Kind] = {
     # config.ini it was sliced with) or one G-code file. library.dispatch_job
     # sends it; link it GENERATED_FROM the part it was sliced from.
     "gcode": _Kind("gcode", "manufacturing", "gcode", "manufacturing.prototype"),
+    # A bill of materials as a file: kicad.export_bom's for a board (pinned to
+    # the PCB revision), or the assembly's mechanical and purchased parts
+    # (pinned to the assembly revision). Its lines are read into metadata so
+    # the release can see what it lists.
+    "bom": _Kind("bom", "manufacturing", "csv", "manufacturing.bom"),
 }
+
+_BOM_SUFFIXES = (".csv", ".tsv", ".json", ".txt")
+_BOM_QTY = ("qty", "quantity", "${quantity}", "count", "qnty", "amount")
+_BOM_REFS = ("refs", "reference", "references", "designator", "designators", "ref")
+_BOM_PART = (
+    "designation",
+    "part",
+    "mpn",
+    "manufacturer part number",
+    "part number",
+    "value",
+    "name",
+    "title",
+    "description",
+)
+_BOM_DNP = ("dnp", "${dnp}", "do not place", "exclude_from_bom")
+#: Lines kept on the node; the file itself holds them all.
+MAX_BOM_LINES = 1000
+
+
+def _bom_rows(path: Path) -> list[dict[str, Any]]:
+    import csv
+    import io
+
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    if path.suffix.lower() == ".json":
+        data = json.loads(text)
+        if isinstance(data, dict):
+            data = data.get("lines") or data.get("items") or data.get("rows") or []
+        if not isinstance(data, list):
+            raise ValueError("a JSON BOM is a list of lines, or {lines: [...]}")
+        return [r for r in data if isinstance(r, dict)]
+    sample = text[:4096]
+    delimiter = (
+        "\t"
+        if sample.count("\t") > sample.count(",")
+        else (";" if sample.count(";") > sample.count(",") else ",")
+    )
+    return list(csv.DictReader(io.StringIO(text), delimiter=delimiter))
+
+
+def bom_scope(source_ref: str | None) -> str:
+    """``electronics`` for a BOM made from a board or schematic, ``mechanical`` for one
+    made from an assembly or part, ``unpinned`` when it names no source."""
+    if not source_ref:
+        return "unpinned"
+    prefix = source_ref.split("-", 1)[0].upper()
+    if prefix in ("PCB", "SCH"):
+        return "electronics"
+    if prefix in ("ASM", "CAD"):
+        return "mechanical"
+    return "other"
+
+
+def read_bom_lines(path: Path) -> list[dict[str, Any]]:
+    """The BOM's lines as ``{part, qty, refs, text}``; placed-nothing lines are left out.
+
+    ``part`` is the first of designation, part, MPN, value or name; ``qty``
+    the quantity column, else the number of references, else 1; ``text``
+    every value of the line, so a check can find a designation anywhere in it.
+    """
+    out: list[dict[str, Any]] = []
+    for raw in _bom_rows(path):
+        row = {str(k).strip().lower(): v for k, v in raw.items() if k is not None}
+        values = [str(v).strip() for v in row.values() if v not in (None, "")]
+        if not values:
+            continue
+        dnp = next((str(row[k]).strip().lower() for k in _BOM_DNP if k in row), "")
+        if dnp in ("dnp", "yes", "true", "1", "x", "excluded"):
+            continue
+        refs_raw = next((row[k] for k in _BOM_REFS if row.get(k)), "")
+        refs = [r for r in re.split(r"[\s,;]+", str(refs_raw)) if r] if refs_raw else []
+        qty_raw = next((row[k] for k in _BOM_QTY if row.get(k) not in (None, "")), None)
+        try:
+            qty = float(str(qty_raw)) if qty_raw is not None else float(len(refs) or 1)
+        except ValueError:
+            qty = float(len(refs) or 1)
+        part = next((str(row[k]).strip() for k in _BOM_PART if row.get(k)), values[0])
+        out.append(
+            {
+                "part": part[:200],
+                "qty": int(qty) if qty.is_integer() else qty,
+                "refs": refs[:200],
+                "text": " | ".join(values)[:400],
+            }
+        )
+    return out
 
 
 def workspace_root() -> Path:
@@ -204,6 +302,8 @@ def select_files(kind: str, path: Path) -> tuple[Path, list[Path]]:
             return folder, [path, *extra]
         if kind == "gcode" and path.suffix.lower() not in _GCODE_SUFFIXES:
             raise ValueError(f"G-code is a .gcode, .gco or .bgcode file, not '{path.name}'")
+        if kind == "bom" and path.suffix.lower() not in _BOM_SUFFIXES:
+            raise ValueError(f"a BOM is a .csv, .tsv or .json file, not '{path.name}'")
         return folder, [path]
 
     folder = path
@@ -277,6 +377,14 @@ def select_files(kind: str, path: Path) -> tuple[Path, list[Path]]:
             raise ValueError(f"no .gcode, .gco or .bgcode file in '{folder}'")
         config = folder / "config.ini"
         return folder, files + ([config] if config.is_file() else [])
+    if kind == "bom":
+        files = [
+            p for p in sorted(folder.iterdir()) if p.is_file() and p.suffix.lower() in _BOM_SUFFIXES
+        ]
+        files.sort(key=lambda p: (p.suffix.lower() not in (".csv", ".tsv"), p.name))
+        if not files:
+            raise ValueError(f"no .csv, .tsv or .json BOM in '{folder}'")
+        return folder, files[:1]
     raise ValueError(f"unknown kind '{kind}'")
 
 
@@ -479,6 +587,12 @@ def make_design_files_recorder(
             raise ValueError(f"{total} bytes is over the {limit}-byte limit")
         payload = [(p.relative_to(folder).as_posix(), p.read_bytes()) for p in files]
         measured = read_simready_record(folder) if work_product_type == "purchased_model" else {}
+        bom_lines: list[dict[str, Any]] = []
+        if work_product_type == "bom":
+            try:
+                bom_lines = read_bom_lines(files[0])
+            except (ValueError, UnicodeError) as exc:
+                raise ValueError(f"the BOM '{files[0].name}' cannot be read: {exc}") from exc
 
         # Which revision this was made from: the caller's, the sources', or the
         # part the slicer says it sliced.
@@ -493,11 +607,18 @@ def make_design_files_recorder(
                 logger.debug("design_files_sliced_model_unmatched", error=str(exc))
                 pinned_source = None
             source_how = "slicer" if pinned_source else ""
-        if pinned_source is None and work_product_type in ("gerber", "pick_and_place", "gcode"):
+        if pinned_source is None and work_product_type in (
+            "gerber",
+            "pick_and_place",
+            "gcode",
+            "bom",
+        ):
             warnings.append(
                 f"no source revision for this {work_product_type}: pass source_ref (the "
                 "revision it was made from), or the release counts it as unpinned"
             )
+        if work_product_type == "bom" and not bom_lines:
+            warnings.append("the BOM lists nothing: the release checklist fails an empty BOM")
         elif pinned_source is not None:
             from twin_core.items import find_item, parse_item_ref
 
@@ -591,6 +712,14 @@ def make_design_files_recorder(
                 meta["build_outputs"] = [
                     rel for rel, _ in payload if Path(rel).name in _BUILD_OUTPUTS
                 ]
+            domain = kind.domain
+            if work_product_type == "bom":
+                scope = bom_scope(pinned_source)
+                domain = scope if scope in ("electronics", "mechanical") else domain
+                meta["bom_scope"] = scope
+                meta["line_items"] = len(bom_lines)
+                meta["bom_lines"] = bom_lines[:MAX_BOM_LINES]
+                span.set_attribute("bom.lines", len(bom_lines))
             # FORGE-711: what the package itself says beats what a caller passes.
             meta.update(measured)
             if metadata:
@@ -604,7 +733,7 @@ def make_design_files_recorder(
                 id=wp_id,
                 name=name,
                 type=WorkProductType(kind.wp_type),
-                domain=kind.domain,
+                domain=domain,
                 file_path="" if primary_key else str(files[0]),
                 content_hash=content_hash,
                 format=fmt,
@@ -653,6 +782,9 @@ def make_design_files_recorder(
                 "thread_unlinked_stages": len(thread.unlinked),
                 "source_ref": pinned_source,
             }
+            if work_product_type == "bom":
+                result["line_items"] = len(bom_lines)
+                result["bom_scope"] = meta["bom_scope"]
             if thread.inferred:
                 result["inferred_links"] = thread.inferred
             if warnings:

@@ -267,10 +267,12 @@ async def test_the_release_gate_and_package_hold_a_failing_drc(
     await _resolved_project(twin, machine_library)
     checklist = await manufacturing_checklist(twin, PID)
     assert checklist is not None and checklist.releasable, checklist.blockers
-    assert [i.id for i in checklist.items if i.status == "not_applicable"][-3:] == [
+    assert [i.id for i in checklist.items if i.status == "not_applicable"][-5:] == [
         "eda_checks",
         "assembly_dfa",
         "outputs_current",
+        "bom_complete",
+        "design_files_released",
     ]
 
     ref = await _board(twin)
@@ -278,10 +280,16 @@ async def test_the_release_gate_and_package_hold_a_failing_drc(
     checklist = await manufacturing_checklist(twin, PID)
     assert checklist is not None and not checklist.releasable
     failing = [i.id for i in checklist.items if i.status == "fail"]
-    # A part and a board: an assembly is needed too.
-    assert failing == ["eda_checks", "assembly_dfa"]
+    # A part and a board: an assembly is needed too, and the board's BOM.
+    assert failing == ["eda_checks", "assembly_dfa", "bom_complete"]
     assert readiness(checklist)["level"] == "in_progress"
-    assert {"eda_checks", "assembly_dfa", "outputs_current"} <= set(GATE_ITEMS)
+    assert {
+        "eda_checks",
+        "assembly_dfa",
+        "outputs_current",
+        "bom_complete",
+        "design_files_released",
+    } <= set(GATE_ITEMS)
 
     g8 = await evaluate_g8_release(twin, PID)
     check = next(c for c in g8.checks if c.id == "manufacturing_release_checklist")
@@ -437,16 +445,21 @@ async def test_an_assembly_is_required_built_checked_and_its_findings_block(
     )
     assert out["outcome"] == "issues_found"
     assert out["counts"]["high"] == 2
+    # The board sits on the cover's holes with nothing holding it: an
+    # unfastened joint (medium).
+    assert out["counts"]["medium"] == 1
     ids = sorted(f["id"] for f in out["open_findings"])
     assert ids == [
+        "fastener:CAD-COVER@1|CAD-DRIVER-BOARD-3D@1:unfastened",
         "hole_pattern:CAD-COVER@1|CAD-DRIVER-BOARD-3D@1",
         "outline_fit:CAD-COVER@1|CAD-DRIVER-BOARD-3D@1",
     ]
     assert out["checklist_item"] is None  # no exact DFM here: the checklist does not apply
     assert asm_ref in out["depends_on"] and "PCB-DRIVER-BOARD@1" in out["depends_on"]
     item = await evaluate_assembly_item(twin, PID, {})
-    assert item.status == "fail" and len(item.blockers) == 2
-    assert all("high:" in b for b in item.blockers)
+    assert item.status == "fail" and len(item.blockers) == 3
+    assert sum("high:" in b for b in item.blockers) == 2
+    assert any("medium: unfastened joint" in b for b in item.blockers)
 
     # Accepted by a person, the findings no longer block.
     fit = server._assembly_fit()
@@ -463,7 +476,7 @@ async def test_an_assembly_is_required_built_checked_and_its_findings_block(
     )
     item = await evaluate_assembly_item(twin, PID, await accepted_waivers(twin, PID))
     assert item.status == "pass", item.blockers
-    assert "2 accepted" in item.detail and "accepted by lead" in item.detail
+    assert "3 accepted" in item.detail and "accepted by lead" in item.detail
 
 
 async def test_a_clean_check_passes_and_a_new_part_revision_reopens_it(
@@ -487,6 +500,8 @@ async def test_a_clean_check_passes_and_a_new_part_revision_reopens_it(
                     "min_deg": -60,
                     "max_deg": 0,
                     "steps": 4,
+                    # A snap hinge: no pin expected on its axis.
+                    "retention": "snap",
                 }
             ],
         }
@@ -499,6 +514,7 @@ async def test_a_clean_check_passes_and_a_new_part_revision_reopens_it(
                 "holes_a": [[3.35, 3.35], [39.65, 3.35]],
                 "b": "Cover",
                 "holes_b": [[7.35, 7.35], [43.65, 7.35]],
+                "retention": "snap",
             }
         ],
         "outlines": [
@@ -545,6 +561,26 @@ async def test_a_product_with_a_board_releases_once_it_is_checked(
         ),
         tmp_path,
     )
+    holes = [[3.35, 3.35], [39.65, 24.65]]
+    screws = [
+        {
+            "designation": "ISO 4762 M2.5x8",
+            "name": f"board screw {i + 1}",
+            # The underside of the head on the board's top face (z 41 + 1.6).
+            "location": {"x": x, "y": y, "z": 42.6},
+            "holes": [
+                {"part": "Board", "diameter_mm": 2.7, "length_mm": 1.6, "center": [x, y, 0]},
+                {
+                    "part": enclosure,
+                    "diameter_mm": 2.1,
+                    "fit": "thread_forming",
+                    "depth_mm": 8,
+                    "center": [x, y, 40],
+                },
+            ],
+        }
+        for i, (x, y) in enumerate(holes)
+    ]
     built = await server.build_assembly(
         {
             "project_id": PROJECT,
@@ -553,8 +589,10 @@ async def test_a_product_with_a_board_releases_once_it_is_checked(
                 {"item_key": enclosure},
                 {"item_key": "CAD-DRIVER-BOARD-3D", "name": "Board", "location": {"z": 41}},
             ],
+            "fasteners": screws,
         }
     )
+    assert [f["designation"] for f in built["layout"]["fasteners"]] == ["ISO 4762 M2.5x8"] * 2
     # The assembly is validated and exported like any CAD item.
     node = await twin.graph.get_node(UUID(built["node_id"]))
     await set_node_metadata(twin, node, **VALIDATED)
@@ -564,7 +602,6 @@ async def test_a_product_with_a_board_releases_once_it_is_checked(
     assert checklist.item("dfm").status == "pass", checklist.item("dfm").detail
     assert checklist.item("assembly_dfa").status == "fail"
 
-    holes = [[3.35, 3.35], [39.65, 24.65]]
     out = await server.check_assembly(
         {
             "project_id": PROJECT,
@@ -585,9 +622,37 @@ async def test_a_product_with_a_board_releases_once_it_is_checked(
         }
     )
     assert out["outcome"] == "passed", out["open_findings"]
+    fastener = next(c for c in out["checks"] if c["check"] == "fastener")
+    assert fastener["status"] == "passed" and fastener["required"], fastener
     assert out["checklist_item"]["status"] == "pass"
     checklist = await manufacturing_checklist(twin, PID)
+    assert checklist is not None and not checklist.releasable
+    # The board's BOM and the assembly's (with its two screws) are still missing.
+    assert [i.id for i in checklist.items if i.status == "fail"] == ["bom_complete"]
+    record = make_design_files_recorder(twin, workspace_dir=str(tmp_path))
+    (tmp_path / "board-bom.csv").write_text(
+        "Refs,Value,Footprint,Qty\nR1 R2,10k,R_0402,2\nJ1,USB_C,USB4105,1\n"
+    )
+    (tmp_path / "asm-bom.csv").write_text(
+        "Part,Description,Qty\nEnclosure,printed PLA,1\nISO 4762 M2.5x8,socket head cap screw,2\n"
+    )
+    await record(
+        work_product_type="bom",
+        file_path=str(tmp_path / "board-bom.csv"),
+        name="Driver board BOM",
+        project_id=PROJECT,
+        source_ref=board,
+    )
+    await record(
+        work_product_type="bom",
+        file_path=str(tmp_path / "asm-bom.csv"),
+        name="Lamp assembly BOM",
+        project_id=PROJECT,
+        source_ref=built["item_ref"],
+    )
+    checklist = await manufacturing_checklist(twin, PID)
     assert checklist is not None and checklist.releasable, checklist.blockers
+    assert "2 line(s)" in checklist.item("bom_complete").detail
     assert readiness(checklist)["level"] == "production"
 
 
@@ -674,7 +739,8 @@ async def test_the_contract_supplies_the_hole_pattern_and_outline(
     assert any("hole pattern from IFC-CAD-EDA@" in n for n in out["derived"])
     assert any("board outline from IFC-CAD-EDA@" in n for n in out["derived"])
     failed = {c["check"] for c in out["checks"] if c["status"] == "failed"}
-    assert failed == {"hole_pattern", "outline_fit"}
+    # The contract's holes miss, and nothing fastens the board to them.
+    assert failed == {"hole_pattern", "outline_fit", "fastener"}
 
 
 async def test_check_assembly_refuses_what_is_not_a_built_assembly(

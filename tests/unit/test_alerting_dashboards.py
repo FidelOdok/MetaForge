@@ -144,7 +144,8 @@ class TestAlertingRules:
         # + 1 CadQuery scripts stopped at the memory limit (FORGE-832).
         # + 1 FEA on a committed CAD item failing (ItemFeaFailures, FORGE-833).
         # + 1 assembly fit checks failing (AssemblyCheckFailures, FORGE-841).
-        assert len(rules) == 94
+        # + 1 stray boards or schematics left out of releases (info).
+        assert len(rules) == 95
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""

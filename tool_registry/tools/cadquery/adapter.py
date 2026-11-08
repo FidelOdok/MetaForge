@@ -984,7 +984,16 @@ class CadqueryServer(McpToolServer):
                 tool_id="cadquery.create_assembly",
                 adapter_id="cadquery",
                 name="Create Assembly",
-                description="Create multi-part assembly from STEP files with constraints",
+                description=(
+                    "Create multi-part assembly from STEP files with constraints. A part may "
+                    "instead be a bought standard part made from its standard's dimensions: "
+                    "shape {generator: socket_head_cap_screw (d, length, dk, k), "
+                    "parallel_pin (d, length), washer (d1, d2, h) or hex_nut (d, m, s), "
+                    "params, z_offset}, its origin the underside of the head (a pin's end, "
+                    "a washer's or nut's top face), running along -Z. Standard parts are "
+                    "left out of the interference list: a screw in its pilot overlaps by "
+                    "design."
+                ),
                 capability="cad_assembly",
                 input_schema={
                     "type": "object",
@@ -996,6 +1005,13 @@ class CadqueryServer(McpToolServer):
                                 "properties": {
                                     "name": {"type": "string"},
                                     "file": {"type": "string"},
+                                    "shape": {
+                                        "type": "object",
+                                        "description": (
+                                            "A standard part instead of a file: generator, "
+                                            "params (mm) and z_offset."
+                                        ),
+                                    },
                                     "location": {
                                         "type": "object",
                                         "description": (
@@ -1009,7 +1025,7 @@ class CadqueryServer(McpToolServer):
                                         },
                                     },
                                 },
-                                "required": ["name", "file"],
+                                "required": ["name"],
                             },
                             "description": "Parts to assemble",
                         },
@@ -1947,13 +1963,24 @@ class CadqueryServer(McpToolServer):
         if not parts:
             raise ValueError("parts list is required and must not be empty")
 
+        from tool_registry.tools.cadquery.operations import standard_shape_spec
+
         for i, part in enumerate(parts):
             if not part.get("name"):
                 raise ValueError(f"Part {i} is missing 'name'")
-            if not part.get("file"):
-                raise ValueError(f"Part {i} is missing 'file'")
+            if part.get("shape"):
+                try:
+                    standard_shape_spec(part["shape"])
+                except ValueError as exc:
+                    raise ValueError(f"Part {i}: {exc}") from exc
+            elif not part.get("file"):
+                raise ValueError(f"Part {i} is missing 'file' (or a standard part 'shape')")
 
-        logger.info("Creating assembly", part_count=len(parts))
+        logger.info(
+            "Creating assembly",
+            part_count=len(parts),
+            standard_parts=sum(1 for p in parts if p.get("shape")),
+        )
 
         from tool_registry.tools.cadquery.operations import CadqueryOperations
 

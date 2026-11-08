@@ -222,12 +222,13 @@ async def test_a_connector_set_back_from_the_edge_is_medium() -> None:
     assert finding.id.endswith("J1:edge")
 
     # At the edge, and facing a slot 0.5 mm away on its centre line: passes.
+    # The slot normal is the way the opening faces, out of the enclosure.
     at_edge = {
         **connector,
         "face": [42.8, 14.0, 3.0],
         "slot_part": "base",
         "slot_center": [0.0, 20.0, 8.0],
-        "slot_normal": [-1, 0, 0],
+        "slot_normal": [1, 0, 0],
     }
     base_close = _body("base", (2, 40, 20), {"x": 43.3, "y": -6, "z": -5})
     ok = await _run([board, base_close], {"connectors": [at_edge]})

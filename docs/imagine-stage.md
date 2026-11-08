@@ -258,14 +258,28 @@ reference, never file bytes:
 5. Put the product together and check it fits: commit each board's
    `kicad.export_3d` STEP with `twin.commit_geometry`, build the assembly with
    `twin.build_assembly` (every part and board at its placement, each hinge a
-   revolute joint with its limits), and check it with `twin.check_assembly`
-   (overlaps, hole patterns, the board outline in its pocket, edge
-   connectors, washer and fastener stacks, joint sweeps, seated parts). Fix
+   revolute joint with its limits, and every screw and hinge pin in
+   `fasteners` by designation, such as `ISO 4762 M2.5x8` or `ISO 2338 4x30`,
+   placed in the holes it goes through), and check it with
+   `twin.check_assembly` (overlaps, hole patterns, the board outline in its
+   pocket, each edge connector's mating axis against its slot's opening and a
+   USB-C plug envelope through the slot, each fastener in its holes, washer
+   stacks, joint sweeps, seated parts). A connector named by its reference
+   (`J1`) takes its footprint and rotation from the board file; record each
+   slot on its part as `connector_slots`. A hole pattern or hinge with no
+   fastener is an unfastened joint unless it is a snap or a press fit. Fix
    each high and medium finding
    ([design for assembly](twin_schema.md#design-for-assembly)).
 6. Record the fabrication outputs, each with its `source_ref` (the revision
    it was made from: an output made from an older revision blocks the
-   release), then `twin.create_baseline`, a
+   release), and two BOMs with `twin.record_design_files`
+   (`work_product_type: bom`): the board's from `kicad.export_bom`, pinned to
+   the `PCB-...@n`, and the assembly's, listing every made part and every
+   fastener by designation and quantity, pinned to the `ASM-...@n`; an empty
+   BOM, or one missing a bought part, blocks the release
+   ([BOM files](twin_schema.md#bom-files)). Record every board and schematic
+   as its item's revision: one that is not is left out of the package and
+   blocks it. Then `twin.create_baseline`, a
    `release_approval` request with `twin.record_engineering_entity`, and
    `twin.create_release_package`. The baseline and the approval wait for the
    person: neither is a human-authority tool, so the human-authority
@@ -275,7 +289,8 @@ reference, never file bytes:
    baseline, approves the release with `twin.approve_release` and creates the
    package, each recorded as its decision on the person's behalf
    ([delegating a release](approvals.md#delegating-a-release-to-an-agent)).
-   A failing ERC, DRC or assembly finding that is truly acceptable is
+   A failing ERC, DRC or assembly finding, or a stray board left out of the
+   package, that is truly acceptable is
    accepted with `twin.accept_release_finding` and a reason: held for the
    person, or, under the same release switch, recorded as the agent's
    decision for them ([the release checklist](twin_schema.md#release-checklist)).
