@@ -152,6 +152,7 @@ jobs:
       POSTGRES_PASSWORD: ci-unused
       MINIO_SECRET_KEY: ci-unused
       TEMPORAL_POSTGRES_PASSWORD: ci-unused
+      GRAFANA_PASSWORD: ci-unused
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
