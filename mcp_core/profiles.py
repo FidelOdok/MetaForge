@@ -928,7 +928,9 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         "twin.measure_dfm",
         "kicad.generate_schematic",
         "kicad.generate_pcb",
-        "kicad.run_erc",
+        # kicad.generate_schematic runs ERC itself, and Check carries kicad.run_erc;
+        # its place here went to editing a board without an upload.
+        "kicad.edit_pcb",
         "kicad.run_drc",
         "component.search_parametric",
         "twin.record_component_selection",
