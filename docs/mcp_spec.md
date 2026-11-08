@@ -1173,7 +1173,7 @@ ENTRYPOINT ["python", "server.py"]
 | `cadquery.get_properties` | `cad_analysis` | Geometric properties (volume, area, center of mass, bounding box, inertia) |
 | `cadquery.export_geometry` | `cad_export` | Export to STEP/STL/OBJ/BREP/AMF/SVG |
 | `cadquery.execute_script` | `cad_scripting` | Run a CadQuery Python script in an OS-isolated child process (see below) |
-| `cadquery.create_assembly` | `cad_assembly` | Multi-part assembly from STEP files with constraints. Without `output_path` it writes into a new folder under its work folder and returns the path as `assembly_file`; a named path must be inside the work folder. Fails if the file is not written |
+| `cadquery.create_assembly` | `cad_assembly` | Multi-part assembly from STEP files with constraints. Without `output_path` it writes into a new folder under its work folder and returns the path as `assembly_file`; a named path must be inside the work folder. Fails if the file is not written. A part may be a `shape` (a screw, pin, washer or nut from its standard's dimensions) instead of a file, left out of the interference list |
 | `cadquery.generate_enclosure` | `cad_enclosure` | PCB enclosure from board dimensions and connector cutouts |
 
 #### Script isolation
@@ -1430,8 +1430,16 @@ handling file bytes. Each takes `project_id`.
 - `twin.build_assembly` (producing, same injection): `{project_id, name,
   parts: [{item_key, name?, location?: {x, y, z, rx, ry, rz}, board_ref?}],
   joints?: [{name, type: revolute | fixed | slider, parent?, child | moving,
-  axis_point, axis_dir, min_deg?, max_deg?, steps?}], material?, item_key?,
-  change_reason?}`. Stages each part revision's STEP, builds the assembly
+  axis_point, axis_dir, min_deg?, max_deg?, steps?, retention?}],
+  fasteners?: [{designation, name?, location, holes?: [{part, diameter_mm,
+  fit?: clearance | tapped | thread_forming | press, length_mm?, depth_mm?,
+  center?, axis?, counterbore?: {diameter_mm, depth_mm}, face_diameter_mm?,
+  flush?}], washers?, nut?, min_engagement_mm?}], material?, item_key?,
+  change_reason?}`. A fastener's `designation` is read the way
+  `library.standard_part` reads it (`ISO 4762 M4x25`, `M2.5x6`, `ISO 2338
+  4x30`); it goes into the STEP as a `shape` part of `cadquery.create_assembly`
+  (`{generator, params, z_offset}`, made from the standard's dimensions) and
+  into `layout.fasteners`. Stages each part revision's STEP, builds the assembly
   with `cadquery.create_assembly` over MCP (no `output_path`: the adapter
   writes into a folder of its own and returns `assembly_file`, which the
   gateway reads) and commits it through the geometry
@@ -1442,9 +1450,20 @@ handling file bytes. Each takes `project_id`.
   `twin.commit_geometry`, `source_tool: kicad.export_3d`), which records its
   `board_ref`.
 - `twin.check_assembly` (additive, same injection): `{project_id, assembly:
-  ASM-... | ASM-...@n | node id, checks?: {clearances, hole_patterns,
-  outlines, connectors, stacks, seats, joints, allowed_overlaps,
-  interference_tolerance_mm3}}`. Measures the placed parts with
+  ASM-... | ASM-...@n | node id, checks?: {clearances, hole_patterns
+  (with retention?), outlines, connectors: [{board, name?, reference? |
+  footprint, rotation_deg?, side?, mating_side? | mating_axis, face?,
+  board_outline? | edge_setback_mm?, slot_part?, slot_center?, slot_normal?,
+  slot_size_mm?, plug?, plug_envelope_mm?, plug_shell_mm?, max_gap_mm?}],
+  stacks, fasteners, seats, joints, allowed_overlaps,
+  interference_tolerance_mm3, fastener_tolerance_mm}}`. `fasteners` and
+  `joints` default to the assembly's own. A connector named by `reference`
+  takes its footprint, rotation and side from the board file; with no
+  connectors given, a USB-C receptacle in the board file makes the connector
+  check required, its slot read from a part's `connector_slots`. A mating
+  axis more than 5 degrees off the slot's opening, or a plug that cannot
+  pass the slot to seat, is high; a hole pattern or revolute joint with no
+  fastener is a medium "unfastened joint". Measures the placed parts with
   `cadquery.check_interference` (read only) and records an `assembly_check`
   pinned to the assembly and every part revision. Returns `{node_id,
   assembly_ref, outcome: passed | issues_found | incomplete, counts,
@@ -1452,9 +1471,11 @@ handling file bytes. Each takes `project_id`.
   has a stable `id`, a `severity` and the `parts` involved. See
   [design for assembly](twin_schema.md#design-for-assembly).
 - `twin.accept_release_finding` (destructive, human authority, release
-  delegated): `{project_id, item: eda_checks | assembly_dfa, targets,
-  reason}`. Accepts a failing ERC or DRC (`PCB-...@n:drc`, `SCH-...@n:erc`)
-  or open assembly findings (their ids) for the release, as an approved
+  delegated): `{project_id, item: eda_checks | assembly_dfa |
+  design_files_released, targets, reason}`. Accepts a failing ERC or DRC
+  (`PCB-...@n:drc`, `SCH-...@n:erc`), open assembly findings (their ids) or
+  leaving a stray board or schematic (its node id) out of the package for
+  the release, as an approved
   `waiver` pinned to the revisions it is about. Held for a person, whose
   approval names the approver; with `METAFORGE_ALLOW_AGENT_RELEASE=true` and
   the agent and person headers it runs as the agent's decision for the
@@ -1468,18 +1489,34 @@ handling file bytes. Each takes `project_id`.
   checklist's `outputs_current` and `twin.create_release_package` refuse an
   output made from an older revision or with no source
   ([output source pins](twin_schema.md#output-source-pins)).
+  `work_product_type: bom` records a BOM file (CSV, TSV or JSON): the
+  board's with `source_ref` the `PCB-...@n`, the assembly's with the
+  `ASM-...@n`; it returns `line_items` and `bom_scope` and keeps the lines in
+  `metadata.bom_lines` ([BOM files](twin_schema.md#bom-files)).
+- `library.standard_part` takes `designation` alone (`ISO 4762 M4x25`,
+  `M2.5x6`, `ISO 7089 M4`, `ISO 2338 4x30`) as well as `family` and `size`,
+  and knows `iso2338` parallel pins.
+- `cadquery.create_assembly` takes a part as `shape: {generator:
+  socket_head_cap_screw | parallel_pin | washer | hex_nut, params, z_offset}`
+  in place of `file`, made from a standard's dimensions and left out of the
+  interference list.
 - `twin.render_work_product` records nothing unless `store: true`: looking at
   a part never changes the twin.
 
 The release checklist (`twin.get_release_checklist`) now also holds
-`eda_checks`, `assembly_dfa` and `outputs_current`, and G8 requires them
+`eda_checks`, `assembly_dfa`, `outputs_current`, `bom_complete` and
+`design_files_released`, and G8 requires them
 ([the release checklist](twin_schema.md#release-checklist)).
+`twin.create_release_package` leaves out any board or schematic that is not
+its item's head revision, lists them in `excluded_design_files`, and refuses
+while one is no item's revision at all and not accepted.
 
 Observability: `metaforge_release_path_call_total{tool, outcome}`,
 `metaforge_assembly_build_total{outcome}`,
 `metaforge_assembly_check_total{outcome}`,
-`metaforge_assembly_finding_total{check, severity}` and
-`metaforge_release_finding_accepted_total{item, route}`; the
+`metaforge_assembly_finding_total{check, severity}`,
+`metaforge_release_finding_accepted_total{item, route}` and
+`metaforge_release_design_file_excluded_total{kind, reason}`; the
 `ItemFeaFailures` and `AssemblyCheckFailures` alerts; and spans
 `twin.measure_dfm`, `twin.dfm.exact.measure`, `twin.resolve_concept_component`,
 `twin.run_item_fea`, `twin.build_assembly`, `twin.check_assembly` and

@@ -102,8 +102,11 @@ async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, An
     A fabrication output carries ``source_status`` too (``current``,
     ``stale``, ``unpinned`` or ``not_required``); one made again from the
     current revision supersedes the older ones and they are left out.
+    A schematic or board is listed only as the head of its item: an older
+    revision, or one that is no item's revision at all (a stray layout), is
+    left out (:func:`twin_core.dfm.release_fit.stray_design_files` names them).
     """
-    from twin_core.dfm.release_fit import OUTPUT_KINDS, output_sources
+    from twin_core.dfm.release_fit import ITEM_DESIGN_TYPES, OUTPUT_KINDS, output_sources
     from twin_core.items import item_for_node, list_items, supports_items
 
     rows: list[dict[str, Any]] = []
@@ -165,12 +168,10 @@ async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, An
         except Exception as exc:  # noqa: BLE001
             logger.warning("release_manifest_type_unavailable", type=wp_type.value, error=str(exc))
             continue
-        newest: dict[str, Any] = {}
+        newest: dict[str, tuple[Any, str | None]] = {}
         for node in sorted(nodes, key=_created_key):
             if str(node.id) in heads or wp_type is WorkProductType.CAD_MODEL:
                 continue  # CAD is listed by item head above, never a superseded revision
-            newest[str(getattr(node, "name", "") or node.id)] = node
-        for name, node in sorted(newest.items()):
             own = None
             if supports_items(twin):
                 try:
@@ -182,6 +183,20 @@ async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, An
                     if found[0].head_node_id not in (None, node.id):
                         continue  # an older revision of a design file
                     own = f"{found[0].key}@{found[1]}"
+                elif wp_type.value in ITEM_DESIGN_TYPES:
+                    # A schematic or board that is no item's revision is never
+                    # packaged: it could be made in place of the released one.
+                    _record_excluded(wp_type.value, "orphan")
+                    logger.info(
+                        "release_manifest_orphan_excluded",
+                        project_id=str(project_id),
+                        kind=wp_type.value,
+                        node_id=str(node.id),
+                        name=str(getattr(node, "name", "") or ""),
+                    )
+                    continue
+            newest[str(getattr(node, "name", "") or node.id)] = (node, own)
+        for name, (node, own) in sorted(newest.items()):
             rows.append(
                 {
                     "kind": wp_type.value,
@@ -196,6 +211,28 @@ async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, An
                 }
             )
     return rows
+
+
+def _record_excluded(kind: str, reason: str) -> None:
+    try:
+        from observability.metrics import collector_for
+
+        collector_for("metaforge-gateway").record_release_design_file_excluded(kind, reason)
+    except Exception as exc:  # noqa: BLE001 - a counter never changes the manifest
+        logger.debug("release_excluded_metric_failed", error=str(exc))
+
+
+async def unaccepted_strays(twin: Any, project_id: UUID) -> tuple[list[Any], list[Any]]:
+    """``(every stray design file, the orphans no person accepted leaving out)``."""
+    from twin_core.dfm.release_fit import (
+        DESIGN_FILES_ITEM,
+        accepted_waivers,
+        stray_design_files,
+    )
+
+    strays = await stray_design_files(twin, project_id)
+    accepted = (await accepted_waivers(twin, project_id)).get(DESIGN_FILES_ITEM, {})
+    return strays, [s for s in strays if s.status == "orphan" and s.node_id not in accepted]
 
 
 def stale_outputs(rows: list[dict[str, Any]]) -> list[str]:
@@ -237,7 +274,10 @@ async def _snapshot(twin: Any, project_id: UUID) -> dict[str, Any]:
         project_id=project_id, work_product_type=WorkProductType.DESIGN_DECISION
     )
     files = await design_file_manifest(twin, project_id)
+    strays, _open = await unaccepted_strays(twin, project_id)
     return {
+        # The schematics and boards left out: older revisions and strays.
+        "excluded_design_files": [s.as_dict() for s in strays],
         "hierarchy_node_ids": [str(n.id) for n in hierarchy_nodes],
         "bom_item_ids": [str(i.id) for i in bom_items],
         "evidence_ids": [str(e.id) for e in evidence],
@@ -342,6 +382,20 @@ def make_release_package_creator(
                     f"{gate.status.value}, not passed -- {failing}"
                 )
 
+            # A schematic or board that is no item's revision may be the board
+            # someone fabricates: it is refused until it is recorded as a
+            # revision or a person accepts leaving it out.
+            _strays, orphans = await unaccepted_strays(twin, pid)
+            if orphans:
+                _record_blocker("design_files_released")
+                raise ValueError(
+                    "twin.create_release_package: design files that are not the released "
+                    "revision of any item -- "
+                    + "; ".join(s.words() for s in orphans)
+                    + ". Record each as its item's revision with twin.record_design_files "
+                    "(item_key), or have a person accept leaving it out with "
+                    "twin.accept_release_finding (item design_files_released, target the node id)."
+                )
             snapshot = await _snapshot(twin, pid)
             # Every fabrication output must be made from the released revision,
             # whether or not the manufacturing checklist applies to the project.

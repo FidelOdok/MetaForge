@@ -1,6 +1,6 @@
 """Release checklist items that make sure the released things fit and match.
 
-Three items the manufacturing release checklist adds to the DFM items in
+Five items the manufacturing release checklist adds to the DFM items in
 :mod:`twin_core.dfm.release_checklist`, all required by the release gate:
 
 ``eda_checks``
@@ -22,8 +22,20 @@ Three items the manufacturing release checklist adds to the DFM items in
     ``FW-...@n``), and that revision is the current one. An output made from
     an older revision, or with no source on record, fails. Outputs are never
     waived: make them again.
+``bom_complete``
+    Every board has a BOM made from its current revision (``source_ref``
+    ``PCB-...@n``) that lists something, and an assembly holding bought
+    parts (fasteners by designation, a purchased model) has a BOM made from
+    its current revision (``ASM-...@n``) listing each of them in at least
+    the quantity the assembly holds. An empty BOM fails.
+``design_files_released``
+    A schematic or board is packaged only as the head revision of its item.
+    One that is not a revision of any item (a stray layout recorded on the
+    side) is left out of the package and fails this item until it is
+    recorded as its item's revision or a person accepts leaving it out.
+    Older revisions are left out without a finding.
 
-**Waivers.** A failing ERC/DRC or an assembly finding may be accepted the same
+**Waivers.** A failing ERC/DRC, an assembly finding or a stray design file may be accepted the same
 way DFM issues are: by a person, or by an agent the owner delegates release to
 acting for a person. ``twin.accept_release_finding`` records it as an approved
 ``waiver`` entity naming the item (``release_check``), what it accepts
@@ -50,15 +62,21 @@ tracer = get_tracer("twin_core.dfm.release_fit")
 EDA_ITEM = "eda_checks"
 ASSEMBLY_ITEM = "assembly_dfa"
 OUTPUTS_ITEM = "outputs_current"
+BOM_ITEM = "bom_complete"
+DESIGN_FILES_ITEM = "design_files_released"
 
 FIT_ITEM_LABELS: dict[str, str] = {
     EDA_ITEM: "ERC and DRC pass on the released schematic and board revisions",
     ASSEMBLY_ITEM: "Assembly checked (DFA)",
     OUTPUTS_ITEM: "Fabrication outputs made from the released revisions",
+    BOM_ITEM: "BOM lists every purchased part and the board's components",
+    DESIGN_FILES_ITEM: "Only the released revision of each design file is packaged",
 }
 
 #: The items a waiver may accept a failure of.
-WAIVABLE_ITEMS: frozenset[str] = frozenset({EDA_ITEM, ASSEMBLY_ITEM})
+WAIVABLE_ITEMS: frozenset[str] = frozenset({EDA_ITEM, ASSEMBLY_ITEM, DESIGN_FILES_ITEM})
+#: Design file types that are packaged only as the head of an item.
+ITEM_DESIGN_TYPES: tuple[str, ...] = ("schematic", "pcb_layout")
 
 #: The record type a ``twin.check_assembly`` run is stored as (an engineering entity).
 ASSEMBLY_CHECK_TYPE = "assembly_check"
@@ -377,6 +395,30 @@ async def latest_assembly_check(twin: Any, project_id: UUID, assembly_ref: str) 
     return max(found, key=lambda r: (_stamp(r[1], _meta(r[1])), r[0]))[1]
 
 
+async def _best_assembly(
+    twin: Any, assemblies: list[Any], part_keys: set[str], board_keys: set[str]
+) -> tuple[Any, dict[str, Any]] | None:
+    """The assembly whose head holds the most of the product's parts and boards."""
+    best: tuple[int, Any, dict[str, Any]] | None = None
+    for asm in assemblies:
+        node = await twin.get_work_product(asm.head_node_id) if asm.head_node_id else None
+        layout = layout_of(_meta(node))
+        keys = {
+            str(p.get("item_ref") or "").split("@")[0]
+            for p in layout.get("parts") or []
+            if isinstance(p, dict)
+        }
+        boards_in = {
+            str(p.get("board_ref") or "").split("@")[0]
+            for p in layout.get("parts") or []
+            if isinstance(p, dict) and p.get("board_ref")
+        }
+        score = len(keys & part_keys) + len(boards_in & board_keys)
+        if best is None or score > best[0]:
+            best = (score, asm, layout)
+    return (best[1], best[2]) if best is not None else None
+
+
 async def evaluate_assembly_item(
     twin: Any, project_id: UUID, waivers: dict[str, dict[str, Waiver]]
 ) -> ChecklistItem:
@@ -415,25 +457,9 @@ async def evaluate_assembly_item(
                 "placement, with the joints"
             ],
         )
-    best: tuple[int, Any, dict[str, Any]] | None = None
-    for asm in assemblies:
-        node = await twin.get_work_product(asm.head_node_id) if asm.head_node_id else None
-        layout = layout_of(_meta(node))
-        keys = {
-            str(p.get("item_ref") or "").split("@")[0]
-            for p in layout.get("parts") or []
-            if isinstance(p, dict)
-        }
-        boards_in = {
-            str(p.get("board_ref") or "").split("@")[0]
-            for p in layout.get("parts") or []
-            if isinstance(p, dict) and p.get("board_ref")
-        }
-        score = len(keys & set(want_parts)) + len(boards_in & set(want_boards))
-        if best is None or score > best[0]:
-            best = (score, asm, layout)
+    best = await _best_assembly(twin, assemblies, set(want_parts), set(want_boards))
     assert best is not None
-    _score, asm, layout = best
+    asm, layout = best
     asm_ref = f"{asm.key}@{asm.head_revision}"
     blockers: list[str] = []
     steps: list[str] = []
@@ -669,8 +695,337 @@ def evaluate_outputs_item(rows: list[OutputSource]) -> ChecklistItem:
     )
 
 
+# ---------------------------------------------------------------------------
+# The BOM
+# ---------------------------------------------------------------------------
+
+
+def _designation_key(text: str) -> tuple[str, str, float | None] | None:
+    """A standard part's ``(family, size, length)`` read from text, or ``None``."""
+    from twin_core.library.standard_parts import StandardPartError, parse_designation
+
+    try:
+        family, size, length = parse_designation(text)
+    except StandardPartError:
+        return None
+    return family, size.upper(), length
+
+
+@dataclass
+class PurchasedPart:
+    """One bought part the assembly holds, and how many."""
+
+    label: str
+    qty: int
+    #: ``(family, size, length)`` for a standard part; ``None`` for a model.
+    key: tuple[str, str, float | None] | None = None
+    #: Words a BOM line naming it contains (a purchased model's key and name).
+    words: tuple[str, ...] = ()
+
+    def listed_by(self, line: dict[str, Any]) -> bool:
+        if self.key is not None:
+            for text in (str(line.get("part") or ""), str(line.get("text") or "")):
+                if _designation_key(text) == self.key:
+                    return True
+            return False
+        text = str(line.get("text") or line.get("part") or "").lower()
+        return any(w and w.lower() in text for w in self.words)
+
+
+def purchased_parts(layout: dict[str, Any]) -> list[PurchasedPart]:
+    """The bought parts an assembly layout holds: its fasteners (with their washers and
+    nuts) by designation, and any purchased part models."""
+    counts: dict[Any, PurchasedPart] = {}
+    for f in layout.get("fasteners") or []:
+        if not isinstance(f, dict):
+            continue
+        for text in [f.get("designation"), *(f.get("washers") or []), f.get("nut")]:
+            if not isinstance(text, str) or not text.strip():
+                continue
+            key = _designation_key(text)
+            slot = key or text.strip().upper()
+            if slot in counts:
+                counts[slot].qty += 1
+            else:
+                counts[slot] = PurchasedPart(text.strip(), 1, key, (text.strip(),))
+    for p in layout.get("parts") or []:
+        if isinstance(p, dict) and p.get("purchased"):
+            item_key = str(p.get("item_ref") or "").split("@")[0]
+            model = ("model", item_key)
+            if model in counts:
+                counts[model].qty += 1
+            else:
+                counts[model] = PurchasedPart(
+                    str(p.get("name") or item_key),
+                    1,
+                    None,
+                    (item_key, str(p.get("name") or "")),
+                )
+    return list(counts.values())
+
+
+@dataclass
+class BomRecord:
+    name: str
+    node_id: str
+    source_ref: str | None
+    lines: list[dict[str, Any]]
+    line_items: int
+
+
+async def bom_records(twin: Any, project_id: UUID) -> list[BomRecord]:
+    """Every current BOM work product (the head of its item), oldest first."""
+    from twin_core.items import item_for_node, supports_items
+    from twin_core.models.enums import WorkProductType
+
+    try:
+        nodes = await twin.list_work_products(
+            project_id=project_id, work_product_type=WorkProductType.BOM
+        )
+    except Exception as exc:  # noqa: BLE001 - unreadable BOMs are no BOM
+        logger.debug("release_boms_unavailable", error=str(exc))
+        return []
+    out: list[BomRecord] = []
+    for node in sorted(
+        nodes, key=lambda n: n.created_at.isoformat() if getattr(n, "created_at", None) else ""
+    ):
+        meta = _meta(node)
+        if not _current(meta):
+            continue
+        if supports_items(twin):
+            own = await item_for_node(twin, node.id)
+            if own is not None and own[0].head_node_id not in (None, node.id):
+                continue  # an older revision of a BOM item
+        lines = [r for r in meta.get("bom_lines") or [] if isinstance(r, dict)]
+        count = meta.get("line_items")
+        out.append(
+            BomRecord(
+                name=str(getattr(node, "name", "") or node.id),
+                node_id=str(node.id),
+                source_ref=await source_of(twin, meta),
+                lines=lines,
+                line_items=int(count) if isinstance(count, int) else len(lines),
+            )
+        )
+    return out
+
+
+def _bom_for(
+    boms: list[BomRecord], key: str, ref: str
+) -> tuple[BomRecord | None, BomRecord | None]:
+    """``(the newest BOM made from ref, the newest made from an older revision of key)``."""
+    on = [b for b in boms if b.source_ref == ref]
+    older = [b for b in boms if (b.source_ref or "").split("@")[0] == key and b.source_ref != ref]
+    return (on[-1] if on else None), (older[-1] if older else None)
+
+
+async def evaluate_bom_item(twin: Any, project_id: UUID) -> ChecklistItem:
+    """The ``bom_complete`` item."""
+    from twin_core.items import list_items, supports_items
+
+    label = FIT_ITEM_LABELS[BOM_ITEM]
+    if not supports_items(twin):
+        return ChecklistItem(BOM_ITEM, label, "not_applicable", "no board or assembly")
+    parts, boards = await product_parts(twin, project_id)
+    assemblies = await list_items(twin, project_id=project_id, item_type="assembly")
+    best = (
+        await _best_assembly(twin, assemblies, {p.key for p in parts}, {b.key for b in boards})
+        if assemblies
+        else None
+    )
+    bought = purchased_parts(best[1]) if best is not None else []
+    if not boards and not bought:
+        return ChecklistItem(
+            BOM_ITEM,
+            label,
+            "not_applicable",
+            "no board, and no bought part in an assembly",
+        )
+    boms = await bom_records(twin, project_id)
+    blockers: list[str] = []
+    steps: list[str] = []
+    passed: list[str] = []
+    for b in boards:
+        on, older = _bom_for(boms, b.key, b.ref)
+        if on is None:
+            blockers.append(
+                f"{b.ref}: no BOM made from this board"
+                + (f" ({older.name} was made from {older.source_ref})" if older else "")
+            )
+            steps.append(
+                f"Export the board's BOM with kicad.export_bom and record it with "
+                f"twin.record_design_files (work_product_type bom, source_ref {b.ref})"
+            )
+        elif on.line_items <= 0:
+            blockers.append(f"{b.ref}: the BOM {on.name} lists nothing")
+            steps.append(f"Export the BOM of {b.ref} again; it must list the board's parts")
+        else:
+            passed.append(f"{b.ref}: {on.line_items} line(s) in {on.name}")
+    if best is not None and bought:
+        asm, _layout = best
+        ref = f"{asm.key}@{asm.head_revision}"
+        on, older = _bom_for(boms, asm.key, ref)
+        needs = ", ".join(f"{p.qty} x {p.label}" for p in bought)
+        if on is None:
+            blockers.append(
+                f"{ref}: no BOM of the assembly listing its bought parts ({needs})"
+                + (f"; {older.name} was made from {older.source_ref}" if older else "")
+            )
+            steps.append(
+                f"Record the assembly's BOM (its parts, and every fastener by designation with "
+                f"its quantity: {needs}) with twin.record_design_files (work_product_type bom, "
+                f"source_ref {ref})"
+            )
+        elif on.line_items <= 0:
+            blockers.append(f"{ref}: the BOM {on.name} lists nothing")
+            steps.append(f"Record the BOM of {ref} again with every bought part: {needs}")
+        else:
+            missing = []
+            for p in bought:
+                listed = sum(float(line.get("qty") or 1) for line in on.lines if p.listed_by(line))
+                if listed + 1e-9 < p.qty:
+                    missing.append(
+                        f"{p.qty} x {p.label}" + (f" (lists {listed:g})" if listed else "")
+                    )
+            if missing:
+                blockers.append(f"{ref}: the BOM {on.name} does not list {', '.join(missing)}")
+                steps.append(
+                    f"Add {', '.join(missing)} to the assembly BOM and record it again "
+                    f"(source_ref {ref})"
+                )
+            else:
+                passed.append(f"{ref}: {len(bought)} bought part(s) listed in {on.name}")
+    if blockers:
+        detail = "; ".join(blockers) + (f"; listed: {'; '.join(passed)}" if passed else "")
+        return ChecklistItem(BOM_ITEM, label, "fail", detail, blockers, steps)
+    return ChecklistItem(BOM_ITEM, label, "pass", "; ".join(passed))
+
+
+# ---------------------------------------------------------------------------
+# Design files that are not the released head of an item
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StrayDesignFile:
+    """A schematic or board node the package leaves out."""
+
+    kind: str
+    node_id: str
+    name: str
+    #: ``orphan`` (not a revision of any item) or ``superseded`` (an older revision).
+    status: str
+    reason: str
+
+    def words(self) -> str:
+        return f"{self.kind} '{self.name}' ({self.node_id[:8]}) {self.reason}"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "node_id": self.node_id,
+            "name": self.name,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+async def stray_design_files(twin: Any, project_id: UUID) -> list[StrayDesignFile]:
+    """Every schematic and board node that is not the head revision of an item.
+
+    A node with no item at all is an ``orphan``: a layout recorded on the side
+    could be fabricated in place of the released board, so it is never packaged
+    and the checklist names it. An older revision is ``superseded``.
+    """
+    from twin_core.items import item_for_node, supports_items
+    from twin_core.models.enums import WorkProductType
+
+    if not supports_items(twin):
+        return []
+    out: list[StrayDesignFile] = []
+    for kind in ITEM_DESIGN_TYPES:
+        try:
+            nodes = await twin.list_work_products(
+                project_id=project_id, work_product_type=WorkProductType(kind)
+            )
+        except Exception as exc:  # noqa: BLE001 - an unreadable type finds nothing
+            logger.debug("release_design_files_unavailable", kind=kind, error=str(exc))
+            continue
+        for node in nodes:
+            try:
+                found = await item_for_node(twin, node.id)
+            except Exception as exc:  # noqa: BLE001 - a failed lookup is no item
+                logger.debug("release_design_file_item_lookup_failed", error=str(exc))
+                found = None
+            name = str(getattr(node, "name", "") or node.id)
+            if found is None:
+                out.append(
+                    StrayDesignFile(
+                        kind, str(node.id), name, "orphan", "is not a revision of any item"
+                    )
+                )
+            elif found[0].head_node_id not in (None, node.id):
+                item = found[0]
+                out.append(
+                    StrayDesignFile(
+                        kind,
+                        str(node.id),
+                        name,
+                        "superseded",
+                        f"is {item.key}@{found[1]}; the head is {item.key}@{item.head_revision}",
+                    )
+                )
+    return out
+
+
+async def evaluate_design_files_item(
+    twin: Any, project_id: UUID, waivers: dict[str, dict[str, Waiver]]
+) -> ChecklistItem:
+    """The ``design_files_released`` item."""
+    from twin_core.items import list_items, supports_items
+
+    label = FIT_ITEM_LABELS[DESIGN_FILES_ITEM]
+    if not supports_items(twin):
+        return ChecklistItem(DESIGN_FILES_ITEM, label, "not_applicable", "no schematic or board")
+    heads = [
+        f"{i.key}@{i.head_revision}"
+        for t in ITEM_DESIGN_TYPES
+        for i in await list_items(twin, project_id=project_id, item_type=t)
+    ]
+    strays = await stray_design_files(twin, project_id)
+    if not heads and not strays:
+        return ChecklistItem(DESIGN_FILES_ITEM, label, "not_applicable", "no schematic or board")
+    accepted = waivers.get(DESIGN_FILES_ITEM, {})
+    orphans = [s for s in strays if s.status == "orphan"]
+    open_ = [s for s in orphans if s.node_id not in accepted]
+    superseded = sum(1 for s in strays if s.status == "superseded")
+    left_out = f"; left out: {superseded} older revision(s)" if superseded else ""
+    kept = [
+        f"{s.words()} ({accepted[s.node_id].words()})" for s in orphans if s.node_id in accepted
+    ]
+    if open_:
+        blockers = [f"{s.words()}: it is left out of the package" for s in open_]
+        steps = [
+            f"If '{s.name}' is the design, record it as its item's next revision with "
+            "twin.record_design_files (item_key); if not, have a person accept leaving it out "
+            f"with twin.accept_release_finding (item {DESIGN_FILES_ITEM}, target {s.node_id})"
+            for s in open_
+        ]
+        return ChecklistItem(
+            DESIGN_FILES_ITEM, label, "fail", "; ".join(blockers) + left_out, blockers, steps
+        )
+    return ChecklistItem(
+        DESIGN_FILES_ITEM,
+        label,
+        "pass",
+        f"packaged: {', '.join(heads) or 'none'}"
+        + left_out
+        + (f"; accepted: {'; '.join(kept)}" if kept else ""),
+    )
+
+
 async def fit_items(twin: Any, project_id: UUID) -> list[ChecklistItem]:
-    """The three items, in checklist order."""
+    """The five items, in checklist order."""
     with tracer.start_as_current_span("twin.dfm.release_fit") as span:
         span.set_attribute("project.id", str(project_id))
         waivers = await accepted_waivers(twin, project_id)
@@ -678,6 +1033,8 @@ async def fit_items(twin: Any, project_id: UUID) -> list[ChecklistItem]:
             await evaluate_eda_item(twin, project_id, waivers),
             await evaluate_assembly_item(twin, project_id, waivers),
             evaluate_outputs_item(await output_sources(twin, project_id)),
+            await evaluate_bom_item(twin, project_id),
+            await evaluate_design_files_item(twin, project_id, waivers),
         ]
         span.set_attribute(
             "release_fit.failing", ",".join(i.id for i in items if i.status == "fail")
@@ -688,25 +1045,36 @@ async def fit_items(twin: Any, project_id: UUID) -> list[ChecklistItem]:
 __all__ = [
     "ASSEMBLY_CHECK_TYPE",
     "ASSEMBLY_ITEM",
+    "BOM_ITEM",
+    "DESIGN_FILES_ITEM",
     "DRC_TOOL",
     "EDA_ITEM",
     "ERC_TOOL",
     "FIT_ITEM_LABELS",
+    "ITEM_DESIGN_TYPES",
     "LAYOUT_KEY",
     "OUTPUTS_ITEM",
     "OUTPUT_KINDS",
     "REPORT_KEY",
     "WAIVABLE_ITEMS",
+    "BomRecord",
     "OutputSource",
+    "PurchasedPart",
+    "StrayDesignFile",
     "Waiver",
     "accepted_waivers",
+    "bom_records",
     "eda_failures",
     "evaluate_assembly_item",
+    "evaluate_bom_item",
+    "evaluate_design_files_item",
     "evaluate_eda_item",
     "evaluate_outputs_item",
     "fit_items",
     "latest_assembly_check",
     "output_sources",
     "product_parts",
+    "purchased_parts",
     "source_of",
+    "stray_design_files",
 ]

@@ -28,6 +28,14 @@ reads the twin and says, item by item, what is resolved and what blocks:
 ``outputs_current``
     Every fabrication output names the revision it was made from, and that
     revision is the current one.
+``bom_complete``
+    Each board has a non-empty BOM made from its current revision, and an
+    assembly holding bought parts (fasteners, purchased models) has a BOM of
+    its current revision listing every one of them.
+``design_files_released``
+    Only the head revision of each schematic and board item is packaged; a
+    schematic or board that is not a revision of any item fails until it is
+    recorded as one or a person accepts leaving it out.
 
 **Applies** only when the project is made by a process whose profile has
 exact checks (today FDM) or has an exact DFM analysis; for anything else
@@ -71,6 +79,8 @@ ITEM_ORDER: tuple[str, ...] = (
     "eda_checks",
     "assembly_dfa",
     "outputs_current",
+    "bom_complete",
+    "design_files_released",
 )
 ITEM_LABELS: dict[str, str] = {
     "components_exact": "Every required component has a validated exact model",
@@ -81,6 +91,8 @@ ITEM_LABELS: dict[str, str] = {
     "eda_checks": "ERC and DRC pass on the released schematic and board revisions",
     "assembly_dfa": "Assembly checked (DFA)",
     "outputs_current": "Fabrication outputs made from the released revisions",
+    "bom_complete": "BOM lists every purchased part and the board's components",
+    "design_files_released": "Only the released revision of each design file is packaged",
 }
 #: The release gate's own release approval check covers ``approvals``.
 GATE_ITEMS: tuple[str, ...] = (
@@ -91,6 +103,8 @@ GATE_ITEMS: tuple[str, ...] = (
     "eda_checks",
     "assembly_dfa",
     "outputs_current",
+    "bom_complete",
+    "design_files_released",
 )
 
 APPROVED_AUTHORITIES = frozenset({"approved", "baselined"})

@@ -1327,6 +1327,23 @@ groups:
             "Assembly checked (DFA)" stays open. Check the CadQuery adapter image
             and the gateway logs (assembly_checked, twin.check_assembly spans).
 
+      # A board or schematic that is no item's revision, left out of a release.
+      - alert: ReleaseStrayDesignFiles
+        expr: >-
+          sum(increase(metaforge_release_design_file_excluded_total{reason="orphan"}[1h])) >= 3
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Release manifests are leaving out stray boards or schematics"
+          description: >-
+            Release manifests left out boards or schematics that are not a
+            revision of any item (metaforge_release_design_file_excluded_total).
+            Each blocks the release package until it is recorded as its item's
+            revision or a person accepts leaving it out. A run that keeps
+            recording layouts without an item key is the usual cause; check the
+            gateway logs (release_manifest_orphan_excluded).
+
       # The slicer cross-check after an exact FDM evaluation (slicer.slice).
       - alert: DfmSlicerCrossCheckUnavailable
         expr: >-
