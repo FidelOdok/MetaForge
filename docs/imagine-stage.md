@@ -230,6 +230,27 @@ stopping: accept, make the concept mesh, hand over once the checklist is
 ready, then Develop, Check and Make, recording each delegated decision with
 `twin.record_decision`. Without delegation they ask the person.
 
+**After the handover, to a release.** Check and Make use tools that take a
+reference, never file bytes:
+
+1. Measure each validated part with `twin.evaluate_dfm` (it measures every
+   part with no exact analysis yet) or `twin.measure_dfm` with its
+   `item_key`; the gateway reads the STEP from the twin
+   ([measuring by reference](twin_schema.md#dfm-by-reference)).
+2. Resolve the concept's components with `twin.resolve_concept_component`:
+   the illustrative components the handover seeded (`CMP-...`) are
+   `realised_by` the CAD parts that make them, or `retired`, each with a
+   reason; `restored` undoes it
+   ([resolving concept components](twin_schema.md#concept-component-resolution)).
+   It is the agent's own design decision, so a project policy approves it.
+3. Run the structural load cases with `twin.run_item_fea` (mesh, then solve)
+   and record each result with `twin.record_document`.
+4. Record the fabrication outputs, then `twin.create_baseline`, a
+   `release_approval` request with `twin.record_engineering_entity`, and
+   `twin.create_release_package`. The baseline and the approval wait for the
+   person: neither is a human-authority tool an agent may decide under
+   delegation ([release packages](twin_schema.md#release-packages)).
+
 ## Mapping into the twin
 
 Each event is written through the service the rest of MetaForge uses for that

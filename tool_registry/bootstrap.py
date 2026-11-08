@@ -375,6 +375,7 @@ async def bootstrap_tool_registry(
     work_product_renderer: Any = None,
     design_files_recorder: Any = None,
     imagine_studio: Any = None,
+    release_path_service: Any = None,
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
@@ -561,6 +562,10 @@ async def bootstrap_tool_registry(
         imagine_studio: Optional Imagine service (api_gateway.imagine,
             FORGE-821). When supplied, registers ``twin.imagine_get_studio``,
             ``twin.imagine_put_studio`` and ``twin.imagine_handover_status``.
+            ``None`` skips registration.
+        release_path_service: Optional release path service
+            (api_gateway.twin.release_path). When supplied, registers
+            ``twin.resolve_concept_component`` and ``twin.run_item_fea``.
             ``None`` skips registration.
         overhang_evaluator: Optional async ``evaluate_overhang(...)``
             (make_overhang_evidence_recorder, FORGE-273). When supplied,
@@ -914,6 +919,7 @@ async def bootstrap_tool_registry(
                     work_product_renderer=work_product_renderer,
                     design_files_recorder=design_files_recorder,
                     imagine_studio=imagine_studio,
+                    release_path_service=release_path_service,
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,
                     promotion_attempter=promotion_attempter,

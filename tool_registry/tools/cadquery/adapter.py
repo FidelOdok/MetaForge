@@ -1363,7 +1363,9 @@ class CadqueryServer(McpToolServer):
                     "and whether it rests on the build plate, the extents along and "
                     "across the build direction, complete cylindrical holes and pins "
                     "with their diameters, and the planar face records (s<solid>f<face> "
-                    "ids and GLB mesh ranges) for highlighting. Read-only."
+                    "ids and GLB mesh ranges) for highlighting. Read-only. For a CAD "
+                    "revision already committed to the twin, call twin.measure_dfm with "
+                    "its item_key instead: it reads the STEP itself and records the result."
                 ),
                 capability="cad_analysis",
                 input_schema={

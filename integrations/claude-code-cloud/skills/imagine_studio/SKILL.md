@@ -241,11 +241,47 @@ When the studio reads `handed_over` and the person asks to proceed:
       `kicad.generate_schematic` for the board and `twin.create_firmware_scaffold`
       for the firmware. A change that breaks a contract is a proposal to the
       person, not an edit.
-   4. **Check.** `twin.evaluate_dfm` and `twin.get_dfm_report` on each part,
-      `twin.constraint_violations`, and the analyses the requirements call for
-      (`calculix.run_fea`, `calculix.run_thermal`).
-   5. **Make.** `twin.get_release_checklist`, then the release package with
-      `twin.create_release_package` when the checklist allows it.
+   4. **Check.**
+      1. **Measure each part by reference.** `twin.evaluate_dfm` measures every
+         validated part that has no exact analysis yet (up to 12 a call; call
+         again while `measured` lists a `deferred` line). For one part,
+         `twin.measure_dfm` with its `item_key` (for example `CAD-LAMP-HEAD@2`).
+         The gateway reads the STEP from the twin: never pass STEP text to
+         the CadQuery measuring tool. Read the result with `twin.get_dfm_report`.
+      2. **Resolve the concept's components.** The concept assembly's
+         components (`CMP-...`) stay illustrative until you say what became
+         of them. `twin.get_release_checklist` names any that block "every
+         required component has a validated exact model". For each, call
+         `twin.resolve_concept_component`: `realised_by` with the `item_keys`
+         of the CAD parts that make it (several parts may realise one
+         component), or `retired` when it is no longer part of the product,
+         each with a reason. It is recorded as a decision and `restored`
+         undoes it.
+      3. **Constraints and analyses.** `twin.constraint_violations`, and the
+         analyses the requirements call for. For structure,
+         `twin.run_item_fea` with the part's `item_key` and a `load_case`
+         (material, the `fixed` and `loaded` surfaces as a name or
+         `{axis, side}`, and `force_n`): it meshes with
+         `freecad.generate_mesh` and solves with `calculix.run_fea` in one
+         call. Check convergence with `calculix.check_mesh_convergence` and
+         record the result with `twin.record_document` using its
+         `record_with` arguments. `calculix.run_thermal` for heat.
+   5. **Make.**
+      1. `twin.get_release_checklist` again; fix what it still names.
+      2. Fabrication outputs: `kicad.export_gerber`, `kicad.export_drill`,
+         `kicad.export_pos`, `kicad.export_bom`, `firmware.build`,
+         `slicer.slice`, each recorded with `twin.record_design_files` so the
+         package can pin it.
+      3. **Baseline.** `twin.create_baseline` (with `approved_by` and a
+         `reason`) pins the current revision of every requirement, entity
+         and item. It changes existing records, so it waits for the person.
+      4. **Release approval.** `twin.record_engineering_entity` with
+         `entity_type: release_approval`. Approving it is the person's.
+      5. **Release package.** `twin.create_release_package` once the
+         checklist, the baseline and the approval pass. It pins a manifest of
+         every current design file (STEPs, Gerbers, drill, position and BOM
+         files, firmware, G-code) with a `manifest_sha256`, and marks the CAD
+         heads released. Refused with every failing check named otherwise.
 3. **Approvals belong to the person.** Every proposal, contract change, gate
    and release waits for them. Say what is waiting and stop; never work round
    an approval or report one as decided.

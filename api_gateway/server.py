@@ -954,6 +954,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # components it affects, after the face remap above.
     from api_gateway.twin.dfm_findings import make_dfm_service
     from api_gateway.twin.dfm_findings import register as register_dfm
+    from api_gateway.twin.release_path import make_release_path_service
 
     register_dfm()
     # C3D slice 6: a validated exact revision schedules its exact DFM checks.
@@ -1396,6 +1397,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-821: the Imagine studio, so an agent writes the per-product
         # formgraph config. The REST routes share the same service.
         imagine_studio=imagine_service,
+        # The release path: concept components resolved (realised by CAD
+        # items, or retired) and a load case on a committed CAD item, over
+        # the exact CAD service's bridge.
+        release_path_service=make_release_path_service(twin),
         # FORGE-316: automatic selective re-run of exactly what a
         # committed ECT's real revalidation_plan marked stale.
         revalidation_executor=revalidation_executor_fn,

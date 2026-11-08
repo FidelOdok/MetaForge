@@ -1291,6 +1291,24 @@ groups:
             blocked. Check the CadQuery adapter image and the gateway logs
             (dfm_exact_failed, dfm_exact_measure_failed).
 
+      # The release path: a load case on a committed CAD item (mesh then solve).
+      - alert: ItemFeaFailures
+        expr: >-
+          sum(increase(metaforge_release_path_call_total{tool="twin.run_item_fea",outcome=~"mesh_failed|solve_failed|unavailable"}[1h]))
+          / clamp_min(sum(increase(metaforge_release_path_call_total{tool="twin.run_item_fea"}[1h])), 1) > 0.5
+          and sum(increase(metaforge_release_path_call_total{tool="twin.run_item_fea",outcome=~"mesh_failed|solve_failed|unavailable"}[1h])) >= 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Structural analysis of committed parts is failing"
+          description: >-
+            More than half of the last hour's twin.run_item_fea calls could not
+            mesh (freecad.generate_mesh) or solve (calculix.run_fea), or found
+            no CAD adapter. An agent then cannot record the structural evidence
+            a release needs. Check the FreeCAD and CalculiX adapters and the
+            gateway logs (item_fea_solved, twin.run_item_fea spans).
+
       # The slicer cross-check after an exact FDM evaluation (slicer.slice).
       - alert: DfmSlicerCrossCheckUnavailable
         expr: >-

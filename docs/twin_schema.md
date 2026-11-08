@@ -1101,6 +1101,16 @@ metadata: {
   evidence_ids: string[]
   decision_ids: string[]
   drawing_ids: string[]  // always [] -- 2D drawings haven't shipped
+  design_files: {        // the files a maker needs, pinned by revision and hash
+    kind: string         // cad_model, assembly, gerber, pick_and_place, bom,
+                         // firmware_source, gcode, schematic, pcb_layout, ...
+    ref: string | null   // KEY@n for an item head (CAD), else null
+    name: string
+    node_id: string
+    format: string
+    content_hash: string
+  }[]
+  manifest_sha256: string  // one sha256 over the rows, order independent
   diff_from_previous: {
     compared_to: string | null  // prior release_package's node id, or null for the first
     hierarchy_delta: number
@@ -1115,6 +1125,10 @@ metadata: {
 **The real gate this reuses, not duplicates.** `release_approval` and G8's `evaluate_g8_release` (`twin_core.consistency.gates`) already existed -- real, comprehensive (baseline fixed, no stale evidence, verification coverage complete, waivers approved, a `release_approval` entity approved) -- but purely informational: nothing before this ticket ever called it as anything but an advisory display value. `twin.create_release_package` (`api_gateway/twin/release_package.py`) is G8's first real consumer with teeth: it calls `evaluate_g8_release` itself (with a real `TraceabilityAgent`-backed `traceability_coverage` accessor, so the "verification complete" check can actually evaluate) and refuses to create a package -- raising with every failing check named -- unless the result is `GateStatus.PASSED`. This is additive: `api_gateway/runs/gate_eval.py`'s `TwinConsistencyGateChecker` stays purely advisory everywhere else, unchanged.
 
 **The manufacturing release checklist (3D-RC-016).** When a component is made by a process whose DFM profile has exact checks, G8 also carries a `manufacturing_release_checklist` check: it FAILs, naming each blocker, until every required component has a validated exact model, the exact DFM analysis passed or a person accepted its issues, every physical verification item is approved and every CAD head has a round-trip-passed STEP (the release approval stays G8's own check). The flow runner's G8 gate lists the same blockers as missing. So a release package, and with it `geometry_state: released`, is refused while any of them is open; see [the release checklist](#release-checklist).
+
+**The design file manifest.** `design_files` lists each current CAD part and assembly by its head revision (`KEY@n`; an analysis model is left out) and the newest file of each name for the other making types (`schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `manufacturing_file`, `bom`, `firmware_source`, `pinmap`, `gcode`), each with its node id and content hash; `manifest_sha256` hashes the rows. It is a snapshot of references, never a copy of the files: record the fabrication outputs with `twin.record_design_files` first so the package pins them. A package cut before the manifest existed lists none.
+
+**The release path for an agent.** The order is: measure each part (`twin.evaluate_dfm` or `twin.measure_dfm`, see [measuring by reference](#dfm-by-reference)), resolve the concept's components (`twin.resolve_concept_component`, see [resolving concept components](#concept-component-resolution)), the analyses (`twin.run_item_fea` for a load case on a CAD item), the fabrication outputs, `twin.create_baseline` (held for a person: it advances existing records), a `release_approval` entity (`twin.record_engineering_entity`; its approval is the person's), then `twin.create_release_package`.
 
 `GET /v1/releases?project_id=` lists a project's packages (oldest first), `POST /v1/releases` creates one (409 if G8 isn't passed, naming the failing checks). The dashboard's Requirements page ("Release packages" section) lists them with per-metric count deltas.
 
@@ -2491,6 +2505,46 @@ prototype** when `components_exact`, `dfm` and `step_round_trip` are
 resolved, and **Ready for production** only when every item is; otherwise
 the open items are its next steps. The checklist is part of G8: see
 [release packages](#release-packages).
+
+#### Measuring by reference {#dfm-by-reference}
+
+`twin.measure_dfm` (additive) measures one committed CAD revision named by
+`item_key` (`KEY` or `KEY@n`) or `node_id`: the gateway reads the revision's
+STEP from the twin, calls `cadquery.dfm_measure` over MCP and stores the
+exact set, exactly as the scheduled exact job does
+(`api_gateway.twin.dfm_exact.measure`). The revision must be validated
+(otherwise the tool errors); `measured: false` with the reason when the
+process has no exact checks. An agent never passes STEP text.
+
+`twin.evaluate_dfm` takes `measure` (default true): after the heuristic pass
+it measures, the same way, each component whose best geometry is a
+validated revision and that has no current exact set, up to 12 a call
+(`measured` lists each one, and a `deferred` line names the rest). With no
+CAD adapter in the process it measures nothing, says so and leaves the
+heuristic sets as they are.
+
+#### Resolving concept components {#concept-component-resolution}
+
+A concept assembly's components (`CMP-...`) stay `Illustrative` until
+engineering says what became of them. `twin.resolve_concept_component`
+(additive) records one of three outcomes as a `design_decision` carrying
+`component_resolution: {component_id, component_name, action, item_keys,
+reason, by, on_behalf_of, at, replaces}` (`twin_core.component_resolution`):
+
+| Action | Effect on the maturity and the checklist |
+|--------|------------------------------------------|
+| `realised_by` | `item_keys` are CAD items (parts or assemblies) of the project. Their components become required in the concept component's place, and it reads as mature as the least mature of them. An item without a CAD head leaves it required, with `missing_items` |
+| `retired` | The component is no longer required. When every concept component is retired, the CAD parts built are required instead |
+| `restored` | Undoes the newest resolution: the component is required again |
+
+The newest resolution of a component wins and every earlier one stays in the
+decision log, so a retire is reviewable and reversible. Nothing changes a CAD
+revision or the concept assembly. The maturity's component rows carry
+`resolution`, and the checklist's `components_exact` detail names each
+resolved component (*USB-C desk lamp enclosure realised by CAD-BASE,
+CAD-ARM*). It is the agent's design decision, recorded as its own, so it is
+additive rather than a human-authority tool, and an `auto_clean` or `auto`
+project policy approves it.
 
 #### API (exact DFM)
 

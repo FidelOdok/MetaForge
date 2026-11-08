@@ -1614,10 +1614,46 @@ class DfmService:
         self._twin = twin
 
     async def evaluate(
-        self, project_id: str, component_ids: list[str] | None = None
+        self, project_id: str, component_ids: list[str] | None = None, *, measure: bool = True
     ) -> dict[str, Any]:
-        await evaluate_project(self._twin, project_id, component_ids=component_ids, trigger="tool")
-        return (await dfm_view(self._twin, project_id)).model_dump(mode="json")
+        """Evaluate, then measure what only an exact measurement can assess.
+
+        With ``measure`` (the default), a component whose best geometry is a
+        validated revision and that has no current exact analysis is measured
+        by reference now (:func:`api_gateway.twin.dfm_exact.measure_missing`),
+        so wall, hole and overhang are assessed rather than reported missing.
+        """
+        out = await evaluate_project(
+            self._twin, project_id, component_ids=component_ids, trigger="tool"
+        )
+        measured: list[dict[str, Any]] = []
+        if measure:
+            from api_gateway.twin.dfm_exact import measure_missing
+
+            measured = await measure_missing(self._twin, project_id, out)
+        view = (await dfm_view(self._twin, project_id)).model_dump(mode="json")
+        if measured:
+            view["measured"] = measured
+        return view
+
+    async def measure(
+        self,
+        project_id: str,
+        *,
+        item_key: str | None = None,
+        node_id: str | None = None,
+        build_direction: list[float] | None = None,
+    ) -> dict[str, Any]:
+        """Measure one committed CAD revision by reference (``twin.measure_dfm``)."""
+        from api_gateway.twin.dfm_exact import measure
+
+        return await measure(
+            self._twin,
+            project_id,
+            item_key=item_key,
+            node_id=node_id,
+            build_direction=build_direction,
+        )
 
     async def findings(self, project_id: str, *, history: bool = False) -> dict[str, Any]:
         view = await dfm_view(self._twin, project_id, include_history=history)

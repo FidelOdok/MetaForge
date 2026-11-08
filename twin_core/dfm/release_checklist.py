@@ -229,6 +229,20 @@ def evaluate_dfm_item(
     )
 
 
+def resolved_components(components: list[dict[str, Any]]) -> list[str]:
+    """One plain line per concept component a decision retired or realised. Pure."""
+    out: list[str] = []
+    for c in components:
+        res = c.get("resolution")
+        if not isinstance(res, dict) or c.get("required"):
+            continue
+        if res.get("action") == "retired":
+            out.append(f"{c['name']} retired ({str(res.get('reason') or '')[:120]})")
+        elif res.get("action") == "realised_by":
+            out.append(f"{c['name']} realised by {', '.join(res.get('item_keys') or [])}")
+    return out
+
+
 def readiness(checklist: ManufacturingChecklist | None) -> dict[str, Any]:
     """What Create may claim: ``prototype``, ``production`` or neither, and why not."""
     if checklist is None:
@@ -334,6 +348,10 @@ async def manufacturing_checklist(
 
         # components_exact
         behind = [c for c in comps if rank(str(c.get("maturity"))) < rank(Maturity.EXACT)]
+        # Concept components a recorded decision retired or mapped to the CAD
+        # items that realise them: no longer required themselves, and named
+        # here so the pass says why they are not counted.
+        resolved = resolved_components(maturity["components"])
         items.append(
             ChecklistItem(
                 id="components_exact",
@@ -347,12 +365,21 @@ async def manufacturing_checklist(
                         if comps
                         else "no required component is known"
                     )
-                ),
+                )
+                + (f"; resolved: {'; '.join(resolved)}" if resolved else ""),
                 blockers=[
                     f"{c['name']}: {c['maturity']}, needs a validated exact model" for c in behind
                 ]
                 or ([] if comps else ["no required component is known"]),
-                next_steps=[f"Build the engineering geometry for {c['name']}" for c in behind]
+                next_steps=[
+                    (
+                        f"Build the engineering geometry for {c['name']}"
+                        if not str(c.get("component_id") or "").startswith("CMP-")
+                        else f"Build the engineering geometry for {c['name']}, or record "
+                        "which CAD parts realise it or that it is retired"
+                    )
+                    for c in behind
+                ]
                 or ([] if comps else ["Describe the parts this product is made of"]),
             )
         )
@@ -464,4 +491,5 @@ __all__ = [
     "evaluate_dfm_item",
     "manufacturing_checklist",
     "readiness",
+    "resolved_components",
 ]

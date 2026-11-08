@@ -272,10 +272,30 @@ function priority(op: OperationView): number {
   }
 }
 
+/**
+ * A failed chat reply that a later reply in the same project has since
+ * completed. The person sent the message again and got an answer, so the old
+ * "Unable to complete" no longer describes anything they need to act on.
+ * Only chat replies are cleared this way: every other failure (a build, a
+ * check, a job) stays until the person dismisses it or it is retried, because
+ * a later success of something else does not fix it.
+ */
+export function supersededChatFailure(op: OperationView, all: readonly OperationView[]): boolean {
+  if (op.kind !== 'chat' || op.state !== 'failed') return false;
+  return all.some(
+    (other) =>
+      other.operation_id !== op.operation_id &&
+      other.kind === 'chat' &&
+      other.state === 'completed' &&
+      other.updated_at > op.updated_at,
+  );
+}
+
 /** Every operation, most important first, newest first within a tier. */
 export function sortedOperations(state: OperationsState, dismissed: readonly string[] = []): OperationView[] {
-  return Object.values(state.byId)
-    .filter((op) => !dismissed.includes(op.operation_id))
+  const all = Object.values(state.byId);
+  return all
+    .filter((op) => !dismissed.includes(op.operation_id) && !supersededChatFailure(op, all))
     .sort((a, b) => priority(a) - priority(b) || b.updated_at.localeCompare(a.updated_at));
 }
 

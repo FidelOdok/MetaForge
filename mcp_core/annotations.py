@@ -375,6 +375,17 @@ ADDITIVE: frozenset[str] = frozenset(
         # inputs reuse the current one) and tags the outputs it read with their
         # status. Never changes geometry or the manufacturing context.
         "twin.evaluate_dfm",
+        # The same exact record twin.evaluate_dfm's measuring step appends, for
+        # one CAD revision named by reference: the gateway reads its STEP and
+        # appends a dfm_finding_set. Never changes geometry or the context.
+        "twin.measure_dfm",
+        # A design decision about one concept component (realised by CAD
+        # items, retired, or restored), appended to the decision log; the
+        # newest wins and an earlier one is never overwritten or deleted, so
+        # a retire is undone by recording `restored`. It is the agent's
+        # engineering decision, recorded as such, not a person's approval:
+        # no approver is its content, so it is not a human-authority tool.
+        "twin.resolve_concept_component",
         # The manufacturing context's next revision. An agent's values are
         # assumptions that never override a stated value or a decision; a
         # person's statement needs a named approver (guardrails.APPROVER_RECORDED).
@@ -524,6 +535,10 @@ PRODUCING: frozenset[str] = frozenset(
         "freecad.export_model",
         "freecad.generate_mesh",
         "calculix.run_fea",
+        # The two calls above chained on a committed CAD revision: it stages
+        # the revision's STEP into its own folder on the adapter workspace and
+        # writes the mesh and solver files there. No twin write.
+        "twin.run_item_fea",
         "calculix.run_thermal",
         # FORGE-542: writes its deck and rawfile to the adapter workspace only.
         "spice.run_simulation",
