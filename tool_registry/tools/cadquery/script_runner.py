@@ -14,9 +14,13 @@ What isolates the child, in the order it is applied:
   has a different uid. The adapter needs ``CAP_SETUID`` and ``CAP_SETGID`` (as
   ambient capabilities) for this and nothing else.
 * **Resource limits** (``setrlimit``, set by the child before the script
-  runs): address space, CPU seconds, file size, open files, processes (under
-  its own uid) and no core dumps; plus a wall-clock deadline the adapter
-  enforces by killing every process of the run.
+  runs): resident memory (``RLIMIT_DATA``, ``CADQUERY_RUNNER_MEMORY_MB``)
+  under an address-space backstop (``RLIMIT_AS``,
+  ``CADQUERY_RUNNER_ADDRESS_SPACE_MB``), CPU seconds, file size, open files,
+  processes (under its own uid) and no core dumps; plus a wall-clock deadline
+  the adapter enforces by killing every process of the run. The child's
+  environment caps glibc malloc arenas and BLAS/OpenMP threads, so the
+  address space it reserves stays close to what it uses (FORGE-832).
 * **Landlock**: read-only system paths, nothing else readable (so not
   ``/workspace``), writable only in its private folder, no ``execve``, and on
   ABI 4+ no TCP bind or connect.
@@ -68,6 +72,10 @@ ALLOWED_SUFFIXES = frozenset({".step", ".stp", ".stl", ".brep", ".amf", ".svg", 
 
 LAYERS = ("uid", "landlock", "seccomp")
 
+#: The child exits 0 or 3 itself; 127 is glibc failing to allocate a new
+#: thread's TLS, which it reports by ``_exit(127)``.
+_EXIT_NO_THREAD_MEMORY = 127
+
 _metrics: Any = None
 
 
@@ -109,7 +117,12 @@ class ScriptRunError(RuntimeError):
 class RunnerLimits:
     """Per-run limits. Sizes in bytes, times in seconds."""
 
+    #: What a script may really use: private writable memory (``RLIMIT_DATA``).
     memory_bytes: int = 2048 * 1024 * 1024
+    #: Address-space backstop (``RLIMIT_AS``), far above any real script.
+    #: OCCT, Python and glibc reserve address space they never touch, so this
+    #: must not be the budget (FORGE-832).
+    address_space_bytes: int = 16 * 1024 * 1024 * 1024
     file_bytes: int = 64 * 1024 * 1024
     open_files: int = 256
     processes: int = 256
@@ -183,14 +196,17 @@ class ScriptRunner:
     uid_pool: list[int] = field(default_factory=list)
     require: frozenset[str] = frozenset({"landlock", "seccomp"})
     limits: RunnerLimits = field(default_factory=RunnerLimits)
-    max_concurrent: int = 4
+    max_concurrent: int = 2
     python: str = sys.executable
 
     def __post_init__(self) -> None:
         unknown = set(self.require) - set(LAYERS)
         if unknown:
             raise ValueError(f"unknown isolation layer(s): {sorted(unknown)}")
-        slots = len(self.uid_pool) if self.uid_pool else self.max_concurrent
+        # With a uid pool, each concurrent run needs a uid of its own.
+        slots = self.max_concurrent
+        if self.uid_pool:
+            slots = min(slots, len(self.uid_pool))
         self._slots = threading.BoundedSemaphore(max(1, slots))
         self._lock = threading.Lock()
         self._free_uids = list(self.uid_pool)
@@ -223,6 +239,9 @@ class ScriptRunner:
         mib = 1024 * 1024
         limits = RunnerLimits(
             memory_bytes=int(num("CADQUERY_RUNNER_MEMORY_MB", defaults.memory_bytes / mib) * mib),
+            address_space_bytes=int(
+                num("CADQUERY_RUNNER_ADDRESS_SPACE_MB", defaults.address_space_bytes / mib) * mib
+            ),
             file_bytes=int(num("CADQUERY_RUNNER_MAX_FILE_MB", defaults.file_bytes / mib) * mib),
             output_bytes=int(
                 num("CADQUERY_RUNNER_MAX_OUTPUT_MB", defaults.output_bytes / mib) * mib
@@ -234,7 +253,7 @@ class ScriptRunner:
             uid_pool=pool,
             require=frozenset(require),
             limits=limits,
-            max_concurrent=int(num("CADQUERY_RUNNER_MAX_CONCURRENT", 4)),
+            max_concurrent=int(num("CADQUERY_RUNNER_MAX_CONCURRENT", 2)),
         )
 
     # -- public ---------------------------------------------------------
@@ -252,9 +271,13 @@ class ScriptRunner:
             span.set_attribute("runner.timeout_s", float(timeout))
             start = time.monotonic()
             outcome = "error"
+            memory_limit: str | None = None
             try:
                 result = self._run(script, suffix, timeout, span)
                 outcome = "ok"
+                # Reported by the child, so only a known value is logged.
+                reported = result.isolation.get("memory_limit")
+                memory_limit = reported if reported in ("data", "address_space") else None
                 return result
             except ScriptRunTimeoutError:
                 outcome = "timeout"
@@ -282,6 +305,7 @@ class ScriptRunner:
                     outcome=outcome,
                     duration_s=round(duration, 3),
                     timeout_s=timeout,
+                    memory_limit=memory_limit,
                 )
 
     # -- internals ------------------------------------------------------
@@ -347,7 +371,12 @@ class ScriptRunner:
             "TMPDIR": workdir,
             "XDG_CACHE_HOME": workdir,
             "LANG": "C.UTF-8",
-            "OMP_NUM_THREADS": "2",
+            # glibc gives each allocating thread its own arena, 64 MB of
+            # reserved address space apiece, and OCCT runs one thread per CPU.
+            "MALLOC_ARENA_MAX": "2",
+            # One BLAS/OpenMP thread: the container has 2 CPUs for all runs.
+            "OMP_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
         }
 
     def _run(self, script: str, suffix: str, timeout: float, span: Any) -> RunResult:
@@ -370,6 +399,7 @@ class ScriptRunner:
                 "require": sorted(self.require - {"uid"}),
                 "limits": {
                     "memory_bytes": self.limits.memory_bytes,
+                    "address_space_bytes": self.limits.address_space_bytes,
                     "cpu_seconds": cpu,
                     "file_bytes": self.limits.file_bytes,
                     "open_files": self.limits.open_files,
@@ -590,6 +620,14 @@ class ScriptRunner:
             except ValueError:
                 name = sig
             return ScriptRunError("crashed", f"The script runner crashed (signal {name}). {tail}")
+        if returncode == _EXIT_NO_THREAD_MEMORY:
+            # glibc's "cannot allocate memory for thread-local data: ABORT":
+            # a thread could not start inside the memory limit.
+            return ScriptLimitError(
+                "memory",
+                f"Script exceeded the {self.limits.memory_bytes // (1024 * 1024)} MB "
+                "memory limit while starting a thread and was stopped",
+            )
         return ScriptRunError(
             "no_result", f"The script runner returned no result (exit {returncode}). {tail}"
         )

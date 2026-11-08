@@ -141,7 +141,8 @@ class TestAlertingRules:
         # + 1 CAD design loop runs or renders failing (CadDesignLoopFailing).
         # + 1 Imagine studio twin writes failing (ImagineStudioTwinWritesFailing, FORGE-821).
         # + 2 CadQuery script runner timeouts and refusals (FORGE-830).
-        assert len(rules) == 91
+        # + 1 CadQuery scripts stopped at the memory limit (FORGE-832).
+        assert len(rules) == 92
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -224,7 +225,8 @@ class TestAlertingRules:
         # + 1 CAD design loop runs or renders failing.
         # + 1 Imagine studio twin writes failing (FORGE-821).
         # + 2 CadQuery script runner timeouts and refusals (FORGE-830).
-        assert len(warnings) == 74
+        # + 1 CadQuery scripts stopped at the memory limit (FORGE-832).
+        assert len(warnings) == 75
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -263,6 +265,8 @@ class TestAlertingRules:
                 # FORGE-830: the isolated CadQuery script runner.
                 "CadqueryScriptTimeoutsSpiking",
                 "CadqueryScriptRunnerRefusing",
+                # FORGE-832: scripts keep stopping at the memory limit.
+                "CadqueryScriptMemoryLimitsSpiking",
                 # FORGE-520: chat replies keep claiming twin writes or node ids
                 # their own tool calls do not back up.
                 "ChatUngroundedClaimsSustained",

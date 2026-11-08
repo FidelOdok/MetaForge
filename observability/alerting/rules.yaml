@@ -1533,6 +1533,25 @@ groups:
             Read the cadquery_script_run log events (outcome=timeout) and the
             cadquery-adapter container's CPU; CADQUERY_RUNNER_STARTUP_GRACE_S and
             the tool's timeout argument set the deadline.
+      - alert: CadqueryScriptMemoryLimitsSpiking
+        expr: >-
+          sum(increase(metaforge_cadquery_script_limit_total{limit="memory"}[30m]))
+          / clamp_min(sum(increase(metaforge_cadquery_script_run_total[30m])), 1) > 0.25
+          and sum(increase(metaforge_cadquery_script_limit_total{limit="memory"}[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CadQuery scripts keep running into their memory limit"
+          description: >-
+            More than a quarter of the last half hour's cadquery.execute_script runs
+            stopped at the memory limit, at least five of them. Ordinary parts stay
+            well under 1 GB resident, so either an agent keeps writing runaway
+            scripts or the limit is not bounding what it should (FORGE-832: it was
+            on address space, which OCCT and glibc reserve per CPU without using).
+            Check the isolation.memory_limit a run reports ("data" is expected),
+            the cadquery_script_run log events (outcome=limit) and
+            CADQUERY_RUNNER_MEMORY_MB.
       - alert: CadqueryScriptRunnerRefusing
         expr: >-
           sum(increase(metaforge_cadquery_script_run_total{outcome="isolation_unavailable"}[15m])) >= 3

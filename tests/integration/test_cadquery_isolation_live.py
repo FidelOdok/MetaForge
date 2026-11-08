@@ -172,6 +172,27 @@ def test_a_memory_hog_hits_the_memory_limit() -> None:
     assert "memory limit" in error, error
 
 
+def test_a_heavy_part_on_a_16_thread_pool_returns_a_step() -> None:
+    """FORGE-832: a desk-lamp base, arm and head (fillets, shell, 77 holes, a
+    loft, unions) with OCCT's pool sized as on a 16-CPU host. Under the old 2 GB
+    address-space limit this failed with "memory limit" while using 0.67 GB."""
+    script = ESCAPE + (
+        "imp('OCP.OSD', fromlist=['OSD_ThreadPool']).OSD_ThreadPool.DefaultPool_s(16)\n"
+        "base = (cq.Workplane('XY').box(130, 90, 47).edges('|Z').fillet(8)\n"
+        "        .faces('>Z').shell(-3).faces('<Z').workplane().rarray(10, 10, 11, 7).hole(3))\n"
+        "loft = cq.Workplane('XY').rect(40, 30).workplane(offset=60).circle(12).loft()\n"
+        "head = (cq.Workplane('XY').cylinder(30, 35).faces('>Z').workplane()\n"
+        "        .rarray(5, 1, 12, 1).rect(1.5, 50).extrude(15))\n"
+        "result = base.union(loft.translate((0, 0, 60))).union(head.translate((0, 0, 140)))\n"
+    )
+    data, error = _script(script, timeout=120)
+    assert not error, error
+    assert base64.b64decode(data["step_base64"]).startswith(b"ISO-10303-21")
+    bb = data["bounding_box"]
+    assert bb["max_x"] - bb["min_x"] == pytest.approx(130.0, abs=0.5)
+    assert _runner_processes() == []
+
+
 def test_huge_output_hits_the_file_size_limit() -> None:
     _, error = _script("while True:\n    print('x' * 100000)")
     assert "file size limit" in error, error
