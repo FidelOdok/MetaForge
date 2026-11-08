@@ -1194,7 +1194,6 @@ services:
       - SETGID
     security_opt:
       - no-new-privileges:true
-    pids_limit: 512
     environment:
       - METAFORGE_ENV=docker
       - CADQUERY_WORK_DIR=/workspace
@@ -1209,6 +1208,8 @@ services:
           # The adapter plus script children, each capped at 2 GB of address space.
           memory: 3G
           cpus: '2'
+          # Every process and thread of the container, script children included.
+          pids: 512
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')"]
       interval: 30s

@@ -449,7 +449,7 @@ itself. The response still carries `step_base64` for `twin.commit_geometry`.
 The container around the adapter is hardened in `docker-compose.yml`:
 `read_only: true` (tmpfs for `/tmp` and `/run/cadquery-runner`),
 `cap_drop: [ALL]` with only `SETUID` and `SETGID` added back,
-`no-new-privileges:true` and `pids_limit: 512`. The image starts as root only
+`no-new-privileges:true` and a limit of 512 processes (`deploy.resources.limits.pids`). The image starts as root only
 so `cadquery-start` can drop to uid 1000 keeping those two capabilities as
 ambient capabilities, which is what lets the adapter start a child as another
 uid. `/workspace` stays writable for the adapter itself, because its other
