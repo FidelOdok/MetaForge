@@ -51,6 +51,14 @@ person's steps, open to you only in a delegated run (rule 2):
 5. **Read before you write.** If `twin.imagine_get_studio` shows a draft, start
    from its config so the person's choices carry over. A handed-over studio is
    read only; a person reopens it.
+6. **Open the session first, and keep it.** Call `session.start` with the
+   project before anything else. When your client does not keep the MCP
+   session (a headless run, or a 2026-07-28 client), the reply gives a
+   `session_handle`: pass it as the `metaforge_session` argument on every
+   later call. That is what keeps each call, including tools with no
+   `project_id` argument such as `cadquery.execute_script`, in the project,
+   so the project's approval policy decides its held writes. Without it such
+   a call names no project and is held for a person.
 
 ## The config, right first time
 

@@ -229,7 +229,10 @@ you whether that took effect: if it returns `project_scope_bound: false`, \
 the scope did NOT stick and you must keep passing project_id explicitly on \
 every call that takes one. Most clients get a sticky scope automatically \
 (stdio, or any HTTP client echoing the Mcp-Session-Id this server issues at \
-initialize); a client doing neither gets `false`.
+initialize); a client doing neither gets `false`. A 2026-07-28 client gets a \
+session_handle back instead: pass it as `metaforge_session` on every later call, \
+or calls with no project_id argument name no project and the project's approval \
+policy cannot decide them.
 - Record design choices with twin.record_decision (title, rationale, alternatives) \
 so they persist as typed, reviewable decisions.
 - Capturing your reasoning (not just actions) is an optional client-side add-on \
@@ -1013,6 +1016,10 @@ class UnifiedMcpServer:
                         },
                     )
                 )
+            except SessionHandleError as exc:
+                self._mark_failed(span, exc)
+                # FORGE-831: the same answer the handshake-free path gives.
+                return json.dumps(make_error(request_id, INVALID_PARAMS, str(exc)))
             except ServiceScopeError as exc:
                 self._mark_failed(span, exc)
                 # FORGE-487. A refusal, not a hold: nobody is waiting on a
@@ -1498,6 +1505,12 @@ class UnifiedMcpServer:
         caller passes back in ``metaforge_session``. The argument is taken out
         before the tool sees it. ``project.open`` and ``session.start`` mint a
         handle when the caller has none and report it in the result.
+
+        FORGE-831: the call then runs in the project the handle is bound to,
+        not only under its session id. The context's project was resolved
+        from the transport before the handle was read, so a tool with no
+        ``project_id`` argument was held as naming no project and its
+        project's approval policy never applied.
         """
         from mcp_core.context import current_context, with_context
 
@@ -1528,7 +1541,7 @@ class UnifiedMcpServer:
             return dict(json.loads(await self.handle_request(raw_message)))
         message = json.loads(raw_message)
         message["params"] = {**params, "arguments": arguments}
-        with with_context(ctx.model_copy(update={"session_id": handle})):
+        with with_context(_context_for_handle(ctx, handle)):
             response = dict(json.loads(await self.handle_request(json.dumps(message))))
         if minted is not None and isinstance(response.get("result"), dict):
             result = response["result"]
@@ -1769,6 +1782,21 @@ class UnifiedMcpServer:
         """
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {}) or {}
+        if isinstance(arguments, dict) and SESSION_ARGUMENT in arguments:
+            # FORGE-831: a handshake client that does not keep the transport
+            # session may still pass the handle ``session.start`` gave it.
+            # Taken out before the tool's own schema sees it, and the call
+            # runs in the handle's session and project.
+            from mcp_core.context import current_context, with_context
+
+            arguments = dict(arguments)
+            supplied = arguments.pop(SESSION_ARGUMENT)
+            try:
+                handle = UUID(str(supplied))
+            except ValueError as exc:
+                raise SessionHandleError(f"{SESSION_ARGUMENT} is not a session handle") from exc
+            with with_context(_context_for_handle(current_context(), handle)):
+                return await self._mcp_tools_call({**params, "arguments": arguments})
         # FORGE-362: every call gets a reference the reply can cite. The same
         # id goes into the session record, so "I committed the geometry" can
         # be checked against something that actually happened rather than
@@ -2475,6 +2503,7 @@ class UnifiedMcpServer:
                     arguments=arguments,
                     caller=caller,
                     reason=decision.reason,
+                    session_id=_stable_session() or None,
                     project=_effective_project(arguments),
                     client=self._client_label(),
                 )
@@ -3796,20 +3825,60 @@ def error_class(exc: BaseException) -> str:
     return "unexpected"
 
 
-def _effective_project(arguments: dict[str, Any]) -> str | None:
-    """Which project this call lands in, for the reviewer's benefit.
+class SessionHandleError(ValueError):
+    """A ``metaforge_session`` argument that is not a session handle (FORGE-831)."""
 
-    An explicit ``project_id`` argument wins, exactly as it does at the data
-    layer. Otherwise it is whatever the session is scoped to -- which since
-    FORGE-335 is the normal case, and is invisible in the arguments.
+
+def _context_for_handle(ctx: Any, handle: UUID) -> Any:
+    """``ctx`` moved onto the session ``handle`` names, in that session's project.
+
+    FORGE-831. The transport built ``ctx`` before the handle was read, so its
+    project is the transport session's sticky scope, or none. The handle's
+    own binding is more specific (the caller named it on this call), so it
+    replaces that; a handle with no binding yet keeps the transport's scope.
+    Without this, a tool with no ``project_id`` argument ran unscoped and was
+    held as naming no project, whatever the project's approval policy said.
+    """
+    from mcp_core.context import bound_project
+
+    update: dict[str, Any] = {"session_id": handle}
+    bound = bound_project(handle)
+    if bound is not None:
+        update["project_id"] = bound
+    return ctx.model_copy(update=update)
+
+
+def _stable_session() -> str:
+    """The call's session id when the caller presented one, else ``""``."""
+    try:
+        from mcp_core.context import current_context
+
+        ctx = current_context()
+    except Exception:  # noqa: BLE001 - no context: no session
+        return ""
+    return str(ctx.session_id) if ctx.session_is_stable else ""
+
+
+def _effective_project(arguments: dict[str, Any]) -> str | None:
+    """Which project this call lands in, for the reviewer and the policy.
+
+    In order (FORGE-831): an explicit ``project_id`` argument, exactly as at
+    the data layer; then the project of the ``metaforge_session`` handle,
+    which ``_context_for_handle`` has already put on the context; then the
+    transport session's sticky scope (FORGE-335). Every hold, policy,
+    delegation and approval-key decision reads it from here.
     """
     explicit = arguments.get("project_id")
     if isinstance(explicit, str) and explicit:
         return explicit
     try:
-        from mcp_core.context import current_context
+        from mcp_core.context import bound_project, current_context
 
-        scoped = current_context().project_id
+        ctx = current_context()
+        scoped = ctx.project_id
+        if scoped is None and ctx.session_is_stable:
+            # A binding made after this context was built still counts.
+            scoped = bound_project(ctx.session_id)
     except Exception:  # noqa: BLE001 — a missing project must not block approval
         return None
     return str(scoped) if scoped else None
