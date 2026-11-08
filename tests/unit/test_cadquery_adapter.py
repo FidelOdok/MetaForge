@@ -44,7 +44,7 @@ class TestCadqueryServer:
 
     def test_registers_seventeen_tools(self):
         server = CadqueryServer()
-        assert len(server.tool_ids) == 19  # + cadquery.dfm_measure (C3D slice 6)
+        assert len(server.tool_ids) == 20  # + cadquery.check_interference (DFA)
 
     def test_tool_ids_correct(self):
         server = CadqueryServer()
@@ -68,6 +68,7 @@ class TestCadqueryServer:
             "cadquery.export_step",
             "cadquery.describe_faces",
             "cadquery.dfm_measure",
+            "cadquery.check_interference",
         }
         assert set(server.tool_ids) == expected
 
@@ -344,7 +345,7 @@ class TestJsonRpcIntegration:
         assert response["jsonrpc"] == "2.0"
         assert response["id"] == "1"
         tools = response["result"]["tools"]
-        assert len(tools) == 19
+        assert len(tools) == 20
 
     async def test_tool_list_filter_by_capability(self):
         server = CadqueryServer()
@@ -379,7 +380,7 @@ class TestJsonRpcIntegration:
         result = response["result"]
         assert result["adapter_id"] == "cadquery"
         assert result["status"] == "healthy"
-        assert result["tools_available"] == 19
+        assert result["tools_available"] == 20
 
     async def test_unknown_method(self):
         server = CadqueryServer()

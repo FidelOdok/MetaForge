@@ -143,7 +143,8 @@ class TestAlertingRules:
         # + 2 CadQuery script runner timeouts and refusals (FORGE-830).
         # + 1 CadQuery scripts stopped at the memory limit (FORGE-832).
         # + 1 FEA on a committed CAD item failing (ItemFeaFailures, FORGE-833).
-        assert len(rules) == 93
+        # + 1 assembly fit checks failing (AssemblyCheckFailures, FORGE-841).
+        assert len(rules) == 94
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -228,7 +229,8 @@ class TestAlertingRules:
         # + 2 CadQuery script runner timeouts and refusals (FORGE-830).
         # + 1 CadQuery scripts stopped at the memory limit (FORGE-832).
         # + 1 FEA on a committed CAD item failing (FORGE-833).
-        assert len(warnings) == 76
+        # + 1 assembly fit checks failing (FORGE-841).
+        assert len(warnings) == 77
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -387,6 +389,8 @@ class TestAlertingRules:
                 "CadDesignLoopFailing",
                 # FORGE-821: the Imagine studio cannot write to the twin.
                 "ImagineStudioTwinWritesFailing",
+                # Design for assembly: assembly checks cannot measure the parts.
+                "AssemblyCheckFailures",
             ]
         )
 

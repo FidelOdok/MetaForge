@@ -84,6 +84,13 @@ EngineeringEntityType = Literal[
     # dependency graph. One entity per checklist (not one per step) -- see
     # api_gateway/twin/bringup_checklist.py's module docstring.
     "bringup_checklist",
+    # One design-for-assembly check of an assembly revision
+    # (twin.check_assembly): metadata carries `assembly_ref` and the report
+    # (`assembly_report`: each check's status and its findings, each with a
+    # severity and the part revisions involved), pinned to the assembly and
+    # part revisions it read. The release checklist's "Assembly checked (DFA)"
+    # reads the newest current one; see twin_core/dfm/release_fit.py.
+    "assembly_check",
 ]
 
 

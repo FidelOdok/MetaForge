@@ -1220,10 +1220,14 @@ async def _evaluate_manufacturing_checklist_check(
     blockers = checklist.gate_blockers()
     return GateCheck(
         id="manufacturing_release_checklist",
-        label="Manufacturing release checklist (exact models, DFM, verification, STEP)",
+        label=(
+            "Manufacturing release checklist (exact models, DFM, verification, STEP, "
+            "ERC and DRC, assembly fit, output sources)"
+        ),
         status=GateCheckStatus.FAIL if blockers else GateCheckStatus.PASS,
         detail="; ".join(blockers)[:2000]
         if blockers
-        else "every required component exact, DFM resolved, verification approved and "
-        "STEP round-tripped",
+        else "every required component exact, DFM resolved, verification approved, "
+        "STEP round-tripped, ERC and DRC passed, the assembly checked and every output "
+        "made from the released revisions",
     )

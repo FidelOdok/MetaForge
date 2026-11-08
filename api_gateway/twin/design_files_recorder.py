@@ -40,6 +40,16 @@ without it, and ``preview_error`` says why.
 
 Files are only read from inside the adapter workspace; a path that resolves
 outside it is refused.
+
+**Source pin.** Every record says which revision it was made from as
+``metadata.source_ref`` (``CAD-...@n``, ``PCB-...@n``, ``FW-...@n``), so the
+release can tell an output made from the released revision from one made from
+an older one (``twin_core.dfm.release_fit``). The caller may pass
+``source_ref``; otherwise it is the item revision among the sources (named or
+inferred), and for G-code the part ``slicer.slice`` sliced: the slicer writes
+``source.json`` beside the G-code with the model's path and sha256, matched to
+the CAD revision with that STEP. A record with no source says so in
+``warnings``.
 """
 
 from __future__ import annotations
@@ -285,6 +295,82 @@ def read_simready_record(folder: Path) -> dict[str, Any]:
     return record
 
 
+#: What slicer.slice writes beside its G-code: the model it sliced.
+SLICER_SOURCE = "source.json"
+#: Item types a design file can be made from.
+_SOURCE_ITEM_TYPES = frozenset(
+    {"cad_model", "assembly", "pcb_layout", "schematic", "firmware_source"}
+)
+_UUID_IN_PATH = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+async def resolve_source_ref(twin: Any, ref: str, project_id: str | None) -> tuple[str, str]:
+    """``(KEY@n, node_id)`` for a caller's ``source_ref``; a bare key pins its current head."""
+    from twin_core.items import ItemError, resolve_item_ref
+
+    try:
+        item, rev = await resolve_item_ref(twin, ref, project_id)
+    except ItemError as exc:
+        raise ValueError(f"source_ref {ref!r}: {exc}") from exc
+    if item.item_type not in _SOURCE_ITEM_TYPES:
+        raise ValueError(
+            f"source_ref {ref!r} is a {item.item_type}; name the CAD, PCB, schematic or firmware "
+            "revision the file was made from"
+        )
+    return f"{item.key}@{rev.revision}", str(rev.node_id)
+
+
+async def _ref_of_nodes(twin: Any, node_ids: list[str]) -> str | None:
+    from twin_core.items import item_for_node
+
+    for raw in node_ids:
+        try:
+            found = await item_for_node(twin, UUID(str(raw)))
+        except Exception as exc:  # noqa: BLE001 - a lookup that fails names nothing
+            logger.debug("design_files_source_lookup_failed", node=raw, error=str(exc))
+            continue
+        if found is not None and found[0].item_type in _SOURCE_ITEM_TYPES:
+            return f"{found[0].key}@{found[1]}"
+    return None
+
+
+async def _sliced_model_ref(twin: Any, folder: Path, project_id: str | None) -> str | None:
+    """The CAD revision slicer.slice sliced, from the ``source.json`` it wrote."""
+    from twin_core.items import item_history, list_items
+
+    record = folder / SLICER_SOURCE
+    if not record.is_file() or not project_id:
+        return None
+    try:
+        raw = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    by_path = await _ref_of_nodes(twin, _UUID_IN_PATH.findall(str(raw.get("model_path") or "")))
+    if by_path is not None:
+        return by_path
+    sha = str(raw.get("model_sha256") or "").lower()
+    if not sha:
+        return None
+    for item_type in ("cad_model", "assembly"):
+        for item in await list_items(twin, project_id=project_id, item_type=item_type):
+            for rev in reversed(await item_history(twin, item)):
+                node = await twin.graph.get_node(rev.node_id)
+                meta = dict(getattr(node, "metadata", None) or {})
+                export = (
+                    meta.get("step_export") if isinstance(meta.get("step_export"), dict) else {}
+                )
+                hashes = {
+                    str(getattr(node, "content_hash", "") or "").lower(),
+                    str(meta.get("content_sha256") or "").lower(),
+                    str((export or {}).get("file_sha256") or "").lower(),
+                }
+                if sha in hashes:
+                    return f"{item.key}@{rev.revision}"
+    return None
+
+
 def _content_type(name: str) -> str:
     low = name.lower()
     if low.endswith(".svg"):
@@ -346,6 +432,7 @@ def make_design_files_recorder(
         supersedes: str | None = None,
         change_reason: str | None = None,
         run_id: str | None = None,
+        source_ref: str | None = None,
     ) -> dict[str, Any]:
         from digital_twin.storage.work_product_blobs import store_work_product_blob
         from twin_core.models.enums import EdgeType, WorkProductType
@@ -365,6 +452,15 @@ def make_design_files_recorder(
             except ValueError as exc:
                 raise ValueError(f"source node id '{s}' is not a UUID") from exc
 
+        # The revision this file was made from, when the caller says.
+        pinned_source: str | None = None
+        if isinstance(source_ref, str) and source_ref.strip():
+            pinned_source, source_node = await resolve_source_ref(
+                twin, source_ref.strip(), project_id
+            )
+            if source_node not in sources:
+                sources.append(source_node)
+
         # FORGE-705: no source named -> the stage before this one, if clear.
         warnings: list[str] = []
         source_inferred = False
@@ -383,6 +479,39 @@ def make_design_files_recorder(
             raise ValueError(f"{total} bytes is over the {limit}-byte limit")
         payload = [(p.relative_to(folder).as_posix(), p.read_bytes()) for p in files]
         measured = read_simready_record(folder) if work_product_type == "purchased_model" else {}
+
+        # Which revision this was made from: the caller's, the sources', or the
+        # part the slicer says it sliced.
+        source_how = "given" if pinned_source else ""
+        if pinned_source is None and sources and work_product_type not in ("schematic",):
+            pinned_source = await _ref_of_nodes(twin, sources)
+            source_how = "sources" if pinned_source else ""
+        if pinned_source is None and work_product_type == "gcode":
+            try:
+                pinned_source = await _sliced_model_ref(twin, folder, project_id)
+            except Exception as exc:  # noqa: BLE001 - an unmatched model pins nothing
+                logger.debug("design_files_sliced_model_unmatched", error=str(exc))
+                pinned_source = None
+            source_how = "slicer" if pinned_source else ""
+        if pinned_source is None and work_product_type in ("gerber", "pick_and_place", "gcode"):
+            warnings.append(
+                f"no source revision for this {work_product_type}: pass source_ref (the "
+                "revision it was made from), or the release counts it as unpinned"
+            )
+        elif pinned_source is not None:
+            from twin_core.items import find_item, parse_item_ref
+
+            key, rev = parse_item_ref(pinned_source)
+            try:
+                head = await find_item(twin, key, project_id) if project_id else None
+            except Exception as exc:  # noqa: BLE001 - the warning is advisory
+                logger.debug("design_files_source_head_unavailable", error=str(exc))
+                head = None
+            if head is not None and rev is not None and rev != head.head_revision:
+                warnings.append(
+                    f"made from {pinned_source}, but {key} is now @{head.head_revision}: the "
+                    "release will refuse it until it is made again from the current revision"
+                )
 
         plan = await plan_definition_revision(
             twin,
@@ -444,6 +573,9 @@ def make_design_files_recorder(
             }
             if source_inferred:
                 meta["source_inferred"] = True
+            if pinned_source:
+                meta["source_ref"] = pinned_source
+                meta["source_ref_from"] = source_how
             if primary_key:
                 meta["minio_object_key"] = primary_key
             if image_files:
@@ -519,6 +651,7 @@ def make_design_files_recorder(
                 "project_linked": linked,
                 "content_hash": content_hash,
                 "thread_unlinked_stages": len(thread.unlinked),
+                "source_ref": pinned_source,
             }
             if thread.inferred:
                 result["inferred_links"] = thread.inferred

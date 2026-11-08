@@ -1309,6 +1309,24 @@ groups:
             a release needs. Check the FreeCAD and CalculiX adapters and the
             gateway logs (item_fea_solved, twin.run_item_fea spans).
 
+      # Design for assembly: an assembly check that cannot measure its solids.
+      - alert: AssemblyCheckFailures
+        expr: >-
+          sum(increase(metaforge_assembly_check_total{outcome=~"failed|unavailable"}[1h]))
+          / clamp_min(sum(increase(metaforge_assembly_check_total[1h])), 1) > 0.5
+          and sum(increase(metaforge_assembly_check_total{outcome=~"failed|unavailable"}[1h])) >= 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Assembly fit checks are failing"
+          description: >-
+            More than half of the last hour's twin.check_assembly runs could not
+            measure the placed parts (cadquery.check_interference failed) or found
+            no CAD adapter. Without a recorded check the release checklist's
+            "Assembly checked (DFA)" stays open. Check the CadQuery adapter image
+            and the gateway logs (assembly_checked, twin.check_assembly spans).
+
       # The slicer cross-check after an exact FDM evaluation (slicer.slice).
       - alert: DfmSlicerCrossCheckUnavailable
         expr: >-

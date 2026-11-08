@@ -356,6 +356,7 @@ def _part_size(part: dict[str, Any]) -> list[float] | None:
 async def gather_components(twin: Any, project_id: str | UUID) -> list[Gathered]:
     """Every known component with the best geometry it has. Never raises on one bad source."""
     from twin_core.component_identity import project_identity
+    from twin_core.dfm.release_checklist import is_board_body
     from twin_core.geometry_state import GeometryState, geometry_state_of
     from twin_core.items import list_items, supports_items
     from twin_core.models.enums import WorkProductType
@@ -390,6 +391,8 @@ async def gather_components(twin: Any, project_id: str | UUID) -> list[Gathered]
                 cid = meta.get(COMPONENT_ID_KEY)
                 if not cid and item_type == "assembly":
                     continue  # an assembly's members have no geometry of their own here
+                if not cid and is_board_body(meta):
+                    continue  # a board's 3D export: the board house makes it, not this process
                 cid = str(cid or f"item:{item.key}")
                 state = geometry_state_of("cad_model", meta)
                 exact = state in (GeometryState.VALIDATED, GeometryState.RELEASED)

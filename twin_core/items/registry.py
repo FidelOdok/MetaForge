@@ -403,6 +403,17 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
         ),
     ),
     TwinTypeSpec(
+        "assembly_check",
+        TwinTypeKind.RECORD,
+        "engineering_entity:assembly_check",
+        description=(
+            "One design-for-assembly check of an assembly revision (twin.check_assembly): "
+            "interference, clearance, hole patterns, outlines, edge connectors, stacks, "
+            "joint motion and seated parts, each finding with a severity and the part "
+            "revisions involved, pinned to the assembly and every part revision it read."
+        ),
+    ),
+    TwinTypeSpec(
         "dfm_report",
         TwinTypeKind.RECORD,
         "work_product:dfm_report",

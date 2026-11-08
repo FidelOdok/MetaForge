@@ -28,6 +28,7 @@ SlicerNotAvailableError in-process.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -335,10 +336,19 @@ class SlicerServer(McpToolServer):
                 seconds=elapsed,
             )
 
+        # What was sliced, beside the G-code: twin.record_design_files reads it
+        # to pin the G-code to the CAD revision whose STEP this is.
+        source = {
+            "model_path": str(model),
+            "model_name": model.name,
+            "model_sha256": hashlib.sha256(model.read_bytes()).hexdigest(),
+        }
+        (run_dir / "source.json").write_text(json.dumps(source, indent=2), encoding="utf-8")
         result: dict[str, Any] = {
             "gcode_path": gcode.relative_to(root).as_posix(),
             "config_used": config_file.relative_to(root).as_posix(),
             "model": model.relative_to(root).as_posix(),
+            "source_model": source,
             "printer": printer or "from config_path",
             "material": material or "from config_path",
             "copies": copies,

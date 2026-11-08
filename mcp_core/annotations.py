@@ -56,6 +56,9 @@ READ_ONLY: frozenset[str] = frozenset(
         "phase.list_tasks",
         # Geometry and model inspection
         "cadquery.get_properties",
+        # Design for assembly: reads the placed parts' STEP files and returns
+        # overlaps, gaps and swept poses. Writes nothing anywhere.
+        "cadquery.check_interference",
         "cadquery.validate_physics_stability",
         # CDE slice 6: both take STEP bytes and return results; the only file
         # they write is a temporary one in the adapter's own work directory,
@@ -386,6 +389,10 @@ ADDITIVE: frozenset[str] = frozenset(
         # engineering decision, recorded as such, not a person's approval:
         # no approver is its content, so it is not a human-authority tool.
         "twin.resolve_concept_component",
+        # Appends one assembly_check record pinned to the assembly and part
+        # revisions it read; the parts and the assembly are only read, the
+        # solids measured by cadquery.check_interference (read only).
+        "twin.check_assembly",
         # The manufacturing context's next revision. An agent's values are
         # assumptions that never override a stated value or a decision; a
         # person's statement needs a named approver (guardrails.APPROVER_RECORDED).
@@ -539,6 +546,11 @@ PRODUCING: frozenset[str] = frozenset(
         # the revision's STEP into its own folder on the adapter workspace and
         # writes the mesh and solver files there. No twin write.
         "twin.run_item_fea",
+        # Stages the parts' STEPs, writes the assembly STEP into a new folder
+        # of its own on the adapter workspace (cadquery.create_assembly) and
+        # commits it as the next revision of the assembly item. The parts are
+        # only read; an earlier assembly revision stays as it was.
+        "twin.build_assembly",
         "calculix.run_thermal",
         # FORGE-542: writes its deck and rawfile to the adapter workspace only.
         "spice.run_simulation",
@@ -669,6 +681,10 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # moves the release_approval's authority forward, the same family as
         # twin.approve_engineering_entity above. Never policy-approved.
         "twin.approve_release",
+        # Accepting a failing ERC/DRC or an assembly finding for the release
+        # is a person's decision (or a delegated agent's for the person) that
+        # moves the release forward, the same family. Never policy-approved.
+        "twin.accept_release_finding",
         "twin.execute_revalidation_plan",
         "twin.mark_engineering_change_rolled_back",
         "twin.reject_engineering_change",

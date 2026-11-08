@@ -942,6 +942,7 @@ class TwinServer(McpToolServer):
             self._register_select_component()
         if release_path_service is not None:
             self._register_release_path_tools()
+            self._register_assembly_fit_tools()
         if release_package_creator is not None:
             self._register_create_release_package()
         if baseline_creator is not None:
@@ -7816,10 +7817,11 @@ class TwinServer(McpToolServer):
                     "Studio renders of a work product in the twin (a STEP part or "
                     "assembly, or a mesh) by blender.render: the STEP is converted to "
                     "GLB the same way the dashboard viewer does, so colours and part "
-                    "names come from the model. Stores the PNGs as a 'render' work "
-                    "product linked to the model (GENERATED_FROM) and returns them as "
-                    "images. Views: iso, front, back, left, right, top, bottom, "
-                    "turntable. store=false renders without recording anything."
+                    "names come from the model. Returns the PNGs as images and records "
+                    "nothing by default (store defaults to false), so looking at a part "
+                    "never changes the twin. store=true also stores them as a 'render' "
+                    "work product linked to the model (GENERATED_FROM). Views: iso, "
+                    "front, back, left, right, top, bottom, turntable."
                 ),
                 capability="twin_render",
                 input_schema={
@@ -7882,7 +7884,7 @@ class TwinServer(McpToolServer):
                         },
                         "store": {
                             "type": "boolean",
-                            "description": "Record the images in the twin. Default true.",
+                            "description": "Record the images in the twin. Default false.",
                         },
                         "name": {"type": "string", "description": "Name of the render node."},
                         "project_id": {
@@ -7932,7 +7934,8 @@ class TwinServer(McpToolServer):
         }
         result: dict[str, Any] = await self._work_product_renderer(
             work_product_id=work_product_id,
-            store=arguments.get("store") is not False,
+            # A look is not a record: only an explicit store=true stores the images.
+            store=arguments.get("store") is True,
             **options,
         )
         return result
@@ -7962,7 +7965,11 @@ class TwinServer(McpToolServer):
                     "source_node_ids are what it was made from (the BOM for a schematic, the "
                     "schematic for a board, the board for gerbers and placement, the pinmap "
                     "for firmware), linked GENERATED_FROM. A schematic or board also gets an "
-                    "SVG preview."
+                    "SVG preview. source_ref pins the revision it was made from (CAD-...@n, "
+                    "PCB-...@n, FW-...@n; a bare key pins the current one); without it the "
+                    "pin comes from the sources, or for G-code from the model slicer.slice "
+                    "sliced. The release refuses an output made from an older revision, or "
+                    "one with no source."
                 ),
                 capability="twin_record_design_files",
                 input_schema={
@@ -7999,6 +8006,14 @@ class TwinServer(McpToolServer):
                         "item_key": {"type": "string"},
                         "supersedes": {"type": "string"},
                         "change_reason": {"type": "string"},
+                        "source_ref": {
+                            "type": "string",
+                            "description": (
+                                "The revision this was made from: CAD-...@n for G-code or a "
+                                "STEP, PCB-...@n for Gerbers, drill and placement, FW-...@n "
+                                "for firmware."
+                            ),
+                        },
                     },
                     "required": ["work_product_type", "file_path", "name"],
                 },
@@ -8010,6 +8025,7 @@ class TwinServer(McpToolServer):
                         "previews": {"type": "array"},
                         "generated_from": {"type": "array"},
                         "item_ref": {"type": "string"},
+                        "source_ref": {"type": ["string", "null"]},
                     },
                 },
                 phase=2,
@@ -8028,7 +8044,7 @@ class TwinServer(McpToolServer):
         metadata = arguments.get("metadata")
         options = {
             key: arguments[key]
-            for key in ("project_id", "item_key", "supersedes", "change_reason")
+            for key in ("project_id", "item_key", "supersedes", "change_reason", "source_ref")
             if arguments.get(key)
         }
         result: dict[str, Any] = await self._design_files_recorder(
@@ -8287,6 +8303,325 @@ class TwinServer(McpToolServer):
                     on_behalf_of=person,
                     reason=reason.strip(),
                     entity_id=entity_id.strip() if isinstance(entity_id, str) else None,
+                )
+            except ValueError as exc:
+                span.record_exception(exc)
+                raise ValueError(f"{tool}: {exc}") from exc
+        return result
+
+    # ------------------------------------------------------------------
+    # Design for assembly and the release waivers
+    # (twin.build_assembly, twin.check_assembly, twin.accept_release_finding)
+    # ------------------------------------------------------------------
+
+    def _register_assembly_fit_tools(self) -> None:
+        _location = {
+            "type": "object",
+            "description": (
+                "Where the part sits in the assembly: x, y, z in mm, and rx, ry, rz in "
+                "degrees about the part's own origin (X, then Y, then Z, then the move)."
+            ),
+            "properties": {k: {"type": "number"} for k in ("x", "y", "z", "rx", "ry", "rz")},
+        }
+        _xyz = {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 3}
+        _joint = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "type": {"type": "string", "enum": ["revolute", "fixed", "slider"]},
+                "parent": {"type": "string", "description": "The part it turns against."},
+                "child": {"type": "string", "description": "The part that moves."},
+                "moving": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Every part that moves with it (default: the child).",
+                },
+                "axis_point": {
+                    **_xyz,
+                    "description": "A point on the axis, in the parent's frame.",
+                },
+                "axis_dir": {**_xyz, "description": "The axis direction, in the parent's frame."},
+                "min_deg": {"type": "number"},
+                "max_deg": {"type": "number"},
+                "steps": {"type": "integer", "minimum": 2, "maximum": 72},
+            },
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.build_assembly",
+                adapter_id="twin",
+                name="Build Assembly",
+                description=(
+                    "Put the product's parts together: place each committed part revision "
+                    "(item_key, CAD-... or CAD-...@n) at a location, build the assembly STEP "
+                    "with cadquery.create_assembly and commit it as the next revision of an "
+                    "assembly item (ASM-...). A board goes in as the STEP kicad.export_3d made "
+                    "of it, committed with twin.commit_geometry (source_tool kicad.export_3d, "
+                    "source_node_ids the board), which records which PCB revision it is. Give "
+                    "the joints (revolute with axis and min_deg/max_deg) so "
+                    "twin.check_assembly can sweep them. The revision keeps each body's "
+                    "revision, placement and the joints. Next: twin.check_assembly. The "
+                    "release checklist's 'Assembly checked (DFA)' needs an assembly of every "
+                    "part and board at its current revision."
+                ),
+                capability="cad_assembly",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "name": {"type": "string", "description": "The assembly's name."},
+                        "parts": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "item_key": {
+                                        "type": "string",
+                                        "description": "CAD-... (current) or CAD-...@n.",
+                                    },
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Its name in the assembly (default: "
+                                        "the part's name).",
+                                    },
+                                    "location": _location,
+                                    "board_ref": {
+                                        "type": "string",
+                                        "description": "PCB-...@n this body is, when the "
+                                        "board STEP does not say.",
+                                    },
+                                },
+                                "required": ["item_key"],
+                            },
+                        },
+                        "joints": {"type": "array", "items": _joint},
+                        "material": {"type": "string"},
+                        "item_key": {
+                            "type": "string",
+                            "description": "The assembly item to revise (default: by name).",
+                        },
+                        "change_reason": {"type": "string"},
+                    },
+                    "required": ["project_id", "name", "parts"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "item_ref": {"type": "string"},
+                        "layout": {"type": "object"},
+                        "interferences": {"type": "array"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=1024, max_cpu_seconds=900),
+            ),
+            handler=self.build_assembly,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.check_assembly",
+                adapter_id="twin",
+                name="Check Assembly (DFA)",
+                description=(
+                    "Design-for-assembly check of an assembly revision built with "
+                    "twin.build_assembly, recorded as an assembly_check pinned to the "
+                    "assembly and every part revision. Checks: every body is its part's "
+                    "current revision; no two bodies overlap (interference, measured by "
+                    "cadquery.check_interference); and, from 'checks': clearances "
+                    "[{a, b, min_gap_mm}], hole_patterns [{a, holes_a, b, holes_b, "
+                    "tolerance_mm}] (positions in each part's own frame), outlines "
+                    "[{part, size_mm, host, opening_mm, clearance_mm}], connectors [{board, "
+                    "name, face, direction, board_outline or edge_setback_mm, "
+                    "max_setback_mm, slot_part, slot_center, slot_normal, max_gap_mm}], "
+                    "stacks [{name, gap_mm, items: [{thickness_mm} or {standard: iso7089, "
+                    "size: M4, count}], fastener}], seats [{part, seat_part, "
+                    "part_diameter_mm, seat_diameter_mm, retention}], joints (default: the "
+                    "assembly's own, each revolute swept through its limits), "
+                    "allowed_overlaps [{a, b, reason}]. With a board in the assembly the "
+                    "hole pattern and outline are required; they come from IFC-CAD-EDA and "
+                    "the parts' metadata (mounting_holes, mounting_bosses, dimensions, "
+                    "internal_envelope) when not given. Each finding has a severity (high, "
+                    "medium, low) and the parts involved; open high and medium findings "
+                    "block the release until fixed or accepted (twin.accept_release_finding)."
+                ),
+                capability="cad_assembly",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "assembly": {
+                            "type": "string",
+                            "description": "ASM-... (current revision), ASM-...@n or a node id.",
+                        },
+                        "checks": {
+                            "type": "object",
+                            "description": "What to check beyond overlaps; see the description.",
+                        },
+                    },
+                    "required": ["project_id", "assembly"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "assembly_ref": {"type": "string"},
+                        "outcome": {"type": "string"},
+                        "counts": {"type": "object"},
+                        "open_findings": {"type": "array"},
+                        "checks": {"type": "array"},
+                        "checklist_item": {"type": "object"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=1024, max_cpu_seconds=900),
+            ),
+            handler=self.check_assembly,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.accept_release_finding",
+                adapter_id="twin",
+                name="Accept Release Finding",
+                description=(
+                    "Accept, for the release, a failing ERC or DRC (item eda_checks, targets "
+                    "'PCB-...@n:drc' or 'SCH-...@n:erc') or open assembly findings (item "
+                    "assembly_dfa, targets the finding ids twin.check_assembly returned), "
+                    "with a reason. A person's decision: held for their approval, or, when "
+                    "the owner sets METAFORGE_ALLOW_AGENT_RELEASE=true and the request names "
+                    "the agent and the person (X-MetaForge-Agent, X-MetaForge-On-Behalf-Of), "
+                    "recorded as the agent's for that person. Recorded as an approved waiver "
+                    "pinned to the revisions it is about: a new revision needs a new "
+                    "acceptance. Fabrication outputs made from an older revision are never "
+                    "accepted; make them again."
+                ),
+                capability="twin_dfm",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string", "description": "Project UUID."},
+                        "item": {"type": "string", "enum": ["eda_checks", "assembly_dfa"]},
+                        "targets": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                        "reason": {"type": "string", "description": "Why it is acceptable."},
+                    },
+                    "required": ["project_id", "item", "targets", "reason"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "approved_by": {"type": "string"},
+                        "on_behalf_of": {"type": "string"},
+                        "checklist_item": {"type": "object"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.accept_release_finding,
+        )
+
+    def _assembly_fit(self) -> Any:
+        fit = getattr(self._release_path, "assembly_fit", None)
+        if fit is None:
+            raise ValueError("design for assembly is not available on this server")
+        return fit
+
+    async def build_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.build_assembly"
+        project_id = self._project_arg(tool, arguments)
+        name = arguments.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{tool}: 'name' is required")
+        parts = arguments.get("parts")
+        joints = arguments.get("joints")
+        if joints is not None and not isinstance(joints, list):
+            raise ValueError(f"{tool}: 'joints' must be a list")
+        material = arguments.get("material")
+        if self._geometry_recorder is None:
+            raise ValueError(f"{tool}: geometry commits are not available on this server")
+        with tracer.start_as_current_span(tool) as span:
+            try:
+                prepared: dict[str, Any] = await self._assembly_fit().prepare_assembly(
+                    project_id,
+                    name=name.strip(),
+                    parts=parts if isinstance(parts, list) else [],
+                    joints=joints,
+                    material=material if isinstance(material, str) and material else None,
+                )
+            except ValueError as exc:
+                span.record_exception(exc)
+                raise ValueError(f"{tool}: {exc}") from exc
+            committed: dict[str, Any] = await self._geometry_recorder(
+                step_base64=prepared["step_base64"],
+                name=name.strip(),
+                project_id=project_id,
+                source_tool="cadquery.create_assembly",
+                extra_metadata={"assembly_layout": prepared["layout"]},
+                parts=prepared["parts"],
+                **_item_kwargs(arguments),
+            )
+        return {
+            **committed,
+            "layout": prepared["layout"],
+            "interference_check_passed": prepared.get("interference_check_passed"),
+            "interferences": prepared.get("interferences") or [],
+            "next": "twin.check_assembly with this assembly's item_ref",
+        }
+
+    async def check_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.check_assembly"
+        project_id = self._project_arg(tool, arguments)
+        assembly = arguments.get("assembly")
+        if not isinstance(assembly, str) or not assembly.strip():
+            raise ValueError(f"{tool}: 'assembly' is required (ASM-..., ASM-...@n or a node id)")
+        checks = arguments.get("checks")
+        if checks is not None and not isinstance(checks, dict):
+            raise ValueError(f"{tool}: 'checks' must be an object")
+        ctx = current_context()
+        actor = str(ctx.agent or ctx.actor_id or "")
+        with tracer.start_as_current_span(tool) as span:
+            try:
+                result: dict[str, Any] = await self._assembly_fit().check_assembly(
+                    project_id, assembly=assembly.strip(), checks=checks, actor=actor
+                )
+            except ValueError as exc:
+                span.record_exception(exc)
+                raise ValueError(f"{tool}: {exc}") from exc
+        return result
+
+    async def accept_release_finding(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.accept_release_finding"
+        project_id = self._project_arg(tool, arguments)
+        item = arguments.get("item")
+        targets = arguments.get("targets")
+        reason = arguments.get("reason")
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{tool}: 'item' is eda_checks or assembly_dfa")
+        if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+            raise ValueError(f"{tool}: 'targets' is a list of strings")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"{tool}: 'reason' is required")
+        # The deciding person comes from the approval, never from an argument.
+        reject_caller_supplied_approver(tool, arguments)
+        delegated = _release_delegate(arguments)
+        person = arguments.get(APPROVED_BY_ARG)
+        if delegated is None and (not isinstance(person, str) or not person.strip()):
+            raise HumanAuthorityRequiredError(
+                tool, "no person approved the call, so nothing was accepted"
+            )
+        agent, approver = delegated if delegated is not None else (None, str(person).strip())
+        with tracer.start_as_current_span(tool) as span:
+            span.set_attribute("release.item", item)
+            span.set_attribute("release.delegated", delegated is not None)
+            try:
+                result: dict[str, Any] = await self._assembly_fit().accept_release_finding(
+                    project_id,
+                    item=item.strip(),
+                    targets=targets,
+                    reason=reason,
+                    approved_by=approver,
+                    agent=agent,
                 )
             except ValueError as exc:
                 span.record_exception(exc)

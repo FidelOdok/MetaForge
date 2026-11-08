@@ -1071,6 +1071,81 @@ class CadqueryServer(McpToolServer):
             handler=self.create_assembly,
         )
 
+        _matrix = {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 12,
+            "maxItems": 12,
+            "description": "Placement: 12 numbers, a 3 x 4 row-major rigid transform (mm).",
+        }
+        _pair = {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.check_interference",
+                adapter_id="cadquery",
+                name="Check Interference",
+                description=(
+                    "Measure placed STEP parts for design for assembly: every pair whose "
+                    "solids overlap by more than tolerance_mm3, the smallest gap between "
+                    "the pairs in distance_pairs, and the overlaps in extra poses (some "
+                    "parts moved, for a joint's sweep). Reads the files, writes nothing. "
+                    "twin.check_assembly calls it with an assembly's parts."
+                ),
+                capability="cad_assembly",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "parts": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "file": {"type": "string"},
+                                    "matrix": _matrix,
+                                    "location": {
+                                        "type": "object",
+                                        "description": "x, y, z (mm), rx, ry, rz (degrees), "
+                                        "as cadquery.create_assembly takes it",
+                                    },
+                                },
+                                "required": ["name", "file"],
+                            },
+                        },
+                        "tolerance_mm3": {"type": "number", "minimum": 0},
+                        "distance_pairs": {"type": "array", "items": _pair},
+                        "poses": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "matrices": {"type": "object", "additionalProperties": _matrix},
+                                    "pairs": {"type": "array", "items": _pair},
+                                },
+                                "required": ["id", "matrices"],
+                            },
+                        },
+                    },
+                    "required": ["parts"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "interferences": {"type": "array", "items": {"type": "object"}},
+                        "distances": {"type": "array", "items": {"type": "object"}},
+                        "poses": {"type": "array", "items": {"type": "object"}},
+                        "tolerance_mm3": {"type": "number"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=4096, max_cpu_seconds=900, max_disk_mb=256
+                ),
+            ),
+            handler=self.check_interference,
+        )
+
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="cadquery.generate_enclosure",
@@ -1871,6 +1946,30 @@ class CadqueryServer(McpToolServer):
             timeout=self.config.max_operation_time,
         )
         return ops.create_assembly(parts, constraints, output_path, material)
+
+    async def check_interference(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Overlaps, gaps and swept poses of placed parts (design for assembly)."""
+        parts = arguments.get("parts")
+        if not isinstance(parts, list) or not parts:
+            raise ValueError("parts list is required and must not be empty")
+        for i, part in enumerate(parts):
+            if not isinstance(part, dict) or not part.get("name") or not part.get("file"):
+                raise ValueError(f"Part {i} needs a 'name' and a 'file'")
+            matrix = part.get("matrix")
+            if matrix is not None and (not isinstance(matrix, list) or len(matrix) != 12):
+                raise ValueError(f"Part {i}: 'matrix' is 12 numbers (3 x 4, row-major)")
+        tolerance = arguments.get("tolerance_mm3", 1e-3)
+        if isinstance(tolerance, bool) or not isinstance(tolerance, int | float) or tolerance < 0:
+            raise ValueError("tolerance_mm3 must be a number from 0")
+        pairs = arguments.get("distance_pairs") or []
+        poses = arguments.get("poses") or []
+        if not isinstance(pairs, list) or not isinstance(poses, list):
+            raise ValueError("distance_pairs and poses are lists")
+
+        from tool_registry.tools.cadquery.operations import check_fit
+
+        logger.info("Checking interference", part_count=len(parts), poses=len(poses))
+        return check_fit(parts, tolerance_mm3=float(tolerance), distance_pairs=pairs, poses=poses)
 
     async def generate_enclosure(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Generate PCB enclosure from board dimensions and connector cutouts."""

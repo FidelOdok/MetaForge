@@ -302,6 +302,14 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                 metadata["session_id"] = session_id
             if extra_metadata:
                 metadata.update(extra_metadata)
+            if sources:
+                metadata.setdefault("source_work_product_ids", list(sources))
+            if board and sources:
+                # A board's 3D export says which board revision it is, so an
+                # assembly holding it is checked against that board.
+                board_ref = await _board_ref_of(twin, sources)
+                if board_ref:
+                    metadata.setdefault("board_ref", board_ref)
             if resolved_parts:
                 metadata["parts"] = resolved_parts
             if plan is not None:
@@ -537,6 +545,23 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             return out
 
     return record
+
+
+async def _board_ref_of(twin: Any, sources: list[str]) -> str | None:
+    """``PCB-...@n`` of the first source that is a board revision. Never raises."""
+    from twin_core.items import item_for_node, supports_items
+
+    if not supports_items(twin):
+        return None
+    for src in sources:
+        try:
+            found = await item_for_node(twin, UUID(str(src)))
+        except Exception as exc:  # noqa: BLE001 - a lookup that fails names nothing
+            logger.debug("geometry_board_ref_lookup_failed", source=src, error=str(exc))
+            continue
+        if found is not None and found[0].item_type == "pcb_layout":
+            return f"{found[0].key}@{found[1]}"
+    return None
 
 
 async def _resolve_assembly_parts(

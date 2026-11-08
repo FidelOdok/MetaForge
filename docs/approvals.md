@@ -807,6 +807,7 @@ must be the verified principal when there is one):
 |------|------|--------------|------------------|
 | Baseline | `twin.create_baseline` (`project_id`, `reason`) | Not held: it runs at once. | The baseline's `approved_by` is `agent:<agent> on behalf of <person>` and its `reason` names the agent, the person and the release flag. An `approved_by` argument is ignored. |
 | Release approval | `twin.approve_release` (`project_id`, `reason`, optional `entity_id`) | Approves the project's newest `release_approval` that is not approved yet (record it first with `twin.record_engineering_entity`). | The entity's `authority` becomes `approved`, its metadata says `approved_by: agent:<agent>` and `on_behalf_of: <person>`, and the checklist item passes with the detail "approved by agent `<agent>` on behalf of `<person>`". |
+| Accepting a failing check | `twin.accept_release_finding` (`project_id`, `item`, `targets`, `reason`) | Accepts a failing ERC or DRC (`eda_checks`) or open assembly findings (`assembly_dfa`) for the release. Only a target that currently fails can be named. | An approved `waiver` with `approved_by: agent:<agent>`, `on_behalf_of: <person>`, `approval_route: delegated` and the reason, pinned to the revisions it is about; the checklist item's detail says "accepted by agent `<agent>` on behalf of `<person>`". Without the flag it is held for a person, and the person who approves the hold is recorded. |
 
 Each call is first recorded on the ledger as a delegated approval, the same
 record as [delegated holds through MCP](#delegated-holds-through-mcp): route
@@ -817,8 +818,8 @@ recorded as the person's own decision.
 
 The release rules stay as they are. `twin.approve_release` refuses, naming each
 blocker, while any other item of the manufacturing release checklist that the
-release gate reads (every component exact, DFM, verification, STEP round trip)
-is open, and `twin.create_release_package` still needs the whole G8 gate,
+release gate reads (every component exact, DFM, verification, STEP round trip,
+ERC and DRC, the assembly check, the outputs' sources) is open, and `twin.create_release_package` still needs the whole G8 gate,
 baseline and approval included.
 
 `twin.approve_release` exists only for a delegated agent. With the flag off,
