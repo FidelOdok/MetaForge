@@ -11,6 +11,8 @@ import base64
 import json
 import signal
 import struct
+import sys
+import types
 
 import pytest
 
@@ -204,3 +206,137 @@ class TestSeccompProgram:
         program = script_child._seccomp_program("x86_64")
         ks = {struct.unpack("=HBBI", program[i : i + 8])[3] for i in range(0, len(program), 8)}
         assert {41, 56, 57, 58, 59, 435} <= ks  # socket, clone, fork, vfork, execve, clone3
+
+
+GB = 1024 * 1024 * 1024
+LIMITS = {
+    "memory_bytes": 2 * GB,
+    "address_space_bytes": 16 * GB,
+    "cpu_seconds": 60,
+    "file_bytes": 64,
+    "open_files": 256,
+    "processes": 256,
+}
+_RLIMITS = {
+    "RLIMIT_AS": 9,
+    "RLIMIT_DATA": 2,
+    "RLIMIT_CPU": 0,
+    "RLIMIT_FSIZE": 1,
+    "RLIMIT_NOFILE": 7,
+    "RLIMIT_CORE": 4,
+    "RLIMIT_NPROC": 6,
+}
+
+
+@pytest.fixture
+def fake_resource(monkeypatch):
+    """A stand-in ``resource`` module; returns the ``(name, value)`` set, in order."""
+    calls: list[tuple[str, int]] = []
+    by_number = {v: k for k, v in _RLIMITS.items()}
+    fake = types.ModuleType("resource")
+    fake.__dict__.update(_RLIMITS)
+    fake.RLIM_INFINITY = -1  # type: ignore[attr-defined]
+    fake.getrlimit = lambda which: (-1, -1)  # type: ignore[attr-defined]
+    fake.setrlimit = lambda which, pair: calls.append((by_number[which], pair[1]))  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "resource", fake)
+    return calls
+
+
+class TestMemoryLimits:
+    """FORGE-832: the budget bounds real memory, not address space."""
+
+    def test_the_budget_goes_on_data_under_an_address_space_backstop(self):
+        assert script_child.memory_rlimits(2 * GB, 16 * GB, True) == [
+            ("RLIMIT_AS", 16 * GB),
+            ("RLIMIT_DATA", 2 * GB),
+        ]
+
+    def test_without_mmap_accounting_the_budget_falls_back_to_address_space(self):
+        assert script_child.memory_rlimits(2 * GB, 16 * GB, False) == [("RLIMIT_AS", 2 * GB)]
+
+    def test_the_backstop_is_never_below_the_budget(self):
+        assert script_child.memory_rlimits(4 * GB, GB, True)[0] == ("RLIMIT_AS", 4 * GB)
+
+    def test_data_is_used_when_the_kernel_counts_mmap(self, fake_resource, monkeypatch):
+        monkeypatch.setattr(script_child, "_data_limit_covers_mmap", lambda budget: True)
+        assert script_child._set_limits(LIMITS, own_uid=False) == "data"
+        # The last value set for each limit is the one that holds.
+        final = dict(fake_resource)
+        assert final["RLIMIT_AS"] == 16 * GB
+        assert final["RLIMIT_DATA"] == 2 * GB
+        assert "RLIMIT_NPROC" not in final
+
+    def test_otherwise_the_budget_falls_back_to_address_space(self, fake_resource, monkeypatch):
+        monkeypatch.setattr(script_child, "_data_limit_covers_mmap", lambda budget: False)
+        assert script_child._set_limits(LIMITS, own_uid=True) == "address_space"
+        final = dict(fake_resource)
+        assert final["RLIMIT_AS"] == 2 * GB
+        assert final["RLIMIT_NPROC"] == 256
+
+    def test_an_inherited_hard_limit_is_never_raised(self, fake_resource, monkeypatch):
+        sys.modules["resource"].getrlimit = lambda which: (-1, 8 * GB if which == 9 else -1)  # type: ignore[attr-defined]
+        monkeypatch.setattr(script_child, "_data_limit_covers_mmap", lambda budget: True)
+        script_child._set_limits(LIMITS, own_uid=False)
+        assert dict(fake_resource)["RLIMIT_AS"] == 8 * GB
+
+    def test_an_occt_out_of_memory_is_a_memory_limit(self):
+        class Standard_OutOfMemory(Exception):  # noqa: N801  (OCP's name)
+            pass
+
+        assert script_child._classify(Standard_OutOfMemory()) == "memory_limit"
+        assert script_child._classify(MemoryError()) == "memory_limit"
+        assert script_child._classify(ValueError()) == "script_error"
+
+    def test_a_thread_that_cannot_get_memory_is_a_memory_limit(self, tmp_path):
+        with pytest.raises(ScriptLimitError, match="2048 MB memory limit") as exc:
+            _runner(tmp_path)._interpret(127, b"", b"", False, False, ".step", 1.0)
+        assert exc.value.limit == "memory"
+
+
+class TestChildEnvironment:
+    def test_arenas_and_math_threads_are_capped(self, tmp_path):
+        env = _runner(tmp_path)._env("/run/x")
+        assert env["MALLOC_ARENA_MAX"] == "2"
+        assert env["OMP_NUM_THREADS"] == "1"
+        assert env["OPENBLAS_NUM_THREADS"] == "1"
+
+    def test_nothing_of_the_adapter_reaches_it(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("METAFORGE_TEST_SECRET", "x")
+        env = _runner(tmp_path)._env("/run/x")
+        assert "METAFORGE_TEST_SECRET" not in env
+        assert env["HOME"] == env["TMPDIR"] == "/run/x"
+
+
+class TestMemoryConfiguration:
+    def test_defaults(self, monkeypatch):
+        for name in (
+            "CADQUERY_RUNNER_MEMORY_MB",
+            "CADQUERY_RUNNER_ADDRESS_SPACE_MB",
+            "CADQUERY_RUNNER_MAX_CONCURRENT",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        runner = ScriptRunner.from_env()
+        assert runner.limits.memory_bytes == 2048 * 1024 * 1024
+        assert runner.limits.address_space_bytes == 16 * GB
+        assert runner.max_concurrent == 2
+
+    def test_from_env(self, monkeypatch):
+        monkeypatch.setenv("CADQUERY_RUNNER_MEMORY_MB", "3072")
+        monkeypatch.setenv("CADQUERY_RUNNER_ADDRESS_SPACE_MB", "8192")
+        monkeypatch.setenv("CADQUERY_RUNNER_MAX_CONCURRENT", "3")
+        runner = ScriptRunner.from_env()
+        assert runner.limits.memory_bytes == 3072 * 1024 * 1024
+        assert runner.limits.address_space_bytes == 8 * GB
+        assert runner.max_concurrent == 3
+
+    @pytest.mark.parametrize(("pool", "max_concurrent", "slots"), [(4, 2, 2), (2, 4, 2), (0, 3, 3)])
+    def test_concurrency_is_the_smaller_of_pool_and_setting(
+        self, tmp_path, pool, max_concurrent, slots
+    ):
+        runner = _runner(
+            tmp_path, uid_pool=list(range(61000, 61000 + pool)), max_concurrent=max_concurrent
+        )
+        taken = 0
+        while runner._slots.acquire(blocking=False):
+            taken += 1
+        assert taken == slots

@@ -446,9 +446,43 @@ checks on every change):
 | Its own uid | Started through `setpriv` as one of `CADQUERY_RUNNER_UIDS` (61000 to 61003, one per concurrent run), with no supplementary groups and every capability dropped (`--inh-caps=-all --ambient-caps=-all --no-new-privs`). It owns nothing outside its folder and cannot signal the adapter (uid 1000) or another run. | A script reports its uid as 61000 to 61003; `kill(1)` fails with `Operation not permitted`; `/proc/1/environ` is unreadable. |
 | Landlock | Read-only access to the system and Python paths (`/usr`, `/etc`, `/app`, the interpreter, its own `/proc/self`); nothing else is readable, so not `/workspace`. Writable: only its private folder. Running any program (`execve`) is refused. On kernel ABI 4 or later every TCP bind and connect is refused too. | Writing `/workspace/...` gives `Permission denied`; listing `/workspace` gives `Permission denied`; the `exporters` the namespace hands the script cannot write there either. |
 | seccomp (all threads) | `socket()` for anything but a Unix socket, `fork`, `vfork`, `clone` of a new process, `clone3`, `execve`, `ptrace`, `process_vm_*`, `io_uring_*`, namespace, mount, keyring, BPF and `perf_event_open` calls are refused. | A TCP connect to the adapter's own listening port gives `Permission denied`; a fork bomb fails at the first `fork` with `Operation not permitted`; `subprocess` cannot start anything. |
-| Resource limits | Address space 2 GB (`CADQUERY_RUNNER_MEMORY_MB`), file size 64 MB (`CADQUERY_RUNNER_MAX_FILE_MB`), 256 open files, 256 processes and threads for its uid, CPU time twice the deadline, no core dumps, and `oom_score_adj` 1000 so memory pressure kills the child, not the adapter. | An 8 GB allocation stops with the memory limit; endless printing or writing stops with the file size limit; 2,000 threads stop at `can't start new thread`. |
+| Resource limits | Memory 2 GB (`CADQUERY_RUNNER_MEMORY_MB`) on `RLIMIT_DATA`, which counts every private writable mapping (heap, anonymous `mmap`, thread stacks) but not address space that is only reserved; address space 16 GB (`CADQUERY_RUNNER_ADDRESS_SPACE_MB`) only as a backstop; file size 64 MB (`CADQUERY_RUNNER_MAX_FILE_MB`), 256 open files, 256 processes and threads for its uid, CPU time twice the deadline, no core dumps, and `oom_score_adj` 1000 so memory pressure kills the child, not the adapter. The child's environment caps glibc malloc arenas at two (`MALLOC_ARENA_MAX`) and BLAS and OpenMP at one thread. If the kernel's `RLIMIT_DATA` does not count `mmap` (before Linux 4.7, or with `ignore_rlimit_data`), the child finds out with an untouched probe mapping and puts the 2 GB on address space instead. | An 8 GB allocation stops with the memory limit; a filleted, shelled and lofted part on a 16-thread OCCT pool exports to STEP; endless printing or writing stops with the file size limit; 2,000 threads stop at `can't start new thread`. |
 | Wall clock | The adapter kills every process of the run's uid at the script's `timeout` plus a start-up allowance (`CADQUERY_RUNNER_STARTUP_GRACE_S`, 15 s), then removes the private folder. | An infinite loop and a long sleep are killed; afterwards no process of a runner uid is left and the runner folder is empty. |
 | Private folder | `/run/cadquery-runner/run-<random>` on a tmpfs, mode 0700, created by the child itself. The folder above it is mode 1733: a runner uid may create its folder but not list the others. | |
+
+**Why memory is bounded on `RLIMIT_DATA`, not address space (FORGE-832).**
+The runner first capped address space (`RLIMIT_AS`) at 2 GB, and 28 of 50
+ordinary desk-lamp parts failed with the memory limit on a 16-CPU host. OCCT
+starts one worker thread per CPU and glibc gives every thread that allocates
+an arena of its own, each reserving 64 MB of address space it mostly never
+touches. Measured in the adapter image, for a 130 x 90 x 47 mm base filleted,
+shelled and drilled with 77 holes, unioned with a loft and a finned head,
+then exported to STEP and STL:
+
+| OCCT threads | Child environment | Peak address space (VmPeak) | Peak resident (VmHWM) | Peak private writable (VmData) |
+|---|---|---|---|---|
+| 6 | before | 1.58 GB | 0.63 GB | 0.42 GB |
+| 16 | before | 2.34 GB (fails under a 2 GB `RLIMIT_AS`) | 0.67 GB | 0.52 GB |
+| 32 | before | 3.49 GB | 0.69 GB | 0.72 GB |
+| 16 | arenas capped at 2, one BLAS thread | 1.38 GB | 0.66 GB | 0.42 GB |
+| 32 | arenas capped at 2, one BLAS thread | 1.51 GB | 0.66 GB | 0.58 GB |
+
+Resident memory barely moves with the thread count; address space grows by
+about 70 MB a thread. A per-child cgroup (`memory.max`) would bound resident
+memory exactly, but it is not available here: Docker mounts
+`/sys/fs/cgroup` read-only in the container, and creating a child cgroup
+needs a writable, delegated subtree that an unprivileged adapter (uid 1000,
+only `SETUID` and `SETGID`) does not have. `RLIMIT_DATA` is the closest bound
+a process can set on itself. A script that deliberately maps shared memory,
+which `RLIMIT_DATA` does not count, is still stopped by the 16 GB address
+space backstop and, before that, by the container's memory limit, under which
+the kernel kills the child first.
+
+The container's memory limit (6G) is sized for the runner: two children at
+once (`CADQUERY_RUNNER_MAX_CONCURRENT`, matching its two CPUs) at 2 GB each,
+the adapter with CadQuery loaded (about 0.7 GB) and its two 512 MB tmpfs
+mounts, which count as memory. Raising either runner variable means raising
+that limit too.
 
 The result comes back only as bytes on the child's stdout pipe, capped at
 64 MB (`CADQUERY_RUNNER_MAX_OUTPUT_MB`); the adapter never opens a path the

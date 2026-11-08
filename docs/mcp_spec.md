@@ -1182,20 +1182,25 @@ ENTRYPOINT ["python", "server.py"]
 never in the adapter (`script_runner.py` starts `script_child.py`). Before the
 script runs, and before any thread exists, the child is confined by the
 kernel: a uid of its own from `CADQUERY_RUNNER_UIDS`, `setrlimit` limits
-(memory, CPU, file size, open files, processes), Landlock (writes only its
+(resident memory, an address-space backstop, CPU, file size, open files,
+processes), Landlock (writes only its
 private folder under `/run/cadquery-runner`, reads only system and Python
 paths, never `/workspace`, runs no program, opens no TCP connection) and a
 seccomp filter on every thread (no network socket, no new process, no
-`execve`, `ptrace` or `io_uring`). The adapter kills every process of the run
+`execve`, `ptrace` or `io_uring`). Its environment caps glibc malloc arenas
+(`MALLOC_ARENA_MAX=2`) and OpenMP and OpenBLAS at one thread, so the address
+space it reserves stays close to what it uses. The adapter kills every process of the run
 at its deadline and removes the folder. The result comes back as bytes on a
 pipe; the adapter writes it to the work folder itself.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `CADQUERY_RUNNER_ROOT` | `/run/cadquery-runner` | Where each run's private folder is made (a tmpfs under compose) |
-| `CADQUERY_RUNNER_UIDS` | `61000-61003` | The uid pool: one uid per concurrent run, which also caps concurrency |
+| `CADQUERY_RUNNER_UIDS` | `61000-61003` | The uid pool: one uid per concurrent run; concurrency is the smaller of the pool and `CADQUERY_RUNNER_MAX_CONCURRENT` |
+| `CADQUERY_RUNNER_MAX_CONCURRENT` | `2` | Script children running at once; the container's 6G memory limit is sized for two |
 | `CADQUERY_RUNNER_REQUIRE` | `uid,landlock,seccomp` | Layers that must hold; a missing one refuses the run |
-| `CADQUERY_RUNNER_MEMORY_MB` | `2048` | Address space of one child |
+| `CADQUERY_RUNNER_MEMORY_MB` | `2048` | Memory one child may really use: private writable memory on `RLIMIT_DATA`, not address space (FORGE-832). Falls back to address space on a kernel whose `RLIMIT_DATA` does not count `mmap` |
+| `CADQUERY_RUNNER_ADDRESS_SPACE_MB` | `16384` | Address-space backstop (`RLIMIT_AS`) of one child. OCCT and glibc reserve address space they never touch, so it is set far above the memory budget |
 | `CADQUERY_RUNNER_MAX_FILE_MB` | `64` | Largest file the child may write (its console log included) |
 | `CADQUERY_RUNNER_MAX_OUTPUT_MB` | `64` | Largest result the adapter accepts |
 | `CADQUERY_RUNNER_STARTUP_GRACE_S` | `15` | Added to the script's `timeout` for interpreter and CadQuery start-up |

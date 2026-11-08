@@ -10,8 +10,10 @@ thread exists), the child locks itself down in this order:
 
 1. creates its private work folder (mode 0700) and makes it the working
    directory; stdout and stderr go to ``console.log`` inside it;
-2. resource limits: address space, CPU seconds, file size, open files, core
-   dumps, and processes when it runs under its own uid;
+2. resource limits: resident memory (``RLIMIT_DATA``, under a much larger
+   ``RLIMIT_AS`` backstop, see :func:`memory_rlimits`), CPU seconds, file
+   size, open files, core dumps, and processes when it runs under its own
+   uid;
 3. Landlock: the file system is read-only everywhere it may read (the Python
    installation, ``/usr``, ``/etc``, the adapter's code), unreadable
    everywhere else (``/workspace`` included), and writable only inside the
@@ -397,13 +399,72 @@ def _read_paths(repo_root: str) -> list[str]:
 _READ_FILES = ["/proc/cpuinfo", "/proc/meminfo", "/proc/stat"]
 
 
-def _set_limits(limits: dict[str, int], own_uid: bool) -> None:
+#: Classes OCCT raises when an allocation fails, as OCP names them.
+_OCCT_OUT_OF_MEMORY = ("Standard_OutOfMemory", "bad_alloc")
+
+
+def memory_rlimits(budget: int, backstop: int, data_covers_mmap: bool) -> list[tuple[str, int]]:
+    """The memory rlimits to set, in order, as ``(RLIMIT name, bytes)``.
+
+    ``budget`` is the memory a script may really use. It is not an
+    address-space figure: OCCT starts one worker thread per CPU, and glibc
+    gives every thread that allocates an arena of its own, reserving 64 MB of
+    address space each that is mostly never touched. With ``RLIMIT_AS`` at
+    2 GB, an ordinary part on a 16-CPU host peaked at 2.2 GB of address space
+    with 0.67 GB resident, and failed (FORGE-832).
+
+    So the budget goes on ``RLIMIT_DATA``, which since Linux 4.7 counts every
+    private writable mapping (heap, anonymous ``mmap``, thread stacks) but not
+    reserved-only (``PROT_NONE``) address space, nor the shared libraries.
+    ``RLIMIT_AS`` stays as a backstop, far above any real script, for the
+    mappings ``RLIMIT_DATA`` does not count. Where ``RLIMIT_DATA`` does not
+    count ``mmap`` (an older kernel, or ``ignore_rlimit_data``) the budget
+    falls back to ``RLIMIT_AS``, which is strict but never lets a script
+    allocate past it.
+    """
+    if data_covers_mmap:
+        return [("RLIMIT_AS", max(backstop, budget)), ("RLIMIT_DATA", budget)]
+    return [("RLIMIT_AS", budget)]
+
+
+def _data_limit_covers_mmap(budget: int) -> bool:
+    """With ``RLIMIT_DATA`` at ``budget``: is a larger private mapping refused?
+
+    The mapping is never touched, so the probe costs no memory.
+    """
+    import mmap
+
+    try:
+        probe = mmap.mmap(
+            -1, budget + 64 * 1024 * 1024, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS
+        )
+    except (OSError, OverflowError):
+        return True
+    probe.close()
+    return False
+
+
+def _set_limits(limits: dict[str, int], own_uid: bool) -> str:
+    """Set every rlimit; return which one bounds memory (``data`` or ``address_space``)."""
     import resource  # POSIX only; imported here so the module loads anywhere
 
     def cap(which: int, value: int) -> None:
+        # Never above an inherited hard limit: raising one is not allowed.
+        hard = resource.getrlimit(which)[1]
+        if hard != resource.RLIM_INFINITY:
+            value = min(value, hard)
         resource.setrlimit(which, (value, value))
 
-    cap(resource.RLIMIT_AS, int(limits["memory_bytes"]))
+    budget = int(limits["memory_bytes"])
+    backstop = int(limits.get("address_space_bytes", budget))
+    covered = False
+    if backstop > budget:
+        for name, value in memory_rlimits(budget, backstop, data_covers_mmap=True):
+            cap(getattr(resource, name), value)
+        covered = _data_limit_covers_mmap(budget)
+    # Lowering a hard limit is always allowed, so the fallback can follow.
+    for name, value in memory_rlimits(budget, backstop, data_covers_mmap=covered):
+        cap(getattr(resource, name), value)
     cpu = int(limits["cpu_seconds"])
     resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 1))
     cap(resource.RLIMIT_FSIZE, int(limits["file_bytes"]))
@@ -412,10 +473,13 @@ def _set_limits(limits: dict[str, int], own_uid: bool) -> None:
     if own_uid:
         # Counted per real uid, so only meaningful when the uid is this run's own.
         cap(resource.RLIMIT_NPROC, int(limits["processes"]))
+    return "data" if covered else "address_space"
 
 
 def _classify(exc: BaseException) -> str:
-    if isinstance(exc, MemoryError):
+    if isinstance(exc, MemoryError) or any(
+        name in type(exc).__name__ for name in _OCCT_OUT_OF_MEMORY
+    ):
         return "memory_limit"
     if isinstance(exc, OSError) and exc.errno == errno.EFBIG:
         return "file_size_limit"
@@ -466,7 +530,7 @@ def main() -> int:
         f.write("1000")
 
     try:
-        _set_limits(spec["limits"], own_uid)
+        isolation["memory_limit"] = _set_limits(spec["limits"], own_uid)
     except (OSError, ValueError) as exc:
         return fail("isolation_unavailable", f"resource limits could not be set: {exc}")
 
@@ -510,7 +574,9 @@ def main() -> int:
             data = f.read(int(spec["limits"]["file_bytes"]) + 1)
     except BaseException as exc:  # noqa: BLE001
         kind = _classify(exc)
-        return fail(kind if kind != "script_error" else "export_failed", f"{exc}")
+        return fail(
+            kind if kind != "script_error" else "export_failed", f"{type(exc).__name__}: {exc}"
+        )
     _emit(
         result_fd,
         {

@@ -188,6 +188,69 @@ def test_a_growing_memory_hog_is_stopped(runner):
     _no_child_left()
 
 
+def test_memory_is_bounded_on_data_not_address_space(runner):
+    """FORGE-832: the 2 GB budget is RLIMIT_DATA, address space only a backstop,
+    and the child's environment caps glibc arenas."""
+    script = ESCAPE + (
+        "r = imp('resource')\n"
+        "env = imp('os').environ\n"
+        "raise ValueError('data=%d as=%d arenas=%s omp=%s' % (\n"
+        "    r.getrlimit(r.RLIMIT_DATA)[1], r.getrlimit(r.RLIMIT_AS)[1],\n"
+        "    env.get('MALLOC_ARENA_MAX'), env.get('OMP_NUM_THREADS')))"
+    )
+    with pytest.raises(ScriptRunError) as exc:
+        runner.run(script, ".step", 20)
+    assert f"data={2048 * 1024 * 1024} as={16 * 1024**3} arenas=2 omp=1" in str(exc.value)
+    _no_child_left()
+
+
+# A desk-lamp base, arm and head as the agent in FORGE-832 built them: filleted,
+# shelled, drilled with 77 holes, lofted and unioned. Before it, the script
+# sizes OCCT's thread pool as a 16-CPU host does: one thread per CPU, each of
+# which glibc gave a 64 MB arena of address space, so under a 2 GB RLIMIT_AS
+# this part failed with the memory limit while using 0.67 GB.
+HEAVY = ESCAPE + (
+    "imp('OCP.OSD', fromlist=['OSD_ThreadPool']).OSD_ThreadPool.DefaultPool_s(16)\n"
+    "base = (cq.Workplane('XY').box(130, 90, 47).edges('|Z').fillet(8)\n"
+    "        .faces('>Z').shell(-3).faces('<Z').workplane().rarray(10, 10, 11, 7).hole(3))\n"
+    "loft = cq.Workplane('XY').rect(40, 30).workplane(offset=60).circle(12).loft()\n"
+    "head = (cq.Workplane('XY').cylinder(30, 35).faces('>Z').workplane()\n"
+    "        .rarray(5, 1, 12, 1).rect(1.5, 50).extrude(15))\n"
+    "result = base.union(loft.translate((0, 0, 60))).union(head.translate((0, 0, 140)))\n"
+)
+
+
+def test_a_heavy_part_on_a_16_thread_pool_exports_a_step(runner):
+    pytest.importorskip("cadquery")
+    run = runner.run(HEAVY, ".step", 120)
+    assert run.data.startswith(b"ISO-10303-21")
+    bb = run.properties["bounding_box"]
+    assert bb["max_x"] - bb["min_x"] == pytest.approx(130.0, abs=0.5)
+    assert run.isolation["memory_limit"] == "data"
+    _no_child_left()
+
+
+def test_a_heavy_part_stays_well_under_the_memory_budget(runner):
+    """The same part's real peaks, read from the child's own /proc/self/status."""
+    pytest.importorskip("cadquery")
+    script = HEAVY + (
+        "exporters.export(result, 'probe.step')\n"
+        "status = B['open']('/proc/self/status').read()\n"
+        "raise ValueError('|'.join(l for l in status.splitlines()\n"
+        "                          if l.split(':')[0] in ('VmPeak', 'VmHWM', 'VmData')))"
+    )
+    with pytest.raises(ScriptRunError) as exc:
+        runner.run(script, ".step", 120)
+    fields = dict(
+        part.split(":", 1) for part in str(exc.value).split("ValueError: ", 1)[1].split("|")
+    )
+    kb = {k: int(v.split()[0]) for k, v in fields.items()}
+    # Measured in the image: VmHWM 0.66 GB, VmData 0.42 GB, VmPeak 1.4 GB.
+    assert kb["VmHWM"] < 1536 * 1024, kb
+    assert kb["VmData"] < 2048 * 1024, kb
+    _no_child_left()
+
+
 def test_huge_printed_output_hits_the_file_size_limit(runner):
     script = "while True:\n    print('x' * 100000)"
     with pytest.raises(ScriptLimitError, match="file size limit"):

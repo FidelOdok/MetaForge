@@ -1202,11 +1202,20 @@ services:
       - CADQUERY_RUNNER_ROOT=/run/cadquery-runner
       - CADQUERY_RUNNER_UIDS=61000-61003
       - CADQUERY_RUNNER_REQUIRE=uid,landlock,seccomp
+      # Each script child may really use this much memory (RLIMIT_DATA, not
+      # address space: FORGE-832), and this many children run at once.
+      - CADQUERY_RUNNER_MEMORY_MB=${CADQUERY_RUNNER_MEMORY_MB:-2048}
+      - CADQUERY_RUNNER_MAX_CONCURRENT=${CADQUERY_RUNNER_MAX_CONCURRENT:-2}
     deploy:
       resources:
         limits:
-          # The adapter plus script children, each capped at 2 GB of address space.
-          memory: 3G
+          # 2 children x 2 GB + the adapter with CadQuery loaded (~0.7 GB) +
+          # its two 512 MB tmpfs mounts, which count as memory = 5.7 GB. Raise
+          # this with CADQUERY_RUNNER_MEMORY_MB or _MAX_CONCURRENT. Two
+          # children match the two CPUs: more would only push each one
+          # towards its timeout. A child is the OOM killer's first choice
+          # (oom_score_adj 1000), never the adapter.
+          memory: 6G
           cpus: '2'
           # Every process and thread of the container, script children included.
           pids: 512
