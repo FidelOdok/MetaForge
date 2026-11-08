@@ -248,8 +248,13 @@ reference, never file bytes:
 4. Record the fabrication outputs, then `twin.create_baseline`, a
    `release_approval` request with `twin.record_engineering_entity`, and
    `twin.create_release_package`. The baseline and the approval wait for the
-   person: neither is a human-authority tool an agent may decide under
-   delegation ([release packages](twin_schema.md#release-packages)).
+   person: neither is a human-authority tool, so the human-authority
+   delegation does not reach them
+   ([release packages](twin_schema.md#release-packages)). When the owner also
+   sets `METAFORGE_ALLOW_AGENT_RELEASE=true`, the delegated agent creates the
+   baseline, approves the release with `twin.approve_release` and creates the
+   package, each recorded as its decision on the person's behalf
+   ([delegating a release](approvals.md#delegating-a-release-to-an-agent)).
 
 ## Mapping into the twin
 

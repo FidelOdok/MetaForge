@@ -59,6 +59,8 @@ from mcp_core.elicitation import (
 )
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
+    DELEGATED_AGENT_ARG,
+    DELEGATED_ONLY_TOOLS,
     REQUIRE_PART_COLOURS_ARG,
     ApprovalAsk,
     ApprovalGateFn,
@@ -73,12 +75,15 @@ from mcp_core.guardrails import (
     ApproverArgumentRejectedError,
     Caller,
     HumanAuthorityRequiredError,
+    ReleaseNotDelegatedError,
     decide,
     human_authority_delegated,
     never_auto_approved,
     records_approver,
     reject_caller_supplied_approver,
+    release_delegated,
     requires_human_authority,
+    requires_release_delegation,
     resolve_approval,
     strip_reserved_arguments,
 )
@@ -2464,6 +2469,25 @@ class UnifiedMcpServer:
                 held=decision.requires_approval,
                 **self._service_log_fields(),
             )
+        if tool_id in DELEGATED_ONLY_TOOLS:
+            # FORGE-834: a delegated agent's release approval, or nothing. No
+            # hold: a person who approved one would still not make it run.
+            delegated_only = await self._delegated_approval(tool_id, arguments, caller, call_id)
+            if delegated_only is None:
+                logger.info(
+                    "mcp_release_not_delegated",
+                    tool_id=tool_id,
+                    caller=caller.value,
+                    release_flag=release_delegated(),
+                )
+                raise ReleaseNotDelegatedError(
+                    tool_id,
+                    "the owner's release flag is off"
+                    if not release_delegated()
+                    else "the request did not name the agent and the person it acts for, "
+                    "or the person is not the signed-in principal",
+                )
+            return delegated_only
         if not decision.requires_approval:
             return None
 
@@ -2675,8 +2699,19 @@ class UnifiedMcpServer:
         ``delegated`` with surface ``agent``, the agent and the person, the
         same record ``forge approvals`` writes for an agent decision. This is
         delegation, not policy: no project policy approves these tools.
+
+        FORGE-834: the release steps (``twin.create_baseline``,
+        ``twin.approve_release``) follow the same rules under their own flag,
+        ``METAFORGE_ALLOW_AGENT_RELEASE``. The human-authority flag does not
+        delegate them. A delegated release call also carries the agent's name
+        in :data:`DELEGATED_AGENT_ARG`, so the tool records the agent and the
+        person, never the person alone.
         """
-        if not requires_human_authority(tool_id) or not human_authority_delegated():
+        release = requires_release_delegation(tool_id)
+        if release:
+            if not release_delegated():
+                return None
+        elif not requires_human_authority(tool_id) or not human_authority_delegated():
             return None
         from mcp_core.context import current_context
 
@@ -2744,8 +2779,23 @@ class UnifiedMcpServer:
             on_behalf_of=person,
             approval_id=resolution.approval_id,
             approver_verified=resolution.approver.verified if resolution.approver else False,
+            release=release,
         )
-        return await self._approved(tool_id, caller, "delegated", resolution, 0.0, None, call_id)
+        approved = await self._approved(
+            tool_id, caller, "delegated", resolution, 0.0, None, call_id
+        )
+        if release:
+            # The tool reads the agent from here, set only on this path, so a
+            # release step records who decided it: the agent, for the person.
+            arguments[DELEGATED_AGENT_ARG] = agent
+            logger.info(
+                "mcp_release_delegated",
+                tool_id=tool_id,
+                agent=agent,
+                on_behalf_of=person,
+                approval_id=resolution.approval_id,
+            )
+        return approved
 
     async def _hold_durably(
         self,
@@ -3171,7 +3221,10 @@ class UnifiedMcpServer:
                 window_seconds=window,
             )
 
-        if requires_human_authority(tool_id) and resolution.approver is None:
+        if resolution.approver is None and (
+            requires_human_authority(tool_id)
+            or (route == "delegated" and requires_release_delegation(tool_id))
+        ):
             # Approved, but by nobody we can name. For an ordinary write that
             # would be fine. Here the approver's name *is* the result, so
             # writing the gate anyway would record an authority that does not
@@ -3311,7 +3364,11 @@ class UnifiedMcpServer:
             progress_token = None
         approver = await self._authorise(tool_id, arguments, call_id, progress_token)
         if approver is not None and (
-            requires_human_authority(tool_id) or records_approver(tool_id)
+            requires_human_authority(tool_id)
+            or records_approver(tool_id)
+            # FORGE-834: a delegated release step records the person the
+            # agent acted for; the agent's name is already in the arguments.
+            or DELEGATED_AGENT_ARG in arguments
         ):
             # The tool reads its deciding human from here and nowhere else.
             arguments[APPROVED_BY_ARG] = approver.label

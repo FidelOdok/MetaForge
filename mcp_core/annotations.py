@@ -665,6 +665,10 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # creates one new Baseline node, but that's incidental to the real
         # effect: every member entity's authority moves forward).
         "twin.create_baseline",
+        # FORGE-834: a delegated agent approving the manufacturing release
+        # moves the release_approval's authority forward, the same family as
+        # twin.approve_engineering_entity above. Never policy-approved.
+        "twin.approve_release",
         "twin.execute_revalidation_plan",
         "twin.mark_engineering_change_rolled_back",
         "twin.reject_engineering_change",

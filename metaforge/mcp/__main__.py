@@ -2167,6 +2167,17 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         )
         exact_cad.register_retries()
         bindings["exact_cad_service"] = exact_cad
+        # FORGE-834: the process-wide CAD service, as the gateway binds it.
+        # twin.measure_dfm, twin.evaluate_dfm's exact pass and the release
+        # path's twin.run_item_fea read it through get_exact_cad_service();
+        # unbound, each reported "the CAD adapter is not available" while
+        # the cadquery adapter was reachable.
+        from api_gateway.twin.dfm_exact import register as register_exact_dfm
+        from api_gateway.twin.exact_cad import set_exact_cad_service
+
+        set_exact_cad_service(exact_cad)
+        # A validated exact revision schedules its exact DFM checks here too.
+        register_exact_dfm()
         # The CAD design loop: twin.design_cad_loop, over the same bridge.
         from api_gateway.twin.cad_design_loop import make_cad_design_loop_service
 
@@ -2215,6 +2226,43 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         bindings["imagine_studio"] = ImagineService(twin, project_backend)
     except Exception as exc:  # noqa: BLE001
         logger.warning("mcp_collaborator_init_failed", collaborator="imagine", error=str(exc))
+
+    # FORGE-834: the release path, as the gateway wires it. Without these the
+    # sidecar registered none of twin.resolve_concept_component,
+    # twin.run_item_fea, twin.approve_release, twin.create_baseline or
+    # twin.create_release_package, so a plugin agent was told they "aren't on
+    # this server" at the last step of a release.
+    def _release_path() -> Any:
+        from api_gateway.twin.release_path import make_release_path_service
+
+        return make_release_path_service(twin)
+
+    _try("release_path_service", _release_path)
+
+    def _baseline_creator() -> Any:
+        from api_gateway.twin.baseline import make_baseline_creator
+
+        return make_baseline_creator(twin)
+
+    _try("baseline_creator", _baseline_creator)
+
+    def _release_package_creator() -> Any:
+        from api_gateway.requirement_intelligence.traceability import TraceabilityAgent
+        from api_gateway.twin.engineering_entity_recorder import (
+            make_engineering_entity_recorder,
+        )
+        from api_gateway.twin.release_package import make_release_package_creator
+
+        async def _coverage(project_id: Any) -> Any:
+            return await TraceabilityAgent(twin).coverage(str(project_id))
+
+        return make_release_package_creator(
+            twin,
+            engineering_entity_recorder=make_engineering_entity_recorder(twin, project_backend),
+            traceability_coverage=_coverage,
+        )
+
+    _try("release_package_creator", _release_package_creator)
 
     try:
         from api_gateway.requirement_intelligence.promotion import attempt_promotion

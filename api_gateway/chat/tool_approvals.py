@@ -776,10 +776,21 @@ DELEGATED_REASON = (
     "decided by the agent for the person it acts for: the gateway owner delegates "
     "human-authority decisions (METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY)"
 )
+#: The same, for a release step the owner delegates under its own flag (FORGE-834).
+DELEGATED_RELEASE_REASON = (
+    "decided by the agent for the person it acts for: the gateway owner delegates "
+    "the release baseline and approval (METAFORGE_ALLOW_AGENT_RELEASE)"
+)
 
 
 def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
     """Record a delegated approval and return it, closed and used (FORGE-827).
+
+    FORGE-834: a release step (``twin.create_baseline``,
+    ``twin.approve_release``) is recorded the same way, under
+    ``METAFORGE_ALLOW_AGENT_RELEASE`` instead of the human-authority flag
+    (403 when it is off), with a reason naming the release flag and the
+    outcome ``delegated_release``.
 
     Refused (403) unless this process delegates human authority too, so a
     sidecar with the flag on cannot have a gateway that keeps it off record
@@ -790,9 +801,31 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
     principal is that person; on route ``delegated``.
     """
     from api_gateway.approvals.schemas import DecisionRecord
-    from mcp_core.guardrails import human_authority_delegated, requires_human_authority
+    from mcp_core.guardrails import (
+        human_authority_delegated,
+        release_delegated,
+        requires_human_authority,
+        requires_release_delegation,
+    )
 
-    if not human_authority_delegated():
+    # FORGE-834: a release step is delegated by its own flag, and only by it.
+    release = requires_release_delegation(body.tool)
+    if release:
+        if not release_delegated():
+            logger.info(
+                "tool_approval_release_not_delegated",
+                tool=body.tool,
+                agent=body.agent,
+                on_behalf_of=body.on_behalf_of,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "this gateway does not delegate the release baseline and approval "
+                    "to agents (METAFORGE_ALLOW_AGENT_RELEASE is off)"
+                ),
+            )
+    elif not human_authority_delegated():
         raise HTTPException(
             status_code=403,
             detail=(
@@ -800,11 +833,12 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
                 "(METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY is off)"
             ),
         )
-    if not requires_human_authority(body.tool):
+    elif not requires_human_authority(body.tool):
         raise HTTPException(
             status_code=422,
             detail=f"'{body.tool}' is not a human-authority tool; it is not delegated",
         )
+    reason = DELEGATED_RELEASE_REASON if release else DELEGATED_REASON
     project = project_for_hold(body.project, body.arguments)
     request: dict[str, Any] = {
         "tool": body.tool,
@@ -828,7 +862,7 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
     _approval_store.start(run.id)
     _approval_store.request_approval(
         run.id,
-        reason=DELEGATED_REASON,
+        reason=reason,
         deadline=_approval_store.now() + DEFAULT_HOLD_TIMEOUT_SECONDS,
     )
     # The decision log is written before the transition that persists it.
@@ -836,7 +870,7 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
     run.request[_DECISIONS_KEY] = [
         DecisionRecord(
             decision="approve",
-            reason=DELEGATED_REASON,
+            reason=reason,
             approver=body.approver,
             approver_verified=verified,
             surface="agent",
@@ -849,10 +883,10 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
         run.id, ApprovalDecision.APPROVE, approved_by=body.approver, approver_verified=verified
     )
     run = _close_decided_hold(
-        run.id, approved=True, approver=body.approver, verified=verified, reason=DELEGATED_REASON
+        run.id, approved=True, approver=body.approver, verified=verified, reason=reason
     )
     logger.info(
-        "tool_approval_delegated",
+        "tool_approval_delegated_release" if release else "tool_approval_delegated",
         run_id=run.id,
         tool=body.tool,
         project=project,
@@ -862,7 +896,7 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
         approver_verified=verified,
         arguments_hash=body.arguments_hash,
     )
-    _record_outcome("delegated")
+    _record_outcome("delegated_release" if release else "delegated")
     return run
 
 

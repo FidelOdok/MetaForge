@@ -272,19 +272,35 @@ When the studio reads `handed_over` and the person asks to proceed:
          `kicad.export_pos`, `kicad.export_bom`, `firmware.build`,
          `slicer.slice`, each recorded with `twin.record_design_files` so the
          package can pin it.
-      3. **Baseline.** `twin.create_baseline` (with `approved_by` and a
-         `reason`) pins the current revision of every requirement, entity
-         and item. It changes existing records, so it waits for the person.
+      3. **Baseline.** `twin.create_baseline` (with a `reason`) pins the
+         current revision of every requirement, entity and item. It changes
+         existing records, so it waits for the person, unless the release is
+         delegated (below).
       4. **Release approval.** `twin.record_engineering_entity` with
-         `entity_type: release_approval`. Approving it is the person's.
+         `entity_type: release_approval`. Approving it is the person's,
+         unless the release is delegated.
       5. **Release package.** `twin.create_release_package` once the
          checklist, the baseline and the approval pass. It pins a manifest of
          every current design file (STEPs, Gerbers, drill, position and BOM
          files, firmware, G-code) with a `manifest_sha256`, and marks the CAD
          heads released. Refused with every failing check named otherwise.
+
+      **Delegated release.** The release is delegated only when the gateway
+      owner sets `METAFORGE_ALLOW_AGENT_RELEASE=true` (a separate switch from
+      `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY`, see docs/approvals.md) and your
+      connection names you and the person (`X-MetaForge-Agent`,
+      `X-MetaForge-On-Behalf-Of`). Then do steps 3 to 5 without stopping:
+      `twin.create_baseline` runs at once and is recorded as yours on the
+      person's behalf; record the release approval request, then approve it
+      with `twin.approve_release` (`project_id`, a `reason`), which is refused
+      with each blocker named while any other checklist item is open; then
+      `twin.create_release_package`. Otherwise, or when either tool is held,
+      refused or missing, stop after the release approval request and ask the
+      person to approve the baseline and the release.
 3. **Approvals belong to the person.** Every proposal, contract change, gate
-   and release waits for them. Say what is waiting and stop; never work round
-   an approval or report one as decided.
+   and release waits for them, except a delegated release (see
+   Delegated release under Make). Say what is waiting and stop; never work round an approval or
+   report one as decided.
 4. **A delegated run carries on.** When the run is delegated (rule 2), do not
    stop between stages to ask: go from the handover through Develop, Check
    and Make in the order above. Anything the project's policy approves runs;
