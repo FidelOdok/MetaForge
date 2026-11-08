@@ -87,11 +87,15 @@ class TestTheAgentCannotApproveItsOwnCall:
         # A delegated release step (FORGE-834) is the same: the agent and the
         # person come from the dispatcher's delegation record, never from an
         # argument, and an undelegated call is refused.
-        exempt = HUMAN_AUTHORITY_TOOLS | RELEASE_DELEGATED_TOOLS | {
-            # Advances an entity's authority state; the actor is the twin's
-            # own `created_by` convention, not a claim about who signed off.
-            "twin.approve_engineering_entity",
-        }
+        exempt = (
+            HUMAN_AUTHORITY_TOOLS
+            | RELEASE_DELEGATED_TOOLS
+            | {
+                # Advances an entity's authority state; the actor is the twin's
+                # own `created_by` convention, not a claim about who signed off.
+                "twin.approve_engineering_entity",
+            }
+        )
         offenders = [t for t in known if "approve" in t and t not in exempt]
         assert offenders == [], offenders
 
