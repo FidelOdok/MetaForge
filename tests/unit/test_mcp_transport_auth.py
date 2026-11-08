@@ -160,6 +160,8 @@ class TestHttpTransportHeader:
         captured: dict[str, Any] = {}
 
         class _FakeResp:
+            status = 200  # aiohttp.ClientResponse.status
+
             async def __aenter__(self) -> _FakeResp:
                 return self
 
@@ -190,6 +192,8 @@ class TestHttpTransportHeader:
         captured: dict[str, Any] = {}
 
         class _FakeResp:
+            status = 200  # aiohttp.ClientResponse.status
+
             async def __aenter__(self) -> _FakeResp:
                 return self
 
@@ -221,6 +225,8 @@ class TestHttpTransportHeader:
         captured: dict[str, Any] = {}
 
         class _FakeResp:
+            status = 200  # aiohttp.ClientResponse.status
+
             async def __aenter__(self) -> _FakeResp:
                 return self
 
@@ -258,6 +264,8 @@ class TestHttpTransportHeader:
         captured: dict[str, Any] = {}
 
         class _FakeResp:
+            status = 200  # aiohttp.ClientResponse.status
+
             async def __aenter__(self) -> _FakeResp:
                 return self
 
