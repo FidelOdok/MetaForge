@@ -287,18 +287,19 @@ def test_an_assembly_of_gateway_staged_parts_is_written_where_the_adapter_can() 
 def test_a_board_sized_step_validates_as_one_compound_body() -> None:
     """A KiCad board export is a few MB of STEP: over aiohttp's 1 MiB default."""
     data, error = _script(
-        "result = cq.Workplane('XY').rarray(3, 3, 30, 30).box(2, 2, 1.6, combine=False)",
+        # About 0.8 KB of base64 per box (CI measured 900 boxes at 0.7 MB).
+        "result = cq.Workplane('XY').rarray(3, 3, 70, 70).box(2, 2, 1.6, combine=False)",
         timeout=240,
     )
     assert not error, error
     step_b64 = data["step_base64"]
-    assert len(step_b64) > 2 * 1024 * 1024, len(step_b64)
+    assert len(step_b64) > 1.5 * 1024 * 1024, len(step_b64)  # over the old 1 MiB
 
     out, error = _tool("cadquery.validate_shape", {"step_base64": step_b64, "board": True})
     assert not error, error
     assert out["outcome"] == "pass", out["findings"]
     assert out["body"] == "board"
-    assert out["solid_count"] == 900
+    assert out["solid_count"] == 4900
 
 
 def test_the_adapter_is_still_healthy() -> None:
