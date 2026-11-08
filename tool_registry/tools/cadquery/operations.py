@@ -2429,10 +2429,14 @@ class CadqueryOperations:
 
             for part_def in parts:
                 name = part_def["name"]
-                file_path = part_def["file"]
                 loc = part_def.get("location", {})
 
-                part_shape = cq.importers.importStep(file_path)
+                if part_def.get("shape"):
+                    # A bought standard part (a screw, a pin, a washer, a nut)
+                    # made from its standard's dimensions.
+                    part_shape = standard_part_solid(part_def["shape"])
+                else:
+                    part_shape = cq.importers.importStep(part_def["file"])
                 props = self._get_shape_properties(part_shape)
                 total_volume += props["volume_mm3"]
 
@@ -2449,7 +2453,12 @@ class CadqueryOperations:
                     )
                 assy.solve()
 
-            interferences = _pairwise_interferences(assy, [p["name"] for p in parts])
+            # A screw in its pilot hole overlaps the part by design (the
+            # thread): standard parts are checked against their holes by the
+            # assembly check, not here.
+            interferences = _pairwise_interferences(
+                assy, [p["name"] for p in parts if not p.get("shape")]
+            )
             span.set_attribute("assembly.interferences", len(interferences))
 
             assy.save(output_path)
@@ -2634,6 +2643,76 @@ class CadqueryOperations:
 #: Overlap below this is treated as touching, not interference: coincident
 #: faces of mated parts intersect with a numerically tiny volume.
 _INTERFERENCE_TOLERANCE_MM3 = 1e-3
+
+
+#: Standard part shapes ``create_assembly`` can make, and the parameters each
+#: needs (mm): the generators ``twin_core.library.standard_parts`` names.
+STANDARD_SHAPES: dict[str, tuple[str, ...]] = {
+    "socket_head_cap_screw": ("d", "length", "dk", "k"),
+    "parallel_pin": ("d", "length"),
+    "washer": ("d1", "d2", "h"),
+    "hex_nut": ("d", "m", "s"),
+}
+
+
+def standard_shape_spec(shape: Any) -> tuple[str, dict[str, float], float]:
+    """``(generator, params, z_offset)`` of a standard part shape; raises ``ValueError``.
+
+    The part's own frame: the origin is the underside of a screw's head (a
+    pin's end, a washer's or nut's top face) and the part runs along -Z;
+    ``z_offset`` moves it along Z first (a washer under another).
+    """
+    if not isinstance(shape, dict):
+        raise ValueError("shape must be {generator, params}")
+    generator = str(shape.get("generator") or "")
+    if generator not in STANDARD_SHAPES:
+        raise ValueError(
+            f"shape generator {generator!r} is not one of {', '.join(sorted(STANDARD_SHAPES))}"
+        )
+    raw = shape.get("params")
+    if not isinstance(raw, dict):
+        raise ValueError(f"{generator}: params is an object")
+    params: dict[str, float] = {}
+    for key in STANDARD_SHAPES[generator]:
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+            raise ValueError(f"{generator}: '{key}' must be a positive number (mm)")
+        params[key] = float(value)
+    if generator == "washer" and params["d1"] >= params["d2"]:
+        raise ValueError("washer: d1 (bore) must be smaller than d2 (outside)")
+    z = shape.get("z_offset", 0.0)
+    if isinstance(z, bool) or not isinstance(z, int | float):
+        raise ValueError("z_offset must be a number (mm)")
+    return generator, params, float(z)
+
+
+def standard_part_solid(shape: Any) -> Any:
+    """The CadQuery solid of a standard part shape (threads not modelled)."""
+    generator, p, z = standard_shape_spec(shape)
+    if generator == "socket_head_cap_screw":
+        head = cq.Workplane("XY").circle(p["dk"] / 2).extrude(p["k"])
+        shank = cq.Workplane("XY").workplane(offset=-p["length"]).circle(p["d"] / 2)
+        solid = head.union(shank.extrude(p["length"]))
+    elif generator == "parallel_pin":
+        solid = cq.Workplane("XY").workplane(offset=-p["length"]).circle(p["d"] / 2)
+        solid = solid.extrude(p["length"])
+    elif generator == "washer":
+        solid = (
+            cq.Workplane("XY")
+            .workplane(offset=-p["h"])
+            .circle(p["d2"] / 2)
+            .circle(p["d1"] / 2)
+            .extrude(p["h"])
+        )
+    else:  # hex_nut: across flats s, so the corners sit on s / cos(30 deg)
+        solid = (
+            cq.Workplane("XY")
+            .workplane(offset=-p["m"])
+            .polygon(6, p["s"] / math.cos(math.radians(30)))
+            .circle(p["d"] / 2)
+            .extrude(p["m"])
+        )
+    return solid.translate((0, 0, z)) if z else solid
 
 
 def _part_location(loc: dict[str, Any]) -> Any:

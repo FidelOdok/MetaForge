@@ -63,6 +63,27 @@ FIT_TOOL = "cadquery.check_interference"
 CONTRACT_KEY = "IFC-CAD-EDA"
 _STAGE_SUBDIR = "_staged_work_products"
 MAX_PARTS = 60
+MAX_FASTENERS = 200
+#: The author a bought part's model is recorded under (simready.import).
+PURCHASED_AUTHOR = "mechanical.library"
+
+
+def _is_purchased(node: Any) -> bool:
+    meta = _meta(node)
+    return bool(meta.get("purchased")) or str(meta.get("authored_by") or "") == PURCHASED_AUTHOR
+
+
+def read_board_text(node: Any) -> str | None:
+    """The ``.kicad_pcb`` text of a board revision, or ``None`` when it cannot be read."""
+    try:
+        from api_gateway.twin.blob_store import resolve_work_product_blob
+
+        content, _name = resolve_work_product_blob(node)
+    except Exception as exc:  # noqa: BLE001 - an unreadable board derives nothing
+        logger.debug("assembly_fit_board_file_unavailable", error=str(exc))
+        return None
+    text = content.decode("utf-8", "replace")
+    return text if "(kicad_pcb" in text[:400] else None
 
 
 class AssemblyFitError(ValueError):
@@ -271,11 +292,15 @@ class AssemblyFitService:
         parts: list[dict[str, Any]],
         joints: list[dict[str, Any]] | None = None,
         material: str | None = None,
+        fasteners: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Resolve, place and build an assembly; the caller commits what comes back.
 
         Returns the STEP bytes (base64), the ``parts`` for
         ``twin.commit_geometry`` and the layout to keep on the revision.
+        ``fasteners`` are bought screws and pins by designation, each placed
+        in its holes; they go into the STEP as plain solids made from their
+        standard's dimensions and into the layout for the check and the BOM.
         """
         from twin_core.dfa.checks import AssemblySpecError, parse_joint
 
@@ -332,6 +357,9 @@ class AssemblyFitService:
                 }
                 if board_ref:
                     entry["board_ref"] = str(board_ref)
+                if _is_purchased(node):
+                    # A bought part's model (simready.import): listed on the BOM.
+                    entry["purchased"] = True
                 layout_parts.append(entry)
 
             def resolve(text: str) -> str:
@@ -361,8 +389,13 @@ class AssemblyFitService:
                         "min_deg": j.min_deg,
                         "max_deg": j.max_deg,
                         "steps": j.steps,
+                        **({"retention": j.retention} if j.retention else {}),
                     }
                 )
+
+            fastener_rows, fastener_parts = self._fasteners(fasteners, resolve, names)
+            adapter_parts.extend(fastener_parts)
+            span.set_attribute("assembly.fasteners", len(fastener_rows))
 
             # No output_path: the adapter writes into a folder it creates
             # inside its own work folder and returns the path. A folder made
@@ -400,6 +433,7 @@ class AssemblyFitService:
                 name=name,
                 parts=len(layout_parts),
                 joints=len(joint_rows),
+                fasteners=len(fastener_rows),
                 interferences=len(data.get("interferences") or []),
             )
             return {
@@ -408,12 +442,104 @@ class AssemblyFitService:
                 "layout": {
                     "parts": layout_parts,
                     "joints": joint_rows,
+                    "fasteners": fastener_rows,
                     "built_with": ASSEMBLY_TOOL,
                     "build_interferences": data.get("interferences") or [],
                 },
                 "interference_check_passed": data.get("interference_check_passed"),
                 "interferences": data.get("interferences") or [],
             }
+
+    def _fasteners(
+        self,
+        raw: list[dict[str, Any]] | None,
+        resolve: Any,
+        names: set[str],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """``(layout rows, adapter parts)`` for the bought fasteners.
+
+        Each fastener is read through its standard (``library.standard_part``)
+        by designation and goes into the STEP as a plain solid at its
+        location, with its washers stacked under the head and its nut under
+        the grip when the grip is known.
+        """
+        from twin_core.dfa.checks import AssemblySpecError
+        from twin_core.dfa.fasteners import FastenerSpecError, parse_fastener
+        from twin_core.library.standard_parts import (
+            StandardPartError,
+            standard_part_by_designation,
+        )
+
+        if raw is None:
+            return [], []
+        if not isinstance(raw, list):
+            raise AssemblyFitError("fasteners must be a list of {designation, location, holes}")
+        if len(raw) > MAX_FASTENERS:
+            raise AssemblyFitError(f"at most {MAX_FASTENERS} fasteners in one assembly")
+        rows: list[dict[str, Any]] = []
+        shapes: list[dict[str, Any]] = []
+        used = set(names)
+        for i, f in enumerate(raw):
+            where = f"fasteners[{i}]"
+            try:
+                spec = parse_fastener(f, resolve, standard_part_by_designation, where, i)
+            except (FastenerSpecError, AssemblySpecError) as exc:
+                raise AssemblyFitError(str(exc)) from exc
+            if spec.matrix is None:
+                raise AssemblyFitError(
+                    f"{where}: 'location' is required: where the underside of its head (a "
+                    "pin's end) sits, its shank along its own -Z"
+                )
+            if spec.name in used:
+                raise AssemblyFitError(f"{where}: the name {spec.name!r} is used twice")
+            used.add(spec.name)
+            location = {k: float(v) for k, v in (f.get("location") or {}).items()}
+            row: dict[str, Any] = {
+                "name": spec.name,
+                "designation": spec.designation,
+                "title": spec.title,
+                "kind": spec.kind,
+                "location": location,
+                "matrix": flat(spec.matrix),
+                "holes": [h.as_dict() for h in spec.holes],
+                "washers": [w.designation for w in spec.washers],
+                "geometry": spec.geometry,
+            }
+            if spec.nut is not None:
+                row["nut"] = spec.nut.designation
+            if spec.min_engagement_mm is not None:
+                row["min_engagement_mm"] = spec.min_engagement_mm
+            rows.append(row)
+            shapes.append({"name": spec.name, "shape": dict(spec.geometry), "location": location})
+            # Washers stack under the head, along the shank (its -Z).
+            z = 0.0
+            try:
+                for k, w in enumerate(spec.washers):
+                    geo = standard_part_by_designation(w.designation).get("geometry") or {}
+                    shapes.append(
+                        {
+                            "name": f"{spec.name} washer {k + 1}",
+                            "shape": {**geo, "z_offset": z},
+                            "location": location,
+                        }
+                    )
+                    z -= w.thickness_mm
+                clamped = [h for h in spec.holes if h.fit == "clearance"]
+                if spec.nut is not None and clamped and all(h.length_mm for h in clamped):
+                    grip = sum(h.length_mm or 0.0 for h in clamped) - (
+                        spec.holes[0].counterbore_depth_mm or 0.0
+                    )
+                    geo = standard_part_by_designation(spec.nut.designation).get("geometry") or {}
+                    shapes.append(
+                        {
+                            "name": f"{spec.name} nut",
+                            "shape": {**geo, "z_offset": z - grip},
+                            "location": location,
+                        }
+                    )
+            except StandardPartError as exc:  # pragma: no cover - parse_fastener read them
+                raise AssemblyFitError(f"{where}: {exc}") from exc
+        return rows, shapes
 
     # -- checking ---------------------------------------------------------
 
@@ -515,6 +641,124 @@ class AssemblyFitService:
             )
         return derived, required, notes
 
+    async def _footprints(self, pid: UUID, board_ref: str) -> dict[str, Any]:
+        """``reference -> BoardFootprint`` read from a board revision's file."""
+        from twin_core.dfa.connectors import kicad_footprints
+        from twin_core.items import parse_item_ref, resolve_item_ref
+
+        try:
+            key, rev = parse_item_ref(board_ref)
+            _item, entry = await resolve_item_ref(self._twin, f"{key}@{rev}" if rev else key, pid)
+            node = await self._twin.get_work_product(entry.node_id)
+        except Exception as exc:  # noqa: BLE001 - an unreadable board derives nothing
+            logger.debug("assembly_fit_board_unavailable", board=board_ref, error=str(exc))
+            return {}
+        text = read_board_text(node) if node is not None else None
+        return kicad_footprints(text) if text else {}
+
+    async def _slots(self, parts: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
+        """``(part name, slot)`` for each ``connector_slots`` entry the parts record."""
+        out: list[tuple[str, dict[str, Any]]] = []
+        for p in parts:
+            if p.get("board_ref"):
+                continue
+            try:
+                node = await self._twin.get_work_product(UUID(str(p["node_id"])))
+            except (ValueError, TypeError):
+                continue
+            for slot in _meta(node).get("connector_slots") or []:
+                if isinstance(slot, dict) and slot.get("center") and slot.get("normal"):
+                    out.append((str(p["name"]), slot))
+        return out
+
+    async def _connector_spec(
+        self, pid: UUID, parts: list[dict[str, Any]], given: dict[str, Any]
+    ) -> tuple[dict[str, Any], bool, list[str]]:
+        """Connectors completed from, or found in, the boards' own files.
+
+        A connector named by ``reference`` (``J1``) with no footprint and no
+        mating axis takes its footprint, rotation and side from the board
+        revision's ``.kicad_pcb``. With no connectors given, every edge
+        connector on a board (a footprint whose mating side is known) is
+        derived and the connector check is required; its slot comes from a
+        part's ``connector_slots`` metadata (``reference`` or ``name``,
+        ``center``, ``normal`` out of the part, ``size_mm``) when it records
+        one. Returns ``(checks, required, notes)``.
+        """
+        from twin_core.dfa.connectors import edge_connectors
+
+        boards = [p for p in parts if p.get("board_ref")]
+        if not boards:
+            return {}, False, []
+        footprints = {
+            str(b["name"]): await self._footprints(pid, str(b["board_ref"])) for b in boards
+        }
+        notes: list[str] = []
+        raw = given.get("connectors")
+        if isinstance(raw, list):
+            completed: list[Any] = []
+            for c in raw:
+                ref = c.get("reference") if isinstance(c, dict) else None
+                if (
+                    isinstance(ref, str)
+                    and not c.get("footprint")
+                    and c.get("mating_axis") is None
+                    and c.get("direction") is None
+                ):
+                    found = next((fps[ref] for fps in footprints.values() if ref in fps), None)
+                    if found is not None:
+                        c = {
+                            **c,
+                            "footprint": found.footprint,
+                            "rotation_deg": found.rotation_deg,
+                            "side": found.side,
+                        }
+                        notes.append(
+                            f"{ref}: footprint {found.footprint} at {found.rotation_deg:g} degrees "
+                            f"({found.side}) from the board file"
+                        )
+                completed.append(c)
+            return {"connectors": completed}, False, notes
+        edges = [(b, f) for b in boards for f in edge_connectors(footprints[str(b["name"])])]
+        if not edges:
+            return {}, False, notes
+        slots = await self._slots(parts)
+        derived: list[dict[str, Any]] = []
+        for b, f in edges:
+            slot = next(
+                (
+                    s
+                    for s in slots
+                    if str(s[1].get("reference") or s[1].get("name") or "") == f.reference
+                ),
+                slots[0] if len(slots) == 1 and len(edges) == 1 else None,
+            )
+            row: dict[str, Any] = {
+                "board": b["name"],
+                "name": f.reference,
+                "reference": f.reference,
+                "footprint": f.footprint,
+                "rotation_deg": f.rotation_deg,
+                "side": f.side,
+                "source": f"{b['board_ref']} board file",
+            }
+            if slot is not None:
+                host, s = slot
+                row.update(
+                    {"slot_part": host, "slot_center": s["center"], "slot_normal": s["normal"]}
+                )
+                if s.get("size_mm") is not None:
+                    row["slot_size_mm"] = s["size_mm"]
+                notes.append(f"{f.reference}: slot from {host}'s connector_slots")
+            else:
+                notes.append(
+                    f"{f.reference} ({f.footprint}) on {b['board_ref']} is an edge connector: give "
+                    "connectors with its slot (slot_part, slot_center, slot_normal, slot_size_mm) "
+                    "and its face"
+                )
+            derived.append(row)
+        return {"connectors": derived}, True, notes
+
     async def check_assembly(
         self,
         project_id: str | UUID,
@@ -597,7 +841,19 @@ class AssemblyFitService:
             given = dict(checks or {})
             if "joints" not in given and layout.get("joints"):
                 given["joints"] = layout["joints"]
+            if "fasteners" not in given and layout.get("fasteners"):
+                given["fasteners"] = layout["fasteners"]
             derived, required, notes = await self._derive(pid, parts, given)
+            connectors, connector_required, connector_notes = await self._connector_spec(
+                pid, parts, given
+            )
+            if "connectors" in given:
+                given.update(connectors)
+            else:
+                derived.update(connectors)
+            if connector_required:
+                required.add("connector")
+            notes.extend(connector_notes)
             try:
                 spec = parse_spec({**derived, **given}, resolve)
             except AssemblySpecError as exc:
@@ -702,18 +958,22 @@ class AssemblyFitService:
     ) -> dict[str, Any]:
         """Record a person's (or a delegated agent's) acceptance of failing checks.
 
-        ``item`` is ``eda_checks`` (targets ``PCB-...@n:drc``/``SCH-...@n:erc``)
-        or ``assembly_dfa`` (targets the finding ids of the newest check). Only
+        ``item`` is ``eda_checks`` (targets ``PCB-...@n:drc``/``SCH-...@n:erc``),
+        ``assembly_dfa`` (targets the finding ids of the newest check) or
+        ``design_files_released`` (targets the node ids of stray boards and
+        schematics, left out of the package). Only
         a target the checklist currently fails on can be accepted.
         """
         from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
         from twin_core.dfa.checks import AssemblyReport
         from twin_core.dfm.release_fit import (
-            ASSEMBLY_ITEM,
+            DESIGN_FILES_ITEM,
             EDA_ITEM,
+            ITEM_DESIGN_TYPES,
             REPORT_KEY,
             WAIVABLE_ITEMS,
             latest_assembly_check,
+            stray_design_files,
         )
         from twin_core.items import list_items
         from twin_core.models.engineering_entity import EngineeringEntity
@@ -750,6 +1010,29 @@ class AssemblyFitService:
                     )
                 clean = [next(h for h in heads if h.lower() == t.lower()) for t in clean]
                 pin_refs = [t.rsplit(":", 1)[0] for t in clean]
+            elif item == DESIGN_FILES_ITEM:
+                strays = {
+                    s.node_id: s
+                    for s in await stray_design_files(self._twin, pid)
+                    if s.status == "orphan"
+                }
+                unknown = [t for t in clean if t not in strays]
+                if unknown:
+                    raise AssemblyFitError(
+                        f"not a stray design file of this project: {', '.join(unknown)}; "
+                        "targets are "
+                        + (
+                            ", ".join(sorted(strays))
+                            or "none (every board and schematic is an item revision)"
+                        ),
+                        409,
+                    )
+                # Pinned to the released boards and schematics it is left out beside.
+                pin_refs = [
+                    f"{i.key}@{i.head_revision}"
+                    for t in ITEM_DESIGN_TYPES
+                    for i in await list_items(self._twin, project_id=pid, item_type=t)
+                ]
             else:
                 found: dict[str, Any] = {}
                 for asm in await list_items(self._twin, project_id=pid, item_type="assembly"):
@@ -817,9 +1100,7 @@ class AssemblyFitService:
                 "approved_by": metadata["approved_by"],
                 "on_behalf_of": approved_by.strip() if delegated else None,
                 "depends_on": [p.ref for p in pins],
-                "checklist_item": await self._checklist_item(
-                    pid, ASSEMBLY_ITEM if item == ASSEMBLY_ITEM else EDA_ITEM
-                ),
+                "checklist_item": await self._checklist_item(pid, item),
             }
 
 

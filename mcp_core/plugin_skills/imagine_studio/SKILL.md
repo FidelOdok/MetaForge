@@ -280,18 +280,35 @@ When the studio reads `handed_over` and the person asks to proceed:
             board as its source, so it records which `PCB-...@n` it is.
          2. `twin.build_assembly`: every part and board by `item_key` with its
             `location` (mm and degrees), and each hinge as a `revolute` joint
-            with its axis and `min_deg`/`max_deg`. Like a part, the assembly
-            revision is then validated and exported (`twin.build_exact_cad`,
-            `twin.export_cad_step`); the checklist's STEP item names it.
+            with its axis and `min_deg`/`max_deg`. Put every bought part that
+            joins them in `fasteners`: each screw and hinge pin by
+            `designation` as `library.standard_part` reads it (`ISO 4762
+            M2.5x8`, `M2.5x6`, `ISO 2338 4x30`), its `location` (the underside
+            of the head, or the pin's end, with the shank along its own -Z),
+            the `holes` it goes through in order (`part`, `diameter_mm`, `fit`
+            clearance, tapped, thread_forming or press, `length_mm` it clamps,
+            `center` in the part's frame, any `counterbore`), and its
+            `washers` and `nut`. A hole pattern or a hinge with no fastener on
+            it is an "unfastened joint" unless its `retention` is `snap` or
+            `press_fit`. Like a part, the assembly revision is then validated
+            and exported (`twin.build_exact_cad`, `twin.export_cad_step`); the
+            checklist's STEP item names it.
          3. `twin.check_assembly` with what the design has: `hole_patterns`
             (the board's mounting holes against the bosses or cover holes),
             `outlines` (the board in its pocket or lip), `connectors` (each
-            edge connector's face against the board edge and its slot),
-            `stacks` (a tongue and its washers in a clevis gap; standard
-            washers and screws by `standard` and `size`), `seats` (a diffuser
-            in its seat, with its `retention`). It also checks overlaps and
-            sweeps each joint through its limits. Fix every high and medium
-            finding and check again.
+            edge connector by `reference`, such as `J1`, whose footprint and
+            rotation are read from the board file, or its `mating_axis`; its
+            `face`; and its slot: `slot_part`, `slot_center` on the outer
+            face, `slot_normal` pointing out of the part, `slot_size_mm`),
+            `stacks` (a tongue and its washers in a clevis gap), `seats` (a
+            diffuser in its seat, with its `retention`). Record each slot on
+            its part as `connector_slots` so the check finds it. The check
+            compares the connector's mating axis with the slot's opening and
+            passes a USB-C plug envelope (12.35 x 6.5 mm overmold, 20 mm deep;
+            `plug_envelope_mm` for another) through the slot: a plug that
+            cannot mate is high. It also holds each fastener to its holes,
+            checks overlaps and sweeps each joint through its limits. Fix
+            every high and medium finding and check again.
    5. **Make.**
       1. `twin.get_release_checklist` again; fix what it still names.
       2. Fabrication outputs: `kicad.export_gerber`, `kicad.export_drill`,
@@ -300,18 +317,31 @@ When the studio reads `handed_over` and the person asks to proceed:
          `source_ref` (the `CAD-...@n`, `PCB-...@n` or `FW-...@n` it was made
          from) so the package can pin it. An output made from an older
          revision blocks the release: make it again from the current one.
-      3. **Accepting a failing check.** A failing ERC or DRC, or an assembly
-         finding, that is truly acceptable is the person's to accept with
-         `twin.accept_release_finding` (the checklist item, the targets it
-         names and a reason). Outputs are never accepted.
-      4. **Baseline.** `twin.create_baseline` (with a `reason`) pins the
+      3. **The BOM.** Record two with `twin.record_design_files`
+         (`work_product_type: bom`): the board's, from `kicad.export_bom`,
+         with `source_ref` the `PCB-...@n`; and the assembly's, a CSV of its
+         made parts and every fastener, washer and nut by designation with
+         its quantity, with `source_ref` the `ASM-...@n`. The checklist's
+         "BOM lists every purchased part and the board's components" fails
+         an empty BOM or one missing a bought part the assembly holds.
+      4. **Only released design files.** Record every board and schematic
+         as a revision of its item (`item_key`). One that is not (a layout
+         tried on the side) is left out of the package and blocks it until
+         it is recorded as its item's revision or the person accepts leaving
+         it out (`twin.accept_release_finding`, item
+         `design_files_released`).
+      5. **Accepting a failing check.** A failing ERC or DRC, an assembly
+         finding or a stray design file that is truly acceptable is the
+         person's to accept with `twin.accept_release_finding` (the checklist
+         item, the targets it names and a reason). Outputs are never accepted.
+      6. **Baseline.** `twin.create_baseline` (with a `reason`) pins the
          current revision of every requirement, entity and item. It changes
          existing records, so it waits for the person, unless the release is
          delegated (below).
-      5. **Release approval.** `twin.record_engineering_entity` with
+      7. **Release approval.** `twin.record_engineering_entity` with
          `entity_type: release_approval`. Approving it is the person's,
          unless the release is delegated.
-      6. **Release package.** `twin.create_release_package` once the
+      8. **Release package.** `twin.create_release_package` once the
          checklist, the baseline and the approval pass. It pins a manifest of
          every current design file (STEPs, Gerbers, drill, position and BOM
          files, firmware, G-code), each with its `source_ref`, with a
@@ -322,7 +352,7 @@ When the studio reads `handed_over` and the person asks to proceed:
       owner sets `METAFORGE_ALLOW_AGENT_RELEASE=true` (a separate switch from
       `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY`, see docs/approvals.md) and your
       connection names you and the person (`X-MetaForge-Agent`,
-      `X-MetaForge-On-Behalf-Of`). Then do steps 3 to 6 without stopping:
+      `X-MetaForge-On-Behalf-Of`). Then do steps 5 to 8 without stopping:
       `twin.create_baseline` runs at once and is recorded as yours on the
       person's behalf; accept a failing check with
       `twin.accept_release_finding` only when it is truly acceptable, with a

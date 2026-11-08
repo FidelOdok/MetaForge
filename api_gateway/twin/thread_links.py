@@ -111,6 +111,10 @@ async def current_records(twin: Any, project_id: UUID, wp_type: str) -> list[Any
             continue
         if wp_type == "cad_model" and not is_thread_stage(wp_type, node):
             continue
+        if wp_type == "bom" and meta.get("bom_scope"):
+            # A BOM made from a board or an assembly is an output of the
+            # design, never the component list a schematic starts from.
+            continue
         key = meta.get("item_key")
         if key:
             rev = int(meta.get("item_revision") or 0)

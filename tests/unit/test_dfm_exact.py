@@ -960,6 +960,8 @@ async def test_routes(
         "eda_checks",
         "assembly_dfa",
         "outputs_current",
+        "bom_complete",
+        "design_files_released",
     ]
     assert body["readiness"]["level"] == "prototype"
     made = client.post(f"{base}/report").json()

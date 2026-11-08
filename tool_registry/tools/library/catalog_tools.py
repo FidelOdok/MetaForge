@@ -418,6 +418,12 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
 
     async def standard(args: dict[str, Any]) -> dict[str, Any]:
         length = args.get("length_mm")
+        designation = args.get("designation")
+        if isinstance(designation, str) and designation.strip() and not args.get("family"):
+            # No family: the whole designation is read ("ISO 4762 M4x25", "M2.5x6").
+            return await service.standard_part("", designation.strip(), None)
+        if not args.get("family") or not args.get("size"):
+            raise ValueError("library.standard_part: give family and size, or a designation")
         return await service.standard_part(
             str(args["family"]), str(args["size"]), float(length) if length is not None else None
         )
@@ -428,22 +434,29 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
         (
             "Build a standard mechanical part from its standard's dimension table, without "
             "storing it: family iso4762 (socket head cap screw; give size like M4 and "
-            "length_mm), iso4032 (hex nut), iso7089 (plain washer) or deep_groove_bearing "
-            "(size is the designation, e.g. 608). Every dimension cites the table row. A "
-            "size or length the standard does not have is refused. Pass the result to "
-            "library.register_component to add it."
+            "length_mm), iso4032 (hex nut), iso7089 (plain washer), iso2338 (parallel pin, "
+            "a hinge or dowel pin; size is the diameter, with length_mm) or "
+            "deep_groove_bearing (size is the designation, e.g. 608). Or give only a "
+            "designation as people write it: 'ISO 4762 M4x25', 'M2.5x6' (a screw), "
+            "'ISO 7089 M4', 'ISO 4032 M4', 'ISO 2338 4x30'. Every dimension cites its "
+            "source. A size or length the standard does not have is refused. Pass the "
+            "result to library.register_component to add it; twin.build_assembly takes "
+            "the same designations as fasteners."
         ),
         {
             "type": "object",
             "properties": {
                 "family": {
                     "type": "string",
-                    "enum": ["iso4762", "iso4032", "iso7089", "deep_groove_bearing"],
+                    "enum": ["iso4762", "iso4032", "iso7089", "iso2338", "deep_groove_bearing"],
                 },
                 "size": {"type": "string"},
                 "length_mm": {"type": "number"},
+                "designation": {
+                    "type": "string",
+                    "description": "The part as written, e.g. 'ISO 4762 M4x25' or 'M2.5x6'.",
+                },
             },
-            "required": ["family", "size"],
         },
         standard,
     )

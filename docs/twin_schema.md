@@ -1128,9 +1128,9 @@ metadata: {
 
 **The manufacturing release checklist (3D-RC-016).** When a component is made by a process whose DFM profile has exact checks, G8 also carries a `manufacturing_release_checklist` check: it FAILs, naming each blocker, until every required component has a validated exact model, the exact DFM analysis passed or a person accepted its issues, every physical verification item is approved and every CAD head has a round-trip-passed STEP (the release approval stays G8's own check). The flow runner's G8 gate lists the same blockers as missing. So a release package, and with it `geometry_state: released`, is refused while any of them is open; see [the release checklist](#release-checklist).
 
-**The design file manifest.** `design_files` lists each current CAD part and assembly by its head revision (`KEY@n`; an analysis model is left out) and the newest file of each name for the other making types (`schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `manufacturing_file`, `bom`, `firmware_source`, `pinmap`, `gcode`), each with its node id, content hash and `source_ref`; `manifest_sha256` hashes the rows, the source pins included. A fabrication output also carries `source_status`. `twin.create_release_package` refuses, naming each one, while any output was made from an older revision or names no source, whether or not the manufacturing checklist applies to the project; an output made again from the current revision supersedes the older one made from the same item, which is then left out of the manifest. It is a snapshot of references, never a copy of the files: record the fabrication outputs with `twin.record_design_files` first so the package pins them. A package cut before the manifest existed lists none.
+**The design file manifest.** `design_files` lists each current CAD part and assembly by its head revision (`KEY@n`; an analysis model is left out) and the newest file of each name for the other making types (`schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `manufacturing_file`, `bom`, `firmware_source`, `pinmap`, `gcode`), each with its node id, content hash and `source_ref`; `manifest_sha256` hashes the rows, the source pins included. A fabrication output also carries `source_status`. `twin.create_release_package` refuses, naming each one, while any output was made from an older revision or names no source, whether or not the manufacturing checklist applies to the project; an output made again from the current revision supersedes the older one made from the same item, which is then left out of the manifest. A schematic or board is listed only as the head revision of its item: an older revision is left out, and one that is not a revision of any item (a layout recorded on the side, which could be fabricated in place of the released board) is never packaged. The package lists what it left out in `excluded_design_files` (`{kind, node_id, name, status: "orphan" | "superseded", reason}`), and `twin.create_release_package` refuses, naming each, while such an orphan is not accepted (`design_files_released`, see [the release checklist](#release-checklist)). It is a snapshot of references, never a copy of the files: record the fabrication outputs with `twin.record_design_files` first so the package pins them. A package cut before the manifest existed lists none.
 
-**The release path for an agent.** The order is: measure each part (`twin.evaluate_dfm` or `twin.measure_dfm`, see [measuring by reference](#dfm-by-reference)), resolve the concept's components (`twin.resolve_concept_component`, see [resolving concept components](#concept-component-resolution)), the analyses (`twin.run_item_fea` for a load case on a CAD item), ERC and DRC recorded on the released revisions, the assembly built and checked (`twin.build_assembly`, `twin.check_assembly`, see [design for assembly](#design-for-assembly)), the fabrication outputs recorded with their `source_ref`, `twin.create_baseline` (held for a person: it advances existing records), a `release_approval` entity (`twin.record_engineering_entity`; its approval is the person's), then `twin.create_release_package`. When the owner sets `METAFORGE_ALLOW_AGENT_RELEASE=true`, an agent that names itself and the person it acts for may do the baseline and the approval itself: the baseline runs unheld with `approved_by` `agent:<agent> on behalf of <person>`, and `twin.approve_release` approves the release approval with metadata `approved_by: agent:<agent>`, `on_behalf_of: <person>`, refusing while any other checklist item the gate reads is open. See [delegating a release to an agent](approvals.md#delegating-a-release-to-an-agent).
+**The release path for an agent.** The order is: measure each part (`twin.evaluate_dfm` or `twin.measure_dfm`, see [measuring by reference](#dfm-by-reference)), resolve the concept's components (`twin.resolve_concept_component`, see [resolving concept components](#concept-component-resolution)), the analyses (`twin.run_item_fea` for a load case on a CAD item), ERC and DRC recorded on the released revisions, the assembly built with its fasteners and checked (`twin.build_assembly`, `twin.check_assembly`, see [design for assembly](#design-for-assembly)), the fabrication outputs and the board's and the assembly's BOMs recorded with their `source_ref` (see [BOM files](#bom-files)), `twin.create_baseline` (held for a person: it advances existing records), a `release_approval` entity (`twin.record_engineering_entity`; its approval is the person's), then `twin.create_release_package`. When the owner sets `METAFORGE_ALLOW_AGENT_RELEASE=true`, an agent that names itself and the person it acts for may do the baseline and the approval itself: the baseline runs unheld with `approved_by` `agent:<agent> on behalf of <person>`, and `twin.approve_release` approves the release approval with metadata `approved_by: agent:<agent>`, `on_behalf_of: <person>`, refusing while any other checklist item the gate reads is open. See [delegating a release to an agent](approvals.md#delegating-a-release-to-an-agent).
 
 `GET /v1/releases?project_id=` lists a project's packages (oldest first), `POST /v1/releases` creates one (409 if G8 isn't passed, naming the failing checks). The dashboard's Requirements page ("Release packages" section) lists them with per-metric count deltas.
 
@@ -1227,7 +1227,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `stakeholder_need` | definition | `NEED` | `EngineeringEntity` `stakeholder_need` |
 | `objective` | definition | `OBJ` | `EngineeringEntity` `objective` |
 | `design_value` | definition | `VAL` | `EngineeringEntity` `design_value` |
-| `bom` | definition | `BOM` | `WorkProduct` `bom` (electronics BOM recorder) |
+| `bom` | definition | `BOM` | `WorkProduct` `bom` (electronics BOM recorder, or a BOM file recorded with `twin.record_design_files`, see [BOM files](#bom-files)) |
 | `component_selection` | definition | `CMP` | `BOMItem` (`twin.record_component_selection`), keyed by `role`, else manufacturer + MPN |
 | `schematic` | definition | `SCH` | `WorkProduct` `schematic`: a KiCad project's sheets (`twin.record_design_files`) |
 | `pcb_layout` | definition | `PCB` | `WorkProduct` `pcb_layout`: a KiCad board (`twin.record_design_files`) |
@@ -2517,6 +2517,8 @@ browsable; the same content reuses the current report.
 | `eda_checks` | Every schematic has a passing ERC and every board a passing DRC on its current revision: a `kicad.run_erc` or `kicad.run_drc` result recorded with `twin.record_evidence` and pinned to that revision (`depends_on: ["PCB-...@n"]`). No result on the revision is a blocker ("no DRC result recorded on this revision"); a failing one names its errors and violations; a result on an older revision does not count. A failure a person accepted (a waiver, below) passes, and says who accepted it and why |
 | `assembly_dfa` | **Assembly checked (DFA).** Only for a product with more than one part, or with a board: an assembly (`twin.build_assembly`) holds every made part and every board (as its 3D export) at its current revision, and the newest `twin.check_assembly` of that assembly revision has no open high or medium finding and no required check left unassessed. Accepted findings pass, named in the detail. See [design for assembly](#design-for-assembly) |
 | `outputs_current` | Every fabrication output (G-code, Gerbers and drill, position file, manufacturing files, a BOM made from a schematic) names the revision it was made from (`source_ref`, see [output source pins](#output-source-pins)) and that revision is the current one. An output from an older revision, or one with no source on record, is a blocker. Outputs are never waived: make them again |
+| `bom_complete` | **BOM lists every purchased part and the board's components.** Every board has a BOM (`twin.record_design_files`, `work_product_type: bom`) made from its current revision (`source_ref` `PCB-...@n`) that lists at least one line. An assembly holding bought parts (fasteners with their washers and nuts, by designation, and purchased part models) has a BOM made from its current revision (`ASM-...@n`) listing each of them in at least the quantity the assembly holds; a line counts for a fastener when its designation reads as the same standard part (`M2.5x8 socket head cap screw` lists `ISO 4762 M2.5x8`). No BOM, a BOM of an older revision or an empty BOM is a blocker. Not applicable with no board and no bought part. See [BOM files](#bom-files) |
+| `design_files_released` | **Only the released revision of each design file is packaged.** A schematic or board is packaged only as the head revision of its item. One that is not a revision of any item (a layout recorded on the side, with no item key) is left out of the package and is a blocker until it is recorded as its item's revision or a person accepts leaving it out (a waiver, target its node id). Older revisions are left out and counted in the detail. CAD is already packaged only by item head |
 
 It applies only when a component is made by a process whose profile has
 exact checks (or has an exact set); otherwise there is no checklist and the
@@ -2528,8 +2530,10 @@ are its next steps. The checklist is part of G8 (every item except
 `approvals`, which is G8's own check): see [release packages](#release-packages).
 
 **Accepting a failing check (waivers).** A failing ERC or DRC
-(`eda_checks`, target `PCB-...@n:drc` or `SCH-...@n:erc`) or an open assembly
-finding (`assembly_dfa`, target the finding id) may be accepted for the
+(`eda_checks`, target `PCB-...@n:drc` or `SCH-...@n:erc`), an open assembly
+finding (`assembly_dfa`, target the finding id) or a stray schematic or board
+left out of the package (`design_files_released`, target its node id; pinned
+to the released boards and schematics) may be accepted for the
 release with `twin.accept_release_finding` and a reason, the same way a
 person accepts a DFM issue. It is a person's decision: the call is held for
 their approval and the approver is recorded. When the owner sets
@@ -2539,7 +2543,7 @@ as an approved `waiver` entity:
 
 ```
 metadata: {
-  release_check: "eda_checks" | "assembly_dfa"
+  release_check: "eda_checks" | "assembly_dfa" | "design_files_released"
   targets: string[]        // what it accepts; only a current failure can be named
   reason: string
   approved_by: string      // the person, or "agent:<name>" on a delegated call
@@ -2552,7 +2556,7 @@ metadata: {
 ```
 
 A stale waiver accepts nothing, so a new board or assembly revision needs a
-new acceptance. Fabrication outputs cannot be accepted.
+new acceptance. Fabrication outputs and the BOM cannot be accepted.
 
 #### Measuring by reference {#dfm-by-reference}
 
@@ -2666,17 +2670,45 @@ metadata.assembly_layout: {
     location: {x, y, z, rx, ry, rz}
     matrix: number[12]    // the placement, 3 x 4 row-major
     board_ref?: string    // PCB-...@n for a board's 3D export
+    purchased?: true      // a bought part's model (simready.import)
   }[]
   joints: {
     name, type,           // revolute (swept), fixed, slider
     parent?, moving: string[],
     axis_point, axis_dir, // in the parent's frame
     min_deg?, max_deg?, steps
+    retention?: string    // snap or press_fit: no pin expected on its axis
+  }[]
+  fasteners: {
+    name: string
+    designation: string   // as given: "ISO 4762 M2.5x8", "M2.5x6", "ISO 2338 4x30"
+    title, kind,          // "screw" or "pin"
+    location, matrix,     // the underside of the head (a pin's end); shank along -Z
+    holes: {part, diameter_mm, fit, length_mm?, depth_mm?, center?, axis?,
+             counterbore_diameter_mm?, counterbore_depth_mm?, face_diameter_mm?, flush?}[]
+    washers: string[], nut?: string, min_engagement_mm?
+    geometry: {generator, params}   // the standard's dimensions
   }[]
   built_with: "cadquery.create_assembly"
   build_interferences: [...]
 }
 ```
+
+**Fasteners.** `twin.build_assembly` takes `fasteners`: each screw or pin by
+`designation`, read the way `library.standard_part` reads it (`ISO 4762
+M4x25`, `M2.5x6` for an ISO 4762 screw, `ISO 2338 4x30` for a parallel pin,
+with `ISO 7089` washers and `ISO 4032` nuts in its `washers` and `nut`). Its
+`location` places the underside of the head (a pin's end) with the shank
+along the fastener's own -Z; its `holes` name, in order from the head, each
+hole it passes through: the `part`, `diameter_mm`, `fit` (`clearance`,
+`tapped`, `thread_forming` for a pilot in plastic, `press` for a pin),
+`length_mm` it clamps, `depth_mm` of a blind hole, a `center` on the hole axis
+in the part's frame, and a `counterbore`. Each goes into the assembly STEP as
+a plain solid made from the standard's dimensions (threads not modelled; its
+washers stacked under the head and its nut under the grip), and is left out of
+the build's interference list, since a screw in its pilot overlaps the part
+by design. A designation the standard does not hold, a fastener with no
+location or a hole on a part not in the assembly is refused.
 
 **The checks.** `twin.check_assembly` (additive) checks one assembly
 revision (`twin_core.dfa.checks`) and records an `assembly_check` entity
@@ -2690,8 +2722,9 @@ revision of any of them makes it stale:
 | `clearance` | A pair in `clearances` is closer than its `min_gap_mm` | medium |
 | `hole_pattern` | A hole on part `a` is more than `tolerance_mm` (default 0.3) from every hole on part `b`, across the fastener axis, or `a` has more holes than `b`. Positions are in each part's own frame and placed by the layout | high |
 | `outline_fit` | A part's `size_mm` plus `clearance_mm` a side does not fit the host's `opening_mm` | high |
-| `connector` | An edge connector's face is more than `max_setback_mm` (default 1) inside its board's edge, or does not reach its slot: more than `max_gap_mm` (default 1) from it, more than `tolerance_mm` off its centre, or facing more than 5 degrees away | medium |
+| `connector` | **Mating axis:** the connector's mouth, in assembly coordinates, faces more than 5 degrees away from its slot's opening (`slot_normal`, out of the part): a plug through the slot cannot mate. **Plug envelope:** the plug's shell does not pass the slot's aperture (`slot_size_mm`), or the receptacle sits more than `max_gap_mm` (default 1) behind the outer face and the plug's overmold does not pass the aperture, so the plug stops short. **Edge:** the face is more than `max_setback_mm` (default 1) inside its board's edge. With no aperture given, a face more than `max_gap_mm` from the slot or more than `tolerance_mm` off its centre | high (axis, envelope), medium (edge, gap) |
 | `stack` | The items in a gap (thicknesses, or standard washers and nuts by `standard` and `size` from the library's ISO tables) plus `min_clearance_mm` exceed `gap_mm`, or a fastener is shorter than the grip plus `min_engagement_mm` or longer than `max_length_mm` | high |
+| `fastener` | A fastener of the assembly (or of `checks.fasteners`) is not in its hole (more than `fastener_tolerance_mm`, default 0.3, off a hole's `center`, or 2 degrees off its axis); its shank does not pass a clearance hole, or is tight (under the ISO 273 fine clearance, medium); a tapped hole is not smaller than the screw, or under its tap drill (medium); a thread-forming pilot is not under 0.9 of the screw (0.9 and over, or under 0.7, medium); a pin does not pass its hole, or a press fit does not hold (more than `max_interference_mm`, default 0.1, is medium); it is too short (into a thread less than `min_engagement_mm`, default one diameter tapped, 1.5 thread-forming; through a nut, the grip and the nut; a pin, every member's `length_mm`); it bottoms out in a blind hole's `depth_mm`; nothing holds it (only clearance holes and no nut); its head does not fit the counterbore, stands proud of a `flush` one (medium), overhangs the face it bears on (medium) or pulls through the first hole. **Unfastened joint:** a hole pattern, or a revolute joint, with no fastener on it (a fastener's axis through each hole, or along the joint's axis), unless its `retention` is `press_fit` or `snap` | high; medium (tight, unfastened joint) |
 | `motion` | A revolute joint with `min_deg` and `max_deg`, swept in `steps` samples, makes a moving body overlap a fixed one | medium |
 | `seat` | A seated part's diameter plus `min_clearance_mm` exceeds the seat's (a `press_fit` must sit 0 to `max_interference_mm` over), or no `retention` (clips, screws, adhesive, press fit) is recorded | high (fit), medium (retention) |
 
@@ -2705,7 +2738,33 @@ them they come from the `IFC-CAD-EDA` contract (its `enclosure` link,
 metadata (the board's `mounting_holes` and `dimensions`, the host's
 `mounting_bosses`, `mounting_standoffs` or `mounting_holes`, and
 `internal_envelope` or `pocket`). A check the call asked for is required
-too. The record:
+too.
+
+**Connectors.** A connector names its `board` and either its `reference`
+(`J1`), whose footprint, rotation and side the check reads from the board
+revision's `.kicad_pcb`, or its `footprint` with `rotation_deg` and `side`, or
+its `mating_axis` (the way the mouth faces, in the board's frame). KiCad's
+horizontal USB-C receptacle footprints put the mouth at +Y of the footprint,
+so a footprint at 0 degrees faces -Y of the board body (the STEP
+`kicad.export_3d` writes reverses KiCad's Y), turned by its rotation
+counter-clockwise seen from the top and mirrored in X on the bottom side; a
+`mating_side` (`+x`, `-y`, or `[x, y]` in the footprint's KiCad frame) sets
+it for a footprint the table does not know. The board's placement then turns
+the axis into assembly coordinates. Its `face` is the centre of the mating
+face in the board's frame. The slot is `slot_part`, `slot_center` (the
+centre of the aperture on the part's outer face) and `slot_normal` (the way
+the opening faces, out of the part), in that part's frame, and
+`slot_size_mm` (`[width in the board's plane, height]`). The plug envelope is
+a USB-C plug's by default (overmold 12.35 x 6.5 mm, 20 mm deep; shell 8.4 x
+2.6 mm, 6.65 mm long), or `plug_envelope_mm` `[w, h, depth]` and
+`plug_shell_mm` per connector. When the call gives no connectors and the
+board file holds a known edge connector (a horizontal USB-C receptacle), the
+connector is derived and the check is required; its slot comes from a part's
+`connector_slots` metadata (`{reference, center, normal, size_mm}` in the
+part's frame) when it records one, and otherwise the check stays not
+assessed and blocks until the slot is given.
+
+The record:
 
 ```
 EngineeringEntity(entity_type="assembly_check").metadata: {
@@ -2733,8 +2792,9 @@ is fixed and checked again, or accepted with `twin.accept_release_finding`
 
 Observability: `metaforge_assembly_build_total{outcome}`,
 `metaforge_assembly_check_total{outcome}`,
-`metaforge_assembly_finding_total{check, severity}` and
-`metaforge_release_finding_accepted_total{item, route}`; the
+`metaforge_assembly_finding_total{check, severity}`,
+`metaforge_release_finding_accepted_total{item, route}` and
+`metaforge_release_design_file_excluded_total{kind, reason}`; the
 `AssemblyCheckFailures` alert; spans `twin.build_assembly`,
 `twin.check_assembly`, `twin.dfa.run_checks`, `twin.accept_release_finding`,
 `twin.dfm.release_fit` and `cadquery.check_interference`.
@@ -2757,6 +2817,33 @@ that is no longer the head warns that the release will refuse it. A STEP
 export is pinned by construction (`step_export.item_ref` on the revision).
 The release checklist's `outputs_current` and the release package read the
 pins (`twin_core.dfm.release_fit.output_sources`).
+
+#### BOM files {#bom-files}
+
+`twin.record_design_files` with `work_product_type: bom` records a bill of
+materials as a file (CSV, TSV or JSON; a folder records its first BOM file):
+the board's, from `kicad.export_bom`, with `source_ref` the `PCB-...@n` it
+lists, or the assembly's (its made parts, and every fastener, washer and nut
+by designation with its quantity), with `source_ref` the `ASM-...@n`.
+Recording the same name again is that item's next revision (`BOM-`). The
+lines are read into the node:
+
+```
+metadata: {
+  bom_scope: "electronics" | "mechanical" | "unpinned"   // from source_ref
+  line_items: number
+  bom_lines: {part, qty, refs: string[], text}[]          // up to 1000
+  source_ref, source_ref_from, ...
+}
+```
+
+`part` is the first of the designation, part, MPN, value or name columns;
+`qty` the quantity column, else the number of references, else 1; `text`
+every value of the line. A line marked do-not-place is left out. A BOM with
+no source, or with no line, says so in `warnings`. Such a BOM is an output of
+the design, so it is never taken as the component list a schematic is drawn
+from. The checklist's `bom_complete` reads them (see
+[the release checklist](#release-checklist)).
 
 *Source: `twin_core/dfa/geometry.py`, `twin_core/dfa/checks.py`, `twin_core/dfm/release_fit.py`, `api_gateway/twin/assembly_fit.py`, `api_gateway/twin/design_files_recorder.py`, `tool_registry/tools/cadquery/operations.py`, `tool_registry/tools/slicer/adapter.py`*
 

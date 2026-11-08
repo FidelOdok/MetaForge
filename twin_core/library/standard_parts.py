@@ -13,9 +13,16 @@ The tables are bd_warehouse's (Apache-2.0, vendored unmodified in
 * ISO 4032 hex nuts (``iso4032``)
 * ISO 7089 plain washers (``iso7089``)
 * single-row deep groove ball bearings, by designation (``deep_groove_bearing``)
+* ISO 2338 parallel pins (``iso2338``): a hinge or dowel pin, whose diameter
+  and length are its designation (``ISO 2338 4 m6 x 30``)
 
 A size the table does not have, or a screw length outside the standard's
 range for that size, is refused. Nothing is interpolated.
+
+:func:`parse_designation` reads a part as people write it (``ISO 4762
+M4x25``, ``M2.5x6``, ``ISO 7089 M4``, ``ISO 2338 4x30``) into the family,
+size and length :func:`build_standard_part` takes;
+:func:`standard_part_by_designation` does both.
 
 Layer: stdlib only.
 """
@@ -23,6 +30,7 @@ Layer: stdlib only.
 from __future__ import annotations
 
 import csv
+import re
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -31,11 +39,14 @@ __all__ = [
     "SOURCE_COMMIT",
     "StandardPartError",
     "deep_groove_bearing",
+    "iso2338",
     "iso4032",
     "iso4762",
     "iso7089",
     "build_standard_part",
+    "parse_designation",
     "seed_entries",
+    "standard_part_by_designation",
 ]
 
 DATA = Path(__file__).parent / "data" / "bd_warehouse"
@@ -266,13 +277,126 @@ def deep_groove_bearing(designation: str) -> dict[str, Any]:
     }
 
 
+#: ISO 2338 nominal diameters (mm). A pin's diameter and length are its
+#: designation, so no dimension table is needed beyond the series itself.
+ISO2338_DIAMETERS: tuple[float, ...] = (
+    0.6, 0.8, 1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 25, 30, 40, 50,
+)  # fmt: skip
+ISO2338_LENGTHS_MM = (2.0, 200.0)
+
+
+def iso2338(size: str, length_mm: float) -> dict[str, Any]:
+    """An ISO 2338 parallel pin (a hinge or dowel pin), e.g. ``iso2338("4", 30)``."""
+    family = "ISO 2338"
+    text = size.strip().lower().removesuffix("mm").strip()
+    for tol in ("m6", "h8", "h11"):
+        text = text.removesuffix(tol).strip()
+    try:
+        diameter = float(text)
+    except ValueError as exc:
+        raise StandardPartError(f"{size!r} is not an ISO 2338 pin diameter like 4") from exc
+    if diameter not in ISO2338_DIAMETERS:
+        raise StandardPartError(
+            f"{family} has no {diameter:g} mm pin; diameters are "
+            + ", ".join(f"{d:g}" for d in ISO2338_DIAMETERS)
+        )
+    lo, hi = ISO2338_LENGTHS_MM
+    if not lo <= length_mm <= hi:
+        raise StandardPartError(f"{family} lengths run {lo:g} to {hi:g} mm, not {length_mm:g}")
+    label = f"{diameter:g}x{length_mm:g}"
+    ref = f"{family} designation {label} (nominal diameter and length)"
+    return {
+        "name": f"iso2338_{_slug(label)}",
+        "title": f"Parallel pin {label} ISO 2338",
+        "family": "pin",
+        "origin": "standard",
+        "standard": family,
+        "size": label,
+        "specs": {
+            "nominal_diameter_mm": _spec(diameter, "mm", ref),
+            "length_mm": _spec(float(length_mm), "mm", ref),
+        },
+        "geometry": {
+            "generator": "parallel_pin",
+            "params": {"d": diameter, "length": float(length_mm)},
+        },
+        "notes": "Chamfers and the end radius are not modelled; the pin is a plain cylinder.",
+    }
+
+
 #: The families :func:`build_standard_part` knows, by the name tools use.
-FAMILIES = ("iso4762", "iso4032", "iso7089", "deep_groove_bearing")
+FAMILIES = ("iso4762", "iso4032", "iso7089", "iso2338", "deep_groove_bearing")
+
+_NUMBER = r"(\d+(?:\.\d+)?)"
+_FAMILY_WORDS: tuple[tuple[str, str], ...] = (
+    (r"ISO\s*2338|DIN\s*7\b|DOWEL|\bPIN\b", "iso2338"),
+    (r"ISO\s*7089|DIN\s*125|WASHER", "iso7089"),
+    (r"ISO\s*4032|DIN\s*934|\bNUT\b", "iso4032"),
+    (r"BEARING", "deep_groove_bearing"),
+    (r"ISO\s*4762|DIN\s*912|SOCKET\s+HEAD|SHCS|SCREW|BOLT", "iso4762"),
+)
+
+
+def parse_designation(text: str) -> tuple[str, str, float | None]:
+    """``(family, size, length_mm)`` of a standard part as people write it.
+
+    ``ISO 4762 M4x25`` and ``M2.5x6`` (a metric size with a length and no
+    standard named is an ISO 4762 screw) -> ``("iso4762", "M4", 25.0)``;
+    ``ISO 7089 M4`` -> ``("iso7089", "M4", None)``; ``ISO 2338 4 m6 x 30``
+    -> ``("iso2338", "4", 30.0)``; ``bearing 608`` -> the bearing. Anything
+    else raises :class:`StandardPartError` naming what it could not read.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        raise StandardPartError("a designation is required, e.g. ISO 4762 M4x25")
+    up = re.sub(r"\s+", " ", raw.upper().replace("×", "X"))
+    family = next((fam for pattern, fam in _FAMILY_WORDS if re.search(pattern, up)), None)
+    if family == "deep_groove_bearing":
+        found = re.search(r"\b(\d{3,5}[A-Z0-9-]*)\b", up)
+        if not found:
+            raise StandardPartError(f"{raw!r}: no bearing designation such as 608")
+        return family, found.group(1), None
+    if family == "iso2338":
+        body = re.sub(r"ISO\s*2338|DIN\s*7\b|DOWEL|PARALLEL|\bPIN\b", " ", up)
+        found = re.search(rf"{_NUMBER}\s*(?:M6|H8|H11)?\s*X\s*{_NUMBER}", body)
+        if not found:
+            raise StandardPartError(f"{raw!r}: a pin is written diameter x length, e.g. 4x30")
+        return family, found.group(1), float(found.group(2))
+    metric = re.search(rf"\bM{_NUMBER}(?:\s*X\s*{_NUMBER})?", up)
+    if metric is None:
+        raise StandardPartError(
+            f"{raw!r}: no metric size such as M4 (write e.g. ISO 4762 M4x25, M2.5x6, "
+            "ISO 7089 M4 or ISO 2338 4x30)"
+        )
+    size = f"M{metric.group(1)}"
+    length = float(metric.group(2)) if metric.group(2) else None
+    if family is None:
+        if length is None:
+            raise StandardPartError(
+                f"{raw!r}: name the standard (ISO 4032 nut, ISO 7089 washer) or give a "
+                "screw length (M4x25)"
+            )
+        family = "iso4762"
+    if family == "iso4762" and length is None:
+        raise StandardPartError(f"{raw!r}: a screw needs its length, e.g. M4x25")
+    return family, size, length if family == "iso4762" else None
+
+
+def standard_part_by_designation(text: str) -> dict[str, Any]:
+    """The library entry for a designation (:func:`parse_designation`)."""
+    family, size, length = parse_designation(text)
+    return build_standard_part(family, size, length)
 
 
 def build_standard_part(family: str, size: str, length_mm: float | None = None) -> dict[str, Any]:
-    """The library entry for one standard part; ``length_mm`` for screws only."""
+    """The library entry for one standard part; ``length_mm`` for screws and pins.
+
+    With no ``family``, ``size`` is read as a whole designation
+    (:func:`parse_designation`), e.g. ``build_standard_part("", "M2.5x6")``.
+    """
     key = family.strip().lower().replace(" ", "")
+    if not key:
+        return standard_part_by_designation(size)
     if key == "iso4762":
         if length_mm is None:
             raise StandardPartError("an ISO 4762 screw needs length_mm")
@@ -281,6 +405,10 @@ def build_standard_part(family: str, size: str, length_mm: float | None = None) 
         return iso4032(size)
     if key == "iso7089":
         return iso7089(size)
+    if key == "iso2338":
+        if length_mm is None:
+            raise StandardPartError("an ISO 2338 pin needs length_mm")
+        return iso2338(size, length_mm)
     if key == "deep_groove_bearing":
         return deep_groove_bearing(size)
     raise StandardPartError(f"family must be one of {', '.join(FAMILIES)}")
