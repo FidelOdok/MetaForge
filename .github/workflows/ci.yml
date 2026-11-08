@@ -132,18 +132,90 @@ jobs:
             echo "No e2e tests directory found, skipping"
           fi
 
+  # FORGE-830: cadquery.execute_script is classified producing because every
+  # script runs in a child the OS isolates. That claim is only as good as the
+  # container that makes it, so this builds the real image, starts it exactly
+  # as docker-compose.yml does (read-only root, cap_drop ALL + SETUID/SETGID,
+  # no-new-privileges) and attacks it: escapes, writes to /workspace and /app,
+  # sockets, fork and thread bombs, loops, memory and output hogs.
+  cadquery-isolation:
+    name: CadQuery script isolation
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.cadquery == 'true'
+    timeout-minutes: 45
+    env:
+      METAFORGE_ADAPTER_TAG: ci
+      # Compose refuses to read the file without these; this job starts only
+      # the cadquery-adapter, which uses none of them.
+      NEO4J_PASSWORD: ci-unused
+      POSTGRES_PASSWORD: ci-unused
+      MINIO_SECRET_KEY: ci-unused
+      TEMPORAL_POSTGRES_PASSWORD: ci-unused
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kernel isolation features
+        run: |
+          uname -r
+          cat /sys/kernel/security/lsm; echo
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the cadquery-adapter image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tool_registry/tools/cadquery/Dockerfile
+          load: true
+          push: false
+          tags: ghcr.io/fidelodok/metaforge-cadquery-adapter:ci
+          cache-from: type=gha,scope=cadquery-adapter
+      - name: Start it as docker-compose.yml does
+        run: docker compose up -d --no-build --wait --wait-timeout 180 cadquery-adapter
+      - run: pip install pytest httpx
+      - name: Attack the script runner
+        env:
+          CADQUERY_ISOLATION_LIVE_URL: http://localhost:8101/mcp
+          CADQUERY_ISOLATION_LIVE_EXEC: docker compose exec -T cadquery-adapter
+        run: >-
+          pytest tests/integration/test_cadquery_isolation_live.py -v --noconftest
+          -p no:cacheprovider -W ignore::pytest.PytestConfigWarning
+      - name: The runner's own tests, inside the image
+        run: >-
+          docker run --rm --user 1000 --tmpfs /tmp:size=1g -e HOME=/tmp
+          -v "$PWD:/src:ro" -w /src --entrypoint sh
+          ghcr.io/fidelodok/metaforge-cadquery-adapter:ci -c
+          "pip install -q --target /tmp/pt pytest &&
+          PYTHONPATH=/src:/tmp/pt python -m pytest -q --noconftest -p no:cacheprovider
+          -W ignore::pytest.PytestConfigWarning
+          tests/integration/test_cadquery_script_runner.py"
+      - name: Adapter logs
+        if: always()
+        run: docker compose logs cadquery-adapter | tail -300
+
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     outputs:
       dashboard: ${{ steps.filter.outputs.dashboard }}
+      cadquery: ${{ steps.filter.outputs.cadquery }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
+            cadquery:
+              # Everything the cadquery-adapter image copies in, its compose
+              # service, the live tests and this workflow.
+              - 'tool_registry/**'
+              - 'mcp_core/**'
+              - 'observability/**'
+              - 'docker-compose.yml'
+              - 'tests/integration/test_cadquery_*'
+              - '.github/workflows/ci.yml'
             dashboard:
               - 'dashboard/**'
               # MET-731: the workflow itself counts as a dashboard change.

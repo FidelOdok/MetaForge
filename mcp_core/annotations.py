@@ -510,6 +510,14 @@ PRODUCING: frozenset[str] = frozenset(
         # never over an existing file (unnamed: a new folder of its own); the
         # two inputs are only read. An auto policy may approve it.
         "cadquery.boolean_operation",
+        # FORGE-830: the script runs in a fresh child the OS isolates (its own
+        # uid, rlimits, Landlock: writes only its private tmpfs folder and
+        # cannot read /workspace; seccomp: no network sockets, no new process,
+        # no execve). Its one write is the result, which the adapter places
+        # inside the work folder, never over an existing file. An auto policy
+        # may approve it, up to METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR.
+        # freecad.execute_code below has no such runner and stays destructive.
+        "cadquery.execute_script",
         "freecad.create_parametric",
         # FORGE-492: returns the STEP bytes in the response and writes
         # nothing (its own docstring: "NOT persisted anywhere").
@@ -603,17 +611,6 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         "library.dispatch_job",
         # FORGE-427: an order can spend money. Held on every call.
         "vendor.place_order",
-        # FORGE-829: kept destructive although its output_path is now confined
-        # to the work folder. That confines the argument, not the script: the
-        # in-process sandbox is source-level (blocked names), the namespace
-        # hands the script `exporters` and the whole CadQuery API, whose
-        # `exporters.export(obj, path)` and `Shape.exportStep(path)` write to
-        # any path the script names, and dunder attribute access reaches `os`.
-        # The container is the boundary, and it can write the shared
-        # /workspace volume (other adapters' files, staged inputs) and reach
-        # every service on the compose network. Same reasoning as
-        # freecad.execute_code below (FORGE-492).
-        "cadquery.execute_script",
         "cadquery.export_geometry",
         "cadquery.export_sdf",
         "cadquery.export_sdf_assembly",

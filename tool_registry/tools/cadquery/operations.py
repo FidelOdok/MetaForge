@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from xml.etree import ElementTree as ET
 
 import structlog
@@ -34,6 +34,9 @@ from tool_registry.tools.cadquery.usd_export import (
     build_usda_assembly,
     parse_stl_mesh,
 )
+
+if TYPE_CHECKING:
+    from tool_registry.tools.cadquery.script_runner import ScriptRunner
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.cadquery.operations")
@@ -869,6 +872,120 @@ def _build_assembly_sdf(
     return xml, emitted_joints
 
 
+def _script_namespace() -> dict[str, Any]:
+    """The namespace an ``execute_script`` script runs in.
+
+    Source-level conveniences and checks only (defence in depth): the
+    isolation boundary is the OS-isolated child process that runs it (see
+    :mod:`tool_registry.tools.cadquery.script_runner`).
+    """
+    import builtins as _builtins_module
+    import functools
+
+    safe_builtins: dict[str, Any] = {}
+    for k in _SAFE_BUILTINS:
+        if hasattr(_builtins_module, k):
+            safe_builtins[k] = getattr(_builtins_module, k)
+    # MET-645 follow-up: a restricted __import__ so any import/from-
+    # import syntax _strip_sandbox_imports' regex doesn't catch
+    # (dotted submodules, unusual formatting) still resolves safely.
+    safe_builtins["__import__"] = _sandboxed_import
+
+    namespace: dict[str, Any] = {
+        "__builtins__": safe_builtins,
+        "cq": cq,
+        "cadquery": cq,
+        "math": math,
+        "reduce": functools.reduce,
+        # MET-688: `from cadquery import exporters` is stripped by
+        # _strip_sandbox_imports (its root "cadquery" matches
+        # _SANDBOX_MODULES) but nothing rebinds `exporters` as a bare
+        # name afterward -- the same class of gap MET-645/649 already
+        # fixed for FreeCAD's Vector/Rotation/Placement/Matrix/math
+        # convenience names. Confirmed live: a script wrote
+        # `exporters.export(...)` and hit "name 'exporters' is not
+        # defined". `cq.exporters` is already used internally
+        # throughout this file with no extra import, so it's safe to
+        # pre-bind the same way.
+        "exporters": getattr(cq, "exporters", None),
+        # MET-649: a no-op stub for the common CQ-editor/CQGI
+        # `show_object(shape)` convention -- not part of this
+        # headless execution context, but common enough in
+        # model-generated scripts (hallucinated from generic
+        # CadQuery scripting knowledge) that silently accepting
+        # it beats a NameError.
+        "show_object": lambda *_a, **_k: None,
+        **{name: getattr(math, name) for name in _MATH_CONVENIENCE_NAMES if hasattr(math, name)},
+        # MET-702: `from cadquery import Workplane, Vector, ...` is
+        # stripped by _strip_sandbox_imports (root "cadquery" matches
+        # _SANDBOX_MODULES) but nothing rebinds those names bare --
+        # the same gap MET-645/649/688 already hit for a handful of
+        # individual names, one at a time. Found this time via a real
+        # external dataset (CAD-Coder, 8.8K CadQuery scripts): ~1.3%
+        # bare-imported a name outside the already-fixed set (mostly
+        # `Workplane`/`Vector`, plus one-off `Solid`/`Assembly`/
+        # `Sketch`/`Plane`/`Location`). Rather than add names one at a
+        # time as the next script happens to use a new one, pre-bind
+        # cadquery's ENTIRE public top-level API -- every one of these
+        # is already fully reachable via `cq.<Name>` (see `"cq": cq`
+        # above), so this grants no new capability, only convenience.
+        # `cq` itself is excluded: `dir(cq)` includes the internal
+        # `cadquery.cq` submodule under that same name, which would
+        # silently replace the `cq` alias for the top-level package
+        # every script actually expects.
+        **{
+            name: getattr(cq, name)
+            for name in (dir(cq) if cq is not None else [])
+            if not name.startswith("_") and name != "cq"
+        },
+    }
+    return namespace
+
+
+def _run_script_in_namespace(script: str) -> Any:
+    """Execute ``script`` (already checked and import-stripped); return ``result``.
+
+    Called inside the isolated child (``script_child.py``), and in the
+    adapter's own process only when ``script_isolation`` is ``in_process``.
+    """
+    namespace = _script_namespace()
+    compiled = compile(script, "<cadquery_script>", "exec")
+    exec(compiled, namespace)  # noqa: S102
+    return namespace.get("result")
+
+
+def shape_properties(shape: Any) -> dict[str, Any]:
+    """Volume, area and bounding box of a CadQuery shape or Workplane.
+
+    FORGE-272: a genuinely empty shape (e.g. the result of ``intersect``-ing
+    two solids with zero overlap) has a zero volume and area but no bounding
+    box: OCCT's ``BoundingBox()`` raises ``Bnd_Box is void`` for it, so it is
+    reported with ``bounding_box: None`` rather than as an error.
+    """
+    solid = shape.val() if hasattr(shape, "val") else shape
+    if hasattr(solid, "Solids") and not solid.Solids():
+        return {"volume_mm3": 0.0, "surface_area_mm2": 0.0, "bounding_box": None}
+    bb = solid.BoundingBox()
+    return {
+        "volume_mm3": round(solid.Volume(), 2),
+        "surface_area_mm2": round(solid.Area(), 2),
+        "bounding_box": {
+            "min_x": round(bb.xmin, 2),
+            "min_y": round(bb.ymin, 2),
+            "min_z": round(bb.zmin, 2),
+            "max_x": round(bb.xmax, 2),
+            "max_y": round(bb.ymax, 2),
+            "max_z": round(bb.zmax, 2),
+        },
+    }
+
+
+def script_isolation_mode() -> str:
+    """``process`` unless ``CADQUERY_SCRIPT_ISOLATION=in_process`` is set."""
+    raw = os.environ.get("CADQUERY_SCRIPT_ISOLATION", "").strip().lower()
+    return "in_process" if raw == "in_process" else "process"
+
+
 class CadqueryOperations:
     """Core CadQuery CAD operations.
 
@@ -882,11 +999,18 @@ class CadqueryOperations:
         timeout: float = 60.0,
         max_script_lines: int = 200,
         sandbox_enabled: bool = True,
+        script_isolation: str | None = None,
+        script_runner: ScriptRunner | None = None,
     ) -> None:
         self.work_dir = work_dir
         self.timeout = timeout
         self.max_script_lines = max_script_lines
         self.sandbox_enabled = sandbox_enabled
+        #: ``process`` (the default): every script runs in an OS-isolated
+        #: child. ``in_process``: in this process, for development and unit
+        #: tests only (``CADQUERY_SCRIPT_ISOLATION``).
+        self.script_isolation = script_isolation or script_isolation_mode()
+        self.script_runner = script_runner
 
     def _require_cadquery(self) -> None:
         """Raise if CadQuery is not available."""
@@ -931,43 +1055,9 @@ class CadqueryOperations:
     def _get_shape_properties(self, shape: Any) -> dict[str, Any]:
         """Extract geometric properties from a CadQuery shape/Workplane.
 
-        FORGE-272: a genuinely empty shape (e.g. the result of
-        ``intersect``-ing two solids with zero overlap -- confirmed by
-        ``Solids() == []``) has a well-defined zero volume/area (CadQuery's
-        own ``Volume()``/``Area()`` return ``0.0`` safely for it), but OCCT's
-        ``BoundingBox()`` raises ``Standard_ConstructionError: Bnd_Box is
-        void`` rather than returning a degenerate box -- there's nothing to
-        bound. No caller of this helper (``boolean_operation`` included) had
-        ever exercised a genuinely empty result before FORGE-272's real
-        interference check ran a real, non-overlapping intersect on fidel-dev
-        and hit this live. Guard it explicitly: an empty shape is a real,
-        describable state (zero volume, no bounding box), not an error.
+        See :func:`shape_properties` (an empty shape has no bounding box).
         """
-        if hasattr(shape, "val"):
-            solid = shape.val()
-        else:
-            solid = shape
-
-        if hasattr(solid, "Solids") and not solid.Solids():
-            return {
-                "volume_mm3": 0.0,
-                "surface_area_mm2": 0.0,
-                "bounding_box": None,
-            }
-
-        bb = solid.BoundingBox()
-        return {
-            "volume_mm3": round(solid.Volume(), 2),
-            "surface_area_mm2": round(solid.Area(), 2),
-            "bounding_box": {
-                "min_x": round(bb.xmin, 2),
-                "min_y": round(bb.ymin, 2),
-                "min_z": round(bb.zmin, 2),
-                "max_x": round(bb.xmax, 2),
-                "max_y": round(bb.ymax, 2),
-                "max_z": round(bb.zmax, 2),
-            },
-        }
+        return shape_properties(shape)
 
     def create_parametric(
         self,
@@ -2031,24 +2121,25 @@ class CadqueryOperations:
         output_path: str = "",
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Execute a sandboxed CadQuery Python script.
+        """Execute a CadQuery Python script in an OS-isolated child process.
 
         The script must assign its final result to a variable named ``result``
-        (a CadQuery Workplane). The result is exported to STEP format.
+        (a CadQuery Workplane). The result is exported in the format of
+        ``output_path`` (STEP by default).
 
-        Security:
-        - Restricted builtins (no __import__, eval, exec, compile, open)
-        - Allowed namespace: cadquery, math, typing, functools.reduce
-        - Max script size enforced
-        - Timeout via signal.alarm() (inside Docker container)
-        - ``output_path`` is confined to the work folder (FORGE-829)
+        Where it runs: a fresh child process per script (see
+        :mod:`tool_registry.tools.cadquery.script_runner`), under its own uid
+        when the adapter has a uid pool, with resource limits, Landlock (no
+        file outside its private folder writable, ``/workspace`` not
+        readable, no ``execve``, no TCP) and seccomp (no network sockets, no
+        new processes). The source checks below (line limit, blocked names,
+        restricted builtins) are defence in depth, not the boundary.
 
-        These checks are source-level and run in this process, so they are not
-        an isolation boundary: ``exporters``, ``cq.Shape.exportStep`` and the
-        rest of the CadQuery API write to any path a script names, and the
-        blocked-name check does not stop dunder attribute access. The real
-        boundary is the cadquery-adapter container (FORGE-829 records what it
-        can reach), which is why the tool stays destructive.
+        Its one write: the result, inside the work folder, never over an
+        existing file. A named ``output_path`` must resolve inside the work
+        folder and must not exist; unnamed, the result goes to a new folder of
+        its own (``output/cadquery/script/<id>/``). That is why the tool is
+        classified as producing.
         """
         self._require_cadquery()
 
@@ -2077,133 +2168,41 @@ class CadqueryOperations:
             # import statements would raise a NameError at exec() time.
             script = _strip_sandbox_imports(script)
 
-            # FORGE-829: the result file lands inside the work folder. This
-            # confines the argument only; the script itself can still write
-            # elsewhere (see the DESTRUCTIVE note in mcp_core/annotations.py).
+            # The result lands inside the work folder and never replaces a file.
             if output_path:
                 output_path = self._confined_output_path(output_path, "cadquery.execute_script")
+                if os.path.lexists(output_path):
+                    raise OutputPathError(
+                        f"cadquery.execute_script: output_path {output_path!r} already "
+                        "exists and is never overwritten. Name a new file, or omit "
+                        "output_path to write to a new folder."
+                    )
             else:
-                output_path = os.path.join(self.work_dir, "script_result.step")
-            self._ensure_output_dir(output_path)
+                output_path = os.path.join(
+                    self.work_dir,
+                    "output",
+                    "cadquery",
+                    "script",
+                    uuid.uuid4().hex,
+                    "script_result.step",
+                )
 
-            # Build sandboxed namespace
-            import builtins as _builtins_module
-            import functools
+            exec_timeout = float(timeout or self.timeout)
+            span.set_attribute("script.lines", len(lines))
+            span.set_attribute("script.isolation", self.script_isolation)
 
-            safe_builtins: dict[str, Any] = {}
-            for k in _SAFE_BUILTINS:
-                if hasattr(_builtins_module, k):
-                    safe_builtins[k] = getattr(_builtins_module, k)
-            # MET-645 follow-up: a restricted __import__ so any import/from-
-            # import syntax _strip_sandbox_imports' regex doesn't catch
-            # (dotted submodules, unusual formatting) still resolves safely.
-            safe_builtins["__import__"] = _sandboxed_import
-
-            namespace: dict[str, Any] = {
-                "__builtins__": safe_builtins,
-                "cq": cq,
-                "cadquery": cq,
-                "math": math,
-                "reduce": functools.reduce,
-                # MET-688: `from cadquery import exporters` is stripped by
-                # _strip_sandbox_imports (its root "cadquery" matches
-                # _SANDBOX_MODULES) but nothing rebinds `exporters` as a bare
-                # name afterward -- the same class of gap MET-645/649 already
-                # fixed for FreeCAD's Vector/Rotation/Placement/Matrix/math
-                # convenience names. Confirmed live: a script wrote
-                # `exporters.export(...)` and hit "name 'exporters' is not
-                # defined". `cq.exporters` is already used internally
-                # throughout this file with no extra import, so it's safe to
-                # pre-bind the same way.
-                "exporters": cq.exporters,
-                # MET-649: a no-op stub for the common CQ-editor/CQGI
-                # `show_object(shape)` convention -- not part of this
-                # headless execution context, but common enough in
-                # model-generated scripts (hallucinated from generic
-                # CadQuery scripting knowledge) that silently accepting
-                # it beats a NameError.
-                "show_object": lambda *_a, **_k: None,
-                **{
-                    name: getattr(math, name)
-                    for name in _MATH_CONVENIENCE_NAMES
-                    if hasattr(math, name)
-                },
-                # MET-702: `from cadquery import Workplane, Vector, ...` is
-                # stripped by _strip_sandbox_imports (root "cadquery" matches
-                # _SANDBOX_MODULES) but nothing rebinds those names bare --
-                # the same gap MET-645/649/688 already hit for a handful of
-                # individual names, one at a time. Found this time via a real
-                # external dataset (CAD-Coder, 8.8K CadQuery scripts): ~1.3%
-                # bare-imported a name outside the already-fixed set (mostly
-                # `Workplane`/`Vector`, plus one-off `Solid`/`Assembly`/
-                # `Sketch`/`Plane`/`Location`). Rather than add names one at a
-                # time as the next script happens to use a new one, pre-bind
-                # cadquery's ENTIRE public top-level API -- every one of these
-                # is already fully reachable via `cq.<Name>` (see `"cq": cq`
-                # above), so this grants no new capability, only convenience.
-                # `cq` itself is excluded: `dir(cq)` includes the internal
-                # `cadquery.cq` submodule under that same name, which would
-                # silently replace the `cq` alias for the top-level package
-                # every script actually expects.
-                **{
-                    name: getattr(cq, name)
-                    for name in dir(cq)
-                    if not name.startswith("_") and name != "cq"
-                },
-            }
-
-            # Execute with timeout
-            exec_timeout = timeout or self.timeout
-            is_main_thread = threading.current_thread() is threading.main_thread()
-            old_handler = None
-
-            def _timeout_handler(signum: int, frame: Any) -> None:
-                raise ScriptTimeoutError(f"Script execution exceeded {exec_timeout}s timeout")
-
-            try:
-                # Use signal.alarm for timeout when running in the main thread
-                # (works inside Docker on Linux). When running in a worker thread
-                # (e.g. via asyncio.to_thread), fall back to wall-clock checking
-                # after exec() returns -- the asyncio.wait_for on the caller side
-                # provides the hard timeout in that case.
-                if is_main_thread and hasattr(signal, "SIGALRM"):
-                    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-                    signal.alarm(int(exec_timeout))
-
-                compiled = compile(script, "<cadquery_script>", "exec")
-                exec(compiled, namespace)  # noqa: S102
-            except ScriptTimeoutError:
-                raise
-            except ScriptSandboxError:
-                raise
-            except Exception as exc:
-                span.record_exception(exc)
-                raise RuntimeError(f"Script execution failed: {exc}") from exc
-            finally:
-                if is_main_thread and hasattr(signal, "SIGALRM"):
-                    signal.alarm(0)
-                    if old_handler is not None:
-                        signal.signal(signal.SIGALRM, old_handler)
-
-            # Wall-clock timeout check for worker threads where signal.alarm
-            # is not available.
-            if not is_main_thread:
-                elapsed_so_far = time.monotonic() - start
-                if elapsed_so_far > exec_timeout:
-                    raise ScriptTimeoutError(f"Script execution exceeded {exec_timeout}s timeout")
-
-            # Extract result
-            result_obj = namespace.get("result")
-            if result_obj is None:
-                raise ValueError("Script must assign its output to a variable named 'result'")
-
-            # Export and get properties
-            _export_shape(result_obj, output_path)
-            props = self._get_shape_properties(result_obj)
+            if self.script_isolation == "in_process":
+                props, data = self._execute_in_process(script, output_path, exec_timeout, start)
+            else:
+                props, data = self._execute_isolated(script, output_path, exec_timeout)
+                self._ensure_output_dir(output_path)
+                # A new file only: the path was checked above, and "x" refuses
+                # to replace anything that appeared since.
+                with open(output_path, "xb") as f:  # noqa: PTH123
+                    f.write(data)
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
-            span.set_attribute("script.lines", len(lines))
 
             logger.info(
                 "Script executed",
@@ -2211,6 +2210,7 @@ class CadqueryOperations:
                 script_lines=len(lines),
                 volume_mm3=props["volume_mm3"],
                 duration_s=round(elapsed, 3),
+                isolation=self.script_isolation,
             )
 
             result: dict[str, Any] = {
@@ -2226,9 +2226,84 @@ class CadqueryOperations:
             # from a different tool. Only populate it for an actual STEP
             # export -- commit_geometry's step_base64 is STEP-specific.
             if output_path.lower().endswith((".step", ".stp")):
-                with open(output_path, "rb") as f:  # noqa: PTH123
-                    result["step_base64"] = base64.b64encode(f.read()).decode("ascii")
+                result["step_base64"] = base64.b64encode(data).decode("ascii")
             return result
+
+    def _execute_isolated(
+        self, script: str, output_path: str, timeout: float
+    ) -> tuple[dict[str, Any], bytes]:
+        """Run the script in a fresh OS-isolated child (see ``script_runner``)."""
+        from tool_registry.tools.cadquery.script_runner import (
+            ScriptRunError,
+            ScriptRunner,
+            ScriptRunTimeoutError,
+        )
+
+        runner = self.script_runner or ScriptRunner.from_env()
+        suffix = Path(output_path).suffix.lower() or ".step"
+        try:
+            run = runner.run(script, suffix, timeout)
+        except ScriptRunTimeoutError as exc:
+            raise ScriptTimeoutError(
+                f"Script execution exceeded {timeout}s timeout; the run was killed"
+            ) from exc
+        except ScriptRunError as exc:
+            if exc.kind == "no_result":
+                raise ValueError(
+                    "Script must assign its output to a variable named 'result'"
+                ) from exc
+            if exc.kind == "cadquery_unavailable":
+                raise CadqueryNotAvailableError from exc
+            raise RuntimeError(f"Script execution failed: {exc}") from exc
+        return run.properties, run.data
+
+    def _execute_in_process(
+        self, script: str, output_path: str, exec_timeout: float, start: float
+    ) -> tuple[dict[str, Any], bytes]:
+        """Run the script in this process. Development and unit tests only.
+
+        Not an isolation boundary: the namespace's ``exporters`` and the rest
+        of the CadQuery API write any path, and dunder attribute access
+        reaches ``os``. The adapter uses this mode only when
+        ``CADQUERY_SCRIPT_ISOLATION=in_process`` is set.
+        """
+        is_main_thread = threading.current_thread() is threading.main_thread()
+        old_handler = None
+
+        def _timeout_handler(signum: int, frame: Any) -> None:
+            raise ScriptTimeoutError(f"Script execution exceeded {exec_timeout}s timeout")
+
+        try:
+            # signal.alarm works only in the main thread; in a worker thread
+            # (asyncio.to_thread) the wall-clock check below applies.
+            if is_main_thread and hasattr(signal, "SIGALRM"):
+                old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+                signal.alarm(int(exec_timeout))
+            result_obj = _run_script_in_namespace(script)
+        except ScriptTimeoutError:
+            raise
+        except ScriptSandboxError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Script execution failed: {exc}") from exc
+        finally:
+            if is_main_thread and hasattr(signal, "SIGALRM"):
+                signal.alarm(0)
+                if old_handler is not None:
+                    signal.signal(signal.SIGALRM, old_handler)
+
+        if not is_main_thread and time.monotonic() - start > exec_timeout:
+            raise ScriptTimeoutError(f"Script execution exceeded {exec_timeout}s timeout")
+
+        if result_obj is None:
+            raise ValueError("Script must assign its output to a variable named 'result'")
+
+        self._ensure_output_dir(output_path)
+        _export_shape(result_obj, output_path)
+        props = self._get_shape_properties(result_obj)
+        with open(output_path, "rb") as f:  # noqa: PTH123
+            data = f.read()
+        return props, data
 
     def create_assembly(
         self,

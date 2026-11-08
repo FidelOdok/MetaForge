@@ -1165,9 +1165,40 @@ ENTRYPOINT ["python", "server.py"]
 | `cadquery.boolean_operation` | `cad_operations` | CSG boolean operations (union, subtract, intersect) |
 | `cadquery.get_properties` | `cad_analysis` | Geometric properties (volume, area, center of mass, bounding box, inertia) |
 | `cadquery.export_geometry` | `cad_export` | Export to STEP/STL/OBJ/BREP/AMF/SVG |
-| `cadquery.execute_script` | `cad_scripting` | Execute a sandboxed CadQuery Python script |
+| `cadquery.execute_script` | `cad_scripting` | Run a CadQuery Python script in an OS-isolated child process (see below) |
 | `cadquery.create_assembly` | `cad_assembly` | Multi-part assembly from STEP files with constraints |
 | `cadquery.generate_enclosure` | `cad_enclosure` | PCB enclosure from board dimensions and connector cutouts |
+
+#### Script isolation
+
+`cadquery.execute_script` runs each script in a fresh, throwaway child process,
+never in the adapter (`script_runner.py` starts `script_child.py`). Before the
+script runs, and before any thread exists, the child is confined by the
+kernel: a uid of its own from `CADQUERY_RUNNER_UIDS`, `setrlimit` limits
+(memory, CPU, file size, open files, processes), Landlock (writes only its
+private folder under `/run/cadquery-runner`, reads only system and Python
+paths, never `/workspace`, runs no program, opens no TCP connection) and a
+seccomp filter on every thread (no network socket, no new process, no
+`execve`, `ptrace` or `io_uring`). The adapter kills every process of the run
+at its deadline and removes the folder. The result comes back as bytes on a
+pipe; the adapter writes it to the work folder itself.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `CADQUERY_RUNNER_ROOT` | `/run/cadquery-runner` | Where each run's private folder is made (a tmpfs under compose) |
+| `CADQUERY_RUNNER_UIDS` | `61000-61003` | The uid pool: one uid per concurrent run, which also caps concurrency |
+| `CADQUERY_RUNNER_REQUIRE` | `uid,landlock,seccomp` | Layers that must hold; a missing one refuses the run |
+| `CADQUERY_RUNNER_MEMORY_MB` | `2048` | Address space of one child |
+| `CADQUERY_RUNNER_MAX_FILE_MB` | `64` | Largest file the child may write (its console log included) |
+| `CADQUERY_RUNNER_MAX_OUTPUT_MB` | `64` | Largest result the adapter accepts |
+| `CADQUERY_RUNNER_STARTUP_GRACE_S` | `15` | Added to the script's `timeout` for interpreter and CadQuery start-up |
+| `CADQUERY_SCRIPT_ISOLATION` | `process` | `in_process` runs scripts unisolated, for development and unit tests only |
+
+The compose service runs read-only with `cap_drop: [ALL]`, only `SETUID` and
+`SETGID` added back (the image drops to uid 1000 keeping just those two, so it
+can start a child as another uid) and `no-new-privileges`. See
+[CadQuery writes under a policy](approvals.md#cadquery-writes-under-a-policy)
+for what each layer stops, how it was verified, and what is not isolated.
 
 ### FreeCAD Adapter (`tool_registry/tools/freecad/`)
 

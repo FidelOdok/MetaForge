@@ -300,7 +300,8 @@ class TestAllMetricsCombined:
         # + 1 slicer cross-check after exact FDM DFM.
         # + 3 reconstruction proposals, accepted features and model passes (4B).
         # + 6 CAD design loop runs, iterations, renders, verdicts, calls and spend.
-        assert len(MetricsRegistry.all_metrics()) == 161
+        # + 3 CadQuery isolated script runner runs, durations and limit stops.
+        assert len(MetricsRegistry.all_metrics()) == 164
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
@@ -323,6 +324,7 @@ class TestAllMetricsCombined:
             + len(MetricsRegistry.gate_review_metrics())
             + len(MetricsRegistry.supervisor_metrics())
             + len(MetricsRegistry.operation_metrics())
+            + len(MetricsRegistry.cadquery_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 

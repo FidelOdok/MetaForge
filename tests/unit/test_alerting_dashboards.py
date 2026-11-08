@@ -140,7 +140,8 @@ class TestAlertingRules:
         # + 1 interface contract checks failing (InterfaceContractChecksFailing).
         # + 1 CAD design loop runs or renders failing (CadDesignLoopFailing).
         # + 1 Imagine studio twin writes failing (ImagineStudioTwinWritesFailing, FORGE-821).
-        assert len(rules) == 89
+        # + 2 CadQuery script runner timeouts and refusals (FORGE-830).
+        assert len(rules) == 91
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -222,7 +223,8 @@ class TestAlertingRules:
         # + 1 interface contract checks failing (lamp golden path).
         # + 1 CAD design loop runs or renders failing.
         # + 1 Imagine studio twin writes failing (FORGE-821).
-        assert len(warnings) == 72
+        # + 2 CadQuery script runner timeouts and refusals (FORGE-830).
+        assert len(warnings) == 74
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -258,6 +260,9 @@ class TestAlertingRules:
             [
                 # FORGE-490: a hold was parked where no approver can answer it.
                 "ApprovalHoldWithNoApprover",
+                # FORGE-830: the isolated CadQuery script runner.
+                "CadqueryScriptTimeoutsSpiking",
+                "CadqueryScriptRunnerRefusing",
                 # FORGE-520: chat replies keep claiming twin writes or node ids
                 # their own tool calls do not back up.
                 "ChatUngroundedClaimsSustained",

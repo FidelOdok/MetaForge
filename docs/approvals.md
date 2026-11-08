@@ -385,13 +385,16 @@ In every mode:
   project, flow, run, approval, review, phase, session, library and vendor
   tools. `phase.claim` keeps its own narrower rule, below. See
   [CadQuery writes under a policy](#cadquery-writes-under-a-policy) for which
-  CadQuery tools are destructive and why.
+  CadQuery tools are destructive and why, and how `cadquery.execute_script` is
+  isolated.
 - **Spend cap.** Paid tools are capped per project per rolling hour: 20
   `twin.render_concept_image` and 20 `twin.generate_sketch` (each
   `METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR`, counted per tool) and 3
   `twin.generate_concept_mesh` (`METAFORGE_AUTO_APPROVE_MESH_PER_HOUR`), and 3
   `twin.design_cad_loop` runs (`METAFORGE_AUTO_APPROVE_CAD_LOOP_PER_HOUR`), each of
-  which also stops at its own model-call and spend budget. Over
+  which also stops at its own model-call and spend budget. `cadquery.execute_script`
+  is not paid but has an hourly cap all the same: 60 per project
+  (`METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR`), and the hold calls it an hourly cap. Over
   the cap the call is held for a person, and the hold's reason and the held
   result's `note` say the cap was reached. A person generating on the Create
   stage is the approver of their own request, but past the same hourly count
@@ -412,39 +415,70 @@ container). The classification lives in `mcp_core/annotations.py`:
 |------|-------|--------------------|-----|
 | `cadquery.create_parametric`, `create_assembly`, `generate_enclosure`, `generate_ros2_launch` | producing | yes | Each writes a new result file. |
 | `cadquery.boolean_operation` | producing | yes | It writes only its result. A named `output_path` must resolve inside the work folder, through any `..` or symlink, and must not exist: an existing file is never overwritten. Unnamed, the result goes to a new folder of its own, `output/cadquery/boolean/<id>/`. The two input files are only read. |
-| `cadquery.execute_script` | destructive | no, a person decides | See below. |
+| `cadquery.execute_script` | producing | yes, up to 60 per project per hour | The script runs in a child process the OS isolates (below). Its one write is the result, which the adapter places inside the work folder exactly as `boolean_operation` does: a named `output_path` must not exist, and unnamed it goes to `output/cadquery/script/<id>/`. |
 | `cadquery.export_*` | destructive | no, a person decides | Each writes to a caller-supplied path and overwrites what is there. |
 
-`cadquery.execute_script` stays destructive because what confines it is the
-container, not the adapter. What was checked:
+##### How a CadQuery script is isolated
 
-- The script runs in the adapter's own process (`exec` in a worker thread,
-  `tool_registry/tools/cadquery/operations.py`), in the cadquery-adapter
-  container. The gateway and sidecar images do not install CadQuery, so it
-  never runs there.
-- The sandbox is source-level: a list of blocked names and a short list of
-  builtins. It does not stop dunder attribute access, so a script can reach
-  the `os` module, and its namespace includes `exporters` and the whole
-  CadQuery API, whose `exporters.export(obj, path)` and `Shape.exportStep(path)`
-  write to any path the script names.
-- `output_path` is now confined to the work folder, but that confines the
-  argument, not the script.
-- The container runs as an unprivileged user with a writable root file
-  system. It can write `/workspace`, which is the `adapter-workspace` volume
-  shared with the gateway, the sidecar and the other adapters (their outputs
-  and staged inputs), and it is on the compose `metaforge` network, so it can
-  reach the other services there.
-- The result reaches the twin by content: the response carries
-  `step_base64`, which `twin.commit_geometry` stores. The twin does not keep
-  the file path.
+The adapter never runs agent code in its own process. For every
+`cadquery.execute_script` call it starts a fresh Python process
+(`tool_registry/tools/cadquery/script_child.py`, run with `python -I -B`) and
+supervises it from `script_runner.py`. The child gets only the script, its
+limits and a clean environment (no adapter variables, endpoints or keys). No
+Docker socket and no Docker-in-Docker are involved.
 
-So a script can overwrite another tool's file in the shared workspace, which
-is what a destructive tool is. An agent working under `auto` is not stopped by
-this for the common shapes: `cadquery.create_parametric`,
-`cadquery.generate_enclosure` and `cadquery.boolean_operation` are approved.
-Making `execute_script` producing needs an OS-level boundary first, such as a
-script runner with a read-only root file system, only a private work folder
-writable and no network.
+What the operating system enforces on the child, and how each was verified
+against the hardened container (the `cadquery-isolation` CI job runs these
+checks on every change):
+
+| Layer | What it does | Verified by |
+|-------|--------------|-------------|
+| Its own uid | Started through `setpriv` as one of `CADQUERY_RUNNER_UIDS` (61000 to 61003, one per concurrent run), with no supplementary groups and every capability dropped (`--inh-caps=-all --ambient-caps=-all --no-new-privs`). It owns nothing outside its folder and cannot signal the adapter (uid 1000) or another run. | A script reports its uid as 61000 to 61003; `kill(1)` fails with `Operation not permitted`; `/proc/1/environ` is unreadable. |
+| Landlock | Read-only access to the system and Python paths (`/usr`, `/etc`, `/app`, the interpreter, its own `/proc/self`); nothing else is readable, so not `/workspace`. Writable: only its private folder. Running any program (`execve`) is refused. On kernel ABI 4 or later every TCP bind and connect is refused too. | Writing `/workspace/...` gives `Permission denied`; listing `/workspace` gives `Permission denied`; the `exporters` the namespace hands the script cannot write there either. |
+| seccomp (all threads) | `socket()` for anything but a Unix socket, `fork`, `vfork`, `clone` of a new process, `clone3`, `execve`, `ptrace`, `process_vm_*`, `io_uring_*`, namespace, mount, keyring, BPF and `perf_event_open` calls are refused. | A TCP connect to the adapter's own listening port gives `Permission denied`; a fork bomb fails at the first `fork` with `Operation not permitted`; `subprocess` cannot start anything. |
+| Resource limits | Address space 2 GB (`CADQUERY_RUNNER_MEMORY_MB`), file size 64 MB (`CADQUERY_RUNNER_MAX_FILE_MB`), 256 open files, 256 processes and threads for its uid, CPU time twice the deadline, no core dumps, and `oom_score_adj` 1000 so memory pressure kills the child, not the adapter. | An 8 GB allocation stops with the memory limit; endless printing or writing stops with the file size limit; 2,000 threads stop at `can't start new thread`. |
+| Wall clock | The adapter kills every process of the run's uid at the script's `timeout` plus a start-up allowance (`CADQUERY_RUNNER_STARTUP_GRACE_S`, 15 s), then removes the private folder. | An infinite loop and a long sleep are killed; afterwards no process of a runner uid is left and the runner folder is empty. |
+| Private folder | `/run/cadquery-runner/run-<random>` on a tmpfs, mode 0700, created by the child itself. The folder above it is mode 1733: a runner uid may create its folder but not list the others. | |
+
+The result comes back only as bytes on the child's stdout pipe, capped at
+64 MB (`CADQUERY_RUNNER_MAX_OUTPUT_MB`); the adapter never opens a path the
+child names. It decodes the bytes, checks a STEP starts with `ISO-10303-21`,
+accepts only the numeric volume, area and bounding box, and writes the file
+itself. The response still carries `step_base64` for `twin.commit_geometry`.
+
+The container around the adapter is hardened in `docker-compose.yml`:
+`read_only: true` (tmpfs for `/tmp` and `/run/cadquery-runner`),
+`cap_drop: [ALL]` with only `SETUID` and `SETGID` added back,
+`no-new-privileges:true` and `pids_limit: 512`. The image starts as root only
+so `cadquery-start` can drop to uid 1000 keeping those two capabilities as
+ambient capabilities, which is what lets the adapter start a child as another
+uid. `/workspace` stays writable for the adapter itself, because its other
+tools (`create_*`, `boolean_operation`, `export_*`) write their results there;
+no script child can reach it.
+
+`CADQUERY_RUNNER_REQUIRE` (`uid,landlock,seccomp` in the image and the compose
+file) lists the layers that must hold. If one cannot be applied, for example a
+host kernel without Landlock or a container started without `SETUID` and
+`SETGID`, the run is refused with the reason and nothing executes; it never
+falls back to running unconfined. `CADQUERY_SCRIPT_ISOLATION=in_process` runs
+scripts in the adapter's own process instead, for development and unit tests
+only: that mode is not isolated, and the producing classification assumes it
+is never set on a deployment.
+
+What is not isolated:
+
+- The child shares the container's network namespace. Network access is cut
+  by seccomp (no non-Unix socket) and Landlock (no TCP), not by an empty
+  namespace: creating a namespace needs `CAP_SYS_ADMIN` under Docker's default
+  seccomp profile, which the container does not get. A Unix socket can still be
+  created; no service in the container listens on one.
+- The child can read what any process may read on the paths above, such as
+  the adapter's code under `/app` and the files in `/etc`. None of it is
+  secret; secrets reach the adapter only through its environment, which the
+  child does not get.
+- The source checks (line limit, blocked names, restricted builtins) still run
+  first, but they are defence in depth. A script that reaches `os` through
+  dunder attributes is stopped by the layers above, not by them.
 
 ## Re-checks after a cross-domain change
 

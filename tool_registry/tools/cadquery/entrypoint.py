@@ -22,6 +22,8 @@ async def main() -> None:
     signal.signal(signal.SIGTERM, _handle_shutdown)
     signal.signal(signal.SIGINT, _handle_shutdown)
 
+    _init_telemetry()
+
     from tool_registry.tools.cadquery.adapter import CadqueryServer
     from tool_registry.tools.cadquery.config import CadqueryConfig
 
@@ -39,6 +41,29 @@ async def main() -> None:
 
     port = int(os.environ.get("CADQUERY_HTTP_PORT", "8100"))
     await _start_http(server, port)
+
+
+def _init_telemetry() -> None:
+    """Export traces, logs and metrics (the script runner's among them) over OTLP.
+
+    Best-effort: telemetry never stops the adapter from starting.
+    """
+    try:
+        from observability.bootstrap import init_observability
+        from observability.config import ObservabilityConfig, OtlpExporterConfig
+
+        state = init_observability(
+            ObservabilityConfig(
+                service_name="metaforge-cadquery-adapter",
+                environment=os.environ.get("METAFORGE_ENV", "development"),
+                otlp=OtlpExporterConfig(
+                    endpoint=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
+                ),
+            )
+        )
+        logger.info("cadquery_observability_initialised", active=state.is_active)
+    except Exception as exc:  # noqa: BLE001 -- telemetry must not block the adapter
+        logger.warning("cadquery_observability_init_failed", error=str(exc))
 
 
 async def _start_http(server, port: int) -> None:

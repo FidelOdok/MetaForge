@@ -23,7 +23,16 @@ from tool_registry.tools.cadquery.operations import (
     _build_single_link_urdf,
     _link_world_offsets_mm,
     _stl_export_kwargs,
+    script_isolation_mode,
 )
+
+
+@pytest.fixture(autouse=True)
+def _scripts_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests exercise the script namespace with a fake ``cq``, so they
+    run it in this process. The adapter's default is the OS-isolated child,
+    which runs the same namespace (``tests/integration/test_cadquery_script_runner.py``)."""
+    monkeypatch.setenv("CADQUERY_SCRIPT_ISOLATION", "in_process")
 
 
 class TestCadqueryOperationsWithoutCadquery:
@@ -521,9 +530,99 @@ class TestBooleanOperationStaysInItsWorkFolder:
         assert existing.read_bytes() == b"original"
 
 
+class TestScriptIsolationMode:
+    """FORGE-830: scripts run in the OS-isolated child unless a developer
+    explicitly asks for the in-process mode."""
+
+    def test_the_default_is_the_isolated_child(self, monkeypatch):
+        monkeypatch.delenv("CADQUERY_SCRIPT_ISOLATION", raising=False)
+        assert script_isolation_mode() == "process"
+        assert CadqueryOperations().script_isolation == "process"
+
+    @pytest.mark.parametrize("value", ["", "off", "none", "IN-PROCESS", "yes"])
+    def test_anything_but_in_process_means_isolated(self, monkeypatch, value):
+        monkeypatch.setenv("CADQUERY_SCRIPT_ISOLATION", value)
+        assert script_isolation_mode() == "process"
+
+    def test_isolated_mode_never_runs_the_script_here(self, tmp_path, monkeypatch):
+        """The script reaches the runner; this process never executes it."""
+        from tool_registry.tools.cadquery.script_runner import RunResult
+
+        seen: list[tuple[str, str, float]] = []
+
+        class _Runner:
+            def run(self, script, suffix, timeout):
+                seen.append((script, suffix, timeout))
+                return RunResult(
+                    data=b"ISO-10303-21;\nEND-ISO-10303-21;\n",
+                    properties={"volume_mm3": 1.0, "surface_area_mm2": 6.0, "bounding_box": None},
+                    isolation={},
+                    duration_s=0.1,
+                )
+
+        ops = CadqueryOperations(
+            work_dir=str(tmp_path), script_isolation="process", script_runner=_Runner()
+        )
+        has, cq = _patched_cq(_FakeCq())
+        with has, cq:
+            result = ops.execute_script(
+                "import cadquery as cq\nraise SystemExit('ran here')\nresult = cq.Workplane()",
+                "parts/a.step",
+                timeout=7,
+            )
+        assert seen == [("raise SystemExit('ran here')\nresult = cq.Workplane()", ".step", 7.0)]
+        out = tmp_path / "parts" / "a.step"
+        assert out.read_bytes().startswith(b"ISO-10303-21")
+        assert result["cad_file"] == str(out)
+        assert result["volume_mm3"] == 1.0
+
+    def test_isolated_mode_refuses_off_linux(self, tmp_path, monkeypatch):
+        """Where the OS isolation cannot exist the script is refused, never run."""
+        import sys
+
+        from tool_registry.tools.cadquery.script_runner import ScriptIsolationError, ScriptRunner
+
+        monkeypatch.setattr(sys, "platform", "win32")
+        ops = CadqueryOperations(
+            work_dir=str(tmp_path),
+            script_isolation="process",
+            script_runner=ScriptRunner(root=str(tmp_path / "runner")),
+        )
+        has, cq = _patched_cq(_FakeCq())
+        with has, cq, pytest.raises(ScriptIsolationError, match="isolated Linux runner"):
+            ops.execute_script("result = cq.Workplane()")
+        assert not (tmp_path / "output").exists()
+
+
+class TestExecuteScriptWritesOnlyANewResult:
+    """FORGE-830: like boolean_operation, the one write is a new result file."""
+
+    def _run(self, ops, output_path=""):
+        has, cq = _patched_cq(_FakeCq())
+        with has, cq:
+            return ops.execute_script("result = cq.Workplane()", output_path)
+
+    def test_unnamed_result_goes_to_a_new_folder_each_call(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        first = Path(self._run(ops)["cad_file"])
+        second = Path(self._run(ops)["cad_file"])
+        assert first != second
+        for out in (first, second):
+            assert out.exists()
+            assert out.is_relative_to(tmp_path / "output" / "cadquery" / "script")
+            assert out.name == "script_result.step"
+
+    def test_an_existing_file_is_never_overwritten(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        existing = tmp_path / "keep.step"
+        existing.write_bytes(b"original")
+        with pytest.raises(OutputPathError, match="never overwritten"):
+            self._run(ops, str(existing))
+        assert existing.read_bytes() == b"original"
+
+
 class TestExecuteScriptOutputPathConfined:
-    """FORGE-829: the argument is confined. The script is not (see
-    test_the_script_itself_is_not_confined), so the tool stays destructive."""
+    """FORGE-829: the argument is confined to the work folder."""
 
     def _run(self, ops, script, output_path):
         has, cq = _patched_cq(_FakeCq())
@@ -543,9 +642,10 @@ class TestExecuteScriptOutputPathConfined:
         result = self._run(ops, "result = cq.Workplane()", "output/script.step")
         assert Path(result["cad_file"]) == tmp_path / "output" / "script.step"
 
-    def test_the_script_itself_is_not_confined(self, tmp_path):
-        """Why execute_script stays destructive: the namespace's own
-        ``exporters`` writes wherever the script says."""
+    def test_in_process_the_script_itself_is_not_confined(self, tmp_path):
+        """Why the in-process mode is for development only: the namespace's
+        own ``exporters`` writes wherever the script says. The isolated child
+        refuses the same write (test_cadquery_script_runner.py)."""
         work = tmp_path / "work"
         work.mkdir()
         outside = tmp_path / "outside.step"

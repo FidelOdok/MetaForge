@@ -20,8 +20,9 @@ In every mode:
   project it lands in (its ``project_id`` argument, else the session's).
 * Human-authority, destructive and administration tools are never approved
   (:func:`mcp_core.guardrails.never_auto_approved`).
-* Paid tools have a spend cap per project per rolling hour. Over it, the call
-  is held for a person, and the hold says why.
+* Paid tools have a spend cap per project per rolling hour, and
+  ``cadquery.execute_script`` an hourly cap. Over it, the call is held for a
+  person, and the hold says why.
 * Every approval is written to the ledger with ``decided_by`` set to
   ``policy:<mode>:<project>``, the tool and the arguments hash.
 """
@@ -41,6 +42,7 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.approvals.tool_write_policy")
 
 __all__ = [
+    "RATE_CAPS",
     "SPEND_CAPS",
     "PolicyVerdict",
     "hourly_cap",
@@ -62,6 +64,14 @@ SPEND_CAPS: dict[str, tuple[str, int]] = {
     "twin.design_cad_loop": ("METAFORGE_AUTO_APPROVE_CAD_LOOP_PER_HOUR", 3),
 }
 
+#: Unpaid tools with an hourly cap all the same, the variable and its default.
+#: ``cadquery.execute_script`` runs agent-written code. The OS isolates it (see
+#: ``tool_registry/tools/cadquery/script_runner.py``); the cap bounds how much
+#: of it a policy approves unattended.
+RATE_CAPS: dict[str, tuple[str, int]] = {
+    "cadquery.execute_script": ("METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR", 60),
+}
+
 #: The rolling window the spend cap counts over.
 CAP_WINDOW_SECONDS = 3600.0
 
@@ -80,8 +90,8 @@ class PolicyVerdict:
 
 
 def hourly_cap(tool: str) -> int | None:
-    """The per-project hourly auto-approval cap for a paid tool, else ``None``."""
-    entry = SPEND_CAPS.get(tool)
+    """The per-project hourly auto-approval cap for a capped tool, else ``None``."""
+    entry = SPEND_CAPS.get(tool) or RATE_CAPS.get(tool)
     if entry is None:
         return None
     env, default = entry
@@ -125,10 +135,11 @@ async def tool_write_covered_by_policy(
         if cap is not None:
             used = approved_in_window(project, tool, CAP_WINDOW_SECONDS)
             if used >= cap:
-                env = SPEND_CAPS[tool][0]
+                env = (SPEND_CAPS.get(tool) or RATE_CAPS[tool])[0]
+                kind = "spend cap" if tool in SPEND_CAPS else "hourly cap"
                 reason = (
                     f"The project's approval policy ({mode}) would approve it, but its "
-                    f"spend cap is reached: {used} {tool} call{'s' if used != 1 else ''} "
+                    f"{kind} is reached:{used} {tool} call{'s' if used != 1 else ''} "
                     f"auto-approved in project {project} in the last hour (cap {cap}, "
                     f"{env}), so a person decides this one."
                 )

@@ -1608,6 +1608,39 @@ class MetricsRegistry:
         labels=["role"],
     )
 
+    # ── CadQuery isolated script runner ────────────────────────────────
+
+    CADQUERY_SCRIPT_RUN_TOTAL = MetricDefinition(
+        name="metaforge_cadquery_script_run_total",
+        type="counter",
+        description=(
+            "cadquery.execute_script runs in the isolated child, by outcome: ok, "
+            "script_error (the script failed), timeout (killed at its deadline), limit "
+            "(stopped by a resource limit), isolation_unavailable (a required isolation "
+            "layer could not be applied, so the script never ran) or error"
+        ),
+        labels=["outcome"],
+    )
+
+    CADQUERY_SCRIPT_RUN_DURATION = MetricDefinition(
+        name="metaforge_cadquery_script_run_duration_seconds",
+        type="histogram",
+        description="Wall-clock time of one isolated cadquery.execute_script run, by outcome",
+        labels=["outcome"],
+        unit="s",
+        buckets=[0.5, 1, 2, 5, 10, 30, 60, 120, 300],
+    )
+
+    CADQUERY_SCRIPT_LIMIT_TOTAL = MetricDefinition(
+        name="metaforge_cadquery_script_limit_total",
+        type="counter",
+        description=(
+            "Isolated cadquery.execute_script runs stopped by a limit, by limit: timeout "
+            "(wall clock), cpu, memory, file_size or output"
+        ),
+        labels=["limit"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -1633,7 +1666,17 @@ class MetricsRegistry:
             + cls.gate_review_metrics()
             + cls.supervisor_metrics()
             + cls.operation_metrics()
+            + cls.cadquery_metrics()
         )
+
+    @classmethod
+    def cadquery_metrics(cls) -> list[MetricDefinition]:
+        """CadQuery adapter's isolated script runner."""
+        return [
+            cls.CADQUERY_SCRIPT_RUN_TOTAL,
+            cls.CADQUERY_SCRIPT_RUN_DURATION,
+            cls.CADQUERY_SCRIPT_LIMIT_TOTAL,
+        ]
 
     @classmethod
     def operation_metrics(cls) -> list[MetricDefinition]:
@@ -2908,6 +2951,21 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.INTERFACE_CONTRACT_VIOLATION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"kind": kind, "check": check})
+
+    def record_cadquery_script_run(self, outcome: str, duration: float) -> None:
+        """Record one isolated cadquery.execute_script run (counter + histogram)."""
+        counter = self._instruments.get(MetricsRegistry.CADQUERY_SCRIPT_RUN_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+        histogram = self._instruments.get(MetricsRegistry.CADQUERY_SCRIPT_RUN_DURATION.name)
+        if histogram is not None:
+            histogram.record(duration, attributes={"outcome": outcome})
+
+    def record_cadquery_script_limit(self, limit: str) -> None:
+        """Record one isolated script run stopped by a limit (timeout, cpu, memory, ...)."""
+        counter = self._instruments.get(MetricsRegistry.CADQUERY_SCRIPT_LIMIT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"limit": limit})
 
     def record_cad_loop_run(self, stop_reason: str) -> None:
         """Record one CAD design loop run that ended, by stop reason."""

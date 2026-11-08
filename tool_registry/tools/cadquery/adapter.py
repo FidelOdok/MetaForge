@@ -21,7 +21,7 @@ class CadqueryServer(McpToolServer):
     - cadquery.boolean_operation: CSG union/subtract/intersect
     - cadquery.get_properties: Volume, area, CoM, bounding box, inertia
     - cadquery.export_geometry: Export to STEP/STL/OBJ/BREP/AMF/SVG
-    - cadquery.execute_script: Execute sandboxed CadQuery Python script
+    - cadquery.execute_script: Run a CadQuery script in an OS-isolated child process
     - cadquery.create_assembly: Multi-part assemblies with constraints (Phase 2)
     - cadquery.generate_enclosure: PCB enclosure generation (Phase 2)
     - cadquery.validate_shape: B-Rep validity of a STEP (CDE slice 6)
@@ -33,7 +33,22 @@ class CadqueryServer(McpToolServer):
     def __init__(self, config: CadqueryConfig | None = None) -> None:
         super().__init__(adapter_id="cadquery", version="0.1.0")
         self.config = config or CadqueryConfig()
+        self._script_runner: Any = None
         self._register_tools()
+
+    def script_runner(self) -> Any:
+        """The one isolated script runner of this adapter (its uid pool and slots)."""
+        if self._script_runner is None:
+            from tool_registry.tools.cadquery.script_runner import ScriptRunner
+
+            self._script_runner = ScriptRunner.from_env()
+            logger.info(
+                "cadquery_script_runner_configured",
+                root=self._script_runner.root,
+                uid_pool=len(self._script_runner.uid_pool),
+                require=sorted(self._script_runner.require),
+            )
+        return self._script_runner
 
     def _register_tools(self) -> None:
         """Register all CadQuery tools."""
@@ -906,7 +921,9 @@ class CadqueryServer(McpToolServer):
                 adapter_id="cadquery",
                 name="Execute Script",
                 description=(
-                    "Execute a sandboxed CadQuery Python script. The script must assign "
+                    "Run a CadQuery Python script in an isolated child process (its own "
+                    "private folder, no network, no access to other files, resource limits). "
+                    "The script must assign "
                     "its final result to a variable named 'result' (a CadQuery Workplane). "
                     "The response includes step_base64 (when the export is STEP format) -- "
                     "pass that directly as twin.commit_geometry's step_base64 argument to "
@@ -925,7 +942,9 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": (
                                 "Output STEP file path, inside the adapter work folder "
-                                "(relative paths resolve there)"
+                                "(relative paths resolve there). It must not exist yet: "
+                                "a file is never overwritten. Omit it to write to a new "
+                                "folder of its own"
                             ),
                         },
                         "timeout": {
@@ -1788,7 +1807,7 @@ class CadqueryServer(McpToolServer):
         )
 
     async def execute_script(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Execute a sandboxed CadQuery Python script."""
+        """Run a CadQuery script in the OS-isolated runner."""
         import asyncio
 
         script = arguments.get("script", "")
@@ -1800,15 +1819,29 @@ class CadqueryServer(McpToolServer):
 
         logger.info("Executing CadQuery script", script_length=len(script))
 
-        from tool_registry.tools.cadquery.operations import CadqueryOperations
+        from tool_registry.tools.cadquery.operations import (
+            CadqueryOperations,
+            script_isolation_mode,
+        )
 
+        isolation = script_isolation_mode()
+        if isolation == "in_process":
+            logger.warning(
+                "cadquery_script_in_process",
+                reason="CADQUERY_SCRIPT_ISOLATION=in_process: the script is NOT isolated",
+            )
         ops = CadqueryOperations(
             work_dir=self.config.work_dir,
             timeout=self.config.max_operation_time,
             max_script_lines=self.config.max_script_lines,
             sandbox_enabled=self.config.sandbox_enabled,
+            script_isolation=isolation,
+            script_runner=self.script_runner() if isolation == "process" else None,
         )
-        # Run in a thread to avoid blocking the async event loop during exec()
+        if timeout is not None:
+            # A caller may shorten the limit, never lengthen it past the adapter's own.
+            timeout = min(float(timeout), float(self.config.max_operation_time))
+        # The runner blocks while it supervises the child; keep the event loop free.
         return await asyncio.to_thread(ops.execute_script, script, output_path, timeout)
 
     async def create_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
