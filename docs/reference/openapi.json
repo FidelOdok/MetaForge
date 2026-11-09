@@ -28132,6 +28132,70 @@
         "title": "UsdExportResponse",
         "type": "object"
       },
+      "ValidatePost": {
+        "additionalProperties": false,
+        "description": "``POST /validate``: a dry run. Idempotent and read-only.",
+        "properties": {
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "gates": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "config_valid",
+                    "handover",
+                    "define_exit"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gates"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "title": "ValidatePost",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -28170,6 +28234,314 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "ValidationFinding": {
+        "additionalProperties": true,
+        "properties": {
+          "accepted_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted By",
+            "type": "array"
+          },
+          "check_id": {
+            "title": "Check Id",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationRef"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationFix"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gate": {
+            "title": "Gate",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "resolver": {
+            "enum": [
+              "agent",
+              "person",
+              "external"
+            ],
+            "title": "Resolver",
+            "type": "string"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "blocking",
+              "advisory"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "fail",
+              "assumed",
+              "inconclusive",
+              "not_assessed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ValidationRef"
+          }
+        },
+        "required": [
+          "id",
+          "check_id",
+          "rule_version",
+          "gate",
+          "severity",
+          "status",
+          "target",
+          "message",
+          "resolver"
+        ],
+        "title": "ValidationFinding",
+        "type": "object"
+      },
+      "ValidationFix": {
+        "additionalProperties": true,
+        "properties": {
+          "needs": {
+            "title": "Needs",
+            "type": "string"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "pointer",
+          "needs"
+        ],
+        "title": "ValidationFix",
+        "type": "object"
+      },
+      "ValidationGateResult": {
+        "additionalProperties": true,
+        "properties": {
+          "advisory": {
+            "default": 0,
+            "title": "Advisory",
+            "type": "integer"
+          },
+          "assumed": {
+            "default": 0,
+            "title": "Assumed",
+            "type": "integer"
+          },
+          "blocking": {
+            "default": 0,
+            "title": "Blocking",
+            "type": "integer"
+          },
+          "decision": {
+            "enum": [
+              "pass",
+              "fail",
+              "incomplete"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "gate": {
+            "title": "Gate",
+            "type": "string"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gate",
+          "rule_version",
+          "decision"
+        ],
+        "title": "ValidationGateResult",
+        "type": "object"
+      },
+      "ValidationRef": {
+        "additionalProperties": true,
+        "description": "A stable address for what a finding is about. The service owns the kinds.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "ValidationRef",
+        "type": "object"
+      },
+      "ValidationReport": {
+        "additionalProperties": true,
+        "description": "The service's report, rendered as it came, plus what only the gateway knows.",
+        "properties": {
+          "computed_at": {
+            "default": "",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "debt": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationFinding"
+            },
+            "title": "Debt",
+            "type": "array"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationFinding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationGateResult"
+            },
+            "title": "Gates",
+            "type": "array"
+          },
+          "input_fingerprint": {
+            "default": "",
+            "title": "Input Fingerprint",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "V0",
+              "V1",
+              "V2"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "profile_id": {
+            "default": "",
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "profile_version": {
+            "default": "",
+            "title": "Profile Version",
+            "type": "string"
+          },
+          "project_id": {
+            "default": "",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "revision_id": {
+            "default": "",
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "revision_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Number"
+          },
+          "schema_version": {
+            "default": "2.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "twin_id": {
+            "default": "",
+            "title": "Twin Id",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "invalid",
+              "needs_agent",
+              "blocked_external",
+              "needs_person",
+              "ready_for_handover"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "verdict"
+        ],
+        "title": "ValidationReport",
         "type": "object"
       },
       "ValidationView": {
@@ -43193,6 +43565,105 @@
           }
         },
         "summary": "Put Studio",
+        "tags": [
+          "imagine"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/validate": {
+      "post": {
+        "description": "Dry run: every finding at once, a computed verdict, and who clears each.\n\nA POST only because it can carry a config. It is idempotent and writes\nnothing; handover, accept and rework stay person-gated on their routes.",
+        "operationId": "post_validate_v1_twin_projects__project_id__imagine_validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ValidatePost"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "A config was supplied but the studio is handed over"
+          },
+          "422": {
+            "description": "The config is invalid (the body is the report), or a ref is unknown"
+          }
+        },
+        "summary": "Post Validate",
+        "tags": [
+          "imagine"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/validation": {
+      "get": {
+        "description": "The report for the head revision.",
+        "operationId": "get_validation_v1_twin_projects__project_id__imagine_validation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Validation",
         "tags": [
           "imagine"
         ]

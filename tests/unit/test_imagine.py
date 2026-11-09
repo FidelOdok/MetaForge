@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import re
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
@@ -261,6 +262,24 @@ async def test_an_invalid_config_is_refused_with_its_errors(client: httpx.AsyncC
     res = await client.put(f"{BASE}/studio", json={"config": cfg})
     assert res.status_code == 422
     assert any("unobtainium" in e for e in res.json()["detail"]["errors"])
+
+
+async def test_the_put_422_carries_findings_in_the_contract_shape_and_no_verdict(
+    client: httpx.AsyncClient,
+) -> None:
+    cfg = base_config()
+    cfg["process"]["material"] = "unobtainium"
+    detail = (await client.put(f"{BASE}/studio", json={"config": cfg})).json()["detail"]
+    # The dashboard's shape stays.
+    assert detail["errors"] and detail["warnings"] is not None
+    # The same Finding objects validate sends, so an agent reads one format.
+    assert detail["findings"]
+    assert all(f["gate"] == "config_valid" and f["resolver"] == "agent" for f in detail["findings"])
+    assert all(f["check_id"] == "config.formgraph" for f in detail["findings"])
+    assert any("unobtainium" in f["message"] for f in detail["findings"])
+    assert not any(f["status"] == "pass" for f in detail["findings"])
+    # The write is refused before anything is judged; verdicts are the service's.
+    assert "verdict" not in detail
 
 
 # ── events ───────────────────────────────────────────────────────────────
@@ -953,3 +972,538 @@ async def test_an_undelegated_agent_scenario_edit_is_not_the_persons(
     assert res.status_code == 200, res.text
     items = _items((await client.get(f"{BASE}/handover")).json())
     assert "knock" in items["scenarios"]["detail"]
+
+
+# -- validation: the gateway renders what the verification service decides ----
+
+URL_ENV = "METAFORGE_VERIFICATION_URL"
+
+
+def _finding(
+    check_id: str = "ledger.reviewed",
+    *,
+    status: str = "fail",
+    resolver: str = "agent",
+    severity: str = "blocking",
+    gate: str = "handover",
+) -> dict[str, Any]:
+    return {
+        "id": f"f_{check_id.replace('.', '_')}",
+        "check_id": check_id,
+        "rule_version": "imagine-v1@1.0.0",
+        "gate": gate,
+        "severity": severity,
+        "status": status,
+        "target": {"kind": "studio", "id": "ledger", "revision": 1},
+        "message": "From the service.",
+        "evidence": [],
+        "resolver": resolver,
+        "fix": None,
+        "accepted_by": [],
+    }
+
+
+def _report(
+    verdict: str = "ready_for_handover",
+    level: str = "V2",
+    findings: list[dict[str, Any]] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "2.0",
+        "profile_id": "imagine-v1",
+        "profile_version": "1.0.0",
+        "twin_id": PROJECT,
+        "revision_id": "r1",
+        "revision_number": 1,
+        "input_fingerprint": "f" * 64,
+        "level": level,
+        "gates": [
+            {
+                "gate": "handover",
+                "rule_version": "imagine-v1@1.0.0",
+                "decision": "pass",
+                "blocking": 0,
+                "assumed": 0,
+                "advisory": 0,
+            }
+        ],
+        "findings": findings or [],
+        "debt": [],
+        "verdict": verdict,
+        "limitations": ["Declared facts only."],
+        **extra,
+    }
+
+
+def _fake_verification(
+    service: ImagineService,
+    *,
+    report: dict[str, Any] | None = None,
+    status: int = 200,
+    json_body: Any = None,
+    raises: Exception | None = None,
+) -> list[dict[str, Any]]:
+    """Install a verification service that answers as told; return the bodies it was sent."""
+    from api_gateway.imagine import verification_client as vc
+
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        if raises is not None:
+            raise raises
+        return httpx.Response(status, json=json_body if json_body is not None else report)
+
+    service._verification = vc.VerificationClient(
+        "http://verify.test", transport=httpx.MockTransport(handler)
+    )
+    return sent
+
+
+async def test_validate_without_a_studio_is_404_and_asks_nobody(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    sent = _fake_verification(service, report=_report())
+    assert (await client.post(f"{BASE}/validate", json={})).status_code == 404
+    assert sent == []
+
+
+async def test_validate_renders_the_services_report_untouched(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    canned = _report(
+        "needs_person",
+        "V1",
+        [
+            _finding("assumptions.settled", resolver="person"),
+            _finding("concept.mesh", resolver="external"),
+        ],
+        future_field={"a": 1},
+    )
+    _fake_verification(service, report=canned)
+    res = await client.post(f"{BASE}/validate", json={})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["verdict"] == "needs_person" and body["level"] == "V1"
+    assert [f["check_id"] for f in body["findings"]] == ["assumptions.settled", "concept.mesh"]
+    assert body["findings"][0]["resolver"] == "person"
+    assert body["future_field"] == {"a": 1}  # a field the gateway does not know yet survives
+    assert body["project_id"] == PROJECT and body["computed_at"] and body["stale"] is False
+
+
+async def test_validate_sends_the_studios_facts_and_the_config_result(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    sent = _fake_verification(service, report=_report())
+    await client.post(f"{BASE}/validate", json={})
+    body = sent[0]
+    rev = body["revision"]
+    assert rev["twin_id"] == PROJECT and rev["number"] == 1 and rev["revision_id"] == "r1"
+    assert {f["id"] for f in rev["functions"]} >= {"e_usbc", "e_th"}
+    assert len(rev["ledger"]) == 8 and rev["concept_mesh"] is False
+    # The config result the gateway still owns: a clean config is said to be clean.
+    config = [f for f in body["supplied"] if f["gate"] == "config_valid"]
+    assert any(f["status"] == "pass" for f in config)
+    assert "scope" not in body and "gates" not in body
+
+
+async def test_validate_passes_scope_and_gates_through(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    sent = _fake_verification(service, report=_report())
+    await client.post(
+        f"{BASE}/validate",
+        json={"scope": [{"kind": "part", "id": "usbc-a"}], "gates": ["handover"]},
+    )
+    assert sent[0]["scope"] == [{"kind": "part", "id": "usbc-a", "revision": None}]
+    assert sent[0]["gates"] == ["handover"]
+
+
+async def test_an_invalid_config_is_reported_and_the_services_report_is_the_422_body(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    bad = base_config()
+    bad["process"]["material"] = "unobtainium"
+    failing = _finding("config.formgraph", gate="config_valid")
+    sent = _fake_verification(service, report=_report("invalid", "V0", [failing]))
+    res = await client.post(f"{BASE}/validate", json={"config": bad})
+    assert res.status_code == 422
+    detail = res.json()["detail"]
+    assert detail["verdict"] == "invalid" and detail["level"] == "V0"
+    assert detail["findings"][0]["check_id"] == "config.formgraph"
+    supplied = sent[0]["supplied"]
+    assert supplied and all(
+        f["status"] == "fail" for f in supplied
+    )  # never a pass for a bad config
+    assert any("unobtainium" in f["message"] for f in supplied)
+
+
+async def test_validate_writes_nothing(client: httpx.AsyncClient, service: ImagineService) -> None:
+    before = await _put(client)
+    _fake_verification(service, report=_report())
+    await client.post(f"{BASE}/validate", json={})
+    await client.get(f"{BASE}/validation")
+    assert (await client.get(f"{BASE}/studio")).json()["revision"] == before["revision"]
+
+
+async def test_only_the_head_revision_can_be_validated(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    sent = _fake_verification(service, report=_report())
+    res = await client.post(f"{BASE}/validate", json={"revision": 99})
+    assert res.status_code == 422 and sent == []
+
+
+async def test_a_handed_over_studio_refuses_a_supplied_config(
+    client: httpx.AsyncClient, service: ImagineService, twin: InMemoryTwinAPI
+) -> None:
+    await _put(client)
+    await _make_ready(client, twin)
+    done = await client.post(f"{BASE}/handover", json={"op_id": "h1"})
+    assert done.status_code == 200, done.text
+    sent = _fake_verification(service, report=_report())
+    assert (
+        await client.post(f"{BASE}/validate", json={"config": full_config()})
+    ).status_code == 409
+    assert sent == []
+    assert (await client.post(f"{BASE}/validate", json={})).status_code == 200
+
+
+# -- the service is the only decider: when it cannot answer, nothing is decided ----
+
+
+def _blocked(body: dict[str, Any], reason: str) -> None:
+    assert body["verdict"] == "blocked_external" and body["level"] == "V0"
+    # Exactly one finding, external, and nothing the gateway judged itself.
+    assert len(body["findings"]) == 1
+    f = body["findings"][0]
+    assert f["check_id"] == "verification.service" and f["resolver"] == "external"
+    assert f["severity"] == "blocking" and f["status"] == "not_assessed"
+    assert reason in f["message"]
+    assert body["gates"] == [] and body["debt"] == []
+    assert "imagine-validate-1" not in json.dumps(body)  # no trace of the retired local rules
+
+
+async def test_an_unconfigured_service_is_blocked_external_never_a_local_fallback(
+    client: httpx.AsyncClient, service: ImagineService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _put(client)
+    monkeypatch.delenv(URL_ENV, raising=False)
+    service._verification = None
+    res = await client.post(f"{BASE}/validate", json={})
+    assert res.status_code == 200
+    _blocked(res.json(), URL_ENV)
+
+
+async def test_an_unreachable_service_is_blocked_external(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, raises=httpx.ConnectError("refused"))
+    _blocked((await client.post(f"{BASE}/validate", json={})).json(), "could not reach")
+
+
+async def test_a_refused_credential_is_blocked_external(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, status=401, json_body={"detail": "no"})
+    _blocked((await client.post(f"{BASE}/validate", json={})).json(), "credential")
+
+
+async def test_a_failing_service_is_blocked_external(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, status=503, json_body={})
+    _blocked((await client.post(f"{BASE}/validate", json={})).json(), "503")
+
+
+async def test_a_report_the_gateway_cannot_read_is_blocked_external_not_trusted(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, report=_report(verdict="all_good_trust_me"))
+    _blocked((await client.post(f"{BASE}/validate", json={})).json(), "does not understand")
+
+
+async def test_an_unknown_scope_ref_is_the_services_422_with_the_bad_ref(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    bad = {"kind": "part", "id": "ghost", "revision": None}
+    _fake_verification(
+        service, status=422, json_body={"detail": {"message": "x", "bad_refs": [bad]}}
+    )
+    res = await client.post(f"{BASE}/validate", json={"scope": [{"kind": "part", "id": "ghost"}]})
+    assert res.status_code == 422
+    assert res.json()["detail"]["bad_refs"] == [bad]
+
+
+async def test_a_request_the_service_calls_malformed_is_a_bug_not_an_outage(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, status=422, json_body={"detail": [{"msg": "bad"}]})
+    res = await client.post(f"{BASE}/validate", json={})
+    assert res.status_code == 502
+    assert res.json()["detail"]["detail"] == [{"msg": "bad"}]
+
+
+# -- MCP ---------------------------------------------------------------------------
+
+
+async def test_validate_is_an_mcp_read_that_returns_the_report(service: ImagineService) -> None:
+    from mcp_core.annotations import annotations_for
+    from mcp_core.profiles import CREATE_STAGE_TOOLS
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    assert "twin.imagine_validate" in srv.tool_ids
+    assert "twin.imagine_validate" in CREATE_STAGE_TOOLS["imagine"]
+    assert annotations_for("twin.imagine_validate").get("readOnlyHint") is True
+
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    sent = _fake_verification(
+        service, report=_report("needs_agent", "V1", [_finding("ledger.reviewed")])
+    )
+    report = await srv.imagine_validate({"project_id": PROJECT})
+    assert report["verdict"] == "needs_agent" and report["findings"][0]["resolver"] == "agent"
+    await srv.imagine_validate(
+        {"project_id": PROJECT, "scope": [{"kind": "studio", "id": "ledger"}]}
+    )
+    assert sent[1]["scope"][0]["id"] == "ledger"
+    assert (await srv.imagine_get_studio({"project_id": PROJECT}))["revision"] == 1
+
+
+async def test_validate_over_mcp_returns_the_invalid_report_not_an_error(
+    service: ImagineService,
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    bad = base_config()
+    bad["process"]["material"] = "unobtainium"
+    _fake_verification(
+        service,
+        report=_report("invalid", "V0", [_finding("config.formgraph", gate="config_valid")]),
+    )
+    report = await srv.imagine_validate({"project_id": PROJECT, "config": bad})
+    assert report["verdict"] == "invalid" and report["level"] == "V0"
+    with pytest.raises(ValueError, match="project_id"):
+        await srv.imagine_validate({"project_id": "nope"})
+    with pytest.raises(ValueError, match="scope"):
+        await srv.imagine_validate({"project_id": PROJECT, "scope": [{"kind": "bogus"}]})
+
+
+async def test_validate_over_mcp_returns_a_blocked_report_when_the_service_is_down(
+    service: ImagineService,
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    _fake_verification(service, raises=httpx.ConnectError("down"))
+    report = await srv.imagine_validate({"project_id": PROJECT})
+    assert report["verdict"] == "blocked_external"
+    assert [f["check_id"] for f in report["findings"]] == ["verification.service"]
+
+
+# -- ROUND TRIP (integration): the real gateway routes, the real verification app, the real client
+#
+# An API-level integration test. It is NOT the full Imagine phase from the dashboard chat,
+# which needs a browser, the chat agent and a model. Nothing here is canned: the verification
+# service is the real app (in process, over httpx's ASGI transport), reached through the same
+# client the gateway uses in production, so the verdicts are the service's. Each result is
+# checked against the gateway's own handover gate. It needs the package; CI installs it and sets
+# METAFORGE_REQUIRE_VERIFICATION_PARITY=1 so a missing package fails and cannot skip.
+
+REQUIRE_PARITY = "METAFORGE_REQUIRE_VERIFICATION_PARITY"
+
+
+@pytest.fixture
+def real_service(service: ImagineService, tmp_path: Path) -> Iterator[ImagineService]:
+    from api_gateway.imagine import verification_client as vc
+
+    try:
+        from metaforge_verification.api import create_app
+        from metaforge_verification.config import Settings
+    except ImportError:
+        if os.environ.get(REQUIRE_PARITY):
+            pytest.fail(f"{REQUIRE_PARITY} is set but metaforge_verification is not importable")
+        pytest.skip("metaforge_verification is not installed: round trip NOT checked")
+    app = create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path / 'verification.db'}",
+            artifact_root=tmp_path / "artifacts",
+            auth_mode="local",
+        )
+    )
+    service._verification = vc.VerificationClient(
+        "http://verification.test", transport=httpx.ASGITransport(app=app)
+    )
+    yield service
+    app.state.store.engine.dispose()
+
+
+async def _validate(client: httpx.AsyncClient, **body: Any) -> httpx.Response:
+    return await client.post(f"{BASE}/validate", json=body)
+
+
+def _by_check(report: dict[str, Any], check_id: str) -> list[dict[str, Any]]:
+    return [f for f in report["findings"] if f["check_id"] == check_id]
+
+
+async def test_roundtrip_a_fresh_studio_is_blocked_on_what_only_others_can_do(
+    client: httpx.AsyncClient, real_service: ImagineService
+) -> None:
+    await _put(client)
+    res = await _validate(client)
+    assert res.status_code == 200, res.text
+    report = res.json()
+    assert report["profile_id"] == "imagine-v1" and report["project_id"] == PROJECT
+    # No concept mesh exists (outside the project) and nobody has confirmed anything (a person).
+    assert report["verdict"] == "blocked_external" and report["level"] == "V1"
+    assert _by_check(report, "concept.mesh")[0]["resolver"] == "external"
+    assert _by_check(report, "assumptions.settled")[0]["resolver"] == "person"
+    assert {g["gate"]: g["decision"] for g in report["gates"]} == {
+        "config_valid": "pass",
+        "handover": "fail",
+        "define_exit": "fail",
+    }
+    # The service's rules, plus only the gateway's interim config check.
+    versions = {f["rule_version"] for f in report["findings"]}
+    assert versions == {"imagine-v1@1.0.0", "metaforge-formgraph-interim"}
+    # The gateway's own gate agrees.
+    assert (await client.get(f"{BASE}/handover")).json()["ready"] is False
+
+
+async def test_roundtrip_a_ready_studio_is_ready_in_the_report_and_hands_over(
+    client: httpx.AsyncClient, real_service: ImagineService, twin: InMemoryTwinAPI
+) -> None:
+    await _put(client)
+    await _make_ready(client, twin)
+    report = (await _validate(client)).json()
+    assert report["verdict"] == "ready_for_handover" and report["level"] == "V2"
+    assert {g["gate"]: g["decision"] for g in report["gates"]}["handover"] == "pass"
+    assert (await client.get(f"{BASE}/handover")).json()["ready"] is True
+    done = await client.post(f"{BASE}/handover", json={"op_id": "h-e2e"})
+    assert done.status_code == 200 and done.json()["handed_over"] is True
+
+
+async def test_roundtrip_a_part_without_interfaces_is_the_agents_to_fix_and_the_gate_agrees(
+    client: httpx.AsyncClient, real_service: ImagineService, twin: InMemoryTwinAPI
+) -> None:
+    cfg = full_config()
+    usbc = next(p for p in cfg["context"]["components"]["parts"] if p["id"] == "usbc-a")
+    # The formgraph engine refuses to write a part with no datasheet, date or envelope, so a
+    # part with no interfaces is the degradation a config can still be written with.
+    usbc["interfaces"] = []
+    await _put(client, cfg)
+    await _make_ready(client, twin)
+
+    report = (await _validate(client)).json()
+    assert report["verdict"] == "needs_agent"
+    finding = next(f for f in _by_check(report, "parts.interfaces") if f["status"] == "fail")
+    assert finding["target"]["kind"] == "part" and finding["target"]["id"] == "usbc-a"
+    assert finding["resolver"] == "agent"
+    # A fix names what is needed and where, and has nowhere to carry a value.
+    assert set(finding["fix"]) == {"op", "pointer", "needs"}
+    assert finding["fix"]["pointer"] == "/parts/0/interface_count"
+    # The gateway's own handover gate refuses for the same reason.
+    refused = await client.post(f"{BASE}/handover", json={"op_id": "h-no"})
+    assert refused.status_code == 409
+    items = {i["id"]: i["status"] for i in refused.json()["detail"]["items"]}
+    assert items["parts"] == "missing"
+
+    # Fix it, then re-check only that part.
+    fixed = full_config()
+    await _put(client, fixed)
+    scoped = (await _validate(client, scope=[{"kind": "part", "id": "usbc-a"}])).json()
+    assert scoped["findings"] and {f["target"]["id"] for f in scoped["findings"]} == {"usbc-a"}
+    assert all(f["status"] == "pass" for f in scoped["findings"])
+    assert (await _validate(client)).json()["verdict"] == "ready_for_handover"
+
+
+async def test_roundtrip_an_invalid_config_is_a_422_carrying_the_services_report(
+    client: httpx.AsyncClient, real_service: ImagineService
+) -> None:
+    await _put(client)
+    bad = base_config()
+    bad["process"]["material"] = "unobtainium"
+    res = await _validate(client, config=bad)
+    assert res.status_code == 422
+    detail = res.json()["detail"]
+    assert detail["verdict"] == "invalid" and detail["level"] == "V0"
+    failing = [f for f in _by_check(detail, "config.formgraph") if f["status"] == "fail"]
+    assert failing and any("unobtainium" in f["message"] for f in failing)
+    assert not any(f["status"] == "pass" for f in _by_check(detail, "config.formgraph"))
+
+
+async def test_roundtrip_an_unknown_scope_ref_is_the_services_422(
+    client: httpx.AsyncClient, real_service: ImagineService
+) -> None:
+    await _put(client)
+    res = await _validate(client, scope=[{"kind": "part", "id": "ghost"}])
+    assert res.status_code == 422
+    assert [r["id"] for r in res.json()["detail"]["bad_refs"]] == ["ghost"]
+
+
+async def test_roundtrip_an_accepted_assumption_is_debt_and_fails_the_define_exit_only(
+    client: httpx.AsyncClient, real_service: ImagineService, twin: InMemoryTwinAPI
+) -> None:
+    await _put(client)
+    await _make_ready(client, twin)
+    await _event(
+        client, "assumption_confirmed", {"id": "cover", "confirmed": False, "accepted": True}
+    )
+    report = (await _validate(client)).json()
+    # Passes the handover (accepted is allowed there) but is listed as debt...
+    assert report["verdict"] == "ready_for_handover"
+    # (the fixture's requirements use the default verification method, which is debt as well)
+    assert sorted(f["check_id"] for f in report["debt"]) == [
+        "assumptions.settled",
+        "requirements.sourced",
+    ]
+    gates = {g["gate"]: g["decision"] for g in report["gates"]}
+    assert gates["handover"] == "pass"
+    # ...and the stricter Define exit says it is not confirmed.
+    assert gates["define_exit"] == "fail"
+    assert _by_check(report, "define.assumptions_confirmed")[0]["status"] == "fail"
+    items = {i["id"]: i["status"] for i in (await client.get(f"{BASE}/handover")).json()["items"]}
+    assert items["assumptions"] == "assumed"
+
+
+async def test_roundtrip_a_service_nobody_is_listening_to_is_blocked_external(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    from api_gateway.imagine import verification_client as vc
+
+    await _put(client)
+    # A real connection to a port nothing listens on: no mock, no fake transport.
+    service._verification = vc.VerificationClient("http://127.0.0.1:9", timeout=2)
+    report = (await _validate(client)).json()
+    assert report["verdict"] == "blocked_external" and report["level"] == "V0"
+    assert [f["check_id"] for f in report["findings"]] == ["verification.service"]
+    assert "could not reach" in report["findings"][0]["message"]
+
+
+async def test_roundtrip_the_mcp_tool_returns_the_same_report(
+    client: httpx.AsyncClient, real_service: ImagineService, twin: InMemoryTwinAPI
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    await _put(client)
+    await _make_ready(client, twin)
+    srv = TwinServer(twin=real_service.twin, imagine_studio=real_service)
+    over_mcp = await srv.imagine_validate({"project_id": PROJECT})
+    over_rest = (await _validate(client)).json()
+    assert over_mcp["verdict"] == over_rest["verdict"] == "ready_for_handover"
+    assert [f["id"] for f in over_mcp["findings"]] == [f["id"] for f in over_rest["findings"]]

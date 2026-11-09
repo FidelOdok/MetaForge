@@ -93,7 +93,21 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[dev]"
+      # The verification service decides Imagine validation (profile imagine-v1)
+      # and the gateway renders what it says. Parity tests keep its decisions
+      # equal to the handover checklist, and round-trip tests drive the real
+      # service. They need its package, so it is installed here PINNED to one
+      # commit: a contract change in that repo must be a deliberate bump of this
+      # pin, in the same change that updates this side. Update VERIFICATION_REF
+      # (and nothing else) to move it. A missing package FAILS the tests below
+      # instead of skipping them.
+      - name: Install the verification service (pinned)
+        env:
+          VERIFICATION_REF: f7886f30fa99ad0c26d2607352ff5c6eb77c49ef
+        run: pip install "metaforge-verification @ git+https://github.com/FidelOdok/MetaForge-Verification@${VERIFICATION_REF}"
       - run: pytest tests/unit/ -x --tb=short -q
+        env:
+          METAFORGE_REQUIRE_VERIFICATION_PARITY: "1"
       # The published API reference is rendered from the committed
       # docs/reference/openapi.json. Regenerate it from the live app and
       # fail if it differs, so a route change cannot ship with a stale or

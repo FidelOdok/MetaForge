@@ -1375,6 +1375,17 @@ per-product formgraph config for Create's Imagine stage
   reworks it.
 - `twin.imagine_handover_status` (read-only): `{ready, items: [{id, label,
   status, detail}]}`, the checklist that gates Imagine to Develop.
+- `twin.imagine_validate` (read-only, never held for approval): a dry run of
+  every Imagine gate. Takes `config` (a draft to check), `scope` (refs to
+  re-check, `{kind, id}`) and `gates`. Returns the verification service's
+  report: `verdict` (`invalid`, `needs_agent`, `blocked_external`,
+  `needs_person`, `ready_for_handover`), `level` (V0 to V2), `gates` and
+  `findings`, each with a `target`, a `status`, a `resolver` (`agent`, `person`
+  or `external`) and, for the agent's, a `fix` that names what is needed and
+  never a value. The report comes back as a result, including `invalid` and
+  `blocked_external`; when the service cannot be reached the result is
+  `blocked_external` with one `verification.service` finding. The tool never
+  decides the verdict itself. See `docs/imagine-stage.md`.
 
 There is deliberately no handover or rework tool: both are a person's
 decisions, taken in the dashboard (`POST .../imagine/handover`, `POST

@@ -46,6 +46,10 @@ services:
       # Let a delegated agent fix the release baseline and approve the
       # manufacturing release for a person (default false).
       - METAFORGE_ALLOW_AGENT_RELEASE=${METAFORGE_ALLOW_AGENT_RELEASE:-false}
+      # The service that decides Imagine validation (MetaForge-Verification).
+      # Unset, the studio reports blocked_external; it never validates locally.
+      - METAFORGE_VERIFICATION_URL=${METAFORGE_VERIFICATION_URL:-}
+      - METAFORGE_VERIFICATION_TOKEN=${METAFORGE_VERIFICATION_TOKEN:-}
       # FORGE-780: a held tool write's approval lasts this long (s) for the
       # identical retry; paid tools auto-approved by a project policy are
       # capped per project per hour.
@@ -575,6 +579,10 @@ services:
       # Let a delegated agent fix the release baseline and approve the
       # manufacturing release for a person (default false).
       - METAFORGE_ALLOW_AGENT_RELEASE=${METAFORGE_ALLOW_AGENT_RELEASE:-false}
+      # The service that decides Imagine validation (MetaForge-Verification).
+      # Unset, the studio reports blocked_external; it never validates locally.
+      - METAFORGE_VERIFICATION_URL=${METAFORGE_VERIFICATION_URL:-}
+      - METAFORGE_VERIFICATION_TOKEN=${METAFORGE_VERIFICATION_TOKEN:-}
       - METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR=${METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR:-20}
       - METAFORGE_AUTO_APPROVE_MESH_PER_HOUR=${METAFORGE_AUTO_APPROVE_MESH_PER_HOUR:-3}
       # cadquery.execute_script runs isolated, so an auto policy may approve it, up

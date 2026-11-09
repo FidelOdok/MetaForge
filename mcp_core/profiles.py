@@ -881,6 +881,9 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
     "imagine": _CREATE_READS
     | {
         "twin.imagine_put_studio",
+        # A dry run of the Imagine gates. Imagine's own work, so it is not in the
+        # reads every stage carries: Develop, Check and Make are near the cap.
+        "twin.imagine_validate",
         # FORGE-824: a person's steps, refused unless the owner delegates
         # human authority, and then held for an approval like any such step.
         "twin.imagine_handover",
