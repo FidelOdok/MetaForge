@@ -869,6 +869,7 @@ _CREATE_READS: frozenset[str] = frozenset(
         "twin.get_manufacturing_context",
         "twin.imagine_get_studio",
         "twin.imagine_handover_status",
+        "twin.imagine_validate",
         "twin.render_work_product",
         "twin.record_decision",
         "knowledge.search",

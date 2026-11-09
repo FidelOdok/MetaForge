@@ -1046,3 +1046,43 @@ async def test_a_handed_over_studio_refuses_a_supplied_config(
     res = await client.post(f"{BASE}/validate", json={"config": full_config()})
     assert res.status_code == 409
     assert (await client.post(f"{BASE}/validate", json={})).status_code == 200
+
+
+async def test_validate_is_an_mcp_read_that_returns_the_report(service: ImagineService) -> None:
+    from mcp_core.annotations import annotations_for
+    from mcp_core.profiles import CREATE_STAGE_TOOLS
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    assert "twin.imagine_validate" in srv.tool_ids
+    assert "twin.imagine_validate" in CREATE_STAGE_TOOLS["imagine"]
+    assert annotations_for("twin.imagine_validate").get("readOnlyHint") is True
+
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    report = await srv.imagine_validate({"project_id": PROJECT})
+    assert report["verdict"] in ("needs_agent", "needs_person", "blocked_external")
+    assert report["studio_revision"] == 1 and report["level"] in ("V0", "V1", "V2")
+    scoped = await srv.imagine_validate(
+        {"project_id": PROJECT, "scope": [{"kind": "studio", "id": "concept_mesh"}]}
+    )
+    assert [f["check_id"] for f in scoped["findings"]] == ["concept.mesh"]
+    # Nothing was written.
+    assert (await srv.imagine_get_studio({"project_id": PROJECT}))["revision"] == 1
+
+
+async def test_validate_over_mcp_returns_an_invalid_report_not_an_error(
+    service: ImagineService,
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    bad = base_config()
+    bad["process"]["material"] = "unobtainium"
+    report = await srv.imagine_validate({"project_id": PROJECT, "config": bad})
+    assert report["verdict"] == "invalid" and report["level"] == "V0"
+    assert any("unobtainium" in f["message"] for f in report["findings"])
+    with pytest.raises(ValueError, match="project_id"):
+        await srv.imagine_validate({"project_id": "nope"})
+    with pytest.raises(ValueError, match="scope"):
+        await srv.imagine_validate({"project_id": PROJECT, "scope": [{"kind": "bogus"}]})
