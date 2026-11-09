@@ -49,6 +49,14 @@ CLIENT_ONLY_WORKFLOWS = frozenset({"connect", "use", "drive", "doctor", "imagine
 # SESSION_RULES), as they apply to a person talking to the agent in the
 # dashboard: no slash commands or subagents here, and approvals are buttons.
 WORKING_RULES = (
+    "- Before custom hardware design, check the project/library and complete commercial "
+    "or open hardware modules first. Compare hard requirements and interfaces; "
+    "record why unsuitable modules were rejected before building from individual parts. "
+    "Unknown specifications and missing executable models are gaps, never passes.\n"
+    "- When a selected library component has models, read its pinned usage and "
+    "limitations with library.resolve_component_model before loading it into an "
+    "engineering tool. Fetch binaries only for the operation that needs them; "
+    "record the lock hash with the resulting evidence.\n"
     "Working rules:\n"
     "- Never use an engineering value without a source. Find it (the person, "
     "project documents, standards, past work, components and stock, analysis, "

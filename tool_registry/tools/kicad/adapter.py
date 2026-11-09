@@ -189,6 +189,9 @@ class KicadServer(McpToolServer):
         from tool_registry.tools.kicad.views import register_view_tools
 
         register_view_tools(self)
+        from tool_registry.tools.kicad.library import register_library_tools
+
+        register_library_tools(self)
 
     def _register_tools(self) -> None:
         """Register all KiCad tools."""

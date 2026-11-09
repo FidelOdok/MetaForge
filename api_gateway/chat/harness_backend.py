@@ -451,6 +451,8 @@ async def mcp_tools_from_bridge(
     enabled: set[str] | None = None,
     domains: tuple[str, ...] | None = None,
     tool_allowlist: frozenset[str] | None = None,
+    *,
+    include_discoverable: bool = False,
 ) -> list[tuple[str, NativeToolDef]]:
     """Adapt a provider's MCP bridge tools into harness ``NativeToolDef``s.
 
@@ -497,7 +499,9 @@ async def mcp_tools_from_bridge(
         # entirely (e.g. a tool meant to be invoked only from inside a
         # skill's handler) -- this is a structural restriction, so it wins
         # even over an explicit `enabled` selection.
-        if entry.get("chat_visible", True) is False:
+        if entry.get("chat_visible", True) is False and not (
+            include_discoverable and entry.get("chat_discoverable", False)
+        ):
             continue
         if enabled is not None and tool_id not in enabled:
             continue
@@ -634,7 +638,7 @@ def make_search_tools_tool(
             raise RuntimeError("search_tools: runtime not ready yet")
         # FORGE-502: the whole MCP catalog from the bridge, never the phase
         # allowlist (that is what the phase already has).
-        catalog = await mcp_tools_from_bridge(bridge, enabled)
+        catalog = await mcp_tools_from_bridge(bridge, enabled, include_discoverable=True)
         known = {t.name for t in runtime.tools.all_tools()}
         matches: list[dict[str, str]] = []
         registered: list[str] = []

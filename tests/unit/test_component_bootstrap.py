@@ -109,25 +109,27 @@ async def test_bootstrap_skips_component_adapter_without_store():
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_skips_component_adapter_without_knowledge_service():
+async def test_bootstrap_keeps_structured_search_without_knowledge_service():
     registry = await bootstrap_tool_registry(
         adapter_ids=[],
         component_catalog_store=_FakeStore(),
         component_intent_llm=_FakeIntentLLM(),
     )
     tool_ids = {_tool_id(t) for t in registry.list_tools()}
-    assert "component.search_parametric" not in tool_ids
+    assert "component.search_parametric" in tool_ids
+    assert "component.search_intent" not in tool_ids
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_skips_component_adapter_without_llm():
+async def test_bootstrap_keeps_structured_search_without_llm():
     registry = await bootstrap_tool_registry(
         adapter_ids=[],
         component_catalog_store=_FakeStore(),
         knowledge_service=_FakeKnowledgeService(),
     )
     tool_ids = {_tool_id(t) for t in registry.list_tools()}
-    assert "component.search_parametric" not in tool_ids
+    assert "component.search_parametric" in tool_ids
+    assert "component.search_intent" not in tool_ids
 
 
 @pytest.mark.asyncio

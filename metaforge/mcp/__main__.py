@@ -1567,14 +1567,15 @@ async def _close_knowledge_service(service: Any) -> None:
 async def _build_component_catalog_store() -> Any:
     """Construct + initialize the parametric component catalog (MET-436).
 
-    Mirrors ``_build_knowledge_service``: returns ``None`` when
-    ``DATABASE_URL`` is unset or init fails, so the rest of the MCP
-    surface stays usable without it — ``component.*`` just stays
-    unregistered (``component_mcp_adapter_skipped``) in that case.
+    Uses the local SQLite index when DATABASE_URL is unset. A configured
+    but unavailable PostgreSQL store is reported rather than silently
+    replacing its data with an empty local index.
     """
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
-        return None
+        from digital_twin.catalog.local_store import SqliteComponentCatalogStore
+
+        return SqliteComponentCatalogStore()
     try:
         from digital_twin.catalog import ComponentCatalogStore
 

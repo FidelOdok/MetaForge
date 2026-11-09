@@ -51,6 +51,8 @@ class ToolManifest(BaseModel):
     # still dispatches them by id regardless of this flag. Defaults to True
     # so every pre-existing manifest keeps today's chat-visible behavior.
     chat_visible: bool = True
+    # Opt-in discovery without sending this schema in every initial prompt.
+    chat_discoverable: bool = False
 
 
 # Type alias for tool handler functions

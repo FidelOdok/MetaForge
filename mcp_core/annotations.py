@@ -83,6 +83,8 @@ READ_ONLY: frozenset[str] = frozenset(
         # FORGE-711: inspect downloads to a scratch folder it deletes again;
         # nothing it writes outlives the call.
         "simready.search",
+        "kicad.search_library",
+        "kicad.describe_library_component",
         "simready.inspect",
         "simready.attribution",
         # Analysis that reads an existing result rather than producing one
@@ -586,6 +588,7 @@ PRODUCING: frozenset[str] = frozenset(
         # FORGE-711: a new folder under simready/ on the adapter workspace; an
         # import of the same package replaces only its own folder.
         "simready.import",
+        "library.resolve_component_model",
         "firmware.static_check",
         "gazebo.run_simulation",
         "isaac_sim.render_scene",

@@ -1845,3 +1845,9 @@ scenario in [`tests/uat/scenarios/`](https://github.com/FidelOdok/MetaForge/tree
 The full master plan and verdict tracker is at
 [`docs/uat/kb-test-plan.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/uat/kb-test-plan.md)
 in the repo (kept out of the published site as QA-internal).
+
+## Reusable component model retrieval
+
+See [Reusing components and model assets](component-library.md) for local structured search,
+versioned representations, `library.resolve_component_model`, verified caching, and
+installed KiCad library discovery. These extend the existing catalogs and storage.

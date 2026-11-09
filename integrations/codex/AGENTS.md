@@ -17,6 +17,8 @@ Call `project.list`, pick the project, then `session.start` with its `project_id
 Follow the bundled `intent-to-verified-design` skill. In short:
 
 - Never use an engineering value without a source. Find missing values with the `source-engineering-values` skill (the user, project documents, standards, past work, components and stock, analysis, measurement) and record each as a `design_value` with its source; a default only as a stated assumption for the person to review. Budget, quantity, machines and look come only from the user. Unknown is a valid answer; an unsourced guess is not.
+- Before custom hardware design, check project/library reuse and complete commercial or open hardware modules. Compare requirements and interfaces; record why unsuitable modules were rejected before building from parts. Unknown specs and missing executable models are gaps, not passes.
+- When a selected library component has models, read its pinned usage and limitations with library.resolve_component_model before loading it into an engineering tool. Fetch binaries only for the operation that needs them; record the lock hash with the resulting evidence.
 - Only create a project when the user asked for one. A flow can be proposed without one.
 - Propose a flow with `flow.propose`, passing `template` and `operations` together. Never `template` alone: that means 'use it unchanged'. Then stop: a person approves it, and there is no tool that lets you.
 

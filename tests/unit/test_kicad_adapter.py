@@ -405,7 +405,7 @@ class TestKicadServer:
         assert server.version == "0.1.0"
 
     def test_registers_sixteen_tools(self, server: KicadServer) -> None:
-        assert len(server.tool_ids) == 16
+        assert len(server.tool_ids) == 18
         expected = {
             "kicad.run_erc",
             "kicad.run_drc",
@@ -428,6 +428,8 @@ class TestKicadServer:
             "kicad.update_components",
             # FORGE-687: SVG previews.
             "kicad.export_svg",
+            "kicad.search_library",
+            "kicad.describe_library_component",
         }
         assert set(server.tool_ids) == expected
 
@@ -725,7 +727,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 16
+        assert len(response["result"]["tools"]) == 18
 
     async def test_tool_call_erc(self, server_with_mocks: KicadServer) -> None:
         request = _make_jsonrpc(
@@ -770,7 +772,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "kicad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 16
+        assert response["result"]["tools_available"] == 18
 
     async def test_tool_list_filter_by_capability(self, server: KicadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "erc_validation"})

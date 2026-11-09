@@ -365,3 +365,29 @@ class TestChatHarnessApprovalWiring:
         ctx.runtime.approval_sleep = fast_sleep
         with pytest.raises(ApprovalDeniedError, match="rejected"):
             await ctx.runtime.call_tool("mcp_twin_commit_geometry", {})
+
+
+@pytest.mark.asyncio
+async def test_on_demand_library_tools_do_not_expose_skill_internal_tools():
+    class Bridge:
+        async def list_tools(self):
+            return [
+                {
+                    "tool_id": "library.resolve_component_model",
+                    "chat_visible": False,
+                    "chat_discoverable": True,
+                    "input_schema": {"type": "object"},
+                },
+                {
+                    "tool_id": "twin.internal",
+                    "chat_visible": False,
+                    "input_schema": {"type": "object"},
+                },
+            ]
+
+    bridge = Bridge()
+    assert await mcp_tools_from_bridge(bridge) == []
+    discovered = await mcp_tools_from_bridge(bridge, include_discoverable=True)
+    assert [(server, tool.name) for server, tool in discovered] == [
+        ("library", "resolve_component_model")
+    ]

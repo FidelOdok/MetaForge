@@ -21,6 +21,7 @@ from tool_registry.tools.simready.importer import (
     attribution_line,
     component_entry,
     family_for,
+    import_identity,
     library_name,
     licence_notice,
 )
@@ -242,7 +243,7 @@ class TestPackage:
         fetcher = FakeFetcher(served)
         manifest = await read_manifest(ref, fetcher)
         served[ref.file_url("simready_usd/a.usda")] = b"#usda 1.0 tampered"
-        with pytest.raises(PackageError, match="does not match its sha256"):
+        with pytest.raises(PackageError, match="sha256|size|byte limit"):
             await download(manifest, manifest.items, tmp_path, fetcher, max_bytes=10**6)
 
     async def test_a_path_outside_the_package_is_refused(self, tmp_path: Path) -> None:
@@ -378,7 +379,7 @@ class TestLibraryEntry:
 
     def test_the_entry_passes_the_library_s_own_checks(self) -> None:
         entry = component_entry(self._record(), _ref())
-        assert entry["name"] == "simready_gripper_2f85_a01" == library_name(_ref())
+        assert entry["name"].startswith(library_name(_ref()) + "_")
         assert entry["family"] == "actuator" and entry["origin"] == "purchased"
         specs = parse_specs(entry["specs"])
         assert specs["mass_kg"].value == 0.9 and specs["mass_kg"].source_kind == "manufacturer_spec"
@@ -541,7 +542,7 @@ class TestRealStage:
         out = await server.import_({"package_url": ref.url})
 
         folder = ws / out["folder"]
-        assert out["folder"] == f"simready/simready_gripper_2f85_a01-{COMMIT[:8]}"
+        assert out["folder"] == f"simready/{import_identity(_ref())}"
         assert (folder / "usd" / root).read_bytes() == layer
         assert not (folder / "usd" / "simready_usd/Textures").exists()
         record = json.loads((folder / "simready.json").read_text())["record"]
@@ -599,3 +600,24 @@ class TestRealStage:
         out = await server.inspect({"package_url": ref.url})
         assert out["licence"]["accepted"] is False and out["licence"]["licence"] == "other"
         assert ref.file_url("simready_usd/ur.usda") not in fetcher.calls
+
+
+@pytest.mark.asyncio
+async def test_concurrent_imports_share_verified_bytes_without_replacing_each_other(tmp_path: Path):
+    import asyncio
+
+    layer = _stage_bytes(tmp_path)
+    ref = _ref()
+    relative = "simready_usd/sm_gripper.usda"
+    fetcher = FakeFetcher(_package(ref, {relative: layer}))
+    workspace = tmp_path / "ws"
+    server = SimReadyServer(SimReadyConfig(workspace_dir=str(workspace)), fetcher)
+    results = await asyncio.gather(*(server.import_({"package_url": ref.url}) for _ in range(2)))
+    assert results[0]["folder"] == results[1]["folder"]
+    folder = workspace / results[0]["folder"]
+    assert (folder / "usd" / relative).read_bytes() == layer
+    lock = json.loads((folder / "model.lock.json").read_text())
+    assert lock["revision"] == COMMIT
+    assert lock["files"][0]["hash"]["sha256"] == _sha(layer)
+    assert fetcher.calls.count(ref.file_url(relative)) == 1
+    assert not list((workspace / "simready").glob(".staging-*"))
