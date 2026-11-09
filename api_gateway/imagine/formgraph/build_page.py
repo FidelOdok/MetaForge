@@ -16,7 +16,7 @@ import json
 import os
 import re
 
-from . import fg_context
+from . import authored, fg_context
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = HERE
@@ -110,10 +110,19 @@ def validate(cfg, cat, ctx=None):
 
     # form
     f = cfg['form']
-    tpl = cat['templates'].get(f.get('template'))
-    if not tpl:
-        E.append(f'form.template "{f.get("template")}" is not available. Choose from: {", ".join(cat["templates"])}.')
+    tpl = None if f.get('template') == authored.TEMPLATE_ID else cat['templates'].get(f.get('template'))
+    if f.get('template') == authored.TEMPLATE_ID:
+        # MetaForge: an agent-authored form (spec 23.6). Its parts carry code, so it is
+        # checked by its own module rather than against a template's parameter list.
+        form_errors, form_warnings = authored.check(f)
+        E.extend(form_errors)
+        W.extend(form_warnings)
+    elif not tpl:
+        choices = ", ".join([*cat["templates"], authored.TEMPLATE_ID])
+        E.append(f'form.template "{f.get("template")}" is not available. Choose from: {choices}.')
     else:
+        if 'authored' in f:
+            E.append('form.authored is only used with form.template "authored".')
         feats = f.get('features', tpl['features'])
         for ft in feats:
             if ft not in tpl['features']:
