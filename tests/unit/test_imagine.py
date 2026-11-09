@@ -263,21 +263,22 @@ async def test_an_invalid_config_is_refused_with_its_errors(client: httpx.AsyncC
     assert any("unobtainium" in e for e in res.json()["detail"]["errors"])
 
 
-async def test_the_put_422_carries_the_same_findings_validate_returns(
+async def test_the_put_422_carries_findings_in_the_contract_shape_and_no_verdict(
     client: httpx.AsyncClient,
 ) -> None:
-    await _put(client)
     cfg = base_config()
     cfg["process"]["material"] = "unobtainium"
-    put = (await client.put(f"{BASE}/studio", json={"config": cfg})).json()["detail"]
-    checked = (await client.post(f"{BASE}/validate", json={"config": cfg})).json()["detail"]
-    assert put["verdict"] == "invalid"
-    assert put["errors"] and put["warnings"] is not None  # the dashboard's shape stays
-    strip = lambda fs: [  # noqa: E731
-        {k: v for k, v in f.items() if k not in ("target", "id")} for f in fs
-    ]
-    assert strip(put["findings"]) == strip(checked["findings"])
-    assert all(f["gate"] == "config_valid" and f["resolver"] == "agent" for f in put["findings"])
+    detail = (await client.put(f"{BASE}/studio", json={"config": cfg})).json()["detail"]
+    # The dashboard's shape stays.
+    assert detail["errors"] and detail["warnings"] is not None
+    # The same Finding objects validate sends, so an agent reads one format.
+    assert detail["findings"]
+    assert all(f["gate"] == "config_valid" and f["resolver"] == "agent" for f in detail["findings"])
+    assert all(f["check_id"] == "config.formgraph" for f in detail["findings"])
+    assert any("unobtainium" in f["message"] for f in detail["findings"])
+    assert not any(f["status"] == "pass" for f in detail["findings"])
+    # The write is refused before anything is judged; verdicts are the service's.
+    assert "verdict" not in detail
 
 
 # ── events ───────────────────────────────────────────────────────────────
@@ -972,97 +973,289 @@ async def test_an_undelegated_agent_scenario_edit_is_not_the_persons(
     assert "knock" in items["scenarios"]["detail"]
 
 
-# -- validation (imagine-validation-api-spec.md) ----------------------------
+# -- validation: the gateway renders what the verification service decides ----
+
+URL_ENV = "METAFORGE_VERIFICATION_URL"
 
 
-async def test_validate_without_a_studio_is_404(client: httpx.AsyncClient) -> None:
-    res = await client.post(f"{BASE}/validate", json={})
-    assert res.status_code == 404
+def _finding(
+    check_id: str = "ledger.reviewed",
+    *,
+    status: str = "fail",
+    resolver: str = "agent",
+    severity: str = "blocking",
+    gate: str = "handover",
+) -> dict[str, Any]:
+    return {
+        "id": f"f_{check_id.replace('.', '_')}",
+        "check_id": check_id,
+        "rule_version": "imagine-v1@1.0.0",
+        "gate": gate,
+        "severity": severity,
+        "status": status,
+        "target": {"kind": "studio", "id": "ledger", "revision": 1},
+        "message": "From the service.",
+        "evidence": [],
+        "resolver": resolver,
+        "fix": None,
+        "accepted_by": [],
+    }
 
 
-async def test_validate_names_who_clears_each_blocker(client: httpx.AsyncClient) -> None:
+def _report(
+    verdict: str = "ready_for_handover",
+    level: str = "V2",
+    findings: list[dict[str, Any]] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "2.0",
+        "profile_id": "imagine-v1",
+        "profile_version": "1.0.0",
+        "twin_id": PROJECT,
+        "revision_id": "r1",
+        "revision_number": 1,
+        "input_fingerprint": "f" * 64,
+        "level": level,
+        "gates": [
+            {
+                "gate": "handover",
+                "rule_version": "imagine-v1@1.0.0",
+                "decision": "pass",
+                "blocking": 0,
+                "assumed": 0,
+                "advisory": 0,
+            }
+        ],
+        "findings": findings or [],
+        "debt": [],
+        "verdict": verdict,
+        "limitations": ["Declared facts only."],
+        **extra,
+    }
+
+
+def _fake_verification(
+    service: ImagineService,
+    *,
+    report: dict[str, Any] | None = None,
+    status: int = 200,
+    json_body: Any = None,
+    raises: Exception | None = None,
+) -> list[dict[str, Any]]:
+    """Install a verification service that answers as told; return the bodies it was sent."""
+    from api_gateway.imagine import verification_client as vc
+
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        if raises is not None:
+            raise raises
+        return httpx.Response(status, json=json_body if json_body is not None else report)
+
+    service._verification = vc.VerificationClient(
+        "http://verify.test", transport=httpx.MockTransport(handler)
+    )
+    return sent
+
+
+async def test_validate_without_a_studio_is_404_and_asks_nobody(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    sent = _fake_verification(service, report=_report())
+    assert (await client.post(f"{BASE}/validate", json={})).status_code == 404
+    assert sent == []
+
+
+async def test_validate_renders_the_services_report_untouched(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
     await _put(client)
+    canned = _report(
+        "needs_person",
+        "V1",
+        [
+            _finding("assumptions.settled", resolver="person"),
+            _finding("concept.mesh", resolver="external"),
+        ],
+        future_field={"a": 1},
+    )
+    _fake_verification(service, report=canned)
     res = await client.post(f"{BASE}/validate", json={})
     assert res.status_code == 200, res.text
-    report = res.json()
-    assert report["level"] in ("V0", "V1", "V2")
-    assert report["verdict"] in ("needs_agent", "needs_person", "blocked_external")
-    blockers = [
-        f for f in report["findings"] if f["severity"] == "blocking" and f["status"] == "fail"
-    ]
-    assert blockers
-    assert {f["resolver"] for f in blockers} <= {"agent", "person", "external"}
-    assert any(f["check_id"] == "concept.mesh" and f["resolver"] == "external" for f in blockers)
+    body = res.json()
+    assert body["verdict"] == "needs_person" and body["level"] == "V1"
+    assert [f["check_id"] for f in body["findings"]] == ["assumptions.settled", "concept.mesh"]
+    assert body["findings"][0]["resolver"] == "person"
+    assert body["future_field"] == {"a": 1}  # a field the gateway does not know yet survives
+    assert body["project_id"] == PROJECT and body["computed_at"] and body["stale"] is False
 
 
-async def test_validate_agrees_with_the_handover_checklist(
-    client: httpx.AsyncClient, twin: InMemoryTwinAPI
+async def test_validate_sends_the_studios_facts_and_the_config_result(
+    client: httpx.AsyncClient, service: ImagineService
 ) -> None:
     await _put(client)
-    await _make_ready(client, twin)
-    checklist = (await client.get(f"{BASE}/handover")).json()
-    report = (await client.get(f"{BASE}/validation")).json()
-    assert checklist["ready"] is True
-    assert report["verdict"] == "ready_for_handover"
-    assert report["level"] == "V2"
-    assert report["stale"] is False
+    sent = _fake_verification(service, report=_report())
+    await client.post(f"{BASE}/validate", json={})
+    body = sent[0]
+    rev = body["revision"]
+    assert rev["twin_id"] == PROJECT and rev["number"] == 1 and rev["revision_id"] == "r1"
+    assert {f["id"] for f in rev["functions"]} >= {"e_usbc", "e_th"}
+    assert len(rev["ledger"]) == 8 and rev["concept_mesh"] is False
+    # The config result the gateway still owns: a clean config is said to be clean.
+    config = [f for f in body["supplied"] if f["gate"] == "config_valid"]
+    assert any(f["status"] == "pass" for f in config)
+    assert "scope" not in body and "gates" not in body
 
 
-async def test_validate_writes_nothing(client: httpx.AsyncClient) -> None:
+async def test_validate_passes_scope_and_gates_through(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    sent = _fake_verification(service, report=_report())
+    await client.post(
+        f"{BASE}/validate",
+        json={"scope": [{"kind": "part", "id": "usbc-a"}], "gates": ["handover"]},
+    )
+    assert sent[0]["scope"] == [{"kind": "part", "id": "usbc-a", "revision": None}]
+    assert sent[0]["gates"] == ["handover"]
+
+
+async def test_an_invalid_config_is_reported_and_the_services_report_is_the_422_body(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    bad = base_config()
+    bad["process"]["material"] = "unobtainium"
+    failing = _finding("config.formgraph", gate="config_valid")
+    sent = _fake_verification(service, report=_report("invalid", "V0", [failing]))
+    res = await client.post(f"{BASE}/validate", json={"config": bad})
+    assert res.status_code == 422
+    detail = res.json()["detail"]
+    assert detail["verdict"] == "invalid" and detail["level"] == "V0"
+    assert detail["findings"][0]["check_id"] == "config.formgraph"
+    supplied = sent[0]["supplied"]
+    assert supplied and all(
+        f["status"] == "fail" for f in supplied
+    )  # never a pass for a bad config
+    assert any("unobtainium" in f["message"] for f in supplied)
+
+
+async def test_validate_writes_nothing(client: httpx.AsyncClient, service: ImagineService) -> None:
     before = await _put(client)
+    _fake_verification(service, report=_report())
     await client.post(f"{BASE}/validate", json={})
     await client.get(f"{BASE}/validation")
-    after = (await client.get(f"{BASE}/studio")).json()
-    assert after["revision"] == before["revision"]
+    assert (await client.get(f"{BASE}/studio")).json()["revision"] == before["revision"]
 
 
-async def test_an_invalid_config_is_a_422_whose_body_is_the_report(
-    client: httpx.AsyncClient,
+async def test_only_the_head_revision_can_be_validated(
+    client: httpx.AsyncClient, service: ImagineService
 ) -> None:
     await _put(client)
-    res = await client.post(f"{BASE}/validate", json={"config": {"not": "a product"}})
-    assert res.status_code == 422
-    body = res.json()["detail"]
-    assert body["verdict"] == "invalid"
-    assert body["level"] == "V0"
-    assert any(f["gate"] == "config_valid" for f in body["findings"])
-
-
-async def test_a_scope_re_checks_only_what_it_names(client: httpx.AsyncClient) -> None:
-    await _put(client)
-    full = (await client.post(f"{BASE}/validate", json={})).json()
-    scope = [{"kind": "studio", "id": "concept_mesh"}]
-    part = (await client.post(f"{BASE}/validate", json={"scope": scope})).json()
-    assert [f["check_id"] for f in part["findings"]] == ["concept.mesh"]
-    assert len(part["findings"]) < len(full["findings"])
-
-
-async def test_a_scope_naming_nothing_is_a_422_with_the_bad_ref(
-    client: httpx.AsyncClient,
-) -> None:
-    await _put(client)
-    bad = {"kind": "part", "id": "no-such-part"}
-    res = await client.post(f"{BASE}/validate", json={"scope": [bad]})
-    assert res.status_code == 422
-    assert res.json()["detail"]["bad_refs"][0]["id"] == "no-such-part"
-
-
-async def test_only_the_head_revision_can_be_validated(client: httpx.AsyncClient) -> None:
-    await _put(client)
+    sent = _fake_verification(service, report=_report())
     res = await client.post(f"{BASE}/validate", json={"revision": 99})
-    assert res.status_code == 422
+    assert res.status_code == 422 and sent == []
 
 
 async def test_a_handed_over_studio_refuses_a_supplied_config(
-    client: httpx.AsyncClient, twin: InMemoryTwinAPI
+    client: httpx.AsyncClient, service: ImagineService, twin: InMemoryTwinAPI
 ) -> None:
     await _put(client)
     await _make_ready(client, twin)
     done = await client.post(f"{BASE}/handover", json={"op_id": "h1"})
     assert done.status_code == 200, done.text
-    res = await client.post(f"{BASE}/validate", json={"config": full_config()})
-    assert res.status_code == 409
+    sent = _fake_verification(service, report=_report())
+    assert (
+        await client.post(f"{BASE}/validate", json={"config": full_config()})
+    ).status_code == 409
+    assert sent == []
     assert (await client.post(f"{BASE}/validate", json={})).status_code == 200
+
+
+# -- the service is the only decider: when it cannot answer, nothing is decided ----
+
+
+def _blocked(body: dict[str, Any], reason: str) -> None:
+    assert body["verdict"] == "blocked_external" and body["level"] == "V0"
+    # Exactly one finding, external, and nothing the gateway judged itself.
+    assert len(body["findings"]) == 1
+    f = body["findings"][0]
+    assert f["check_id"] == "verification.service" and f["resolver"] == "external"
+    assert f["severity"] == "blocking" and f["status"] == "not_assessed"
+    assert reason in f["message"]
+    assert body["gates"] == [] and body["debt"] == []
+    assert "imagine-validate-1" not in json.dumps(body)  # no trace of the retired local rules
+
+
+async def test_an_unconfigured_service_is_blocked_external_never_a_local_fallback(
+    client: httpx.AsyncClient, service: ImagineService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _put(client)
+    monkeypatch.delenv(URL_ENV, raising=False)
+    service._verification = None
+    res = await client.post(f"{BASE}/validate", json={})
+    assert res.status_code == 200
+    _blocked(res.json(), URL_ENV)
+
+
+async def test_an_unreachable_service_is_blocked_external(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, raises=httpx.ConnectError("refused"))
+    _blocked((await client.post(f"{BASE}/validate", json={})).json(), "could not reach")
+
+
+async def test_a_refused_credential_is_blocked_external(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, status=401, json_body={"detail": "no"})
+    _blocked((await client.post(f"{BASE}/validate", json={})).json(), "credential")
+
+
+async def test_a_failing_service_is_blocked_external(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, status=503, json_body={})
+    _blocked((await client.post(f"{BASE}/validate", json={})).json(), "503")
+
+
+async def test_a_report_the_gateway_cannot_read_is_blocked_external_not_trusted(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, report=_report(verdict="all_good_trust_me"))
+    _blocked((await client.post(f"{BASE}/validate", json={})).json(), "does not understand")
+
+
+async def test_an_unknown_scope_ref_is_the_services_422_with_the_bad_ref(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    bad = {"kind": "part", "id": "ghost", "revision": None}
+    _fake_verification(
+        service, status=422, json_body={"detail": {"message": "x", "bad_refs": [bad]}}
+    )
+    res = await client.post(f"{BASE}/validate", json={"scope": [{"kind": "part", "id": "ghost"}]})
+    assert res.status_code == 422
+    assert res.json()["detail"]["bad_refs"] == [bad]
+
+
+async def test_a_request_the_service_calls_malformed_is_a_bug_not_an_outage(
+    client: httpx.AsyncClient, service: ImagineService
+) -> None:
+    await _put(client)
+    _fake_verification(service, status=422, json_body={"detail": [{"msg": "bad"}]})
+    res = await client.post(f"{BASE}/validate", json={})
+    assert res.status_code == 502
+    assert res.json()["detail"]["detail"] == [{"msg": "bad"}]
+
+
+# -- MCP ---------------------------------------------------------------------------
 
 
 async def test_validate_is_an_mcp_read_that_returns_the_report(service: ImagineService) -> None:
@@ -1076,18 +1269,19 @@ async def test_validate_is_an_mcp_read_that_returns_the_report(service: ImagineS
     assert annotations_for("twin.imagine_validate").get("readOnlyHint") is True
 
     await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
-    report = await srv.imagine_validate({"project_id": PROJECT})
-    assert report["verdict"] in ("needs_agent", "needs_person", "blocked_external")
-    assert report["studio_revision"] == 1 and report["level"] in ("V0", "V1", "V2")
-    scoped = await srv.imagine_validate(
-        {"project_id": PROJECT, "scope": [{"kind": "studio", "id": "concept_mesh"}]}
+    sent = _fake_verification(
+        service, report=_report("needs_agent", "V1", [_finding("ledger.reviewed")])
     )
-    assert [f["check_id"] for f in scoped["findings"]] == ["concept.mesh"]
-    # Nothing was written.
+    report = await srv.imagine_validate({"project_id": PROJECT})
+    assert report["verdict"] == "needs_agent" and report["findings"][0]["resolver"] == "agent"
+    await srv.imagine_validate(
+        {"project_id": PROJECT, "scope": [{"kind": "studio", "id": "ledger"}]}
+    )
+    assert sent[1]["scope"][0]["id"] == "ledger"
     assert (await srv.imagine_get_studio({"project_id": PROJECT}))["revision"] == 1
 
 
-async def test_validate_over_mcp_returns_an_invalid_report_not_an_error(
+async def test_validate_over_mcp_returns_the_invalid_report_not_an_error(
     service: ImagineService,
 ) -> None:
     from tool_registry.tools.twin.adapter import TwinServer
@@ -1096,10 +1290,26 @@ async def test_validate_over_mcp_returns_an_invalid_report_not_an_error(
     await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
     bad = base_config()
     bad["process"]["material"] = "unobtainium"
+    _fake_verification(
+        service,
+        report=_report("invalid", "V0", [_finding("config.formgraph", gate="config_valid")]),
+    )
     report = await srv.imagine_validate({"project_id": PROJECT, "config": bad})
     assert report["verdict"] == "invalid" and report["level"] == "V0"
-    assert any("unobtainium" in f["message"] for f in report["findings"])
     with pytest.raises(ValueError, match="project_id"):
         await srv.imagine_validate({"project_id": "nope"})
     with pytest.raises(ValueError, match="scope"):
         await srv.imagine_validate({"project_id": PROJECT, "scope": [{"kind": "bogus"}]})
+
+
+async def test_validate_over_mcp_returns_a_blocked_report_when_the_service_is_down(
+    service: ImagineService,
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    _fake_verification(service, raises=httpx.ConnectError("down"))
+    report = await srv.imagine_validate({"project_id": PROJECT})
+    assert report["verdict"] == "blocked_external"
+    assert [f["check_id"] for f in report["findings"]] == ["verification.service"]

@@ -30,8 +30,9 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
+from pydantic import ValidationError
 
-from api_gateway.imagine import engine_page
+from api_gateway.imagine import engine_page, verification_client
 from api_gateway.imagine.schemas import (
     COLLECTION_KINDS,
     KIND_COLLECTIONS,
@@ -46,16 +47,10 @@ from api_gateway.imagine.schemas import (
 )
 from api_gateway.imagine.twin_bridge import TwinBridge, mfc_field
 from api_gateway.imagine.validation import (
-    Finding,
-    GateName,
     Report,
     ValidatePost,
-    build_report,
-    compute_verdict,
     config_findings,
-    handover_findings,
-    known_refs,
-    scope_findings,
+    unavailable_report,
 )
 from observability.tracing import get_tracer
 
@@ -374,11 +369,24 @@ def _mfc_from_config(config: dict[str, Any]) -> dict[str, Any]:
 class ImagineService:
     """The Imagine stage over one twin."""
 
-    def __init__(self, twin: Any, project_backend: Any = None, bridge: Any = None) -> None:
+    def __init__(
+        self,
+        twin: Any,
+        project_backend: Any = None,
+        bridge: Any = None,
+        verification: Any = None,
+    ) -> None:
         self.twin = twin
         self.project_backend = project_backend
         self.bridge = bridge if bridge is not None else TwinBridge(twin, project_backend)
+        self._verification = verification
         self._locks: dict[str, asyncio.Lock] = {}
+
+    def _verification_client(self) -> Any:
+        """The service that decides validation, or ``None`` when none is configured."""
+        if self._verification is not None:
+            return self._verification
+        return verification_client.from_env()
 
     def _lock(self, project_id: str) -> asyncio.Lock:
         lock = self._locks.get(project_id)
@@ -516,8 +524,9 @@ class ImagineService:
             except engine_page.ConfigError as exc:
                 _count("put", "refused")
                 # ``errors`` and ``warnings`` stay for the dashboard; ``findings``
-                # is the same shape POST /validate returns, so an agent reads
-                # one format (imagine-validation-api-spec.md, 4.2).
+                # is the same shape POST /validate returns, so an agent reads one
+                # format. There is no verdict here: the write is refused before
+                # anything is judged, and verdicts are the service's to give.
                 findings = config_findings(exc.errors, exc.warnings, None)
                 raise ImagineError(
                     "The config does not pass the formgraph checks.",
@@ -526,7 +535,6 @@ class ImagineService:
                         "errors": exc.errors,
                         "warnings": exc.warnings,
                         "findings": [f.model_dump(mode="json") for f in findings],
-                        "verdict": compute_verdict(findings),
                     },
                 ) from exc
             async with self._lock(project_id):
@@ -894,13 +902,23 @@ class ImagineService:
             return await self._checklist(project_id, head)
 
     async def validate(self, project_id: str, request: ValidatePost | None = None) -> Report:
-        """Dry-run every gate and return one report (spec: imagine-validation-api-spec.md).
+        """Ask the verification service for the report, and render what it decides.
 
-        Read-only: nothing is written and no assumption is accepted. A config in
-        the request is checked instead of the head's (409 once handed over);
-        one the formgraph refuses is a 422 whose body is the report, verdict
-        ``invalid``.
+        The rules, the verdict and the level are the service's (profile
+        ``imagine-v1``); nothing here judges. Read-only: nothing is written and
+        no assumption is accepted. The gateway states the studio's facts
+        (:mod:`concept_revision`), sends the ``config_valid`` result it still
+        owns (an interim exception), and returns the report untouched.
+
+        A config in the request is checked instead of the head's (409 once
+        handed over). A config the service finds invalid is a 422 whose body is
+        its report. A service that is unconfigured, unreachable or failing is a
+        ``blocked_external`` report with one external finding, never a local
+        fallback.
         """
+        # Imported here: concept_revision reads this module's helpers.
+        from api_gateway.imagine.concept_revision import build_concept_revision
+
         req = request or ValidatePost()
         with tracer.start_as_current_span("imagine.validate") as span:
             span.set_attribute("project_id", project_id)
@@ -920,63 +938,87 @@ class ImagineService:
                 raise ImagineError(
                     f"{head.ref} is handed over; validate the frozen revision instead.", 409
                 )
-            gates: list[GateName] = list(req.gates or ["config_valid", "handover"])
             config = req.config if req.config is not None else head.state.get("config") or {}
+
+            client = self._verification_client()
+            if client is None:
+                _count("validate", "unconfigured")
+                logger.warning("imagine_verification_unconfigured", project_id=project_id)
+                return unavailable_report(
+                    project_id,
+                    head.revision,
+                    "The verification service is not configured "
+                    f"({verification_client.URL_ENV} is unset).",
+                )
+
+            # Interim exception: the formgraph config check is still this
+            # gateway's. The service folds the result into its verdict and
+            # never assumes a config is valid on its own.
+            try:
+                checked = engine_page.validate_config(config)
+                supplied = config_findings([], checked.warnings, head.revision)
+            except engine_page.ConfigError as exc:
+                supplied = config_findings(exc.errors, exc.warnings, head.revision)
+
+            has_mesh = await self.bridge.has_concept_mesh(project_id)
+            body: dict[str, Any] = {
+                "revision": build_concept_revision(
+                    project_id,
+                    head.revision,
+                    config,
+                    head.state["collections"],
+                    has_mesh=has_mesh,
+                ),
+                "supplied": [f.model_dump(mode="json") for f in supplied],
+            }
             if req.scope:
-                bad = [r for r in req.scope if (r.kind, r.id) not in known_refs(config)]
-                if bad:
+                body["scope"] = [
+                    r.model_dump(mode="json", include={"kind", "id", "revision"}) for r in req.scope
+                ]
+            if req.gates:
+                body["gates"] = list(req.gates)
+
+            try:
+                raw = await client.validate(body)
+            except verification_client.VerificationUnavailable as exc:
+                _count("validate", "unavailable")
+                return unavailable_report(project_id, head.revision, exc.reason)
+            except verification_client.VerificationRefused as exc:
+                detail = exc.detail
+                if isinstance(detail, dict) and detail.get("bad_refs"):
                     _count("validate", "refused")
                     raise ImagineError(
                         "A scope ref names nothing in this studio.",
                         422,
-                        {"bad_refs": [r.model_dump() for r in bad]},
-                    )
+                        {"bad_refs": detail["bad_refs"]},
+                    ) from exc
+                # The service called our request malformed: a bug here, not an outage.
+                _count("validate", "error")
+                raise ImagineError(
+                    "The verification service refused the request.", 502, {"detail": detail}
+                ) from exc
 
-            findings: list[Finding] = []
-            invalid = False
             try:
-                checked = engine_page.validate_config(config)
-                if "config_valid" in gates:
-                    findings += config_findings([], checked.warnings, head.revision)
-            except engine_page.ConfigError as exc:
-                invalid = True
-                findings += config_findings(exc.errors, exc.warnings, head.revision)
-            if "handover" in gates and not invalid:
-                # The checklist reads the head's collections; a supplied config
-                # is judged against the same recorded decisions.
-                probe = _Head(
-                    revision=head.revision,
-                    node_id=head.node_id,
-                    metadata=head.metadata,
-                    state={**head.state, "config": config},
-                    updated_at=head.updated_at,
+                report = Report.model_validate(
+                    {**raw, "project_id": project_id, "computed_at": _now(), "stale": False}
                 )
-                checklist = await self._checklist(project_id, probe)
-                has_mesh = await self.bridge.has_concept_mesh(project_id)
-                findings += handover_findings(
-                    config,
-                    probe.state["collections"],
-                    checklist,
-                    has_mesh=has_mesh,
-                    revision=head.revision,
+            except ValidationError as exc:
+                _count("validate", "unavailable")
+                logger.error("imagine_verification_report_unreadable", error=str(exc)[:300])
+                return unavailable_report(
+                    project_id,
+                    head.revision,
+                    "The verification service answered a report this gateway does not understand.",
                 )
-            if req.scope:
-                findings = scope_findings(findings, req.scope)
-            report = build_report(
-                project_id,
-                head.revision,
-                findings,
-                gates,
-                computed_at=_now(),
-            )
             span.set_attribute("validate.verdict", report.verdict)
-            _count("validate", "invalid" if invalid else "ok")
-            if invalid:
+            if report.verdict == "invalid":
+                _count("validate", "invalid")
                 raise ImagineError(
                     "The config does not pass the formgraph checks.",
                     422,
                     report.model_dump(mode="json"),
                 )
+            _count("validate", "ok")
             return report
 
     async def _checklist(self, project_id: str, head: _Head) -> HandoverChecklist:

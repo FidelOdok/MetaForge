@@ -1,204 +1,143 @@
-"""The pure half of Imagine validation (spec: imagine-validation-api-spec.md)."""
+"""What the gateway keeps of Imagine validation: contract shapes, the interim config
+gate and the unavailable answer. The rules, verdicts and levels are the verification
+service's, so nothing here judges a studio.
+"""
 
 from __future__ import annotations
 
-import copy
-from typing import Any
+import ast
+import inspect
 
-from api_gateway.imagine.schemas import HandoverChecklist, HandoverItem
+import pytest
+from pydantic import ValidationError
+
+from api_gateway.imagine import validation
 from api_gateway.imagine.validation import (
-    MAX_LEVEL,
-    Finding,
-    Fix,
-    Ref,
-    build_report,
-    compute_verdict,
+    Report,
+    ValidatePost,
     config_findings,
-    handover_findings,
+    unavailable_report,
 )
-from tests.unit.imagine_fixtures import full_config
 
-_STUDIO = Ref(kind="studio", id="x", revision=3)
-
-
-def _f(
-    status: str = "fail",
-    resolver: str = "agent",
-    severity: str = "blocking",
-    gate: str = "handover",
-    check_id: str = "x.y",
-) -> Finding:
-    return Finding(
-        id=f"f_{check_id}_{status}_{resolver}",
-        check_id=check_id,
-        gate=gate,  # type: ignore[arg-type]
-        severity=severity,  # type: ignore[arg-type]
-        status=status,  # type: ignore[arg-type]
-        target=_STUDIO,
-        message="m",
-        resolver=resolver,  # type: ignore[arg-type]
-    )
+# -- the interim config_valid gate ----------------------------------------------
 
 
-def _items(**status: str) -> HandoverChecklist:
-    ids = [
-        "ledger",
-        "assumptions",
-        "scenarios",
-        "requirements",
-        "parts",
-        "manufacturing_context",
-        "concept_assembly",
-        "interfaces",
-        "screening",
+def test_a_clean_config_says_so_because_the_service_never_assumes_it() -> None:
+    found = config_findings([], [], 3)
+    assert [(f.status, f.severity, f.gate) for f in found] == [("pass", "blocking", "config_valid")]
+    assert found[0].target.revision == 3
+
+
+def test_errors_are_blocking_failures_and_there_is_no_pass() -> None:
+    found = config_findings(["bad key", "bad value"], ["odd"], None)
+    assert [(f.status, f.severity) for f in found] == [
+        ("fail", "blocking"),
+        ("fail", "blocking"),
+        ("fail", "advisory"),
     ]
-    return HandoverChecklist(
-        ready=False,
-        items=[HandoverItem(id=i, label=i, status=status.get(i, "done")) for i in ids],  # type: ignore[arg-type]
+    assert not any(f.status == "pass" for f in found)
+
+
+def test_warnings_alongside_a_clean_config_are_advisory_and_follow_the_pass() -> None:
+    found = config_findings([], ["odd value"], 1)
+    assert [f.status for f in found] == ["pass", "fail"]
+    assert found[1].severity == "advisory"
+
+
+def test_every_config_finding_is_the_agents_to_fix_and_ids_are_unique() -> None:
+    found = config_findings(["a", "b"], ["c", "d"], 1)
+    assert {f.resolver for f in found} == {"agent"}
+    assert {f.check_id for f in found} == {"config.formgraph"}
+    assert len({f.id for f in found}) == len(found)
+
+
+def test_a_long_engine_message_is_clipped_to_the_contracts_bound() -> None:
+    assert len(config_findings(["x" * 900], [], 1)[0].message) == 500
+
+
+def test_the_interim_gate_is_labelled_as_such() -> None:
+    assert "interim" in config_findings([], [], 1)[0].rule_version
+
+
+# -- the unavailable answer ---------------------------------------------------------
+
+
+def test_unavailable_is_blocked_external_with_exactly_one_external_finding() -> None:
+    report = unavailable_report("p1", 4, "could not reach the verification service")
+    assert report.verdict == "blocked_external" and report.level == "V0"
+    assert len(report.findings) == 1
+    f = report.findings[0]
+    assert (f.check_id, f.resolver, f.severity, f.status) == (
+        "verification.service",
+        "external",
+        "blocking",
+        "not_assessed",
     )
+    assert f.target.revision == 4 and report.revision_number == 4
+    assert report.gates == [] and report.debt == []
 
 
-def _collections() -> dict[str, Any]:
-    return {"ledger": {}, "assumptions": {}, "scenarios": {}, "screening": {}}
+def test_unavailable_claims_nothing_above_v0_and_judges_nothing() -> None:
+    report = unavailable_report("p1", None, "down")
+    assert report.level == "V0" and report.revision_id == ""
+    assert {f.status for f in report.findings} == {"not_assessed"}
 
 
-# -- verdict precedence (spec 3.7) -----------------------------------------
+# -- the report is rendered, not edited ---------------------------------------------
 
 
-def test_a_failing_config_check_is_invalid_before_anything_else() -> None:
-    findings = [_f(gate="config_valid"), _f(resolver="agent"), _f(resolver="person")]
-    assert compute_verdict(findings) == "invalid"
+def _wire(**over: object) -> dict[str, object]:
+    return {"level": "V2", "verdict": "ready_for_handover", **over}
 
 
-def test_the_verdict_names_who_acts_next_in_precedence_order() -> None:
-    both = [_f(resolver="person"), _f(resolver="external"), _f(resolver="agent")]
-    assert compute_verdict(both) == "needs_agent"
-    assert compute_verdict([_f(resolver="person"), _f(resolver="external")]) == "blocked_external"
-    assert compute_verdict([_f(resolver="person")]) == "needs_person"
+def test_a_field_the_service_adds_survives_the_round_trip() -> None:
+    report = Report.model_validate(_wire(future={"a": 1}))
+    assert report.model_dump(mode="json")["future"] == {"a": 1}
 
 
-def test_assumed_and_advisory_findings_do_not_block() -> None:
-    findings = [
-        _f(status="assumed", severity="advisory", resolver="person"),
-        _f(status="fail", severity="advisory"),
-        _f(status="pass"),
-    ]
-    assert compute_verdict(findings) == "ready_for_handover"
+def test_a_verdict_or_level_the_gateway_does_not_know_is_refused_not_trusted() -> None:
+    with pytest.raises(ValidationError):
+        Report.model_validate(_wire(verdict="all_good_trust_me"))
+    with pytest.raises(ValidationError):
+        Report.model_validate(_wire(level="V5"))
 
 
-def test_a_check_that_could_not_run_blocks_when_the_check_is_blocking() -> None:
-    assert compute_verdict([_f(status="unknown", resolver="external")]) == "blocked_external"
-    assert compute_verdict([_f(status="unknown", severity="advisory")]) == "ready_for_handover"
+def test_a_finding_status_outside_the_contract_is_refused() -> None:
+    bad = {
+        "id": "f",
+        "check_id": "c",
+        "rule_version": "v",
+        "gate": "handover",
+        "severity": "blocking",
+        "status": "verified",
+        "target": {"kind": "studio", "id": "x"},
+        "message": "m",
+        "resolver": "agent",
+    }
+    with pytest.raises(ValidationError):
+        Report.model_validate(_wire(findings=[bad]))
 
 
-# -- config_valid -----------------------------------------------------------
+def test_a_fix_has_no_value_field_to_invent() -> None:
+    assert set(validation.Fix.model_fields) == {"op", "pointer", "needs"}
 
 
-def test_each_engine_error_and_warning_is_one_finding() -> None:
-    found = config_findings(["bad key"], ["odd value", "odd again"], 2)
-    assert [f.severity for f in found] == ["blocking", "advisory", "advisory"]
-    assert {f.gate for f in found} == {"config_valid"}
-    assert [f.message for f in found] == ["bad key", "odd value", "odd again"]
-    assert len({f.id for f in found}) == 3
+# -- the request ---------------------------------------------------------------------
 
 
-# -- handover: the status mapping is exact (spec 5.1) ------------------------
+def test_validate_post_refuses_unknown_fields_and_unknown_gates() -> None:
+    with pytest.raises(ValidationError):
+        ValidatePost.model_validate({"surprise": 1})
+    with pytest.raises(ValidationError):
+        ValidatePost.model_validate({"gates": ["handover", "bogus"]})
+    assert ValidatePost.model_validate({"gates": ["define_exit"]}).gates == ["define_exit"]
 
 
-def test_missing_assumed_and_done_map_to_fail_assumed_and_pass() -> None:
-    found = handover_findings(
-        full_config(),
-        _collections(),
-        _items(ledger="missing", assumptions="assumed", scenarios="done"),
-        has_mesh=True,
-        revision=3,
-    )
-    by_id = {f.id: f for f in found}
-    assert by_id["f_ledger"].status == "fail" and by_id["f_ledger"].severity == "blocking"
-    assert by_id["f_assumptions"].status == "assumed"
-    assert by_id["f_assumptions"].severity == "advisory"
-    assert by_id["f_scenarios"].status == "pass"
+# -- the seam: no rule has crept back in --------------------------------------------
 
 
-def test_who_clears_each_item_is_fixed_by_the_check() -> None:
-    found = handover_findings(full_config(), _collections(), _items(), has_mesh=False, revision=1)
-    resolver = {f.check_id: f.resolver for f in found}
-    assert resolver["ledger.reviewed"] == "agent"
-    assert resolver["assumptions.settled"] == "person"
-    assert resolver["scenarios.confirmed"] == "person"
-    assert resolver["concept.mesh"] == "external"
-
-
-def test_the_parts_item_splits_per_part_per_gap() -> None:
-    cfg = copy.deepcopy(full_config())
-    parts = cfg["context"]["components"]["parts"]
-    usbc = next(p for p in parts if p["id"] == "usbc-a")
-    usbc.pop("datasheet")
-    usbc["geometry"].pop("envelope")
-    usbc["geometry"].pop("source")  # _part_gaps also accepts the geometry's source
-    found = handover_findings(cfg, _collections(), _items(), has_mesh=True, revision=3)
-    failing = {f.id: f for f in found if f.gate == "handover" and f.status == "fail"}
-    assert "f_parts_usbc-a_source" in failing
-    assert "f_parts_usbc-a_3d_envelope" in failing
-    source = failing["f_parts_usbc-a_source"]
-    assert source.check_id == "parts.source"
-    assert source.target == Ref(kind="part", id="usbc-a", revision=3)
-    assert source.resolver == "agent"
-
-
-def test_a_fix_names_what_it_needs_and_never_carries_a_value() -> None:
-    assert "value" not in Fix.model_fields
-    cfg = copy.deepcopy(full_config())
-    for p in cfg["context"]["components"]["parts"]:
-        p.pop("interfaces", None)
-    found = handover_findings(cfg, _collections(), _items(), has_mesh=True, revision=3)
-    fixes = [f.fix for f in found if f.fix is not None]
-    assert fixes and all(fx.needs for fx in fixes)
-
-
-# -- the report -------------------------------------------------------------
-
-
-def test_a_report_lists_assumed_findings_as_debt_and_stays_at_v1_without_screening() -> None:
-    found = handover_findings(
-        full_config(),
-        _collections(),
-        _items(assumptions="assumed", screening="missing"),
-        has_mesh=True,
-        revision=3,
-    )
-    report = build_report("p1", 3, found, ["handover"], computed_at="2026-11-09T00:00:00Z")
-    assert [f.check_id for f in report.debt] == ["assumptions.settled"]
-    assert report.level == "V1"
-    assert report.verdict == "needs_person"
-    assert report.gates[0].assumed == 1
-
-
-def test_no_report_claims_above_v2() -> None:
-    found = handover_findings(full_config(), _collections(), _items(), has_mesh=True, revision=3)
-    report = build_report("p1", 3, found, ["handover"], computed_at="2026-11-09T00:00:00Z")
-    assert report.level == MAX_LEVEL == "V2"
-    assert report.verdict == "ready_for_handover"
-    assert report.model_dump(mode="json")["level"] in {"V0", "V1", "V2"}
-
-
-def test_a_failing_config_reports_v0() -> None:
-    report = build_report(
-        "p1",
-        None,
-        config_findings(["broken"], [], None),
-        ["config_valid"],
-        computed_at="2026-11-09T00:00:00Z",
-    )
-    assert report.level == "V0"
-    assert report.verdict == "invalid"
-    assert report.gates[0].result == "fail"
-
-
-def test_the_same_input_gives_the_same_report() -> None:
-    args = (full_config(), _collections(), _items(ledger="missing"))
-    a = handover_findings(*args, has_mesh=True, revision=3)
-    b = handover_findings(*args, has_mesh=True, revision=3)
-    ra = build_report("p1", 3, a, ["handover"], computed_at="t")
-    rb = build_report("p1", 3, b, ["handover"], computed_at="t")
-    assert ra.model_dump_json() == rb.model_dump_json()
+def test_this_module_decides_nothing() -> None:
+    """A threshold or predicate lives in the service. If one appears here, one of them drifts."""
+    tree = ast.parse(inspect.getsource(validation))
+    defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    assert defined == {"config_findings", "unavailable_report"}
