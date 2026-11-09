@@ -47,8 +47,8 @@ from api_gateway.imagine.schemas import (
 )
 from api_gateway.imagine.twin_bridge import TwinBridge, mfc_field
 from api_gateway.imagine.validation import (
-    Report,
     ValidatePost,
+    ValidationReport,
     config_findings,
     unavailable_report,
 )
@@ -901,7 +901,9 @@ class ImagineService:
                 )
             return await self._checklist(project_id, head)
 
-    async def validate(self, project_id: str, request: ValidatePost | None = None) -> Report:
+    async def validate(
+        self, project_id: str, request: ValidatePost | None = None
+    ) -> ValidationReport:
         """Ask the verification service for the report, and render what it decides.
 
         The rules, the verdict and the level are the service's (profile
@@ -999,7 +1001,7 @@ class ImagineService:
                 ) from exc
 
             try:
-                report = Report.model_validate(
+                report = ValidationReport.model_validate(
                     {**raw, "project_id": project_id, "computed_at": _now(), "stale": False}
                 )
             except ValidationError as exc:

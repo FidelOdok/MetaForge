@@ -13,8 +13,8 @@ from pydantic import ValidationError
 
 from api_gateway.imagine import validation
 from api_gateway.imagine.validation import (
-    Report,
     ValidatePost,
+    ValidationReport,
     config_findings,
     unavailable_report,
 )
@@ -91,15 +91,15 @@ def _wire(**over: object) -> dict[str, object]:
 
 
 def test_a_field_the_service_adds_survives_the_round_trip() -> None:
-    report = Report.model_validate(_wire(future={"a": 1}))
+    report = ValidationReport.model_validate(_wire(future={"a": 1}))
     assert report.model_dump(mode="json")["future"] == {"a": 1}
 
 
 def test_a_verdict_or_level_the_gateway_does_not_know_is_refused_not_trusted() -> None:
     with pytest.raises(ValidationError):
-        Report.model_validate(_wire(verdict="all_good_trust_me"))
+        ValidationReport.model_validate(_wire(verdict="all_good_trust_me"))
     with pytest.raises(ValidationError):
-        Report.model_validate(_wire(level="V5"))
+        ValidationReport.model_validate(_wire(level="V5"))
 
 
 def test_a_finding_status_outside_the_contract_is_refused() -> None:
@@ -115,11 +115,11 @@ def test_a_finding_status_outside_the_contract_is_refused() -> None:
         "resolver": "agent",
     }
     with pytest.raises(ValidationError):
-        Report.model_validate(_wire(findings=[bad]))
+        ValidationReport.model_validate(_wire(findings=[bad]))
 
 
 def test_a_fix_has_no_value_field_to_invent() -> None:
-    assert set(validation.Fix.model_fields) == {"op", "pointer", "needs"}
+    assert set(validation.ValidationFix.model_fields) == {"op", "pointer", "needs"}
 
 
 # -- the request ---------------------------------------------------------------------

@@ -4,9 +4,11 @@ Every rule that decides pass or fail lives in MetaForge-Verification (profile
 ``imagine-v1``). This module holds no predicate, no threshold, no verdict and no
 level. It holds three things:
 
-- the shapes of the shared contract (``Finding``, ``Report``, ``Ref``), mirrored
-  here so the gateway can validate what it renders; the service defines them
-  and a change to them lands in both repositories;
+- the shapes of the shared contract (``ValidationFinding``, ``ValidationReport``,
+  ``ValidationRef``), mirrored here so the gateway can validate what it
+  renders; the service defines them and a change to them lands in both
+  repositories. The names carry a ``Validation`` prefix so they cannot collide
+  with another model in the published API schema;
 - ``config_findings``: the ``config_valid`` gate, which MetaForge still owns
   until the formgraph rules move into the service. This is a labelled interim
   exception. The gateway reports what the formgraph engine said and the
@@ -17,7 +19,7 @@ level. It holds three things:
   finding, never a local fallback: a fallback nobody is alarmed by becomes
   permanent.
 
-Finding text is data, not instructions.
+ValidationFinding text is data, not instructions.
 """
 
 from __future__ import annotations
@@ -27,10 +29,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
-    "Finding",
-    "GateResult",
-    "Ref",
-    "Report",
+    "ValidationFinding",
+    "ValidationGateResult",
+    "ValidationRef",
+    "ValidationReport",
     "ValidatePost",
     "config_findings",
     "unavailable_report",
@@ -56,7 +58,7 @@ class _Contract(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class Ref(_Contract):
+class ValidationRef(_Contract):
     """A stable address for what a finding is about. The service owns the kinds."""
 
     kind: str
@@ -64,28 +66,28 @@ class Ref(_Contract):
     revision: int | None = None
 
 
-class Fix(_Contract):
+class ValidationFix(_Contract):
     op: str
     pointer: str
     needs: str
 
 
-class Finding(_Contract):
+class ValidationFinding(_Contract):
     id: str
     check_id: str
     rule_version: str
     gate: str
     severity: Severity
     status: Status
-    target: Ref
+    target: ValidationRef
     message: str
-    evidence: list[Ref] = Field(default_factory=list)
+    evidence: list[ValidationRef] = Field(default_factory=list)
     resolver: Resolver
-    fix: Fix | None = None
+    fix: ValidationFix | None = None
     accepted_by: list[str] = Field(default_factory=list)
 
 
-class GateResult(_Contract):
+class ValidationGateResult(_Contract):
     gate: str
     rule_version: str
     decision: Literal["pass", "fail", "incomplete"]
@@ -94,7 +96,7 @@ class GateResult(_Contract):
     advisory: int = 0
 
 
-class Report(_Contract):
+class ValidationReport(_Contract):
     """The service's report, rendered as it came, plus what only the gateway knows."""
 
     schema_version: str = "2.0"
@@ -105,9 +107,9 @@ class Report(_Contract):
     revision_number: int | None = None
     input_fingerprint: str = ""
     level: Level
-    gates: list[GateResult] = Field(default_factory=list)
-    findings: list[Finding] = Field(default_factory=list)
-    debt: list[Finding] = Field(default_factory=list)
+    gates: list[ValidationGateResult] = Field(default_factory=list)
+    findings: list[ValidationFinding] = Field(default_factory=list)
+    debt: list[ValidationFinding] = Field(default_factory=list)
     verdict: Verdict
     limitations: list[str] = Field(default_factory=list)
     # Gateway-side: which project this is, when it was asked, and whether the
@@ -127,11 +129,13 @@ class ValidatePost(BaseModel):
     #: Only the head revision can be validated (422 otherwise).
     revision: int | None = None
     #: Re-check only what these refs address. The service rejects an unknown ref.
-    scope: list[Ref] | None = None
+    scope: list[ValidationRef] | None = None
     gates: list[Literal["config_valid", "handover", "define_exit"]] | None = None
 
 
-def config_findings(errors: list[str], warnings: list[str], revision: int | None) -> list[Finding]:
+def config_findings(
+    errors: list[str], warnings: list[str], revision: int | None
+) -> list[ValidationFinding]:
     """The ``config_valid`` gate: what the formgraph engine said, as findings.
 
     A clean config yields one ``pass`` finding, because the service never
@@ -139,11 +143,11 @@ def config_findings(errors: list[str], warnings: list[str], revision: int | None
     failures and warnings advisory ones. Text is the engine's own, clipped to
     the contract's bound.
     """
-    target = Ref(kind="studio", id="config", revision=revision)
-    out: list[Finding] = []
+    target = ValidationRef(kind="studio", id="config", revision=revision)
+    out: list[ValidationFinding] = []
     if not errors:
         out.append(
-            Finding(
+            ValidationFinding(
                 id="f_config_ok",
                 check_id=CONFIG_CHECK_ID,
                 rule_version=CONFIG_RULE_VERSION,
@@ -158,7 +162,7 @@ def config_findings(errors: list[str], warnings: list[str], revision: int | None
     for kind, texts in (("error", errors), ("warning", warnings)):
         for i, text in enumerate(texts):
             out.append(
-                Finding(
+                ValidationFinding(
                     id=f"f_config_{kind}_{i}",
                     check_id=CONFIG_CHECK_ID,
                     rule_version=CONFIG_RULE_VERSION,
@@ -173,23 +177,23 @@ def config_findings(errors: list[str], warnings: list[str], revision: int | None
     return out
 
 
-def unavailable_report(project_id: str, revision: int | None, reason: str) -> Report:
+def unavailable_report(project_id: str, revision: int | None, reason: str) -> ValidationReport:
     """``blocked_external`` with exactly one external finding. No rule is evaluated here."""
-    return Report(
+    return ValidationReport(
         profile_id="imagine-v1",
         twin_id=project_id,
         revision_id=f"r{revision}" if revision is not None else "",
         revision_number=revision,
         level="V0",
         findings=[
-            Finding(
+            ValidationFinding(
                 id="f_verification_service",
                 check_id="verification.service",
                 rule_version="metaforge-gateway",
                 gate="verification",
                 severity="blocking",
                 status="not_assessed",
-                target=Ref(kind="studio", id="verification", revision=revision),
+                target=ValidationRef(kind="studio", id="verification", revision=revision),
                 message=reason[:MAX_MESSAGE],
                 resolver="external",
             )

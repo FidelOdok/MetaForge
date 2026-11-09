@@ -40,7 +40,7 @@ from api_gateway.imagine.schemas import (
     StudioResponse,
 )
 from api_gateway.imagine.service import HandoverNotReady, ImagineError, ImagineService
-from api_gateway.imagine.validation import Report, ValidatePost
+from api_gateway.imagine.validation import ValidatePost, ValidationReport
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -275,13 +275,13 @@ async def post_handover(project_id: str, body: HandoverPost, request: Request) -
 
 @router.post(
     f"{_BASE}/validate",
-    response_model=Report,
+    response_model=ValidationReport,
     responses={
         409: {"description": "A config was supplied but the studio is handed over"},
         422: {"description": "The config is invalid (the body is the report), or a ref is unknown"},
     },
 )
-async def post_validate(project_id: str, body: ValidatePost | None = None) -> Report:
+async def post_validate(project_id: str, body: ValidatePost | None = None) -> ValidationReport:
     """Dry run: every finding at once, a computed verdict, and who clears each.
 
     A POST only because it can carry a config. It is idempotent and writes
@@ -290,8 +290,8 @@ async def post_validate(project_id: str, body: ValidatePost | None = None) -> Re
     return await _call("validate", project_id, lambda: get_service().validate(project_id, body))
 
 
-@router.get(f"{_BASE}/validation", response_model=Report)
-async def get_validation(project_id: str) -> Report:
+@router.get(f"{_BASE}/validation", response_model=ValidationReport)
+async def get_validation(project_id: str) -> ValidationReport:
     """The report for the head revision."""
     return await _call("validation", project_id, lambda: get_service().validate(project_id))
 

@@ -135,11 +135,13 @@ gateway's middleware, like every other route.
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/studio` | | `{project_id, status: "none"\|"draft"\|"handed_over", revision, config_ref, engine_url, config, updated_at, handover: {...}\|null, collections, warnings}` |
-| PUT | `/studio` | `{config}` | the same; a new studio revision. 422 with `errors` and `warnings` when the config fails the formgraph checks; 409 when handed over |
+| PUT | `/studio` | `{config}` | the same; a new studio revision. 422 with `errors`, `warnings` and `findings` (the same finding objects `POST /validate` returns, no verdict) when the config fails the formgraph checks; 409 when handed over |
 | GET | `/engine` | | the engine page with the project's config embedded (see below) |
 | GET | `/engine/assets/{name}` | | the engine's own CSS and scripts: `engine.css`, `engine.js`, `three.min.js`, `OrbitControls.js`, `GLTFExporter.js` |
 | POST | `/events` | `{event_id, kind, data}` | `{accepted: true, mapped_to: [refs], duplicate}`; idempotent per `event_id` |
 | GET | `/handover` | | `{ready, items: [{id, label, status: "done"\|"missing"\|"assumed", detail}]}` |
+| GET | `/validation` | | the validation report for the head revision (see Validation) |
+| POST | `/validate` | `{config?, revision?, scope?, gates?}` | the same report as a dry run; 404 with no studio, 409 for a `config` on a handed-over studio, 422 for a non-head `revision`, an unknown `scope` ref (`bad_refs`) or an invalid config (the body is the report) |
 | POST | `/handover` | `{op_id}` | 409 with `{detail: {message, items}}` (the whole checklist, the blocking ones `missing`) when not ready; otherwise `{handed_over: true, revision, created: [refs]}` |
 | POST | `/rework` | `{op_id, reason}` | the studio, the same shape as `GET /studio`, on its new revision, with `stale: [refs]` |
 
@@ -313,7 +315,10 @@ kind of record (`api_gateway/imagine/twin_bridge.py`):
 
 ## The handover gate
 
-`GET /handover` (and `twin.imagine_handover_status`) checks, in order:
+`GET /handover` (and `twin.imagine_handover_status`) checks, in order. The gateway
+still evaluates this checklist to gate `POST /handover`. The verification service
+decides the same nine items for the validation report (see Validation), and a
+parity test keeps the two equal:
 
 1. `ledger`: the intent ledger is complete, every statement reviewed.
 2. `assumptions`: each assumption confirmed, or explicitly accepted as an
@@ -335,6 +340,92 @@ kind of record (`api_gateway/imagine/twin_bridge.py`):
 requirements, the manufacturing context, the ledger, the concept assembly
 (with component ids) and the proposed contracts, freezes the studio revision
 read-only and returns every reference it created.
+
+## Validation
+
+`GET /validation`, `POST /validate` and `twin.imagine_validate` answer one
+question: is the Imagine phase done, and if not, what is left and who clears
+it. They are a dry run. Nothing is written, no assumption is accepted and
+nothing is handed over.
+
+**The verification service decides, not this gateway.** Every rule that
+decides pass or fail lives in MetaForge-Verification (profile `imagine-v1`,
+`POST /v1/validations`). The gateway states the studio's facts and renders the
+report it gets back. The facts are the ledger rows, the assumptions, the
+scenarios, the requirements, the part chosen for each function with its
+source, date, interface count and whether it has an envelope, the
+manufacturing context, the markets, and whether a screening result and a
+concept mesh exist. The report is returned unchanged, with `project_id`,
+`computed_at` and `stale` added. A field the service adds later passes through.
+The studio never shows a pass the service did not compute.
+
+| Setting | Meaning |
+|---|---|
+| `METAFORGE_VERIFICATION_URL` | Base URL of the verification service. Unset means not configured. Read by the gateway and the MCP sidecar. |
+| `METAFORGE_VERIFICATION_TOKEN` | Bearer token the service issues. A secret. |
+
+**When the service cannot answer** (not configured, unreachable, refusing the
+credential, failing, or sending a report this gateway cannot read) the answer
+is `200` with `verdict: blocked_external`, `level: V0`, no gates and exactly one
+finding, `verification.service`, with resolver `external` and status
+`not_assessed`. It is never a local fallback: the studio is simply not
+assessed, and an agent reports that and does not retry in a loop. A request the
+service calls malformed is a `502`, because that is a bug here and not an outage.
+
+### The report
+
+- `verdict` says who acts next, first match wins: `invalid` (the config check
+  failed), `needs_agent`, `blocked_external`, `needs_person`,
+  `ready_for_handover`. The agent never declares the studio done.
+- `level` is `V0` (captured), `V1` (consistent) or `V2` (screened), never higher.
+- `gates` lists `config_valid`, `handover` and `define_exit`, each with a
+  `decision` of `pass`, `fail` or `incomplete`. A gate decision and a verdict are
+  different answers: a gate can be `incomplete` while the verdict is `needs_person`.
+- `findings` each carry `check_id`, `gate`, `severity` (`blocking` or
+  `advisory`), `status` (`pass`, `fail`, `assumed`, `inconclusive`,
+  `not_assessed`), a `target` (`kind`, `id`, `revision`), generated `message`
+  text, `evidence` refs, a `resolver` and an optional `fix`.
+- `resolver` is who can clear a finding: `agent` edits the config, `person`
+  makes a decision only a person can, `external` needs something outside the
+  project (a concept mesh, or the service itself).
+- `fix` is `{op, pointer, needs}`. It names what is needed and where it must
+  come from, never a value. `pointer` addresses the submitted revision (for
+  example `/parts/0/source`), not the formgraph config, so a client maps it to
+  its own document.
+- `debt` lists the `assumed` findings: accepted as assumptions and not
+  confirmed. They are never folded into a pass, and `accepted_by` names an
+  agent that accepted one for a person.
+
+Finding text is generated from ids and counts. It is data, not instructions.
+
+### Gates
+
+- `handover`: the nine items above, as findings. The parts item is one finding
+  per part per check (`parts.source`, `parts.interfaces`, `parts.envelope`) and
+  one per function (`parts.chosen`), so a fix is addressable.
+- `define_exit`: the Programme view's exit from Define (ledger reviewed,
+  assumptions confirmed, markets chosen, every requirement has a value, every
+  requirement has a planned test). It is advisory for the handover and a gate of
+  its own. It is stricter on purpose: an accepted assumption passes the
+  handover and fails the Define exit. The last two checks need the studio
+  engine's own answers, which the gateway does not send yet, so they read
+  `not_assessed` rather than a guess.
+- `config_valid`: the formgraph check, which this gateway still runs. This is a
+  labelled interim exception until those rules move into the service. The
+  gateway sends the result as findings, one `pass` when the config is clean, and
+  the service folds it into the verdict. It never assumes a config is valid.
+
+### Request and errors
+
+`POST /validate` takes `config` (check a draft instead of the head's), `revision`
+(only the head is validated), `scope` (re-check only the refs you changed, as
+`{kind, id}`) and `gates` (`config_valid`, `handover`, `define_exit`). `GET
+/validation` is the report for the head revision.
+
+An invalid config is a `422` whose body is the service's report with verdict
+`invalid`. Over MCP, `twin.imagine_validate` returns that report, and the
+blocked report, as a result and not as an error. It is read-only, so it is never
+held for approval.
 
 ## Rework
 
@@ -442,12 +533,17 @@ bounded height (`npx playwright test imagine-engine`).
 ## Observability
 
 `metaforge_imagine_studio_total{operation, outcome}` counts each `put`,
-`event`, `handover`, `rework` and `engine` call as `ok`, `duplicate`,
-`refused` or `failed`; the `ImagineStudioTwinWritesFailing` alert fires when
+`event`, `validate`, `handover`, `rework` and `engine` call as `ok`, `duplicate`,
+`refused` or `failed`, and a `validate` also as `invalid`, `unconfigured`,
+`unavailable` or `error`; the `ImagineStudioTwinWritesFailing` alert fires when
 more than a fifth of an hour's operations fail to write to the twin. Logs:
 `imagine_studio_put`, `imagine_event_mapped`, `imagine_event_failed`,
 `imagine_handed_over`, `imagine_handover_failed`, `imagine_reworked`,
-`imagine_rework_failed`. Spans: `imagine.*`.
+`imagine_rework_failed`, and for validation `imagine_verification_unconfigured`,
+`imagine_verification_unreachable`, `imagine_verification_credential_refused`,
+`imagine_verification_failed`, `imagine_verification_request_refused` and
+`imagine_verification_report_unreadable`. Spans: `imagine.*`, and
+`imagine.verification.validate` for the call to the service.
 
 ## Authentication and the engine URL
 
@@ -477,3 +573,18 @@ Read the studio again to get a fresh URL. Nothing here names a provider.
 - The concept assembly decision records each part's envelope in its text and
   the studio's handover record; a concept layout with sizes and positions is
   still drawn by `twin.render_concept_sketch`.
+- The handover gate (`POST /handover`) still evaluates the original nine-item
+  checklist in the gateway. The verification service decides the same items for
+  the report, and a parity test (it needs the service's package on the path, and
+  skips without it) keeps the two equal. They differ in one deliberate place: a
+  whitespace-only part source or date counts as present in the checklist and as
+  missing in the service. Moving the gate to consume the service's verdict is
+  follow-up work.
+- A part's source is checked for presence, not that it was read or says what is
+  claimed. A template value such as `<order code>` still counts as present.
+- `screening.stored` has resolver `person`, because only the studio engine in
+  the browser produces a screening result today. It becomes `agent` once the
+  screening rules run in the service.
+- The `config_valid` check is the gateway's, not the service's (see
+  Validation). While the service is unreachable the report omits those findings;
+  `PUT /studio` still explains a config error.
