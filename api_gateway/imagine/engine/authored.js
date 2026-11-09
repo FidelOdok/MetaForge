@@ -595,6 +595,25 @@
     return block;
   }
 
+  // A slider's grid. A range input snaps its value to min + n * step, so a step that does not
+  // divide the declared value moves it on first touch, and a person (or an agent) asking for
+  // 400 gets 400.8. Pick the largest step, at most 1, that has enough positions, lands exactly
+  // on the declared value and keeps whole numbers reachable.
+  function sliderGrid(v, lo, hi) {
+    var steps = [1, 0.5, 0.1, 0.05, 0.01, 0.005, 0.001], i, s, a, b;
+    function round(x) { return Math.round(x * 1e6) / 1e6; }
+    for (i = 0; i < steps.length; i++) {
+      s = steps[i];
+      a = round(v - Math.floor((v - lo) / s + 1e-9) * s);
+      b = round(a + Math.ceil((hi - a) / s - 1e-9) * s);
+      var off = (Math.ceil(a) - a) / s;
+      if ((b - a) / s >= 50 && Math.abs(off - Math.round(off)) < 1e-6) return { lo: a, hi: b, step: s };
+    }
+    s = steps[steps.length - 1];
+    a = round(v - Math.floor((v - lo) / s + 1e-9) * s);
+    return { lo: a, hi: round(a + Math.max(1, Math.ceil((hi - a) / s)) * s), step: s };
+  }
+
   function mount(env) {
     var THREE = env.THREE, doc = env.document || document, form = env.cfg.form, parts = form.authored.parts;
     var params = Object.assign({}, form.params), ranges = form.ranges || {};
@@ -613,9 +632,9 @@
       var row = doc.createElement('label'); row.className = 'fg-authored-row';
       var name = doc.createElement('span'); name.textContent = key;
       var val = doc.createElement('span'); val.className = 'fg-authored-val'; val.textContent = String(v);
-      var input = doc.createElement('input'); input.type = 'range'; input.min = String(lo); input.max = String(hi); input.step = String((hi - lo) / 200); input.value = String(v);
+      var input = doc.createElement('input'); input.type = 'range'; var grid = sliderGrid(v, lo, hi); input.min = String(grid.lo); input.max = String(grid.hi); input.step = String(grid.step); input.value = String(v);
       input.setAttribute('data-param', key);
-      input.addEventListener('input', function () { params[key] = +input.value; val.textContent = (+input.value).toFixed(1); schedule(); });
+      input.addEventListener('input', function () { params[key] = +input.value; val.textContent = String(+input.value); schedule(); });
       row.appendChild(name); row.appendChild(val); row.appendChild(input); rows.appendChild(row);
     });
     var legend = doc.createElement('div'); legend.className = 'fg-authored-legend';
@@ -683,5 +702,5 @@
     return { render: render, group: group, panel: panel, params: params };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, mount: mount };
 });

@@ -62,6 +62,7 @@ CHECKS = [
     "describe_states_what_was_measured_and_what_was_not_assessed",
     "describe_says_a_form_was_not_or_only_partly_drawn_and_why",
     "summary_block_renders_the_description_into_the_page",
+    "sliders_can_land_exactly_on_the_declared_values_and_on_whole_numbers",
     "mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change",
 ]
 

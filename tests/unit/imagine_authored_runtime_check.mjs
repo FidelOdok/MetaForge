@@ -316,6 +316,38 @@ await check('summary_block_renders_the_description_into_the_page', async () => {
 });
 
 // -- mount: the page side, with a minimal fake DOM and three.js ------------------
+await check('sliders_can_land_exactly_on_the_declared_values_and_on_whole_numbers', async () => {
+  const el = () => {
+    const e = { children: [], style: {}, className: '', textContent: '', attrs: {},
+      appendChild(c) { e.children.push(c); return c; }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {} };
+    return e;
+  };
+  const fakeDoc = { createElement: el, createTextNode: (t) => ({ text: t }), body: el() };
+  class Group { constructor() { this.children = []; } add(c) { this.children.push(c); } }
+  const THREE = { Group, Mesh: class {}, BufferGeometry: class { setAttribute() {} setIndex() {} computeVertexNormals() {} dispose() {} },
+    MeshStandardMaterial: class {}, Float32BufferAttribute: class {} };
+  const cfg = { form: { template: 'authored', params: { base_r: 55, base_h: 12, arm_len: 260, lean: -3.5 },
+    ranges: { arm_len: [120, 480], lean: [-80, 80] },
+    authored: { parts: [part('b', 'return [g.box(1, 1, 1)];')] } } };
+  const m = FG.mount({ THREE, scene: new Group(), cfg, document: fakeDoc, host: fakeDoc.body, options: OPTS });
+  await m.render();
+  const rows = m.panel.children[1].children;
+  const bad = [];
+  rows.forEach((row) => {
+    const input = row.children[2];
+    const key = input.attrs['data-param'];
+    const lo = +input.min, hi = +input.max, step = +input.step;
+    const want = cfg.form.params[key];
+    const k = (want - lo) / step;
+    if (Math.abs(k - Math.round(k)) > 1e-6) bad.push(key + ': ' + want + ' is not on the grid ' + lo + ' + n * ' + step);
+    for (const whole of [Math.ceil(lo) + 1, Math.floor(hi) - 1]) {
+      const j = (whole - lo) / step;
+      if (Math.abs(j - Math.round(j)) > 1e-6) bad.push(key + ': whole number ' + whole + ' is not reachable (step ' + step + ', min ' + lo + ')');
+    }
+  });
+  return bad.length ? bad.join(' | ') : true;
+});
+
 await check('mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change', async () => {
   const el = () => {
     const e = {
