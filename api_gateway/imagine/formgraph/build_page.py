@@ -1,6 +1,6 @@
 """Build a Formgraph product page from a product config.
 
-Vendored from idroneinnovations formgraph 2.7.0 (skills/formgraph/scripts/build_page.py).
+Vendored from formgraph 2.7.0 (skills/formgraph/scripts/build_page.py).
 MetaForge changes: package-relative imports, the data folder sits beside this
 file, and the command-line entry point is removed (the gateway calls
 validate() and build() directly; see api_gateway/imagine/README.md).

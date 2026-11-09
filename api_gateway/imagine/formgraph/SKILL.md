@@ -143,4 +143,4 @@ Use the pack's `programme.exit` list for the current phase. For each criterion t
 - Catalogue values and programme factors (failure rates, carbon factors, lead times, anthropometrics) are typical.
 - Part numbers come only from a source you read (datasheet or maker page, linked, with the date). Never invent one. Test results and certificates come from people, never from you.
 - Everything before gate 4 is early screening; tracked domains stay open until someone attaches evidence. Repeat this when summarising.
-- Brand pages as idroneinnovations; the registered company is idroneimages ltd. Do not use em dashes in anything you write.
+- Brand pages as MetaForge (metaforge.uk). Do not use em dashes in anything you write.

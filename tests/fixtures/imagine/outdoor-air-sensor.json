@@ -4,7 +4,7 @@
   "product": {
     "id": "outdoor-air-sensor",
     "name": "Outdoor Air Sensor",
-    "brand": "idroneinnovations",
+    "brand": "MetaForge",
     "brief": "Battery air temperature and humidity sensor for building sites. Reports over LTE every 30 minutes, lasts two weeks, recharged over USB-C, survives being knocked off a scaffold rail."
   },
   "scenarios": [

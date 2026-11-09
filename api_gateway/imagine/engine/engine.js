@@ -1572,7 +1572,7 @@ function renderGates(){
   $('#cpPack').disabled=!(G4[2].ok);
 }
 $('#cpPack').addEventListener('click',()=>{if(!last||!last.shape)return;const s=last.shape,L=[];
-  L.push('FORMGRAPH VALIDATION PACK',`Product: ${CP.name||'Unnamed product'} (${CP.id||'default'})`,`Engine: ${ENGINE}`,'idroneinnovations, a trading name of idroneimages ltd','',`Fingerprint: sha256:${(last.bom&&last.bom.fp)||''}`,`Revision: ${(S.revs[S.revs.length-1]||{}).rev||'unreleased'}`,`Process: ${PROC[S.proc].name}, ${matOf().name}, ${finishOf().name}`,`Envelope: ${fmt(s.W,1)} x ${fmt(s.D,1)} x ${fmt(s.H,1)} mm, wall ${fmt(s.t||0,2)} mm`,'');
+  L.push('FORMGRAPH VALIDATION PACK',`Product: ${CP.name||'Unnamed product'} (${CP.id||'default'})`,`Engine: ${ENGINE}`,'MetaForge, metaforge.uk','',`Fingerprint: sha256:${(last.bom&&last.bom.fp)||''}`,`Revision: ${(S.revs[S.revs.length-1]||{}).rev||'unreleased'}`,`Process: ${PROC[S.proc].name}, ${matOf().name}, ${finishOf().name}`,`Envelope: ${fmt(s.W,1)} x ${fmt(s.D,1)} x ${fmt(s.H,1)} mm, wall ${fmt(s.t||0,2)} mm`,'');
   L.push('GATES');gateState().forEach(g=>L.push(`  ${g.n}. ${g.name}: ${g.ok?'pass':'open'} (${g.msg})`));L.push('','REQUIREMENTS');
   REQ.forEach(r=>{const q=REQS.find(x=>x.id===r.id);L.push(`  [${r.pri}] ${q.t.replace(/\[(\w+)\]/g,(m,k)=>{const o=q.in.opts&&q.in.opts.find(o=>o[0]===S.req[k]);return o?o[1]:S.req[k];})}`,`      ${r.st.toUpperCase()}: ${r.val} (${r.conf}${r.how?', '+r.how:''})`);});
   if(EL){L.push('','ELECTRONICS AND WIRING CHECKS');EL.checks.forEach(c=>L.push(`  [${c.st.toUpperCase()}] ${c.label}: ${c.val} (${c.lim})`));
@@ -2950,7 +2950,7 @@ function toast(msg){const t=document.createElement('div');t.className='toast';t.
 function showText(txt){$('#ioBox').hidden=false;const io=$('#io');io.value=txt;io.focus();io.select();$('#ioApply').hidden=true;}
 function copy(txt,what){try{navigator.clipboard.writeText(txt).then(()=>toast(what+' copied.'),()=>{showText(txt);toast('Select the text below and copy it.');});}catch(e){showText(txt);}}
 function spec(){const s=last&&last.shape;if(!s)return null;const P=PROC[S.proc];const d=derive(s);
-  return{tool:'Formgraph Studio',brand:'idroneinnovations (idroneimages ltd)',units:'mm, degrees',process:P.name,material:P.mat,finish:finishOf().name,volume_units:S.qty,
+  return{tool:'Formgraph Studio',brand:'MetaForge',units:'mm, degrees',process:P.name,material:P.mat,finish:finishOf().name,volume_units:S.qty,
     form:{width:+fmt(s.W,2),depth:+fmt(s.D,2),height:+fmt(s.H,2),corner_radius:+fmt(s.R,2),top_fillet:+fmt(s.F,2),draft_deg:+fmt(s.A,2)},
     shell:s.t?{wall:+fmt(s.t,2),inside_corner_radius:+fmt(d.ri,2),inside_top_fillet:+fmt(Math.max(d.fi,0),2),open_face:'bottom'}:null,
     vent_slots:s.slots&&s.slots.n?{count:s.slots.n,width:+fmt(s.slots.w,2),length:+fmt(d.slotL,2),gap:s.slots.n>1?+fmt(d.gap,2):null,face:'top'}:null,

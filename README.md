@@ -590,7 +590,7 @@ history will not resolve for you. Nothing needed to review a change depends on t
 
 ## 18. Licence and third-party notices
 
-MetaForge is developed by idroneinnovations, the trading name of idroneimages ltd, and
+MetaForge is published at [metaforge.uk](https://www.metaforge.uk) and
 is licensed under the [Apache License 2.0](LICENSE). Attribution is in
 [`NOTICE`](NOTICE).
 
