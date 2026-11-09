@@ -34,6 +34,7 @@ from twin_core.library.catalog import MaterialEntry
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "MATERIAL_SKIP_PREFIXES",
     "MATERIAL_TOOL_PREFIXES",
     "MaterialResolutionError",
     "catalog_source",
@@ -44,6 +45,15 @@ __all__ = [
 
 #: Tools whose ``material`` is an engineering material to look up.
 MATERIAL_TOOL_PREFIXES = ("cadquery.", "freecad.", "calculix.", "twin.")
+
+#: Tools under those prefixes whose arguments are NOT a material lookup. The Imagine
+#: studio config is a whole product document. Its ``process.material`` names a
+#: catalogue material or a library family, and the studio checks that itself when the
+#: config is written (a catalogue material such as ``absfr`` need not be in the
+#: library). The same document carries prose under keys that happen to be called
+#: ``material``, such as the rationale ``programme.rationale.material``. Walking it
+#: as a lookup refuses a valid config and reads a sentence as a material name.
+MATERIAL_SKIP_PREFIXES = ("twin.imagine_",)
 
 MaterialSource = Callable[[str], Awaitable[dict[str, Any]]]
 
@@ -158,7 +168,11 @@ async def fill_material_arguments(tool_id: str, arguments: Any) -> list[str]:
     so the call fails with the candidates rather than running on no figures.
     Explicit figures the caller passed are left for the tool to prefer.
     """
-    if not tool_id.startswith(MATERIAL_TOOL_PREFIXES) or not isinstance(arguments, dict):
+    if (
+        not tool_id.startswith(MATERIAL_TOOL_PREFIXES)
+        or tool_id.startswith(MATERIAL_SKIP_PREFIXES)
+        or not isinstance(arguments, dict)
+    ):
         return []
     resolved: dict[str, dict[str, Any]] = {}
 

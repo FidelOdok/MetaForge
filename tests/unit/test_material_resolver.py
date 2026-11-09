@@ -102,6 +102,36 @@ async def test_an_unresolved_material_fails_the_call(catalog: SqliteCatalog) -> 
 
 
 @pytest.mark.asyncio
+async def test_an_imagine_studio_config_is_not_read_as_a_material_lookup(
+    catalog: SqliteCatalog,
+) -> None:
+    """The studio config is a product document, not a material to look up.
+
+    Its ``process.material`` is a catalogue material or a library family that the studio
+    checks itself, and a rationale note can sit under a key also called ``material``.
+    Reading either as a library name refused a valid config and read a sentence as a name.
+    """
+    args = {
+        "config": {
+            "process": {"id": "im", "material": "absfr"},
+            "programme": {
+                "rationale": {"material": "flame-retardant ABS because a cell sits inside"}
+            },
+        }
+    }
+    before = repr(args)
+    for tool in ("twin.imagine_put_studio", "twin.imagine_validate"):
+        assert await fill_material_arguments(tool, args) == []
+    assert repr(args) == before, "the config must be passed through unchanged"
+
+
+@pytest.mark.asyncio
+async def test_other_twin_tools_still_resolve_their_materials(catalog: SqliteCatalog) -> None:
+    with pytest.raises(MaterialResolutionError):
+        await fill_material_arguments("twin.generate_something", {"material": "no-such-material"})
+
+
+@pytest.mark.asyncio
 async def test_other_tools_are_not_touched(catalog: SqliteCatalog) -> None:
     args = {"material": "anything"}
     assert await fill_material_arguments("library.process_limits", args) == []
