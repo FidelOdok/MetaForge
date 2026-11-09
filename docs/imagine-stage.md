@@ -427,6 +427,22 @@ An invalid config is a `422` whose body is the service's report with verdict
 blocked report, as a result and not as an error. It is read-only, so it is never
 held for approval.
 
+### The form in the revision
+
+When the studio's form is authored (`form.template` is `authored`), the revision
+sent to the service carries `form`: `kind: "authored"` and each part's `id`, its
+`kind` (`generated`, `primitive` or `component`) and whether it is the `body`. The
+geometry code never leaves the studio. An enclosure studio sends no `form` at all,
+because the service refuses fields it does not know and its report for an enclosure
+studio must stay what it was. If an authored block has no usable parts, none is sent.
+
+For an authored form the service adds two advisory findings and no blocking one:
+`form.enclosure_checks` (`not_assessed`: the checks that need an enclosure were not
+run) and `form.confidence_mix` (every part is a bought component). Advisory findings
+cannot change the verdict, a gate or the level. The verification service must be a
+build that knows `form`; an older one refuses the request, so the pin MetaForge's CI
+installs has to move with this change.
+
 ## Rework
 
 `POST /rework` opens the next `IMG-STUDIO` revision as a draft. Moving the

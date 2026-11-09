@@ -69,6 +69,42 @@ def _quantity(value: Any) -> int | None:
     return number if number >= 0 else None
 
 
+_FORM_PART_KINDS = ("generated", "primitive", "component")
+_MAX_FORM_PARTS = 24
+
+
+def _form(config: dict[str, Any]) -> dict[str, Any] | None:
+    """The authored form as the contract's ``FormFacts``, or ``None`` when there is nothing to say.
+
+    Only an authored form is described. An enclosure form, or no form, sends nothing: the
+    contract refuses fields it does not know, so the block must be absent unless it is
+    needed, and the service's report for an enclosure studio stays exactly what it was.
+    The code of each part stays here; the service is told what each part is and how far to
+    trust it as geometry. A part whose kind the contract does not know is left out, not
+    given one. If nothing usable remains, no form is sent, because an authored form with
+    no parts is something the contract refuses.
+    """
+    form = config.get("form")
+    if not isinstance(form, dict) or form.get("template") != "authored":
+        return None
+    block = form.get("authored")
+    raw = block.get("parts") if isinstance(block, dict) else None
+    if not isinstance(raw, list):
+        return None
+    ids = _Ids()
+    parts: list[dict[str, Any]] = []
+    body_taken = False
+    for item in raw:
+        if not isinstance(item, dict) or item.get("kind") not in _FORM_PART_KINDS:
+            continue
+        if len(parts) >= _MAX_FORM_PARTS:
+            break
+        is_body = item.get("body") is True and not body_taken
+        body_taken = body_taken or is_body
+        parts.append({"id": ids.take(item.get("id")), "kind": item["kind"], "body": is_body})
+    return {"kind": "authored", "parts": parts} if parts else None
+
+
 def build_concept_revision(
     project_id: str,
     revision: int,
@@ -173,7 +209,7 @@ def build_concept_revision(
         1 for p in _chosen_parts(config, collections).values() if p and p.get("interfaces")
     )
 
-    return {
+    out: dict[str, Any] = {
         "twin_id": safe_id(project_id),
         "revision_id": f"r{revision}",
         "number": revision,
@@ -193,3 +229,7 @@ def build_concept_revision(
         "screening_stored": bool((collections.get("screening") or {}).get("latest")),
         "concept_mesh": bool(has_mesh),
     }
+    form = _form(config)
+    if form is not None:
+        out["form"] = form
+    return out

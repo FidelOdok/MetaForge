@@ -122,7 +122,24 @@ def process(s: State, **fields: Any) -> None:
             s["config"]["process"][k] = v
 
 
+def authored_form(s: State) -> None:
+    from tests.unit.imagine_fixtures import authored_lamp_form
+
+    s["config"]["form"] = authored_lamp_form()
+
+
+def authored_form_of_bought_parts(s: State) -> None:
+    from tests.unit.imagine_fixtures import authored_lamp_form
+
+    form = authored_lamp_form()
+    form["authored"]["parts"] = [p for p in form["authored"]["parts"] if p["kind"] == "component"]
+    s["config"]["form"] = form
+
+
 MUTATORS: dict[str, Mutator] = {
+    # the form (spec 23.6): never one of the nine items, so no outcome may move
+    "form:authored": authored_form,
+    "form:authored-only-bought": authored_form_of_bought_parts,
     # ledger
     "ledger:none": lambda s: s["config"]["programme"].update(ledger=[]),
     "ledger:unreviewed": lambda s: s["config"]["programme"]["ledger"][0].update(
@@ -322,11 +339,61 @@ async def test_combinations_agree(verification: Any) -> None:
         for n in picked:
             try:
                 MUTATORS[n](state)
-            except (KeyError, IndexError, AttributeError):
+            except (KeyError, IndexError, AttributeError, StopIteration):
                 # An earlier mutation removed what this one edits (for example an
-                # emptied list). Skip it, as a real edit would not apply either.
+                # emptied list, or a part that no longer exists, which ``next()`` reports
+                # as StopIteration). Skip it, as a real edit would not apply either.
                 continue
         await compare(state, verification, " + ".join(picked))
+
+
+# -- the form: sent only when authored, and it never moves the decision --------------
+
+
+def _revision_of(state: State) -> dict[str, Any]:
+    return build_concept_revision(
+        str(uuid4()), 1, state["config"], state["collections"], has_mesh=state["mesh"]
+    )
+
+
+async def test_an_authored_form_reaches_the_service_and_is_named_not_assessed(
+    verification: Any,
+) -> None:
+    state = ready_state()
+    plain = verification(_revision_of(state))
+    authored_form(state)
+    revision = _revision_of(state)
+    assert revision["form"]["kind"] == "authored"
+    report = verification(revision)
+    note = [f for f in report.findings if f.check_id == "form.enclosure_checks"]
+    assert len(note) == 1 and note[0].status == "not_assessed" and note[0].severity == "advisory"
+    assert report.verdict == plain.verdict
+    assert [(g.gate, g.decision) for g in report.gates] == [
+        (g.gate, g.decision) for g in plain.gates
+    ]
+    assert [f.id for f in report.findings if not f.check_id.startswith("form.")] == [
+        f.id for f in plain.findings
+    ]
+
+
+async def test_a_form_of_only_bought_parts_is_called_out_and_still_moves_nothing(
+    verification: Any,
+) -> None:
+    state = ready_state()
+    plain = verification(_revision_of(state))
+    authored_form_of_bought_parts(state)
+    report = verification(_revision_of(state))
+    mix = [f for f in report.findings if f.check_id == "form.confidence_mix"]
+    assert len(mix) == 1 and mix[0].status == "fail" and mix[0].severity == "advisory"
+    assert report.verdict == plain.verdict == "ready_for_handover"
+
+
+async def test_an_enclosure_studio_sends_no_form_and_the_service_adds_no_form_finding(
+    verification: Any,
+) -> None:
+    revision = _revision_of(ready_state())
+    assert "form" not in revision
+    assert not [f for f in verification(revision).findings if f.check_id.startswith("form.")]
 
 
 # -- where the two deliberately differ ----------------------------------------------

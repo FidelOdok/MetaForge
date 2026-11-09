@@ -394,3 +394,76 @@ def test_every_mapped_id_fits_the_services_alphabet() -> None:
             assert pattern.match(item["id"]), (key, item["id"])
             if item.get("part_id"):
                 assert pattern.match(item["part_id"])
+
+
+# -- the form (spec 23.6): sent only for an authored form ------------------------------
+
+
+def authored_config() -> dict[str, Any]:
+    from tests.unit.imagine_fixtures import authored_lamp_form
+
+    cfg = config()
+    cfg["form"] = authored_lamp_form()
+    return cfg
+
+
+def test_an_authored_form_is_sent_with_each_part_and_how_far_to_trust_it() -> None:
+    form = build(authored_config())["form"]
+    assert form["kind"] == "authored"
+    assert form["parts"] == [
+        {"id": "base", "kind": "generated", "body": True},
+        {"id": "arm", "kind": "generated", "body": False},
+        {"id": "shade", "kind": "generated", "body": False},
+        {"id": "panel", "kind": "primitive", "body": False},
+        {"id": "button", "kind": "component", "body": False},
+        {"id": "usbc", "kind": "component", "body": False},
+    ]
+
+
+def test_the_code_never_leaves_the_studio() -> None:
+    sent = json.dumps(build(authored_config())["form"])
+    assert "cylinder" not in sent and "return" not in sent and "code" not in sent
+
+
+def test_an_enclosure_form_sends_no_form_so_an_older_service_still_accepts_it() -> None:
+    """The contract refuses unknown fields: the block must be absent unless it is needed."""
+    assert "form" not in build()
+    cfg = config()
+    cfg["form"] = {"template": "enclosure"}
+    assert "form" not in build(cfg)
+    assert set(build()) == CONTRACT_KEYS
+
+
+def test_an_authored_revision_adds_exactly_one_key() -> None:
+    assert set(build(authored_config())) == CONTRACT_KEYS | {"form"}
+
+
+def test_part_ids_are_made_safe_and_unique() -> None:
+    cfg = authored_config()
+    parts = cfg["form"]["authored"]["parts"]
+    parts[1]["id"] = "Arm 1!"
+    parts[2]["id"] = "arm-1_"
+    ids = [p["id"] for p in build(cfg)["form"]["parts"]]
+    assert len(set(ids)) == len(ids)
+    assert all(safe_id(i) == i for i in ids)
+
+
+def test_a_part_with_a_kind_the_contract_does_not_know_is_left_out_not_invented() -> None:
+    cfg = authored_config()
+    cfg["form"]["authored"]["parts"][1]["kind"] = "magic"
+    ids = [p["id"] for p in build(cfg)["form"]["parts"]]
+    assert "arm" not in ids and "base" in ids
+
+
+def test_a_malformed_authored_block_does_not_break_the_revision() -> None:
+    for bad in (None, [], {"parts": None}, {"parts": ["x", 3]}, "text"):
+        cfg = config()
+        cfg["form"] = {"template": "authored", "authored": bad}
+        assert "form" not in build(cfg), "an authored form with no usable parts is not sent"
+
+
+def test_an_enclosure_that_carries_a_stray_authored_block_sends_no_form() -> None:
+    """The template decides, not a block's presence: an enclosure is never sent as authored."""
+    cfg = authored_config()
+    cfg["form"]["template"] = "enclosure"
+    assert "form" not in build(cfg)
