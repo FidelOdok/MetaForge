@@ -96,10 +96,7 @@ jobs:
           DIGEST: ${{ steps.copy.outputs.digest }}
         # The copy is already tagged, so a transient Fulcio or Rekor failure
         # here would leave the tag unsigned (a host refuses it): retried.
-        run: |
-          for attempt in 1 2 3; do
-            cosign sign --yes "${IMAGE}@${DIGEST}" && exit 0
-            echo "::warning::cosign sign failed (attempt $attempt)"
-            sleep $((attempt * 15))
-          done
-          exit 1
+          # Used only if keyless signing fails (Rekor down).
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: bash scripts/ci/sign_image.sh "${IMAGE}@${DIGEST}"

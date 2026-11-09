@@ -342,6 +342,13 @@ jobs:
       # transparency log. What a verifier checks is therefore not "someone had
       # the key" but "this workflow, in this repository, on this ref, produced
       # this digest" -- which is the claim actually worth making.
+      #
+      # scripts/ci/sign_image.sh retries keyless, and only if the
+      # public Rekor log is still down signs with the COSIGN_PRIVATE_KEY
+      # secret instead (no log entry). Hosts accept that signature only
+      # against a cosign.pub they hold. Without the secret it fails as before.
+      # Every publishing workflow signs through the same script.
+
       - name: Sign the pushed image
         env:
           # By DIGEST, never by tag. A tag is a moving pointer: signing
@@ -349,13 +356,10 @@ jobs:
           # verifier resolving the tag would be trusting the registry to hand
           # it the same bytes. The digest IS the bytes.
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          for attempt in 1 2 3; do
-            cosign sign --yes "${IMAGE}@${DIGEST}" && exit 0
-            echo "::warning::cosign sign failed (attempt $attempt)"
-            sleep $((attempt * 15))
-          done
-          exit 1
+          # Used only if keyless signing fails (Rekor down).
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: bash scripts/ci/sign_image.sh "${IMAGE}@${DIGEST}"
 
       # Only a signed digest is tagged. One source, so imagetools copies the
       # index as is and every tag names exactly the signed digest; checked.

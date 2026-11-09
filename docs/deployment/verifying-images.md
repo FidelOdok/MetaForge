@@ -51,11 +51,89 @@ subject.
   `FidelOdok/MetaForge`. Narrow it further if you want to require a specific
   workflow or branch, for example `.../\.github/workflows/release\.yml@refs/heads/main$`.
 
-There is no public key anywhere in this, which is the point. Signing is keyless:
+There is no public key anywhere in this check, which is the point. Signing is keyless:
 CI exchanges its GitHub OIDC token for a short-lived certificate from Sigstore's
 CA, and the signature is recorded in a public transparency log. So there is no
 MetaForge private key that can leak, and a signature proves a *build provenance*
 claim rather than possession of a secret.
+
+## Two kinds of signature
+
+Almost every image carries the keyless signature above. Keyless signing needs
+Sigstore's public services, and on 2026-11-07 the Rekor transparency log
+returned `500 unexpected error communicating with inactive shard` for long
+enough that three releases failed to sign, which blocked every image-only host
+from deploying.
+
+So CI has a fallback. Every publishing workflow signs through
+`scripts/ci/sign_image.sh`, which:
+
+1. tries keyless signing, three times over about a minute;
+2. if that still fails and the repository has a `COSIGN_PRIVATE_KEY` secret,
+   signs with that key instead, with no transparency log entry, and marks the
+   run with a warning saying the image was key-signed because Rekor was
+   unavailable;
+3. otherwise fails the job, as it always did.
+
+| | Keyless (normal) | Key (fallback) |
+|---|---|---|
+| Proves | this repository's CI workflow built this digest | the holder of the MetaForge fallback key signed this digest |
+| Verified with | the identity and issuer flags | `cosign.pub` from the repository root |
+| Public log entry | yes, in Rekor | no |
+| Needs Sigstore at signing time | yes | no |
+
+A given image has one or the other. Check keyless first; if it fails, check the
+key.
+
+### Verify a key-signed image
+
+Take `cosign.pub` from the root of this repository, from a commit you trust,
+and keep your own copy. Then:
+
+```bash
+cosign verify --key cosign.pub --insecure-ignore-tlog=true \
+  "ghcr.io/fidelodok/metaforge-gateway@${digest}"
+```
+
+`--insecure-ignore-tlog=true` is required because the fallback signature was
+made precisely when the log was unavailable, so there is no entry to find.
+Until `cosign.pub` exists in the repository, no image is key-signed and every
+image must pass the keyless check.
+
+### What the fallback gives up
+
+- **No public record.** A keyless signature is logged where anyone can see
+  it, so a signature made with stolen credentials is discoverable. A key
+  signature made without the log is not: if the key leaked, a forged signature
+  would leave no public trace.
+- **Key custody.** The private key lives only as the `COSIGN_PRIVATE_KEY`
+  repository secret, protected by `COSIGN_PASSWORD`. Anyone who can run a
+  workflow with access to repository secrets can use it.
+- **Rotation is manual.** Rotating means generating a new pair, replacing both
+  secrets, committing the new `cosign.pub`, and replacing the copy on every
+  host. Images signed with the old key stop verifying against the new one, so
+  rotate after the images signed with it have been superseded, or keep the old
+  public key on hosts until then.
+
+The keyless path is unchanged, and a host only accepts a key signature if its
+operator placed the public key there.
+
+### Create the fallback key (maintainers)
+
+Run once, on a trusted machine with [cosign](https://docs.sigstore.dev/cosign/installation/)
+and the GitHub CLI, from the repository root:
+
+```bash
+cosign generate-key-pair                    # prompts for a password; writes cosign.key and cosign.pub
+gh secret set COSIGN_PRIVATE_KEY < cosign.key
+gh secret set COSIGN_PASSWORD               # paste the same password at the prompt
+git add cosign.pub && git commit -m "chore: add the cosign fallback public key"
+rm cosign.key                               # or move it to offline storage
+```
+
+Never commit `cosign.key`; `.gitignore` excludes it. CI never needs the file
+again, because the secret holds it. Then give each host the new `cosign.pub`
+(see [Running a host from images](image-only-host.md#accepting-key-signed-images)).
 
 ## Verify a digest, not a tag
 
@@ -118,7 +196,8 @@ SBOM is what you feed to a scanner to ask the second question.
 
 The image-only host update, `scripts/host_update.sh`, verifies every MetaForge
 image it pulls by digest, with the two flags above, and restarts nothing if any
-check fails. See [Running a host from images](image-only-host.md).
+check fails. If the keyless check fails and the host holds a `cosign.pub`, it
+accepts a key signature instead. See [Running a host from images](image-only-host.md).
 Nothing else refuses an unverified image: `docker compose up` on a checkout
 still runs whatever it has.
 

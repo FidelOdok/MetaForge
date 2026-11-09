@@ -70,3 +70,95 @@ def test_no_source_code_is_in_the_bundle() -> None:
 
 def test_the_script_parses() -> None:
     subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
+
+
+# --- Signature verification (FORGE-823) -------------------------------------
+#
+# Keyless first, exactly as before. A key signature, made by CI only when the
+# public Rekor log is down, is accepted only against a public key the operator
+# placed on the host. These drive ``verify_signature`` with a fake cosign.
+
+LIB = REPO_ROOT / "scripts" / "lib" / "verify_signature.sh"
+DIGEST = "ghcr.io/fidelodok/metaforge-gateway@sha256:" + "b" * 64
+
+
+def _verify(
+    tmp_path: Path, *, keyless_rc: int, key_rc: int, pubkey: bool
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    calls = tmp_path / "calls"
+    fake = tmp_path / "cosign"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$*" >> "{calls.as_posix()}"\n'
+        f'case "$*" in *--key*) echo "key: no matching signatures" >&2; exit {key_rc} ;; esac\n'
+        'echo "keyless: no matching signatures" >&2\n'
+        f"exit {keyless_rc}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    fake.chmod(0o755)
+    key = tmp_path / "cosign.pub"
+    if pubkey:
+        key.write_text("-----BEGIN PUBLIC KEY-----\n", encoding="utf-8")
+    script = (
+        f'. "{LIB.as_posix()}"; '
+        f'COSIGN="{fake.as_posix()}"; PUBKEY="{key.as_posix()}"; '
+        r"IDENTITY='^https://github\.com/FidelOdok/MetaForge/'; "
+        "ISSUER=https://token.actions.githubusercontent.com; "
+        f'verify_signature "{DIGEST}"'
+    )
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    lines = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+    return result, lines
+
+
+def test_a_keyless_signature_passes_without_looking_at_the_key(tmp_path: Path) -> None:
+    result, calls = _verify(tmp_path, keyless_rc=0, key_rc=1, pubkey=True)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"verified  {DIGEST}"
+    assert len(calls) == 1
+    assert "--certificate-oidc-issuer https://token.actions.githubusercontent.com" in calls[0]
+    assert "--key" not in calls[0]
+
+
+def test_a_key_signature_passes_when_the_host_pins_the_key(tmp_path: Path) -> None:
+    result, calls = _verify(tmp_path, keyless_rc=1, key_rc=0, pubkey=True)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"verified (key, no transparency log)  {DIGEST}"
+    assert len(calls) == 2
+    assert calls[1] == (
+        f"verify --key {(tmp_path / 'cosign.pub').as_posix()} --insecure-ignore-tlog=true {DIGEST}"
+    )
+
+
+def test_both_failing_stops_the_update(tmp_path: Path) -> None:
+    result, calls = _verify(tmp_path, keyless_rc=1, key_rc=1, pubkey=True)
+
+    assert result.returncode == 1
+    assert f"SIGNATURE CHECK FAILED for {DIGEST}; nothing restarted" in result.stderr
+    assert len(calls) == 2
+
+
+def test_without_a_pinned_key_only_keyless_counts(tmp_path: Path) -> None:
+    # The host behaves exactly as before FORGE-823 until an operator places
+    # cosign.pub: a key signature is never even tried.
+    result, calls = _verify(tmp_path, keyless_rc=1, key_rc=0, pubkey=False)
+
+    assert result.returncode == 1
+    assert "SIGNATURE CHECK FAILED" in result.stderr
+    assert len(calls) == 1
+    assert "--key" not in calls[0]
+
+
+def test_the_public_key_never_rides_in_the_bundle() -> None:
+    """The key's trust must not come from the same fetch it vouches for."""
+    assert not any("cosign" in path for path in _array("BUNDLE"))
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "METAFORGE_COSIGN_PUBKEY" in text
+    assert "--no-verify" in text
+
+
+def test_the_verify_library_parses() -> None:
+    subprocess.run(["bash", "-n", str(LIB)], check=True)

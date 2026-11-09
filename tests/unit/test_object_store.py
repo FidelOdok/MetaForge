@@ -123,6 +123,7 @@ class TestTheMirrorIsVerifiedAndSigned:
 
     def test_the_copy_is_signed_by_digest(self) -> None:
         step = self._step("Sign the mirrored image as ours")
-        assert "cosign sign" in step["run"]
+        # Signing goes through the shared script, which runs `cosign sign`.
+        assert "scripts/ci/sign_image.sh" in step["run"]
         assert "@${DIGEST}" in step["run"]
         assert "steps.copy.outputs.digest" in step["env"]["DIGEST"]
