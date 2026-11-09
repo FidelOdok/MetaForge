@@ -65,7 +65,7 @@ returned `500 unexpected error communicating with inactive shard` for long
 enough that three releases failed to sign, which blocked every image-only host
 from deploying.
 
-So CI has a fallback (FORGE-823). Every publishing workflow signs through
+So CI has a fallback. Every publishing workflow signs through
 `scripts/ci/sign_image.sh`, which:
 
 1. tries keyless signing, three times over about a minute;
@@ -127,7 +127,7 @@ and the GitHub CLI, from the repository root:
 cosign generate-key-pair                    # prompts for a password; writes cosign.key and cosign.pub
 gh secret set COSIGN_PRIVATE_KEY < cosign.key
 gh secret set COSIGN_PASSWORD               # paste the same password at the prompt
-git add cosign.pub && git commit -m "chore: add the cosign fallback public key (FORGE-823)"
+git add cosign.pub && git commit -m "chore: add the cosign fallback public key"
 rm cosign.key                               # or move it to offline storage
 ```
 
