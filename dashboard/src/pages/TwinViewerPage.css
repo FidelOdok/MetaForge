@@ -31,7 +31,7 @@
   --tw-inspector: 0px;
 }
 .tw-workspace[data-chat="side"] {
-  --tw-chat: 360px;
+  --tw-chat: clamp(280px, var(--tw-chat-w, 480px), 60vw);
 }
 .tw-workspace[data-rail="min"] {
   --tw-rail: 72px;
@@ -546,7 +546,8 @@
   right: calc(var(--tw-inspector) + 16px);
   bottom: 44px;
   z-index: 18;
-  max-width: 780px;
+  width: min(var(--tw-float-w, 780px), calc(100% - var(--tw-rail) - var(--tw-inspector) - 28px));
+  max-width: none;
   margin-inline: auto;
   border: 1px solid var(--tw-line);
   border-radius: 12px;
@@ -579,7 +580,7 @@
 .tw-chat-position .twin-agent {
   min-height: 0 !important;
   max-height: none !important;
-  height: 370px;
+  height: var(--tw-float-h, 370px);
   display: flex;
   flex-direction: column;
   border: 0;
@@ -717,6 +718,7 @@
 }
 .tw-workspace[data-chat="side"] .tw-chat-position {
   position: relative;
+  overflow: visible;
   grid-area: chat;
   inset: auto;
   margin: 0;
@@ -728,6 +730,60 @@
   box-shadow: none;
   display: flex;
   flex-direction: column;
+}
+.tw-float-resizer {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+}
+.tw-float-resizer-top {
+  top: -3px;
+  left: 12px;
+  right: 12px;
+  height: 8px;
+  cursor: row-resize;
+}
+.tw-float-resizer-left,
+.tw-float-resizer-right {
+  top: 12px;
+  bottom: 12px;
+  width: 8px;
+  cursor: col-resize;
+}
+.tw-float-resizer-left {
+  left: -3px;
+}
+.tw-float-resizer-right {
+  right: -3px;
+}
+.tw-float-resizer:hover,
+.tw-float-resizer:active {
+  background: #ff5a0a55;
+}
+@media (max-width: 900px) {
+  .tw-float-resizer-left,
+  .tw-float-resizer-right {
+    display: none;
+  }
+}
+.tw-chat-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 8px;
+  z-index: 30;
+  cursor: col-resize;
+  touch-action: none;
+}
+.tw-chat-resizer:hover,
+.tw-chat-resizer:active {
+  background: #ff5a0a55;
+}
+@media (max-width: 900px) {
+  .tw-chat-resizer {
+    display: none;
+  }
 }
 .tw-workspace[data-chat="side"] .tw-chat-position .twin-agent {
   height: auto;
@@ -1008,9 +1064,6 @@
   .tw-chat-position {
     left: 84px;
   }
-  .tw-workspace[data-chat="side"] {
-    --tw-chat: 310px;
-  }
   .tw-workspace[data-chat="side"][data-inspector="on"] {
     --tw-inspector: 240px;
   }
@@ -1195,7 +1248,7 @@
   border: 1px solid var(--tw-line);
   border-radius: 12px;
   box-shadow: 0 10px 32px #0002;
-  height: 410px;
+  height: var(--tw-float-h, 410px);
   min-height: 0 !important;
   max-height: none !important;
   color: var(--tw-ink);
