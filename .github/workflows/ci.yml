@@ -152,6 +152,25 @@ jobs:
   # as docker-compose.yml does (read-only root, cap_drop ALL + SETUID/SETGID,
   # no-new-privileges) and attacks it: escapes, writes to /workspace and /app,
   # sockets, fork and thread bombs, loops, memory and output hogs.
+  plain-install:
+    name: Plain install starts the MCP server
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      # A real wheel with the project's own dependencies and no extras: what the
+      # claude-code-local plugin's README tells people to install. The unit tests run
+      # with every extra and from the source tree, so they cannot see a dependency only
+      # an extra brings in, or a package left out of the wheel. Either leaves the
+      # plugin showing CONNECTION_CLOSED with nothing to say why.
+      - run: pip install .
+      # From a neutral folder, so the source tree on disk cannot be imported by accident.
+      - run: cd "$RUNNER_TEMP" && python "$GITHUB_WORKSPACE/scripts/ci/check_mcp_starts.py"
+
   cadquery-isolation:
     name: CadQuery script isolation
     runs-on: ubuntu-latest
