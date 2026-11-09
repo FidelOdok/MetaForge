@@ -550,6 +550,8 @@ const matDraft=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.6,me
 const matSlot=new THREE.MeshStandardMaterial({color:0x0b0c0f,roughness:.95,metalness:0});
 const matCut=new THREE.MeshBasicMaterial({color:0xe5584f,side:THREE.BackSide});
 const part=new THREE.Group();scene.add(part);
+/* MetaForge: an agent-authored form (spec 23.6) is drawn by authored.js, in a sandbox, instead of the enclosure. */
+const AUTHORED=!!(CFG.form&&CFG.form.template==='authored'&&CFG.form.authored&&window.FGAuthored);let AUTHORED_MOUNT=null;
 
 const C_GREEN=new THREE.Color('#3FAE76').convertSRGBToLinear(),C_AMBER=new THREE.Color('#E3A43A').convertSRGBToLinear(),C_RED=new THREE.Color('#E04A42').convertSRGBToLinear(),C_NEU=new THREE.Color('#9AA3B2').convertSRGBToLinear();
 function ringPts(a,b,r,seg){a=Math.max(a,0.05);b=Math.max(b,0.05);r=clamp(r,0.001,Math.min(a,b));const cx=a-r,cz=b-r,P=[];
@@ -576,6 +578,7 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();if(!s)return;
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,host:document.getElementById('viewPane')||document.body,onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
   const Lo=levels(s.H,s.F,tan,0);
@@ -625,7 +628,7 @@ const FIT_DIR=new THREE.Vector3(0.55,0.5,0.75).normalize();
    until the part's bounding sphere fits both the height and the width of
    the view, whatever the view's aspect. */
 function fitDistance(r,fovDeg,aspect,margin){const v=fovDeg*DEG/2,h=Math.atan(Math.tan(v)*Math.max(aspect,0.05));return r*(margin||1.15)/Math.sin(Math.min(v,h));}
-function frame(s){if(!s)return;part.updateMatrixWorld(true);const box=new THREE.Box3().setFromObject(part);
+function frame(s){if(!s)return;part.updateMatrixWorld(true);const box=new THREE.Box3().setFromObject(part);if(AUTHORED_MOUNT){AUTHORED_MOUNT.group.updateMatrixWorld(true);box.union(new THREE.Box3().setFromObject(AUTHORED_MOUNT.group));}
   let c,r;if(box.isEmpty()){c=new THREE.Vector3(0,s.H/2,0);r=Math.max(s.W,s.D,s.H,AF?AFSPAN:0)/2;}
   else{const sp=box.getBoundingSphere(new THREE.Sphere());c=sp.center;r=sp.radius;}
   r=Math.max(r,1);const d=fitDistance(r,camera.fov,camera.aspect);

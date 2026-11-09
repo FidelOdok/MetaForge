@@ -618,3 +618,13 @@ li.clip{display:none!important}
   .fg-hosted .bar{gap:6px;padding:8px 10px}
   .fg-hosted .bar .seg button{padding:4px 9px;font-size:11.5px}
 }
+
+/* MetaForge: the parameter panel of an agent-authored form (authored.js). */
+.fg-authored-panel{position:absolute;left:12px;bottom:12px;z-index:5;width:240px;max-height:60%;overflow:auto;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.93);box-shadow:0 2px 12px rgba(0,0,0,.14);font:12px/1.35 system-ui,sans-serif;color:#222}
+.fg-authored-title{font-weight:600;margin-bottom:6px}
+.fg-authored-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin-bottom:6px}
+.fg-authored-row input{grid-column:1 / -1;width:100%}
+.fg-authored-val{font-variant-numeric:tabular-nums;color:#555}
+.fg-authored-legend{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:8px;font-size:11px;color:#555}
+.fg-authored-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.fg-authored-errors{display:none;margin-top:8px;padding:6px 8px;border-radius:6px;background:#fdecea;color:#8a1c14;font-size:11px}
