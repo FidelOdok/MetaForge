@@ -1137,6 +1137,94 @@ export function TwinViewerPage() {
   const [chatMax, setChatMax] = useState(false);
   const [chatMin, setChatMin] = useState(!sampleMode);
   const [chatDock, setChatDock] = useState<'overlay' | 'side'>('overlay');
+  // Docked chat width in px, drag-resizable from its left edge and remembered.
+  const [chatWidth, setChatWidth] = useState<number>(() => {
+    try {
+      const v = Number(window.localStorage.getItem('mf.twin.chatWidth'));
+      return v >= 280 && v <= 1400 ? v : 480;
+    } catch {
+      return 480;
+    }
+  });
+  // Floating chat size in px (null = CSS default), drag-resizable from its
+  // top, left and right edges and remembered. Width is centred, so a side
+  // drag grows both edges.
+  const [floatSize, setFloatSize] = useState<{ w: number | null; h: number | null }>(() => {
+    try {
+      const raw = JSON.parse(window.localStorage.getItem('mf.twin.chatFloat') ?? 'null');
+      const ok = (v: unknown, lo: number, hi: number) =>
+        typeof v === 'number' && v >= lo && v <= hi ? v : null;
+      return { w: ok(raw?.w, 320, 2000), h: ok(raw?.h, 200, 1400) };
+    } catch {
+      return { w: null, h: null };
+    }
+  });
+  const startFloatResize = useCallback(
+    (edge: 'top' | 'left' | 'right') => (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let latest = { w: floatSize.w ?? Math.round(box.width), h: floatSize.h ?? null };
+      const startH = floatSize.h ?? Math.round(box.height);
+      const startW = latest.w as number;
+      const onMove = (ev: PointerEvent) => {
+        if (edge === 'top') {
+          const h = Math.max(200, Math.min(window.innerHeight - 160, startH + (startY - ev.clientY)));
+          latest = { ...latest, h };
+        } else {
+          const dx = edge === 'right' ? ev.clientX - startX : startX - ev.clientX;
+          latest = { ...latest, w: Math.max(320, Math.min(2000, startW + dx * 2)) };
+        }
+        setFloatSize(latest);
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        try {
+          window.localStorage.setItem('mf.twin.chatFloat', JSON.stringify(latest));
+        } catch {
+          /* storage unavailable: size just won't persist */
+        }
+      };
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = edge === 'top' ? 'row-resize' : 'col-resize';
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [floatSize],
+  );
+  const startChatResize = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = chatWidth;
+      let latest = startW;
+      const max = Math.min(1400, Math.round(window.innerWidth * 0.6));
+      const onMove = (ev: PointerEvent) => {
+        latest = Math.max(280, Math.min(max, startW + (startX - ev.clientX)));
+        setChatWidth(latest);
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        try {
+          window.localStorage.setItem('mf.twin.chatWidth', String(latest));
+        } catch {
+          /* storage unavailable: width just won't persist */
+        }
+      };
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [chatWidth],
+  );
   // Defaulted plainly, not from searchParams: useSearchParams is declared
   // further down, and reading it in this initialiser is a temporal-dead-zone
   // crash at render (invisible to tsc -- the dashboard tests caught it).
@@ -1469,6 +1557,7 @@ export function TwinViewerPage() {
       data-inspector={inspectorOpen ? 'on' : 'off'}
       data-rail={railMin ? 'min' : 'on'}
       data-chat={chatDock}
+      style={{ '--tw-chat-w': `${chatWidth}px` } as React.CSSProperties}
     >
       <header className="tw-top">
         <button
@@ -1894,7 +1983,63 @@ export function TwinViewerPage() {
         )}
       </section>
 
-      <div className="tw-chat-position" data-size={chatMax ? 'max' : chatMin ? 'min' : 'normal'} hidden={!agentOpen}>
+      <div
+        className="tw-chat-position"
+        data-size={chatMax ? 'max' : chatMin ? 'min' : 'normal'}
+        hidden={!agentOpen}
+        style={
+          chatDock === 'overlay' && !chatMax && !chatMin
+            ? ({
+                ...(floatSize.w ? { '--tw-float-w': `${floatSize.w}px` } : {}),
+                ...(floatSize.h ? { '--tw-float-h': `${floatSize.h}px` } : {}),
+              } as React.CSSProperties)
+            : undefined
+        }
+      >
+        {chatDock === 'overlay' && !chatMax && !chatMin && (
+          <>
+            {(['top', 'left', 'right'] as const).map((edge) => (
+              <div
+                key={edge}
+                className={`tw-float-resizer tw-float-resizer-${edge}`}
+                role="separator"
+                aria-label={edge === 'top' ? 'Resize conversation height' : 'Resize conversation width'}
+                title="Drag to resize, double-click to reset"
+                onPointerDown={startFloatResize(edge)}
+                onDoubleClick={() => {
+                  setFloatSize({ w: null, h: null });
+                  try {
+                    window.localStorage.removeItem('mf.twin.chatFloat');
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              />
+            ))}
+          </>
+        )}
+        {chatDock === 'side' && (
+          <div
+            className="tw-chat-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize conversation"
+            title="Drag to resize"
+            onPointerDown={startChatResize}
+            onDoubleClick={() => setChatWidth(480)}
+          />
+        )}
+        {chatDock === 'side' && (
+          <div
+            className="tw-chat-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize conversation"
+            title="Drag to resize"
+            onPointerDown={startChatResize}
+            onDoubleClick={() => setChatWidth(480)}
+          />
+        )}
         <TwinAgentChat
           key={activeProjectId ?? 'unscoped'}
           projectId={activeProjectId}
