@@ -81,6 +81,20 @@ class Finding(BaseModel):
     fix: Fix | None = None
 
 
+class ValidatePost(BaseModel):
+    """``POST /validate``: a dry run. Idempotent and read-only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: A config to check instead of the head's. Refused (409) once handed over.
+    config: dict[str, Any] | None = None
+    #: Only the head revision can be validated today (422 otherwise).
+    revision: int | None = None
+    #: Re-check only what these refs address.
+    scope: list[Ref] | None = None
+    gates: list[GateName] | None = None
+
+
 class GateResult(BaseModel):
     gate: GateName
     rule_version: str
@@ -375,3 +389,25 @@ def build_report(
         computed_at=computed_at,
         stale=stale,
     )
+
+
+def scope_findings(findings: list[Finding], scope: list[Ref]) -> list[Finding]:
+    """The findings whose target or evidence is one of the refs."""
+    wanted = {(r.kind, r.id) for r in scope}
+    return [
+        f
+        for f in findings
+        if (f.target.kind, f.target.id) in wanted
+        or any((e.kind, e.id) in wanted for e in f.evidence)
+    ]
+
+
+def known_refs(config: dict[str, Any]) -> set[tuple[str, str]]:
+    """The refs a config can be asked about: parts, functions and checklist items."""
+    from api_gateway.imagine.service import _parts
+
+    studio = {"config", "functions", "concept_mesh", *_ITEM_CHECKS}
+    refs: set[tuple[str, str]] = {("studio", i) for i in studio}
+    refs |= {("part", pid) for pid in _parts(config)}
+    refs |= {("function", str(f)) for f in config.get("functions") or []}
+    return refs

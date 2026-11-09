@@ -953,3 +953,96 @@ async def test_an_undelegated_agent_scenario_edit_is_not_the_persons(
     assert res.status_code == 200, res.text
     items = _items((await client.get(f"{BASE}/handover")).json())
     assert "knock" in items["scenarios"]["detail"]
+
+
+# -- validation (imagine-validation-api-spec.md) ----------------------------
+
+
+async def test_validate_without_a_studio_is_404(client: httpx.AsyncClient) -> None:
+    res = await client.post(f"{BASE}/validate", json={})
+    assert res.status_code == 404
+
+
+async def test_validate_names_who_clears_each_blocker(client: httpx.AsyncClient) -> None:
+    await _put(client)
+    res = await client.post(f"{BASE}/validate", json={})
+    assert res.status_code == 200, res.text
+    report = res.json()
+    assert report["level"] in ("V0", "V1", "V2")
+    assert report["verdict"] in ("needs_agent", "needs_person", "blocked_external")
+    blockers = [
+        f for f in report["findings"] if f["severity"] == "blocking" and f["status"] == "fail"
+    ]
+    assert blockers
+    assert {f["resolver"] for f in blockers} <= {"agent", "person", "external"}
+    assert any(f["check_id"] == "concept.mesh" and f["resolver"] == "external" for f in blockers)
+
+
+async def test_validate_agrees_with_the_handover_checklist(
+    client: httpx.AsyncClient, twin: InMemoryTwinAPI
+) -> None:
+    await _put(client)
+    await _make_ready(client, twin)
+    checklist = (await client.get(f"{BASE}/handover")).json()
+    report = (await client.get(f"{BASE}/validation")).json()
+    assert checklist["ready"] is True
+    assert report["verdict"] == "ready_for_handover"
+    assert report["level"] == "V2"
+    assert report["stale"] is False
+
+
+async def test_validate_writes_nothing(client: httpx.AsyncClient) -> None:
+    before = await _put(client)
+    await client.post(f"{BASE}/validate", json={})
+    await client.get(f"{BASE}/validation")
+    after = (await client.get(f"{BASE}/studio")).json()
+    assert after["revision"] == before["revision"]
+
+
+async def test_an_invalid_config_is_a_422_whose_body_is_the_report(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    res = await client.post(f"{BASE}/validate", json={"config": {"not": "a product"}})
+    assert res.status_code == 422
+    body = res.json()["detail"]
+    assert body["verdict"] == "invalid"
+    assert body["level"] == "V0"
+    assert any(f["gate"] == "config_valid" for f in body["findings"])
+
+
+async def test_a_scope_re_checks_only_what_it_names(client: httpx.AsyncClient) -> None:
+    await _put(client)
+    full = (await client.post(f"{BASE}/validate", json={})).json()
+    scope = [{"kind": "studio", "id": "concept_mesh"}]
+    part = (await client.post(f"{BASE}/validate", json={"scope": scope})).json()
+    assert [f["check_id"] for f in part["findings"]] == ["concept.mesh"]
+    assert len(part["findings"]) < len(full["findings"])
+
+
+async def test_a_scope_naming_nothing_is_a_422_with_the_bad_ref(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    bad = {"kind": "part", "id": "no-such-part"}
+    res = await client.post(f"{BASE}/validate", json={"scope": [bad]})
+    assert res.status_code == 422
+    assert res.json()["detail"]["bad_refs"][0]["id"] == "no-such-part"
+
+
+async def test_only_the_head_revision_can_be_validated(client: httpx.AsyncClient) -> None:
+    await _put(client)
+    res = await client.post(f"{BASE}/validate", json={"revision": 99})
+    assert res.status_code == 422
+
+
+async def test_a_handed_over_studio_refuses_a_supplied_config(
+    client: httpx.AsyncClient, twin: InMemoryTwinAPI
+) -> None:
+    await _put(client)
+    await _make_ready(client, twin)
+    done = await client.post(f"{BASE}/handover", json={"op_id": "h1"})
+    assert done.status_code == 200, done.text
+    res = await client.post(f"{BASE}/validate", json={"config": full_config()})
+    assert res.status_code == 409
+    assert (await client.post(f"{BASE}/validate", json={})).status_code == 200

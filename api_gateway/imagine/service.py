@@ -45,6 +45,17 @@ from api_gateway.imagine.schemas import (
     StudioResponse,
 )
 from api_gateway.imagine.twin_bridge import TwinBridge, mfc_field
+from api_gateway.imagine.validation import (
+    Finding,
+    GateName,
+    Report,
+    ValidatePost,
+    build_report,
+    config_findings,
+    handover_findings,
+    known_refs,
+    scope_findings,
+)
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -871,6 +882,92 @@ class ImagineService:
                     ],
                 )
             return await self._checklist(project_id, head)
+
+    async def validate(self, project_id: str, request: ValidatePost | None = None) -> Report:
+        """Dry-run every gate and return one report (spec: imagine-validation-api-spec.md).
+
+        Read-only: nothing is written and no assumption is accepted. A config in
+        the request is checked instead of the head's (409 once handed over);
+        one the formgraph refuses is a 422 whose body is the report, verdict
+        ``invalid``.
+        """
+        req = request or ValidatePost()
+        with tracer.start_as_current_span("imagine.validate") as span:
+            span.set_attribute("project_id", project_id)
+            head = await self._head(project_id)
+            if head is None:
+                _count("validate", "refused")
+                raise ImagineError("No studio yet: an agent puts a config first.", 404)
+            if req.revision is not None and req.revision != head.revision:
+                _count("validate", "refused")
+                raise ImagineError(
+                    f"Only the head revision ({head.revision}) can be validated.",
+                    422,
+                    {"revision": req.revision, "head": head.revision},
+                )
+            if req.config is not None and head.state.get("status") == "handed_over":
+                _count("validate", "refused")
+                raise ImagineError(
+                    f"{head.ref} is handed over; validate the frozen revision instead.", 409
+                )
+            gates: list[GateName] = list(req.gates or ["config_valid", "handover"])
+            config = req.config if req.config is not None else head.state.get("config") or {}
+            if req.scope:
+                bad = [r for r in req.scope if (r.kind, r.id) not in known_refs(config)]
+                if bad:
+                    _count("validate", "refused")
+                    raise ImagineError(
+                        "A scope ref names nothing in this studio.",
+                        422,
+                        {"bad_refs": [r.model_dump() for r in bad]},
+                    )
+
+            findings: list[Finding] = []
+            invalid = False
+            try:
+                checked = engine_page.validate_config(config)
+                if "config_valid" in gates:
+                    findings += config_findings([], checked.warnings, head.revision)
+            except engine_page.ConfigError as exc:
+                invalid = True
+                findings += config_findings(exc.errors, exc.warnings, head.revision)
+            if "handover" in gates and not invalid:
+                # The checklist reads the head's collections; a supplied config
+                # is judged against the same recorded decisions.
+                probe = _Head(
+                    revision=head.revision,
+                    node_id=head.node_id,
+                    metadata=head.metadata,
+                    state={**head.state, "config": config},
+                    updated_at=head.updated_at,
+                )
+                checklist = await self._checklist(project_id, probe)
+                has_mesh = await self.bridge.has_concept_mesh(project_id)
+                findings += handover_findings(
+                    config,
+                    probe.state["collections"],
+                    checklist,
+                    has_mesh=has_mesh,
+                    revision=head.revision,
+                )
+            if req.scope:
+                findings = scope_findings(findings, req.scope)
+            report = build_report(
+                project_id,
+                head.revision,
+                findings,
+                gates,
+                computed_at=_now(),
+            )
+            span.set_attribute("validate.verdict", report.verdict)
+            _count("validate", "invalid" if invalid else "ok")
+            if invalid:
+                raise ImagineError(
+                    "The config does not pass the formgraph checks.",
+                    422,
+                    report.model_dump(mode="json"),
+                )
+            return report
 
     async def _checklist(self, project_id: str, head: _Head) -> HandoverChecklist:
         config = head.state.get("config") or {}
