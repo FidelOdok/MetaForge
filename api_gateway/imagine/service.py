@@ -51,6 +51,7 @@ from api_gateway.imagine.validation import (
     Report,
     ValidatePost,
     build_report,
+    compute_verdict,
     config_findings,
     handover_findings,
     known_refs,
@@ -514,10 +515,19 @@ class ImagineService:
                 checked = engine_page.validate_config(config)
             except engine_page.ConfigError as exc:
                 _count("put", "refused")
+                # ``errors`` and ``warnings`` stay for the dashboard; ``findings``
+                # is the same shape POST /validate returns, so an agent reads
+                # one format (imagine-validation-api-spec.md, 4.2).
+                findings = config_findings(exc.errors, exc.warnings, None)
                 raise ImagineError(
                     "The config does not pass the formgraph checks.",
                     422,
-                    {"errors": exc.errors, "warnings": exc.warnings},
+                    {
+                        "errors": exc.errors,
+                        "warnings": exc.warnings,
+                        "findings": [f.model_dump(mode="json") for f in findings],
+                        "verdict": compute_verdict(findings),
+                    },
                 ) from exc
             async with self._lock(project_id):
                 head = await self._head(project_id)

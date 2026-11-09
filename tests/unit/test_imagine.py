@@ -263,6 +263,23 @@ async def test_an_invalid_config_is_refused_with_its_errors(client: httpx.AsyncC
     assert any("unobtainium" in e for e in res.json()["detail"]["errors"])
 
 
+async def test_the_put_422_carries_the_same_findings_validate_returns(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    cfg = base_config()
+    cfg["process"]["material"] = "unobtainium"
+    put = (await client.put(f"{BASE}/studio", json={"config": cfg})).json()["detail"]
+    checked = (await client.post(f"{BASE}/validate", json={"config": cfg})).json()["detail"]
+    assert put["verdict"] == "invalid"
+    assert put["errors"] and put["warnings"] is not None  # the dashboard's shape stays
+    strip = lambda fs: [  # noqa: E731
+        {k: v for k, v in f.items() if k not in ("target", "id")} for f in fs
+    ]
+    assert strip(put["findings"]) == strip(checked["findings"])
+    assert all(f["gate"] == "config_valid" and f["resolver"] == "agent" for f in put["findings"])
+
+
 # ── events ───────────────────────────────────────────────────────────────
 
 
