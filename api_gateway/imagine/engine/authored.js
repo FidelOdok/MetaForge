@@ -525,6 +525,76 @@
     component: { color: 0x2b3036, label: 'Bought component' },
   };
 
+  /* What the page may say about an authored form. The engine's own checks, verdict, cost and
+     assembly are computed from an enclosure; none of them was run on this form, so none is
+     shown. What is shown is measured from the geometry, and what was not assessed is listed
+     with its reason, never as a pass. */
+  var NOT_ASSESSED = [
+    { id: 'wall', label: 'Wall thickness, draft and moulding rules', why: 'They are computed from an enclosure shell; this form has none.' },
+    { id: 'fit', label: 'Fit of the electronics inside the form', why: 'The engine places parts only inside an enclosure.' },
+    { id: 'thermal', label: 'Vents, heat and radio checks', why: 'They depend on the enclosure walls and openings.' },
+    { id: 'verdict', label: 'Manufacturing verdict and unit cost', why: 'Cost and process fit are priced from the enclosure.' },
+    { id: 'assembly', label: 'Assembly steps and time', why: 'The assembly model follows the enclosure and its fixings.' },
+    { id: 'tests', label: 'Product tests and requirements met', why: 'Their inputs come from the enclosure model.' },
+    { id: 'bom', label: 'Bill of materials for the form itself', why: 'The shell line is priced from the enclosure.' },
+  ];
+
+  function fmtMm(v) { return String(Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10); }
+
+  function describe(summary, material) {
+    var sm = summary || {}, parts = sm.parts || [], errors = sm.errors || [];
+    var drawn = parts.filter(function (p) { return !p.error && p.triangles > 0; }).length;
+    var d = { headline: '', dims: '', facts: [], notAssessed: NOT_ASSESSED.slice(), problems: errors.slice() };
+    if (sm.status === 'running' || !sm.parts || !sm.parts.length) { d.headline = 'Drawing the form'; return d; }
+    if (errors.length) { d.headline = drawn ? 'Form partly drawn' : 'Form not drawn'; return d; }
+    var b = sm.bbox;
+    if (!b) { d.headline = 'Form not drawn'; return d; }
+    var vol = parts.reduce(function (a, p) { return a + (p.volume || 0); }, 0) / 1000;     // mm3 to cm3
+    var size = fmtMm(b.max[0] - b.min[0]) + ' × ' + fmtMm(b.max[2] - b.min[2]) + ' × ' + fmtMm(b.max[1] - b.min[1]) + ' mm';
+    d.headline = 'Form drawn';
+    d.dims = size + ' · ' + (Math.round(vol * 10) / 10) + ' cm³';
+    d.facts.push(['Envelope', size]);
+    d.facts.push(['Volume of the shapes', (Math.round(vol * 10) / 10) + ' cm³, overlaps counted twice']);
+    d.facts.push(['Parts', String(parts.length)]);
+    d.facts.push(['Triangles', String(sm.triangles)]);
+    if (material && typeof material.density === 'number') d.facts.push(['Mass if solid in ' + material.name, Math.round(vol * material.density) + ' g']);
+    return d;
+  }
+
+  function renderSummary(doc, host, d) {
+    if (!host) return null;
+    if (typeof host.querySelector === 'function') { var old = host.querySelector('#authBlk'); if (old && old.parentNode) old.parentNode.removeChild(old); }
+    var block = doc.createElement('section'); block.className = 'blk'; block.id = 'authBlk';
+    var lbl = doc.createElement('div'); lbl.className = 'lbl'; lbl.textContent = d.headline; block.appendChild(lbl);
+    if (d.dims) { var note = doc.createElement('p'); note.className = 'note'; note.textContent = 'The size and volume are measured from the shapes the code makes.'; block.appendChild(note); }
+    if (d.facts.length) {
+      var dl = doc.createElement('dl'); dl.className = 'fg-authored-facts';
+      d.facts.forEach(function (f) {
+        var dt = doc.createElement('dt'); dt.textContent = f[0]; var dd = doc.createElement('dd'); dd.textContent = f[1];
+        dl.appendChild(dt); dl.appendChild(dd);
+      });
+      block.appendChild(dl);
+    }
+    if (d.problems.length) {
+      var bad = doc.createElement('div'); bad.className = 'fg-authored-errors'; bad.style.display = 'block';
+      d.problems.forEach(function (t) { var line = doc.createElement('div'); line.textContent = t; bad.appendChild(line); });
+      block.appendChild(bad);
+    }
+    var head = doc.createElement('div'); head.className = 'lbl'; head.textContent = 'Not assessed for an authored form'; block.appendChild(head);
+    var ul = doc.createElement('ul'); ul.className = 'rlist';
+    d.notAssessed.forEach(function (n) {
+      var li = doc.createElement('li'); li.className = 'rule st-warn';
+      var chip = doc.createElement('span'); chip.className = 'chip'; chip.textContent = 'not assessed';
+      var wrap = doc.createElement('div'); wrap.className = 'rt';
+      var l1 = doc.createElement('div'); l1.className = 'rl'; l1.textContent = n.label;
+      var l2 = doc.createElement('div'); l2.className = 'rv'; l2.textContent = n.why;
+      wrap.appendChild(l1); wrap.appendChild(l2); li.appendChild(chip); li.appendChild(wrap); ul.appendChild(li);
+    });
+    block.appendChild(ul);
+    if (typeof host.insertBefore === 'function') host.insertBefore(block, host.firstChild); else host.appendChild(block);
+    return block;
+  }
+
   function mount(env) {
     var THREE = env.THREE, doc = env.document || document, form = env.cfg.form, parts = form.authored.parts;
     var params = Object.assign({}, form.params), ranges = form.ranges || {};
@@ -575,6 +645,9 @@
         errors: result ? result.errors : [],
       };
       GLOBAL.FG_AUTHORED = summary;
+      var desc = describe(summary, env.material ? env.material() : null);
+      if (env.summaryHost) renderSummary(doc, env.summaryHost, desc);
+      if (env.onSummary) env.onSummary(desc);
       try { GLOBAL.dispatchEvent(new GLOBAL.CustomEvent('fg-authored', { detail: summary })); } catch (e) { /* no events here */ }
     }
     function draw(result) {
@@ -610,5 +683,5 @@
     return { render: render, group: group, panel: panel, params: params };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, mount: mount };
 });

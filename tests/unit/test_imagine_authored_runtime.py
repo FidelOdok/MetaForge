@@ -59,6 +59,9 @@ CHECKS = [
     "extrude_triangulates_a_concave_outline",
     "lathe_and_torus_and_tube_and_frustum_build",
     "a_builder_call_with_a_bad_argument_says_which_one",
+    "describe_states_what_was_measured_and_what_was_not_assessed",
+    "describe_says_a_form_was_not_or_only_partly_drawn_and_why",
+    "summary_block_renders_the_description_into_the_page",
     "mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change",
 ]
 

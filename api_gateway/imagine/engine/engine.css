@@ -628,3 +628,16 @@ li.clip{display:none!important}
 .fg-authored-legend{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:8px;font-size:11px;color:#555}
 .fg-authored-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .fg-authored-errors{display:none;margin-top:8px;padding:6px 8px;border-radius:6px;background:#fdecea;color:#8a1c14;font-size:11px}
+
+/* MetaForge: for an authored form the enclosure's own analysis is hidden, because it was run on a
+   hidden placeholder and would read as assurance about a form it never saw. authored.js shows what
+   was measured and what was not assessed. */
+html[data-authored] #gateBlk,html[data-authored] #reqBlk,html[data-authored] #valBlk,html[data-authored] #dfaBlk,
+html[data-authored] #envBlk,html[data-authored] #verdictBlk,html[data-authored] #testBlk,html[data-authored] #elecBlk,
+html[data-authored] #rulesBlk,html[data-authored] #bomBlk,html[data-authored] #partBlk,html[data-authored] #costBlk,
+html[data-authored] #handBlk{display:none}
+html[data-authored] #graphPane > *:not(.fg-authored-panel){display:none}
+html[data-authored] #graphPane .fg-authored-panel{position:static;width:auto;max-height:none;box-shadow:none;background:transparent;padding:16px;font-size:13px}
+.fg-authored-facts{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:6px 0 10px;font-size:12px}
+.fg-authored-facts dt{color:var(--muted,#667)}
+.fg-authored-facts dd{margin:0}

@@ -18,7 +18,10 @@ from tests.unit.imagine_fixtures import base_config
 
 LAMP_BASE = "return [g.cylinder(p.base_r, p.base_h).at(0, p.base_h / 2, 0).name('base')];"
 LAMP_ARM = "return [g.cylinder(4, p.arm_len).at(0, p.base_h + p.arm_len / 2, 0).name('arm')];"
-LAMP_HEAD = "return [g.cone(p.head_r, p.head_h).at(0, p.base_h + p.arm_len, 0).name('head')];"
+LAMP_HEAD = (
+    "return [g.cone(p.head_r, p.head_h)"
+    ".at(0, p.base_h + p.arm_len + p.head_h / 2, 0).name('head')];"
+)
 
 
 def lamp_form() -> dict[str, Any]:

@@ -268,6 +268,53 @@ await check('a_builder_call_with_a_bad_argument_says_which_one', async () => {
   return b.error && /cylinder/.test(b.error) && /radius|positive/.test(b.error) ? true : 'error: ' + b.error;
 });
 
+// -- what the page says about a form: measured facts, and what was not assessed ----
+await check('describe_states_what_was_measured_and_what_was_not_assessed', async () => {
+  const r = await FG.run(LAMP, LAMP_P, OPTS);
+  const summary = { status: 'ready', parts: r.parts, bbox: r.bbox, triangles: r.triangles, errors: [] };
+  const d = FG.describe(summary, { name: 'PETG', density: 1.27 });
+  if (d.headline !== 'Form drawn') return 'headline ' + d.headline;
+  if (d.dims.indexOf('110 \u00d7 110 \u00d7 332 mm') !== 0) return 'dims ' + d.dims;
+  const facts = Object.fromEntries(d.facts);
+  if (facts['Parts'] !== '3' || facts['Triangles'] !== '240') return 'facts ' + JSON.stringify(d.facts);
+  if (!/g$/.test(facts['Mass if solid in PETG'] || '')) return 'no mass: ' + JSON.stringify(d.facts);
+  if (d.notAssessed.length < 6) return 'only ' + d.notAssessed.length + ' not assessed';
+  if (d.notAssessed.some((n) => !n.label || !n.why)) return 'an item has no reason';
+  const text = JSON.stringify(d).toLowerCase();
+  if (/\bpass(es|ed)?\b|\bready\b/.test(text.replace('form drawn', ''))) return 'it claims a pass: ' + text.slice(0, 200);
+  return true;
+});
+
+await check('describe_says_a_form_was_not_or_only_partly_drawn_and_why', async () => {
+  const bad = await FG.run([part('bad', "throw new Error('boom');"), part('ok', 'return [g.box(2, 2, 2)];')], {}, OPTS);
+  const partly = FG.describe({ status: 'error', parts: bad.parts, bbox: bad.bbox, triangles: bad.triangles, errors: bad.errors }, null);
+  if (partly.headline !== 'Form partly drawn') return 'partly: ' + partly.headline;
+  if (!partly.problems.some((x) => x.includes('boom'))) return 'no reason: ' + JSON.stringify(partly.problems);
+  if (partly.dims !== '') return 'a partly drawn form gave a size: ' + partly.dims;
+  const none = await FG.run([part('bad', "throw new Error('boom');")], {}, OPTS);
+  const nothing = FG.describe({ status: 'error', parts: none.parts, bbox: none.bbox, triangles: 0, errors: none.errors }, null);
+  return nothing.headline === 'Form not drawn' && nothing.facts.length === 0 ? true : JSON.stringify(nothing);
+});
+
+await check('summary_block_renders_the_description_into_the_page', async () => {
+  const el = () => {
+    const e = { children: [], style: {}, className: '', textContent: '', id: '',
+      appendChild(c) { e.children.push(c); return c; }, insertBefore(c) { e.children.unshift(c); return c; },
+      setAttribute() {}, addEventListener() {}, get firstChild() { return e.children[0] || null; } };
+    return e;
+  };
+  const doc = { createElement: el, createTextNode: (t) => ({ textContent: t }) };
+  const host = el();
+  const d = FG.describe({ status: 'ready', parts: (await FG.run(LAMP, LAMP_P, OPTS)).parts, bbox: { min: [0,0,0], max: [1,2,3] }, triangles: 240, errors: [] }, null);
+  FG.renderSummary(doc, host, d);
+  const all = [];
+  (function walk(n) { if (!n) return; if (n.textContent) all.push(n.textContent); (n.children || []).forEach(walk); })(host);
+  const text = all.join(' | ');
+  const block = host.children[0];
+  return block && block.id === 'authBlk' && text.includes('Form drawn') && text.includes('not assessed') && text.includes(d.notAssessed[0].label)
+    ? true : 'block ' + (block && block.id) + ' text ' + text.slice(0, 200);
+});
+
 // -- mount: the page side, with a minimal fake DOM and three.js ------------------
 await check('mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change', async () => {
   const el = () => {

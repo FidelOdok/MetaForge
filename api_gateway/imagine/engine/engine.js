@@ -552,6 +552,7 @@ const matCut=new THREE.MeshBasicMaterial({color:0xe5584f,side:THREE.BackSide});
 const part=new THREE.Group();scene.add(part);
 /* MetaForge: an agent-authored form (spec 23.6) is drawn by authored.js, in a sandbox, instead of the enclosure. */
 const AUTHORED=!!(CFG.form&&CFG.form.template==='authored'&&CFG.form.authored&&window.FGAuthored);let AUTHORED_MOUNT=null;
+if(AUTHORED)document.documentElement.setAttribute('data-authored','1');
 
 const C_GREEN=new THREE.Color('#3FAE76').convertSRGBToLinear(),C_AMBER=new THREE.Color('#E3A43A').convertSRGBToLinear(),C_RED=new THREE.Color('#E04A42').convertSRGBToLinear(),C_NEU=new THREE.Color('#9AA3B2').convertSRGBToLinear();
 function ringPts(a,b,r,seg){a=Math.max(a,0.05);b=Math.max(b,0.05);r=clamp(r,0.001,Math.min(a,b));const cx=a-r,cz=b-r,P=[];
@@ -578,7 +579,7 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();if(!s)return;
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,host:document.getElementById('viewPane')||document.body,onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
   const Lo=levels(s.H,s.F,tan,0);
@@ -683,6 +684,7 @@ function updateNodeReadouts(ev){
 }
 
 function renderPanel(ev){
+  if(AUTHORED)return null; /* the enclosure's checks say nothing about an authored form; authored.js shows what was measured */
   const s=ev.shape,P=PROC[S.proc];
   const osum=$('#osum');
   if(!s){
