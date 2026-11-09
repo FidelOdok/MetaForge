@@ -91,8 +91,10 @@ The header holds only the name and one status spot with **Decisions** and
 the activity card.
 
 - **Imagine** hosts the studio the assistant builds for the product, in a
-  sandboxed frame, with a **Studio** and **Sketch** tab, and the handover
-  checklist with **Hand over to engineering**. With no studio yet it says to
+  sandboxed frame, with a **Studio** and **Sketch** tab, and **Ready for
+  engineering?**: what is left and who clears it (you, the assistant, or
+  something outside the project), then the handover checklist and **Hand over
+  to engineering**. With no studio yet it says to
   ask the assistant to start one.
 - **Develop** shows the twin's current model, read only, with its maturity
   and representation level, what is running and what needs attention.

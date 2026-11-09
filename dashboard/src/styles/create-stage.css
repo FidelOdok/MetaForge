@@ -772,6 +772,75 @@
   color: var(--cv-muted);
   font-size: 12px;
 }
+.cv-validation {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-self: stretch;
+}
+.cv-validation-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cv-validation-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.cv-validation p {
+  margin: 0;
+}
+.cv-verdict {
+  padding: 2px 8px;
+  border: 1px solid var(--cv-line);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.cv-verdict.is-ready_for_handover {
+  border-color: var(--cv-ok);
+  color: var(--cv-ok);
+}
+.cv-verdict.is-needs_person,
+.cv-verdict.is-needs_agent {
+  border-color: var(--cv-warn);
+  color: var(--cv-warn);
+}
+.cv-verdict.is-blocked_external,
+.cv-verdict.is-invalid {
+  border-color: var(--cv-bad);
+  color: var(--cv-bad);
+}
+.cv-level {
+  font-size: 12px;
+}
+.cv-group h5 {
+  margin: 0 0 4px;
+  color: var(--cv-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.cv-group .cv-checklist-label,
+.cv-define .cv-checklist-label {
+  overflow-wrap: anywhere;
+}
+.cv-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.cv-define summary,
+.cv-checklist-details summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+.cv-define p,
+.cv-define ul,
+.cv-checklist-details > ul {
+  margin: 6px 0 0;
+}
+.cv-checklist-details {
+  align-self: stretch;
+}
 .cv-sketch {
   display: flex;
   flex-direction: column;

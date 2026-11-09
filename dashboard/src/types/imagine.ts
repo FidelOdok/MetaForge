@@ -87,3 +87,72 @@ export interface HandoverReply {
   revision: number;
   created: string[];
 }
+
+/**
+ * The validation report (`GET .../imagine/validation`). The verification
+ * service decides it; the gateway returns it unchanged. This mirrors its shape
+ * so the dashboard can show what it says and never works a verdict out itself.
+ */
+export type FindingStatus = 'pass' | 'fail' | 'assumed' | 'inconclusive' | 'not_assessed';
+/** Who can clear a finding: the assistant, the person, or something outside the project. */
+export type Resolver = 'agent' | 'person' | 'external';
+export type Verdict =
+  | 'invalid'
+  | 'needs_agent'
+  | 'blocked_external'
+  | 'needs_person'
+  | 'ready_for_handover';
+
+export interface ValidationRef {
+  kind: string;
+  id: string;
+  revision?: number | null;
+}
+
+/** A hint that names what is needed and where it must come from, never a value. */
+export interface ValidationFix {
+  op: string;
+  pointer: string;
+  needs: string;
+}
+
+export interface ValidationFinding {
+  id: string;
+  check_id: string;
+  rule_version: string;
+  gate: string;
+  severity: 'blocking' | 'advisory';
+  status: FindingStatus;
+  target: ValidationRef;
+  message: string;
+  evidence: ValidationRef[];
+  resolver: Resolver;
+  fix: ValidationFix | null;
+  accepted_by: string[];
+}
+
+export interface ValidationGate {
+  gate: string;
+  rule_version: string;
+  decision: 'pass' | 'fail' | 'incomplete';
+  blocking: number;
+  assumed: number;
+  advisory: number;
+}
+
+export interface ValidationReport {
+  profile_id: string;
+  profile_version: string;
+  revision_number: number | null;
+  /** V0 captured, V1 consistent, V2 screened. Never higher. */
+  level: 'V0' | 'V1' | 'V2';
+  gates: ValidationGate[];
+  findings: ValidationFinding[];
+  /** Findings accepted as assumptions and not confirmed. Never counted as passes. */
+  debt: ValidationFinding[];
+  verdict: Verdict;
+  limitations: string[];
+  project_id: string;
+  computed_at: string;
+  stale: boolean;
+}

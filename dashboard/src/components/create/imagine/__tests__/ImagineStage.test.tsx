@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor, within } from '../../../../test/test-utils';
-import type { HandoverChecklist, ImagineStudio } from '../../../../types/imagine';
+import type { HandoverChecklist, ImagineStudio, ValidationReport } from '../../../../types/imagine';
 
 const getStudio = vi.fn();
 const getHandover = vi.fn();
+const getValidation = vi.fn();
 const postHandover = vi.fn();
 const postRework = vi.fn();
 vi.mock('../../../../api/endpoints/imagine', async (orig) => ({
   ...(await orig<typeof import('../../../../api/endpoints/imagine')>()),
   getStudio: (...a: unknown[]) => getStudio(...a),
   getHandover: (...a: unknown[]) => getHandover(...a),
+  getValidation: (...a: unknown[]) => getValidation(...a),
   postHandover: (...a: unknown[]) => postHandover(...a),
   postRework: (...a: unknown[]) => postRework(...a),
 }));
@@ -43,6 +45,36 @@ const CHECKLIST: HandoverChecklist = {
   ],
 };
 
+const REPORT: ValidationReport = {
+  profile_id: 'imagine-v1',
+  profile_version: '1.0.0',
+  revision_number: 2,
+  level: 'V1',
+  gates: [],
+  findings: [
+    {
+      id: 'f_assumptions',
+      check_id: 'assumptions.settled',
+      rule_version: 'imagine-v1@1.0.0',
+      gate: 'handover',
+      severity: 'blocking',
+      status: 'fail',
+      target: { kind: 'studio', id: 'assumptions', revision: 2 },
+      message: '3 of 3 assumptions still to confirm or accept.',
+      evidence: [],
+      resolver: 'person',
+      fix: null,
+      accepted_by: [],
+    },
+  ],
+  debt: [],
+  verdict: 'needs_person',
+  limitations: [],
+  project_id: P,
+  computed_at: '2026-11-09T12:00:00Z',
+  stale: false,
+};
+
 function imagine(view: 'studio' | 'sketch' = 'studio') {
   const onView = vi.fn();
   const onAskAssistant = vi.fn();
@@ -53,6 +85,7 @@ function imagine(view: 'studio' | 'sketch' = 'studio') {
 beforeEach(() => {
   getStudio.mockReset();
   getHandover.mockReset().mockResolvedValue(CHECKLIST);
+  getValidation.mockReset().mockResolvedValue(REPORT);
   postHandover.mockReset();
   postRework.mockReset();
 });
@@ -117,6 +150,26 @@ describe('Imagine', () => {
     expect(within(list).getByText(/Battery has no source/)).toBeInTheDocument();
     expect(screen.getAllByTestId('stage-primary')).toHaveLength(1);
     expect(screen.getByTestId('stage-primary')).toHaveTextContent('Hand over to engineering');
+  });
+
+  it('shows what is left and who clears it above the checklist, and the handover stays the person\'s', async () => {
+    getStudio.mockResolvedValue(studio());
+    imagine();
+    expect(await screen.findByTestId('validation-verdict')).toHaveTextContent('Waiting on you');
+    const person = screen.getByRole('list', { name: 'Waiting on you' });
+    expect(within(person).getByText(/3 of 3 assumptions still to confirm or accept/)).toBeInTheDocument();
+    // The old checklist is still there, one click away, and the single primary action is unchanged.
+    expect(screen.getByRole('list', { name: 'Handover checklist' })).toBeInTheDocument();
+    expect(screen.getAllByTestId('stage-primary')).toHaveLength(1);
+    expect(getValidation).toHaveBeenCalledWith(P, expect.anything());
+  });
+
+  it('still lets the person try the handover when the report says blocked, since the gateway decides', async () => {
+    getStudio.mockResolvedValue(studio());
+    getValidation.mockResolvedValue({ ...REPORT, verdict: 'blocked_external' });
+    imagine();
+    expect(await screen.findByTestId('validation-verdict')).toHaveTextContent('Blocked outside the project');
+    expect(screen.getByTestId('stage-primary')).toBeEnabled();
   });
 
   it('shows the missing items when the gateway refuses the handover (409)', async () => {
