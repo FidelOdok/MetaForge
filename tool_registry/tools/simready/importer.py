@@ -24,6 +24,7 @@ a package that fails it costs three small requests, not 60 MB.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import shutil
@@ -100,6 +101,18 @@ def library_name(ref: PackageRef) -> str:
     return f"simready_{slug}"[:80]
 
 
+def asset_identity(ref: PackageRef) -> str:
+    """Stable component identity; a revision changes its model, not its identity."""
+    raw = json.dumps([ref.namespace, ref.dataset, ref.asset])
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def import_identity(ref: PackageRef, include_textures: bool = False) -> str:
+    """Full upstream identity, independent of lossy display-name sanitization."""
+    raw = json.dumps([ref.namespace, ref.dataset, ref.asset, ref.commit, include_textures])
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def attribution_line(record: dict[str, Any]) -> str:
     """Title, author, source, licence: what CC BY asks for, and enough for the others."""
     licence = record.get("licence") or "unknown licence"
@@ -168,6 +181,8 @@ def _record(
         "package_url": ref.url,
         "source_url": ref.browse_url,
         "commit": ref.commit,
+        "legacy_library_name": library_name(ref),
+        "source_identity": asset_identity(ref),
         "package_sha256": manifest.package_sha256,
         "licence": licence,
         "root_usd": f"usd/{manifest.root_usd}",
@@ -202,7 +217,7 @@ def component_entry(record: dict[str, Any], ref: PackageRef) -> dict[str, Any]:
         if value:
             specs[key] = {"value": round(value * 1000, 3), "unit": "mm", "source": source}
     return {
-        "name": library_name(ref),
+        "name": f"{library_name(ref)[:40]}_{asset_identity(ref)[:32]}",
         "title": ref.asset,
         "family": family_for(ref, record.get("semantic_labels") or {}),
         "origin": "purchased",
@@ -235,13 +250,21 @@ async def _fetch_and_probe(
     *,
     include_textures: bool,
     max_bytes: int,
+    cache_dir: Path | None = None,
 ) -> tuple[Manifest, dict[str, Any], Any, list[str]]:
     manifest = await read_manifest(ref, fetcher)
     early = await _licence(manifest, dataset_licence, None)
     if not early.accepted:
         raise PackageError(f"not imported: {early.reason}")
     items = select_items(manifest, include_textures=include_textures)
-    files = await download(manifest, items, dest, fetcher, max_bytes=max_bytes)
+    files = await download(
+        manifest,
+        items,
+        dest,
+        fetcher,
+        max_bytes=max_bytes,
+        cache_dir=cache_dir,
+    )
     probe = await asyncio.to_thread(_probe().probe_stage, dest / manifest.root_usd)
     decision = await _licence(manifest, dataset_licence, probe.get("asset_license"))
     if not decision.accepted:
@@ -301,12 +324,10 @@ async def import_package(
     max_bytes: int,
 ) -> dict[str, Any]:
     """Fetch, check and keep one package; return its folder and library entry."""
-    rel_folder = Path(IMPORT_ROOT) / f"{library_name(ref)}-{ref.commit[:8]}"
+    rel_folder = Path(IMPORT_ROOT) / import_identity(ref, include_textures)
     folder = workspace / rel_folder
-    staging = workspace / IMPORT_ROOT / f".staging-{ref.commit[:8]}-{library_name(ref)}"
-    if staging.exists():
-        shutil.rmtree(staging)
-    staging.mkdir(parents=True)
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=folder.parent))
     try:
         manifest, probe, decision, files = await _fetch_and_probe(
             ref,
@@ -315,6 +336,7 @@ async def import_package(
             staging / "usd",
             include_textures=include_textures,
             max_bytes=max_bytes,
+            cache_dir=workspace / ".asset-cache",
         )
         preview = await asyncio.to_thread(
             _probe().stage_to_glb, staging / "usd" / manifest.root_usd, staging / "preview.glb"
@@ -323,6 +345,17 @@ async def import_package(
         record["preview_glb"] = "preview.glb"
         record["licence_obligations"] = decision.obligations
         component = component_entry(record, ref)
+        lock = {
+            "schema_version": 1,
+            "source_url": ref.url,
+            "revision": ref.commit,
+            "scope": "downloaded_simready_layers",
+            "licence": str(decision.licence),
+            "files": [
+                dict(item) for item in select_items(manifest, include_textures=include_textures)
+            ],
+        }
+        (staging / "model.lock.json").write_text(json.dumps(lock, indent=2), encoding="utf-8")
         (staging / "LICENSE.txt").write_text(
             licence_notice(record, manifest.licence_text), encoding="utf-8"
         )
@@ -331,9 +364,16 @@ async def import_package(
             json.dumps({"record": record, "library_component": component}, indent=2),
             encoding="utf-8",
         )
-        if folder.exists():
-            shutil.rmtree(folder)
-        staging.rename(folder)
+        try:
+            staging.rename(folder)
+        except OSError:
+            if not folder.is_dir():
+                raise
+            existing = json.loads((folder / "simready.json").read_text())["record"]
+            if existing.get("package_url") != ref.url:
+                raise PackageError("existing import identity does not match upstream")
+            shutil.rmtree(staging)
+
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

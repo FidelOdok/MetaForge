@@ -163,7 +163,7 @@ def catalog_tool_ids() -> set[str]:
     The ids are assembled per kind, which a literal-id source scan cannot
     see, so coverage checks import this (the same as ``distributor_tool_ids``).
     """
-    ids = {"library.process_limits", "library.standard_part"}
+    ids = {"library.process_limits", "library.standard_part", "library.resolve_component_model"}
     for kind, plural in (
         ("process", "processes"),
         ("material", "materials"),
@@ -379,6 +379,14 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "size": {"type": "string"},
                 "specs": {"type": "object"},
                 "geometry": {"type": "object"},
+                "models": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "Versioned model representations with usage, limits, "
+                        "pinned artifacts and dependencies."
+                    ),
+                },
                 "material": {"type": "string"},
                 "suppliers": {"type": "array", "items": {"type": "object"}},
                 "notes": {"type": "string"},

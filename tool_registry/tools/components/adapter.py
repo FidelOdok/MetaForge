@@ -30,8 +30,8 @@ from typing import Any
 
 import structlog
 
+from digital_twin.catalog.local_store import CatalogStore
 from digital_twin.catalog.query import CatalogQuery, ComponentCatalogRow, ComponentFilter
-from digital_twin.catalog.store import ComponentCatalogStore
 from digital_twin.catalog.taxonomy import CATEGORY_REGISTRY
 from digital_twin.knowledge.intent_search import search_intent
 from digital_twin.knowledge.intent_search import to_dict as intent_to_dict
@@ -61,9 +61,9 @@ class ComponentServer(McpToolServer):
     def __init__(
         self,
         *,
-        search_store: ComponentCatalogStore,
-        knowledge_service: KnowledgeService,
-        llm: IntentLLM,
+        search_store: CatalogStore,
+        knowledge_service: KnowledgeService | None = None,
+        llm: IntentLLM | None = None,
         subsystem_templates: Mapping[str, SubsystemTemplate] | None = None,
         known_categories: KnownCategories | None = None,
     ) -> None:
@@ -179,6 +179,9 @@ class ComponentServer(McpToolServer):
             handler=self.handle_search_parametric,
         )
 
+        if self._knowledge_service is None or self._llm is None:
+            return
+
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="component.search_intent",
@@ -267,6 +270,8 @@ class ComponentServer(McpToolServer):
             }
 
     async def handle_search_intent(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if self._llm is None or self._knowledge_service is None:
+            raise ValueError("Intent search requires a configured knowledge service and LLM")
         intent_text = arguments.get("intent_text")
         if not isinstance(intent_text, str) or not intent_text.strip():
             raise ValueError(

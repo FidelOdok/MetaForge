@@ -14,9 +14,13 @@ preview, the mass and the physics need none of them.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import os
 import re
+import tempfile
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -43,6 +47,10 @@ class PackageError(ValueError):
 
 class FetchError(PackageError):
     def __init__(self, url: str, status: int | None, detail: str = "") -> None:
+        from urllib.parse import urlsplit, urlunsplit
+
+        parsed = urlsplit(url)
+        url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
         self.url = url
         self.status = status
         super().__init__(f"could not fetch {url}: {status or detail}")
@@ -53,22 +61,83 @@ class Fetcher(Protocol):
 
 
 class HttpFetcher:
-    """httpx GET with redirects followed (Hugging Face serves LFS files from a CDN)."""
+    """Bounded streaming downloads; retries happen only before body consumption."""
 
     def __init__(self, timeout_s: float = 60.0) -> None:
         self._timeout = timeout_s
 
-    async def get(self, url: str) -> bytes:
+    async def iter_bytes(self, url: str) -> AsyncIterator[bytes]:
+        from urllib.parse import urljoin, urlsplit
+
         import httpx
 
-        try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=self._timeout) as client:
-                response = await client.get(url)
-        except httpx.HTTPError as exc:
-            raise FetchError(url, None, str(exc)) from exc
-        if response.status_code != 200:
-            raise FetchError(url, response.status_code)
-        return response.content
+        allowed = (
+            "github.com",
+            "api.github.com",
+            "raw.githubusercontent.com",
+            "release-assets.githubusercontent.com",
+            "huggingface.co",
+            "hf.co",
+            "gitlab.com",
+        )
+        async with httpx.AsyncClient(follow_redirects=False, timeout=self._timeout) as client:
+            redirects = 0
+            attempt = 0
+            while True:
+                parsed = urlsplit(url)
+                host = parsed.hostname or ""
+                if (
+                    parsed.scheme != "https"
+                    or parsed.username
+                    or parsed.password
+                    or parsed.port not in (None, 443)
+                    or not any(host == h or host.endswith("." + h) for h in allowed)
+                ):
+                    raise PackageError("download host is not an approved public registry or CDN")
+                try:
+                    async with client.stream("GET", url) as response:
+                        if response.status_code in {301, 302, 303, 307, 308}:
+                            redirects += 1
+                            if redirects > 5 or not response.headers.get("location"):
+                                raise FetchError(url, response.status_code, "redirect limit")
+                            url = urljoin(url, response.headers["location"])
+                            continue
+                        if response.status_code in {429, 502, 503, 504} and attempt < 2:
+                            await asyncio.sleep(0.25 * 2**attempt)
+                            attempt += 1
+                            continue
+                        if response.status_code != 200:
+                            raise FetchError(url, response.status_code)
+                        async for chunk in response.aiter_bytes(chunk_size=65536):
+                            yield chunk
+                        return
+                except httpx.HTTPError as exc:
+                    raise FetchError(url, None, "HTTP transfer failed") from exc
+
+    async def get(self, url: str) -> bytes:
+        return await bounded_get(self, url, max_bytes=METADATA_MAX_BYTES)
+
+
+METADATA_MAX_BYTES = 8 * 1024 * 1024
+
+
+async def chunks(fetcher: Fetcher, url: str) -> AsyncIterator[bytes]:
+    stream = getattr(fetcher, "iter_bytes", None)
+    if stream is not None:
+        async for chunk in stream(url):
+            yield chunk
+    else:
+        # Compatibility for injected fetchers. Production HTTP always streams.
+        yield await fetcher.get(url)
+
+
+async def bounded_get(fetcher: Fetcher, url: str, *, max_bytes: int) -> bytes:
+    data = bytearray()
+    async for chunk in chunks(fetcher, url):
+        if len(data) + len(chunk) > max_bytes:
+            raise PackageError("download exceeds actual byte limit")
+        data.extend(chunk)
+    return bytes(data)
 
 
 @dataclass(frozen=True)
@@ -116,6 +185,7 @@ def parse_package_url(url: str) -> PackageRef:
             f"package_url is pinned to '{commit}', not a commit; use the 40-character "
             "commit the SimReady Central index lists (simready.search returns it)"
         )
+    _relative_path(match["asset"])
     return PackageRef(match["namespace"], match["dataset"], commit, match["asset"])
 
 
@@ -148,14 +218,18 @@ def _json(data: bytes, what: str) -> Any:
 
 async def read_manifest(ref: PackageRef, fetcher: Fetcher) -> Manifest:
     """The package's manifest, its verified bill of materials and its root layer."""
-    packaging = _json(await fetcher.get(ref.url), PACKAGING_FILE)
+    packaging = _json(
+        await bounded_get(fetcher, ref.url, max_bytes=METADATA_MAX_BYTES), PACKAGING_FILE
+    )
     bom_entry = next(
         (m for m in packaging.get("metadata") or [] if str(m.get("name", "")).endswith("bom.json")),
         None,
     )
     if bom_entry is None:
         raise PackageError("the package manifest lists no bill of materials")
-    bom_bytes = await fetcher.get(ref.file_url(f".metadata/{bom_entry['name']}"))
+    bom_bytes = await bounded_get(
+        fetcher, ref.file_url(f".metadata/{bom_entry['name']}"), max_bytes=METADATA_MAX_BYTES
+    )
     expected = str((bom_entry.get("hash") or {}).get("sha256") or "")
     if _sha256(bom_bytes) != expected:
         raise PackageError("the bill of materials does not match the digest in the manifest")
@@ -163,7 +237,10 @@ async def read_manifest(ref: PackageRef, fetcher: Fetcher) -> Manifest:
     if not items:
         raise PackageError("the bill of materials lists no files")
 
-    roots = _json(await fetcher.get(ref.file_url(ROOT_USDS_FILE)), ROOT_USDS_FILE)
+    roots = _json(
+        await bounded_get(fetcher, ref.file_url(ROOT_USDS_FILE), max_bytes=METADATA_MAX_BYTES),
+        ROOT_USDS_FILE,
+    )
     entries = roots.get("entries") or []
     listed = {i["relative_path"] for i in items}
     root = next((e for e in entries if e in listed), None)
@@ -171,9 +248,9 @@ async def read_manifest(ref: PackageRef, fetcher: Fetcher) -> Manifest:
         raise PackageError("the package names no root USD layer that its file list contains")
 
     try:
-        licence_text: str | None = (await fetcher.get(ref.file_url(LICENCE_FILE))).decode(
-            "utf-8", "replace"
-        )
+        licence_text: str | None = (
+            await bounded_get(fetcher, ref.file_url(LICENCE_FILE), max_bytes=METADATA_MAX_BYTES)
+        ).decode("utf-8", "replace")
     except FetchError as exc:
         if exc.status != 404:
             raise
@@ -211,7 +288,22 @@ def select_items(manifest: Manifest, *, include_textures: bool = False) -> list[
     return chosen
 
 
+def _relative_path(relative: str) -> None:
+    from urllib.parse import unquote
+
+    decoded = unquote(relative)
+    if (
+        not decoded
+        or decoded.startswith("/")
+        or "\\" in decoded
+        or any(p in {"", ".", ".."} for p in decoded.split("/"))
+        or any(c in decoded for c in "?#\x00")
+    ):
+        raise PackageError(f"the package lists a path outside itself: {relative}")
+
+
 def _safe_target(dest: Path, relative: str) -> Path:
+    _relative_path(relative)
     target = (dest / relative).resolve()
     if dest.resolve() not in target.parents:
         raise PackageError(f"the package lists a path outside itself: {relative}")
@@ -225,24 +317,59 @@ async def download(
     fetcher: Fetcher,
     *,
     max_bytes: int,
+    cache_dir: Path | None = None,
 ) -> list[str]:
     """Fetch ``items`` into ``dest``, refusing any file whose sha256 differs."""
-    total = sum(int(i.get("size") or 0) for i in items)
+    sizes: list[int] = []
+    for item in items:
+        size = item.get("size")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise PackageError("every file needs a non-negative integer size")
+        sizes.append(size)
+    total = sum(sizes)
     if total > max_bytes:
-        raise PackageError(
-            f"the selected files are {total / 1e6:.0f} MB, over the {max_bytes / 1e6:.0f} MB "
-            "limit (raise max_package_mb, or leave textures out)"
-        )
+        raise PackageError("the selected files are over the package byte limit")
     written = []
+    received = 0
     for item in items:
         relative = str(item["relative_path"])
         target = _safe_target(dest, relative)
-        data = await manifest_fetch(manifest, relative, fetcher)
         expected = str((item.get("hash") or {}).get("sha256") or "")
-        if _sha256(data) != expected:
-            raise PackageError(f"{relative} does not match its sha256 in the bill of materials")
+        if cache_dir is not None:
+            from tool_registry.asset_cache import AssetIntegrityError, VerifiedAssetCache
+
+            try:
+                await VerifiedAssetCache(cache_dir).fetch_to(
+                    url=manifest.ref.file_url(relative),
+                    sha256=expected,
+                    size=item["size"],
+                    target=target,
+                    fetcher=fetcher,
+                )
+            except AssetIntegrityError as exc:
+                raise PackageError(str(exc)) from exc
+            written.append(relative)
+            continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        fd, temporary = tempfile.mkstemp(prefix=".download-", dir=target.parent)
+        count = 0
+        digest = hashlib.sha256()
+        try:
+            with os.fdopen(fd, "wb") as output:
+                async for chunk in chunks(fetcher, manifest.ref.file_url(relative)):
+                    count += len(chunk)
+                    received += len(chunk)
+                    if received > max_bytes or count > item["size"]:
+                        raise PackageError("download exceeds declared size or actual byte limit")
+                    digest.update(chunk)
+                    output.write(chunk)
+            if count != item["size"]:
+                raise PackageError(f"{relative} does not match its declared size")
+            if digest.hexdigest() != expected:
+                raise PackageError(f"{relative} does not match its sha256 in the bill of materials")
+            os.replace(temporary, target)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
         written.append(relative)
     logger.info(
         "simready_package_downloaded",

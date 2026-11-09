@@ -1,0 +1,131 @@
+# Reusing components and model assets
+
+MetaForge searches existing project/library parts and complete commercial or
+open hardware modules before proposing a custom design. Record why a reusable
+module fails the requirements before choosing to build from individual parts.
+This is agent guidance, not a claim that every proposed selection has passed
+engineering verification. Missing specifications remain unknown.
+
+## Existing catalogs
+
+- `library.list_components`, `library.get_component`, and the register/update
+  tools manage reusable entries with sourced specs and revision history.
+- `component.search_parametric` searches typed specifications. Without
+  `DATABASE_URL`, the gateway and local MCP entry point use SQLite at
+  `~/.metaforge/component_catalog.db` (override with
+  `METAFORGE_COMPONENT_CATALOG_PATH`). Structured search does not require an
+  intent LLM. The catalog starts empty; this change does not invent seed parts.
+- `component.search_intent` additionally requires the knowledge service and an
+  intent LLM. Its complete-module and individual-part results stay separate.
+- `simready.search`, `simready.inspect`, and `simready.import` retrieve upstream
+  USD assets. These remain distinct from exact manufacturer-part records.
+
+## Model representations on reusable entries
+
+`library.register_component` and `library.update_component` accept an optional
+`models` array. Old entries load with an empty array. Each representation has:
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | `1` |
+| `model_id`, `version` | Stable model identity and immutable content version |
+| `kind` | `cad`, `physics`, `emulation`, or `module` |
+| `engine`, `engine_versions` | Required engine and optional exact allowed versions |
+| `entrypoint` | One of the artifact paths |
+| `usage`, `limitations` | How to use it and what it cannot establish |
+| `artifacts` | Relative path, public HTTPS URL, SHA-256, exact byte size, license, source revision |
+| `dependencies` | Exact `{component, model_id, version}` references |
+| `status`, `status_reason` | Active, deprecated, or withdrawn, with reasons for inactive models |
+
+A new model version is required to change content. Older versions must be
+retained; mark an unsafe version withdrawn rather than deleting it. The
+resolver rejects withdrawn dependencies and emits warnings for deprecated
+ones. Current generic-model license policy still applies; this change does
+not widen it to every external library license.
+
+For example, after registering an approved model on a component, resolve it:
+
+```json
+{
+  "ref": "motor",
+  "model_id": "motor-physics",
+  "version": "1.0.0",
+  "engine": "mujoco",
+  "engine_version": "3.0",
+  "fetch": false
+}
+```
+
+Pass that object to `library.resolve_component_model`. It returns the complete
+resolved metadata, usage/limitations, artifact hashes and a deterministic lock
+hash. Set `fetch: true` to verify and copy the assets to an isolated folder in
+`ADAPTER_WORKSPACE_DIR` (default `/workspace`). Set `offline: true` with fetching
+to prohibit upstream artifact downloads; catalog access may still use the
+configured gateway. A miss or corrupt cached object is an explicit error.
+The tool resolves files, never executes their code. Pass returned entrypoint
+paths to an appropriate installed engineering adapter separately. It is an
+on-demand tool (`chat_visible: false`); clients can discover it through tool
+search without adding its schema to every default chat prompt.
+
+All metadata, license, engine, dependency-cycle and total-size checks run
+before downloads. The initial graph limit is 100 representations and 200 MiB.
+The lockfile records the actual selected model definitions and artifacts; it
+does not claim to discover undeclared runtime imports inside executable code.
+A future replay must resolve the pinned metadata and check current withdrawal
+policy, not silently select a newer model.
+
+## Download integrity and cache
+
+Shared `VerifiedAssetCache` objects live under the adapter workspace's
+`.asset-cache`. Each object is keyed by SHA-256, verified on reuse, and copied
+into jobs. A job cannot mutate the cached object through a hard link. Concurrent
+requests in one worker coordinate per digest. HTTP downloads stream through
+actual byte counters; declared sizes are not trusted as the only limit.
+Completed files become visible atomically. Upstream errors, oversize bodies,
+incorrect lengths and hash failures leave prior valid outputs intact.
+
+HTTP sources are restricted to approved public registry/CDN host families;
+each redirect is rechecked. Metadata is capped at 8 MiB; transient HTTP status
+retries are bounded. The downloader does not attach provider credentials.
+Private/gated provider authentication is outside this implementation.
+
+SimReady imports use publisher/dataset/asset/full-revision identity rather
+than sanitized display names and eight-character commit prefixes. Unique
+staging directories prevent imports from deleting each other's work. Existing
+legacy folders and catalog IDs are not renamed. Import metadata retains the
+legacy library name for reconciliation; there is no automatic merge of
+potentially ambiguous legacy entries. Different texture selections have
+separate output folders. A per-import `model.lock.json` records the downloaded
+USD/texture set; it is not a universal simulation dependency declaration.
+
+## Discover installed KiCad assets
+
+Two on-demand read tools inspect the already-installed adapter libraries:
+
+- `kicad.search_library`: `{ "query": "Device:R", "limit": 10 }`.
+- `kicad.describe_library_component`: `{ "symbol_id": "Device:R" }`.
+
+Descriptions flatten inherited symbols, list pins and assigned footprints,
+resolve configured 3D-model references, and report a source-file checksum.
+Absent geometry is explicit: the adapter image deliberately keeps only selected
+3D-model families. Symbols can be generic and are not proof of a purchasable
+part or of simulation/emulation support. These tools read local supported
+KiCad library files; they do not crawl GitLab or republish KiCad assets.
+
+## Persistence and verification boundaries
+
+Model resolution and workspace caching do not replace project persistence.
+Continue to record imported deliverables with `twin.record_design_files`,
+using `purchased_model` for SimReady imports, and handle any `store_error`
+before treating binaries as durably stored. Existing MinIO paths stay intact.
+Evidence must identify the selected lock hash, engine build and run inputs.
+Verification findings do not silently edit a selected design.
+
+## Remaining rollout work
+
+Remote pinned KiCad synchronization and source-specific license handling,
+reviewed GitHub Release publishing, automatic cross-catalog synchronization,
+cache quota/eviction, multi-worker download coordination, and durable recovery
+coordination across catalog/Twin/object-store writes remain separate rollout
+steps. There is no new private registry, new emulator, or hosted storage
+service in this change.

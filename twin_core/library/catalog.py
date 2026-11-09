@@ -431,6 +431,15 @@ def parse_colour(raw: Any) -> dict[str, Any]:
     }
 
 
+def parse_models(raw: Any) -> list[dict[str, Any]]:
+    from twin_core.library.model_contracts import validate_models
+
+    try:
+        return validate_models(raw)
+    except ValueError as exc:
+        raise CatalogError(str(exc)) from exc
+
+
 def parse_geometry(raw: Any) -> dict[str, Any]:
     """Where the part's CAD comes from: a generator and its parameters, a STEP
     file, or a third-party OpenUSD package."""
@@ -630,6 +639,7 @@ class ComponentEntry:
     geometry: dict[str, Any]
     material: str
     suppliers: list[dict[str, str]]
+    models: list[dict[str, Any]] = field(default_factory=list)
     notes: str = ""
     version: int = 1
     updated_at: float = 0.0
@@ -971,6 +981,7 @@ class SqliteCatalog:
                 size=str(data.get("size") or "").strip(),
                 specs=parse_specs(data.get("specs")),
                 geometry=parse_geometry(data.get("geometry")),
+                models=parse_models(data.get("models")),
                 material=str(data.get("material") or "").strip().lower(),
                 suppliers=parse_suppliers(data.get("suppliers")),
                 notes=str(data.get("notes") or ""),
@@ -1017,7 +1028,7 @@ class SqliteCatalog:
         if isinstance(entry, ProcessEntry):
             allowed = {"title", "machine_kinds", "material_families", "rules", "notes"}
         elif isinstance(entry, ComponentEntry):
-            allowed = {"title", "specs", "geometry", "material", "suppliers", "notes"}
+            allowed = {"title", "specs", "geometry", "material", "suppliers", "notes", "models"}
         elif isinstance(entry, ErgonomicLimitEntry):
             allowed = {
                 "title",
@@ -1087,6 +1098,24 @@ class SqliteCatalog:
             if "suppliers" in changes:
                 entry.suppliers = parse_suppliers(changes["suppliers"])
         elif isinstance(entry, ComponentEntry):
+            if "models" in changes:
+                proposed = parse_models(changes["models"])
+                previous = {(m["model_id"], m["version"]): m for m in entry.models}
+
+                def content(model: dict[str, Any]) -> dict[str, Any]:
+                    return {k: v for k, v in model.items() if k not in {"status", "status_reason"}}
+
+                for model in proposed:
+                    old = previous.get((model["model_id"], model["version"]))
+                    if old and content(old) != content(model):
+                        raise CatalogError(
+                            "published model content is immutable; increment its version"
+                        )
+                if set(previous) - {(m["model_id"], m["version"]) for m in proposed}:
+                    raise CatalogError(
+                        "retain published model versions; withdraw instead of removing"
+                    )
+                entry.models = proposed
             if "specs" in changes:
                 entry.specs = {**entry.specs, **parse_specs(changes["specs"])}
             if "geometry" in changes:

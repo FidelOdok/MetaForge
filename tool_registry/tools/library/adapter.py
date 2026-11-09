@@ -139,6 +139,9 @@ class LibraryServer(McpToolServer):
         from tool_registry.tools.library.catalog_tools import register_catalog_tools
 
         register_catalog_tools(self.register_tool, library)
+        from tool_registry.tools.library.model_resolver import register_resolver
+
+        register_resolver(self.register_tool, library)
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="library.list_machines",

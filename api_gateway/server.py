@@ -589,6 +589,10 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             logger.warning("knowledge_service_lightrag_failed", error=str(exc))
             knowledge_service = None
     app.state.knowledge_service = knowledge_service
+    if component_catalog_store is None and not os.environ.get("DATABASE_URL"):
+        from digital_twin.catalog.local_store import SqliteComponentCatalogStore
+
+        component_catalog_store = SqliteComponentCatalogStore()
     app.state.component_catalog_store = component_catalog_store
     app.state.component_intent_llm = component_intent_llm
 

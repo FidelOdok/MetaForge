@@ -1095,16 +1095,11 @@ async def bootstrap_tool_registry(
 
         # ----- Component MCP adapter (MET-436) -----
         # Runtime-injected, same pattern as knowledge/constraint/memory:
-        # depends on three collaborators (the Postgres-backed parametric
-        # catalog store, the existing KnowledgeService for mode-2 fallback,
-        # and an intent-translation LLM client) rather than a static
-        # factory. All three must be present — a partially-wired component
-        # search (e.g. no fallback LLM) would silently degrade in ways
-        # that are worse than just not registering the tool.
+        # Structured search requires only the query store (Postgres or SQLite).
+        # Intent translation is registered separately when knowledge and LLM
+        # collaborators are available; missing an LLM must not hide the catalog.
         if (
             component_catalog_store is not None
-            and knowledge_service is not None
-            and component_intent_llm is not None
             and _is_adapter_enabled("component")
             and (not adapter_ids or "component" in adapter_ids)
         ):
