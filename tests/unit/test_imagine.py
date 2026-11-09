@@ -1282,6 +1282,51 @@ async def test_validate_is_an_mcp_read_that_returns_the_report(service: ImagineS
     assert (await srv.imagine_get_studio({"project_id": PROJECT}))["revision"] == 1
 
 
+async def test_validate_takes_a_revision_and_its_description_tells_the_agent_why(
+    service: ImagineService,
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    tool = srv._tools["twin.imagine_validate"].manifest
+    props = tool.input_schema["properties"]
+    assert props["revision"]["type"] == "integer"
+    assert set(props["gates"]["items"]["enum"]) == {"config_valid", "handover", "define_exit"}
+    # The agent is told to name the revision after a write, and why.
+    assert "revision" in tool.description and "not run again" in tool.description
+
+
+async def test_a_recheck_that_names_the_revision_is_not_a_repeat_of_the_earlier_call() -> None:
+    """The chat answers a byte-identical call in a turn from the earlier result, without running it.
+
+    Naming the revision a write returned is what makes the re-check after a fix a new call, so
+    it cannot be answered with the report from before the fix.
+    """
+    from orchestrator.harness.tool_exec import dedup_key
+
+    name = "mcp_twin_imagine_validate"
+    first = {"scope": [{"kind": "part", "id": "usbc-a"}]}
+    again = {"scope": [{"kind": "part", "id": "usbc-a"}], "revision": 2}
+    assert dedup_key(name, first) != dedup_key(name, again)
+    assert dedup_key(name, {"revision": 2}) != dedup_key(name, {"revision": 3})
+
+
+async def test_validate_over_mcp_accepts_the_head_revision_and_refuses_another(
+    service: ImagineService,
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    sent = _fake_verification(service, report=_report())
+    report = await srv.imagine_validate({"project_id": PROJECT, "revision": 1})
+    assert report["verdict"] == "ready_for_handover" and sent[0]["revision"]["number"] == 1
+    with pytest.raises(ValueError, match="Only the head revision"):
+        await srv.imagine_validate({"project_id": PROJECT, "revision": 9})
+    with pytest.raises(ValueError, match="revision"):
+        await srv.imagine_validate({"project_id": PROJECT, "revision": "two"})
+
+
 async def test_validate_over_mcp_returns_the_invalid_report_not_an_error(
     service: ImagineService,
 ) -> None:

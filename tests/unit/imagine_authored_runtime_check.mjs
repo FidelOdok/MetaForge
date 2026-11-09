@@ -53,6 +53,28 @@ async function check(name, fn) {
 }
 const near = (a, b, tol = 1e-3) => Math.abs(a - b) <= tol;
 
+// Two helper modes, used by tests that keep the agent's skill honest against this runtime:
+//   --methods          prints the shape builder's method names
+//   --form FILE.json   runs {"params", "parts"} and prints what each part drew
+const argv = process.argv.slice(2);
+if (argv[0] === '--methods') {
+  const r = await FG.run([part('p', "throw new Error(Object.keys(g).sort().join(','));")], {}, OPTS);
+  console.log(JSON.stringify({ methods: r.parts[0].error.split(',') }));
+  process.exit(0);
+}
+if (argv[0] === '--form') {
+  const fs = await import('node:fs');
+  const spec = JSON.parse(fs.readFileSync(argv[1], 'utf8'));
+  const r = await FG.run(spec.parts, spec.params || {}, OPTS);
+  const span = (b) => b && [b.max[0] - b.min[0], b.max[2] - b.min[2], b.max[1] - b.min[1]];
+  console.log(JSON.stringify({
+    parts: r.parts.map((p) => ({ id: p.id, kind: p.kind, triangles: p.triangles, error: p.error || null, size: span(p.bbox) })),
+    size: span(r.bbox),
+    errors: r.errors,
+  }));
+  process.exit(0);
+}
+
 // -- the lamp ----------------------------------------------------------------
 const LAMP = [
   part('base', "return [g.cylinder(p.base_r, p.base_h).at(0, p.base_h / 2, 0).name('base')];"),

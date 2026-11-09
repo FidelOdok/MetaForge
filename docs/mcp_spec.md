@@ -1377,7 +1377,10 @@ per-product formgraph config for Create's Imagine stage
   status, detail}]}`, the checklist that gates Imagine to Develop.
 - `twin.imagine_validate` (read-only, never held for approval): a dry run of
   every Imagine gate. Takes `config` (a draft to check), `scope` (refs to
-  re-check, `{kind, id}`) and `gates`. Returns the verification service's
+  re-check, `{kind, id}`), `revision` (the head revision; after a write, name
+  the revision it returned, because the chat answers an identical repeat of an
+  earlier call from that call's result, so a plain repeat would show the report
+  from before the fix) and `gates`. Returns the verification service's
   report: `verdict` (`invalid`, `needs_agent`, `blocked_external`,
   `needs_person`, `ready_for_handover`), `level` (V0 to V2), `gates` and
   `findings`, each with a `target`, a `status`, a `resolver` (`agent`, `person`

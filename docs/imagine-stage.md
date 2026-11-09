@@ -546,6 +546,117 @@ files in a sandboxed frame in Chromium and checks the empty state, the
 labels, the bounding-box fit through a resize, the one-column layout and the
 bounded height (`npx playwright test imagine-engine`).
 
+## Authored forms
+
+The catalogue has one template, `enclosure`. A product whose shape is something
+else sets `form.template` to `authored` and describes the form as parts, each
+carrying the body of a geometry function, `build(p, g)`. The agent skill
+(`mcp_core/plugin_skills/imagine_studio/SKILL.md`) is the reference for writing
+one, with the shape builder and a worked lamp; this section says how the gateway
+and the page treat it.
+
+### The config
+
+| Field | Meaning |
+|---|---|
+| `form.params` | The dimensions, as numbers. A name is letters, digits and underscores, starting with a letter, 32 characters at most. |
+| `form.ranges` | `[min, max]` for the parameters a person may move. |
+| `form.authored.parts[]` | `id` (a slug), `name`, `kind` (`generated`, `primitive` or `component`), `code`, `uses` (parameters the code reads, each declared), `body` (at most one part), `max_triangles` (optional). |
+
+`kind` says how far to trust a part as geometry, and the page colours the three
+differently. A `component` is a stand in for a bought part drawn from its
+envelope, not the part's real mesh. `form.authored` is refused with any other
+template, and `features` belongs to the enclosure.
+
+### Checks when it is written
+
+`api_gateway/imagine/formgraph/authored.py` is pure and runs inside the formgraph
+checks, so `PUT /studio` refuses the config, naming the part, when a part's code:
+
+- contains any of `fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `import`, `eval`, `Function`, `document`, `window`, `self`, `globalThis`, `postMessage`, `constructor`, `prototype`, `__proto__`, `require`, `process`, `this`, in code, a comment or a string;
+- contains a backslash escape or a backtick template string, which can hide a word;
+- is over 6000 bytes, or the parts together are over 40000;
+- declares more than 20000 triangles for a part or 100000 in all.
+
+More than 24 parts, a duplicate id, an unknown kind, two bodies or a
+parameter the code uses but `form.params` does not declare are refused too. With
+no `body` part the write passes and warns that the checks that need an enclosure
+will read `not_assessed`. This is the first of two layers: a word list is never
+the safety boundary.
+
+### The sandbox
+
+`engine/authored.js` is loaded before `engine.js` and runs the code on the page
+without trusting it:
+
+- **Isolation.** There is one worker per part, so a syntax error, a crash or an
+  endless loop belongs to one named part and stops no other.
+- **The sandbox first.** Each worker's source removes the network, storage,
+  timers, messaging and `eval` from its scope (18 names) before the part's code is
+  placed in it. The code is the body of a function in the worker's source text,
+  never passed to `eval`, so the page's Content Security Policy is unchanged:
+  `script-src 'self'`, `worker-src blob:` and `connect-src 'none'` still apply, and
+  `Function(...)` inside a worker dies with an `EvalError` (checked in Chromium).
+- **A time limit on the code, not the page.** The page solves on its own thread,
+  so a busy page cannot read a worker's reply for seconds. The limit (3 seconds)
+  starts when the worker reports that it has started; a separate 20 second limit
+  covers a worker that never starts.
+- **Nothing it sends back is trusted.** Every number must be finite and within
+  100000 mm, every index must point at a real vertex, and the triangle count must
+  fit the part's budget, or the part reports an error.
+
+### What the page shows
+
+For an authored form the engine's own analysis is hidden, because it is computed
+from an enclosure and for this form that enclosure is a placeholder: the verdict,
+checks, requirements met, assembly, electronics, bill of materials, cost and
+hand off blocks. The enclosure's sliders are replaced by the form's own
+parameters; moving one runs the code again with no model call. The page shows
+what was measured (size, volume of the shapes with overlaps counted twice, parts,
+triangles and the mass if solid in the process material) beside a list of what was
+not assessed: wall thickness and moulding, the fit of the electronics, vents and
+heat, the manufacturing verdict and cost, assembly, product tests and the form's
+bill of materials. That list never reads as a pass. A form that fails shows
+"Form not drawn" or "Form partly drawn" with each part's error and gives no size.
+
+The page publishes what it drew as `window.FG_AUTHORED`: `status` (`running`,
+`ready` or `error`), `params`, `bbox`, `triangles`, `errors`, and for each part its
+`kind`, `triangles`, `bbox`, `volume` and `error`. It dispatches an `fg-authored`
+event on every change.
+
+### Looking at it
+
+`scripts/imagine_look.py` opens an engine page in a real browser (it needs the
+`playwright` package and a Chromium build), waits for `window.FG_AUTHORED`,
+prints each part's size and takes a screenshot:
+
+```bash
+python scripts/imagine_look.py --gateway http://127.0.0.1:8000 --project <id> \
+    --out look --set arm_len=400
+```
+
+With `--set` it moves that parameter's slider and looks again, and reports what
+changed, how much of the picture changed and every request the page made after
+the change: the sandbox workers start from `blob:` URLs, so a change that redraws
+the form shows no network request and no call to a model. It exits 0 when the form
+is drawn, 2 when a part failed and 3 when the page published no authored form.
+
+### What the verification service says
+
+The revision carries the form's parts (see "The form in the revision"), and the
+service adds two advisory findings: `form.enclosure_checks` (`not_assessed`) and
+`form.confidence_mix` (every part is a `component`). Neither can change a
+verdict, a gate or a level.
+
+### Limits
+
+- The electronics are not placed in an authored form, so the fit of the
+  electronics is not assessed. There are no component meshes yet: a `component`
+  is a box.
+- Shapes compose and do not subtract: there are no boolean cuts.
+- The page's measured size is not sent to the service, so no fit check runs.
+- The look needs a browser. A client with none must say it could not look.
+
 ## Observability
 
 `metaforge_imagine_studio_total{operation, outcome}` counts each `put`,
@@ -580,12 +691,11 @@ Read the studio again to get a fresh URL. Nothing here names a provider.
 ## Known limits
 
 - The form catalogue (`api_gateway/imagine/formgraph/data/catalogue.json`)
-  has one template, `enclosure`: a rounded, shelled box with a lid. It can
-  stand for a lamp's base housing but not an arm, a hinge or a shade, and the
-  engine labels every product's shell *Fuselage shell* (`engine/engine.js`,
-  the parts panel and the readiness row), wording from the multirotor
-  reference. Non-box products need more templates, or their made parts in the
-  inline context.
+  has one template, `enclosure`: a rounded, shelled box with a lid. Other shapes
+  are authored (see "Authored forms"), which has its own limits. For an
+  enclosure the engine still labels every product's shell *Fuselage shell*
+  (`engine/engine.js`, the parts panel and the readiness row), wording from the
+  multirotor reference.
 - The concept assembly decision records each part's envelope in its text and
   the studio's handover record; a concept layout with sizes and positions is
   still drawn by `twin.render_concept_sketch`.

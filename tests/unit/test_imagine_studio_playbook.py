@@ -11,11 +11,17 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from api_gateway.chat.playbooks import load_playbooks
 from api_gateway.imagine.engine_page import validate_config
+from api_gateway.imagine.formgraph import authored
 
 REPO = Path(__file__).resolve().parents[2]
 PLAYBOOK = REPO / "mcp_core" / "plugin_skills" / "imagine_studio" / "SKILL.md"
@@ -101,3 +107,92 @@ def test_a_delegated_run_carries_on_without_a_person() -> None:
 
 def test_the_playbook_has_no_em_dashes() -> None:
     assert "—" not in PLAYBOOK.read_text(encoding="utf-8")
+
+
+# -- authoring a form (spec 23.6) --------------------------------------------------------
+
+RUNTIME_CHECK = REPO / "tests" / "unit" / "imagine_authored_runtime_check.mjs"
+
+
+def _skill() -> str:
+    return PLAYBOOK.read_text(encoding="utf-8")
+
+
+def _authoring_section() -> str:
+    text = _skill()
+    start = text.index("## Authoring a form")
+    end = text.index("## Steps")
+    return text[start:end]
+
+
+def _authored_example() -> dict[str, Any]:
+    blocks = re.findall(r"```json authored-form\n(.*?)\n```", _skill(), re.S)
+    assert len(blocks) == 1, "the skill carries exactly one authored-form example"
+    data: dict[str, Any] = json.loads(blocks[0])
+    return data
+
+
+def _node(*args: str) -> dict[str, Any]:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the authored-form runtime cannot be exercised")
+    proc = subprocess.run(
+        [node, str(RUNTIME_CHECK), *args], capture_output=True, text=True, timeout=120, cwd=REPO
+    )
+    assert proc.returncode == 0, proc.stderr
+    out: dict[str, Any] = json.loads(proc.stdout.strip().splitlines()[-1])
+    return out
+
+
+def test_the_skill_names_both_form_templates_and_no_longer_says_enclosure_is_the_only_one() -> None:
+    text = _skill()
+    assert "Today that is only" not in text
+    assert "`authored`" in text and "`enclosure`" in text
+    assert "## Authoring a form" in text
+
+
+def test_the_authored_example_passes_the_checks_the_write_runs() -> None:
+    cfg = _skeleton()
+    cfg["form"] = _authored_example()
+    validated = validate_config(cfg)
+    assert validated.config["form"]["template"] == "authored"
+
+
+def test_the_authored_example_really_draws_in_the_sandbox() -> None:
+    form = _authored_example()
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+        json.dump({"params": form["params"], "parts": form["authored"]["parts"]}, handle)
+    result = _node("--form", handle.name)
+    assert all(p["error"] is None for p in result["parts"]), result["parts"]
+    assert {p["kind"] for p in result["parts"]} >= {"generated", "component"}
+    assert all(p["triangles"] > 0 for p in result["parts"])
+    assert result["size"][2] > 100, "a desk lamp is taller than a hand"
+
+
+def test_the_skill_lists_every_word_the_checker_refuses_and_every_budget() -> None:
+    section = _authoring_section()
+    for token in authored.BANNED_TOKENS:
+        assert f"`{token}`" in section, f"{token} is refused by the checker but not in the skill"
+    for number in (
+        authored.MAX_PARTS,
+        authored.MAX_PART_CODE_BYTES,
+        authored.MAX_TOTAL_CODE_BYTES,
+        authored.MAX_PART_TRIANGLES,
+        authored.MAX_TOTAL_TRIANGLES,
+    ):
+        assert str(number) in section.replace(",", "").replace(" ", ""), number
+    for kind in authored.KINDS:
+        assert f"`{kind}`" in section, kind
+
+
+def test_the_skill_documents_exactly_the_shapes_the_sandbox_offers() -> None:
+    offered = set(_node("--methods")["methods"])
+    documented = set(re.findall(r"`g\.([a-z]+)\(", _authoring_section()))
+    assert documented == offered, documented ^ offered
+
+
+def test_the_skill_tells_the_agent_what_a_form_is_not_assessed_for_and_not_to_claim_it() -> None:
+    section = _authoring_section()
+    assert "not assessed" in section
+    assert "form.enclosure_checks" in section and "form.confidence_mix" in section
+    assert "could not look" in section, "an agent that cannot see the form must say so"

@@ -85,9 +85,11 @@ write:
   hyphens, 2 to 49 characters, for example `desk-lamp`) and `name` of 60
   characters or fewer.
 - **`engine`** is `formgraph@2` (`formgraph@1` also passes).
-- **`form.template`** must be one the catalogue has. Today that is only
-  `enclosure` (a soft-shell box with a lid). Use it as the shell or base and
-  say in the ledger what the template cannot show.
+- **`form.template`** is `enclosure` (a soft-shell box with a lid, sized by
+  its parameters) or `authored` (a form you build from parts, see "Authoring a
+  form"). Use `enclosure` when the product is a box around electronics. When
+  its shape is something else, such as a lamp, author the form: do not stand
+  a box in for it.
 - **`requirements[].pri`** is `Must`, `Should` or `Off`, exactly. Ids come from
   the catalogue: `interval`, `life`, `resp`, `cov`, `acc`, `drop`, `touch`,
   `chgt`, `chgh`, `ip`. Anything else is a custom requirement in
@@ -178,13 +180,203 @@ product's own, keep the shape:
 The angle-bracket values pass the checks but are not facts. Replace each with
 what you read, or list it to the person as missing.
 
+## Authoring a form
+
+The `enclosure` template draws one thing: a soft-shell box with a lid. Use it
+when the product is a box around electronics. When the shape is something else
+(a lamp with a base, an arm and a shade, a clock, a stand), author the form:
+write its geometry as code and the page draws it.
+
+Set `form.template` to `authored`. Put every dimension in `form.params`
+(numbers; a name is letters, digits and underscores, starting with a letter, 32
+characters at most), the range of the ones a person may move in `form.ranges`,
+and the parts in `form.authored.parts`. Leave out `features`: it belongs to the
+enclosure. Each part has:
+
+- `id` (a lowercase slug), `name`, and `kind`, which says how far to trust it
+  as geometry:
+  - `generated`: geometry you wrote for this product (a shade, an arm, a base);
+  - `primitive`: a simple solid you declare as a stand in;
+  - `component`: a stand in for a bought part, drawn from its envelope. It is a
+    box, not the part's real mesh.
+  The page draws the three differently, so a scene made of stand ins does not
+  read as a finished design.
+- `code`: the body of `build(p, g)`. `p` holds the parameters, read only (`p.arm_len`);
+  `g` builds shapes. Return a list of shapes, for example
+  `return [g.box(10, 5, 5).at(0, 2.5, 0)];`
+- `uses`: the parameters the code reads. Each must be in `form.params`.
+- `body`: `true` on at most one part, the main body the electronics would sit
+  in. Without one, the page says the fit of the electronics is not assessed.
+- `max_triangles`: an optional cap for the part.
+
+Units are millimetres and Y is up. Stand the product on the floor at Y = 0,
+centred on the origin. A shape is made centred on its own origin (a box runs
+from -w/2 to w/2), so rotate it first with `.rot(x, y, z)` and then place it
+with `.at(x, y, z)`.
+
+`g` offers only these shapes:
+
+| Call | Makes |
+|---|---|
+| `g.box(w, h, d)` | a box |
+| `g.cylinder(r, h, seg)` | a cylinder along Y |
+| `g.cone(r, h, seg)` | a cone, base at the bottom, point up |
+| `g.frustum(r0, r1, h, seg)` | a cone with its top cut off: `r0` at the bottom, `r1` at the top (a lamp shade) |
+| `g.sphere(r, seg)` | a sphere |
+| `g.torus(R, r, segR, segr)` | a ring in the XZ plane: `R` to the centre of the tube, `r` its radius |
+| `g.lathe(profile, seg)` | `[[radius, y], ...]` turned about Y |
+| `g.extrude(outline, depth)` | `[[x, z], ...]` pushed along Y and centred; a simple outline that does not cross itself |
+| `g.tube(path, r, seg)` | a round bar along `[[x, y, z], ...]` |
+
+`seg` is optional (3 to 96). Every shape takes `.at(x, y, z)`, `.rot(x, y, z)`
+in degrees (about x, then y, then z), `.scale(x, y, z)` or `.scale(s)`, and
+`.name(label)`.
+
+**The code is checked and sandboxed.** It runs in a sandbox with no network,
+storage, timers or page access. A write is refused, naming the part, when a
+part's code contains any of these words, even in a comment or a string:
+`fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `import`, `eval`, `Function`, `document`, `window`, `self`, `globalThis`, `postMessage`, `constructor`, `prototype`, `__proto__`, `require`, `process`, `this`. A backslash escape or a backtick template string is refused too,
+because it can hide a word: write plain text. Budgets: at most
+24 parts, 6000 bytes of code per part and
+40000 in all, 20000 triangles per part and
+100000 in all.
+
+**What the page and the report say, and what you must not.**
+
+- The page shows what was measured (size, volume, parts, triangles) and lists
+  what was not assessed: wall thickness and moulding, the fit of the
+  electronics, vents and heat, the manufacturing verdict and cost, assembly,
+  product tests and the form's bill of materials. None of those ran on an
+  authored form. Never say it passes any of them.
+- `twin.imagine_validate` adds two advisory findings: `form.enclosure_checks`
+  (not assessed; there is nothing for you to fix) and `form.confidence_mix`
+  (every part is a `component`; add geometry that is yours). Advisory findings
+  never change the verdict.
+- Code that throws, loops or draws nothing shows on the page as "Form partly
+  drawn" or "Form not drawn", with the part named. Look at the page after each
+  write if your client can (a browser, or `python scripts/imagine_look.py`,
+  which also takes `--set name=value` to move a parameter and look again). If it
+  cannot, say that you wrote the form and could not look at it. You have not
+  seen it, and "it looks right" would be invented.
+
+**How to work.** Choose the parameters first: every dimension a person might
+want to change is one, so a slider moves it and the form redraws with no
+further model call. Write one small part at a time from the shapes above. It is
+a concept, not exact geometry, and nothing here is claimed as exact. Write with
+`twin.imagine_put_studio`; a refusal lists every problem and names the parts, so
+fix those parts and write again. Then validate as in the steps below.
+
+A desk lamp with a base, an arm, a shade, a light panel, a touch button and a
+USB-C port. Replace `form` in the skeleton with this and keep the rest:
+
+```json authored-form
+{
+  "template": "authored",
+  "params": {
+    "base_r": 55,
+    "base_h": 12,
+    "arm_len": 260,
+    "arm_lean": 40,
+    "head_r": 50,
+    "head_h": 70
+  },
+  "ranges": {
+    "arm_len": [
+      120,
+      480
+    ],
+    "arm_lean": [
+      -80,
+      80
+    ],
+    "head_r": [
+      30,
+      80
+    ]
+  },
+  "authored": {
+    "parts": [
+      {
+        "id": "base",
+        "name": "Weighted base",
+        "kind": "generated",
+        "uses": [
+          "base_r",
+          "base_h"
+        ],
+        "code": "return [g.cylinder(p.base_r, p.base_h, 48).at(0, p.base_h / 2, 0)];",
+        "body": true
+      },
+      {
+        "id": "arm",
+        "name": "Arm",
+        "kind": "generated",
+        "uses": [
+          "base_h",
+          "arm_len",
+          "arm_lean"
+        ],
+        "code": "const top = p.base_h + p.arm_len;return [g.tube([[0, p.base_h, 0], [p.arm_lean * 0.2, p.base_h + p.arm_len * 0.5, 0], [p.arm_lean, top, 0]], 4, 16)];"
+      },
+      {
+        "id": "shade",
+        "name": "Shade",
+        "kind": "generated",
+        "uses": [
+          "base_h",
+          "arm_len",
+          "arm_lean",
+          "head_r",
+          "head_h"
+        ],
+        "code": "return [g.frustum(p.head_r, 12, p.head_h, 48).at(p.arm_lean, p.base_h + p.arm_len + p.head_h / 2, 0)];"
+      },
+      {
+        "id": "panel",
+        "name": "Light panel",
+        "kind": "primitive",
+        "uses": [
+          "base_h",
+          "arm_len",
+          "arm_lean",
+          "head_r"
+        ],
+        "code": "return [g.cylinder(p.head_r * 0.85, 3, 48).at(p.arm_lean, p.base_h + p.arm_len + 1.5, 0)];"
+      },
+      {
+        "id": "button",
+        "name": "Touch button",
+        "kind": "component",
+        "uses": [
+          "base_r",
+          "base_h"
+        ],
+        "code": "return [g.cylinder(7, 4, 24).at(p.base_r * 0.55, p.base_h + 2, 0)];"
+      },
+      {
+        "id": "usbc",
+        "name": "USB-C receptacle",
+        "kind": "component",
+        "uses": [
+          "base_r",
+          "base_h"
+        ],
+        "code": "return [g.box(9, 3.2, 7.5).at(0, p.base_h / 2, -(p.base_r - 3))];"
+      }
+    ]
+  }
+}
+```
+
 ## Steps
 
 1. **Read the studio** with `twin.imagine_get_studio`. Handed over: go to
    "After handover". A draft: start from its config.
 2. **Work from what the person said.** Split their words into ledger
    statements; map each to a function, a requirement or a scenario, mark it
-   `custom` with a custom requirement, or `out-of-scope` with a note. Ask at
+   `custom` with a custom requirement, or `out-of-scope` with a note. If the
+   product's shape is not a box around electronics, author its form (see
+   "Authoring a form"). Ask at
    most three questions, in one message, and only for what you cannot infer
    (quantity, where it is used, how it is powered are the usual ones). Put
    every value you assumed in `programme.assumptions`.
@@ -200,8 +392,13 @@ what you read, or list it to the person as missing.
 5. **Fix what is yours, then check only that.** While the verdict is
    `needs_agent` or `invalid`, fix every finding whose `resolver` is `agent`,
    write the config with `twin.imagine_put_studio`, then call
-   `twin.imagine_validate` with `scope` set to the refs you changed
-   (`{kind, id}` as the findings give them). A refused write lists every
+   `twin.imagine_validate` with `revision` set to the revision that write
+   returned, and `scope` set to the refs you changed (`{kind, id}` as the
+   findings give them). Always name the `revision`: the chat repeats an
+   earlier result for a call identical to one already made in the same turn
+   and does not run it again, so a re-check with the same arguments as before
+   would show you the report from before your fix and you would think it had
+   not worked. A refused write lists every
    formgraph error at once: fix all of them. Stop after three rounds, or when
    the same findings come back twice, and tell the person which still fail;
    do not loop.

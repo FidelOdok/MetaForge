@@ -63,3 +63,55 @@ def test_the_engine_marks_the_page_authored_and_skips_the_enclosure_panel() -> N
 def test_the_parameters_mount_in_the_left_pane_and_the_summary_in_the_right() -> None:
     assert "host:document.getElementById('graphPane')" in JS
     assert "summaryHost:document.getElementById('dfm')" in JS
+
+
+# -- the docs say what the code does ----------------------------------------------------
+
+DOCS = Path(__file__).parents[2] / "docs" / "imagine-stage.md"
+
+
+def _authored_docs() -> str:
+    text = DOCS.read_text(encoding="utf-8")
+    assert "## Authored forms" in text, "docs/imagine-stage.md has no Authored forms section"
+    start = text.index("## Authored forms")
+    nxt = text.find("\n## ", start + 5)
+    return text[start : nxt if nxt != -1 else len(text)]
+
+
+def test_the_docs_state_the_budgets_the_checker_enforces() -> None:
+    from api_gateway.imagine.formgraph import authored
+
+    section = _authored_docs().replace(",", "").replace(" ", "")
+    for number in (
+        authored.MAX_PARTS,
+        authored.MAX_PART_CODE_BYTES,
+        authored.MAX_TOTAL_CODE_BYTES,
+        authored.MAX_PART_TRIANGLES,
+        authored.MAX_TOTAL_TRIANGLES,
+    ):
+        assert str(number) in section, number
+
+
+def test_the_docs_name_the_findings_the_script_and_the_sandbox_properties() -> None:
+    section = _authored_docs()
+    for needle in (
+        "form.enclosure_checks",
+        "form.confidence_mix",
+        "scripts/imagine_look.py",
+        "window.FG_AUTHORED",
+        "one worker per part",
+        "never passed to `eval`",
+        "worker-src blob:",
+        "not assessed",
+    ):
+        assert needle in section, needle
+
+
+def test_the_docs_do_not_claim_the_page_checks_an_authored_form() -> None:
+    section = _authored_docs()
+    assert "never reads as a pass" in section
+    assert "15 of 16" not in section
+
+
+def test_the_docs_have_no_em_dashes() -> None:
+    assert "—" not in DOCS.read_text(encoding="utf-8")
