@@ -124,11 +124,16 @@ class TestBuildComponentCatalogStore:
     """``_build_component_catalog_store`` (MET-436) — mirrors
     ``TestBuildKnowledgeService``'s DATABASE_URL-gated construction contract."""
 
-    async def test_returns_none_when_database_url_unset(
+    async def test_uses_local_sqlite_index_when_database_url_unset(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from digital_twin.catalog.local_store import SqliteComponentCatalogStore
+
         monkeypatch.delenv("DATABASE_URL", raising=False)
-        assert await _build_component_catalog_store() is None
+        monkeypatch.setenv("METAFORGE_COMPONENT_CATALOG_PATH", ":memory:")
+        store = await _build_component_catalog_store()
+        assert isinstance(store, SqliteComponentCatalogStore)
+        await _close_component_catalog_store(store)
 
     async def test_constructs_with_normalised_dsn_and_initializes(
         self, monkeypatch: pytest.MonkeyPatch
