@@ -7,6 +7,7 @@ import type {
   ImagineEvent,
   ImagineEventReply,
   ImagineStudio,
+  ValidationReport,
 } from '../../types/imagine';
 
 /**
@@ -22,6 +23,7 @@ export const imagineKeys = {
   all: ['imagine'] as const,
   studio: (projectId: string) => ['imagine', projectId, 'studio'] as const,
   handover: (projectId: string) => ['imagine', projectId, 'handover'] as const,
+  validation: (projectId: string) => ['imagine', projectId, 'validation'] as const,
 };
 
 /** `GET .../imagine/studio`. */
@@ -45,6 +47,16 @@ export async function postImagineEvent(projectId: string, event: ImagineEvent): 
 /** `GET .../imagine/handover`: the checklist from Imagine to Develop. */
 export async function getHandover(projectId: string, signal?: AbortSignal): Promise<HandoverChecklist> {
   const { data } = await apiClient.get<HandoverChecklist>(`${base(projectId)}/handover`, { signal });
+  return data;
+}
+
+/**
+ * `GET .../imagine/validation`: what is left and who clears it, for the head
+ * revision. The verification service decides it. When that service cannot be
+ * reached the report says so (`blocked_external`) instead of failing.
+ */
+export async function getValidation(projectId: string, signal?: AbortSignal): Promise<ValidationReport> {
+  const { data } = await apiClient.get<ValidationReport>(`${base(projectId)}/validation`, { signal });
   return data;
 }
 

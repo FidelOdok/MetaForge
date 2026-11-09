@@ -215,8 +215,32 @@ dimensions yet, the 3D view shows *No shape yet* instead of a default part.
 
 ### The handover
 
-Under the studio, **Ready for engineering?** lists the handover checklist
-from `GET .../imagine/handover`: the ledger, the assumptions (confirmed or
+Under the studio, **Ready for engineering?** opens with **What is left, and
+who clears it**: the verification service's report from
+`GET .../imagine/validation`, shown as it came. The page never works out a
+verdict of its own, so it cannot show a pass the service did not compute.
+
+- A chip gives the verdict in plain words: *Nothing blocks the handover*,
+  *Waiting on you*, *Waiting on the assistant*, *Blocked outside the project*
+  or *The config has errors*. Beside it is the level, V0 to V2 and never
+  higher.
+- Open findings are grouped by who can clear them. **Waiting on you** is what
+  only a person can do (confirm or accept the assumptions, confirm the scenario
+  tests, open the studio so its checks run), with the ids it is about.
+  **Waiting on the assistant** says what is needed. **Outside the project** is
+  what has to happen elsewhere, such as a concept mesh.
+- **Assumed, not confirmed** lists what was accepted as an assumption, or uses
+  a default, and has not been confirmed. An assumption an agent accepted for a
+  person names the agent and says it is not a person's confirmation.
+- **Leaving the Define phase** is stricter than the handover on purpose: an
+  assumption that is only accepted passes the handover and does not pass this.
+- If the verification service cannot be reached, the report says so: *Blocked
+  outside the project*, level V0, with one finding. The hand-over button stays
+  where it is, because the gateway decides the handover.
+
+The report refreshes every ten seconds, so a step taken in the studio shows
+up without a reload. Under it, **Handover checklist** (collapsed) lists the
+nine items from `GET .../imagine/handover` that the handover itself checks: the ledger, the assumptions (confirmed or
 explicitly accepted), the scenario tests, the requirements with their source
 and verification method, one chosen part per function, the manufacturing
 context, the concept assembly with component ids and an illustrative concept
@@ -1090,6 +1114,7 @@ The Imagine stage uses these routes, under
 | `PUT /studio` | A new studio revision from a product config |
 | `POST /events` | One studio write, `{event_id, kind, data}`; idempotent per `event_id` |
 | `GET /handover` | The handover checklist, `{ready, items: [{id, label, status, detail}]}` |
+| `GET /validation` | What is left and who clears it, for the head revision: the verification service's report (`verdict`, `level`, `gates`, `findings`, `debt`). See `docs/imagine-stage.md` |
 | `POST /handover` | Hand over (`{op_id}`); `409` with the missing items when not ready |
 | `POST /rework` | Reopen Imagine on a new revision (`{op_id, reason}`); dependent evidence is marked stale |
 | `GET /engine` | The studio's engine page, with the project's config embedded |

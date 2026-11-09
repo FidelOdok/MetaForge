@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getHandover,
   getStudio,
+  getValidation,
   imagineKeys,
   newId,
   postHandover,
@@ -26,6 +27,17 @@ export function useHandoverChecklist(projectId: string, enabled = true) {
   return useQuery({
     queryKey: imagineKeys.handover(projectId),
     queryFn: ({ signal }) => getHandover(projectId, signal),
+    enabled,
+    refetchInterval: POLL_MS,
+    retry: false,
+  });
+}
+
+/** The validation report, polled like the checklist so a person's step in the studio shows up. */
+export function useValidation(projectId: string, enabled = true) {
+  return useQuery({
+    queryKey: imagineKeys.validation(projectId),
+    queryFn: ({ signal }) => getValidation(projectId, signal),
     enabled,
     refetchInterval: POLL_MS,
     retry: false,

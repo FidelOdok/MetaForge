@@ -4,6 +4,7 @@ import { handoverMissing } from '../../../api/endpoints/imagine';
 import { refusalOf } from '../../../api/endpoints/create';
 import { useHandover, useHandoverChecklist, useRework } from '../../../hooks/use-imagine';
 import type { HandoverItem, ImagineStudio } from '../../../types/imagine';
+import { ValidationReport } from './ValidationReport';
 
 const STATUS_WORD: Record<HandoverItem['status'], string> = {
   done: 'Done',
@@ -122,8 +123,12 @@ export function HandoverPanel({
   return (
     <section className="cv-card cv-handover" aria-labelledby="cv-handover-title">
       <h3 id="cv-handover-title">Ready for engineering?</h3>
+      <ValidationReport projectId={projectId} />
       {items.length > 0 ? (
-        <ItemList items={items} label="Handover checklist" />
+        <details className="cv-checklist-details">
+          <summary>Handover checklist</summary>
+          <ItemList items={items} label="Handover checklist" />
+        </details>
       ) : checklist.isError ? (
         <p className="cv-muted">The checklist could not be loaded: {refusalOf(checklist.error)}</p>
       ) : (
