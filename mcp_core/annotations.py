@@ -259,6 +259,9 @@ READ_ONLY: frozenset[str] = frozenset(
         # A dry run of the Imagine gates: reads, writes nothing, so a human
         # is never asked to approve it.
         "twin.imagine_validate",
+        # A look at an authored form in a headless browser: it renders the stored
+        # studio's page and returns what it drew and a picture. Nothing is written.
+        "twin.imagine_look",
         # FORGE-523: an item's revision history, read from REVISION_OF edges.
         "twin.item_history",
         "twin.rank_sensitivity",

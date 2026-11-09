@@ -196,3 +196,37 @@ def test_the_skill_tells_the_agent_what_a_form_is_not_assessed_for_and_not_to_cl
     assert "not assessed" in section
     assert "form.enclosure_checks" in section and "form.confidence_mix" in section
     assert "could not look" in section, "an agent that cannot see the form must say so"
+
+
+# -- the look tool the skill sends the agent to ---------------------------------------------
+
+
+def test_the_skill_sends_the_agent_to_the_look_tool_and_names_its_arguments() -> None:
+    from api_gateway.imagine.service import ImagineService
+    from tool_registry.tools.twin.adapter import TwinServer
+    from twin_core.api import InMemoryTwinAPI
+
+    text = _skill()
+    section = _authoring_section()
+    assert "`twin.imagine_look`" in text.split("## Rules")[0], "listed in the tool table"
+    assert "`twin.imagine_look`" in section
+    twin = InMemoryTwinAPI.create()
+    manifest = (
+        TwinServer(twin=twin, imagine_studio=ImagineService(twin))
+        ._tools["twin.imagine_look"]
+        .manifest
+    )
+    for argument in ("revision", "set"):
+        assert argument in manifest.input_schema["properties"]
+        assert f"`{argument}`" in section, f"the skill does not name the {argument} argument"
+    for answer in ("unavailable", "not_authored"):
+        assert f"`{answer}`" in section, answer
+    assert "could not look" in section
+
+
+def test_the_imagine_command_tells_the_agent_to_look_after_each_write_of_an_authored_form() -> None:
+    from mcp_core.workflows import prompt_body
+
+    command = prompt_body("imagine")
+    assert "`twin.imagine_look`" in command
+    assert "authored" in command and "could not look" in command

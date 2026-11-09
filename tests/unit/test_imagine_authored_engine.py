@@ -115,3 +115,14 @@ def test_the_docs_do_not_claim_the_page_checks_an_authored_form() -> None:
 
 def test_the_docs_have_no_em_dashes() -> None:
     assert "—" not in DOCS.read_text(encoding="utf-8")
+
+
+def test_the_look_tool_is_documented_where_the_other_imagine_tools_are() -> None:
+    root = Path(__file__).parents[2] / "docs"
+    section = _authored_docs()
+    assert "`twin.imagine_look`" in section and "`unavailable`" in section
+    assert "playwright install chromium" in section
+    assert "`twin.imagine_look`" in (root / "capability-matrix.md").read_text(encoding="utf-8")
+    spec = (root / "mcp_spec.md").read_text(encoding="utf-8")
+    assert "`twin.imagine_look` (read-only, never held for approval)" in spec
+    assert "`revision`" in spec.split("`twin.imagine_look`")[1][:900]

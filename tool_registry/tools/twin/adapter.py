@@ -9437,6 +9437,71 @@ class TwinServer(McpToolServer):
             ),
             handler=self.imagine_validate,
         )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_look",
+                adapter_id="twin",
+                name="Imagine: Look at the form",
+                description=(
+                    "Look at the authored form: open the stored studio's engine page in "
+                    "headless Chromium, read what each part drew (kind, size, triangles, "
+                    "errors) and return the picture as an image. Pass 'set' "
+                    "({parameter: number}) to move parameters in the page only, and look "
+                    "again: nothing is saved, the form redraws with no model call, and the "
+                    "result carries both pictures, what changed and the requests the page "
+                    "made after the change. Only an authored form can be looked at "
+                    "(form.template 'authored'); an enclosure studio answers not_authored. "
+                    "After you write a config, look with 'revision' set to the revision the "
+                    "write returned: a call identical to an earlier one in the same turn is "
+                    "answered with the earlier result and is not run again, so a plain "
+                    "repeat would show you the picture from before your fix. When "
+                    "Playwright or a Chromium build is missing the result is status "
+                    "unavailable with how to install them: then say you could not look at "
+                    "the form, and never claim it looks right. A part that fails shows its "
+                    "error by name and the rest is still drawn. The form is a concept, "
+                    "never exact geometry, and nothing here is above V2. Reads only: "
+                    "nothing is written."
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        **project,
+                        "revision": {
+                            "type": "integer",
+                            "description": (
+                                "The studio revision to look at: the head. Name the "
+                                "revision your last write returned."
+                            ),
+                        },
+                        "set": {
+                            "type": "object",
+                            "description": (
+                                "Parameters to move in the page, name to number, for "
+                                'example {"arm_len": 400}. Never saved.'
+                            ),
+                        },
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "enum": ["ready", "error", "none", "not_authored", "unavailable"],
+                        },
+                        "revision": {"type": "integer"},
+                        "size": {"type": ["array", "null"]},
+                        "parts": {"type": "array"},
+                        "errors": {"type": "array"},
+                        "images": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=1024, max_cpu_seconds=120),
+            ),
+            handler=self.imagine_look,
+        )
         # FORGE-824: the handover and rework, for an agent the gateway owner
         # lets decide human-authority steps. Always registered; refused unless
         # METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY is on where the call lands.
@@ -9692,6 +9757,99 @@ class TwinServer(McpToolServer):
                 return dict(detail)
             raise ValueError(f"{tool_id}: {_imagine_refusal(exc)}") from exc
         return dict(report.model_dump(mode="json"))
+
+    async def imagine_look(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        import base64
+
+        from api_gateway.imagine import look
+
+        tool_id = "twin.imagine_look"
+        pid = self._imagine_project(arguments, tool_id)
+        try:
+            sets = look.check_sets(arguments.get("set"))
+        except ValueError as exc:
+            raise ValueError(f"{tool_id}: {exc}") from exc
+        try:
+            studio = await self._imagine_studio.get_studio(pid)
+        except Exception as exc:
+            raise ValueError(f"{tool_id}: {_imagine_refusal(exc)}") from exc
+        if studio.status == "none":
+            raise ValueError(
+                f"{tool_id}: there is no studio yet; write one with twin.imagine_put_studio first"
+            )
+        wanted = arguments.get("revision")
+        if wanted is not None and wanted != studio.revision:
+            raise ValueError(
+                f"{tool_id}: the studio is at revision {studio.revision}, not {wanted}"
+            )
+        base = {"project_id": pid, "revision": studio.revision}
+        template = ((studio.config or {}).get("form") or {}).get("template") or "enclosure"
+        if template != "authored":
+            return {
+                **base,
+                "status": "not_authored",
+                "form": template,
+                "message": (
+                    "This studio's form is the enclosure template, not an authored form, so "
+                    "there is nothing to look at here. Author the form first."
+                ),
+            }
+
+        def unavailable(reason: str) -> dict[str, Any]:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": reason,
+                "install": look.INSTALL,
+                "message": (
+                    f"The look is unavailable here ({reason}). You could not look at the "
+                    "form: say so, and do not claim that it looks right."
+                ),
+            }
+
+        if not look.playwright_available():
+            return unavailable("the playwright package is not installed")
+        try:
+            html = await self._imagine_studio.engine_html(pid)
+        except Exception as exc:
+            raise ValueError(f"{tool_id}: {_imagine_refusal(exc)}") from exc
+        try:
+            raw = await look.look_html(html, pid, sets)
+        except look.LookUnavailable as exc:
+            return unavailable(str(exc))
+        except ValueError as exc:
+            raise ValueError(f"{tool_id}: {exc}") from exc
+
+        before, after = raw["before"], raw["after"]
+        statuses = [before["status"], (after or {}).get("status")]
+        status = "error" if "error" in statuses else before["status"]
+        views = ["first look", "after the change"]
+        result: dict[str, Any] = {
+            **base,
+            "status": status,
+            "size": before["size"],
+            "triangles": before["triangles"],
+            "params": before["params"],
+            "parts": before["parts"],
+            "errors": before["errors"],
+            "requests": raw["requests"],
+            "csp": raw["csp"],
+            "images": [
+                {"view": views[i], "png_base64": base64.b64encode(png).decode("ascii")}
+                for i, png in enumerate(raw["shots"])
+            ],
+        }
+        if after is not None:
+            result["after"] = after
+            result["compare"] = raw["compare"]
+            result["pixel_difference"] = raw["pixel_difference"]
+            result["requests_after_change"] = raw["requests_after_change"]
+        if status == "none":
+            result["message"] = (
+                "The page published no authored form in time, so nothing could be read. "
+                "You could not look at the form: say so."
+            )
+        return result
 
     # ------------------------------------------------------------------
     # twin.item_history (FORGE-523)

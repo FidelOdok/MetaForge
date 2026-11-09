@@ -11,7 +11,7 @@ real parts, the process and quantity, where it lives, and the programme
 records (intent ledger, assumptions, markets). The person shapes it in the
 browser; the handover to engineering is theirs.
 
-You write the config and check it with four tools:
+You write the config and check it with five tools:
 
 | Tool | Does |
 |---|---|
@@ -19,8 +19,9 @@ You write the config and check it with four tools:
 | `twin.imagine_put_studio` | Writes the config as the next revision. The formgraph checks run first; any error refuses the write and lists every problem. |
 | `twin.imagine_handover_status` | The handover checklist: each item done, missing or assumed. Reads only. |
 | `twin.imagine_validate` | A dry run of every gate: all findings at once, who can clear each (you, the person, or something outside), and a verdict that says who acts next. Writes nothing. The verification service decides it, not you. |
+| `twin.imagine_look` | Looks at an authored form: what each part drew and a picture, and with `set` moves a parameter and looks again. Reads only; needs a browser where the tools run and says when it has none. |
 
-All four take `project_id` (defaults to the chat's project). Two more are a
+All five take `project_id` (defaults to the chat's project). Two more are a
 person's steps, open to you only in a delegated run (rule 2):
 
 | Tool | Does |
@@ -253,11 +254,18 @@ because it can hide a word: write plain text. Budgets: at most
   (every part is a `component`; add geometry that is yours). Advisory findings
   never change the verdict.
 - Code that throws, loops or draws nothing shows on the page as "Form partly
-  drawn" or "Form not drawn", with the part named. Look at the page after each
-  write if your client can (a browser, or `python scripts/imagine_look.py`,
-  which also takes `--set name=value` to move a parameter and look again). If it
-  cannot, say that you wrote the form and could not look at it. You have not
-  seen it, and "it looks right" would be invented.
+  drawn" or "Form not drawn", with the part named. **Look after each write** with
+  `twin.imagine_look`: pass `revision` set to the revision your write returned
+  (an identical repeat of an earlier call in the same turn is answered from the
+  earlier result, so a plain repeat would show you the picture from before your
+  fix), and `set` (`{"arm_len": 400}`) to move a parameter in the page, never
+  saved, and look again. It returns the status, each part's size and error, the
+  pictures, and what changed. A part that failed is named and the rest is still
+  drawn: fix that part. If it answers `unavailable` (no browser on this machine,
+  with how to install one) or `not_authored` (the form is the enclosure), or you
+  have no way to look, say that you wrote the form and could not look at it. You
+  have not seen it, and "it looks right" would be invented. A client with a shell
+  can also run `python scripts/imagine_look.py`.
 
 **How to work.** Choose the parameters first: every dimension a person might
 want to change is one, so a slider moves it and the form redraws with no

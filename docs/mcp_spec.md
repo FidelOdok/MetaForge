@@ -1399,6 +1399,17 @@ decisions, taken in the dashboard (`POST .../imagine/handover`, `POST
 These tools let an agent take a validated design to a release without
 handling file bytes. Each takes `project_id`.
 
+- `twin.imagine_look` (read-only, never held for approval): look at an authored
+  form. Renders the stored studio's engine page in headless Chromium and returns
+  `status` (`ready`, `error`, `none`, `not_authored` or `unavailable`), each
+  part's `kind`, `size`, `triangles` and `error`, and the screenshots as image
+  blocks. Takes `revision` (the head; after a write, name the revision it
+  returned, for the same reason as `twin.imagine_validate`) and `set`
+  (`{parameter: number}`, moved in the page and never saved, then it looks
+  again and adds `after`, `compare` and `requests_after_change`). A part that
+  fails is named and the rest is still drawn. `unavailable` carries `install`:
+  the `playwright` package and a Chromium build are not part of MetaForge, and
+  the agent must say it could not look rather than claim the form is right.
 - `twin.measure_dfm` (additive, registered with the DFM tools): `{item_key |
   node_id, build_direction?}`. The gateway reads the committed revision's
   STEP from the twin and calls `cadquery.dfm_measure` itself, then stores the

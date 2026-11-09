@@ -626,9 +626,22 @@ event on every change.
 
 ### Looking at it
 
-`scripts/imagine_look.py` opens an engine page in a real browser (it needs the
-`playwright` package and a Chromium build), waits for `window.FG_AUTHORED`,
-prints each part's size and takes a screenshot:
+An agent looks with `twin.imagine_look` (see `docs/mcp_spec.md`). It renders the
+stored studio's engine page in headless Chromium inside the process: the page and
+its assets are answered from memory with the gateway's own Content Security Policy
+and every other request is aborted, so no gateway has to be running and it works in
+the stdio plugin. It returns the status, each part's size and error and the
+screenshots as images. `set` moves a parameter in the page and looks again, never
+saved; `revision` names the head after a write, so a repeat is not answered from
+the earlier result. It reads and writes nothing in the twin and is never held.
+`playwright` and a Chromium build are not installed with MetaForge
+(`pip install playwright pillow && playwright install chromium`): without them the
+result is `unavailable` with that line, and the agent must say it could not look.
+An enclosure studio answers `not_authored` without starting a browser.
+
+`scripts/imagine_look.py` is the same look from a shell. It opens an engine page in
+a real browser (it needs the `playwright` package and a Chromium build), waits for
+`window.FG_AUTHORED`, prints each part's size and takes a screenshot:
 
 ```bash
 python scripts/imagine_look.py --gateway http://127.0.0.1:8000 --project <id> \
