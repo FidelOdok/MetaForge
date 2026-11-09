@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://idroneinnovations.com/schemas/formgraph/product-1.json",
+  "$id": "https://www.metaforge.uk/schemas/formgraph/product-1.json",
   "title": "Formgraph product config",
   "description": "One product intent environment, composed only of Formgraph primitives. The page builder checks catalogue ids and cross-rules that a schema cannot express.",
   "type": "object",
@@ -43,7 +43,7 @@
         },
         "brand": {
           "type": "string",
-          "default": "idroneinnovations"
+          "default": "MetaForge"
         },
         "brief": {
           "type": "string",

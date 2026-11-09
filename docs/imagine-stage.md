@@ -7,8 +7,7 @@ driven by the digital twin (exact CAD, KiCad, firmware, simulation, DFM,
 interface contracts, release); they show twin state and are not a second
 editor.
 
-The studio is **formgraph**, merged into MetaForge from idroneinnovations
-formgraph 2.7.0 (idroneinnovations is a trading name of idroneimages ltd) and
+The studio is **formgraph**, merged into MetaForge from formgraph 2.7.0 and
 restyled to MetaForge's design tokens. The standalone formgraph plugin keeps
 its own copy; this one lives in `api_gateway/imagine/` (provenance in its
 `README.md`).

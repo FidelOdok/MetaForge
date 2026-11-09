@@ -21,7 +21,7 @@ import re
 
 from . import fg_refs
 
-# Vendored from idroneinnovations formgraph 2.7.0. MetaForge changes: the data
+# Vendored from formgraph 2.7.0. MetaForge changes: the data
 # folder sits beside this file, and the per-user machine registry
 # (~/.formgraph/machines.json) is not read: a gateway serves many users, so a
 # product's machines come from its own context only.
