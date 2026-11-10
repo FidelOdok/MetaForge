@@ -377,6 +377,10 @@ because it can hide a word: write plain text. Budgets: at most
   they are screening estimates, and wall thickness, clearance round the
   electronics and fit are not measured. A revision nobody looked at is reported
   by the service as not measured.
+  **Look before you validate.** The service judges only the measurements a look
+  recorded for the revision it is checking, so a validate that comes before the
+  look reports the form as not measured. After every write, look, then validate;
+  and if you looked after your last validate, validate again before you report.
 
 **How to work.** Choose the parameters first: every dimension a person might
 want to change is one, so a slider moves it and the form redraws with no

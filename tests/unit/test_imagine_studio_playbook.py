@@ -434,3 +434,10 @@ def test_the_skill_says_a_made_up_link_is_not_a_source() -> None:
     text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
     assert "A made-up link is a made-up source" in text
     assert "`.invalid`" in text and "does not count as a source" in text
+
+
+def test_the_skill_says_to_look_before_validating_and_to_validate_again_after_a_late_look() -> None:
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    assert "**Look before you validate.**" in text
+    assert "a validate that comes before the look reports the form as not measured" in text
+    assert "validate again before you report" in text
