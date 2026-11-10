@@ -389,3 +389,32 @@ def test_the_skill_names_every_advisory_form_finding_the_service_can_return() ->
     assert len(names) >= 5, names
     missing = [n for n in names if f"`{n}`" not in text]
     assert not missing, f"the skill does not name: {missing}"
+
+
+def test_the_skill_teaches_the_look_measure_fix_loop_and_its_limits() -> None:
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    for phrase in (
+        "**Read what the look measured.**",
+        "`support.tip_angle_deg`",
+        "`margin_mm` below zero",
+        "`support` is null",
+        "`overhang_share`",
+        "`overlaps`",
+        "write, look again and say how the angle moved",
+        "Never call these measurements verified",
+        "wall thickness",
+    ):
+        assert phrase in text, phrase
+
+
+def test_the_skills_tip_threshold_is_the_one_the_service_uses() -> None:
+    rules = pytest.importorskip("metaforge_verification.profile.rules")
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    assert f"under {rules.TIP_SCREEN_DEG:.0f} degrees" in text
+
+
+def test_the_imagine_command_tells_the_agent_to_read_the_measurements() -> None:
+    from mcp_core.workflows import WORKFLOWS
+
+    text = " ".join(str(w) for w in WORKFLOWS.values() if "imagine" in str(w).lower())
+    assert "measured" in text and "tip" in text

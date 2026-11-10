@@ -359,6 +359,19 @@ because it can hide a word: write plain text. Budgets: at most
   have no way to look, say that you wrote the form and could not look at it. You
   have not seen it, and "it looks right" would be invented. A client with a shell
   can also run `python scripts/imagine_look.py`.
+- **Read what the look measured.** The look returns `measured`, estimated from the
+  drawn triangles with uniform density. `support.tip_angle_deg` is the angle the
+  form tips over at, and a `margin_mm` below zero means it would tip over now.
+  `support` is null when the form has no flat base to stand on, which is normal
+  for something that hangs: say it was not assessed, do not call it stable.
+  `overhang_share` is an upper bound on the share of the surface that looks
+  steeply downward. `overlaps` lists components whose boxes overlap. If the form
+  would tip over, or tips at under 15 degrees, change it (a wider or heavier
+  base, a shorter or less leaned arm), write, look again and say how the angle
+  moved. If components overlap, move one. Never call these measurements verified:
+  they are screening estimates, and wall thickness, clearance round the
+  electronics and fit are not measured. A revision nobody looked at is reported
+  by the service as not measured.
 
 **How to work.** Choose the parameters first: every dimension a person might
 want to change is one, so a slider moves it and the form redraws with no
