@@ -304,3 +304,11 @@ def test_the_skill_lists_every_fixed_list_word_the_checker_holds_a_field_to() ->
     }
     assert all(len(v) > 0 for v in expected.values()), expected
     assert not missing, f"the allowed-values table is missing: {missing}"
+
+
+def test_the_skill_tells_the_agent_to_keep_contact_details_out_of_the_project() -> None:
+    text = PLAYBOOK.read_text(encoding="utf-8")
+    rules = " ".join(text.split("## Rules", 1)[1].split("## The config", 1)[0].split())
+    assert "Keep the person's details out of the project" in rules
+    for word in ("company name", "email address", "project description", "studio"):
+        assert word in rules, f"the rule does not mention: {word}"
