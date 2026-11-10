@@ -590,6 +590,9 @@ def validate_fidelity(where, g, E, W):
     needs its basis in words; the last two are listed as warnings so nobody mistakes
     them for a real part.
     """
+    size_basis = g.get('size_basis')
+    if size_basis is not None and size_basis not in ('read', 'typical', 'generic'):
+        E.append(f'{where}: geometry.size_basis must be one of read, typical, generic.')
     word = g.get('fidelity')
     if word is None:
         W.append(f'{where}: geometry does not say how its 3D was made; set geometry.fidelity to one of {", ".join(FIDELITY)}.')

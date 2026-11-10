@@ -115,3 +115,20 @@ async def test_a_refused_write_stores_nothing_even_when_a_body_would_have_been_d
     with pytest.raises(ImagineError):
         await service.put_studio(PROJECT, config, actor="test")
     assert (await service.get_studio(PROJECT)).status == "none"
+
+
+async def test_a_part_the_studio_drew_still_counts_as_missing_its_real_envelope(
+    service: ImagineService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api_gateway.imagine import service as service_module
+    from api_gateway.imagine.concept_revision import build_concept_revision
+
+    monkeypatch.delenv(rp.LIBRARY_ENV, raising=False)
+    config = _without_geometry(full_config(), "btn-a")
+    response = await service.put_studio(PROJECT, config, actor="test")
+    stored = next(p for p in _parts(response.config or {}) if p["id"] == "btn-a")
+    assert stored["geometry"]["envelope"], "the studio should have drawn a body"
+    assert "3D envelope" in service_module._part_gaps(stored)
+    revision = build_concept_revision(PROJECT, 1, response.config or {}, {}, has_mesh=False)
+    drawn = next(p for p in revision["parts"] if p["id"].startswith("btn-a"))
+    assert drawn["has_envelope"] is False

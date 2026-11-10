@@ -159,6 +159,7 @@ def _from_model(
     out["body"] = [{"shape": "box", "at": [0, 0, size[2] / 2], "size": list(size)}]
     out["fidelity"] = fidelity
     out["fidelity_basis"] = basis
+    out["size_basis"] = "read"
     out["source"] = f"KiCad library {symbol_id}"
     return out
 

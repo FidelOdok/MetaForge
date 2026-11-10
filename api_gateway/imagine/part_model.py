@@ -89,6 +89,22 @@ _CLASS_WORDS = (
 )
 
 
+#: How a size was obtained: read (a record, a drawing or a library model), typical (a
+#: class or family guess) or generic (a placeholder block).
+SIZE_BASIS = ("read", "typical", "generic")
+
+
+def size_is_read(geometry: Mapping[str, Any]) -> bool:
+    """Whether a part's geometry has an envelope that counts as one.
+
+    A size the agent wrote, or one read from a record or a library model, counts. A
+    typical or generic guess does not: it draws a body but is not a sized part.
+    """
+    if not isinstance(geometry, Mapping) or not geometry.get("envelope"):
+        return False
+    return geometry.get("size_basis") in (None, "read")
+
+
 def approximate_geometry(part: Mapping[str, Any]) -> dict[str, Any]:
     """Return the part's ``geometry`` with an approximation drawn, or untouched if it
     already has an exact or generated model. The input is never changed."""
@@ -102,7 +118,7 @@ def approximate_geometry(part: Mapping[str, Any]) -> dict[str, Any]:
         source = str(geometry.get("source") or "").strip()
         where = source if source else "source not stated"
         basis = f"size {_fmt(size)} mm given in the part record ({where}); drawn as a box"
-        return _finish(geometry, size, "approximation", basis)
+        return _finish(geometry, size, "approximation", basis, "read")
 
     text = " ".join(
         str(x)
@@ -117,7 +133,7 @@ def approximate_geometry(part: Mapping[str, Any]) -> dict[str, Any]:
     named = _from_name(text)
     if named:
         size, basis = named
-        return _finish(geometry, size, "approximation", basis)
+        return _finish(geometry, size, "approximation", basis, "typical")
 
     kind = _class_of(part)
     if kind:
@@ -126,10 +142,10 @@ def approximate_geometry(part: Mapping[str, Any]) -> dict[str, Any]:
             f"typical size for a {label} ({_fmt(size)} mm); this is the class, "
             "not this part, and its real size was not read"
         )
-        return _finish(geometry, list(size), "approximation", basis)
+        return _finish(geometry, list(size), "approximation", basis, "typical")
 
     basis = "nothing usable was found about its size, so a generic block stands in"
-    return _finish(geometry, list(PLACEHOLDER_SIZE), "placeholder", basis)
+    return _finish(geometry, list(PLACEHOLDER_SIZE), "placeholder", basis, "generic")
 
 
 def _from_name(text: str) -> tuple[list[float], str] | None:
@@ -176,13 +192,14 @@ def _class_of(part: Mapping[str, Any]) -> str | None:
 
 
 def _finish(
-    geometry: dict[str, Any], size: list[float], fidelity: str, basis: str
+    geometry: dict[str, Any], size: list[float], fidelity: str, basis: str, size_basis: str
 ) -> dict[str, Any]:
     out = dict(geometry)
     out["envelope"] = size
     out["body"] = [{"shape": "box", "at": [0, 0, size[2] / 2], "size": list(size)}]
     out["fidelity"] = fidelity
     out["fidelity_basis"] = basis
+    out["size_basis"] = size_basis
     if not out.get("source"):
         out["source"] = "closest approximation, see fidelity_basis"
     return out

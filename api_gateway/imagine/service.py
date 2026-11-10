@@ -32,7 +32,7 @@ from uuid import UUID, uuid4
 import structlog
 from pydantic import ValidationError
 
-from api_gateway.imagine import engine_page, resolve_part, verification_client
+from api_gateway.imagine import engine_page, part_model, resolve_part, verification_client
 from api_gateway.imagine.schemas import (
     COLLECTION_KINDS,
     KIND_COLLECTIONS,
@@ -270,7 +270,7 @@ def _part_gaps(part: dict[str, Any]) -> list[str]:
         gaps.append("date")
     if not part.get("interfaces"):
         gaps.append("interfaces")
-    if not geometry.get("envelope"):
+    if not part_model.size_is_read(geometry):
         gaps.append("3D envelope")
     return gaps
 
@@ -1497,6 +1497,8 @@ class ImagineService:
                 "source": p.get("datasheet") or p.get("url") or (p.get("cost") or {}).get("source"),
                 "retrieved": p.get("retrieved") or p.get("date"),
                 "envelope_mm": (p.get("geometry") or {}).get("envelope"),
+                "fidelity": (p.get("geometry") or {}).get("fidelity"),
+                "size_basis": (p.get("geometry") or {}).get("size_basis"),
             }
         lines = [
             f"The concept assembly chosen in the Imagine studio ({head.ref}). Parts and "

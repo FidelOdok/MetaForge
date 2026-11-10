@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from api_gateway.imagine import part_model
 from api_gateway.imagine.service import (
     _agent_label,
     _chosen_parts,
@@ -196,7 +197,7 @@ def build_concept_revision(
                             if isinstance(interfaces, (list, dict))
                             else (1 if interfaces else 0)
                         ),
-                        "has_envelope": bool(geometry.get("envelope")),
+                        "has_envelope": part_model.size_is_read(geometry),
                     }
                 )
             chosen = part_key[key]
