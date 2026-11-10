@@ -441,3 +441,17 @@ def test_the_skill_says_to_look_before_validating_and_to_validate_again_after_a_
     assert "**Look before you validate.**" in text
     assert "a validate that comes before the look reports the form as not measured" in text
     assert "validate again before you report" in text
+
+
+def test_the_skill_lists_each_process_with_its_materials_finishes_and_fixings() -> None:
+    import json
+
+    root = REPO / "api_gateway" / "imagine" / "formgraph" / "data"
+    processes = json.loads((root / "catalogue.json").read_text(encoding="utf-8"))["processes"]
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    for pid, spec in processes.items():
+        line = next((x for x in text.split(" | `process` ") if x.startswith(f"`{pid}` |")), "")
+        assert line, f"no row for process {pid}"
+        for word in (*spec["materials"], *spec["finishes"], *spec["fixings"]):
+            assert f"`{word}`" in line, f"process {pid} row lacks {word}"
+    assert "a `custom` object inside `power` with positive numbers `L`, `W`, `H`" in text

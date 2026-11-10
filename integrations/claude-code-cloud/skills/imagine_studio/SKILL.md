@@ -187,6 +187,11 @@ costs a write, so use exactly these:
 | `interfaces[].bus` | `analog`, `can`, `gpio`, `i2c`, `pwm`, `pwr`, `rf`, `spi`, `uart`, `usb` |
 | `interfaces[].dir` | `in`, `out`, `bi` |
 | `interfaces[]` of bus `pwr` | also `v`, the voltage window `[min, max]` in volts, read from the datasheet; with no `v` the write is refused, so leave that interface out and say you did not read it |
+| `process` `im` | materials `abs`, `absfr`, `pcabsfr`, `pc`, `pp`; finishes `gloss`, `matte`, `tex`; fixings `pt25`, `pt30`, `ins25`, `ins30` (a fixing from another process is refused) |
+| `process` `cnc` | materials `al6061`, `al6082`, `pom`; finishes `asm`, `anod`; fixings `tap25`, `tap30` (a fixing from another process is refused) |
+| `process` `sls` | materials `pa12`, `pa12gb`; finishes `dyed`, `vapour`; fixings `pt25`, `pt30`, `ins25`, `ins30` (a fixing from another process is refused) |
+| `process` `fdm` | materials `petg`, `pla`, `petgcf`, `asa`; finishes `asp`, `fine`, `sanded`; fixings `ins25`, `ins30`, `pt25`, `pt30` (a fixing from another process is refused) |
+| the `board` in `power` set to `custom` | also a `custom` object inside `power` with positive numbers `L`, `W`, `H` (mm), `P` (watts) and `M` (grams); without them the write is refused, so use a catalogue board unless you have those figures |
 | `level` | `simple` or `eng` |
 | `view.tryit` | `device` or `mission` |
 
