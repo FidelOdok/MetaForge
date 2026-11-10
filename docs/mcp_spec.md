@@ -1399,6 +1399,17 @@ decisions, taken in the dashboard (`POST .../imagine/handover`, `POST
 These tools let an agent take a validated design to a release without
 handling file bytes. Each takes `project_id`.
 
+- `twin.imagine_resolve_part` (read-only, never held for approval): give one real
+  part a 3D body. Takes `part` (the object as it goes in `context.components.parts`:
+  `id`, `role`, `name`, `mpn`, optionally `geometry` and `kicad.symbol`) and returns
+  `rung` (`existing`, `exact`, `approximation` or `placeholder`), `geometry`
+  (envelope, body, `fidelity`, `fidelity_basis`, `source`), `tried` (each rung and why
+  it was or was not used) and `message`. `exact` means a CAD kernel measured the KiCad
+  library's own model; a size only estimated from the file is an `approximation`.
+  The datasheet package rung is `not_built`. The KiCad rung reads the folder named by
+  `METAFORGE_KICAD_LIBRARY_DIR` (holding `symbols`, `footprints` and `3dmodels`) and is
+  skipped with a reason when it is unset. Nothing is written: copy `geometry` into the
+  part.
 - `twin.imagine_look` (read-only, never held for approval): look at an authored
   form. Renders the stored studio's engine page in headless Chromium and returns
   `status` (`ready`, `error`, `none`, `not_authored` or `unavailable`), each

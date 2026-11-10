@@ -262,6 +262,8 @@ READ_ONLY: frozenset[str] = frozenset(
         # A look at an authored form in a headless browser: it renders the stored
         # studio's page and returns what it drew and a picture. Nothing is written.
         "twin.imagine_look",
+        # A part's 3D body and how trustworthy it is: reads libraries, writes nothing.
+        "twin.imagine_resolve_part",
         # FORGE-523: an item's revision history, read from REVISION_OF edges.
         "twin.item_history",
         "twin.rank_sensitivity",

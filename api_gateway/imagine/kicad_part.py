@@ -70,6 +70,25 @@ def estimate_step_size(path: Path) -> StepSize | None:
     return StepSize(size=size, method="text_estimate")
 
 
+def measure_step(path: Path) -> StepSize | None:
+    """Measure a STEP file with a CAD kernel when one is importable, else estimate.
+
+    The kernel is CadQuery's. It is in the CAD adapter images, and usually not in the
+    gateway, in which case this falls back to :func:`estimate_step_size` and the result
+    is only ever an approximation.
+    """
+    try:
+        import cadquery as cq  # type: ignore[import-not-found,unused-ignore]
+
+        box = cq.importers.importStep(str(path)).val().BoundingBox()
+        size = [round(float(box.xlen), 3), round(float(box.ylen), 3), round(float(box.zlen), 3)]
+        if all(s > 0 for s in size):
+            return StepSize(size=size, method="cad_kernel")
+    except Exception:  # no kernel here, or it could not read this file
+        pass
+    return estimate_step_size(path)
+
+
 def kicad_geometry(
     part: dict[str, Any], config: Any, *, measure: Measure = estimate_step_size
 ) -> tuple[dict[str, Any] | None, str]:

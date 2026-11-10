@@ -887,6 +887,8 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         # A look at the authored form: what each part drew, and a picture. Imagine's
         # own work, so it is not in the reads every stage carries.
         "twin.imagine_look",
+        # A real part's 3D body and its fidelity, from KiCad's own model or an approximation.
+        "twin.imagine_resolve_part",
         # FORGE-824: a person's steps, refused unless the owner delegates
         # human authority, and then held for an approval like any such step.
         "twin.imagine_handover",

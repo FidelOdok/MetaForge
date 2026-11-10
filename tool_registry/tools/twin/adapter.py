@@ -9502,6 +9502,62 @@ class TwinServer(McpToolServer):
             ),
             handler=self.imagine_look,
         )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_resolve_part",
+                adapter_id="twin",
+                name="Imagine: Give a part a 3D body",
+                description=(
+                    "Give one real part a 3D body and learn how trustworthy it is. Pass the "
+                    "part as you would put it in context.components.parts (id, role, name, "
+                    "mpn, and a geometry with a footprint or envelope if you have them; "
+                    "kicad.symbol names a KiCad symbol such as Sensor_Pressure:BMP280). The "
+                    "answer's rung says where the body came from: exact (the KiCad "
+                    "library's own 3D model, sized by a CAD kernel), approximation (the "
+                    "closest shape that can be defended, with its basis) or placeholder "
+                    "(nothing was known, so a generic block). 'tried' lists every rung and "
+                    "why it was or was not used; building a model from the datasheet's "
+                    "package drawing is not available yet and is listed as not_built. Copy "
+                    "'geometry' into the part, including fidelity and fidelity_basis, and "
+                    "say in your report which parts are not exact. Never type a size you "
+                    "did not read: a part you cannot size comes back as a placeholder, "
+                    "and that is the honest answer. The KiCad rung needs the KiCad "
+                    "libraries where this runs (METAFORGE_KICAD_LIBRARY_DIR); without them "
+                    "it says so and the part is an approximation. Reads only: nothing is "
+                    "written."
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "part": {
+                            "type": "object",
+                            "description": (
+                                "The part: id, role (fn:<function>, board, battery, other), "
+                                "name, mpn and optionally geometry and kicad.symbol."
+                            ),
+                        },
+                    },
+                    "required": ["part"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "part_id": {"type": "string"},
+                        "rung": {
+                            "type": "string",
+                            "enum": ["existing", "exact", "approximation", "placeholder"],
+                        },
+                        "geometry": {"type": "object"},
+                        "tried": {"type": "array"},
+                        "message": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.imagine_resolve_part,
+        )
         # FORGE-824: the handover and rework, for an agent the gateway owner
         # lets decide human-authority steps. Always registered; refused unless
         # METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY is on where the call lands.
@@ -9757,6 +9813,25 @@ class TwinServer(McpToolServer):
                 return dict(detail)
             raise ValueError(f"{tool_id}: {_imagine_refusal(exc)}") from exc
         return dict(report.model_dump(mode="json"))
+
+    async def imagine_resolve_part(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        import asyncio
+
+        from api_gateway.imagine import resolve_part
+
+        tool_id = "twin.imagine_resolve_part"
+        part = arguments.get("part")
+        if not isinstance(part, dict):
+            raise ValueError(
+                f"{tool_id}: part must be an object (id, role, name, mpn and optionally "
+                "geometry), the way it goes in context.components.parts"
+            )
+        config = resolve_part.kicad_config_from_env()
+        # Reading a library and measuring a model are file work: off the event loop.
+        result = await asyncio.to_thread(
+            lambda: resolve_part.resolve_part(part, kicad_config=config)
+        )
+        return dict(result)
 
     async def imagine_look(self, arguments: dict[str, Any]) -> dict[str, Any]:
         import base64
