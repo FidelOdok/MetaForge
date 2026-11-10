@@ -413,3 +413,115 @@ def test_spend_alert_ignores_unknown_cost(
             metrics=metrics,  # type: ignore[arg-type]
         )
     assert metrics.exceeded == []
+
+
+# -- the cost the router says it billed ------------------------------------------------
+#
+# OpenRouter reports what a call cost. A model that is not in the price table (most
+# routed ones) used to record cost None, so no turn showed its spend and no spend cap
+# could be enforced. A cost the provider reports is exact and wins over the table; with
+# neither, cost stays None, never zero.
+
+
+def _openrouter_client(cost: float | None) -> Any:
+    usage = SimpleNamespace(
+        prompt_tokens=1000,
+        completion_tokens=40,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=600, cache_write_tokens=100),
+    )
+    if cost is not None:
+        usage.cost = cost
+    msg = SimpleNamespace(content="hello", tool_calls=None)
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+        model="anthropic/claude-sonnet-5.5",
+        usage=usage,
+    )
+
+    async def create(**_: Any) -> Any:
+        return resp
+
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+
+async def test_a_cost_the_router_reports_is_recorded_for_an_unpriced_model(
+    store: UsageStore,
+) -> None:
+    spec = ProviderSpec(
+        name="openrouter",
+        model="anthropic/claude-sonnet-5.5",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    assert price_cost_usd("openrouter", spec.model, TokenUsage(prompt=1, completion=1)) is None
+    pipe = ProviderPipeline(RoleModelSlots({"generator": [spec]}))
+
+    async def invoke(s: ProviderSpec, r: Any) -> Any:
+        return await openai_invoke(s, r, client=_openrouter_client(0.0123))
+
+    with usage_scope(run_id="run-or", role="chat"):
+        await pipe.complete("generator", REQ, invoke)
+    totals = store.run_totals("run-or")
+    assert totals is not None
+    assert totals["cost_usd"] == pytest.approx(0.0123)
+    assert totals["calls_unpriced"] == 0
+
+
+async def test_without_a_reported_or_table_cost_it_stays_unknown_not_zero(
+    store: UsageStore,
+) -> None:
+    spec = ProviderSpec(
+        name="openrouter",
+        model="anthropic/claude-sonnet-5.5",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    pipe = ProviderPipeline(RoleModelSlots({"generator": [spec]}))
+
+    async def invoke(s: ProviderSpec, r: Any) -> Any:
+        return await openai_invoke(s, r, client=_openrouter_client(None))
+
+    with usage_scope(run_id="run-none", role="chat"):
+        await pipe.complete("generator", REQ, invoke)
+    totals = store.run_totals("run-none")
+    assert totals is not None
+    assert totals["cost_usd"] is None and totals["calls_unpriced"] == 1
+
+
+def test_a_reported_cost_wins_over_the_price_table() -> None:
+    event = record_call(
+        provider="anthropic",
+        model="claude-sonnet-5",
+        pipeline_role="generator",
+        usage={"input_tokens": 1_000_000, "output_tokens": 0, "cost_usd": 0.5},
+    )
+    assert event is not None and event.cost_usd == pytest.approx(0.5)
+
+
+def test_a_bad_reported_cost_is_ignored() -> None:
+    for bad in (-1.0, float("nan"), "free", None):
+        event = record_call(
+            provider="openrouter",
+            model="m/unpriced",
+            pipeline_role="generator",
+            usage={"input_tokens": 10, "output_tokens": 1, "cost_usd": bad},
+        )
+        assert event is not None and event.cost_usd is None, bad
+
+
+async def test_openrouter_is_asked_to_report_cost() -> None:
+    seen: dict[str, Any] = {}
+
+    async def create(**kw: Any) -> Any:
+        seen.update(kw)
+        msg = SimpleNamespace(content="hi", tool_calls=None)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=msg, finish_reason="stop")], model="m", usage=None
+        )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    spec = ProviderSpec(
+        name="openrouter",
+        model="anthropic/claude-sonnet-5.5",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    await openai_invoke(spec, REQ, client=client)
+    assert (seen.get("extra_body") or {}).get("usage") == {"include": True}

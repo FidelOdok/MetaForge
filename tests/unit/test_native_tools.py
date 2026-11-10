@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -482,3 +483,130 @@ async def test_truncation_retry_is_bounded_by_max_steps() -> None:
     assert result.stop_reason == "max_steps"
     assert len(result.steps) == 3
     assert all(s.error == "response truncated at the output token limit" for s in result.steps)
+
+
+@pytest.mark.asyncio
+async def test_spend_cap_uses_the_cost_the_provider_reports_for_an_unpriced_model() -> None:
+    """The cap used to be a no-op for any model missing from the price table. A cost the
+    provider reports per call (OpenRouter does) is exact, so it enforces the cap."""
+    rt = _runtime_with_double()
+    toolcall = {
+        "text": "",
+        "tool_calls": [{"id": "c", "name": "double", "arguments": {"x": 1}}],
+        "usage": {"input_tokens": 10, "output_tokens": 10, "cost_usd": 0.5},
+    }
+    inv = _scripted(toolcall, {"text": "Stopped by the cap.", "tool_calls": []})
+    res = await run_native_tools(
+        rt,
+        "loop",
+        invoke=inv,
+        max_steps=10,
+        max_cost_usd=0.1,
+        cost_provider="openrouter",
+        cost_model="anthropic/claude-sonnet-5.5",
+    )
+    assert res.stop_reason == "budget_exceeded"
+    assert len(res.steps) == 1
+
+
+@pytest.mark.asyncio
+async def test_spend_cap_sums_reported_cost_across_steps_and_shows_it_on_the_result() -> None:
+    rt = _runtime_with_double()
+    step = {
+        "text": "",
+        "tool_calls": [{"id": "c", "name": "double", "arguments": {"x": 1}}],
+        "usage": {"input_tokens": 5, "output_tokens": 5, "cost_usd": 0.04},
+    }
+    inv = _scripted(step, step, step, {"text": "Done.", "tool_calls": []})
+    res = await run_native_tools(
+        rt,
+        "loop",
+        invoke=inv,
+        max_steps=10,
+        max_cost_usd=0.1,
+        cost_provider="openrouter",
+        cost_model="anthropic/claude-sonnet-5.5",
+    )
+    assert res.stop_reason == "budget_exceeded"  # 0.04 + 0.04 + 0.04 crosses 0.1
+    assert len(res.steps) == 3
+    assert res.usage is not None and res.usage["cost_usd"] == pytest.approx(0.12)
+
+
+@pytest.mark.asyncio
+async def test_a_reported_cost_below_the_cap_does_not_stop_the_loop() -> None:
+    rt = _runtime_with_double()
+    step = {
+        "text": "",
+        "tool_calls": [{"id": "c", "name": "double", "arguments": {"x": 1}}],
+        "usage": {"input_tokens": 5, "output_tokens": 5, "cost_usd": 0.001},
+    }
+    inv = _scripted(step, step, {"text": "Done.", "tool_calls": []})
+    res = await run_native_tools(
+        rt,
+        "loop",
+        invoke=inv,
+        max_steps=2,
+        max_cost_usd=0.1,
+        cost_provider="openrouter",
+        cost_model="anthropic/claude-sonnet-5.5",
+    )
+    assert res.stop_reason == "max_steps"
+
+
+@pytest.mark.asyncio
+async def test_a_call_that_reports_no_cost_leaves_the_total_unknown() -> None:
+    """If one call has no cost the sum would understate the spend, so no total is shown
+    and the cap is not enforced from a partial figure."""
+    rt = _runtime_with_double()
+    with_cost = {
+        "text": "",
+        "tool_calls": [{"id": "c", "name": "double", "arguments": {"x": 1}}],
+        "usage": {"input_tokens": 5, "output_tokens": 5, "cost_usd": 0.5},
+    }
+    without = {
+        "text": "",
+        "tool_calls": [{"id": "d", "name": "double", "arguments": {"x": 2}}],
+        "usage": {"input_tokens": 5, "output_tokens": 5},
+    }
+    inv = _scripted(without, with_cost, {"text": "Done.", "tool_calls": []})
+    res = await run_native_tools(
+        rt,
+        "loop",
+        invoke=inv,
+        max_steps=2,
+        max_cost_usd=0.1,
+        cost_provider="openrouter",
+        cost_model="anthropic/claude-sonnet-5.5",
+    )
+    assert res.stop_reason == "max_steps"
+    assert res.usage is not None and "cost_usd" not in res.usage
+
+
+def test_schema_tokens_estimates_what_the_tool_list_costs_per_call() -> None:
+    from orchestrator.harness.native_tools import schema_tokens
+
+    assert schema_tokens([]) == 0
+    one = [{"type": "function", "function": {"name": "double", "parameters": {"type": "object"}}}]
+    many = one * 10
+    assert 0 < schema_tokens(one) < schema_tokens(many)
+    # Roughly four characters a token, the same rule the context meter uses.
+    assert schema_tokens(many) == len(json.dumps(many, separators=(",", ":"))) // 4
+
+
+@pytest.mark.asyncio
+async def test_the_loop_logs_what_its_tool_list_costs_and_when_it_changes() -> None:
+    """A 28k token tool list on every call was only found when a key ran out. The loop now
+    says how big the list is at the first step, and again whenever it changes."""
+    from structlog.testing import capture_logs
+
+    rt = _runtime_with_double()
+    toolcall = {
+        "text": "",
+        "tool_calls": [{"id": "c", "name": "double", "arguments": {"x": 1}}],
+    }
+    inv = _scripted(toolcall, toolcall, {"text": "Done.", "tool_calls": []})
+    with capture_logs() as logs:
+        await run_native_tools(rt, "loop", invoke=inv, max_steps=5)
+    rows = [row for row in logs if row.get("event") == "native_tool_schemas"]
+    assert len(rows) == 1, rows  # three steps, one unchanged list: logged once
+    assert rows[0]["tools"] >= 1 and rows[0]["approx_tokens"] > 0 and rows[0]["step"] == 1

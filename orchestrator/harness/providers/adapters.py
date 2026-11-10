@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from collections.abc import AsyncIterator
 from typing import Any, cast
@@ -104,7 +105,7 @@ def _usage_from(
     if u is None:
         return None
     try:
-        out: dict[str, int | bool] = {
+        out: dict[str, Any] = {
             "input_tokens": int(getattr(u, in_key, 0) or 0),
             "output_tokens": int(getattr(u, out_key, 0) or 0),
         }
@@ -126,6 +127,16 @@ def _usage_from(
             written = getattr(details, "cache_write_tokens", None)
             if isinstance(written, int):
                 out["cache_creation_input_tokens"] = written
+        # A router that bills per call (OpenRouter) reports the cost it charged. That is exact,
+        # so it is kept beside the tokens; anything that is not a usable amount is dropped.
+        cost = getattr(u, "cost", None)
+        if (
+            isinstance(cost, (int, float))
+            and not isinstance(cost, bool)
+            and math.isfinite(cost)
+            and cost >= 0
+        ):
+            out["cost_usd"] = float(cost)
         return out
     except (TypeError, ValueError):
         return None
@@ -220,6 +231,9 @@ def _apply_openai_cache(
         )
     if caching.routes_claude_cache_control(spec.name, spec.base_url, spec.model):
         extra["cache_control"] = caching.automatic_cache_control()
+    if caching.is_openrouter(spec.name, spec.base_url):
+        # Ask for the cost OpenRouter billed for this call (usage accounting).
+        extra["usage"] = {"include": True}
     if extra:
         kwargs["extra_body"] = extra
 
