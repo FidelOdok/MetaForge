@@ -134,3 +134,29 @@ def test_existing_openings_and_keepouts_are_kept() -> None:
         {"id": "b", "role": "fn:e_btn", "geometry": {"access": access, "place": "wall"}}
     )
     assert g["access"] == access and g["place"] == "wall"
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"id": "a", "role": "fn:e_wifi"},
+        {"id": "b", "role": "fn:e_ble"},
+        {"id": "c", "role": "other", "name": "Wi-Fi and BLE module"},
+        {"id": "d", "role": "other", "name": "Bluetooth LE module"},
+        {"id": "e", "role": "other", "name": "LoRa transceiver"},
+        {"id": "f", "role": "other", "name": "Zigbee radio"},
+    ],
+    ids=["e_wifi", "e_ble", "wifi-name", "bluetooth-name", "lora-name", "zigbee-name"],
+)
+def test_a_wireless_module_gets_the_radio_module_class_not_a_placeholder(
+    part: dict[str, Any],
+) -> None:
+    g = approximate_geometry(part)
+    assert g["fidelity"] == "approximation" and g["size_basis"] == "typical"
+    assert "radio module" in g["fidelity_basis"] and "not this part" in g["fidelity_basis"]
+
+
+def test_a_word_inside_another_word_does_not_make_a_part_a_radio() -> None:
+    for name in ("Capable housing", "Tabletop base", "Bleed valve"):
+        g = approximate_geometry({"id": "x", "role": "other", "name": name})
+        assert g["fidelity"] == "placeholder", name

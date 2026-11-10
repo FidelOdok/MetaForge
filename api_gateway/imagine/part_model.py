@@ -72,6 +72,9 @@ _CLASS = {
     "e_lte": ("cellular module", [30.0, 30.0, 2.5]),
     "e_lora": ("LoRa radio module", [15.0, 15.0, 2.5]),
     "e_ext": ("radio or interface module", [15.0, 15.0, 2.5]),
+    "e_wifi": ("radio module", [15.0, 15.0, 2.5]),
+    "e_ble": ("radio module", [15.0, 15.0, 2.5]),
+    "radio": ("radio module", [15.0, 15.0, 2.5]),
     "e_ldrv": ("LED driver module", [20.0, 10.0, 5.0]),
     "battery": ("coin cell", [20.0, 20.0, 3.2]),
     "board": ("small microcontroller board", [25.0, 18.0, 3.0]),
@@ -86,6 +89,12 @@ _CLASS_WORDS = (
     ("coin cell", "battery"),
     ("cr2032", "battery"),
     ("led", "e_led"),
+    ("wi-fi", "radio"),
+    ("wifi", "radio"),
+    ("bluetooth", "radio"),
+    ("ble", "radio"),
+    ("lora", "radio"),
+    ("zigbee", "radio"),
 )
 
 
