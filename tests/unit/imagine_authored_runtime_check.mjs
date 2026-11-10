@@ -370,6 +370,51 @@ await check('sliders_can_land_exactly_on_the_declared_values_and_on_whole_number
   return bad.length ? bad.join(' | ') : true;
 });
 
+// -- the panel in the engine's own markup (so it looks and behaves like the other studios) -----
+await check('quick_panel_uses_the_engines_own_markup_and_still_redraws', async () => {
+  const mk = (tag) => {
+    const e = { tag, children: [], style: { setProperty() {} }, className: '', attrs: {}, handlers: {}, _text: '', open: false,
+      appendChild(c) { e.children.push(c); return c; },
+      setAttribute(k, v) { e.attrs[k] = v; }, addEventListener(t, f) { e.handlers[t] = f; } };
+    Object.defineProperty(e, 'textContent', { get() { return e._text; }, set(v) { e._text = String(v); if (v === '') e.children.length = 0; } });
+    return e;
+  };
+  const doc = { createElement: mk, createTextNode: (t) => ({ tag: '#text', _text: t, children: [] }), body: mk('body') };
+  class Group { constructor() { this.children = []; } add(c) { this.children.push(c); } }
+  const THREE = { Group, Mesh: class { constructor() { this.userData = {}; } },
+    BufferGeometry: class { setAttribute() {} setIndex() {} computeVertexNormals() {} dispose() {} },
+    MeshStandardMaterial: class {}, Float32BufferAttribute: class {} };
+  const cfg = { form: { template: 'authored', label: 'Phone stand', params: { base_w: 90, tilt: 55 }, ranges: { tilt: [40, 80] },
+    authored: { parts: [part('base', 'return [g.box(p.base_w, 8, 20)];'), part('rest', 'return [g.box(p.base_w, p.tilt, 3)];')] } } };
+  const quick = mk('div');
+  const m = FG.mount({ THREE, scene: new Group(), cfg, document: doc, quick, options: OPTS });
+  await m.render();
+  const all = [];
+  (function walk(n) { all.push(n); (n.children || []).forEach(walk); })(quick);
+  const byClass = (c) => all.filter((n) => (n.className || '').split(' ').includes(c));
+  const needs = { qintro: 1, pp: 2, ppb: 2, qgrp: 1, qs: 2, qt: 2, rng: 2 };
+  for (const [c, n] of Object.entries(needs)) if (byClass(c).length < n) return 'class ' + c + ' x' + byClass(c).length + ', wanted ' + n;
+  if (all.some((n) => (n.className || '').includes('fg-authored-panel'))) return 'the floating panel was used';
+  const summary = all.find((n) => n.tag === 'summary');
+  if (!summary || !JSON.stringify(summary, (k, v) => (k === 'handlers' ? undefined : v)).includes('Phone stand')) return 'the form is not named in the summary';
+  const rows = byClass('qs');
+  const keys = rows.slice(0, 2).map((r) => r.attrs['data-q']);
+  if (keys.join() !== 'base_w,tilt') return 'rows ' + keys;
+  const label = (r) => r.children[0].children[0]._text;
+  if (label(rows[0]) !== 'Base w' || label(rows[1]) !== 'Tilt') return 'labels ' + label(rows[0]) + ' / ' + label(rows[1]);
+  const input = rows[1].children[1];
+  if (input.className !== 'rng' || input.type !== 'range' || +input.min > 40 || +input.max < 80) return 'slider ' + input.className + input.min + input.max;
+  const value = rows[1].children[0].children[1];
+  if (value._text !== '55') return 'value ' + value._text;
+  input.value = '70'; input.handlers.input();
+  if (value._text !== '70') return 'the value did not follow the slider: ' + value._text;
+  await new Promise((r) => setTimeout(r, 600));
+  if (globalThis.FG_AUTHORED.params.tilt !== 70) return 'the form was not redrawn: ' + JSON.stringify(globalThis.FG_AUTHORED.params);
+  const partRows = all.filter((n) => n.attrs && n.attrs['data-part']);
+  if (partRows.map((n) => n.attrs['data-part']).join() !== 'base,rest') return 'parts list: ' + partRows.map((n) => n.attrs['data-part']);
+  return true;
+});
+
 await check('mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change', async () => {
   const el = () => {
     const e = {

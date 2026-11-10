@@ -19,38 +19,60 @@ HTML = (ENGINE_DIR / "engine.html").read_text(encoding="utf-8")
 CSS = (ENGINE_DIR / "engine.css").read_text(encoding="utf-8")
 JS = (ENGINE_DIR / "engine.js").read_text(encoding="utf-8")
 
-# Every block of the right-hand pane that is computed from the enclosure.
-ENCLOSURE_BLOCKS = [
-    "gateBlk",  # Readiness: gates per part
-    "reqBlk",  # Requirements met
-    "valBlk",  # Validation in the background
-    "dfaBlk",  # Assembly
-    "envBlk",  # Where it lives
+# The blocks of the right-hand pane that assert something about the placeholder enclosure the
+# engine solves for every studio. For an authored form that enclosure is not the product, so each
+# of these would read as assurance about a form it never analysed.
+ASSERTS_ABOUT_THE_PLACEHOLDER = [
+    "valBlk",  # Validation in the background: routing, heat and drop on the placeholder
+    "dfaBlk",  # Assembly: a design-for-assembly index for the placeholder's screws
+    "envBlk",  # Where it lives: the placeholder's internal temperature
     "verdictBlk",  # Manufacturing verdict
-    "testBlk",  # Product tests
-    "elecBlk",  # Electronics and wiring
+    "testBlk",  # Product tests: a drop test of the placeholder
+    "elecBlk",  # Electronics and wiring: cables routed inside the placeholder
     "rulesBlk",  # Checks
-    "bomBlk",  # Bill of materials
+    "bomBlk",  # Bill of materials: a top shell and a lid the form does not have
     "partBlk",  # Part metrics
     "costBlk",  # Unit cost by process
     "handBlk",  # Hand off
+    "partReady",  # Readiness's parts table: "integrated" means fits the placeholder
+]
+
+# What carries the person's controls and records, and so must stay usable.
+KEPT_FOR_THE_PERSON = [
+    "gateBlk",  # Readiness: gate 1 says which assumptions to confirm
+    "reqBlk",  # Requirements, the situations it must handle, and Confirm these assumptions
+    "optBlk",  # Options: the part decisions
+    "ctxBlk",  # Context: the parts and machines
+    "mdlBlk",  # Models and scenarios
+    "compBlk",  # What it does and what goes inside
 ]
 
 
-@pytest.mark.parametrize("block", ENCLOSURE_BLOCKS)
-def test_each_enclosure_analysis_block_is_hidden_for_an_authored_form(block: str) -> None:
-    assert f'id="{block}"' in HTML, f"{block} has no id in engine.html"
+def _hidden_ids() -> str:
     rules = re.findall(r"html\[data-authored\][^{]*\{[^}]*display\s*:\s*none", CSS)
-    assert any(f"#{block}" in rule for rule in rules), f"{block} is not hidden under data-authored"
+    return " ".join(rules)
 
 
-def test_the_enclosure_sliders_are_replaced_by_the_forms_own_parameters() -> None:
-    rule = (
-        r"html\[data-authored\]\s+#graphPane\s*>\s*\*:not\(\.fg-authored-panel\)"
-        r"[^{]*\{[^}]*display\s*:\s*none"
-    )
-    assert re.search(rule, CSS), "the graph pane still shows the enclosure's sliders"
-    assert "html[data-authored] #graphPane .fg-authored-panel" in CSS
+@pytest.mark.parametrize("block", ASSERTS_ABOUT_THE_PLACEHOLDER)
+def test_each_block_that_asserts_about_the_placeholder_is_hidden_for_an_authored_form(
+    block: str,
+) -> None:
+    assert f'id="{block}"' in HTML, f"{block} has no id in engine.html"
+    assert f"#{block}" in _hidden_ids(), f"{block} is not hidden under data-authored"
+
+
+@pytest.mark.parametrize("block", KEPT_FOR_THE_PERSON)
+def test_each_block_that_carries_the_persons_controls_stays_visible(block: str) -> None:
+    assert f'id="{block}"' in HTML, f"{block} has no id in engine.html"
+    assert f"#{block}" not in _hidden_ids(), f"{block} is hidden: the person loses its controls"
+
+
+def test_the_engines_own_controls_panel_shows_at_every_level_and_the_graph_editor_is_hidden() -> (
+    None
+):
+    assert re.search(r"html\[data-authored\]\s+#quick\s*\{[^}]*display\s*:\s*grid", CSS)
+    ids = _hidden_ids()
+    assert "#graphPane .gtools" in ids and "#graphPane #canvas" in ids
 
 
 def test_the_engine_marks_the_page_authored_and_skips_the_enclosure_panel() -> None:
@@ -60,9 +82,33 @@ def test_the_engine_marks_the_page_authored_and_skips_the_enclosure_panel() -> N
     )
 
 
-def test_the_parameters_mount_in_the_left_pane_and_the_summary_in_the_right() -> None:
-    assert "host:document.getElementById('graphPane')" in JS
+def test_the_parameters_are_rendered_into_the_engines_own_controls_panel() -> None:
+    assert "quick:document.getElementById('quick')" in JS
     assert "summaryHost:document.getElementById('dfm')" in JS
+    assert re.search(r"function renderQuick\(ev\)\{\s*if\(AUTHORED\)return", JS), (
+        "the engine's own panel would overwrite the authored one"
+    )
+
+
+def test_the_enclosure_is_not_given_a_shape_that_the_programme_view_needs() -> None:
+    """A null shape breaks the Programme tab ("Connect a form to see the programme"). Keep it."""
+    assert "ev.shape=null" not in JS and "ev.shape = null" not in JS
+
+
+def test_a_requirement_is_never_marked_met_for_an_authored_form() -> None:
+    assert re.search(r"const lab=AUTHORED\?\{[^}]*Not assessed", JS), (
+        "the Met and At risk chips come from a check of the placeholder enclosure"
+    )
+    squashed = JS.replace(" ", "")
+    assert "set('Requirements',AUTHORED?'notassessed':" in squashed, "the header says N of N met"
+
+
+def test_the_gates_after_intent_are_never_green_for_an_authored_form() -> None:
+    pattern = (
+        r"if\(AUTHORED\)\{for\(let i=1;i<4;i\+\+\)\{g\[i\]\.ok=false;"
+        r"g\[i\]\.msg='Not assessed for an authored form'"
+    )
+    assert re.search(pattern, JS), "gates 2 to 4 are decided by the enclosure analysis"
 
 
 # -- the docs say what the code does ----------------------------------------------------

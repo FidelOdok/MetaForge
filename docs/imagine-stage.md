@@ -607,17 +607,35 @@ without trusting it:
 
 ### What the page shows
 
-For an authored form the engine's own analysis is hidden, because it is computed
-from an enclosure and for this form that enclosure is a placeholder: the verdict,
-checks, requirements met, assembly, electronics, bill of materials, cost and
-hand off blocks. The enclosure's sliders are replaced by the form's own
-parameters; moving one runs the code again with no model call. The page shows
-what was measured (size, volume of the shapes with overlaps counted twice, parts,
-triangles and the mass if solid in the process material) beside a list of what was
-not assessed: wall thickness and moulding, the fit of the electronics, vents and
-heat, the manufacturing verdict and cost, assembly, product tests and the form's
-bill of materials. That list never reads as a pass. A form that fails shows
-"Form not drawn" or "Form partly drawn" with each part's error and gives no size.
+The page keeps the studio's own look and controls. The left pane is the engine's own controls
+panel, filled with the form's parameters: the same sections and sliders as any studio, with
+readable labels (`slot_len` reads "Slot len"), and a Parts list that gives each part's colour
+(its kind) and size. Moving a slider runs the code again with no model call. The node graph
+editor is hidden, because it edits the enclosure's parameters and a form made of code has none.
+
+The right pane keeps what carries the person's controls and records, and labels what the engine
+cannot say about this form:
+
+- **Readiness**: gate 1 names the assumptions still to confirm. Gates 2 to 4 read "Not assessed for
+  an authored form", because the engine decides them from checks of the enclosure.
+- **Requirements**: the priorities and values, the situations it must handle, and "Confirm these
+  assumptions". Each requirement's chip reads "Not assessed", never Met, and the header says so.
+- **Options, Context, Models and scenarios, Manufacturing process** work as for any studio.
+- The **Programme** tab works as for any studio.
+
+It hides what asserts something about the placeholder enclosure that the engine solves for every
+studio, which is not this product: validation in the background, assembly, where it lives, the
+manufacturing verdict, product tests (a drop test of the placeholder), electronics and wiring,
+checks, the bill of materials (a top shell and a lid the form does not have), part, cost, hand off,
+and Readiness's parts table. Giving the engine no shape instead would break the Programme tab, so
+the blocks are hidden and the verdicts relabelled.
+
+The page also shows what was measured (size, volume of the shapes with overlaps counted twice,
+parts, triangles and the mass if solid in the process material) beside a list of what was not
+assessed: wall thickness and moulding, the fit of the electronics, vents and heat, the
+manufacturing verdict and cost, assembly, product tests and the form's bill of materials. That list
+never reads as a pass. A form that fails shows "Form not drawn" or "Form partly drawn" with each
+part's error and gives no size.
 
 The page publishes what it drew as `window.FG_AUTHORED`: `status` (`running`,
 `ready` or `error`), `params`, `bbox`, `triangles`, `errors`, and for each part its

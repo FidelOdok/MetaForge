@@ -26,7 +26,7 @@ from PIL import Image
 from api_gateway.imagine import routes as imagine_routes
 from api_gateway.imagine.service import ImagineService
 from scripts import imagine_look as look
-from tests.unit.imagine_fixtures import authored_lamp_form, base_config
+from tests.unit.imagine_fixtures import authored_lamp_form, base_config, full_config
 from twin_core.api import InMemoryTwinAPI
 
 PROJECT = "7d1f1b5e-5d2a-4c4e-9a59-0d3f8f4a2c11"
@@ -256,3 +256,88 @@ def test_a_page_that_is_not_an_authored_form_is_reported_not_waited_on_forever(
     result = look.look(url, tmp_path, timeout_s=6)
     assert result["before"]["status"] == "none"
     assert look.exit_code(result) == 3
+
+
+# -- what a person sees in the authored studio --------------------------------------------
+
+_STUDIO_FACTS = """() => {
+  const vis = (id) => {
+    const e = document.getElementById(id);
+    return !!e && getComputedStyle(e).display !== 'none' && !e.hidden;
+  };
+  const text = (sel) =>
+    Array.from(document.querySelectorAll(sel)).map((e) => e.textContent.trim());
+  const rows = Array.from(document.querySelectorAll('#quick .qs input.rng'));
+  const flags = (ids) => Object.fromEntries(ids.map((i) => [i, vis(i)]));
+  return {
+    quick_sections: document.querySelectorAll('#quick details.pp').length,
+    sliders: rows.map((r) => r.getAttribute('data-param') || r.getAttribute('aria-label')),
+    slider_classes: Array.from(new Set(rows.map((r) => r.className))),
+    intro: (document.querySelector('#quick .qintro') || {}).textContent || '',
+    parts_listed: document.querySelectorAll('#quick [data-part]').length,
+    graph_editor_visible: vis('canvas'),
+    visible: flags(['gateBlk', 'reqBlk', 'optBlk', 'ctxBlk', 'mdlBlk', 'compBlk']),
+    hidden: flags(['valBlk', 'dfaBlk', 'envBlk', 'verdictBlk', 'testBlk', 'elecBlk',
+      'rulesBlk', 'bomBlk', 'partBlk', 'costBlk', 'handBlk', 'partReady']),
+    req_chips: text('#reqList .chip'),
+    assumptions_box: vis('asmBox') ? document.getElementById('asmBox').textContent : '',
+    gate_message: (document.getElementById('gateMsg') || {}).textContent || '',
+  };
+}"""
+
+
+def test_the_authored_studio_keeps_the_persons_controls_and_claims_nothing_about_a_placeholder(
+    server: str,
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from api_gateway.imagine.look import CHROMIUM_ARGS
+
+    cfg = copy.deepcopy(full_config())  # options, parts and assumptions, as a real studio has
+    cfg["form"] = authored_lamp_form()
+    res = httpx.put(
+        f"{server}/v1/twin/projects/{PROJECT}/imagine/studio", json={"config": cfg}, timeout=30
+    )
+    assert res.status_code == 200, res.text
+    url = f"{server}/v1/twin/projects/{PROJECT}/imagine/engine"
+    assumptions = cfg["programme"]["assumptions"]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=list(CHROMIUM_ARGS))
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 1200})
+            page.goto(url, wait_until="domcontentloaded")
+            deadline = time.monotonic() + 40
+            while time.monotonic() < deadline:
+                if page.evaluate(
+                    "() => !!(window.FG_AUTHORED && window.FG_AUTHORED.status === 'ready')"
+                ):
+                    break
+                page.wait_for_timeout(200)
+            page.wait_for_timeout(1500)  # the engine's own renderers run after the form is drawn
+            facts = page.evaluate(_STUDIO_FACTS)
+            # The Programme tab needs the engine to have a shape; it must not say "connect a form".
+            page.locator('button[data-pview="prog"]').click()
+            page.wait_for_timeout(1500)
+            programme = page.evaluate("() => document.getElementById('progView').textContent")
+        finally:
+            browser.close()
+
+    # The controls look and behave like every other studio: the engine's own panel and slider.
+    assert facts["quick_sections"] >= 2 and facts["slider_classes"] == ["rng"], facts
+    assert sorted(facts["sliders"]) == sorted(authored_lamp_form()["params"]), facts["sliders"]
+    assert facts["intro"].startswith("This form is built from code")
+    assert facts["parts_listed"] == 6 and facts["graph_editor_visible"] is False
+    # What carries the person's controls and records is there.
+    assert all(facts["visible"].values()), facts["visible"]
+    if assumptions:
+        assert "Confirm these assumptions" in facts["assumptions_box"], facts["assumptions_box"]
+    assert (
+        "assumption" in facts["gate_message"].lower() or "intent" in facts["gate_message"].lower()
+    )
+    # What would assert something about the placeholder enclosure is not.
+    assert not any(facts["hidden"].values()), facts["hidden"]
+    # No requirement is called met.
+    assert facts["req_chips"], "no requirement rows"
+    assert set(facts["req_chips"]) <= {"Not assessed", "Off", "n/a"}, facts["req_chips"]
+    # The Programme tab still works.
+    assert "Connect a form" not in programme and "Phase exit" in programme, programme[:200]

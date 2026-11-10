@@ -578,8 +578,9 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
-  clearPart();if(!s)return;
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  clearPart();
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,quick:document.getElementById('quick'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
   const Lo=levels(s.H,s.F,tan,0);
@@ -1133,6 +1134,7 @@ function applyLevel(){document.documentElement.setAttribute('data-level',S.level
   document.querySelectorAll('[data-level]').forEach(b=>{if(b.tagName==='BUTTON')b.setAttribute('aria-pressed',String((b.dataset.level==='eng')===(S.level==='eng')));});
   if(S.level==='eng')requestAnimationFrame(()=>{drawWires();});}
 function renderQuick(ev){
+  if(AUTHORED)return; /* an authored form renders its own controls into #quick (authored.js) */
   const box=$('#quick');const sl=G.nodes.filter(n=>n.type==='slider');
   const sig=sl.map(n=>n.id+n.props.key+n.props.min+n.props.max).join('|');
   if(sig!==quickSig){quickSig=sig;const used=new Set();
@@ -1469,7 +1471,7 @@ function renderScenarios(){const box=$('#scen');if(!box)return;const sc=Array.is
   box.innerHTML=sc.length?`<div class="lbl">Situations it must handle</div><ul class="scen">${sc.map(x=>`<li><b>${esc(x.text)}</b>${Array.isArray(x.requires)&&x.requires.length?`<span>proved by ${x.requires.map(id=>esc(RN[id]||id)).join(', ')}</span>`:''}</li>`).join('')}</ul>`:'';}
 function renderReqs(){
   const box=$('#reqList');if(box.contains(document.activeElement)&&document.activeElement.matches('input,select'))return;
-  const lab={pass:'Met',warn:'At risk',fail:'Not met',na:'n/a'},cl={rule:'Rule',provisional:'Provisional',estimated:'Estimated'};
+  const lab=AUTHORED?{pass:'Not assessed',warn:'Not assessed',fail:'Not assessed',na:'n/a'}:{pass:'Met',warn:'At risk',fail:'Not met',na:'n/a'},cl={rule:'Rule',provisional:'Provisional',estimated:'Estimated'};
   box.innerHTML=REQ.map((r,i)=>{const q=REQS.find(x=>x.id===r.id),off=r.pri==='Off';
     const txt=esc(q.t).replace(/\[(\w+)\]/g,(m,k)=>q.in.type==='select'?`<select class="rqv" data-r="${k}" aria-label="${k}">${q.in.opts.map(([v,l])=>`<option value="${v}"${S.req[k]===v?' selected':''}>${esc(l)}</option>`).join('')}</select>`:`<input class="rqv" data-r="${k}" type="number" step="${q.in.step}" min="${q.in.min}" value="${S.req[k]}" aria-label="${k}">`);
     return `<li class="rq st-${r.st}${off?' off':''}"><div class="rqh"><span class="chip">${off?'Off':lab[r.st]}</span><select class="rpri" data-p="${r.id}" aria-label="Priority">${['Must','Should','Off'].map(p=>`<option${p===r.pri?' selected':''}>${p}</option>`).join('')}</select><span class="conf c-${r.conf} eng">${cl[r.conf]||''}</span>${r.fix&&!off&&(r.st==='fail'||r.st==='warn')?`<button class="fix" type="button" data-rfix="${i}">${esc(r.fix.label)}</button>`:''}</div><div class="ears">${txt}</div><div class="rv"><b>${esc(r.val)}</b>${r.how?` <span class="eng">· ${esc(r.how)}</span>`:''}${RSRC[r.id]?` <span class="eng">· source: ${esc(RSRC[r.id])}</span>`:''}</div></li>`;}).join('');
@@ -2033,6 +2035,8 @@ function gateState(){
   const unv=C.filter(c=>c.pri==='Must'&&((S.prog&&S.prog.creq&&S.prog.creq[c.id]&&S.prog.creq[c.id].st)||'open')!=='met');
   if(unv.length&&g[3].ok){g[3].ok=false;g[3].msg=`${unv.length} custom Must requirement${unv.length>1?'s':''} still to verify`;}
   for(let i=1;i<4;i++)if(!g[i-1].ok&&g[i].ok){g[i].ok=false;g[i].msg='Waiting on earlier gates';}
+  /* MetaForge: gates 2 to 4 are decided by checks of the placeholder enclosure, so for an authored form they are never green. */
+  if(AUTHORED){for(let i=1;i<4;i++){g[i].ok=false;g[i].msg='Not assessed for an authored form';}}
   return g;}
 
 /* ---------- design view additions: assumptions, custom requirements, rationale ---------- */
@@ -2255,7 +2259,7 @@ function accSummaries(){
   const s=last&&last.shape,set=(title,txt,st)=>{const sec=document.querySelector(`#dfm > section[data-acc="${title}"]`);if(!sec)return;const a=sec.querySelector('.acc-s');a.querySelector('span').textContent=txt||'';a.querySelector('.sdot').className='sdot'+(st?' s-'+st:'');};
   const w=a=>a.some(x=>x==='fail')?'fail':a.some(x=>x==='warn')?'warn':a.length?'pass':'';
   const g=gateState(),cur=g.find(x=>!x.ok);set('Readiness',cur?`Gate ${cur.n}: ${cur.msg}`:'All four gates pass',cur?(cur.n<=2?'warn':'open'):'pass');
-  const act=REQ.filter(r=>r.st!=='na'),met=act.filter(r=>r.st==='pass').length;set('Requirements',`${met} of ${act.length} met`,w(REQ.filter(r=>r.pri==='Must').map(r=>r.st)));
+  const act=REQ.filter(r=>r.st!=='na'),met=act.filter(r=>r.st==='pass').length;set('Requirements',AUTHORED?'not assessed':`${met} of ${act.length} met`,AUTHORED?'':w(REQ.filter(r=>r.pri==='Must').map(r=>r.st)));
   const run=Object.values(JOBS).filter(j=>j.status==='running'||j.status==='queued').length;set('Validation in the background',run?`${run} running`:'Up to date',run?'open':'pass');
   set('Manufacturing process',`${PROC[S.proc].short} · ${matOf().name.split(',')[0]} · ${S.qty.toLocaleString('en-GB')} units`,'');
   set('What it does and what goes inside',`${boardOf().name} · ${battOf().mass?battOf().name.split(',')[0]:'no battery'} · ${G.nodes.filter(n=>EB[n.type]&&EB[n.type].func).length} functions`,'');

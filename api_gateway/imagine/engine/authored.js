@@ -621,30 +621,97 @@
     group.name = 'authored-form';
     env.scene.add(group);
 
-    var panel = doc.createElement('div');
-    panel.className = 'fg-authored-panel';
-    panel.setAttribute('data-fg-authored', 'panel');
-    var title = doc.createElement('div'); title.className = 'fg-authored-title'; title.textContent = 'Form parameters'; panel.appendChild(title);
-    var rows = doc.createElement('div'); panel.appendChild(rows);
-    Object.keys(params).forEach(function (key) {
+    var quick = env.quick || null;
+    var partsBox = null;
+    function el(tag, cls, text) {
+      var e = doc.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined) e.textContent = text;
+      return e;
+    }
+    // A code identifier shown as a label: slot_len becomes "Slot len".
+    function humanise(key) {
+      var t = String(key).replace(/_+/g, ' ').trim();
+      return t.charAt(0).toUpperCase() + t.slice(1);
+    }
+    function gridOf(key) {
       var v = +params[key], r = ranges[key], lo = r ? +r[0] : Math.min(v * 0.25, v - 1), hi = r ? +r[1] : Math.max(v * 2, v + 1);
-      if (v < lo) lo = v; if (v > hi) hi = v;
-      var row = doc.createElement('label'); row.className = 'fg-authored-row';
-      var name = doc.createElement('span'); name.textContent = key;
-      var val = doc.createElement('span'); val.className = 'fg-authored-val'; val.textContent = String(v);
-      var input = doc.createElement('input'); input.type = 'range'; var grid = sliderGrid(v, lo, hi); input.min = String(grid.lo); input.max = String(grid.hi); input.step = String(grid.step); input.value = String(v);
-      input.setAttribute('data-param', key);
-      input.addEventListener('input', function () { params[key] = +input.value; val.textContent = String(+input.value); schedule(); });
-      row.appendChild(name); row.appendChild(val); row.appendChild(input); rows.appendChild(row);
-    });
-    var legend = doc.createElement('div'); legend.className = 'fg-authored-legend';
-    Object.keys(KIND_STYLE).forEach(function (k) {
-      var item = doc.createElement('span'); var sw = doc.createElement('i'); sw.style.background = '#' + KIND_STYLE[k].color.toString(16).padStart(6, '0');
-      item.appendChild(sw); item.appendChild(doc.createTextNode(KIND_STYLE[k].label)); legend.appendChild(item);
-    });
-    panel.appendChild(legend);
-    var problems = doc.createElement('div'); problems.className = 'fg-authored-errors'; panel.appendChild(problems);
-    (env.host || doc.body).appendChild(panel);
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+      return sliderGrid(v, lo, hi);
+    }
+    function legendInto(parent) {
+      var legend = el('div', 'fg-authored-legend');
+      Object.keys(KIND_STYLE).forEach(function (k) {
+        var item = doc.createElement('span'), sw = doc.createElement('i');
+        sw.style.background = '#' + KIND_STYLE[k].color.toString(16).padStart(6, '0');
+        item.appendChild(sw); item.appendChild(doc.createTextNode(KIND_STYLE[k].label)); legend.appendChild(item);
+      });
+      parent.appendChild(legend);
+    }
+
+    var panel, problems;
+    if (quick) {
+      // The engine's own markup for its Simple-mode controls, so an authored form looks and
+      // behaves like every other studio: the same sections, sliders and headings.
+      panel = quick;
+      quick.textContent = '';
+      quick.appendChild(el('p', 'qintro', 'This form is built from code. Drag a slider and it is redrawn with no model call.'));
+      var det = el('details', 'pp');
+      det.open = true; det.setAttribute('open', ''); det.setAttribute('data-pps', 'form');
+      var sum = el('summary');
+      sum.appendChild(el('span', '', form.label || (env.cfg.product && env.cfg.product.name) || 'Form'));
+      det.appendChild(sum);
+      var body = el('div', 'ppb'), grp = el('div', 'qgrp');
+      grp.appendChild(el('h3', '', 'Size and shape'));
+      Object.keys(params).forEach(function (key) {
+        var v = +params[key], grid = gridOf(key);
+        var q = el('div', 'qs');
+        q.setAttribute('data-q', key);
+        var qt = el('div', 'qt'), value = el('b', '', String(v));
+        qt.appendChild(el('span', '', humanise(key)));
+        qt.appendChild(value);
+        q.appendChild(qt);
+        var input = el('input', 'rng');
+        input.type = 'range';
+        input.min = String(grid.lo); input.max = String(grid.hi); input.step = String(grid.step); input.value = String(v);
+        input.setAttribute('aria-label', humanise(key));
+        input.setAttribute('data-param', key);
+        // No manufacturing limit applies to a free form, so the whole track is allowed.
+        if (input.style && input.style.setProperty) { input.style.setProperty('--lo', '0%'); input.style.setProperty('--hi', '100%'); }
+        input.addEventListener('input', function () { params[key] = +input.value; value.textContent = String(+input.value); schedule(); });
+        q.appendChild(input);
+        grp.appendChild(q);
+      });
+      body.appendChild(grp); det.appendChild(body); quick.appendChild(det);
+      var pdet = el('details', 'pp'), psum = el('summary');
+      pdet.open = true; pdet.setAttribute('open', ''); pdet.setAttribute('data-pps', 'parts');
+      psum.appendChild(el('span', '', 'Parts')); pdet.appendChild(psum);
+      partsBox = el('div', 'ppb'); pdet.appendChild(partsBox);
+      legendInto(pdet);
+      quick.appendChild(pdet);
+      problems = el('div', 'fg-authored-errors'); quick.appendChild(problems);
+    } else {
+      panel = doc.createElement('div');
+      panel.className = 'fg-authored-panel';
+      panel.setAttribute('data-fg-authored', 'panel');
+      var title = doc.createElement('div'); title.className = 'fg-authored-title'; title.textContent = 'Form parameters'; panel.appendChild(title);
+      var rows = doc.createElement('div'); panel.appendChild(rows);
+      Object.keys(params).forEach(function (key) {
+        var v = +params[key], r = ranges[key], lo = r ? +r[0] : Math.min(v * 0.25, v - 1), hi = r ? +r[1] : Math.max(v * 2, v + 1);
+        if (v < lo) lo = v; if (v > hi) hi = v;
+        var row = doc.createElement('label'); row.className = 'fg-authored-row';
+        var name = doc.createElement('span'); name.textContent = key;
+        var val = doc.createElement('span'); val.className = 'fg-authored-val'; val.textContent = String(v);
+        var input = doc.createElement('input'); input.type = 'range'; var grid = sliderGrid(v, lo, hi); input.min = String(grid.lo); input.max = String(grid.hi); input.step = String(grid.step); input.value = String(v);
+        input.setAttribute('data-param', key);
+        input.addEventListener('input', function () { params[key] = +input.value; val.textContent = String(+input.value); schedule(); });
+        row.appendChild(name); row.appendChild(val); row.appendChild(input); rows.appendChild(row);
+      });
+      legendInto(panel);
+      problems = doc.createElement('div'); problems.className = 'fg-authored-errors'; panel.appendChild(problems);
+      (env.host || doc.body).appendChild(panel);
+    }
 
     var seq = 0, timer = null, materials = {};
     function material(kind) {
@@ -683,6 +750,21 @@
           group.add(mesh);
         });
       });
+      if (partsBox) {
+        partsBox.textContent = '';
+        result.parts.forEach(function (p) {
+          var row = el('div', 'qs'), qt = el('div', 'qt'), name = doc.createElement('span'), sw = doc.createElement('i');
+          row.setAttribute('data-part', p.id);
+          sw.style.background = '#' + (KIND_STYLE[p.kind] || KIND_STYLE.generated).color.toString(16).padStart(6, '0');
+          sw.className = 'fg-authored-swatch';
+          name.appendChild(sw); name.appendChild(doc.createTextNode(' ' + p.name));
+          var b = p.bbox;
+          qt.appendChild(name);
+          qt.appendChild(el('b', '', p.error ? 'not drawn' : b ? fmtMm(b.max[0] - b.min[0]) + ' \u00d7 ' + fmtMm(b.max[2] - b.min[2]) + ' \u00d7 ' + fmtMm(b.max[1] - b.min[1]) + ' mm' : ''));
+          row.appendChild(qt);
+          partsBox.appendChild(row);
+        });
+      }
       problems.textContent = '';
       result.errors.forEach(function (e) { var d = doc.createElement('div'); d.textContent = e; problems.appendChild(d); });
       problems.style.display = result.errors.length ? 'block' : 'none';
