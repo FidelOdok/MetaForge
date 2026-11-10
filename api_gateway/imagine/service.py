@@ -325,11 +325,18 @@ def _chosen_parts(
 
 def _part_gaps(part: dict[str, Any]) -> list[str]:
     geometry = part.get("geometry") or {}
-    source = (
-        part.get("datasheet")
-        or part.get("url")
-        or (part.get("cost") or {}).get("source")
-        or geometry.get("source")
+    source = next(
+        (
+            c
+            for c in (
+                part.get("datasheet"),
+                part.get("url"),
+                (part.get("cost") or {}).get("source"),
+                geometry.get("source"),
+            )
+            if part_model.is_real_source(c)
+        ),
+        None,
     )
     gaps = []
     if not source:

@@ -48,6 +48,8 @@ person's steps, open to you only in a delegated run (rule 2):
 3. **No invented part numbers.** A part's order code, maker and datasheet come
    from a source you read, with the date you read it. When you have none, keep
    the placeholder and list the part as missing; never make one up.
+   A made-up link is a made-up source: a link on a reserved `.invalid` name does
+   not count as a source, and the handover still lists the part as lacking one.
 4. **Every number has a source.** A value the person did not give goes in
    `programme.assumptions` and its requirement's `source` names that assumption.
 5. **Read before you write.** If `twin.imagine_get_studio` shows a draft, start

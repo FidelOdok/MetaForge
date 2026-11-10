@@ -225,11 +225,18 @@ def build_concept_revision(
             key = id(part)
             if key not in part_key:
                 geometry = part.get("geometry") or {}
-                source = (
-                    part.get("datasheet")
-                    or part.get("url")
-                    or (part.get("cost") or {}).get("source")
-                    or geometry.get("source")
+                source = next(
+                    (
+                        c
+                        for c in (
+                            part.get("datasheet"),
+                            part.get("url"),
+                            (part.get("cost") or {}).get("source"),
+                            geometry.get("source"),
+                        )
+                        if part_model.is_real_source(c)
+                    ),
+                    None,
                 )
                 interfaces = part.get("interfaces")
                 part_key[key] = part_ids.take(part.get("id"))

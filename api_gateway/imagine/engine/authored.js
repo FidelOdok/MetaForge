@@ -735,6 +735,15 @@
     var drawn = {}, formParts = (((cfg && cfg.form) || {}).authored || {}).parts || [];
     formParts.forEach(function (p) { if (p && typeof p.component_ref === 'string') drawn[p.component_ref] = true; });
     function hasText(v) { return typeof v === 'string' && v.trim() !== ''; }
+    // A link whose host ends in .invalid is reserved to mean "not a real address": an agent that
+    // has not read a datasheet puts one there to satisfy a format check. It is not a source.
+    function realSource(v) {
+      if (!hasText(v)) return false;
+      var m = /^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i.exec(v.trim());
+      if (!m) return true;
+      var host = m[1].split('@').pop().split(':')[0].replace(/\.$/, '').toLowerCase();
+      return !(host === 'invalid' || /\.invalid$/.test(host));
+    }
     function sized(g) {
       var e = g && g.envelope;
       if (!(Array.isArray(e) && e.length === 3 && e.every(function (x) { return typeof x === 'number' && x > 0; }))) return false;
@@ -748,7 +757,7 @@
       var steps = {
         defined: hasText(p.mpn) && hasText(p.manufacturer),
         size: sized(g),
-        sourced: hasText(p.datasheet) && hasText(p.retrieved),
+        sourced: realSource(p.datasheet) && hasText(p.retrieved),
         drawn: !!drawn[p.id],
       };
       var done = [steps.defined, steps.size, steps.sourced, steps.drawn].filter(Boolean).length;

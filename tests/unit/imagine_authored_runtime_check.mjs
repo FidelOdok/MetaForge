@@ -667,6 +667,21 @@ await check('components_a_guess_never_counts_as_a_real_size', async () => {
   return got === 'true,true,false,false,false,false' ? true : got;
 });
 
+await check('components_a_dummy_link_is_not_a_source', async () => {
+  const sourced = (datasheet) => FG.describeComponents({ _context: { parts: [
+    { id: 'p', role: 'other', mpn: 'M', manufacturer: 'A', datasheet, retrieved: '2026-11-10',
+      geometry: { envelope: [1, 1, 1] } }] } }).rows[0].steps.sourced;
+  const got = [
+    sourced('https://www.mouser.com/datasheet/x.pdf'),
+    sourced('https://example.invalid/no-datasheet-read'),
+    sourced('http://x.INVALID./a'),
+    sourced('https://user@host.invalid:8080/a'),
+    sourced('datasheet page 12'),
+    sourced(''),
+  ].join();
+  return got === 'true,false,false,false,true,false' ? true : got;
+});
+
 await check('components_card_renders_rows_and_missing_functions_and_is_absent_when_empty', async () => {
   const el = () => {
     const e = { children: [], style: {}, className: '', textContent: '', id: '',

@@ -94,6 +94,27 @@ _CLASS_WORDS = (
 SIZE_BASIS = ("read", "typical", "generic")
 
 
+_INVALID_HOST = re.compile(r"^[a-z][a-z0-9+.-]*://([^/?#]*)", re.IGNORECASE)
+
+
+def is_real_source(value: Any) -> bool:
+    """Whether a source (a datasheet link, a page, a note) counts as one.
+
+    Empty text never does. A link whose host ends in ``.invalid`` never does either: that name
+    is reserved to mean "not a real address", and an agent that has not read a datasheet has
+    used it to satisfy a format check. Anything else is taken as given: presence is checked
+    here, not that the source was read.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return False
+    match = _INVALID_HOST.match(value.strip())
+    if match:
+        host = match.group(1).rsplit("@", 1)[-1].split(":", 1)[0].rstrip(".").lower()
+        if host == "invalid" or host.endswith(".invalid"):
+            return False
+    return True
+
+
 def size_is_read(geometry: Mapping[str, Any]) -> bool:
     """Whether a part's geometry has an envelope that counts as one.
 

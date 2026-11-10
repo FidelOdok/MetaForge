@@ -428,3 +428,9 @@ def test_the_skill_lists_the_interface_buses_and_the_rule_for_power_interfaces()
     assert not missing, f"the skill does not name these buses: {missing}"
     assert "also `v`, the voltage window" in text
     assert "leave that interface out and say you did not read it" in text
+
+
+def test_the_skill_says_a_made_up_link_is_not_a_source() -> None:
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    assert "A made-up link is a made-up source" in text
+    assert "`.invalid`" in text and "does not count as a source" in text

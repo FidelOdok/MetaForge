@@ -399,22 +399,23 @@ async def test_a_revision_with_no_form_block_still_gets_no_form_finding(verifica
 # -- where the two deliberately differ ----------------------------------------------
 
 
-async def test_a_blank_part_source_is_stricter_in_the_service(verification: Any) -> None:
-    """The checklist counts "   " as a source; the service does not.
+async def test_a_blank_or_dummy_part_source_is_missing_in_both(verification: Any) -> None:
+    """Whitespace is not a source, and neither is a link on the reserved ``.invalid`` name.
 
-    Deliberate: whitespace is not a source. It is the one known place the
-    service is stricter than the checklist it replaces, so a studio that is
-    ready by the old rule can read not ready by the new one, never the reverse.
+    This used to be the one place the service was stricter than the checklist it replaces. The
+    checklist now refuses both too, so the two agree: a studio is not ready on a source nobody
+    gave, whichever side asks.
     """
-    state = ready_state()
-    set_part(state, "usbc-a", datasheet="   ")
-    part(state, "usbc-a")["geometry"].pop("source")
-    items, _ = await checklist_of(state)
-    revision = build_concept_revision(
-        str(uuid4()), 1, state["config"], state["collections"], has_mesh=True
-    )
-    assert items["parts"] == "done"
-    assert service_items(verification(revision))["parts"] == "missing"
+    for dummy in ("   ", "https://example.invalid/no-datasheet-read"):
+        state = ready_state()
+        set_part(state, "usbc-a", datasheet=dummy)
+        part(state, "usbc-a")["geometry"].pop("source")
+        items, _ = await checklist_of(state)
+        revision = build_concept_revision(
+            str(uuid4()), 1, state["config"], state["collections"], has_mesh=True
+        )
+        assert items["parts"] == "missing", dummy
+        assert service_items(verification(revision))["parts"] == "missing", dummy
 
 
 async def test_a_blank_part_date_is_stricter_in_the_service(verification: Any) -> None:

@@ -72,6 +72,7 @@ CHECKS = [
     "mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change",
     "components_describe_each_part_its_readiness_and_the_functions_without_a_part",
     "components_a_guess_never_counts_as_a_real_size",
+    "components_a_dummy_link_is_not_a_source",
     "components_card_renders_rows_and_missing_functions_and_is_absent_when_empty",
     "measure_a_standing_box_has_no_overhang_and_tips_at_45_degrees",
     "measure_a_block_hanging_off_a_small_base_would_tip_over",
