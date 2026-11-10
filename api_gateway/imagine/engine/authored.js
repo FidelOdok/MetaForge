@@ -561,26 +561,58 @@
     return d;
   }
 
+  // The engine wraps its own sections into collapsible cards once, at start-up. These blocks are
+  // added later, so each builds the same card (header, summary, body) itself.
+  function makeCard(doc, id, title, summary, dotClass, open) {
+    var sec = doc.createElement('section'); sec.className = open ? 'blk open' : 'blk'; sec.id = id;
+    sec.setAttribute('data-acc', title);
+    var head = doc.createElement('button'); head.type = 'button'; head.className = 'acc-h'; head.setAttribute('aria-expanded', String(!!open));
+    var t = doc.createElement('span'); t.className = 'acc-t'; t.textContent = title;
+    var sum = doc.createElement('span'); sum.className = 'acc-s';
+    var dot = doc.createElement('i'); dot.className = 'sdot' + (dotClass ? ' ' + dotClass : '');
+    var st = doc.createElement('span'); st.textContent = summary;
+    sum.appendChild(dot); sum.appendChild(st);
+    var chev = doc.createElement('span'); chev.className = 'acc-c'; chev.setAttribute('aria-hidden', 'true');
+    head.appendChild(t); head.appendChild(sum); head.appendChild(chev);
+    var body = doc.createElement('div'); body.className = 'acc-b';
+    head.addEventListener('click', function () {
+      var now = !sec.classList.contains('open');
+      sec.classList.toggle('open', now); head.setAttribute('aria-expanded', String(now));
+    });
+    sec.appendChild(head); sec.appendChild(body);
+    return { section: sec, body: body };
+  }
+
   function renderSummary(doc, host, d) {
     if (!host) return null;
-    if (typeof host.querySelector === 'function') { var old = host.querySelector('#authBlk'); if (old && old.parentNode) old.parentNode.removeChild(old); }
-    var block = doc.createElement('section'); block.className = 'blk'; block.id = 'authBlk';
-    var lbl = doc.createElement('div'); lbl.className = 'lbl'; lbl.textContent = d.headline; block.appendChild(lbl);
-    if (d.dims) { var note = doc.createElement('p'); note.className = 'note'; note.textContent = 'The size and volume are measured from the shapes the code makes.'; block.appendChild(note); }
+    if (typeof host.querySelector === 'function') {
+      ['authBlk', 'authNa'].forEach(function (id) { var old = host.querySelector('#' + id); if (old && old.parentNode) old.parentNode.removeChild(old); });
+    }
+    var form = makeCard(doc, 'authBlk', d.headline,
+      d.problems.length ? d.problems.length + ' problem' + (d.problems.length > 1 ? 's' : '') : (d.dims || ''),
+      d.problems.length ? 's-fail' : d.dims ? 's-pass' : '', true);
+    var body = form.body;
+    if (d.dims) { var note = doc.createElement('p'); note.className = 'note'; note.textContent = 'The size and volume are measured from the shapes the code makes.'; body.appendChild(note); }
     if (d.facts.length) {
       var dl = doc.createElement('dl'); dl.className = 'fg-authored-facts';
       d.facts.forEach(function (f) {
-        var dt = doc.createElement('dt'); dt.textContent = f[0]; var dd = doc.createElement('dd'); dd.textContent = f[1];
-        dl.appendChild(dt); dl.appendChild(dd);
+        var tile = doc.createElement('div'); tile.className = 'fg-fact';
+        var dt = doc.createElement('dt'); dt.textContent = f[0]; var dd = doc.createElement('dd');
+        var cut = String(f[1]).indexOf(', ');   // "295 cm³, overlaps counted twice": the figure, then its caveat
+        if (cut > 0) {
+          dd.appendChild(doc.createTextNode(String(f[1]).slice(0, cut)));
+          var small = doc.createElement('small'); small.textContent = String(f[1]).slice(cut + 2); dd.appendChild(small);
+        } else dd.textContent = f[1];
+        tile.appendChild(dt); tile.appendChild(dd); dl.appendChild(tile);
       });
-      block.appendChild(dl);
+      body.appendChild(dl);
     }
     if (d.problems.length) {
       var bad = doc.createElement('div'); bad.className = 'fg-authored-errors'; bad.style.display = 'block';
       d.problems.forEach(function (t) { var line = doc.createElement('div'); line.textContent = t; bad.appendChild(line); });
-      block.appendChild(bad);
+      body.appendChild(bad);
     }
-    var head = doc.createElement('div'); head.className = 'lbl'; head.textContent = 'Not assessed for an authored form'; block.appendChild(head);
+    var na = makeCard(doc, 'authNa', 'Not assessed', 'authored form, ' + d.notAssessed.length + ' checks', 's-warn', false);
     var ul = doc.createElement('ul'); ul.className = 'rlist';
     d.notAssessed.forEach(function (n) {
       var li = doc.createElement('li'); li.className = 'rule st-warn';
@@ -590,9 +622,12 @@
       var l2 = doc.createElement('div'); l2.className = 'rv'; l2.textContent = n.why;
       wrap.appendChild(l1); wrap.appendChild(l2); li.appendChild(chip); li.appendChild(wrap); ul.appendChild(li);
     });
-    block.appendChild(ul);
-    if (typeof host.insertBefore === 'function') host.insertBefore(block, host.firstChild); else host.appendChild(block);
-    return block;
+    na.body.appendChild(ul);
+    // Inserted first, so the form card ends up above it.
+    [na.section, form.section].forEach(function (sec) {
+      if (typeof host.insertBefore === 'function') host.insertBefore(sec, host.firstChild); else host.appendChild(sec);
+    });
+    return form.section;
   }
 
   // A slider's grid. A range input snaps its value to min + n * step, so a step that does not

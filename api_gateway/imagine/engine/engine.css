@@ -647,9 +647,13 @@ html[data-authored] #verdictBlk,html[data-authored] #testBlk,html[data-authored]
 html[data-authored] #rulesBlk,html[data-authored] #bomBlk,html[data-authored] #partBlk,
 html[data-authored] #costBlk,html[data-authored] #handBlk,html[data-authored] #partReady{display:none}
 .fg-authored-swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:2px;vertical-align:-1px}
-.fg-authored-facts{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:6px 0 10px;font-size:12px}
-.fg-authored-facts dt{color:var(--muted,#667)}
-.fg-authored-facts dd{margin:0}
+.fg-authored-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:2px 0 6px}
+.fg-authored-facts .fg-fact{background:var(--panel2);border-radius:var(--r-md,10px);padding:9px 11px;min-width:0}
+.fg-authored-facts dt{color:var(--muted);font-size:11px;letter-spacing:.02em;margin-bottom:3px}
+.fg-authored-facts dd{margin:0;font-size:15px;font-weight:600;font-family:var(--f-mono);overflow-wrap:anywhere}
+.fg-authored-facts dd small{display:block;font-size:11px;font-weight:400;color:var(--muted);font-family:inherit}
+#authBlk > .acc-b,#authNa > .acc-b{align-content:start}
+.fg-authored-facts .fg-fact:first-child{grid-column:1/-1}
 
 /* The Engineer graph of an authored form (authored.js). It borrows the engine's own node, port and wire
    styles (.node, .nh, .port, .wire) and adds only what they do not have: fixed row heights, so a wire's

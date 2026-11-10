@@ -497,3 +497,54 @@ def test_the_graph_and_the_side_buttons_also_work_inside_the_dashboards_frame(
             _engineer_graph_checks(page, frame, form)
         finally:
             browser.close()
+
+
+def test_the_form_summary_is_a_card_with_tiles_and_the_not_assessed_list_is_its_own_card(
+    server: str,
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from api_gateway.imagine.look import CHROMIUM_ARGS
+
+    url = _put(server, PROJECT, authored_lamp_form())
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=list(CHROMIUM_ARGS))
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 950})
+            page.goto(url, wait_until="domcontentloaded")
+            _wait_ready(page)
+            facts = page.evaluate(
+                """() => {
+                  const s = (sel) => document.querySelector(sel);
+                  const card = (id) => { const e = s(id); if (!e) return null;
+                    const h = e.querySelector(':scope > .acc-h');
+                    const b = e.querySelector(':scope > .acc-b');
+                    return { open: e.classList.contains('open'), header: !!h,
+                      title: h && h.querySelector('.acc-t').textContent,
+                      bodyShown: !!b && getComputedStyle(b).display !== 'none',
+                      border: getComputedStyle(e).borderTopWidth,
+                      tiles: e.querySelectorAll('.fg-fact').length }; };
+                  return { form: card('#authBlk'), na: card('#authNa'),
+                    order: Array.from(document.querySelectorAll('#dfm > section'))
+                      .slice(0, 3).map(e => e.id) };
+                }"""
+            )
+            assert facts["form"]["header"] and facts["form"]["title"] == "Form drawn", facts
+            assert facts["form"]["open"] and facts["form"]["bodyShown"], facts
+            assert facts["form"]["border"] != "0px" and facts["form"]["tiles"] == 5, facts
+            assert facts["na"]["title"] == "Not assessed", facts
+            assert not facts["na"]["open"] and not facts["na"]["bodyShown"], facts
+            assert facts["order"][:2] == ["authBlk", "authNa"], facts
+            # Both cards open and close like the engine's own.
+            page.locator("#authNa > .acc-h").click()
+            page.locator("#authBlk > .acc-h").click()
+            page.wait_for_timeout(200)
+            after = page.evaluate(
+                """() => {
+                  const open = (id) => document.querySelector(id).classList.contains('open');
+                  return { na: open('#authNa'), form: open('#authBlk') };
+                }"""
+            )
+            assert after == {"na": True, "form": False}, after
+        finally:
+            browser.close()

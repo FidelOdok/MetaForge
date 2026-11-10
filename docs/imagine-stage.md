@@ -621,6 +621,10 @@ mesh. Scroll zooms, dragging the background pans, and Fit frames everything. The
 panes, the graph, the model and the summary, and the left and right panes each minimise with
 the edge buttons (or `[` and `]`), also when the page sits inside the dashboard's frame.
 
+At the top of the right pane, a "Form drawn" card shows the measured envelope, volume, part count,
+triangles and mass as tiles, and a collapsed "Not assessed" card lists the checks the engine cannot
+make for a coded form. Both open and close like the engine's own cards.
+
 The right pane keeps what carries the person's controls and records, and labels what the engine
 cannot say about this form:
 
