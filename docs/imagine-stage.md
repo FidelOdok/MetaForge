@@ -221,7 +221,8 @@ the person must be the authenticated principal. An agent's "confirm" of an
 assumption is recorded as an acceptance there too.
 
 **The concept mesh without a person.** The checklist's `concept_assembly`
-item needs an illustrative concept mesh in the project. An agent makes one
+item is cleared by a person having seen the form, or by an illustrative concept
+mesh in the project. An agent makes a mesh
 with `twin.render_concept_image` and then `twin.generate_concept_mesh` from
 that image (a job; poll `twin.job_status`). Both are illustrative writes, so
 a project policy of `auto_clean` or `auto` approves them within the spend cap
@@ -338,8 +339,13 @@ parity test keeps the two equal:
 5. `parts`: one chosen part per function, each with a source, a retrieved
    date, interfaces and a 3D envelope.
 6. `manufacturing_context`: process, material and quantity recorded.
-7. `concept_assembly`: a chosen part for every function, and an illustrative
-   concept mesh for the project.
+7. `concept_assembly`: a chosen part for every function, and the form seen:
+   either a person has said "I have seen this form" for this revision (the
+   studio's button; the server stamps the revision, so a form the agent changed
+   since is not covered, and an agent cannot record it), or an illustrative
+   concept mesh exists. The mesh is optional: nothing downstream reads it, it can
+   never be evidence, and a paid provider should not decide whether a design is
+   ready.
 8. `interfaces`: interfaces described, so contracts can be proposed.
 9. `screening`: screening results stored at V2.
 

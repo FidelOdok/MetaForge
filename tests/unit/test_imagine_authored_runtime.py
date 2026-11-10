@@ -83,6 +83,7 @@ CHECKS = [
     "measure_says_what_it_did_not_measure",
     "describe_shows_the_measurements_and_says_when_a_form_would_tip_over",
     "screening_rules_report_only_what_was_measured",
+    "the_summary_offers_a_button_for_a_person_to_say_they_have_seen_the_form",
 ]
 
 

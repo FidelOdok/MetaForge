@@ -19,6 +19,7 @@ EventKind = Literal[
     "requirement",
     "ledger",
     "screening",
+    "form_seen",
 ]
 
 #: Browser collection (``fg:write``) to event kind.
@@ -30,6 +31,7 @@ COLLECTION_KINDS: dict[str, str] = {
     "requirements": "requirement",
     "ledger": "ledger",
     "screening": "screening",
+    "formSeen": "form_seen",
 }
 #: Event kind to browser collection, for the snapshot the host sends back.
 KIND_COLLECTIONS: dict[str, str] = {v: k for k, v in COLLECTION_KINDS.items()}

@@ -33,6 +33,7 @@ export const COLLECTION_KIND: Record<StudioCollection, ImagineEventKind> = {
   requirements: 'requirement',
   ledger: 'ledger',
   screening: 'screening',
+  formSeen: 'form_seen',
 };
 
 /**

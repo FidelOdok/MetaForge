@@ -813,5 +813,31 @@ await check('screening_rules_report_only_what_was_measured', async () => {
   return FG.screeningRules(null) === null ? true : 'no summary must give no screening';
 });
 
+await check('the_summary_offers_a_button_for_a_person_to_say_they_have_seen_the_form', async () => {
+  const el = () => {
+    const e = { children: [], style: {}, className: '', textContent: '', id: '', attrs: {}, handlers: {}, disabled: false,
+      appendChild(c) { e.children.push(c); return c; }, insertBefore(c) { e.children.unshift(c); return c; },
+      setAttribute(k, v) { e.attrs[k] = v; }, addEventListener(t, f) { e.handlers[t] = f; }, get firstChild() { return e.children[0] || null; } };
+    return e;
+  };
+  const doc = { createElement: el, createTextNode: (t) => ({ textContent: t }) };
+  const base = FG.describe({ status: 'ready', parts: [{ id: 'a', name: 'a', kind: 'generated', triangles: 12, volume: 1000 }],
+    bbox: { min: [0, 0, 0], max: [1, 2, 3] }, triangles: 12, errors: [] }, null);
+  const find = (n, pred, out = []) => { if (!n) return out; if (pred(n)) out.push(n); (n.children || []).forEach((c) => find(c, pred, out)); return out; };
+  // No hook: no button, so a plain summary is unchanged.
+  const none = el(); FG.renderSummary(doc, none, base);
+  if (find(none, (n) => n.attrs && n.attrs['data-form-seen'] !== undefined).length) return 'a button appeared with no hook';
+  let calls = 0;
+  const host = el(); FG.renderSummary(doc, host, { ...base, onSeen: () => { calls++; }, seen: false });
+  const btn = find(host, (n) => n.attrs && n.attrs['data-form-seen'] !== undefined)[0];
+  if (!btn) return 'no button for a person to say they have seen the form';
+  if (!/seen this form/i.test(btn.textContent) || btn.disabled) return 'unexpected unseen button: ' + btn.textContent;
+  btn.handlers.click();
+  if (calls !== 1) return 'a click should call the hook once, got ' + calls;
+  const done = el(); FG.renderSummary(doc, done, { ...base, onSeen: () => { calls++; }, seen: true });
+  const b2 = find(done, (n) => n.attrs && n.attrs['data-form-seen'] !== undefined)[0];
+  return b2 && b2.disabled && /seen/i.test(b2.textContent) ? true : 'a seen form should show a disabled, recorded button';
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

@@ -778,6 +778,21 @@ class ImagineService:
                 collection = KIND_COLLECTIONS[event.kind]
                 previous = head.state["collections"][collection].get(doc_id)
                 data = {k: v for k, v in data.items() if k not in _DELEGATION_KEYS}
+                if event.kind == "form_seen":
+                    # A person looking at the form is not something an agent can say for them,
+                    # and the revision is the server's, never the page's.
+                    if from_agent or delegated:
+                        _count("event", "refused")
+                        raise ImagineError(
+                            "Seeing the form is the person's own act; an agent cannot record it.",
+                            403,
+                        )
+                    doc_id = "latest"
+                    data = {
+                        "seen": data.get("seen") is True,
+                        "revision": head.revision,
+                        "at": datetime.now(UTC).isoformat(),
+                    }
                 if delegated:
                     data = _delegated_write(event.kind, data, previous, delegated)
                 elif from_agent and event.kind == "scenario":
@@ -1331,22 +1346,36 @@ class ImagineService:
                 f"{mfc['selected_process']}, {mfc['selected_material']}, {mfc['quantity']} units.",
             )
 
-        # 7. concept assembly and an illustrative concept mesh
+        # 7. concept assembly, and the form seen. A person having seen this revision of the form
+        # satisfies it, or an illustrative concept mesh does (spec 5.1, concept.form_seen). The mesh
+        # is optional: nothing downstream reads it and it can never be evidence.
         mesh = await self.bridge.has_concept_mesh(project_id)
+        seen_doc = (cols.get("formSeen") or {}).get("latest") or {}
+        seen = bool(seen_doc.get("seen")) and seen_doc.get("revision") == head.revision
         parts_ok = bool(chosen) and not no_part
-        if parts_ok and mesh:
+        if parts_ok and (mesh or seen):
+            how = (
+                f"a person has seen this form (revision {head.revision})"
+                if seen
+                else "an illustrative concept mesh exists"
+            )
+            if seen and mesh:
+                how += "; an illustrative concept mesh also exists"
             add(
                 "concept_assembly",
                 "Concept assembly and concept mesh",
                 "done",
-                "Component ids are assigned at handover; an illustrative concept mesh exists.",
+                f"Component ids are assigned at handover; {how}.",
             )
         else:
             missing = []
             if not parts_ok:
                 missing.append("a chosen part for every function")
-            if not mesh:
-                missing.append("an illustrative concept mesh (generate one in Imagine)")
+            if not (mesh or seen):
+                missing.append(
+                    "a person to have seen the form (use 'I have seen this form' in the studio), "
+                    "or an illustrative concept mesh"
+                )
             add(
                 "concept_assembly",
                 "Concept assembly and concept mesh",

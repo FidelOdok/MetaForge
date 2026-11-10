@@ -579,7 +579,7 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
@@ -2368,7 +2368,10 @@ window.__formgraphPick=(x,y)=>pickAt(x,y);
 const EB_BASE=EB_PRE,OPTS=CTX?(CTX.options||[]):[],CMP=CTX?(CTX.compiled||{}):{},CPART={};
 if(CTX)(CTX.parts||[]).forEach(p=>CPART[p.id]=p);
 S.picks=S.picks||{};S.userScen=S.userScen||[];S.edits=S.edits||[];
-let DFA=null,OBS=null,DBH=null,SHARED_SCN=null,SHARED_EDITS=null,MODEL_OVR={};const DBQ=[];
+let DFA=null,OBS=null,DBH=null,SHARED_SCN=null,SHARED_EDITS=null,MODEL_OVR={};
+let SHARED_SEEN=null;const REV=(()=>{try{const v=new URLSearchParams(location.search).get('rev');return v==null?null:parseInt(v,10);}catch(e){return null;}})();
+function formSeenNow(){return !!(SHARED_SEEN&&SHARED_SEEN.seen&&REV!=null&&SHARED_SEEN.revision===REV);}
+function paintSeen(){const b=document.querySelector('[data-form-seen]');if(!b)return;const on=formSeenNow();b.disabled=on;b.textContent=on?'You have seen this form. Recorded.':'I have seen this form';}const DBQ=[];
 function rebuildType(t){const b=EB[t];if(!b)return;
   TYPES[t]={cat:'elec',dom:'e',title:b.name,inputs:(b.ins||[]).map(([k,tt])=>({k,label:PL[k]||k,t:tt})),outputs:(b.outs||[]).map(([k,tt])=>({k,label:PL[k]||k,t:tt})),compute:()=>({})};
   const has=(id,k,dir)=>{const n=G.nodes.find(m=>m.id===id);if(!n||!TYPES[n.type])return true;return(dir==='in'?TYPES[n.type].inputs:TYPES[n.type].outputs).some(x=>x.k===k);};
@@ -2545,7 +2548,7 @@ $('#ctxBody').addEventListener('submit',e=>{e.preventDefault();const f=e.target,
    fg:snapshot. fg:readonly freezes every edit control after the handover.
    Standalone (no parent frame), the page keeps the claude.use('db') path. */
 const FG_ASSETS=(()=>{const el=document.getElementById('fg-assets');let a={};try{a=JSON.parse(el&&el.textContent||'{}')||{};}catch(e){}return{gltf:a.gltf||'engine/assets/GLTFExporter.js'};})();
-const FG_COLLECTIONS=['choices','scenarios','contextEdits','assumptions','requirements','ledger','screening'];
+const FG_COLLECTIONS=['choices','scenarios','contextEdits','assumptions','requirements','ledger','screening','formSeen'];
 let HOST_ORIGIN=null,READONLY=false;const HOSTQ=[];
 /** The frame height a hosted page asks for, at a given width. Wide pages
  * sit the controls beside a view of up to 560 px; narrow ones stack. */
@@ -2584,6 +2587,7 @@ function hostApply(cols){if(!cols||typeof cols!=='object')return;DBH=DBH||{hoste
     const dec=OPTS.find(o=>o.id===id);if(dec&&v.pick&&(S.picks[id]||dec.pick)!==v.pick&&dec.candidates.includes(v.pick)){applyPick(dec,v.pick,true);ch=true;}});
   SHARED_SCN=ent('scenarios').map(([id,v])=>Object.assign({},v,{id}));
   SHARED_EDITS=ent('contextEdits').map(([id,v])=>Object.assign({},v,{id}));
+  SHARED_SEEN=(ent('formSeen').find(([id])=>id==='latest')||[])[1]||null;paintSeen();
   SHARED_EDITS.forEach(e=>{if(e.kind==='machine'&&e.machine&&!ALLM.some(m=>m.id===e.machine.id)){const pm=Object.assign({pending:true},e.machine);if(PROC0[pm.process])MACH.push(pm);ALLM.push(pm);}});
   const p=progState();
   ent('assumptions').forEach(([id,v])=>{if(typeof v.confirmed==='boolean')p.confirmed[id]=v.confirmed;});

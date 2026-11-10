@@ -704,6 +704,20 @@
       });
       body.appendChild(dl);
     }
+    if (typeof d.onSeen === 'function') {
+      // The person's own act: only they can say they have looked at this revision of the form.
+      var row = doc.createElement('div'); row.className = 'fg-seen';
+      var seenBtn = doc.createElement('button'); seenBtn.type = 'button'; seenBtn.className = 'btn';
+      seenBtn.setAttribute('data-form-seen', '1');
+      seenBtn.textContent = d.seen ? 'You have seen this form. Recorded.' : 'I have seen this form';
+      seenBtn.disabled = !!d.seen;
+      seenBtn.addEventListener('click', function () {
+        if (seenBtn.disabled) return;
+        seenBtn.disabled = true; seenBtn.textContent = 'You have seen this form. Recorded.';
+        d.onSeen();
+      });
+      row.appendChild(seenBtn); body.appendChild(row);
+    }
     if (d.problems.length) {
       var bad = doc.createElement('div'); bad.className = 'fg-authored-errors'; bad.style.display = 'block';
       d.problems.forEach(function (t) { var line = doc.createElement('div'); line.textContent = t; bad.appendChild(line); });
@@ -1076,6 +1090,7 @@
       };
       GLOBAL.FG_AUTHORED = summary;
       var desc = describe(summary, env.material ? env.material() : null);
+      if (env.onSeen) { desc.onSeen = env.onSeen; desc.seen = !!(env.seenState && env.seenState()); }
       if (env.summaryHost) renderSummary(doc, env.summaryHost, desc);
       if (env.summaryHost) renderComponents(doc, env.summaryHost, describeComponents(env.cfg));
       if (env.onSummary) env.onSummary(desc);

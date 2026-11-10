@@ -60,6 +60,7 @@ describe('writeToEvent', () => {
     expect(writeToEvent({ ...msg, collection: 'assumptions' }, 'e').kind).toBe('assumption_confirmed');
     expect(writeToEvent({ ...msg, collection: 'choices' }, 'e').kind).toBe('choice');
     expect(writeToEvent({ ...msg, collection: 'screening' }, 'e').kind).toBe('screening');
+    expect(writeToEvent({ ...msg, collection: 'formSeen' }, 'e').kind).toBe('form_seen');
   });
 });
 

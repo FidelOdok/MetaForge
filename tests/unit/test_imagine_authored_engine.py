@@ -222,3 +222,12 @@ def test_an_authored_form_writes_a_screening_entry_from_the_checks_that_apply() 
 def test_the_screening_entry_is_rewritten_when_the_authored_form_is_measured() -> None:
     # The parts draw in a worker, so the measurement arrives after recompute has run.
     assert "'fg-authored'" in JS and "hostScreening" in JS.split("'fg-authored'", 1)[1][:300]
+
+
+def test_the_page_records_that_a_person_has_seen_the_form_for_this_revision() -> None:
+    # The page reports only that the person looked. The server stamps the revision, and the
+    # page reads its own revision from the frame address to know whether the record covers it.
+    assert "'formSeen'" in JS.split("FG_COLLECTIONS=", 1)[1][:200]
+    assert "dbWrite('formSeen'" in JS
+    assert "onSeen" in JS, "the mount must be given the hook"
+    assert "get('rev')" in JS, "the page must read its revision from its address"

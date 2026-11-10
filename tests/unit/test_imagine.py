@@ -537,6 +537,7 @@ async def test_the_dashboard_forwards_the_whole_page_write(client: httpx.AsyncCl
         "requirements",
         "ledger",
         "screening",
+        "formSeen",
     }
 
 
@@ -1595,3 +1596,68 @@ async def test_roundtrip_a_newer_write_goes_back_to_not_measured(
     await _put(client)  # revision 2: the figure was for revision 1
     report = (await _validate(client)).json()
     assert _by_check(report, "form.measured") and not _by_check(report, "form.balance")
+
+
+# -- the form seen, instead of a mesh that nothing downstream reads ------------------
+#
+# Item 7 used to need a paid concept mesh that no later stage consumes and that can never
+# be evidence. It is now satisfied by a person having seen this revision of the form, or
+# by a mesh (spec 5.1, concept.form_seen). The acknowledgement is the person's own and is
+# tied to the revision, so a form the agent changed since is not covered.
+
+
+async def test_a_person_having_seen_the_form_clears_the_concept_item_without_a_mesh(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    before = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert before["status"] == "missing"
+    assert "seen the form" in before["detail"]
+    res = await _event(client, "form_seen", {"id": "latest", "seen": True})
+    assert res.status_code == 200, res.text
+    after = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert after["status"] == "done", after
+    assert "seen" in after["detail"] and "mesh" not in after["detail"].replace("no mesh", "")
+
+
+async def test_seeing_the_form_does_not_cover_a_revision_the_agent_saved_afterwards(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    assert (await _event(client, "form_seen", {"id": "latest", "seen": True})).status_code == 200
+    cfg = full_config()
+    cfg["product"]["name"] = "A changed product"
+    await _put(client, cfg)
+    item = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert item["status"] == "missing", item
+
+
+async def test_the_form_seen_is_stamped_by_the_server_not_taken_from_the_page(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    rev = (await client.get(f"{BASE}/studio")).json()["revision"]
+    await _event(client, "form_seen", {"id": "latest", "seen": True, "revision": 999})
+    seen = (await client.get(f"{BASE}/studio")).json()["collections"]["formSeen"]["latest"]
+    assert seen["revision"] == rev and seen["seen"] is True
+
+
+async def test_an_agent_cannot_say_a_person_has_seen_the_form(client: httpx.AsyncClient) -> None:
+    await _put(client)
+    res = await client.post(
+        f"{BASE}/events",
+        json={"event_id": uuid4().hex, "kind": "form_seen", "data": {"id": "latest", "seen": True}},
+        headers=AGENT,
+    )
+    assert res.status_code == 403, res.text
+    item = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert item["status"] == "missing"
+
+
+async def test_a_mesh_still_clears_the_concept_item(
+    client: httpx.AsyncClient, twin: InMemoryTwinAPI
+) -> None:
+    await _put(client)
+    await _add_mesh(twin)
+    item = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert item["status"] == "done" and "concept mesh exists" in item["detail"]
