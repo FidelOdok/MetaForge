@@ -32,7 +32,7 @@ from uuid import UUID, uuid4
 import structlog
 from pydantic import ValidationError
 
-from api_gateway.imagine import engine_page, verification_client
+from api_gateway.imagine import engine_page, resolve_part, verification_client
 from api_gateway.imagine.schemas import (
     COLLECTION_KINDS,
     KIND_COLLECTIONS,
@@ -519,6 +519,13 @@ class ImagineService:
     ) -> StudioResponse:
         with tracer.start_as_current_span("imagine.put_studio") as span:
             span.set_attribute("project_id", project_id)
+            # A part with no size gets a labelled 3D body, so every part exists in 3D.
+            # Reading a library and a model is file work: off the event loop.
+            config, drawn = await asyncio.to_thread(
+                resolve_part.fill_part_bodies,
+                config,
+                kicad_config=resolve_part.kicad_config_from_env(),
+            )
             try:
                 checked = engine_page.validate_config(config)
             except engine_page.ConfigError as exc:
@@ -552,7 +559,7 @@ class ImagineService:
                     "events": (head.state["events"] if head else {}),
                     "handover": None,
                     "rework": head.state.get("rework") if head else None,
-                    "warnings": checked.warnings,
+                    "warnings": [*checked.warnings, *drawn],
                 }
                 new = await self._write_revision(
                     project_id, state, actor=actor, reason="studio config from the agent"

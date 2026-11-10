@@ -18,6 +18,7 @@ part itself.
 
 from __future__ import annotations
 
+import copy
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -102,6 +103,43 @@ def resolve_part(
     geometry = approximate_geometry(safe)
     tried.append({"rung": "approximation", "outcome": "used", "why": geometry["fidelity_basis"]})
     return _answer(safe, geometry["fidelity"], geometry, tried)
+
+
+def fill_part_bodies(
+    config: dict[str, Any],
+    *,
+    kicad_config: KicadConfig | None = None,
+    measure: Measure | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Give every part in ``context.components.parts`` that has no size a 3D body.
+
+    Returns a copy of the config and one note per part drawn. A part that already has a
+    size is left exactly as written, and an excluded part is never touched: the studio
+    adds a body only where there is none, and the note and the part's own ``fidelity``
+    say how it was made.
+    """
+    out = copy.deepcopy(config)
+    context = out.get("context") if isinstance(out, dict) else None
+    components = context.get("components") if isinstance(context, dict) else None
+    parts = components.get("parts") if isinstance(components, dict) else None
+    notes: list[str] = []
+    if not isinstance(parts, list):
+        return out, notes
+    for part in parts:
+        if not isinstance(part, dict) or part.get("excluded"):
+            continue
+        geometry = part.get("geometry")
+        if isinstance(geometry, dict) and _has_size(geometry):
+            continue
+        result = resolve_part(part, kicad_config=kicad_config, measure=measure)
+        part["geometry"] = result["geometry"]
+        basis = result["geometry"].get("fidelity_basis", "")
+        label = str(part.get("id") or "?")
+        notes.append(
+            f'context part "{label}": it had no size, so the studio drew its 3D '
+            f"({result['rung']}): {basis}"
+        )
+    return out, notes
 
 
 _MESSAGES = {
