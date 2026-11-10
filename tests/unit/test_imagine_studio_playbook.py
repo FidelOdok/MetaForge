@@ -240,3 +240,18 @@ def test_the_skill_lists_every_colour_the_checker_accepts() -> None:
     text = PLAYBOOK.read_text(encoding="utf-8")
     missing = [c for c in colours if f"`{c}`" not in text]
     assert not missing, f"the skill does not name these colours: {missing}"
+
+
+def test_the_skill_lists_every_sector_the_checker_accepts() -> None:
+    import re
+
+    source = (REPO / "api_gateway" / "imagine" / "formgraph" / "build_page.py").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"pg\[.sector.\] not in \(([^)]*)\)", source)
+    assert match, "the sector check moved: update this test to follow it"
+    sectors = re.findall(r"'([a-z]+)'", match.group(1))
+    assert len(sectors) == 7, sectors
+    text = PLAYBOOK.read_text(encoding="utf-8")
+    missing = [x for x in sectors if f"`{x}`" not in text]
+    assert not missing, f"the skill does not name these sectors: {missing}"

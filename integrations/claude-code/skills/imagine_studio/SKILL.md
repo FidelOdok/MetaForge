@@ -88,6 +88,11 @@ write:
   picture; a bought component keeps its dark colour. Set it only when the brief
   names a colour, pick the nearest of the four, and say which you picked. The
   person can change it with the swatches.
+- **`programme.sector`** is optional and is one of `ict`, `industrial`,
+  `luminaire`, `household`, `medical`, `automotive` or `aircraft`, nothing else.
+  Words like `consumer`, `stationery` or `furniture` are refused. Pick the
+  nearest (a desk tidy or a key rack is `household`), or leave it out when none
+  fits, and say which you chose.
 - **`product` is required**, with `id` a lowercase slug (letters, digits and
   hyphens, 2 to 49 characters, for example `desk-lamp`) and `name` of 60
   characters or fewer.
