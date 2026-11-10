@@ -312,3 +312,49 @@ def test_the_skill_tells_the_agent_to_keep_contact_details_out_of_the_project() 
     assert "Keep the person's details out of the project" in rules
     for word in ("company name", "email address", "project description", "studio"):
         assert word in rules, f"the rule does not mention: {word}"
+
+
+def test_the_skill_tells_the_agent_to_resolve_each_parts_3d_body_and_to_report_the_gaps() -> None:
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    for phrase in (
+        "twin.imagine_resolve_part",
+        "Never type a size you did not read",
+        "list every part that is not `exact`",
+        "never call an approximation or a placeholder the real part",
+    ):
+        assert phrase in text, phrase
+    from api_gateway.imagine.formgraph import fg_context
+
+    for word in (*fg_context.FIDELITY, "read", "typical", "generic"):
+        assert f"`{word}`" in text, word
+
+
+def test_the_skills_route_for_a_function_outside_the_catalogue_passes_the_checker() -> None:
+    import copy
+
+    from api_gateway.imagine import engine_page as ep
+    from api_gateway.imagine.formgraph import build_page
+    from tests.unit.imagine_fixtures import _part, full_config
+
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    for phrase in ("catalogue.blocks.e_<name>", 'role: "fn:e_<name>"', "parts.chosen"):
+        assert phrase in text, phrase
+
+    def check(*, block: bool, part: bool) -> list[str]:
+        cfg = copy.deepcopy(full_config())
+        cfg["functions"].append("e_press")
+        if block:
+            cfg.setdefault("catalogue", {}).setdefault("blocks", {})["e_press"] = {
+                "name": "Pressure sensor"
+            }
+        if part:
+            cfg["context"]["components"]["parts"].append(
+                _part("press-a", "fn:e_press", "Pressure sensor", [3.0, 3.0, 1.0], "i2c")
+            )
+        ctx = ep._inline_context(cfg.pop("context"))
+        errors, _ = build_page.validate(cfg, ep.catalogue(), ctx)
+        return errors
+
+    assert check(block=True, part=True) == []
+    assert check(block=False, part=False), "an unknown function id must still be refused"
+    assert check(block=False, part=True), "a part claiming an unknown function must be refused"

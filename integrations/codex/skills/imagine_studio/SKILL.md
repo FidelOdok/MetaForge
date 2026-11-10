@@ -132,6 +132,29 @@ write:
   `id`, `role` (`fn:<function>`, `board` or `battery`), `mpn`, `manufacturer`,
   `datasheet`, `retrieved`, `interfaces` and `geometry.envelope` with a
   `source`.
+- **Every part gets a 3D body, and says how it was made.** For each part you
+  record, call `twin.imagine_resolve_part` with it. Pass the KiCad symbol
+  (for example `{"kicad": {"symbol": "Sensor_Pressure:BMP280"}}`) when you know it, and a
+  size you actually read in `geometry.envelope` with its `source` (the
+  datasheet and page). Copy the `geometry` it returns into the part, including
+  `fidelity`, `fidelity_basis` and `size_basis`. `fidelity` is `exact` (the
+  KiCad library's own 3D model, measured by a CAD kernel), `generated`,
+  `approximation` (the closest shape that can be defended) or `placeholder` (a
+  generic block, because nothing was known). **Never type a size you did not
+  read.** A part you cannot size comes back as a placeholder, and that is the
+  honest answer; a typical or generic size does not count as the part's
+  envelope, so the handover still lists it as missing. A studio write also
+  draws a body for any part with no size and names it in the write's warnings,
+  but call the tool yourself so you know which parts are not exact. In your
+  report, list every part that is not `exact` with its basis, and never call an
+  approximation or a placeholder the real part.
+- **A function the catalogue does not have** (a pressure sensor, a display):
+  add `catalogue.blocks.e_<name>` (an object with at least a `name`), put
+  `e_<name>` in `functions`, and record one real part with
+  `role: "fn:e_<name>"`. A part with no real part chosen leaves `parts.chosen`
+  open and names it; say so and do not fill it in. Never reuse another
+  function's id for a part that is not that function: `e_ext` means "powered
+  from outside", and `board` is the main board, not a sensor.
 
 ### Words the checker holds to a list
 
@@ -155,6 +178,8 @@ costs a write, so use exactly these:
 | `decisions.btnbusy` | `queue` or `ignore` |
 | `decisions.nosignal` | `store` or `forever` |
 | `requirements[].values` | numbers must be positive (`drop` is metres, not 0); `cov` is `good`, `fair` or `poor`; `ip` is `none`, `ip54` or `ip67`; `chgt` takes no value |
+| `geometry.fidelity` | `exact`, `generated`, `approximation`, `placeholder` (each needs `fidelity_basis`, in words) |
+| `geometry.size_basis` | `read`, `typical`, `generic` |
 | `level` | `simple` or `eng` |
 | `view.tryit` | `device` or `mission` |
 
