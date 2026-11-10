@@ -6,8 +6,9 @@ best first:
 1. ``existing``: the part already carries an exact or generated model. Kept as it is.
 2. ``kicad``: the KiCad library's own 3D model, sized by a CAD kernel when one is
    available (exact) or estimated from the file (approximation).
-3. ``datasheet_package``: a model built from the datasheet's package drawing. Not built
-   yet, and listed as such so nobody assumes it was tried.
+3. ``datasheet_package``: the size read from the datasheet's package outline text, which
+   the agent passes in. A rule-based parser reads standard IC outlines only, and says so
+   when it does not recognise the text.
 4. ``approximation``: the closest shape that can be defended, or a placeholder block when
    nothing is known. Always labelled, with its basis.
 
@@ -24,6 +25,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from api_gateway.imagine.datasheet_package import package_geometry
 from api_gateway.imagine.kicad_part import Measure, kicad_geometry, measure_step
 from api_gateway.imagine.part_model import BETTER, approximate_geometry
 from tool_registry.tools.kicad.config import KicadConfig
@@ -46,7 +48,11 @@ def kicad_config_from_env(env: Mapping[str, str] | None = None) -> KicadConfig |
 
 
 def resolve_part(
-    part: Any, *, kicad_config: KicadConfig | None = None, measure: Measure | None = None
+    part: Any,
+    *,
+    kicad_config: KicadConfig | None = None,
+    measure: Measure | None = None,
+    package_text: Any = None,
 ) -> dict[str, Any]:
     """Give ``part`` a 3D body from the best rung available. Never raises on bad input."""
     safe = _clean(part)
@@ -88,16 +94,51 @@ def resolve_part(
                 }
             )
 
-    tried.append(
-        {
-            "rung": "datasheet_package",
-            "outcome": "not_built",
-            "why": "building a model from a datasheet's package drawing is not available yet",
-        }
-    )
+    if geometry is not None and geometry.get("fidelity") == "exact":
+        tried.append(
+            {
+                "rung": "datasheet_package",
+                "outcome": "not_needed",
+                "why": "KiCad gave an exact body",
+            }
+        )
+    elif package_text is None:
+        tried.append(
+            {
+                "rung": "datasheet_package",
+                "outcome": "not_provided",
+                "why": (
+                    "no package_text was given; pass the package outline section of the "
+                    "datasheet to read the size from it"
+                ),
+            }
+        )
+    else:
+        drawn, why = package_geometry(safe, package_text)
+        if drawn is None:
+            tried.append({"rung": "datasheet_package", "outcome": "skipped", "why": why})
+        else:
+            tried.append(
+                {
+                    "rung": "datasheet_package",
+                    "outcome": "used",
+                    "why": "the size was read from the datasheet's package outline",
+                }
+            )
+            if geometry is not None:
+                for entry in tried:
+                    if entry["rung"] == "kicad" and entry["outcome"] == "used":
+                        entry["outcome"] = "superseded"
+                        entry["why"] = (
+                            "KiCad gave only an estimate; the datasheet outline gave a size "
+                            "read from a drawing, which is used instead"
+                        )
+            geometry = drawn
 
     if geometry is not None:
-        tried.append({"rung": "approximation", "outcome": "not_needed", "why": "KiCad gave a body"})
+        tried.append(
+            {"rung": "approximation", "outcome": "not_needed", "why": "a better rung gave a body"}
+        )
         return _answer(safe, geometry["fidelity"], geometry, tried)
 
     geometry = approximate_geometry(safe)

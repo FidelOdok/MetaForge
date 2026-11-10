@@ -318,6 +318,7 @@ def test_the_skill_tells_the_agent_to_resolve_each_parts_3d_body_and_to_report_t
     text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
     for phrase in (
         "twin.imagine_resolve_part",
+        "`package_text`",
         "Never type a size you did not read",
         "list every part that is not `exact`",
         "never call an approximation or a placeholder the real part",

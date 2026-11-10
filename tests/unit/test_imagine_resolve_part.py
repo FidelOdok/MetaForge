@@ -42,7 +42,7 @@ def test_a_part_in_the_kicad_library_is_exact_and_the_answer_lists_every_rung(
     assert result["rung"] == "exact"
     assert result["geometry"]["fidelity"] == "exact"
     assert _rung(result, "kicad")["outcome"] == "used"
-    assert _rung(result, "datasheet_package")["outcome"] == "not_built"
+    assert _rung(result, "datasheet_package")["outcome"] == "not_needed"
     assert not _problems(result["geometry"])
 
 

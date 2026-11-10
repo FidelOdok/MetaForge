@@ -9515,9 +9515,11 @@ class TwinServer(McpToolServer):
                     "answer's rung says where the body came from: exact (the KiCad "
                     "library's own 3D model, sized by a CAD kernel), approximation (the "
                     "closest shape that can be defended, with its basis) or placeholder "
-                    "(nothing was known, so a generic block). 'tried' lists every rung and "
-                    "why it was or was not used; building a model from the datasheet's "
-                    "package drawing is not available yet and is listed as not_built. Copy "
+                    "(nothing was known, so a generic block). Pass package_text, the package "
+                    "outline section you read from the datasheet, and the size is read "
+                    "from it (an approximation whose size is read, for standard IC "
+                    "outlines). 'tried' lists every rung and why it was or was not used. "
+                    "Copy "
                     "'geometry' into the part, including fidelity and fidelity_basis, and "
                     "say in your report which parts are not exact. Never type a size you "
                     "did not read: a part you cannot size comes back as a placeholder, "
@@ -9535,6 +9537,16 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "The part: id, role (fn:<function>, board, battery, other), "
                                 "name, mpn and optionally geometry and kicad.symbol."
+                            ),
+                        },
+                        "package_text": {
+                            "type": "string",
+                            "description": (
+                                "Optional: the package outline section of the part's "
+                                "datasheet, as text you read. A rule-based parser reads the "
+                                "size from it. It understands standard IC outlines in the "
+                                "TI/JEDEC millimetre format and says so when it does not "
+                                "recognise the text. At most 30000 characters."
                             ),
                         },
                     },
@@ -9826,10 +9838,16 @@ class TwinServer(McpToolServer):
                 f"{tool_id}: part must be an object (id, role, name, mpn and optionally "
                 "geometry), the way it goes in context.components.parts"
             )
+        package_text = arguments.get("package_text")
+        if package_text is not None and not isinstance(package_text, str):
+            raise ValueError(
+                f"{tool_id}: package_text must be text, the package outline section of "
+                "the datasheet"
+            )
         config = resolve_part.kicad_config_from_env()
         # Reading a library and measuring a model are file work: off the event loop.
         result = await asyncio.to_thread(
-            lambda: resolve_part.resolve_part(part, kicad_config=config)
+            lambda: resolve_part.resolve_part(part, kicad_config=config, package_text=package_text)
         )
         return dict(result)
 

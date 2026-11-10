@@ -136,7 +136,10 @@ write:
   record, call `twin.imagine_resolve_part` with it. Pass the KiCad symbol
   (for example `{"kicad": {"symbol": "Sensor_Pressure:BMP280"}}`) when you know it, and a
   size you actually read in `geometry.envelope` with its `source` (the
-  datasheet and page). Copy the `geometry` it returns into the part, including
+  datasheet and page). When you have read the datasheet's package outline, pass
+  its text as `package_text`: for a standard IC outline the size is read from it,
+  and you should check the result against the drawing. Copy the `geometry` it
+  returns into the part, including
   `fidelity`, `fidelity_basis` and `size_basis`. `fidelity` is `exact` (the
   KiCad library's own 3D model, measured by a CAD kernel), `generated`,
   `approximation` (the closest shape that can be defended) or `placeholder` (a

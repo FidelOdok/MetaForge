@@ -1401,12 +1401,12 @@ handling file bytes. Each takes `project_id`.
 
 - `twin.imagine_resolve_part` (read-only, never held for approval): give one real
   part a 3D body. Takes `part` (the object as it goes in `context.components.parts`:
-  `id`, `role`, `name`, `mpn`, optionally `geometry` and `kicad.symbol`) and returns
+  `id`, `role`, `name`, `mpn`, optionally `geometry` and `kicad.symbol`, and optionally `package_text`) and returns
   `rung` (`existing`, `exact`, `approximation` or `placeholder`), `geometry`
   (envelope, body, `fidelity`, `fidelity_basis`, `source`), `tried` (each rung and why
   it was or was not used) and `message`. `exact` means a CAD kernel measured the KiCad
   library's own model; a size only estimated from the file is an `approximation`.
-  The datasheet package rung is `not_built`. The KiCad rung reads the folder named by
+  Pass `package_text` (the package outline section of the datasheet, at most 30000 characters) and a rule-based parser reads the size from it: standard IC outlines in the TI/JEDEC millimetre format, an `approximation` whose size is read (`size_basis` `read`); text it does not recognise is skipped with a reason. The KiCad rung reads the folder named by
   `METAFORGE_KICAD_LIBRARY_DIR` (holding `symbols`, `footprints` and `3dmodels`) and is
   skipped with a reason when it is unset. Nothing is written: copy `geometry` into the
   part.
