@@ -2492,7 +2492,7 @@ function runModels(){MT1={};if(!MODELS.length)return;const Q=pageQ();MODELS.forE
     B.forEach(c=>my.share[c.id]=pass[c.id]/my.N);my.status='done';renderCtx();renderGates();accSummaries();})();}
 
 /* ---------- Scenarios: asked of the user, run against the models ---------- */
-function scenList(){const base=CTX?(CTX.scenarios||[]):[];return base.concat(DBH&&SHARED_SCN?SHARED_SCN:S.userScen);}
+function scenList(){const base=CTX?(CTX.scenarios||[]):[],top=Array.isArray(CFG.scenarios)?CFG.scenarios.filter(x=>x&&typeof x==='object'&&x.id):[],mine=DBH&&SHARED_SCN?SHARED_SCN:S.userScen,by=new Map();base.concat(top,mine).forEach(x=>by.set(x.id,Object.assign({},by.get(x.id)||{},x)));return[...by.values()];}
 function scenEval(sc){const Q=pageQ(),over={};Object.entries(sc.set||{}).forEach(([k,v])=>{const [m,i]=k.split('.');(over[m]||(over[m]={}))[i]=v;});
   const res=[];let st='pass';(sc.expect||[]).forEach(x=>{const [mid,o]=x.output.split('.'),m=MODELS.find(z=>z.id===mid);const v=m?evalModel(m,Q,Object.assign({},MODEL_OVR[mid]||{},over[mid]||{}),false)[o]:NaN;const ok=isFinite(v)&&cmpOp(v,x.op,x.value);res.push({x,v,ok});if(!ok)st='fail';});
   (sc.requires||[]).forEach(id=>{const r=REQ.find(q=>q.id===id),c=boundReqs().find(q=>q.id===id);const s2=r?r.st:c?bindState(c).st:'open';if(s2==='fail')st='fail';else if(s2!=='pass'&&s2!=='na'&&st!=='fail')st='warn';});
@@ -2507,12 +2507,13 @@ function renderModels(){const box=$('#mdlBody'),sec=$('#mdlBlk');if(!box)return;
     +B.map(c=>{const b=bindState(c);return`<div class="mrow st-${b.st}"><span>${stc(b.st)} ${esc(c.id)}: ${esc(c.model)} ${esc(c.op||'>=')} ${c.limit}</span><b>${fmt(b.val,2)}</b><small>${esc(b.conf||'')}${b.share!=null?`, ${fmt(b.share*100,0)} % of runs pass`:''}</small></div>`;}).join('')
     :'<p class="note">No models yet. Requirements without a model stay open at gate 3.</p>')
     +`<div class="lbl" style="margin-top:10px">Scenario tests</div>`
-    +(sc.length?sc.map((x,i)=>{const r=scenEval(x);return`<div class="sc st-${r.st}"><span class="chip">${r.st}</span><div>${esc(x.text)}<small>${x.by==='user'?'from you':'inferred, confirm it'}${r.res.map(q=>` · ${esc(q.x.output)} ${fmt(q.v,2)} ${esc(q.x.op)} ${q.x.value}`).join('')}</small></div>${(x.events||[]).length?`<button class="fix" type="button" data-play="${i}">Play</button>`:'<span></span>'}</div>`;}).join(''):'<p class="note">No scenario tests yet. Add the situations it must survive.</p>')
+    +(sc.length?sc.map((x,i)=>{const r=scenEval(x);return`<div class="sc st-${r.st}"><span class="chip">${r.st}</span><div>${esc(x.text)}<small>${x.by==='user'?'from you':'inferred, confirm it'}${r.res.map(q=>` · ${esc(q.x.output)} ${fmt(q.v,2)} ${esc(q.x.op)} ${q.x.value}`).join('')}</small>${x.by!=='user'?`<button class="fix" type="button" data-confirm-scn="${i}">Confirm</button>`:''}</div>${(x.events||[]).length?`<button class="fix" type="button" data-play="${i}">Play</button>`:'<span></span>'}</div>`;}).join(''):'<p class="note">No scenario tests yet. Add the situations it must survive.</p>')
     +(outs.length?`<form class="cform" id="scForm"><b style="font-size:12px">Add a scenario</b><input name="text" placeholder="What happens, in your words" required>
       <div class="r2"><select name="out">${outs.map(([k])=>`<option>${esc(k)}</option>`).join('')}</select><div class="r2"><select name="op"><option>&gt;=</option><option>&lt;=</option><option>&gt;</option><option>&lt;</option></select><input name="val" type="number" step="any" placeholder="value" required></div></div>
       <div class="r2"><select name="inp"><option value="">No input change</option>${MODELS.flatMap(m=>Object.keys(m.inputs||{}).filter(k=>!(m.inputs[k]||{}).from).map(k=>`<option>${esc(m.id+'.'+k)}</option>`)).join('')}</select><input name="iv" type="number" step="any" placeholder="new input value"></div>
       <button class="btn" type="submit">Add scenario</button></form>`:'');}
-$('#mdlBody').addEventListener('click',e=>{const b=e.target.closest('[data-play]');if(b)playScen(scenList()[+b.dataset.play]);});
+$('#mdlBody').addEventListener('click',e=>{const b=e.target.closest('[data-play]');if(b)playScen(scenList()[+b.dataset.play]);
+  const c=e.target.closest('[data-confirm-scn]');if(c){const x=scenList()[+c.dataset.confirmScn];if(x){const sc=Object.assign({},x,{by:'user'});if(!DBH)S.userScen.push(sc);dbWrite('scenarios',sc.id,sc);toast('Scenario confirmed. It goes back to Claude on the next sync.');schedule();}}});
 $('#mdlBody').addEventListener('submit',e=>{e.preventDefault();const f=e.target,v=k=>f.elements[k].value;const sc={id:'u'+Date.now().toString(36),text:v('text').trim(),by:'user',set:{},expect:[{output:v('out'),op:v('op'),value:+v('val')}],at:new Date().toISOString()};
   if(v('inp')&&v('iv')!=='')sc.set[v('inp')]=+v('iv');if(!sc.text)return;if(!DBH)S.userScen.push(sc);dbWrite('scenarios',sc.id,sc);toast('Scenario added. It goes back to Claude on the next sync.');schedule();});
 
@@ -2566,11 +2567,16 @@ function psetWrite(path,v){const ks=String(path).split('.'),at=new Date().toISOS
   else if(ks[0]==='ledger'&&ks.length===2){const i=parseInt(ks[1].slice(1),10),x=(PCFG.ledger||[])[i]||{};dbWrite('ledger',ks[1],{index:i,status:String(v),text:x.text||'',at});}
   else if(ks[0]==='creq'&&ks.length===3){const c=(PCFG.customRequirements||[]).find(q=>q.id===ks[1])||{};dbWrite('requirements',ks[1],Object.assign({id:ks[1],text:c.text||'',verify:c.verify||'test',source:'studio'},progState().creq[ks[1]]||{},{at}));}}
 let SCR_SIG='',SCR_T=0;
-function hostScreening(ev){if(!HOSTED||READONLY||!ev||!ev.rep)return;clearTimeout(SCR_T);SCR_T=setTimeout(()=>{
-  const rules=(ev.rep.rules||[]).map(r=>({id:String(r.id||r.label||''),label:String(r.label||''),status:r.st,value:r.val==null?null:String(r.val),limit:r.lim==null?null:String(r.lim)}));
+function hostScreening(ev){if(!HOSTED||READONLY||!ev)return;
+  /* An authored form has no enclosure report; screen it from what its drawn triangles measured. */
+  let rep=ev.rep;if(!rep&&AUTHORED&&window.FGAuthored&&FGAuthored.screeningRules){const r=FGAuthored.screeningRules(window.FG_AUTHORED);if(r)rep={rules:r};}
+  if(!rep)return;clearTimeout(SCR_T);SCR_T=setTimeout(()=>{
+  const rules=(rep.rules||[]).map(r=>({id:String(r.id||r.label||''),label:String(r.label||''),status:r.st,value:r.val==null?null:String(r.val),limit:r.lim==null?null:String(r.lim)}));
   const reqs=(REQ||[]).map(r=>({id:String(r.id),status:r.st,priority:r.pri||null}));
   const sig=JSON.stringify([S.proc,rules,reqs]);if(sig===SCR_SIG)return;SCR_SIG=sig;
   dbWrite('screening','latest',{engine:ENGINE,rule_version:ENGINE+'#'+(S.proc||'none'),process:S.proc||null,rules,requirements:reqs,at:new Date().toISOString()});},1500);}
+/* The parts draw in a worker, so the measurement arrives after recompute has run. */
+if(AUTHORED)window.addEventListener('fg-authored',()=>hostScreening({}));
 function hostApply(cols){if(!cols||typeof cols!=='object')return;DBH=DBH||{hosted:true};
   const ent=c=>{const v=cols[c];if(!v||typeof v!=='object')return[];return Array.isArray(v)?v.filter(x=>x&&x.id!=null).map(x=>[String(x.id),x]):Object.entries(v).filter(([,x])=>x&&typeof x==='object');};
   let ch=false;

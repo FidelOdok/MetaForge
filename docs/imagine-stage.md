@@ -43,6 +43,13 @@ version; decisions, requirements and entities are written at their default,
 proposed authority; manufacturing context fields are `assumption` or
 `user_stated`, never `decision`; interface contract values are `estimated`.
 
+**Screening an authored form.** The enclosure checks (wall thickness, draft, fit,
+cost) are not run for an authored form, so the page screens it from what its drawn
+triangles measured: that every part draws, the tip angle against a 15 degree
+screening choice, the overhang share (an upper bound, reported without a limit) and
+whether components overlap. The stored entry also lists the enclosure checks as
+`na`, "not run", never as passed. Nothing is stored until a measurement exists.
+
 ## The studio
 
 An agent writes the studio with `twin.imagine_put_studio` (or `PUT

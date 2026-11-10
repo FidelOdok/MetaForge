@@ -82,6 +82,7 @@ CHECKS = [
     "measure_overhang_starts_at_45_degrees_from_straight_down",
     "measure_says_what_it_did_not_measure",
     "describe_shows_the_measurements_and_says_when_a_form_would_tip_over",
+    "screening_rules_report_only_what_was_measured",
 ]
 
 

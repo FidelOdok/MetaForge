@@ -883,6 +883,30 @@
     return 'M' + a[0] + ',' + a[1] + ' C' + (a[0] + dx) + ',' + a[1] + ' ' + (b[0] - dx) + ',' + b[1] + ' ' + b[0] + ',' + b[1];
   }
 
+  // The checks that apply to an authored form, as screening rules (V2, preliminary). Only what was
+  // measured from the drawn triangles is reported. The enclosure checks (wall, draft, fit, cost) are
+  // listed as not run, never as passed. Returns null when nothing was measured, so nothing is stored.
+  var SCREEN_TIP_DEG = 15;   // a screening choice, not a standard
+  function screeningRules(summary) {
+    if (!summary || typeof summary !== 'object') return null;
+    var errors = (summary.errors || []).filter(Boolean), m = summary.measured || null;
+    if (!m && !errors.length) return null;
+    var rules = [{ id: 'form.draws', label: 'Every part draws without errors', st: errors.length ? 'fail' : 'pass', val: errors.length ? errors.length + ' failed' : 'all drawn', lim: null }];
+    if (m) {
+      var s = m.support, st = 'na', val = 'no flat base, not assessed';
+      if (s) {
+        if (s.margin_mm < 0) { st = 'fail'; val = 'centre of mass outside the base'; }
+        else { st = s.tip_angle_deg < SCREEN_TIP_DEG ? 'warn' : 'pass'; val = Math.round(s.tip_angle_deg * 10) / 10 + ' deg'; }
+      }
+      rules.push({ id: 'form.balance', label: 'Tips over only past ' + SCREEN_TIP_DEG + ' degrees (uniform density)', st: st, val: val, lim: SCREEN_TIP_DEG + ' deg' });
+      rules.push({ id: 'form.overhang', label: 'Overhang, an upper bound that counts covered faces', st: 'na', val: Math.round((m.overhang_share || 0) * 100) + '% of the surface', lim: null });
+      var n = (m.overlaps || []).length;
+      rules.push({ id: 'form.component_overlap', label: 'Components do not overlap', st: n ? 'warn' : 'pass', val: n ? n + ' pair' + (n === 1 ? '' : 's') : 'none', lim: null });
+    }
+    rules.push({ id: 'form.enclosure_checks', label: 'Enclosure checks (wall, draft, fit, cost) not run: this form is authored', st: 'na', val: 'not run', lim: null });
+    return rules;
+  }
+
   function mount(env) {
     var THREE = env.THREE, doc = env.document || document, form = env.cfg.form, parts = form.authored.parts;
     var params = Object.assign({}, form.params), ranges = form.ranges || {};
@@ -1283,5 +1307,5 @@
     return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });

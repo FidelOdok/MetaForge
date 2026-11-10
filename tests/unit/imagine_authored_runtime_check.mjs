@@ -786,5 +786,32 @@ await check('describe_shows_the_measurements_and_says_when_a_form_would_tip_over
   return facts(FG.describe(base, null))['Tips over at'] === undefined ? true : 'a form with no measurements showed some';
 });
 
+await check('screening_rules_report_only_what_was_measured', async () => {
+  const base = { status: 'ready', parts: [{ id: 'a', name: 'a', kind: 'generated', triangles: 12, volume: 1000 }],
+    bbox: { min: [0, 0, 0], max: [1, 2, 3] }, triangles: 12, errors: [] };
+  const m = (support, overlaps = []) => ({ overhang_share: 0.1, overhang_area: 10, total_area: 100, com: [0, 5, 0], support, overlaps, notes: [] });
+  const by = (rules, id) => rules.find((r) => r.id === id);
+  const ok = FG.screeningRules({ ...base, measured: m({ margin_mm: 40, tip_angle_deg: 22 }) });
+  if (!Array.isArray(ok)) return 'no rules for a measured form: ' + JSON.stringify(ok);
+  if (by(ok, 'form.balance').st !== 'pass') return JSON.stringify(by(ok, 'form.balance'));
+  if (by(ok, 'form.component_overlap').st !== 'pass') return JSON.stringify(by(ok, 'form.component_overlap'));
+  if (by(ok, 'form.draws').st !== 'pass') return JSON.stringify(by(ok, 'form.draws'));
+  const enc = by(ok, 'form.enclosure_checks');
+  if (!enc || enc.st !== 'na' || !/not run/i.test(enc.label)) return 'the enclosure checks must be listed as not run: ' + JSON.stringify(enc);
+  if (ok.some((r) => ['wall', 'draft', 'cost', 'fit'].some((w) => r.id.includes(w)))) return 'a rule claims an enclosure check';
+  const low = FG.screeningRules({ ...base, measured: m({ margin_mm: 4, tip_angle_deg: 10 }) });
+  if (by(low, 'form.balance').st !== 'warn') return 'under 15 degrees should warn: ' + JSON.stringify(by(low, 'form.balance'));
+  const tip = FG.screeningRules({ ...base, measured: m({ margin_mm: -4, tip_angle_deg: -20 }) });
+  if (by(tip, 'form.balance').st !== 'fail') return 'a centre of mass outside the base should fail';
+  const flat = FG.screeningRules({ ...base, measured: m(null) });
+  if (by(flat, 'form.balance').st !== 'na') return 'no flat base should be not assessed';
+  const ov = FG.screeningRules({ ...base, measured: m({ margin_mm: 40, tip_angle_deg: 22 }, [{ a: 'x', b: 'y', volume_mm3: 5 }]) });
+  if (by(ov, 'form.component_overlap').st !== 'warn') return 'overlapping components should warn';
+  const bad = FG.screeningRules({ ...base, errors: ['part x failed'], measured: m({ margin_mm: 40, tip_angle_deg: 22 }) });
+  if (by(bad, 'form.draws').st !== 'fail') return 'a part that failed to draw should fail';
+  if (FG.screeningRules({ status: 'pending', parts: [], errors: [], measured: null }) !== null) return 'nothing measured must give no screening';
+  return FG.screeningRules(null) === null ? true : 'no summary must give no screening';
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

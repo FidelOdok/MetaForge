@@ -179,3 +179,46 @@ def test_the_look_tool_is_documented_where_the_other_imagine_tools_are() -> None
     spec = (root / "mcp_spec.md").read_text(encoding="utf-8")
     assert "`twin.imagine_look` (read-only, never held for approval)" in spec
     assert "`revision`" in spec.split("`twin.imagine_look`")[1][:900]
+
+
+def _scenario_block() -> str:
+    start = JS.index("function scenList()")
+    end = JS.index("/* ---------- Context edits", start)
+    return JS[start:end]
+
+
+def test_scenarios_the_agent_saved_at_the_top_level_are_listed() -> None:
+    # The agent saves its inferred scenarios at config.scenarios; the checklist waits on a
+    # person to confirm them. A page that lists only context scenarios shows "No scenario
+    # tests yet" and the person has nothing to confirm.
+    assert "CFG.scenarios" in _scenario_block().split("function scenEval")[0]
+
+
+def test_an_inferred_scenario_has_a_confirm_control_that_makes_it_the_persons() -> None:
+    block = _scenario_block()
+    assert "data-confirm-scn" in block, "an inferred scenario needs a Confirm button"
+    # The confirmation is the person's own scenario write, so the checklist reads it as theirs.
+    handler = block[block.index("data-confirm-scn", block.index("addEventListener")) :]
+    assert "by:'user'" in handler and "dbWrite('scenarios'" in handler
+
+
+def test_a_user_scenario_shows_no_confirm_control() -> None:
+    assert "x.by!=='user'" in _scenario_block()
+
+
+def _host_screening() -> str:
+    start = JS.index("function hostScreening(")
+    return JS[start : JS.index("function hostApply(", start)]
+
+
+def test_an_authored_form_writes_a_screening_entry_from_the_checks_that_apply() -> None:
+    # The enclosure report is null for an authored form, so the page must build the
+    # screening rules from what the form measured, or no authored studio can ever hand over.
+    body = _host_screening()
+    assert "FGAuthored.screeningRules" in body
+    assert "FG_AUTHORED" in body
+
+
+def test_the_screening_entry_is_rewritten_when_the_authored_form_is_measured() -> None:
+    # The parts draw in a worker, so the measurement arrives after recompute has run.
+    assert "'fg-authored'" in JS and "hostScreening" in JS.split("'fg-authored'", 1)[1][:300]
