@@ -108,6 +108,43 @@ def test_comparing_two_looks_names_what_changed() -> None:
     assert c["parts_changed"] == ["arm"]
 
 
+_MEASURED = {
+    "total_area": 600.0,
+    "overhang_area": 60.0,
+    "overhang_share": 0.1,
+    "com": [0.0, 5.0, 0.0],
+    "support": {"points": 4, "margin_mm": 5.0, "tip_angle_deg": 45.0},
+    "overlaps": [],
+    "notes": ["Measured from the drawn triangles, with uniform density."],
+}
+
+
+def test_the_summary_carries_the_measurements_and_none_when_there_are_none() -> None:
+    with_m = {**copy.deepcopy(SUMMARY), "measured": copy.deepcopy(_MEASURED)}
+    assert look.summarize(with_m)["measured"] == _MEASURED
+    assert look.summarize(SUMMARY)["measured"] is None
+    assert look.summarize(None)["measured"] is None
+    junk = {**copy.deepcopy(SUMMARY), "measured": "not a dict"}
+    assert look.summarize(junk)["measured"] is None
+
+
+def test_comparing_two_looks_names_how_the_measurements_moved() -> None:
+    before = {**copy.deepcopy(SUMMARY), "measured": copy.deepcopy(_MEASURED)}
+    moved = copy.deepcopy(_MEASURED)
+    moved["support"]["tip_angle_deg"] = 30.0
+    moved["overhang_share"] = 0.25
+    moved["overlaps"] = [{"a": "x", "b": "y", "volume_mm3": 5.0}]
+    after = {**copy.deepcopy(SUMMARY), "measured": moved}
+    c = look.compare(look.summarize(before), look.summarize(after))
+    assert c["measured_changed"] == {
+        "overhang_share": [0.1, 0.25],
+        "tip_angle_deg": [45.0, 30.0],
+        "overlapping_pairs": [0, 1],
+    }
+    same = look.compare(look.summarize(before), look.summarize(before))
+    assert same["measured_changed"] == {}
+
+
 def test_the_pixel_difference_is_the_share_of_pixels_that_changed(tmp_path: Path) -> None:
     a, b, c = (tmp_path / n for n in ("a.png", "b.png", "c.png"))
     Image.new("RGB", (10, 10), (255, 255, 255)).save(a)
@@ -531,7 +568,9 @@ def test_the_form_summary_is_a_card_with_tiles_and_the_not_assessed_list_is_its_
             )
             assert facts["form"]["header"] and facts["form"]["title"] == "Form drawn", facts
             assert facts["form"]["open"] and facts["form"]["bodyShown"], facts
-            assert facts["form"]["border"] != "0px" and facts["form"]["tiles"] == 5, facts
+            assert facts["form"]["border"] != "0px" and facts["form"]["tiles"] == 7, (
+                facts
+            )  # five facts, overhang and tip angle
             assert facts["na"]["title"] == "Not assessed", facts
             assert not facts["na"]["open"] and not facts["na"]["bodyShown"], facts
             # The form card, then the components card (this studio has functions with no
@@ -745,3 +784,42 @@ def test_the_components_card_lists_each_real_part_its_readiness_and_the_function
     assert "e_imu" in facts["none"] and "no part" in facts["none"], facts["none"]
     assert facts["order"][:3] == ["authBlk", "authComp", "authNa"], facts["order"]
     assert collapsed["open"] is False and after["exists"] and after["open"] is False, after
+
+
+def test_the_lamp_is_measured_and_leaning_the_arm_out_lowers_the_angle_it_tips_at(
+    server: str, tmp_path: Path
+) -> None:
+    url = _put(server, PROJECT, authored_lamp_form())
+    result = look.look(url, tmp_path, sets={"arm_lean": 80})
+    before, after = result["before"]["measured"], result["after"]["measured"]
+    assert before is not None and after is not None
+    assert 0 < before["overhang_share"] < 1
+    assert before["support"]["margin_mm"] > 0 and 0 < before["support"]["tip_angle_deg"] < 90
+    assert any("wall thickness" in n for n in before["notes"])
+    # The arm leans from 40 to 80 mm, so the centre of mass moves toward the edge of the base.
+    assert after["support"]["tip_angle_deg"] < before["support"]["tip_angle_deg"]
+    moved = result["compare"]["measured_changed"]
+    assert moved["tip_angle_deg"] == [
+        before["support"]["tip_angle_deg"],
+        after["support"]["tip_angle_deg"],
+    ]
+
+
+def test_the_page_shows_the_measurements_in_the_form_card(server: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from api_gateway.imagine.look import CHROMIUM_ARGS
+
+    url = _put(server, PROJECT, authored_lamp_form())
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=list(CHROMIUM_ARGS))
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 1100})
+            page.goto(url, wait_until="domcontentloaded")
+            _wait_ready(page)
+            text = page.evaluate("() => document.querySelector('#authBlk').textContent")
+        finally:
+            browser.close()
+    for label in ("Overhang (upper bound)", "Tips over at"):
+        assert label in text, text
+    assert "% of the surface" in text and "°" in text

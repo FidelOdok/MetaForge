@@ -459,6 +459,94 @@
     return { bbox: { min: min, max: max }, volume: vol };
   }
 
+  // What can be measured from the drawn triangles, and nothing more. Overhang is the area of
+  // faces that look steeply downward and do not rest on the floor; it counts faces another
+  // part covers, so it is an upper bound. Balance puts the centre of mass (uniform density, a
+  // part's overlap counted twice) against the flat base the form stands on. Components that
+  // overlap are listed with the volume. Wall thickness and the fit of the electronics are not
+  // measured, and the notes say so.
+  function measureForm(results) {
+    var live = (results || []).filter(function (r) { return r && !r.error && r.shapes && r.shapes.length; });
+    if (!live.length) return null;
+    var minY = Infinity, EPS = 0.01, COS = 0.7071067811865476;
+    live.forEach(function (r) { r.shapes.forEach(function (sh) { for (var i = 1; i < sh.positions.length; i += 3) if (sh.positions[i] < minY) minY = sh.positions[i]; }); });
+    var total = 0, down = 0, vol = 0, cx = 0, cy = 0, cz = 0, base = {}, basePts = [];
+    live.forEach(function (r) {
+      r.shapes.forEach(function (sh) {
+        var P = sh.positions, I = sh.indices, i, t;
+        for (i = 0; i < P.length; i += 3) {
+          if (P[i + 1] <= minY + 0.05) {
+            var key = Math.round(P[i] * 1000) + ',' + Math.round(P[i + 2] * 1000);
+            if (!base[key]) { base[key] = true; basePts.push([P[i], P[i + 2]]); }
+          }
+        }
+        for (t = 0; t < I.length; t += 3) {
+          var a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+          var ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+          var vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+          var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+          var len = Math.sqrt(nx * nx + ny * ny + nz * nz), area = len / 2;
+          total += area;
+          if (len > 0 && ny / len < -COS) {
+            var onFloor = P[a + 1] <= minY + EPS && P[b + 1] <= minY + EPS && P[c + 1] <= minY + EPS;
+            if (!onFloor) down += area;
+          }
+          var v = (P[a] * (P[b + 1] * P[c + 2] - P[b + 2] * P[c + 1]) - P[a + 1] * (P[b] * P[c + 2] - P[b + 2] * P[c]) + P[a + 2] * (P[b] * P[c + 1] - P[b + 1] * P[c])) / 6;
+          vol += v;
+          cx += v * (P[a] + P[b] + P[c]) / 4; cy += v * (P[a + 1] + P[b + 1] + P[c + 1]) / 4; cz += v * (P[a + 2] + P[b + 2] + P[c + 2]) / 4;
+        }
+      });
+    });
+    var round = function (x) { return Math.round(x * 1000) / 1000; };
+    var notes = [
+      'Measured from the drawn triangles, with uniform density.',
+      'Overhang is an upper bound: it counts faces that another part covers.',
+      'The centre of mass counts overlapping parts twice.',
+      'Not measured: wall thickness, clearance round the electronics, and fit.',
+    ];
+    var com = vol > 0 ? [round(cx / vol), round(cy / vol), round(cz / vol)] : null;
+    var support = null;
+    if (com) {
+      var hull = convexHull(basePts);
+      if (hull.length >= 3) {
+        var margin = Infinity;
+        for (var h = 0; h < hull.length; h++) {
+          var p = hull[h], q = hull[(h + 1) % hull.length], ex = q[0] - p[0], ez = q[1] - p[1], el = Math.sqrt(ex * ex + ez * ez);
+          if (el === 0) continue;
+          var d = (ex * (com[2] - p[1]) - ez * (com[0] - p[0])) / el;
+          if (d < margin) margin = d;
+        }
+        var rise = com[1] - minY;
+        support = { points: hull.length, margin_mm: round(margin), tip_angle_deg: round(rise > 0 ? Math.atan2(margin, rise) * 180 / Math.PI : 90) };
+      }
+    }
+    if (!support) notes.push('The form has no flat base to stand on (it hangs, or rests on a point or an edge), so balance is not assessed.');
+    var overlaps = [], comps = live.filter(function (r) { return r.kind === 'component' && r.bbox; });
+    for (var i = 0; i < comps.length; i++) {
+      for (var j = i + 1; j < comps.length; j++) {
+        var A = comps[i].bbox, B = comps[j].bbox, ov = 1;
+        for (var k = 0; k < 3; k++) ov *= Math.max(0, Math.min(A.max[k], B.max[k]) - Math.max(A.min[k], B.min[k]));
+        if (ov > 0.001) overlaps.push({ a: comps[i].id, b: comps[j].id, volume_mm3: round(ov) });
+      }
+    }
+    return {
+      total_area: round(total), overhang_area: round(down), overhang_share: total > 0 ? round(down / total) : 0,
+      com: com, support: support, overlaps: overlaps, notes: notes,
+    };
+  }
+
+  // The outline of a set of [x, z] points, counter-clockwise (Andrew's monotone chain).
+  function convexHull(points) {
+    var pts = points.slice().sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+    if (pts.length < 3) return pts;
+    function cross(o, a, b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
+    var lower = [], upper = [], i;
+    for (i = 0; i < pts.length; i++) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pts[i]) <= 1e-9) lower.pop(); lower.push(pts[i]); }
+    for (i = pts.length - 1; i >= 0; i--) { while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pts[i]) <= 1e-9) upper.pop(); upper.push(pts[i]); }
+    upper.pop(); lower.pop();
+    return lower.concat(upper);
+  }
+
   function runPart(part, params, o) {
     return new Promise(function (resolve) {
       var done = false, w = null, timer = null;
@@ -511,7 +599,7 @@
         if (r.error) errors.push(r.name + ' (' + r.id + '): ' + r.error);
       });
       var any = isFinite(min[0]);
-      return { parts: results, triangles: total, bbox: any ? { min: min, max: max } : null, errors: errors };
+      return { parts: results, triangles: total, bbox: any ? { min: min, max: max } : null, errors: errors, measured: any ? measureForm(results) : null };
     });
   }
 
@@ -558,6 +646,15 @@
     d.facts.push(['Parts', String(parts.length)]);
     d.facts.push(['Triangles', String(sm.triangles)]);
     if (material && typeof material.density === 'number') d.facts.push(['Mass if solid in ' + material.name, Math.round(vol * material.density) + ' g']);
+    var m = sm.measured;
+    if (m) {
+      d.facts.push(['Overhang (upper bound)', Math.round((m.overhang_share || 0) * 100) + '% of the surface']);
+      if (m.support) {
+        if (m.support.margin_mm < 0) d.facts.push(['Balance', 'Would tip over: its centre of mass is outside the base']);
+        else d.facts.push(['Tips over at', Math.round(m.support.tip_angle_deg) + '°']);
+      } else d.facts.push(['Balance', 'No flat base, so not assessed']);
+      if (m.overlaps && m.overlaps.length) d.facts.push(['Components overlap', m.overlaps.length + ' pair' + (m.overlaps.length === 1 ? '' : 's')]);
+    }
     return d;
   }
 
@@ -942,6 +1039,7 @@
         bbox: result ? result.bbox : null,
         triangles: result ? result.triangles : 0,
         errors: result ? result.errors : [],
+        measured: result ? result.measured || null : null,
       };
       GLOBAL.FG_AUTHORED = summary;
       var desc = describe(summary, env.material ? env.material() : null);
@@ -1176,5 +1274,5 @@
     return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });

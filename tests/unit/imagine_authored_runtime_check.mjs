@@ -689,5 +689,87 @@ await check('components_card_renders_rows_and_missing_functions_and_is_absent_wh
   return none === null && empty.children.length === 0 ? true : 'an empty config drew a card';
 });
 
+
+// -- what is measured from the drawn shapes: overhang, balance and overlaps ---------------------
+
+const P = (id, kind, code) => ({ id, name: id, kind, code, uses: [] });
+const measured = async (...parts) => (await FG.run(parts, {}, OPTS)).measured;
+const closeTo = (a, b, tol) => Math.abs(a - b) <= (tol === undefined ? 0.01 : tol);
+
+await check('measure_a_standing_box_has_no_overhang_and_tips_at_45_degrees', async () => {
+  const m = await measured(P('box', 'generated', 'return [g.box(10, 10, 10).at(0, 5, 0)];'));
+  if (!m) return 'nothing measured';
+  if (m.overhang_area !== 0 || m.overhang_share !== 0) return 'overhang ' + m.overhang_area;
+  if (!closeTo(m.com[1], 5) || !closeTo(m.com[0], 0) || !closeTo(m.com[2], 0)) return 'com ' + JSON.stringify(m.com);
+  if (!m.support || !closeTo(m.support.margin_mm, 5) || !closeTo(m.support.tip_angle_deg, 45, 0.05)) return 'support ' + JSON.stringify(m.support);
+  return closeTo(m.total_area, 600) ? true : 'area ' + m.total_area;
+});
+
+await check('measure_a_block_hanging_off_a_small_base_would_tip_over', async () => {
+  const m = await measured(
+    P('base', 'generated', 'return [g.box(2, 2, 2).at(0, 1, 0)];'),
+    P('block', 'generated', 'return [g.box(10, 10, 10).at(6, 7, 0)];'));
+  if (!m || !m.support) return 'no support ' + JSON.stringify(m);
+  if (!(m.support.margin_mm < 0) || !(m.support.tip_angle_deg < 0)) return 'stable? ' + JSON.stringify(m.support);
+  return m.com[0] > 5 ? true : 'com x ' + m.com[0];
+});
+
+await check('measure_a_mushroom_overhang_counts_the_whole_underside_as_an_upper_bound', async () => {
+  const m = await measured(
+    P('stem', 'generated', 'return [g.box(2, 10, 2).at(0, 5, 0)];'),
+    P('disc', 'generated', 'return [g.box(10, 2, 10).at(0, 11, 0)];'));
+  if (!m) return 'nothing measured';
+  if (!closeTo(m.overhang_area, 100)) return 'overhang ' + m.overhang_area;
+  if (!(m.overhang_share > 0.25 && m.overhang_share < 0.3)) return 'share ' + m.overhang_share;
+  return m.notes.some((n) => n.includes('upper bound')) ? true : 'no note about the upper bound: ' + JSON.stringify(m.notes);
+});
+
+await check('measure_a_form_with_a_point_at_the_bottom_has_no_base_to_stand_on', async () => {
+  const m = await measured(P('cone', 'generated', 'return [g.lathe([[0, 0], [10, 20], [0, 20]], 24)];'));
+  if (!m) return 'nothing measured';
+  return m.support === null && m.notes.some((n) => n.includes('no flat base')) ? true : 'support ' + JSON.stringify(m.support) + ' ' + JSON.stringify(m.notes);
+});
+
+await check('measure_overlapping_components_are_listed_with_their_volume_and_generated_parts_are_not', async () => {
+  const m = await measured(
+    P('a', 'component', 'return [g.box(10, 10, 10).at(0, 5, 0)];'),
+    P('b', 'component', 'return [g.box(10, 10, 10).at(5, 5, 0)];'),
+    P('c', 'generated', 'return [g.box(10, 10, 10).at(2, 5, 0)];'));
+  if (!m || m.overlaps.length !== 1) return 'overlaps ' + JSON.stringify(m && m.overlaps);
+  const o = m.overlaps[0];
+  return o.a === 'a' && o.b === 'b' && closeTo(o.volume_mm3, 500, 0.5) ? true : JSON.stringify(o);
+});
+
+await check('measure_overhang_starts_at_45_degrees_from_straight_down', async () => {
+  // A 10 x 1 x 10 slab tilted about z, clear of the floor. Its underside has area 100.
+  // At 30 degrees the underside is within 45 of straight down: it counts (100). At 60 it
+  // is not, and only the 10 mm^2 edge that now looks down is counted.
+  const slab = (deg) => P('slab', 'generated', 'return [g.box(10, 1, 10).rot(0, 0, ' + deg + ').at(0, 20, 0)];');
+  const flat = (await measured(slab(30))).overhang_area, steep = (await measured(slab(60))).overhang_area;
+  return closeTo(flat, 100, 0.5) && closeTo(steep, 10, 0.5) ? true : 'at 30: ' + flat + ' at 60: ' + steep;
+});
+
+await check('measure_says_what_it_did_not_measure', async () => {
+  const m = await measured(P('box', 'generated', 'return [g.box(10, 10, 10).at(0, 5, 0)];'));
+  const text = (m.notes || []).join(' ');
+  return ['wall thickness', 'counts overlapping', 'uniform density'].every((w) => text.includes(w)) ? true : text;
+});
+
+await check('describe_shows_the_measurements_and_says_when_a_form_would_tip_over', async () => {
+  const base = { status: 'ready', parts: [{ id: 'a', name: 'a', kind: 'generated', triangles: 12, volume: 1000 }],
+    bbox: { min: [0, 0, 0], max: [1, 2, 3] }, triangles: 12, errors: [] };
+  const ok = FG.describe({ ...base, measured: { overhang_share: 0.274, overhang_area: 50, total_area: 180, com: [0, 5, 0],
+    support: { margin_mm: 5, tip_angle_deg: 45 }, overlaps: [], notes: [] } }, null);
+  const bad = FG.describe({ ...base, measured: { overhang_share: 0, overhang_area: 0, total_area: 180, com: [6, 7, 0],
+    support: { margin_mm: -4.9, tip_angle_deg: -35.5 }, overlaps: [{ a: 'x', b: 'y', volume_mm3: 500 }], notes: [] } }, null);
+  const facts = (d) => Object.fromEntries(d.facts);
+  const f = facts(ok), g2 = facts(bad);
+  if (f['Overhang (upper bound)'] !== '27% of the surface') return JSON.stringify(f);
+  if (f['Tips over at'] !== '45°') return JSON.stringify(f);
+  if (!/would tip over/i.test(g2['Balance'] || '')) return JSON.stringify(g2);
+  if (!/1 pair/.test(g2['Components overlap'] || '')) return JSON.stringify(g2);
+  return facts(FG.describe(base, null))['Tips over at'] === undefined ? true : 'a form with no measurements showed some';
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

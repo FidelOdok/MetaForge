@@ -634,6 +634,18 @@ At the top of the right pane, a "Form drawn" card shows the measured envelope, v
 triangles and mass as tiles, and a collapsed "Not assessed" card lists the checks the engine cannot
 make for a coded form. Both open and close like the engine's own cards.
 
+The "Form drawn" card also shows what is measured from the drawn triangles, with uniform density:
+**Overhang (upper bound)**, the share of the surface that looks steeply downward (more than 45 degrees
+from vertical) and does not rest on the floor; **Tips over at**, the angle at which the centre of mass
+would tip past the edge of the flat base the form stands on, or **Balance: Would tip over** when the
+centre of mass is already outside it, or **No flat base, so not assessed** for a form that hangs or
+rests on a point; and **Components overlap**, the pairs of `component` parts whose boxes overlap, with
+the volume. Overhang counts faces another part covers and the centre of mass counts overlapping parts
+twice, so both are estimates and the notes say so. Wall thickness, clearance round the electronics and
+fit are not measured. `twin.imagine_look` returns the same block as `measured`, and with `set` it
+reports in `compare.measured_changed` how the measurements moved. These are V2 screening measurements,
+never a verification.
+
 Below the form card, a "Components" card lists every real part in `context.components.parts` (an
 excluded part is left out) with four yes or no readiness steps: **Defined** (an order code and a maker),
 **Real size** (an envelope that is not a typical or generic guess and not a placeholder), **Sourced** (a

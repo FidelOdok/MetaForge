@@ -9458,7 +9458,15 @@ class TwinServer(McpToolServer):
                     "repeat would show you the picture from before your fix. When "
                     "Playwright or a Chromium build is missing the result is status "
                     "unavailable with how to install them: then say you could not look at "
-                    "the form, and never claim it looks right. A part that fails shows its "
+                    "the form, and never claim it looks right. The result's measured block is "
+                    "measured from the drawn triangles, with uniform density: overhang_share "
+                    "(the share of the surface that looks steeply downward and is not on the "
+                    "floor, an upper bound), support (margin_mm and tip_angle_deg of the "
+                    "centre of mass against the flat base: a negative margin means it would "
+                    "tip over; null means there is no flat base) and overlaps (components "
+                    "whose boxes overlap, with the volume). Report them as measured, never "
+                    "as verified; wall thickness and the fit of the electronics are not "
+                    "measured. A part that fails shows its "
                     "error by name and the rest is still drawn. The form is a concept, "
                     "never exact geometry, and nothing here is above V2. Reads only: "
                     "nothing is written."
@@ -9495,6 +9503,7 @@ class TwinServer(McpToolServer):
                         "size": {"type": ["array", "null"]},
                         "parts": {"type": "array"},
                         "errors": {"type": "array"},
+                        "measured": {"type": ["object", "null"]},
                         "images": {"type": "array"},
                     },
                 },
@@ -9927,6 +9936,7 @@ class TwinServer(McpToolServer):
             "params": before["params"],
             "parts": before["parts"],
             "errors": before["errors"],
+            "measured": before.get("measured"),
             "requests": raw["requests"],
             "csp": raw["csp"],
             "images": [

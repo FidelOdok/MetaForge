@@ -1418,6 +1418,10 @@ handling file bytes. Each takes `project_id`.
   returned, for the same reason as `twin.imagine_validate`) and `set`
   (`{parameter: number}`, moved in the page and never saved, then it looks
   again and adds `after`, `compare` and `requests_after_change`). A part that
+  fails is named and the rest is still drawn. It also returns `measured`: `overhang_share`
+  (an upper bound), `support` (`margin_mm` and `tip_angle_deg` of the centre of mass against the flat base,
+  negative when it would tip over, `null` with no flat base), `overlaps` (component boxes that overlap)
+  and `notes`, and `compare.measured_changed` after a `set`. V2 screening, never a verification.
   fails is named and the rest is still drawn. `unavailable` carries `install`:
   the `playwright` package and a Chromium build are not part of MetaForge, and
   the agent must say it could not look rather than claim the form is right.

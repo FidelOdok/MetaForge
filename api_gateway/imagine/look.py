@@ -138,6 +138,7 @@ def summarize(fg: dict[str, Any] | None) -> dict[str, Any]:
             "parts": [],
             "errors": [],
             "params": {},
+            "measured": None,
         }
     return {
         "status": fg.get("status", "none"),
@@ -145,6 +146,7 @@ def summarize(fg: dict[str, Any] | None) -> dict[str, Any]:
         "triangles": fg.get("triangles", 0),
         "params": dict(fg.get("params") or {}),
         "errors": list(fg.get("errors") or []),
+        "measured": _measured(fg.get("measured")),
         "parts": [
             {
                 "id": p["id"],
@@ -173,7 +175,39 @@ def compare(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     )
     was = {p["id"]: p["size"] for p in before["parts"]}
     changed = [p["id"] for p in after["parts"] if was.get(p["id"]) != p["size"]]
-    return {"params_changed": params, "size_delta": delta, "parts_changed": changed}
+    return {
+        "params_changed": params,
+        "size_delta": delta,
+        "parts_changed": changed,
+        "measured_changed": _measured_changes(before.get("measured"), after.get("measured")),
+    }
+
+
+def _measured(value: Any) -> dict[str, Any] | None:
+    """The measurements the page made, reduced to the fields a reader uses."""
+    if not isinstance(value, dict):
+        return None
+    keys = ("total_area", "overhang_area", "overhang_share", "com", "support", "overlaps", "notes")
+    return {k: value.get(k) for k in keys}
+
+
+def _measured_changes(before: Any, after: Any) -> dict[str, list[Any]]:
+    """How the measurements moved between two looks, only where they did."""
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return {}
+
+    def tip(m: dict[str, Any]) -> Any:
+        return (m.get("support") or {}).get("tip_angle_deg")
+
+    moved: dict[str, list[Any]] = {}
+    if before.get("overhang_share") != after.get("overhang_share"):
+        moved["overhang_share"] = [before.get("overhang_share"), after.get("overhang_share")]
+    if tip(before) != tip(after):
+        moved["tip_angle_deg"] = [tip(before), tip(after)]
+    pairs = (len(before.get("overlaps") or []), len(after.get("overlaps") or []))
+    if pairs[0] != pairs[1]:
+        moved["overlapping_pairs"] = [pairs[0], pairs[1]]
+    return moved
 
 
 def pixel_difference(

@@ -297,3 +297,18 @@ async def test_a_page_that_never_finishes_is_read_as_it_is_not_waited_on_forever
     page = _FakePage(ready_after=10**9)
     result = await look.observe(page, [], look.ORIGIN, None, timeout_s=0.2)
     assert result["before"]["status"] == "running" and result["before"]["size"] is None
+
+
+def test_the_tool_description_says_what_is_measured_and_what_is_not() -> None:
+    from api_gateway.imagine.service import ImagineService
+    from tool_registry.tools.twin.adapter import TwinServer
+    from twin_core.api import InMemoryTwinAPI
+
+    svc = ImagineService(InMemoryTwinAPI.create())
+    text = (
+        TwinServer(twin=svc.twin, imagine_studio=svc)
+        ._tools["twin.imagine_look"]
+        .manifest.description.lower()
+    )
+    for phrase in ("measured", "overhang", "tip", "upper bound", "wall thickness"):
+        assert phrase in text, phrase

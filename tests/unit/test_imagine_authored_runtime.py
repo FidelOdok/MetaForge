@@ -73,6 +73,14 @@ CHECKS = [
     "components_describe_each_part_its_readiness_and_the_functions_without_a_part",
     "components_a_guess_never_counts_as_a_real_size",
     "components_card_renders_rows_and_missing_functions_and_is_absent_when_empty",
+    "measure_a_standing_box_has_no_overhang_and_tips_at_45_degrees",
+    "measure_a_block_hanging_off_a_small_base_would_tip_over",
+    "measure_a_mushroom_overhang_counts_the_whole_underside_as_an_upper_bound",
+    "measure_a_form_with_a_point_at_the_bottom_has_no_base_to_stand_on",
+    "measure_overlapping_components_are_listed_with_their_volume_and_generated_parts_are_not",
+    "measure_overhang_starts_at_45_degrees_from_straight_down",
+    "measure_says_what_it_did_not_measure",
+    "describe_shows_the_measurements_and_says_when_a_form_would_tip_over",
 ]
 
 
