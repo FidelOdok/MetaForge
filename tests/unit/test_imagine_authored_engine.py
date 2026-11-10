@@ -67,10 +67,17 @@ def test_each_block_that_carries_the_persons_controls_stays_visible(block: str) 
     assert f"#{block}" not in _hidden_ids(), f"{block} is hidden: the person loses its controls"
 
 
-def test_the_engines_own_controls_panel_shows_at_every_level_and_the_graph_editor_is_hidden() -> (
+def test_simple_level_shows_the_engines_controls_panel_and_engineer_shows_the_authored_graph() -> (
     None
 ):
-    assert re.search(r"html\[data-authored\]\s+#quick\s*\{[^}]*display\s*:\s*grid", CSS)
+    assert re.search(
+        r'html\[data-authored\]\[data-level="simple"\]\s+#quick\s*\{[^}]*display\s*:\s*grid', CSS
+    )
+    assert re.search(
+        r'html\[data-authored\]:not\(\[data-level="simple"\]\)\s+#authGraph\s*\{[^}]*display\s*:\s*flex',
+        CSS,
+    )
+    # The enclosure's own graph editor stays hidden: it edits parameters a coded form lacks.
     ids = _hidden_ids()
     assert "#graphPane .gtools" in ids and "#graphPane #canvas" in ids
 

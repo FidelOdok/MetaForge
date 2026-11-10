@@ -614,6 +614,56 @@
     return { lo: a, hi: round(a + Math.max(1, Math.ceil((hi - a) / s)) * s), step: s };
   }
 
+  /* ---- The Engineer graph: parameters feed the parts that use them, and the parts make the form.
+          buildGraph is pure: the nodes, where they sit and the wires between them. The geometry is
+          fixed (every row is ROW_H tall), so a wire's end is computed, not measured, and the same
+          numbers draw it in a browser and in a test. ---- */
+  var NODE_W = 196, HEAD_H = 30, ROW_H = 24, FOOT_H = 22, PBODY_H = 44, GAP_Y = 16, COL_X = [24, 300, 580];
+
+  function labelOf(key) {
+    var t = String(key).replace(/_+/g, ' ').trim();
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+
+  function buildGraph(form) {
+    var names = Object.keys((form && form.params) || {});
+    var parts = (form && form.authored && form.authored.parts) || [];
+    var nodes = [], links = [], y = 24, bottom = 24;
+    names.forEach(function (key) {
+      var h = HEAD_H + PBODY_H;
+      nodes.push({ id: 'param:' + key, kind: 'param', key: key, title: labelOf(key), x: COL_X[0], y: y, w: NODE_W, h: h });
+      y += h + GAP_Y;
+    });
+    y = 24;
+    parts.forEach(function (p) {
+      var uses = (p.uses || []).filter(function (k) { return names.indexOf(k) >= 0; });
+      var h = HEAD_H + (uses.length + 1) * ROW_H + FOOT_H;
+      nodes.push({ id: 'part:' + p.id, kind: 'part', partId: p.id, title: p.name || p.id, partKind: p.kind, body: !!p.body, uses: uses, x: COL_X[1], y: y, w: NODE_W, h: h });
+      uses.forEach(function (k) { links.push({ from: { node: 'param:' + k, port: 'out' }, to: { node: 'part:' + p.id, port: k }, type: 'num' }); });
+      y += h + GAP_Y;
+    });
+    bottom = Math.max(bottom, y - GAP_Y);
+    var fh = HEAD_H + parts.length * ROW_H + FOOT_H * 2;
+    nodes.push({ id: 'form', kind: 'form', title: (form && form.label) || 'Form', partIds: parts.map(function (p) { return p.id; }),
+      x: COL_X[2], y: 24 + Math.max(0, (bottom - 24 - fh) / 2), w: NODE_W, h: fh });
+    parts.forEach(function (p) { links.push({ from: { node: 'part:' + p.id, port: 'shape' }, to: { node: 'form', port: p.id }, type: 'shape' }); });
+    return { nodes: nodes, links: links };
+  }
+
+  // Where a wire meets a node: the right edge for an output, the left edge for an input.
+  function portPos(node, dir, key) {
+    var x = dir === 'out' ? node.x + node.w : node.x, row;
+    if (node.kind === 'param') return [x, node.y + HEAD_H + PBODY_H / 2];
+    if (node.kind === 'part') row = dir === 'out' ? node.uses.length : Math.max(0, node.uses.indexOf(key));
+    else row = Math.max(0, node.partIds.indexOf(key));
+    return [x, node.y + HEAD_H + row * ROW_H + ROW_H / 2];
+  }
+
+  function curvePath(a, b) {
+    var dx = Math.max(40, Math.abs(b[0] - a[0]) * 0.5);
+    return 'M' + a[0] + ',' + a[1] + ' C' + (a[0] + dx) + ',' + a[1] + ' ' + (b[0] - dx) + ',' + b[1] + ' ' + b[0] + ',' + b[1];
+  }
+
   function mount(env) {
     var THREE = env.THREE, doc = env.document || document, form = env.cfg.form, parts = form.authored.parts;
     var params = Object.assign({}, form.params), ranges = form.ranges || {};
@@ -622,7 +672,21 @@
     env.scene.add(group);
 
     var quick = env.quick || null;
-    var partsBox = null;
+    var partsBox = null, graphApi = null, selected = null;
+    // Every slider for one parameter, in the controls panel and in the graph, stays in step.
+    var regs = {};
+    function setParam(key, v) {
+      params[key] = v;
+      (regs[key] || []).forEach(function (r) {
+        if (+r.input.value !== v) r.input.value = String(v);
+        r.valueEl.textContent = String(v);
+      });
+      schedule();
+    }
+    function reg(key, input, valueEl) {
+      (regs[key] = regs[key] || []).push({ input: input, valueEl: valueEl });
+      input.addEventListener('input', function () { setParam(key, +input.value); });
+    }
     function el(tag, cls, text) {
       var e = doc.createElement(tag);
       if (cls) e.className = cls;
@@ -679,7 +743,7 @@
         input.setAttribute('data-param', key);
         // No manufacturing limit applies to a free form, so the whole track is allowed.
         if (input.style && input.style.setProperty) { input.style.setProperty('--lo', '0%'); input.style.setProperty('--hi', '100%'); }
-        input.addEventListener('input', function () { params[key] = +input.value; value.textContent = String(+input.value); schedule(); });
+        reg(key, input, value);
         q.appendChild(input);
         grp.appendChild(q);
       });
@@ -713,7 +777,23 @@
       (env.host || doc.body).appendChild(panel);
     }
 
-    var seq = 0, timer = null, materials = {};
+    var seq = 0, timer = null, materials = {}, litMaterials = {};
+    function litMaterial(kind) {
+      var st = KIND_STYLE[kind] || KIND_STYLE.generated;
+      return litMaterials[kind] || (litMaterials[kind] = new THREE.MeshStandardMaterial({ color: st.color, roughness: 0.6, metalness: 0.05, emissive: 0x2f6fff, emissiveIntensity: 0.55 }));
+    }
+    // The selected part glows in the 3D view; everything else keeps its kind's colour.
+    function applySelection() {
+      group.children.forEach(function (mesh) {
+        var kind = mesh.userData && mesh.userData.kind;
+        mesh.material = selected !== null && selected === 'part:' + (mesh.userData && mesh.userData.part) ? litMaterial(kind) : material(kind);
+      });
+    }
+    function setSelected(id) {
+      selected = id;
+      if (graphApi) graphApi.refresh();
+      applySelection();
+    }
     function material(kind) {
       var s = KIND_STYLE[kind] || KIND_STYLE.generated;
       return materials[kind] || (materials[kind] = new THREE.MeshStandardMaterial({ color: s.color, roughness: 0.6, metalness: 0.05 }));
@@ -768,6 +848,8 @@
       problems.textContent = '';
       result.errors.forEach(function (e) { var d = doc.createElement('div'); d.textContent = e; problems.appendChild(d); });
       problems.style.display = result.errors.length ? 'block' : 'none';
+      if (graphApi) graphApi.update(result);
+      applySelection();
       if (env.onDraw) env.onDraw(result);
     }
     function render() {
@@ -780,9 +862,185 @@
       });
     }
     function schedule() { if (timer) clearTimeout(timer); timer = setTimeout(render, 120); }
+    function buildGraphUi() {
+      var g = buildGraph(form), box = env.graph, svgNs = 'http://www.w3.org/2000/svg';
+      var view = { x: 0, y: 0, k: 1 }, drag = null, fitted = false, nodeEls = {}, footEls = {}, byId = {};
+      g.nodes.forEach(function (n) { byId[n.id] = n; });
+      box.textContent = '';
+      var bar = el('div', 'agx-bar'), fitBtn = el('button', 'agx-fit', 'Fit');
+      fitBtn.type = 'button';
+      bar.appendChild(el('span', 'agx-hint', 'Parameters feed the parts that use them, and the parts make the form. Drag a slider to reshape it. Scroll to zoom, drag the background to pan.'));
+      bar.appendChild(fitBtn);
+      box.appendChild(bar);
+      var canvas = el('div', 'agx-canvas'), world = el('div', 'agx-world');
+      var svg = doc.createElementNS(svgNs, 'svg');
+      svg.setAttribute('class', 'agx-wires');
+      world.appendChild(svg);
+      canvas.appendChild(world);
+      box.appendChild(canvas);
+
+      function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+      function applyView() { world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.k + ')'; }
+      function place(n) { var e = nodeEls[n.id]; e.style.left = n.x + 'px'; e.style.top = n.y + 'px'; }
+      function port(parent, dir, type, key) {
+        var p = el('span', 'port ' + dir);
+        p.setAttribute('data-t', type); p.setAttribute('data-k', key); p.setAttribute('data-dir', dir);
+        parent.appendChild(p);
+        return p;
+      }
+      function row(label, dir, type, key) {
+        var r = el('div', 'agx-row ' + dir);
+        r.setAttribute('data-k', key);
+        r.appendChild(el('span', 'agx-label', label));
+        port(r, dir, type, key);
+        return r;
+      }
+      function header(n, cls) {
+        var head = el('div', 'nh drag'), dot = el('i', 'dot');
+        if (n.partKind) dot.style.background = '#' + (KIND_STYLE[n.partKind] || KIND_STYLE.generated).color.toString(16).padStart(6, '0');
+        head.appendChild(dot);
+        head.appendChild(el('span', 'title', n.title));
+        // A header drags its node and, for a part, selects it. A slider inside the node never starts a drag.
+        head.addEventListener('pointerdown', function (e) {
+          if (e.button) return;
+          if (e.stopPropagation) e.stopPropagation();
+          if (n.kind === 'part') setSelected(n.id);
+          drag = { n: n, sx: e.clientX, sy: e.clientY, ox: n.x, oy: n.y };
+          try { head.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
+        });
+        head.addEventListener('pointermove', function (e) {
+          if (!drag || drag.n !== n) return;
+          n.x = drag.ox + (e.clientX - drag.sx) / view.k;
+          n.y = drag.oy + (e.clientY - drag.sy) / view.k;
+          place(n); drawWires();
+        });
+        head.addEventListener('pointerup', function () { drag = null; });
+        return head;
+      }
+
+      g.nodes.forEach(function (n) {
+        var e = el('div', 'node agx-node ' + (n.kind === 'param' ? 't-param' : n.kind === 'part' ? 'op t-part' : 'op t-out'));
+        e.setAttribute('data-id', n.id);
+        e.appendChild(header(n));
+        if (n.kind === 'param') {
+          var body = el('div', 'agx-pbody'), q = el('div', 'qs'), qt = el('div', 'qt'), val = el('b', '', String(params[n.key]));
+          var grid = gridOf(n.key), input = el('input', 'rng');
+          qt.appendChild(el('span', '', grid.lo + ' to ' + grid.hi));
+          qt.appendChild(val);
+          q.appendChild(qt);
+          input.type = 'range';
+          input.min = String(grid.lo); input.max = String(grid.hi); input.step = String(grid.step); input.value = String(params[n.key]);
+          input.setAttribute('aria-label', n.title); input.setAttribute('data-param', n.key);
+          if (input.style && input.style.setProperty) { input.style.setProperty('--lo', '0%'); input.style.setProperty('--hi', '100%'); }
+          input.addEventListener('pointerdown', function (ev) { if (ev.stopPropagation) ev.stopPropagation(); });
+          reg(n.key, input, val);
+          q.appendChild(input);
+          body.appendChild(q);
+          port(body, 'out', 'num', 'out');
+          e.appendChild(body);
+        } else if (n.kind === 'part') {
+          n.uses.forEach(function (k) { e.appendChild(row(labelOf(k), 'in', 'num', k)); });
+          e.appendChild(row('shape · ' + n.partKind + (n.body ? ' · body' : ''), 'out', 'shape', 'shape'));
+          footEls[n.id] = el('div', 'agx-foot', '');
+          e.appendChild(footEls[n.id]);
+        } else {
+          n.partIds.forEach(function (id) {
+            var pn = byId['part:' + id];
+            e.appendChild(row(pn ? pn.title : id, 'in', 'shape', id));
+          });
+          footEls[n.id] = el('div', 'agx-foot', '');
+          e.appendChild(footEls[n.id]);
+          e.appendChild(el('div', 'agx-foot agx-foot2', ''));
+        }
+        nodeEls[n.id] = e;
+        place(n);
+        world.appendChild(e);
+      });
+
+      function drawWires() {
+        svg.textContent = '';
+        g.links.forEach(function (l) {
+          var a = portPos(byId[l.from.node], 'out', l.from.port), b = portPos(byId[l.to.node], 'in', l.to.port);
+          var hl = selected !== null && (l.from.node === selected || l.to.node === selected);
+          var path = doc.createElementNS(svgNs, 'path');
+          path.setAttribute('class', 'wire link' + (l.type === 'shape' ? ' shape' : '') + (hl ? ' hl' : ''));
+          path.setAttribute('d', curvePath(a, b));
+          svg.appendChild(path);
+        });
+      }
+      function refresh() {
+        g.nodes.forEach(function (n) { nodeEls[n.id].classList.toggle('sel', n.id === selected); });
+        drawWires();
+      }
+      function update(result) {
+        result.parts.forEach(function (p) {
+          var foot = footEls['part:' + p.id];
+          if (!foot) return;
+          var b = p.bbox;
+          foot.textContent = p.error ? 'not drawn: ' + String(p.error).slice(0, 60)
+            : p.triangles + ' tri · ' + (b ? fmtMm(b.max[0] - b.min[0]) + ' × ' + fmtMm(b.max[2] - b.min[2]) + ' × ' + fmtMm(b.max[1] - b.min[1]) + ' mm' : '');
+          foot.classList.toggle('agx-err', !!p.error);
+        });
+        var ff = footEls.form, b2 = result.bbox;
+        if (ff) ff.textContent = b2 ? fmtMm(b2.max[0] - b2.min[0]) + ' × ' + fmtMm(b2.max[2] - b2.min[2]) + ' × ' + fmtMm(b2.max[1] - b2.min[1]) + ' mm' : 'not drawn';
+        nodeEls.form.children[nodeEls.form.children.length - 1].textContent = result.triangles + ' triangles';
+      }
+      function fit() {
+        var cw = canvas.clientWidth, ch = canvas.clientHeight;
+        if (!cw || !ch) return false;
+        var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        g.nodes.forEach(function (n) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + n.w); y1 = Math.max(y1, n.y + n.h); });
+        var k = clamp(Math.min((cw - 32) / Math.max(1, x1 - x0), (ch - 32) / Math.max(1, y1 - y0)), 0.3, 1.1);
+        view.k = k; view.x = (cw - (x1 - x0) * k) / 2 - x0 * k; view.y = Math.max(16, (ch - (y1 - y0) * k) / 2) - y0 * k;
+        applyView();
+        return true;
+      }
+
+      // Zoom about the pointer, pan by dragging the background, click the background to deselect.
+      canvas.addEventListener('wheel', function (e) {
+        if (e.preventDefault) e.preventDefault();
+        var r = canvas.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top;
+        var k2 = clamp(view.k * Math.exp(-e.deltaY * 0.002), 0.3, 1.6);
+        view.x = cx - (cx - view.x) * (k2 / view.k); view.y = cy - (cy - view.y) * (k2 / view.k); view.k = k2;
+        applyView();
+      });
+      canvas.addEventListener('pointerdown', function (e) {
+        if (e.button) return;
+        if (e.target !== canvas && e.target !== world && e.target !== svg) return;
+        drag = { pan: true, sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y, moved: false };
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
+      });
+      canvas.addEventListener('pointermove', function (e) {
+        if (!drag || !drag.pan) return;
+        if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 3) drag.moved = true;
+        view.x = drag.ox + (e.clientX - drag.sx); view.y = drag.oy + (e.clientY - drag.sy);
+        applyView();
+      });
+      canvas.addEventListener('pointerup', function () {
+        if (drag && drag.pan && !drag.moved) setSelected(null);
+        drag = null;
+      });
+      fitBtn.addEventListener('click', fit);
+
+      fitted = fit();
+      if (!fitted && typeof ResizeObserver !== 'undefined') {
+        // Hidden in Simple level, so it has no size yet: fit the first time it is shown.
+        var ro = new ResizeObserver(function () { if (!fitted && fit()) { fitted = true; ro.disconnect(); } });
+        ro.observe(canvas);
+      }
+      applyView();
+      drawWires();
+      return {
+        nodes: g.nodes, links: g.links, view: view, refresh: refresh, update: update, fit: fit,
+        nodeAt: function (id) { return byId[id]; },
+        select: setSelected, selected: function () { return selected; },
+      };
+    }
+
+    if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params };
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });

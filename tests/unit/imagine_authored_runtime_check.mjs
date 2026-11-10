@@ -337,6 +337,175 @@ await check('summary_block_renders_the_description_into_the_page', async () => {
     ? true : 'block ' + (block && block.id) + ' text ' + text.slice(0, 200);
 });
 
+// -- the Engineer graph: parameters to parts to the form ------------------------------------
+function graphDom() {
+  const mk = (tag) => {
+    const e = {
+      tag, children: [], style: { setProperty(k, v) { e.style[k] = v; } }, attrs: {}, handlers: {}, _text: '', open: false,
+      clientWidth: 900, clientHeight: 700, value: '', type: '', min: '', max: '', step: '',
+      appendChild(c) { e.children.push(c); c.parent = e; return c; },
+      setAttribute(k, v) { e.attrs[k] = String(v); if (k === 'class') e.className = String(v); },
+      getAttribute(k) { return e.attrs[k]; },
+      addEventListener(t, f) { (e.handlers[t] ||= []).push(f); },
+      getBoundingClientRect() { return { left: 0, top: 0, width: e.clientWidth, height: e.clientHeight }; },
+      setPointerCapture() {}, releasePointerCapture() {},
+      fire(t, ev) { (e.handlers[t] || []).forEach((f) => f(Object.assign({ target: e, preventDefault() {}, stopPropagation() {}, pointerId: 1 }, ev))); },
+    };
+    let cls = '';
+    Object.defineProperty(e, 'className', { get() { return cls; }, set(v) { cls = String(v); } });
+    e.classList = {
+      contains: (c) => cls.split(/\s+/).includes(c),
+      add: (c) => { if (!cls.split(/\s+/).includes(c)) cls = (cls + ' ' + c).trim(); },
+      remove: (c) => { cls = cls.split(/\s+/).filter((x) => x && x !== c).join(' '); },
+      toggle: (c, on) => { const has = cls.split(/\s+/).includes(c); if (on === undefined ? !has : on) { if (!has) cls = (cls + ' ' + c).trim(); } else e.classList.remove(c); },
+    };
+    Object.defineProperty(e, 'textContent', { get() { return e._text; }, set(v) { e._text = String(v); if (v === '') e.children.length = 0; } });
+    return e;
+  };
+  const doc = { createElement: mk, createElementNS: (ns, tag) => mk(tag), createTextNode: (t) => ({ tag: '#text', _text: t, children: [] }), body: mk('body') };
+  const all = (root) => { const out = []; (function w(n) { out.push(n); (n.children || []).forEach(w); })(root); return out; };
+  const withClass = (root, c) => all(root).filter((n) => (n.className || '').split(/\s+/).includes(c));
+  return { mk, doc, all, withClass };
+}
+const LAMPFORM = {
+  template: 'authored', label: 'Desk lamp', params: { base_r: 55, arm_len: 260, head_r: 50 },
+  ranges: { arm_len: [120, 480] },
+  authored: { parts: [
+    { ...part('base', 'return [g.cylinder(p.base_r, 12, 24)];'), name: 'Base', uses: ['base_r'], body: true },
+    { ...part('arm', 'return [g.cylinder(4, p.arm_len, 12)];'), name: 'Arm', uses: ['arm_len'] },
+    { ...part('shade', 'return [g.cone(p.head_r, 40, 24)];', { kind: 'primitive' }), name: 'Shade', uses: ['arm_len', 'head_r'] },
+  ] },
+};
+
+await check('graph_structure_is_built_from_the_forms_parameters_parts_and_uses', async () => {
+  const g = FG.buildGraph(LAMPFORM);
+  const by = (k) => g.nodes.filter((n) => n.kind === k);
+  if (by('param').length !== 3 || by('part').length !== 3 || by('form').length !== 1) return 'nodes ' + JSON.stringify(g.nodes.map((n) => n.id));
+  // one wire per name a part uses, and one from each part to the form
+  const uses = LAMPFORM.authored.parts.reduce((a, p) => a + p.uses.length, 0);
+  if (g.links.length !== uses + 3) return 'links ' + g.links.length + ', wanted ' + (uses + 3);
+  const shade = g.nodes.find((n) => n.id === 'part:shade');
+  const into = g.links.filter((l) => l.to.node === 'part:shade').map((l) => l.from.node + '>' + l.to.port).sort().join();
+  if (into !== 'param:arm_len>arm_len,param:head_r>head_r') return 'shade inputs ' + into;
+  if (!g.links.some((l) => l.from.node === 'part:shade' && l.to.node === 'form' && l.type === 'shape')) return 'no shape wire to the form';
+  // columns left to right, and nothing on top of anything else
+  const x = (k) => by(k)[0].x;
+  if (!(x('param') < x('part') && x('part') < x('form'))) return 'columns ' + [x('param'), x('part'), x('form')];
+  for (const col of ['param', 'part']) {
+    const ns = by(col).slice().sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ns.length; i++) if (ns[i].y < ns[i - 1].y + ns[i - 1].h) return col + ' nodes overlap';
+  }
+  if (!(shade.h > 0 && shade.w > 0)) return 'no size';
+  return true;
+});
+
+function mountGraph(extra = {}, form = LAMPFORM) {
+  const { doc, mk } = graphDom();
+  class Group { constructor() { this.children = []; } add(c) { this.children.push(c); } }
+  const mats = [];
+  const THREE = { Group, Mesh: class { constructor(geometry, material) { this.geometry = geometry; this.material = material; this.userData = {}; } },
+    BufferGeometry: class { setAttribute() {} setIndex() {} computeVertexNormals() {} dispose() {} },
+    MeshStandardMaterial: class { constructor(o) { this.o = o; mats.push(this); } clone() { return new THREE.MeshStandardMaterial({ ...this.o }); } },
+    Float32BufferAttribute: class {} };
+  const graph = mk('div'), quick = mk('div');
+  const m = FG.mount({ THREE, scene: new Group(), cfg: { form }, document: doc, quick, graph, options: OPTS, ...extra });
+  return { m, doc, graph, quick, THREE, mats, all: (r) => graphDom().all.call(null, r) };
+}
+
+await check('graph_renders_nodes_ports_and_wires_in_the_engines_styles', async () => {
+  const { m, graph } = mountGraph();
+  await m.render();
+  const { all, withClass } = graphDom();
+  const nodes = withClass(graph, 'node');
+  if (nodes.length !== 7) return 'nodes ' + nodes.length;
+  for (const c of ['nh', 'port', 'title', 'dot']) if (!withClass(graph, c).length) return 'no .' + c;
+  const wires = all(graph).filter((n) => (n.className || '').split(/\s+/).includes('wire'));
+  if (wires.length !== 4 + 3) return 'wires ' + wires.length + ', wanted 7';
+  if (!wires.some((w) => (w.className || '').includes('shape'))) return 'no shape-coloured wire';
+  if (!wires.every((w) => /^M[\d.\-]+,[\d.\-]+ C/.test(w.attrs.d || ''))) return 'bad path: ' + wires.map((w) => w.attrs.d).slice(0, 2);
+  // each wire ends on a port: its start is at a part or parameter's right edge
+  const sliders = withClass(graph, 'rng');
+  if (sliders.length !== 3) return 'parameter sliders ' + sliders.length;
+  if (withClass(graph, 'agx-foot').length < 3) return 'part nodes show no live size';
+  return true;
+});
+
+await check('graph_slider_and_panel_slider_stay_in_step_and_redraw', async () => {
+  const { m, graph, quick } = mountGraph();
+  await m.render();
+  const { withClass } = graphDom();
+  const gs = withClass(graph, 'rng').find((r) => r.attrs['data-param'] === 'arm_len');
+  const qs = withClass(quick, 'rng').find((r) => r.attrs['data-param'] === 'arm_len');
+  if (!gs || !qs) return 'a slider is missing';
+  gs.value = '300'; gs.fire('input', {});
+  if (qs.value !== '300') return 'the controls panel did not follow the graph: ' + qs.value;
+  const shown = (root) => withClass(root, 'qs').find((q) => q.attrs['data-q'] === 'arm_len').children[0].children[1]._text;
+  if (shown(quick) !== '300') return 'panel value ' + shown(quick);
+  qs.value = '200'; qs.fire('input', {});
+  if (gs.value !== '200') return 'the graph did not follow the panel: ' + gs.value;
+  await new Promise((r) => setTimeout(r, 600));
+  if (globalThis.FG_AUTHORED.params.arm_len !== 200) return 'not redrawn: ' + globalThis.FG_AUTHORED.params.arm_len;
+  return true;
+});
+
+await check('selecting_a_part_highlights_its_node_wires_and_mesh', async () => {
+  const { m, graph } = mountGraph();
+  await m.render();
+  const { all, withClass } = graphDom();
+  const node = withClass(graph, 'node').find((n) => n.attrs['data-id'] === 'part:shade');
+  node.children[0].fire('pointerdown', { clientX: 10, clientY: 10, button: 0 });
+  node.children[0].fire('pointerup', { clientX: 10, clientY: 10 });
+  if (!node.classList.contains('sel')) return 'the node is not selected';
+  const hl = all(graph).filter((n) => (n.className || '').split(/\s+/).includes('hl'));
+  if (hl.length !== 3) return 'highlighted wires ' + hl.length + ', wanted its 2 inputs and 1 output';
+  if (m.graph.selected() !== 'part:shade') return 'selected() ' + m.graph.selected();
+  const meshes = m.group.children.filter((c) => c.userData.part);
+  const lit = meshes.filter((c) => c.material.o && c.material.o.emissive);
+  if (lit.length !== 1 || lit[0].userData.part !== 'shade') return 'lit meshes ' + lit.map((c) => c.userData.part);
+  // another part moves the highlight; clicking the background clears it
+  const other = withClass(graph, 'node').find((n) => n.attrs['data-id'] === 'part:base');
+  other.children[0].fire('pointerdown', { clientX: 5, clientY: 5, button: 0 }); other.children[0].fire('pointerup', { clientX: 5, clientY: 5 });
+  if (node.classList.contains('sel') || !other.classList.contains('sel')) return 'the highlight did not move';
+  const canvas = withClass(graph, 'agx-canvas')[0];
+  canvas.fire('pointerdown', { target: canvas, clientX: 400, clientY: 400, button: 0 }); canvas.fire('pointerup', { target: canvas, clientX: 400, clientY: 400 });
+  return m.graph.selected() === null && m.group.children.every((c) => !(c.material.o && c.material.o.emissive)) ? true : 'the background did not clear it';
+});
+
+await check('graph_pans_zooms_drags_and_fits', async () => {
+  const { m, graph } = mountGraph();
+  await m.render();
+  const { withClass } = graphDom();
+  const canvas = withClass(graph, 'agx-canvas')[0], world = withClass(graph, 'agx-world')[0];
+  const v0 = { ...m.graph.view };
+  canvas.fire('wheel', { clientX: 300, clientY: 300, deltaY: -240 });
+  if (!(m.graph.view.k > v0.k)) return 'wheel up did not zoom in: ' + v0.k + ' -> ' + m.graph.view.k;
+  for (let i = 0; i < 40; i++) canvas.fire('wheel', { clientX: 300, clientY: 300, deltaY: 400 });
+  if (m.graph.view.k < 0.3 - 1e-9) return 'zoomed out past the limit: ' + m.graph.view.k;
+  for (let i = 0; i < 60; i++) canvas.fire('wheel', { clientX: 300, clientY: 300, deltaY: -400 });
+  if (m.graph.view.k > 1.6 + 1e-9) return 'zoomed in past the limit: ' + m.graph.view.k;
+  const before = { x: m.graph.view.x, y: m.graph.view.y };
+  canvas.fire('pointerdown', { target: canvas, clientX: 100, clientY: 100, button: 0 });
+  canvas.fire('pointermove', { clientX: 160, clientY: 130 });
+  canvas.fire('pointerup', { clientX: 160, clientY: 130 });
+  if (Math.round(m.graph.view.x - before.x) !== 60 || Math.round(m.graph.view.y - before.y) !== 30) return 'pan ' + JSON.stringify([m.graph.view.x - before.x, m.graph.view.y - before.y]);
+  if (!/translate\(.*\) scale\(/.test(world.style.transform || '')) return 'the world was not transformed: ' + world.style.transform;
+  // dragging a node by its header moves it and its wires follow
+  const node = withClass(graph, 'node').find((n) => n.attrs['data-id'] === 'part:arm');
+  const x0 = m.graph.nodeAt('part:arm').x;
+  node.children[0].fire('pointerdown', { clientX: 10, clientY: 10, button: 0 });
+  node.children[0].fire('pointermove', { clientX: 70, clientY: 10 });
+  node.children[0].fire('pointerup', { clientX: 70, clientY: 10 });
+  if (!(m.graph.nodeAt('part:arm').x > x0)) return 'the node did not move';
+  // Fit puts every node inside the canvas
+  m.graph.fit();
+  const g = m.graph, k = g.view.k;
+  for (const n of g.nodes) {
+    const x = n.x * k + g.view.x, y = n.y * k + g.view.y;
+    if (x < -1 || y < -1 || x + n.w * k > 900 + 1 || y + n.h * k > 700 + 1) return 'Fit left ' + n.id + ' outside: ' + [x, y, n.w * k, n.h * k];
+  }
+  return true;
+});
+
 // -- mount: the page side, with a minimal fake DOM and three.js ------------------
 await check('sliders_can_land_exactly_on_the_declared_values_and_on_whole_numbers', async () => {
   const el = () => {

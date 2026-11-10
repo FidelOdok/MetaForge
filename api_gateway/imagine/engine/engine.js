@@ -579,7 +579,7 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,quick:document.getElementById('quick'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
@@ -2299,12 +2299,12 @@ document.addEventListener('click',e=>{const u=e.target.closest('[data-unclamp]')
 function renderAcc(){accSummaries();clampLists();}
 
 /* ================= Minimisable sides ================= */
-function applySides(){S.sides=S.sides||{};if(HOSTED)S.sides={};const m=$('main'),L=!!S.sides.l,R=!!S.sides.r;m.classList.toggle('hideL',L);m.classList.toggle('hideR',R);
+function applySides(){S.sides=S.sides||{};if(HOSTED&&!AUTHORED)S.sides={}; /* an authored form keeps its three panes minimisable when hosted too */const m=$('main'),L=!!S.sides.l,R=!!S.sides.r;m.classList.toggle('hideL',L);m.classList.toggle('hideR',R);
   const el=$('#edgeL'),er=$('#edgeR');el.classList.toggle('flip',L);er.classList.toggle('flip',R);
   el.setAttribute('aria-label',L?'Show controls':'Hide controls');el.title=(L?'Show':'Hide')+' controls ( [ )';
   er.setAttribute('aria-label',R?'Show panel':'Hide panel');er.title=(R?'Show':'Hide')+' panel ( ] )';
   setTimeout(()=>{resize();if(!L&&S.level==='eng')drawWires();},230);}
-function toggleSide(k){if(HOSTED)return;S.sides=S.sides||{};S.sides[k]=!S.sides[k];applySides();save();}
+function toggleSide(k){if(HOSTED&&!AUTHORED)return;S.sides=S.sides||{};S.sides[k]=!S.sides[k];applySides();save();}
 $('#edgeL').addEventListener('click',()=>toggleSide('l'));$('#edgeR').addEventListener('click',()=>toggleSide('r'));
 document.addEventListener('keydown',e=>{const tg=e.target&&e.target.closest?e.target:null;if(e.ctrlKey||e.metaKey||e.altKey||(tg&&tg.closest('input,select,textarea,[contenteditable]')))return;if(e.key==='['){e.preventDefault();toggleSide('l');}else if(e.key===']'){e.preventDefault();toggleSide('r');}});
 

@@ -632,7 +632,10 @@ li.clip{display:none!important}
 /* MetaForge: an authored form uses the engine's own controls panel (#quick) at every level, so it
    looks and behaves like every other studio. The node graph is for the enclosure's parameters and
    does not apply to a form made of code. */
-html[data-authored] #quick{display:grid}
+/* Simple level shows the controls panel; Engineer level shows the graph (parameters, parts, the form). */
+html[data-authored] #authGraph{display:none}
+html[data-authored]:not([data-level="simple"]) #authGraph{display:flex}
+html[data-authored][data-level="simple"] #quick{display:grid}
 html[data-authored] #graphPane .gtools,html[data-authored] #graphPane #canvas{display:none}
 /* These blocks assert something about the placeholder enclosure the engine solves for every studio
    (a drop test, a bill of materials with a top shell, cables routed inside it). For an authored form
@@ -647,3 +650,48 @@ html[data-authored] #costBlk,html[data-authored] #handBlk,html[data-authored] #p
 .fg-authored-facts{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:6px 0 10px;font-size:12px}
 .fg-authored-facts dt{color:var(--muted,#667)}
 .fg-authored-facts dd{margin:0}
+
+/* The Engineer graph of an authored form (authored.js). It borrows the engine's own node, port and wire
+   styles (.node, .nh, .port, .wire) and adds only what they do not have: fixed row heights, so a wire's
+   end is computed from the layout rather than measured. */
+.agx{flex:1;flex-direction:column;min-height:0}
+.agx-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+.agx-hint{flex:1;line-height:1.4}
+.agx-fit{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+.agx-canvas{position:relative;flex:1;min-height:200px;overflow:hidden;touch-action:none;cursor:grab;
+  background-image:radial-gradient(var(--dot) 1.2px, transparent 1.3px);background-size:20px 20px}
+.agx-world{position:absolute;left:0;top:0;transform-origin:0 0}
+.agx-wires{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
+.wire.hl{stroke-width:3.5;opacity:1}
+.agx-pbody{position:relative;height:44px;padding:6px 12px 0;box-sizing:border-box}
+.agx-row{position:relative;height:24px;display:flex;align-items:center;padding:0 12px;font-size:12px;box-sizing:border-box}
+.agx-row.out{justify-content:flex-end}
+.agx-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agx-foot{height:22px;display:flex;align-items:center;padding:0 12px;font-family:var(--f-mono);font-size:10.5px;color:var(--muted);border-top:1px solid var(--line);box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agx-foot.agx-err{color:var(--fail)}
+.agx-foot2{border-top:0}
+.node.t-part .nh .dot,.node.t-out .nh .dot{border-radius:2px}
+
+/* An authored form: three panes, graph | view | results, with the left and right minimisable, in the
+   standalone page and inside the dashboard. The engine stacks the results under the view when hosted and
+   switches the edge buttons off; that is undone here, for an authored form only, at 900 px and wider. */
+@media (min-width:900px){
+  html[data-authored] main,html[data-authored] main.hideL,html[data-authored] main.hideR,html[data-authored] main.hideL.hideR,
+  html[data-authored].fg-hosted main,html[data-authored].fg-hosted main.hideL,html[data-authored].fg-hosted main.hideR,
+  html[data-authored].fg-hosted main.hideL.hideR{grid-template-rows:minmax(0,1fr);grid-template-areas:"graph view dfm";min-height:0}
+  html[data-authored] main,html[data-authored].fg-hosted main{grid-template-columns:minmax(300px,28%) minmax(0,1fr) minmax(320px,30%)}
+  html[data-authored] main.hideL,html[data-authored].fg-hosted main.hideL{grid-template-columns:0 minmax(0,1fr) minmax(320px,30%)}
+  html[data-authored] main.hideR,html[data-authored].fg-hosted main.hideR{grid-template-columns:minmax(300px,28%) minmax(0,1fr) 0}
+  html[data-authored] main.hideL.hideR,html[data-authored].fg-hosted main.hideL.hideR{grid-template-columns:0 minmax(0,1fr) 0}
+  html[data-authored] #graphPane,html[data-authored].fg-hosted #graphPane{grid-area:graph;display:flex;flex-direction:column;height:auto;min-height:0;overflow:auto}
+  html[data-authored] #viewPane,html[data-authored].fg-hosted #viewPane{grid-area:view;height:auto;min-height:0;border-bottom:0}
+  html[data-authored] #dfm,html[data-authored].fg-hosted #dfm{grid-area:dfm;display:block;min-height:0;overflow:auto;columns:auto}
+  html[data-authored] main.hideL #graphPane,html[data-authored] main.hideR #dfm,
+  html[data-authored].fg-hosted main.hideL #graphPane,html[data-authored].fg-hosted main.hideR #dfm{display:none}
+  html[data-authored] .edge,html[data-authored].fg-hosted .edge{display:block}
+  /* The graph needs room to be read, so Engineer level gives the left pane more of the width. */
+  html[data-authored]:not([data-level="simple"]) main,html[data-authored].fg-hosted:not([data-level="simple"]) main{grid-template-columns:minmax(420px,44%) minmax(0,1fr) minmax(300px,26%)}
+  html[data-authored]:not([data-level="simple"]) main.hideL,html[data-authored].fg-hosted:not([data-level="simple"]) main.hideL{grid-template-columns:0 minmax(0,1fr) minmax(300px,26%)}
+  html[data-authored]:not([data-level="simple"]) main.hideR,html[data-authored].fg-hosted:not([data-level="simple"]) main.hideR{grid-template-columns:minmax(420px,44%) minmax(0,1fr) 0}
+  html[data-authored]:not([data-level="simple"]) main.hideL.hideR,html[data-authored].fg-hosted:not([data-level="simple"]) main.hideL.hideR{grid-template-columns:0 minmax(0,1fr) 0}
+}

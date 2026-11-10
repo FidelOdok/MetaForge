@@ -610,8 +610,16 @@ without trusting it:
 The page keeps the studio's own look and controls. The left pane is the engine's own controls
 panel, filled with the form's parameters: the same sections and sliders as any studio, with
 readable labels (`slot_len` reads "Slot len"), and a Parts list that gives each part's colour
-(its kind) and size. Moving a slider runs the code again with no model call. The node graph
-editor is hidden, because it edits the enclosure's parameters and a form made of code has none.
+(its kind) and size. Moving a slider runs the code again with no model call. The enclosure's
+own node graph editor is hidden, because it edits parameters a form made of code has none.
+
+At the Engineer level the left pane shows the form's own graph instead: a column of parameter
+nodes (each with its slider), a column of part nodes, and the form node. A wire runs from a
+parameter to each part that uses it, and from each part to the form. Sliders here and in the
+Simple panel stay in step. Selecting a part (its title bar) lights its node, its wires and its
+mesh. Scroll zooms, dragging the background pans, and Fit frames everything. The page has three
+panes, the graph, the model and the summary, and the left and right panes each minimise with
+the edge buttons (or `[` and `]`), also when the page sits inside the dashboard's frame.
 
 The right pane keeps what carries the person's controls and records, and labels what the engine
 cannot say about this form:

@@ -279,7 +279,9 @@ async def observe(
         mark = len(seen)
         tolerance: dict[str, float] = {}
         for name, value in sets.items():
-            slider = page.locator(f'input[data-param="{name}"]')
+            # The Simple panel and the Engineer graph each carry a slider for the key and the
+            # two stay in step, so moving the first moves both.
+            slider = page.locator(f'input[data-param="{name}"]').first
             if await slider.count() == 0:
                 known = ", ".join(sorted(before["params"]))
                 raise ValueError(f'there is no parameter "{name}"; the form has: {known}')

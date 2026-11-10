@@ -64,6 +64,11 @@ CHECKS = [
     "summary_block_renders_the_description_into_the_page",
     "sliders_can_land_exactly_on_the_declared_values_and_on_whole_numbers",
     "quick_panel_uses_the_engines_own_markup_and_still_redraws",
+    "graph_structure_is_built_from_the_forms_parameters_parts_and_uses",
+    "graph_renders_nodes_ports_and_wires_in_the_engines_styles",
+    "graph_slider_and_panel_slider_stay_in_step_and_redraw",
+    "selecting_a_part_highlights_its_node_wires_and_mesh",
+    "graph_pans_zooms_drags_and_fits",
     "mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change",
 ]
 

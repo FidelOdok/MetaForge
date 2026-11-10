@@ -354,3 +354,146 @@ def test_the_authored_studio_keeps_the_persons_controls_and_claims_nothing_about
     )
     # The Programme tab still works.
     assert "Connect a form" not in programme and "Phase exit" in programme, programme[:200]
+
+
+_GRAPH_FACTS = """() => {
+  const q = (s) => Array.from(document.querySelectorAll(s));
+  const box = (s) => { const e = document.querySelector(s); if (!e) return null;
+    const r = e.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height) }; };
+  return {
+    graph: box('#authGraph'), quick: box('#quick'), view: box('#viewPane'), right: box('#dfm'),
+    nodes: q('#authGraph .agx-node').length, wires: q('#authGraph path.wire').length,
+    sel: q('#authGraph .agx-node.sel').length, hl: q('#authGraph path.wire.hl').length,
+    hideL: document.querySelector('main').classList.contains('hideL'),
+    hideR: document.querySelector('main').classList.contains('hideR'),
+  };
+}"""
+
+
+def _wait_ready(page: Any) -> None:
+    deadline = time.monotonic() + 40
+    while time.monotonic() < deadline:
+        if page.evaluate("() => !!(window.FG_AUTHORED && window.FG_AUTHORED.status === 'ready')"):
+            break
+        page.wait_for_timeout(200)
+    page.wait_for_timeout(1200)
+
+
+def _engineer_graph_checks(page: Any, root: Any, form: dict[str, Any]) -> None:
+    """Shared by the standalone and the hosted test. `root` is the page or the iframe's frame."""
+    facts = root.evaluate(_GRAPH_FACTS)
+    # Simple level keeps the engine's own panel and no graph.
+    assert facts["graph"]["w"] == 0 and facts["quick"]["w"] > 0, facts
+    root.locator('button[data-level="eng"]').click()
+    page.wait_for_timeout(800)
+    facts = root.evaluate(_GRAPH_FACTS)
+    parts, params = form["authored"]["parts"], form["params"]
+    uses = sum(len(p.get("uses", [])) for p in parts)
+    # One node per parameter, per part and the form; one wire per use and per part into the form.
+    assert facts["nodes"] == len(params) + len(parts) + 1, facts
+    assert facts["wires"] == uses + len(parts), facts
+    assert facts["graph"]["w"] > 200 and facts["quick"]["w"] == 0, facts
+    # Three panes: the graph left of the model, the model left of the summary.
+    assert facts["graph"]["w"] > 0 and facts["view"]["w"] > 200 and facts["right"]["w"] > 200
+
+    # A slider in the graph moves the part's size and the Simple panel stays in step.
+    key = next(iter(form["ranges"]))
+    graph_slider = root.locator("#authGraph input[type=range]").first
+    lo, hi = form["ranges"][key][0], form["ranges"][key][1]
+    target = (lo + hi) / 2
+    before = root.evaluate("() => JSON.stringify(window.FG_AUTHORED)")
+    graph_slider.evaluate(
+        "(el, v) => { el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); }",
+        target,
+    )
+    page.wait_for_timeout(1500)
+    after = root.evaluate("() => JSON.stringify(window.FG_AUTHORED)")
+    assert before != after, "moving a graph slider did not redraw the form"
+
+    # Selecting a part lights its node and the wires into it, and clears on a background click.
+    root.locator("#authGraph .agx-node .nh").nth(len(params)).click()
+    page.wait_for_timeout(300)
+    facts = root.evaluate(_GRAPH_FACTS)
+    assert facts["sel"] == 1 and facts["hl"] >= 1, facts
+
+    # Each side can be minimised and restored, and the model view takes the room.
+    for edge, flag, side in (("#edgeL", "hideL", "graph"), ("#edgeR", "hideR", "right")):
+        width = _settled(page, root)["view"]["w"]
+        root.locator(edge).click()
+        hidden = _settled(page, root)
+        assert hidden[flag] is True and hidden["view"]["w"] > width, (edge, hidden)
+        assert hidden[side]["w"] < 60, (edge, hidden)
+        root.locator(edge).click()
+        restored = _settled(page, root)
+        assert restored[flag] is False and abs(restored["view"]["w"] - width) < 4, restored
+
+
+def _settled(page: Any, root: Any) -> dict[str, Any]:
+    """The layout facts once the grid's 0.2 s transition has stopped moving."""
+    last: dict[str, Any] = {}
+    for _ in range(40):
+        page.wait_for_timeout(150)
+        facts = root.evaluate(_GRAPH_FACTS)
+        if last and facts == last:
+            return facts
+        last = facts
+    return last
+
+
+def test_the_engineer_level_draws_the_graph_and_both_sides_minimise(server: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from api_gateway.imagine.look import CHROMIUM_ARGS
+
+    form = authored_lamp_form()
+    url = _put(server, PROJECT, form)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=list(CHROMIUM_ARGS))
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 950})
+            page.goto(url, wait_until="domcontentloaded")
+            _wait_ready(page)
+            _engineer_graph_checks(page, page, form)
+        finally:
+            browser.close()
+
+
+def test_the_graph_and_the_side_buttons_also_work_inside_the_dashboards_frame(
+    server: str,
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from api_gateway.imagine.look import CHROMIUM_ARGS
+
+    form = authored_lamp_form()
+    url = _put(server, PROJECT, form)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=list(CHROMIUM_ARGS))
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 950})
+            # The engine allows framing by its own origin only, so host the frame there.
+            page.goto(f"{server}/openapi.json")
+            page.evaluate(
+                """(u) => { const f = document.createElement('iframe'); f.src = u;
+                   f.style.cssText = 'width:1450px;height:900px;border:0';
+                   document.body.append(f); }""",
+                url,
+            )
+            frame = None
+            deadline = time.monotonic() + 40
+            while time.monotonic() < deadline:
+                frame = next((f for f in page.frames if f.url.startswith(url)), None)
+                if frame and frame.evaluate(
+                    "() => !!(window.FG_AUTHORED && window.FG_AUTHORED.status === 'ready')"
+                ):
+                    break
+                page.wait_for_timeout(300)
+            assert frame is not None
+            page.wait_for_timeout(1200)
+            assert frame.evaluate("() => document.body.classList.contains('fg-hosted')") or (
+                frame.evaluate("() => document.documentElement.classList.contains('fg-hosted')")
+            )
+            _engineer_graph_checks(page, frame, form)
+        finally:
+            browser.close()
