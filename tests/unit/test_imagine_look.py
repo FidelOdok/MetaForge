@@ -315,6 +315,14 @@ def test_the_authored_studio_keeps_the_persons_controls_and_claims_nothing_about
                 page.wait_for_timeout(200)
             page.wait_for_timeout(1500)  # the engine's own renderers run after the form is drawn
             facts = page.evaluate(_STUDIO_FACTS)
+            # A person can act on the blockers the dashboard names: open Requirements, confirm
+            # one assumption, and the gate counts down.
+            gate = "() => document.getElementById('gateMsg').textContent"
+            gate_before = page.evaluate(gate)
+            page.locator('#dfm > section[data-acc="Requirements"] button.acc-h').click()
+            page.locator("#asmBox input[type=checkbox]").first.check()
+            page.wait_for_timeout(1500)
+            gate_after = page.evaluate(gate)
             # The Programme tab needs the engine to have a shape; it must not say "connect a form".
             page.locator('button[data-pview="prog"]').click()
             page.wait_for_timeout(1500)
@@ -339,5 +347,10 @@ def test_the_authored_studio_keeps_the_persons_controls_and_claims_nothing_about
     # No requirement is called met.
     assert facts["req_chips"], "no requirement rows"
     assert set(facts["req_chips"]) <= {"Not assessed", "Off", "n/a"}, facts["req_chips"]
+    count = len(assumptions)
+    assert f"{count} assumption" in gate_before and f"{count - 1} assumption" in gate_after, (
+        gate_before,
+        gate_after,
+    )
     # The Programme tab still works.
     assert "Connect a form" not in programme and "Phase exit" in programme, programme[:200]
