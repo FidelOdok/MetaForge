@@ -35,6 +35,7 @@ def _part(pid: str, role: str, name: str, env: list[float], bus: str) -> dict[st
 
 def base_config() -> dict[str, Any]:
     data: dict[str, Any] = json.loads(_EXAMPLE.read_text(encoding="utf-8"))
+    data["form"] = authored_lamp_form()
     return data
 
 

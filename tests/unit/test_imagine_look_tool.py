@@ -113,11 +113,30 @@ async def test_without_playwright_it_says_so_by_name_and_how_to_install_it(
     assert "could not look" in result["message"]
 
 
-async def test_an_enclosure_studio_is_answered_without_starting_a_browser(
+async def test_an_enclosure_studio_cannot_be_written_any_more(service: ImagineService) -> None:
+    srv = server(service)
+    legacy = lamp_config()
+    legacy["form"] = {"template": "enclosure"}
+    with pytest.raises(ValueError, match="enclosure"):
+        await srv.imagine_put_studio({"project_id": PROJECT, "config": legacy})
+
+
+async def test_a_legacy_enclosure_studio_is_answered_without_starting_a_browser(
     service: ImagineService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     srv = server(service)
-    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    legacy = lamp_config()
+    legacy["form"] = {"template": "enclosure"}
+    state = {
+        "config": legacy,
+        "status": "draft",
+        "collections": {},
+        "events": {},
+        "handover": None,
+        "rework": None,
+        "warnings": [],
+    }
+    await service._write_revision(PROJECT, state, actor="test", reason="a studio from before")
 
     async def boom(*a: Any, **k: Any) -> Any:  # a browser must not start
         raise AssertionError("a browser was started for an enclosure studio")
@@ -126,7 +145,7 @@ async def test_an_enclosure_studio_is_answered_without_starting_a_browser(
     result = await srv.imagine_look({"project_id": PROJECT})
     assert result["status"] == "not_authored"
     assert result["form"] == "enclosure"
-    assert "authored" in result["message"]
+    assert "removed" in result["message"] and "authored" in result["message"]
 
 
 async def test_no_studio_is_an_error_not_an_empty_look(service: ImagineService) -> None:

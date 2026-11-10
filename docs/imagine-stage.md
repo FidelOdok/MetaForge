@@ -432,9 +432,9 @@ held for approval.
 When the studio's form is authored (`form.template` is `authored`), the revision
 sent to the service carries `form`: `kind: "authored"` and each part's `id`, its
 `kind` (`generated`, `primitive` or `component`) and whether it is the `body`. The
-geometry code never leaves the studio. An enclosure studio sends no `form` at all,
-because the service refuses fields it does not know and its report for an enclosure
-studio must stay what it was. If an authored block has no usable parts, none is sent.
+geometry code never leaves the studio. A studio from before the enclosure template was
+removed sends no `form`, because the service refuses fields it does not know. If an
+authored block has no usable parts, none is sent.
 
 For an authored form the service adds two advisory findings and no blocking one:
 `form.enclosure_checks` (`not_assessed`: the checks that need an enclosure were not
@@ -548,9 +548,12 @@ bounded height (`npx playwright test imagine-engine`).
 
 ## Authored forms
 
-The catalogue has one template, `enclosure`. A product whose shape is something
-else sets `form.template` to `authored` and describes the form as parts, each
-carrying the body of a geometry function, `build(p, g)`. The agent skill
+Every form is authored. The enclosure template was removed: the checker refuses it with a
+message saying so, and a studio written before the removal stays readable but cannot be
+drawn (the engine page answers 410 and `twin.imagine_look` answers `not_authored`). Nothing
+deletes stored studios; write a new authored studio instead. A form sets `form.template` to
+`authored` and describes the form as parts, each carrying the body of a geometry function,
+`build(p, g)`. A box around electronics is a form whose body part is a `g.box`. The agent skill
 (`mcp_core/plugin_skills/imagine_studio/SKILL.md`) is the reference for writing
 one, with the shape builder and a worked lamp; this section says how the gateway
 and the page treat it.
@@ -565,8 +568,7 @@ and the page treat it.
 
 `kind` says how far to trust a part as geometry, and the page colours the three
 differently. A `component` is a stand in for a bought part drawn from its
-envelope, not the part's real mesh. `form.authored` is refused with any other
-template, and `features` belongs to the enclosure.
+envelope, not the part's real mesh. `form.template` must be `authored`.
 
 ### Checks when it is written
 
@@ -674,7 +676,8 @@ the earlier result. It reads and writes nothing in the twin and is never held.
 `playwright` and a Chromium build are not installed with MetaForge
 (`pip install playwright pillow && playwright install chromium`): without them the
 result is `unavailable` with that line, and the agent must say it could not look.
-An enclosure studio answers `not_authored` without starting a browser.
+A studio from before the enclosure template was removed answers `not_authored` without starting a
+browser.
 
 `scripts/imagine_look.py` is the same look from a shell. It opens an engine page in
 a real browser (it needs the `playwright` package and a Chromium build), waits for
@@ -740,12 +743,9 @@ Read the studio again to get a fresh URL. Nothing here names a provider.
 
 ## Known limits
 
-- The form catalogue (`api_gateway/imagine/formgraph/data/catalogue.json`)
-  has one template, `enclosure`: a rounded, shelled box with a lid. Other shapes
-  are authored (see "Authored forms"), which has its own limits. For an
-  enclosure the engine still labels every product's shell *Fuselage shell*
-  (`engine/engine.js`, the parts panel and the readiness row), wording from the
-  multirotor reference.
+- The enclosure template was removed (see "Authored forms"). The engine page still carries the
+  enclosure solver and its checks in `engine/engine.js`, which no new studio reaches; that
+  dead code has not been deleted yet, and the catalogue still lists the template's data.
 - The concept assembly decision records each part's envelope in its text and
   the studio's handover record; a concept layout with sizes and positions is
   still drawn by `twin.render_concept_sketch`.

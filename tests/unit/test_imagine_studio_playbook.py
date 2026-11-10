@@ -371,3 +371,12 @@ def test_the_skill_tells_the_agent_to_link_a_component_to_its_part_and_leave_the
         "one with no link is a stand in",
     ):
         assert phrase in text, phrase
+
+
+def test_the_skill_says_every_form_is_authored_and_no_longer_offers_the_enclosure() -> None:
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    assert "is `authored`, always: you build the form from parts" in text
+    assert "The old `enclosure` template was removed and is refused" in text
+    for stale in ("Use `enclosure` when", "The `enclosure` template draws one thing"):
+        assert stale not in text, stale
+    assert '"template": "enclosure"' not in text

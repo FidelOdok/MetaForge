@@ -9450,7 +9450,8 @@ class TwinServer(McpToolServer):
                     "again: nothing is saved, the form redraws with no model call, and the "
                     "result carries both pictures, what changed and the requests the page "
                     "made after the change. Only an authored form can be looked at "
-                    "(form.template 'authored'); an enclosure studio answers not_authored. "
+                    "(form.template 'authored'); a studio from before the enclosure template was "
+                    "removed answers not_authored. "
                     "After you write a config, look with 'revision' set to the revision the "
                     "write returned: a call identical to an earlier one in the same turn is "
                     "answered with the earlier result and is not run again, so a plain "
@@ -9876,15 +9877,16 @@ class TwinServer(McpToolServer):
                 f"{tool_id}: the studio is at revision {studio.revision}, not {wanted}"
             )
         base = {"project_id": pid, "revision": studio.revision}
-        template = ((studio.config or {}).get("form") or {}).get("template") or "enclosure"
+        template = ((studio.config or {}).get("form") or {}).get("template") or "none"
         if template != "authored":
             return {
                 **base,
                 "status": "not_authored",
                 "form": template,
                 "message": (
-                    "This studio's form is the enclosure template, not an authored form, so "
-                    "there is nothing to look at here. Author the form first."
+                    f"This studio's form is {template!r}, not an authored form. The "
+                    "enclosure template was removed, so there is nothing to look at here: "
+                    "write a new studio with form.template authored."
                 ),
             }
 

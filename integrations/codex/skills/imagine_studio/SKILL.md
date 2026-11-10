@@ -104,11 +104,10 @@ write:
   hyphens, 2 to 49 characters, for example `desk-lamp`) and `name` of 60
   characters or fewer.
 - **`engine`** is `formgraph@2` (`formgraph@1` also passes).
-- **`form.template`** is `enclosure` (a soft-shell box with a lid, sized by
-  its parameters) or `authored` (a form you build from parts, see "Authoring a
-  form"). Use `enclosure` when the product is a box around electronics. When
-  its shape is something else, such as a lamp, author the form: do not stand
-  a box in for it.
+- **`form.template`** is `authored`, always: you build the form from parts
+  (see "Authoring a form"), around the real components in
+  `context.components.parts`. The old `enclosure` template was removed and is
+  refused. A box around electronics is simply a form whose body part is a box.
 - **`requirements[].pri`** is `Must`, `Should` or `Off`, exactly. Ids come from
   the catalogue: `interval`, `life`, `resp`, `cov`, `acc`, `drop`, `touch`,
   `chgt`, `chgh`, `ip`. Anything else is a custom requirement in
@@ -196,7 +195,16 @@ product's own, keep the shape:
 {
   "engine": "formgraph@2",
   "product": {"id": "desk-lamp", "name": "Desk Lamp", "brief": "<the person's own words>"},
-  "form": {"template": "enclosure", "params": {"W": 120, "H": 40, "t": 2.2}, "features": ["bosses", "ribs"]},
+  "form": {
+    "template": "authored",
+    "params": {"body_w": 60, "body_d": 40, "body_h": 20},
+    "ranges": {"body_w": [30, 120], "body_d": [20, 80], "body_h": [10, 50]},
+    "authored": {"parts": [{
+      "id": "body", "name": "Body", "kind": "generated", "body": true,
+      "uses": ["body_w", "body_d", "body_h"],
+      "code": "return [g.box(p.body_w, p.body_h, p.body_d).at(0, p.body_h / 2, 0)];"
+    }]}
+  },
   "process": {"id": "fdm", "material": "petg", "finish": "asp", "fixings": "ins25", "qty": 20},
   "power": {"board": "mcu", "battery": "none"},
   "functions": ["e_usbc", "e_btn", "e_ldrv"],
@@ -257,16 +265,14 @@ what you read, or list it to the person as missing.
 
 ## Authoring a form
 
-The `enclosure` template draws one thing: a soft-shell box with a lid. Use it
-when the product is a box around electronics. When the shape is something else
-(a lamp with a base, an arm and a shade, a clock, a stand), author the form:
-write its geometry as code and the page draws it.
+Every form is authored: you write its geometry as code and the page draws it,
+whether the product is a lamp with a base, an arm and a shade, a clock, a stand,
+or a box around electronics (a box is one `g.box`).
 
 Set `form.template` to `authored`. Put every dimension in `form.params`
 (numbers; a name is letters, digits and underscores, starting with a letter, 32
 characters at most), the range of the ones a person may move in `form.ranges`,
-and the parts in `form.authored.parts`. Leave out `features`: it belongs to the
-enclosure. Each part has:
+and the parts in `form.authored.parts`. Each part has:
 
 - `id` (a lowercase slug), `name`, and `kind`, which says how far to trust it
   as geometry:
@@ -344,7 +350,8 @@ because it can hide a word: write plain text. Budgets: at most
   saved, and look again. It returns the status, each part's size and error, the
   pictures, and what changed. A part that failed is named and the rest is still
   drawn: fix that part. If it answers `unavailable` (no browser on this machine,
-  with how to install one) or `not_authored` (the form is the enclosure), or you
+  with how to install one) or `not_authored` (a studio from before the enclosure template was removed),
+  or you
   have no way to look, say that you wrote the form and could not look at it. You
   have not seen it, and "it looks right" would be invented. A client with a shell
   can also run `python scripts/imagine_look.py`.

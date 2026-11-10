@@ -360,10 +360,11 @@ async def test_an_authored_form_reaches_the_service_and_is_named_not_assessed(
     verification: Any,
 ) -> None:
     state = ready_state()
-    plain = verification(_revision_of(state))
     authored_form(state)
     revision = _revision_of(state)
     assert revision["form"]["kind"] == "authored"
+    # The same revision without the form block is what an older sender would send.
+    plain = verification({k: v for k, v in revision.items() if k != "form"})
     report = verification(revision)
     note = [f for f in report.findings if f.check_id == "form.enclosure_checks"]
     assert len(note) == 1 and note[0].status == "not_assessed" and note[0].severity == "advisory"
@@ -388,10 +389,9 @@ async def test_a_form_of_only_bought_parts_is_called_out_and_still_moves_nothing
     assert report.verdict == plain.verdict == "ready_for_handover"
 
 
-async def test_an_enclosure_studio_sends_no_form_and_the_service_adds_no_form_finding(
-    verification: Any,
-) -> None:
-    revision = _revision_of(ready_state())
+async def test_a_revision_with_no_form_block_still_gets_no_form_finding(verification: Any) -> None:
+    """An older sender, or a legacy studio, sends no form: the service adds no form finding."""
+    revision = {k: v for k, v in _revision_of(ready_state()).items() if k != "form"}
     assert "form" not in revision
     assert not [f for f in verification(revision).findings if f.check_id.startswith("form.")]
 

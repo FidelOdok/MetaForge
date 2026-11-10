@@ -591,7 +591,15 @@ class ImagineService:
             if head is None:
                 _count("engine", "refused")
                 raise ImagineError("No studio yet: an agent puts a config first.", 404)
-            checked = engine_page.validate_config(head.state.get("config") or {})
+            config = head.state.get("config") or {}
+            if ((config.get("form") or {}).get("template")) != "authored":
+                _count("engine", "refused")
+                raise ImagineError(
+                    "This studio uses the enclosure template, which was removed: every form "
+                    "is authored now. Write a new studio with form.template authored.",
+                    410,
+                )
+            checked = engine_page.validate_config(config)
             _count("engine", "ok")
             return engine_page.render_engine(checked.compiled)
 

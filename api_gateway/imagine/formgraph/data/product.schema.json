@@ -163,7 +163,6 @@
       "properties": {
         "template": {
           "enum": [
-            "enclosure",
             "authored"
           ]
         },

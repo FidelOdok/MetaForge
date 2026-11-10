@@ -252,8 +252,8 @@ def test_a_part_that_fails_is_reported_by_name_and_the_exit_code_says_so(
 def test_a_page_that_is_not_an_authored_form_is_reported_not_waited_on_forever(
     server: str, tmp_path: Path
 ) -> None:
-    url = _put(server, "5a1f1b5e-5d2a-4c4e-9a59-0d3f8f4a2c99", base_config()["form"])
-    result = look.look(url, tmp_path, timeout_s=6)
+    # Any page that is not an authored studio: the look reports it and does not wait forever.
+    result = look.look(f"{server}/openapi.json", tmp_path, timeout_s=6)
     assert result["before"]["status"] == "none"
     assert look.exit_code(result) == 3
 

@@ -220,17 +220,28 @@ def test_the_config_validator_refuses_a_banned_token_in_an_authored_part() -> No
     assert any("arm" in e and "fetch" in e for e in errors), errors
 
 
-def test_the_enclosure_template_still_works_and_the_unknown_template_lists_both() -> None:
+def test_the_authored_example_passes_and_an_unknown_template_is_told_to_use_authored() -> None:
     errors, _ = build_page.validate(base_config(), _catalogue())
     assert not [e for e in errors if e.startswith("form")], errors
     bad = copy.deepcopy(base_config())
     bad["form"]["template"] = "nope"
     errors, _ = build_page.validate(bad, _catalogue())
-    assert any("enclosure" in e and "authored" in e for e in errors), errors
+    assert any("form.template" in e and "authored" in e for e in errors), errors
 
 
-def test_an_enclosure_with_an_authored_block_is_refused() -> None:
+def test_the_enclosure_template_is_refused_and_the_message_says_it_was_removed() -> None:
     cfg = copy.deepcopy(base_config())
-    cfg["form"]["authored"] = lamp_form()["authored"]
+    cfg["form"] = {"template": "enclosure", "params": {"W": 80}}
     errors, _ = build_page.validate(cfg, _catalogue())
-    assert any("authored" in e for e in errors), errors
+    hit = [e for e in errors if "enclosure" in e]
+    assert hit and "removed" in hit[0] and "authored" in hit[0], errors
+
+
+@pytest.mark.parametrize("form", [{}, {"template": None}, {"template": "box"}, {"template": 3}])
+def test_a_form_with_no_template_or_an_unknown_one_must_choose_authored(
+    form: dict[str, object],
+) -> None:
+    cfg = copy.deepcopy(base_config())
+    cfg["form"] = form
+    errors, _ = build_page.validate(cfg, _catalogue())
+    assert any("form.template" in e and "authored" in e for e in errors), errors

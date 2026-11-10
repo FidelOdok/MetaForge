@@ -69,7 +69,8 @@ def by_id(items: list[dict[str, Any]], id_: str) -> dict[str, Any]:
 
 def test_the_output_is_exactly_the_contracts_top_level_fields_and_json_safe() -> None:
     rev = build()
-    assert set(rev) == CONTRACT_KEYS
+    # Every studio is authored now, so every revision carries the form block.
+    assert set(rev) == CONTRACT_KEYS | {"form"}
     assert json.loads(json.dumps(rev)) == rev
 
 
@@ -425,13 +426,11 @@ def test_the_code_never_leaves_the_studio() -> None:
     assert "cylinder" not in sent and "return" not in sent and "code" not in sent
 
 
-def test_an_enclosure_form_sends_no_form_so_an_older_service_still_accepts_it() -> None:
-    """The contract refuses unknown fields: the block must be absent unless it is needed."""
-    assert "form" not in build()
+def test_a_config_with_a_form_that_is_not_authored_sends_no_form_block() -> None:
+    """A stored studio from before the enclosure template was removed has no authored form."""
     cfg = config()
     cfg["form"] = {"template": "enclosure"}
     assert "form" not in build(cfg)
-    assert set(build()) == CONTRACT_KEYS
 
 
 def test_an_authored_revision_adds_exactly_one_key() -> None:

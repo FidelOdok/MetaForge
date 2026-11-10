@@ -110,10 +110,18 @@ def validate(cfg, cat, ctx=None):
 
     # form
     f = cfg['form']
-    tpl = None if f.get('template') == authored.TEMPLATE_ID else cat['templates'].get(f.get('template'))
-    if f.get('template') == authored.TEMPLATE_ID:
+    template = f.get('template') if isinstance(f, dict) else None
+    if template == 'enclosure':
+        E.append(
+            'form.template "enclosure" was removed: every form is authored now. Set '
+            'form.template to "authored" and build the form from parts, around the real '
+            'components in context.components.parts.'
+        )
+    elif template != authored.TEMPLATE_ID:
+        E.append(f'form.template must be "authored" (got {template!r}).')
+    else:
         # MetaForge: an agent-authored form (spec 23.6). Its parts carry code, so it is
-        # checked by its own module rather than against a template's parameter list.
+        # checked by its own module.
         form_errors, form_warnings = authored.check(f)
         E.extend(form_errors)
         W.extend(form_warnings)
@@ -125,34 +133,6 @@ def validate(cfg, cat, ctx=None):
         link_errors, link_warnings = authored.check_links(f, by_id)
         E.extend(link_errors)
         W.extend(link_warnings)
-    elif not tpl:
-        choices = ", ".join([*cat["templates"], authored.TEMPLATE_ID])
-        E.append(f'form.template "{f.get("template")}" is not available. Choose from: {choices}.')
-    else:
-        if 'authored' in f:
-            E.append('form.authored is only used with form.template "authored".')
-        feats = f.get('features', tpl['features'])
-        for ft in feats:
-            if ft not in tpl['features']:
-                E.append(f'form.features: unknown feature "{ft}".')
-        for k, v in (f.get('params') or {}).items():
-            spec = tpl['params'].get(k)
-            if not spec:
-                E.append(f'form.params: unknown parameter "{k}". Known: {", ".join(tpl["params"])}.')
-                continue
-            if not isinstance(v, (int, float)):
-                E.append(f'form.params.{k} must be a number.')
-                continue
-            if spec.get('feature') and spec['feature'] not in feats:
-                W.append(f'form.params.{k} is set but the "{spec["feature"]}" feature is not enabled; it will be ignored.')
-            lo, hi = spec['range']
-            if v < lo or v > hi:
-                W.append(f'form.params.{k} = {v} is outside the usual range {lo} to {hi}; the slider range will be widened.')
-        for k, r in (f.get('ranges') or {}).items():
-            if k not in tpl['params']:
-                E.append(f'form.ranges: unknown parameter "{k}".')
-            elif not (isinstance(r, list) and len(r) == 2 and r[0] < r[1]):
-                E.append(f'form.ranges.{k} must be [min, max] with min below max.')
 
     # process
     pr = cfg['process']
