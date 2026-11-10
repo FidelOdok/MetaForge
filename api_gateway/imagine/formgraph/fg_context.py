@@ -575,6 +575,33 @@ def validate_geometry(where, p, E, W):
         E.append(f'{where}: geometry.place must be floor, ceil, wall or any.')
     if g.get('model') and not URL.match(str(g['model'])):
         E.append(f'{where}: geometry.model must be a link to the maker\'s 3D model.')
+    validate_fidelity(where, g, E, W)
+
+
+FIDELITY = ('exact', 'generated', 'approximation', 'placeholder')
+
+
+def validate_fidelity(where, g, E, W):
+    """How the part's 3D was made. A part is never shown as better than it is.
+
+    exact: the maker's or a library's own model was read. generated: built from the
+    datasheet's package drawing. approximation: the closest shape we can justify.
+    placeholder: nothing usable was found, so a generic block stands in. Every word
+    needs its basis in words; the last two are listed as warnings so nobody mistakes
+    them for a real part.
+    """
+    word = g.get('fidelity')
+    if word is None:
+        W.append(f'{where}: geometry does not say how its 3D was made; set geometry.fidelity to one of {", ".join(FIDELITY)}.')
+        return
+    if word not in FIDELITY:
+        E.append(f'{where}: geometry.fidelity must be one of {", ".join(FIDELITY)}.')
+        return
+    basis = g.get('fidelity_basis')
+    if not (isinstance(basis, str) and basis.strip()):
+        E.append(f'{where}: geometry.fidelity_basis must say, in words, what the {word} 3D rests on.')
+    if word in ('approximation', 'placeholder'):
+        W.append(f'{where}: its 3D is a{"n" if word == "approximation" else ""} {word}, not the real part ({str(basis or "no basis given").strip()}).')
 
 
 # ---------------------------------------------------------------- compile
