@@ -418,3 +418,13 @@ def test_the_imagine_command_tells_the_agent_to_read_the_measurements() -> None:
 
     text = " ".join(str(w) for w in WORKFLOWS.values() if "imagine" in str(w).lower())
     assert "measured" in text and "tip" in text
+
+
+def test_the_skill_lists_the_interface_buses_and_the_rule_for_power_interfaces() -> None:
+    from api_gateway.imagine.formgraph import fg_context
+
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    missing = [b for b in sorted(fg_context.BUSES) if f"`{b}`" not in text]
+    assert not missing, f"the skill does not name these buses: {missing}"
+    assert "also `v`, the voltage window" in text
+    assert "leave that interface out and say you did not read it" in text

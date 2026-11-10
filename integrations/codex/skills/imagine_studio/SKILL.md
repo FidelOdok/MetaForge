@@ -182,6 +182,9 @@ costs a write, so use exactly these:
 | `requirements[].values` | numbers must be positive (`drop` is metres, not 0); `cov` is `good`, `fair` or `poor`; `ip` is `none`, `ip54` or `ip67`; `chgt` takes no value |
 | `geometry.fidelity` | `exact`, `generated`, `approximation`, `placeholder` (each needs `fidelity_basis`, in words) |
 | `geometry.size_basis` | `read`, `typical`, `generic` |
+| `interfaces[].bus` | `analog`, `can`, `gpio`, `i2c`, `pwm`, `pwr`, `rf`, `spi`, `uart`, `usb` |
+| `interfaces[].dir` | `in`, `out`, `bi` |
+| `interfaces[]` of bus `pwr` | also `v`, the voltage window `[min, max]` in volts, read from the datasheet; with no `v` the write is refused, so leave that interface out and say you did not read it |
 | `level` | `simple` or `eng` |
 | `view.tryit` | `device` or `mission` |
 
