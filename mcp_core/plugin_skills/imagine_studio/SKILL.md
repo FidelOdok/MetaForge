@@ -82,6 +82,12 @@ write:
   - `use_scenarios` goes in `scenarios` (top level, each with `requires`);
   - `parts` goes in `context.components.parts`;
   - `options` goes in `context.options.decisions`.
+- **`color`** is optional and is one of `graphite` (the default), `arctic`,
+  `signal` (orange) or `cobalt`, nothing else. A hex value such as `#0047AB` is
+  refused. It paints the product's own parts in the drawing and the look
+  picture; a bought component keeps its dark colour. Set it only when the brief
+  names a colour, pick the nearest of the four, and say which you picked. The
+  person can change it with the swatches.
 - **`product` is required**, with `id` a lowercase slug (letters, digits and
   hyphens, 2 to 49 characters, for example `desk-lamp`) and `name` of 60
   characters or fewer.
@@ -91,11 +97,6 @@ write:
   form"). Use `enclosure` when the product is a box around electronics. When
   its shape is something else, such as a lamp, author the form: do not stand
   a box in for it.
-- **`color`** is optional and is one of `graphite` (the default), `arctic`,
-  `signal` (orange) or `cobalt`, nothing else. It paints the product's own parts
-  in the drawing and the look picture; a bought component keeps its dark colour.
-  Set it only when the brief names a colour, pick the nearest of the four, and
-  say which you picked. The person can change it with the swatches.
 - **`requirements[].pri`** is `Must`, `Should` or `Off`, exactly. Ids come from
   the catalogue: `interval`, `life`, `resp`, `cov`, `acc`, `drop`, `touch`,
   `chgt`, `chgh`, `ip`. Anything else is a custom requirement in
