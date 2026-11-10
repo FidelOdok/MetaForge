@@ -105,7 +105,7 @@ const PL={vext:'Power in',vbus:'USB 5 V',usb:'USB data',bat:'Battery',v33:'3.3 V
 const EB_PRE=JSON.parse(JSON.stringify(EB));
 if(CFG.catalogue&&CFG.catalogue.blocks)Object.entries(CFG.catalogue.blocks).forEach(([k,b])=>{if(/^e_/.test(k))EB[k]=Object.assign({},EB[k]||{},b);});
 Object.entries(EB).forEach(([k,b])=>{TYPES[k]={cat:'elec',dom:'e',title:b.name,
-  inputs:b.ins.map(([kk,t])=>({k:kk,label:PL[kk]||kk,t})),outputs:(b.outs||[]).map(([kk,t])=>({k:kk,label:PL[kk]||kk,t})),compute:()=>({})};});
+  inputs:(b.ins||[]).map(([kk,t])=>({k:kk,label:PL[kk]||kk,t})),outputs:(b.outs||[]).map(([kk,t])=>({k:kk,label:PL[kk]||kk,t})),compute:()=>({})};});
 const domOf=n=>(TYPES[n.type]&&TYPES[n.type].dom)||'f';
 const inTab=n=>((S.gtab||'form')==='elec')===(domOf(n)==='e');
 const nodeHidden=id=>{const n=G.nodes.find(m=>m.id===id);return !n||!inTab(n);};
@@ -1241,7 +1241,7 @@ function elecAnalyse(s){
   // connections
   ns.forEach(n=>{const b=EB[n.type];if(n.type==='e_batt'||n.type==='e_usbc')return;
     if(sp[n.id].missing){ck({id:'miss'+n.id,label:sp[n.id].missing,val:'not selected',lim:'choose one under What goes inside',st:n.type==='e_board'?'fail':'warn'});return;}
-    b.ins.forEach(([k,t])=>{if(n.type==='e_chg'&&(k==='vbus'||(k==='bat'&&!hasBat)))return;if(n.type==='e_board'&&k==='usb')return;
+    (b.ins||[]).forEach(([k,t])=>{if(n.type==='e_chg'&&(k==='vbus'||(k==='bat'&&!hasBat)))return;if(n.type==='e_board'&&k==='usb')return;
       if(!lin(n.id,k))ck({id:'nc'+n.id+k,label:`${nm(n)}: ${PL[k]||k}`,val:'not wired',lim:t==='pwr'?'needs a power source':'needs a link',st:'fail',fix:{act:'wire',label:'Wire it'},lines:[lineOf(n)]});});});
   // supply voltages
   G.links.forEach(l=>{const a=byId(l.from[0]),b=byId(l.to[0]);if(!a||!b||!sp[a.id]||!sp[b.id]||outType(a,l.from[1])!=='pwr')return;
@@ -1333,7 +1333,7 @@ function elecAnalyse(s){
   // BOM lines for electronics and harness
   const bomLines=[];
   ns.forEach(n=>{if(n.type==='e_board'||n.type==='e_batt')return;if(n.type==='e_usbc'&&pos.board&&!boardOf().custom)return;const b=EB[n.type];
-    const parts=[];b.ins.forEach(([k,t])=>{if(t!=='pwr')parts.push(t.toUpperCase());});if(b.addr)parts.push('address '+b.addr);if(b.peak)parts.push(fmt(b.peak/1000,1)+' A peak');if(b.mhz)parts.push(b.mhz+' MHz');if(b.open)parts.push('needs an opening');
+    const parts=[];(b.ins||[]).forEach(([k,t])=>{if(t!=='pwr')parts.push(t.toUpperCase());});if(b.addr)parts.push('address '+b.addr);if(b.peak)parts.push(fmt(b.peak/1000,1)+' A peak');if(b.mhz)parts.push(b.mhz+' MHz');if(b.open)parts.push('needs an opening');
     bomLines.push({id:'e_'+n.id,item:b.name,spec:parts.join(', ')||'electronics',unit:b.cost,mass:b.mass,ph:'Manufacturer part number',mpn:b.standIn?null:(b.mpn||null),mfr:b.mfr,src:b.src||'Formgraph catalogue, typical values',standIn:!!b.standIn});});
   if(cables.length){const conn={},wire={};
     cables.forEach(c=>{const k=c.fam+'|'+c.cond+'|'+(c.mate||'');conn[k]=(conn[k]||0)+2;const w=c.rf?'coax':c.awg;wire[w]=(wire[w]||0)+c.len*(c.rf?1:c.cond)/1000;});
@@ -2370,7 +2370,7 @@ if(CTX)(CTX.parts||[]).forEach(p=>CPART[p.id]=p);
 S.picks=S.picks||{};S.userScen=S.userScen||[];S.edits=S.edits||[];
 let DFA=null,OBS=null,DBH=null,SHARED_SCN=null,SHARED_EDITS=null,MODEL_OVR={};const DBQ=[];
 function rebuildType(t){const b=EB[t];if(!b)return;
-  TYPES[t]={cat:'elec',dom:'e',title:b.name,inputs:b.ins.map(([k,tt])=>({k,label:PL[k]||k,t:tt})),outputs:(b.outs||[]).map(([k,tt])=>({k,label:PL[k]||k,t:tt})),compute:()=>({})};
+  TYPES[t]={cat:'elec',dom:'e',title:b.name,inputs:(b.ins||[]).map(([k,tt])=>({k,label:PL[k]||k,t:tt})),outputs:(b.outs||[]).map(([k,tt])=>({k,label:PL[k]||k,t:tt})),compute:()=>({})};
   const has=(id,k,dir)=>{const n=G.nodes.find(m=>m.id===id);if(!n||!TYPES[n.type])return true;return(dir==='in'?TYPES[n.type].inputs:TYPES[n.type].outputs).some(x=>x.k===k);};
   G.links=G.links.filter(l=>has(l.from[0],l.from[1],'out')&&has(l.to[0],l.to[1],'in'));}
 function applyPick(d,id,quiet){

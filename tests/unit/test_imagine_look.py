@@ -823,3 +823,52 @@ def test_the_page_shows_the_measurements_in_the_form_card(server: str) -> None:
     for label in ("Overhang (upper bound)", "Tips over at"):
         assert label in text, text
     assert "% of the surface" in text and "°" in text
+
+
+def test_a_function_the_catalogue_lacks_does_not_crash_the_page(server: str) -> None:
+    """The skill's route for a function outside the catalogue: a block with just a name."""
+    from playwright.sync_api import sync_playwright
+
+    from api_gateway.imagine.look import CHROMIUM_ARGS
+
+    cfg = copy.deepcopy(full_config())
+    cfg["form"] = authored_lamp_form()
+    cfg.setdefault("catalogue", {}).setdefault("blocks", {})["e_ble"] = {
+        "name": "Bluetooth LE radio"
+    }
+    cfg["functions"] = [*cfg["functions"], "e_ble"]
+    cfg["context"]["components"]["parts"].append(
+        {
+            "id": "ble-a",
+            "role": "fn:e_ble",
+            "name": "Bluetooth LE module",
+            "mpn": "BLE-01",
+            "manufacturer": "Example Parts",
+            "datasheet": "https://example.com/ble.pdf",
+            "retrieved": "2026-11-10",
+            "interfaces": [{"id": "io", "bus": "uart", "dir": "bi"}],
+            "geometry": {"envelope": [15, 15, 2.5], "source": "datasheet drawing"},
+        }
+    )
+    res = httpx.put(
+        f"{server}/v1/twin/projects/{PROJECT}/imagine/studio", json={"config": cfg}, timeout=30
+    )
+    assert res.status_code == 200, res.text
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=list(CHROMIUM_ARGS))
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 1000})
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(
+                f"{server}/v1/twin/projects/{PROJECT}/imagine/engine", wait_until="domcontentloaded"
+            )
+            _wait_ready(page)
+            state = page.evaluate(
+                "() => window.FG_AUTHORED ? {status: window.FG_AUTHORED.status,"
+                " measured: !!window.FG_AUTHORED.measured} : null"
+            )
+        finally:
+            browser.close()
+    assert not errors, errors
+    assert state == {"status": "ready", "measured": True}, state
