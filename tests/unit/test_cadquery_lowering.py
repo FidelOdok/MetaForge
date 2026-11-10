@@ -562,15 +562,80 @@ class TestRevolve:
         )
         result = await lower_design_ir_cadquery(mcp, doc)
         assert result.terminal_entity_id == "rev1"
-        assert "v_rev1_axis_start = v_sk1.plane.origin" in result.script_text
-        assert "v_rev1_axis_end = v_rev1_axis_start + v_sk1.plane.xDir" in result.script_text
-        assert (
-            "v_rev1 = v_sk1.revolve(360.0, "
-            "(v_rev1_axis_start.x, v_rev1_axis_start.y, v_rev1_axis_start.z), "
-            "(v_rev1_axis_end.x, v_rev1_axis_end.y, v_rev1_axis_end.z))" in result.script_text
-        )
+        # CadQuery's revolve takes its axis in the workplane's LOCAL coordinates.
+        assert "v_rev1 = v_sk1.revolve(360.0, (0, 0, 0), (1, 0, 0))" in result.script_text
         # First feature of the body -- no union with a nonexistent prior solid.
         assert "union" not in result.script_text
+
+    async def test_revolve_axis_is_local_on_every_plane(self):
+        """The axis was passed as world points (plane.origin + plane.yDir). CadQuery
+        reads them as local, so on XZ the world yDir (0, 0, 1) became the plane's
+        normal: the profile turned about an axis through itself and the solid had
+        zero volume. A local axis is the same on every plane."""
+        for plane in ("XY", "XZ", "YZ"):
+            doc = DesignIR(
+                entities=[
+                    {"id": "body1", "op": "create_body"},
+                    {
+                        "id": "sk1",
+                        "op": "sketch",
+                        "body_ref": "body1",
+                        "plane": plane,
+                        "elements": [
+                            {
+                                "type": "rectangle",
+                                "origin": (0.0, 0.0),
+                                "width": 60.0,
+                                "height": 18.0,
+                            }
+                        ],
+                    },
+                    {
+                        "id": "rev1",
+                        "op": "revolve",
+                        "body_ref": "body1",
+                        "sketch_ref": "sk1",
+                        "axis": "V",
+                        "angle": 360.0,
+                    },
+                ]
+            )
+            result = await lower_design_ir_cadquery(_bridge(), doc)
+            assert "v_sk1.revolve(360.0, (0, 0, 0), (0, 1, 0))" in result.script_text, plane
+            assert "plane.yDir" not in result.script_text
+            assert "plane.origin" not in result.script_text
+
+    async def test_a_revolve_on_xz_has_the_disc_volume(self):
+        """Run the lowered script on the real kernel (in the CadQuery image)."""
+        cq = pytest.importorskip("cadquery")
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XZ",
+                    "elements": [
+                        {"type": "rectangle", "origin": (0.0, 0.0), "width": 60.0, "height": 18.0}
+                    ],
+                },
+                {
+                    "id": "rev1",
+                    "op": "revolve",
+                    "body_ref": "body1",
+                    "sketch_ref": "sk1",
+                    "axis": "V",
+                    "angle": 360.0,
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(_bridge(), doc)
+        scope: dict[str, object] = {"cq": cq}
+        exec(result.script_text, scope)  # noqa: S102 - our own lowered script
+        solid = scope["v_rev1"].val()  # type: ignore[attr-defined]
+        assert solid.isValid()
+        assert solid.Volume() == pytest.approx(3.141592653589793 * 60.0**2 * 18.0, rel=1e-6)
 
     async def test_revolve_vertical_axis_reversed(self):
         mcp = _bridge()
@@ -597,8 +662,7 @@ class TestRevolve:
             ]
         )
         result = await lower_design_ir_cadquery(mcp, doc)
-        assert "v_rev1_axis_end = v_rev1_axis_start - v_sk1.plane.yDir" in result.script_text
-        assert "v_sk1.revolve(180.0," in result.script_text
+        assert "v_sk1.revolve(180.0, (0, 0, 0), (0, -1, 0))" in result.script_text
 
     async def test_revolve_as_a_subsequent_feature_unions_onto_the_body(self):
         mcp = _bridge()
