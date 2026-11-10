@@ -114,7 +114,8 @@ def check(form: Any) -> tuple[list[str], list[str]]:
 
         code = part.get("code")
         if not isinstance(code, str) or not code.strip():
-            errors.append(f"{label}: code is required, the body of build(p, g).")
+            if not isinstance(part.get("component_ref"), str):
+                errors.append(f"{label}: code is required, the body of build(p, g).")
         else:
             size = len(code.encode("utf-8"))
             total_bytes += size
@@ -170,3 +171,70 @@ def check(form: Any) -> tuple[list[str], list[str]]:
             "electronics inside the form; checks that need an enclosure will report not_assessed."
         )
     return errors, warnings
+
+
+def check_links(form: Any, context_parts: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Errors and warnings for the links from form parts to real parts.
+
+    A ``component`` part names its real part with ``component_ref`` (a part id in
+    ``context.components.parts``) and says where it sits with ``at``. Without a link it is
+    a stand-in, and the warning says so.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    block = form.get("authored") if isinstance(form, dict) else None
+    parts = block.get("parts") if isinstance(block, dict) else None
+    if not isinstance(parts, list):
+        return errors, warnings
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        label = f'part "{part.get("id", "")}"'
+        ref = part.get("component_ref")
+        if ref is None:
+            if part.get("kind") == "component":
+                warnings.append(
+                    f"{label}: a component with no component_ref is a stand-in, not a real "
+                    "part; set component_ref to a part in context.components.parts."
+                )
+            continue
+        if part.get("kind") != "component":
+            errors.append(f"{label}: component_ref is only for a part whose kind is component.")
+            continue
+        if not isinstance(ref, str) or ref not in context_parts:
+            known = ", ".join(sorted(context_parts)) or "none yet"
+            errors.append(
+                f'{label}: component_ref "{ref}" is not a part in context.components.parts '
+                f"(known: {known})."
+            )
+            continue
+        for key in ("at", "rot"):
+            if key in part and not _is_vector(part[key]):
+                errors.append(f"{label}: {key} must be [x, y, z], three numbers.")
+        real = context_parts[ref]
+        env = ((real or {}).get("geometry") or {}).get("envelope") if isinstance(real, dict) else None
+        sized = (
+            isinstance(env, list)
+            and len(env) == 3
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 for x in env)
+        )
+        has_code = isinstance(part.get("code"), str) and part["code"].strip()
+        if not sized and not has_code:
+            errors.append(
+                f'{label}: its part "{ref}" has no size, so it cannot be drawn; give the part '
+                "a size or write the code yourself."
+            )
+        elif sized and not has_code:
+            errors.append(
+                f"{label}: its code is derived when the studio is written; write it through "
+                "twin.imagine_put_studio."
+            )
+    return errors, warnings
+
+
+def _is_vector(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in value)
+    )

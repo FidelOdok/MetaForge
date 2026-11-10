@@ -32,7 +32,13 @@ from uuid import UUID, uuid4
 import structlog
 from pydantic import ValidationError
 
-from api_gateway.imagine import engine_page, part_model, resolve_part, verification_client
+from api_gateway.imagine import (
+    component_link,
+    engine_page,
+    part_model,
+    resolve_part,
+    verification_client,
+)
 from api_gateway.imagine.schemas import (
     COLLECTION_KINDS,
     KIND_COLLECTIONS,
@@ -526,6 +532,9 @@ class ImagineService:
                 config,
                 kicad_config=resolve_part.kicad_config_from_env(),
             )
+            # A component in the form that names its real part is drawn from that part.
+            config, linked = component_link.expand_component_parts(config)
+            drawn = [*drawn, *linked]
             try:
                 checked = engine_page.validate_config(config)
             except engine_page.ConfigError as exc:

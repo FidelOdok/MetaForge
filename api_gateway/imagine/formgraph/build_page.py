@@ -117,6 +117,14 @@ def validate(cfg, cat, ctx=None):
         form_errors, form_warnings = authored.check(f)
         E.extend(form_errors)
         W.extend(form_warnings)
+        by_id = {
+            str(p['id']): p
+            for p in (((ctx or {}).get('components') or {}).get('parts') or [])
+            if isinstance(p, dict) and p.get('id')
+        }
+        link_errors, link_warnings = authored.check_links(f, by_id)
+        E.extend(link_errors)
+        W.extend(link_warnings)
     elif not tpl:
         choices = ", ".join([*cat["templates"], authored.TEMPLATE_ID])
         E.append(f'form.template "{f.get("template")}" is not available. Choose from: {choices}.')

@@ -643,3 +643,30 @@ def test_a_colour_the_agent_writes_into_the_config_is_what_the_look_picture_show
         f"{server}/v1/twin/projects/{PROJECT}/imagine/studio", json={"config": bad}, timeout=30
     )
     assert res.status_code >= 400 and "graphite" in res.text, res.text[:200]
+
+
+def test_a_linked_component_is_drawn_in_the_page_at_the_size_of_its_real_part(
+    server: str, tmp_path: Path
+) -> None:
+    cfg = copy.deepcopy(full_config())  # its USB-C part, usbc-a, is 9.0 x 7.5 x 3.2 mm
+    cfg["form"] = authored_lamp_form()
+    cfg["form"]["authored"]["parts"].append(
+        {
+            "id": "usb",
+            "name": "USB-C socket",
+            "kind": "component",
+            "component_ref": "usbc-a",
+            "at": [0, 0, 0],
+        }
+    )
+    res = httpx.put(
+        f"{server}/v1/twin/projects/{PROJECT}/imagine/studio", json={"config": cfg}, timeout=30
+    )
+    assert res.status_code == 200, res.text
+    assert any("usb" in w and "drawn from context part" in w for w in res.json()["warnings"])
+    result = look.look(f"{server}/v1/twin/projects/{PROJECT}/imagine/engine", tmp_path, sets={})
+    parts = {p["id"]: p for p in result["before"]["parts"]}
+    assert parts["usb"]["error"] is None
+    # The page reports width, depth, height: the part's own length, width and height.
+    for got, want in zip(parts["usb"]["size"], [9.0, 7.5, 3.2], strict=True):
+        assert got == pytest.approx(want, abs=0.01), parts["usb"]["size"]

@@ -272,10 +272,18 @@ enclosure. Each part has:
   as geometry:
   - `generated`: geometry you wrote for this product (a shade, an arm, a base);
   - `primitive`: a simple solid you declare as a stand in;
-  - `component`: a stand in for a bought part, drawn from its envelope. It is a
-    box, not the part's real mesh.
+  - `component`: a bought part, drawn from its envelope. It is a box, not the
+    part's real mesh. Link it to its part (see `component_ref` below); one with
+    no link is a stand in and the write warns about it.
   The page draws the three differently, so a scene made of stand ins does not
   read as a finished design.
+- `component_ref`, `at` and `rot`, for a `component` only: `component_ref` is the
+  `id` of its part in `context.components.parts`, `at` is where its box sits as
+  `[x, y, z]` in millimetres (Y up, the box is centred there), and `rot` is an
+  optional `[x, y, z]` rotation in degrees. Leave `code` out: the studio writes
+  it from the part's size, so the shape and the sourced part cannot drift apart,
+  and writes it again from the part each time you write the studio. A part that
+  has its own `code` keeps it. A `component_ref` that names no part is refused.
 - `code`: the body of `build(p, g)`. `p` holds the parameters, read only (`p.arm_len`);
   `g` builds shapes. Return a list of shapes, for example
   `return [g.box(10, 5, 5).at(0, 2.5, 0)];`

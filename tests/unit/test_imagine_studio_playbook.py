@@ -359,3 +359,15 @@ def test_the_skills_route_for_a_function_outside_the_catalogue_passes_the_checke
     assert check(block=True, part=True) == []
     assert check(block=False, part=False), "an unknown function id must still be refused"
     assert check(block=False, part=True), "a part claiming an unknown function must be refused"
+
+
+def test_the_skill_tells_the_agent_to_link_a_component_to_its_part_and_leave_the_code_out() -> None:
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    for phrase in (
+        "`component_ref`",
+        "context.components.parts",
+        "Leave `code` out",
+        "writes it again from the part each time",
+        "one with no link is a stand in",
+    ):
+        assert phrase in text, phrase
