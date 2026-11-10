@@ -230,3 +230,13 @@ def test_the_imagine_command_tells_the_agent_to_look_after_each_write_of_an_auth
     command = prompt_body("imagine")
     assert "`twin.imagine_look`" in command
     assert "authored" in command and "could not look" in command
+
+
+def test_the_skill_lists_every_colour_the_checker_accepts() -> None:
+    import json
+
+    catalogue = REPO / "api_gateway" / "imagine" / "formgraph" / "data" / "catalogue.json"
+    colours = json.loads(catalogue.read_text(encoding="utf-8"))["colors"]
+    text = PLAYBOOK.read_text(encoding="utf-8")
+    missing = [c for c in colours if f"`{c}`" not in text]
+    assert not missing, f"the skill does not name these colours: {missing}"

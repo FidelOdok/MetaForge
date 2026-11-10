@@ -594,3 +594,52 @@ def test_the_colour_swatches_recolour_an_authored_form(server: str) -> None:
     assert white > graphite + 40, (graphite, white)
     assert white > orange > graphite, (graphite, orange, white)
     assert abs(back - graphite) < 6, (graphite, back)
+
+
+def _mean_rgb(png_path: str | Path) -> tuple[float, float, float]:
+    from PIL import Image
+
+    img = Image.open(png_path).convert("RGB")
+    w, h = img.size
+    px = list(img.crop((w // 4, h // 5, 3 * w // 4, 4 * h // 5)).getdata())
+    bg = max(set(px), key=px.count)
+    body = [p for p in px if sum(abs(a - b) for a, b in zip(p, bg, strict=True)) > 30]
+    assert len(body) > 500, "the model did not draw"
+    n = len(body)
+    return (
+        sum(p[0] for p in body) / n,
+        sum(p[1] for p in body) / n,
+        sum(p[2] for p in body) / n,
+    )
+
+
+def test_a_colour_the_agent_writes_into_the_config_is_what_the_look_picture_shows(
+    server: str, tmp_path: Path
+) -> None:
+    def shot(colour: str | None) -> tuple[float, float, float]:
+        cfg = copy.deepcopy(base_config())
+        cfg["form"] = authored_lamp_form()
+        if colour:
+            cfg["color"] = colour
+        res = httpx.put(
+            f"{server}/v1/twin/projects/{PROJECT}/imagine/studio", json={"config": cfg}, timeout=30
+        )
+        assert res.status_code == 200, res.text
+        url = f"{server}/v1/twin/projects/{PROJECT}/imagine/engine"
+        out = tmp_path / (colour or "default")
+        out.mkdir()
+        result = look.look(url, out, sets={})
+        return _mean_rgb(result["screenshots"][0])
+
+    default, cobalt, signal = shot(None), shot("cobalt"), shot("signal")
+    assert cobalt[2] > cobalt[0] + 25, ("cobalt should read blue", cobalt)
+    assert signal[0] > signal[2] + 25, ("signal should read orange", signal)
+    assert default[0] < 140 and default[2] < 140, ("the default is graphite", default)
+    # A colour the checker does not know is refused with the list, not drawn grey.
+    bad = copy.deepcopy(base_config())
+    bad["form"] = authored_lamp_form()
+    bad["color"] = "red"
+    res = httpx.put(
+        f"{server}/v1/twin/projects/{PROJECT}/imagine/studio", json={"config": bad}, timeout=30
+    )
+    assert res.status_code >= 400 and "graphite" in res.text, res.text[:200]
