@@ -548,3 +548,49 @@ def test_the_form_summary_is_a_card_with_tiles_and_the_not_assessed_list_is_its_
             assert after == {"na": True, "form": False}, after
         finally:
             browser.close()
+
+
+def _model_brightness(page: Any) -> float:
+    """Mean brightness of the pixels in the model view that are not the page background."""
+    import io
+
+    from PIL import Image
+
+    png = page.locator("#graphPane canvas, #viewPane canvas").first.screenshot()
+    img = Image.open(io.BytesIO(png)).convert("L")
+    w, h = img.size
+    box = img.crop((w // 4, h // 5, 3 * w // 4, 4 * h // 5))
+    data = list(box.getdata())
+    bg = max(set(data), key=data.count)  # the commonest value is the empty backdrop
+    body = [v for v in data if abs(v - bg) > 6]
+    assert len(body) > 500, "the model did not draw"
+    return sum(body) / len(body)
+
+
+def test_the_colour_swatches_recolour_an_authored_form(server: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from api_gateway.imagine.look import CHROMIUM_ARGS
+
+    url = _put(server, PROJECT, authored_lamp_form())
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=list(CHROMIUM_ARGS))
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 950})
+            page.goto(url, wait_until="domcontentloaded")
+            _wait_ready(page)
+            graphite = _model_brightness(page)
+            page.locator('#cmf button[data-c="arctic"]').click()
+            page.wait_for_timeout(1200)
+            white = _model_brightness(page)
+            page.locator('#cmf button[data-c="signal"]').click()
+            page.wait_for_timeout(1200)
+            orange = _model_brightness(page)
+            page.locator('#cmf button[data-c="graphite"]').click()
+            page.wait_for_timeout(1200)
+            back = _model_brightness(page)
+        finally:
+            browser.close()
+    assert white > graphite + 40, (graphite, white)
+    assert white > orange > graphite, (graphite, orange, white)
+    assert abs(back - graphite) < 6, (graphite, back)

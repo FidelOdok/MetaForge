@@ -813,10 +813,33 @@
     }
 
     var seq = 0, timer = null, materials = {}, litMaterials = {};
-    function litMaterial(kind) {
-      var st = KIND_STYLE[kind] || KIND_STYLE.generated;
-      return litMaterials[kind] || (litMaterials[kind] = new THREE.MeshStandardMaterial({ color: st.color, roughness: 0.6, metalness: 0.05, emissive: 0x2f6fff, emissiveIntensity: 0.55 }));
+    // Colours are given as sRGB hex. three.js (r128) lights in linear space, so a hex passed
+    // straight in comes out washed out; convert it the way the engine does for its own body.
+    function paint(hex) {
+      if (!THREE.Color) return hex;
+      var c = new THREE.Color(hex);
+      if (typeof c.convertSRGBToLinear === 'function') c.convertSRGBToLinear();
+      return c;
     }
+    // The product's own parts take the colour and finish chosen with the swatches; a bought
+    // component keeps its own dark colour so it still reads as not made from that material.
+    function look(kind) {
+      var cmf = env.cmf ? env.cmf() : null, st = KIND_STYLE[kind] || KIND_STYLE.generated;
+      if (!cmf || kind === 'component') return { color: st.color, rough: 0.6, metal: 0.05, cc: 0 };
+      return { color: cmf.hex, rough: cmf.rough, metal: cmf.metal, cc: cmf.cc || 0 };
+    }
+    function make(kind, extra) {
+      var l = look(kind);
+      var o = { color: paint(l.color), roughness: l.rough, metalness: l.metal };
+      if (l.cc) o.clearcoat = l.cc;
+      Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+      return new THREE.MeshStandardMaterial(o);
+    }
+    function litMaterial(kind) {
+      return litMaterials[kind] || (litMaterials[kind] = make(kind, { emissive: 0x2f6fff, emissiveIntensity: 0.55 }));
+    }
+    // The swatches or the finish changed: rebuild the materials and put them on the meshes.
+    function recolour() { materials = {}; litMaterials = {}; applySelection(); }
     // The selected part glows in the 3D view; everything else keeps its kind's colour.
     function applySelection() {
       group.children.forEach(function (mesh) {
@@ -829,10 +852,7 @@
       if (graphApi) graphApi.refresh();
       applySelection();
     }
-    function material(kind) {
-      var s = KIND_STYLE[kind] || KIND_STYLE.generated;
-      return materials[kind] || (materials[kind] = new THREE.MeshStandardMaterial({ color: s.color, roughness: 0.6, metalness: 0.05 }));
-    }
+    function material(kind) { return materials[kind] || (materials[kind] = make(kind)); }
     function clear() {
       while (group.children.length) { var m = group.children.pop(); if (m.geometry) m.geometry.dispose(); }
     }
@@ -1074,7 +1094,7 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam };
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour };
   }
 
   return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };

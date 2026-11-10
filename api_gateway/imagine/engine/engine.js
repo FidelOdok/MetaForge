@@ -579,7 +579,7 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
@@ -623,6 +623,7 @@ function styleMaterial(){
   const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];
   matBody.color.set(c.hex).convertSRGBToLinear();matBody.metalness=P.metal?0.9:0;matBody.roughness=P.metal?Math.max(.22,fin.rough):fin.rough;
   matBody.clearcoat=fin.cc||0;matBody.needsUpdate=true;
+  if(typeof AUTHORED_MOUNT!=='undefined'&&AUTHORED_MOUNT&&AUTHORED_MOUNT.recolour)AUTHORED_MOUNT.recolour(); /* an authored form's parts follow the same colour and finish */
 }
 let framedFor=null,camMoved=false;
 const FIT_DIR=new THREE.Vector3(0.55,0.5,0.75).normalize();
