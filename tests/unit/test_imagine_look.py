@@ -534,7 +534,9 @@ def test_the_form_summary_is_a_card_with_tiles_and_the_not_assessed_list_is_its_
             assert facts["form"]["border"] != "0px" and facts["form"]["tiles"] == 5, facts
             assert facts["na"]["title"] == "Not assessed", facts
             assert not facts["na"]["open"] and not facts["na"]["bodyShown"], facts
-            assert facts["order"][:2] == ["authBlk", "authNa"], facts
+            # The form card, then the components card (this studio has functions with no
+            # part), then the list of what is not assessed.
+            assert facts["order"][:3] == ["authBlk", "authComp", "authNa"], facts
             # Both cards open and close like the engine's own.
             page.locator("#authNa > .acc-h").click()
             page.locator("#authBlk > .acc-h").click()
@@ -670,3 +672,76 @@ def test_a_linked_component_is_drawn_in_the_page_at_the_size_of_its_real_part(
     # The page reports width, depth, height: the part's own length, width and height.
     for got, want in zip(parts["usb"]["size"], [9.0, 7.5, 3.2], strict=True):
         assert got == pytest.approx(want, abs=0.01), parts["usb"]["size"]
+
+
+_COMPONENT_FACTS = """() => {
+  const card = document.querySelector('#authComp');
+  const rows = Array.from(document.querySelectorAll('#authComp li.rule'));
+  const text = (e) => (e ? e.textContent.replace(/\\s+/g, ' ').trim() : '');
+  return {
+    exists: !!card,
+    open: !!card && card.classList.contains('open'),
+    title: text(card && card.querySelector('.acc-t')),
+    summary: text(card && card.querySelector('.acc-s')),
+    rows: rows.length,
+    usb: text(rows.find((r) => r.textContent.includes('USB-C receptacle'))),
+    led: text(rows.find((r) => r.textContent.includes('RGB LED'))),
+    none: text(rows.find((r) => r.textContent.includes('no part'))),
+    order: Array.from(document.querySelectorAll('#dfm > section')).slice(0, 3).map((e) => e.id),
+  };
+}"""
+
+
+def test_the_components_card_lists_each_real_part_its_readiness_and_the_functions_with_none(
+    server: str,
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from api_gateway.imagine.look import CHROMIUM_ARGS
+
+    cfg = copy.deepcopy(full_config())  # six parts: usbc-a, th-a, th-b, lte-a, btn-a, led-a
+    cfg["form"] = authored_lamp_form()
+    cfg["form"]["authored"]["parts"].append(
+        {
+            "id": "usb",
+            "name": "USB-C socket",
+            "kind": "component",
+            "component_ref": "usbc-a",
+            "at": [0, 0, 0],
+        }
+    )
+    cfg["functions"] = [*cfg["functions"], "e_imu"]  # no part is chosen for it
+    res = httpx.put(
+        f"{server}/v1/twin/projects/{PROJECT}/imagine/studio", json={"config": cfg}, timeout=30
+    )
+    assert res.status_code == 200, res.text
+    parts = cfg["context"]["components"]["parts"]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=list(CHROMIUM_ARGS))
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 1100})
+            page.goto(
+                f"{server}/v1/twin/projects/{PROJECT}/imagine/engine", wait_until="domcontentloaded"
+            )
+            _wait_ready(page)
+            facts = page.evaluate(_COMPONENT_FACTS)
+            page.locator("#authComp > .acc-h").click()  # collapse it
+            page.wait_for_timeout(200)
+            collapsed = page.evaluate(_COMPONENT_FACTS)
+            # A slider moves, the form redraws and the card is built again: it stays collapsed.
+            page.evaluate(
+                """() => { const el = document.querySelector('#quick input[data-param]');
+                           el.value = String((+el.min + +el.max) / 2);
+                           el.dispatchEvent(new Event('input', {bubbles: true})); }"""
+            )
+            page.wait_for_timeout(1800)
+            after = page.evaluate(_COMPONENT_FACTS)
+        finally:
+            browser.close()
+    assert facts["exists"] and facts["open"] and facts["title"] == "Components", facts
+    assert facts["rows"] == len(parts) + 1, facts  # every part, and the function with none
+    assert f"{len(parts)} parts" in facts["summary"] and "1 drawn in the form" in facts["summary"]
+    assert "Drawn in the form: yes" in facts["usb"] and "Drawn in the form: no" in facts["led"]
+    assert "e_imu" in facts["none"] and "no part" in facts["none"], facts["none"]
+    assert facts["order"][:3] == ["authBlk", "authComp", "authNa"], facts["order"]
+    assert collapsed["open"] is False and after["exists"] and after["open"] is False, after

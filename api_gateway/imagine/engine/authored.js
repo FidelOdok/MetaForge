@@ -630,6 +630,84 @@
     return form.section;
   }
 
+  // The real parts behind the form: each one, how far it is trusted, and the functions that
+  // have no part at all. A guess (a typical or generic size, or a placeholder) never counts
+  // as a real size, the same rule the checker and Verification apply.
+  function describeComponents(cfg) {
+    var ctx = (cfg && cfg._context) || {}, all = Array.isArray(ctx.parts) ? ctx.parts : [];
+    var drawn = {}, formParts = (((cfg && cfg.form) || {}).authored || {}).parts || [];
+    formParts.forEach(function (p) { if (p && typeof p.component_ref === 'string') drawn[p.component_ref] = true; });
+    function hasText(v) { return typeof v === 'string' && v.trim() !== ''; }
+    function sized(g) {
+      var e = g && g.envelope;
+      if (!(Array.isArray(e) && e.length === 3 && e.every(function (x) { return typeof x === 'number' && x > 0; }))) return false;
+      if (g.fidelity === 'placeholder') return false;
+      return g.size_basis === undefined || g.size_basis === null || g.size_basis === 'read';
+    }
+    var rows = [], roles = {};
+    all.forEach(function (p) {
+      if (!p || p.excluded) return;
+      var g = p.geometry || {};
+      var steps = {
+        defined: hasText(p.mpn) && hasText(p.manufacturer),
+        size: sized(g),
+        sourced: hasText(p.datasheet) && hasText(p.retrieved),
+        drawn: !!drawn[p.id],
+      };
+      var done = [steps.defined, steps.size, steps.sourced, steps.drawn].filter(Boolean).length;
+      if (typeof p.role === 'string') roles[p.role] = true;
+      rows.push({
+        id: String(p.id), name: String(p.name || p.id), role: String(p.role || ''), mpn: hasText(p.mpn) ? p.mpn : '',
+        maker: hasText(p.manufacturer) ? p.manufacturer : '', steps: steps, done: done, state: done === 4 ? 'pass' : 'warn',
+        fidelity: g.fidelity || '', sizeBasis: g.size_basis || '', basis: g.fidelity_basis || '',
+        interfaces: Array.isArray(p.interfaces) ? p.interfaces.length : 0,
+      });
+    });
+    var missing = ((cfg && cfg.functions) || []).filter(function (f) { return !roles['fn:' + f]; });
+    var real = rows.filter(function (r) { return r.steps.size; }).length, linked = rows.filter(function (r) { return r.steps.drawn; }).length;
+    return {
+      rows: rows, missing: missing,
+      headline: rows.length + ' part' + (rows.length === 1 ? '' : 's') + ' · ' + real + ' with a real size · ' + linked + ' drawn in the form',
+    };
+  }
+
+  function renderComponents(doc, host, d) {
+    if (!host) return null;
+    var old = typeof host.querySelector === 'function' ? host.querySelector('#authComp') : null, wasOpen = true;
+    if (old) { wasOpen = !old.classList || old.classList.contains('open'); if (old.parentNode) old.parentNode.removeChild(old); }
+    if (!d.rows.length && !d.missing.length) return null;
+    var open = wasOpen;
+    var card = makeCard(doc, 'authComp', 'Components', d.headline, d.rows.some(function (r) { return r.state === 'warn'; }) || d.missing.length ? 's-warn' : 's-pass', open);
+    var ul = doc.createElement('ul'); ul.className = 'rlist';
+    function yes(b) { return b ? 'yes' : 'no'; }
+    d.rows.forEach(function (r) {
+      var li = doc.createElement('li'); li.className = 'rule st-' + r.state;
+      var chip = doc.createElement('span'); chip.className = 'chip'; chip.textContent = r.done + ' of 4';
+      var wrap = doc.createElement('div'); wrap.className = 'rt';
+      var l1 = doc.createElement('div'); l1.className = 'rl';
+      l1.textContent = r.name + (r.role ? ' · ' + r.role.replace(/^fn:/, '') : '') + (r.mpn ? ' · ' + r.mpn : '') + (r.maker ? ' (' + r.maker + ')' : '');
+      var l2 = doc.createElement('div'); l2.className = 'rv';
+      l2.textContent = 'Defined: ' + yes(r.steps.defined) + ' · Real size: ' + yes(r.steps.size) + (r.fidelity ? ' (' + r.fidelity + (r.sizeBasis ? ', ' + r.sizeBasis : '') + ')' : '') +
+        ' · Sourced: ' + yes(r.steps.sourced) + ' · Drawn in the form: ' + yes(r.steps.drawn);
+      wrap.appendChild(l1); wrap.appendChild(l2);
+      if (r.basis) { var l3 = doc.createElement('div'); l3.className = 'rv'; l3.textContent = r.basis; wrap.appendChild(l3); }
+      li.appendChild(chip); li.appendChild(wrap); ul.appendChild(li);
+    });
+    d.missing.forEach(function (f) {
+      var li = doc.createElement('li'); li.className = 'rule st-warn';
+      var chip = doc.createElement('span'); chip.className = 'chip'; chip.textContent = 'no part';
+      var wrap = doc.createElement('div'); wrap.className = 'rt';
+      var l1 = doc.createElement('div'); l1.className = 'rl'; l1.textContent = f;
+      var l2 = doc.createElement('div'); l2.className = 'rv'; l2.textContent = 'This function has no real part chosen, so the handover stays open on it.';
+      wrap.appendChild(l1); wrap.appendChild(l2); li.appendChild(chip); li.appendChild(wrap); ul.appendChild(li);
+    });
+    card.body.appendChild(ul);
+    var na = typeof host.querySelector === 'function' ? host.querySelector('#authNa') : null;
+    if (na && typeof host.insertBefore === 'function') host.insertBefore(card.section, na);
+    else if (typeof host.insertBefore === 'function') host.insertBefore(card.section, host.firstChild); else host.appendChild(card.section);
+    return card.section;
+  }
+
   // A slider's grid. A range input snaps its value to min + n * step, so a step that does not
   // divide the declared value moves it on first touch, and a person (or an agent) asking for
   // 400 gets 400.8. Pick the largest step, at most 1, that has enough positions, lands exactly
@@ -868,6 +946,7 @@
       GLOBAL.FG_AUTHORED = summary;
       var desc = describe(summary, env.material ? env.material() : null);
       if (env.summaryHost) renderSummary(doc, env.summaryHost, desc);
+      if (env.summaryHost) renderComponents(doc, env.summaryHost, describeComponents(env.cfg));
       if (env.onSummary) env.onSummary(desc);
       try { GLOBAL.dispatchEvent(new GLOBAL.CustomEvent('fg-authored', { detail: summary })); } catch (e) { /* no events here */ }
     }
@@ -1097,5 +1176,5 @@
     return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });

@@ -70,6 +70,9 @@ CHECKS = [
     "selecting_a_part_highlights_its_node_wires_and_mesh",
     "graph_pans_zooms_drags_and_fits",
     "mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change",
+    "components_describe_each_part_its_readiness_and_the_functions_without_a_part",
+    "components_a_guess_never_counts_as_a_real_size",
+    "components_card_renders_rows_and_missing_functions_and_is_absent_when_empty",
 ]
 
 

@@ -622,5 +622,72 @@ await check('mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change',
   return near(b.bbox.max[0] - b.bbox.min[0], 16) && draws.length >= 2 ? true : 'after change ' + JSON.stringify(b.bbox) + ' draws ' + draws.length;
 });
 
+
+// -- the components panel: each real part, how far it is trusted, and what has no part -----
+
+const COMP_CFG = () => ({
+  functions: ['e_th', 'e_press'],
+  form: { authored: { parts: [
+    { id: 'th', kind: 'component', component_ref: 'th-a' },
+    { id: 'body', kind: 'generated' },
+  ] } },
+  _context: { parts: [
+    { id: 'th-a', role: 'fn:e_th', name: 'Temp sensor', mpn: 'T-1', manufacturer: 'Acme',
+      datasheet: 'https://x.test/t.pdf', retrieved: '2026-11-10', interfaces: [{ id: 'io' }],
+      geometry: { envelope: [3, 3, 1], fidelity: 'exact', size_basis: 'read', fidelity_basis: 'from the model' } },
+    { id: 'led-a', role: 'fn:e_led', name: 'Status LED', mpn: 'L-1', manufacturer: 'Acme',
+      geometry: { envelope: [2, 2, 1], fidelity: 'approximation', size_basis: 'typical', fidelity_basis: 'typical class size' } },
+    { id: 'gone', role: 'other', name: 'Excluded part', excluded: true },
+  ] },
+});
+
+await check('components_describe_each_part_its_readiness_and_the_functions_without_a_part', async () => {
+  const d = FG.describeComponents(COMP_CFG());
+  if (d.rows.length !== 2) return 'rows ' + d.rows.length + ' (an excluded part must be left out)';
+  const th = d.rows.find((r) => r.id === 'th-a'), led = d.rows.find((r) => r.id === 'led-a');
+  const all = (r) => [r.steps.defined, r.steps.size, r.steps.sourced, r.steps.drawn].join();
+  if (all(th) !== 'true,true,true,true' || th.state !== 'pass') return 'th ' + all(th) + ' ' + th.state;
+  if (all(led) !== 'true,false,false,false' || led.state !== 'warn') return 'led ' + all(led) + ' ' + led.state;
+  if (JSON.stringify(d.missing) !== '["e_press"]') return 'missing ' + JSON.stringify(d.missing);
+  if (th.fidelity !== 'exact' || led.sizeBasis !== 'typical') return 'labels ' + th.fidelity + ' ' + led.sizeBasis;
+  const h = d.headline;
+  return h.includes('2 parts') && h.includes('1 with a real size') && h.includes('1 drawn in the form') ? true : h;
+});
+
+await check('components_a_guess_never_counts_as_a_real_size', async () => {
+  const size = (geometry) => FG.describeComponents({ _context: { parts: [{ id: 'p', role: 'other', geometry }] } }).rows[0].steps.size;
+  const got = [
+    size({ envelope: [1, 1, 1] }),
+    size({ envelope: [1, 1, 1], size_basis: 'read' }),
+    size({ envelope: [1, 1, 1], size_basis: 'typical' }),
+    size({ envelope: [1, 1, 1], size_basis: 'generic' }),
+    size({ envelope: [1, 1, 1], fidelity: 'placeholder' }),
+    size({}),
+  ].join();
+  return got === 'true,true,false,false,false,false' ? true : got;
+});
+
+await check('components_card_renders_rows_and_missing_functions_and_is_absent_when_empty', async () => {
+  const el = () => {
+    const e = { children: [], style: {}, className: '', textContent: '', id: '',
+      appendChild(c) { e.children.push(c); return c; }, insertBefore(c) { e.children.unshift(c); return c; },
+      setAttribute() {}, addEventListener() {}, get firstChild() { return e.children[0] || null; } };
+    return e;
+  };
+  const doc = { createElement: el, createTextNode: (t) => ({ textContent: t }) };
+  const host = el();
+  const card = FG.renderComponents(doc, host, FG.describeComponents(COMP_CFG()));
+  const all = [];
+  (function walk(n) { if (!n) return; if (n.textContent) all.push(n.textContent); (n.children || []).forEach(walk); })(host);
+  const text = all.join(' | ');
+  if (!card || card.id !== 'authComp') return 'card ' + (card && card.id);
+  for (const want of ['Components', 'Temp sensor', 'T-1', 'Status LED', 'e_press', 'no part', 'typical']) {
+    if (!text.includes(want)) return 'missing "' + want + '" in ' + text.slice(0, 300);
+  }
+  const empty = el();
+  const none = FG.renderComponents(doc, empty, FG.describeComponents({}));
+  return none === null && empty.children.length === 0 ? true : 'an empty config drew a card';
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

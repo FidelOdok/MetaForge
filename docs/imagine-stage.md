@@ -634,6 +634,14 @@ At the top of the right pane, a "Form drawn" card shows the measured envelope, v
 triangles and mass as tiles, and a collapsed "Not assessed" card lists the checks the engine cannot
 make for a coded form. Both open and close like the engine's own cards.
 
+Below the form card, a "Components" card lists every real part in `context.components.parts` (an
+excluded part is left out) with four yes or no readiness steps: **Defined** (an order code and a maker),
+**Real size** (an envelope that is not a typical or generic guess and not a placeholder), **Sourced** (a
+datasheet link and a date) and **Drawn in the form** (a form part names it with `component_ref`). Each row
+shows its fidelity, size basis and the basis in words. A function with no part chosen is listed as "no
+part", because the handover stays open on it. The card keeps its open or closed state when a slider
+redraws the form.
+
 The right pane keeps what carries the person's controls and records, and labels what the engine
 cannot say about this form:
 
