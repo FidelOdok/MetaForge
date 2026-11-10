@@ -82,6 +82,19 @@ function imagine(view: 'studio' | 'sketch' = 'studio') {
   return { onView, onAskAssistant };
 }
 
+describe('studio frame follows the revision', () => {
+  it('reloads the frame when the agent saves a new revision', async () => {
+    getStudio.mockReset().mockResolvedValue(studio({ revision: 2 }));
+    imagine();
+    const frame = await screen.findByTestId('studio-frame');
+    expect(frame.getAttribute('src')).toContain('rev=2');
+    const before = frame.getAttribute('src');
+    getStudio.mockResolvedValue(studio({ revision: 3 }));
+    await waitFor(() => expect(screen.getByTestId('studio-frame').getAttribute('src')).toContain('rev=3'), { timeout: 15000 });
+    expect(screen.getByTestId('studio-frame').getAttribute('src')).not.toBe(before);
+  }, 20000);
+});
+
 beforeEach(() => {
   getStudio.mockReset();
   getHandover.mockReset().mockResolvedValue(CHECKLIST);
@@ -106,7 +119,7 @@ describe('Imagine', () => {
     getStudio.mockResolvedValue(studio());
     imagine();
     const frame = await screen.findByTestId('studio-frame');
-    expect(frame).toHaveAttribute('src', '/api/v1/twin/projects/proj-imagine/imagine/engine?theme=light');
+    expect(frame).toHaveAttribute('src', '/api/v1/twin/projects/proj-imagine/imagine/engine?rev=2&theme=light');
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
   });
 

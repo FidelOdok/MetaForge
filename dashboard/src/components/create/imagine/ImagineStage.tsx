@@ -30,7 +30,9 @@ interface ImagineStageProps {
 export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, onStartDeveloping }: ImagineStageProps) {
   const studio = useStudio(projectId);
   const data = studio.data;
-  const src = data ? engineHref(data) : null;
+  // The revision is in the address so the page reloads when the agent saves a new one.
+  const base = data ? engineHref(data) : null;
+  const src = base ? `${base}${base.includes('?') ? '&' : '?'}rev=${data?.revision ?? 0}` : null;
   const hasStudio = !!data && data.status !== 'none' && !!src;
 
   return (
