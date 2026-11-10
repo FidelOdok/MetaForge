@@ -525,3 +525,66 @@ async def test_openrouter_is_asked_to_report_cost() -> None:
     )
     await openai_invoke(spec, REQ, client=client)
     assert (seen.get("extra_body") or {}).get("usage") == {"include": True}
+
+
+# -- a key you bring yourself (BYOK) ----------------------------------------------------
+#
+# With a provider key brought to OpenRouter, ``usage.cost`` is only OpenRouter's own fee
+# (0 on the free tier) and the real spend sits in ``cost_details.upstream_inference_cost``.
+# Recording the 0 would make a 60,000 token call look free and let every spend cap through.
+
+
+def _byok_client(fee: float, upstream: float, *, byok: bool = True) -> Any:
+    usage = SimpleNamespace(
+        prompt_tokens=1000,
+        completion_tokens=40,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+        cost=fee,
+        is_byok=byok,
+        cost_details={"upstream_inference_cost": upstream},
+    )
+    msg = SimpleNamespace(content="hello", tool_calls=None)
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+        model="anthropic/claude-sonnet-5.5",
+        usage=usage,
+    )
+
+    async def create(**_: Any) -> Any:
+        return resp
+
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+
+async def _record_openrouter(store: UsageStore, client: Any, run: str) -> dict[str, Any] | None:
+    spec = ProviderSpec(
+        name="openrouter",
+        model="anthropic/claude-sonnet-5.5",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    pipe = ProviderPipeline(RoleModelSlots({"generator": [spec]}))
+
+    async def invoke(s: ProviderSpec, r: Any) -> Any:
+        return await openai_invoke(s, r, client=client)
+
+    with usage_scope(run_id=run, role="chat"):
+        await pipe.complete("generator", REQ, invoke)
+    return store.run_totals(run)
+
+
+async def test_a_byok_call_costs_the_upstream_spend_plus_the_routers_fee(
+    store: UsageStore,
+) -> None:
+    totals = await _record_openrouter(store, _byok_client(0.0, 0.0123), "run-byok")
+    assert totals is not None and totals["cost_usd"] == pytest.approx(0.0123)
+    both = await _record_openrouter(store, _byok_client(0.001, 0.0123), "run-byok-fee")
+    assert both is not None and both["cost_usd"] == pytest.approx(0.0133)
+
+
+async def test_a_call_that_is_not_byok_does_not_add_the_upstream_cost_twice(
+    store: UsageStore,
+) -> None:
+    totals = await _record_openrouter(
+        store, _byok_client(0.0123, 0.0123, byok=False), "run-not-byok"
+    )
+    assert totals is not None and totals["cost_usd"] == pytest.approx(0.0123)

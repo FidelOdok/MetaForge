@@ -129,17 +129,32 @@ def _usage_from(
                 out["cache_creation_input_tokens"] = written
         # A router that bills per call (OpenRouter) reports the cost it charged. That is exact,
         # so it is kept beside the tokens; anything that is not a usable amount is dropped.
-        cost = getattr(u, "cost", None)
-        if (
-            isinstance(cost, (int, float))
-            and not isinstance(cost, bool)
-            and math.isfinite(cost)
-            and cost >= 0
-        ):
-            out["cost_usd"] = float(cost)
+        # With a key brought to the router (BYOK) ``cost`` is only the router's own fee, often
+        # 0, and the real spend is the upstream provider's cost, reported separately. Both are
+        # spent, so both count; otherwise a 60,000 token call would read as free.
+        cost = _usable_cost(getattr(u, "cost", None))
+        if cost is not None:
+            if getattr(u, "is_byok", None) is True:
+                details = getattr(u, "cost_details", None)
+                upstream = _usable_cost(
+                    details.get("upstream_inference_cost")
+                    if isinstance(details, dict)
+                    else getattr(details, "upstream_inference_cost", None)
+                )
+                cost += upstream or 0.0
+            out["cost_usd"] = cost
         return out
     except (TypeError, ValueError):
         return None
+
+
+def _usable_cost(value: Any) -> float | None:
+    """A cost amount from a provider's usage block, or ``None`` when it is not a usable one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
 
 
 def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], int, float]:
