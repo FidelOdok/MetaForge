@@ -466,3 +466,103 @@ def test_an_enclosure_that_carries_a_stray_authored_block_sends_no_form() -> Non
     cfg = authored_config()
     cfg["form"]["template"] = "enclosure"
     assert "form" not in build(cfg)
+
+
+# -- what a look measured ----------------------------------------------------------------
+
+RECORD: dict[str, Any] = {
+    "revision": 3,
+    "at": "2026-11-10T13:00:00+00:00",
+    "method": "headless look run by the gateway",
+    "measured": {
+        "total_area": 600.0,
+        "overhang_area": 60.0,
+        "overhang_share": 0.1,
+        "com": [0.0, 5.0, 0.0],
+        "support": {"points": 4, "margin_mm": 22.0, "tip_angle_deg": 31.0},
+        "overlaps": [{"a": "button", "b": "usbc", "volume_mm3": 12.5}],
+        "notes": ["Measured from the drawn triangles, with uniform density."],
+    },
+}
+
+
+def build_measured(record: dict[str, Any] | None, revision: int = 3) -> dict[str, Any]:
+    return build_concept_revision(
+        "73491e61-8421-425c-a751-aad37a21269c",
+        revision,
+        authored_config(),
+        _empty_collections(),
+        has_mesh=False,
+        measured=record,
+    )
+
+
+def test_without_a_record_the_form_carries_no_measurements() -> None:
+    assert "measured" not in build_measured(None)["form"]
+
+
+def test_a_recorded_measurement_is_sent_in_the_contracts_words() -> None:
+    m = build_measured(copy.deepcopy(RECORD))["form"]["measured"]
+    assert m == {
+        "overhang_share": 0.1,
+        "has_flat_base": True,
+        "tip_angle_deg": 31.0,
+        "margin_mm": 22.0,
+        "overlaps": [{"a": "button", "b": "usbc", "volume_mm3": 12.5}],
+    }
+
+
+def test_a_form_with_no_flat_base_is_sent_as_such() -> None:
+    record = copy.deepcopy(RECORD)
+    record["measured"]["support"] = None
+    m = build_measured(record)["form"]["measured"]
+    assert m["has_flat_base"] is False
+    assert m["tip_angle_deg"] is None and m["margin_mm"] is None
+
+
+def test_a_measurement_of_another_revision_is_not_sent() -> None:
+    assert "measured" not in build_measured(copy.deepcopy(RECORD), revision=4)["form"]
+
+
+def test_overlaps_follow_the_ids_the_part_list_was_given() -> None:
+    cfg = authored_config()
+    for p in cfg["form"]["authored"]["parts"]:
+        if p["id"] == "usbc":
+            p["id"] = "usb-c"
+    record = copy.deepcopy(RECORD)
+    record["measured"]["overlaps"] = [{"a": "button", "b": "usb-c", "volume_mm3": 1.0}]
+    rev = build_concept_revision(
+        "73491e61-8421-425c-a751-aad37a21269c",
+        3,
+        cfg,
+        _empty_collections(),
+        has_mesh=False,
+        measured=record,
+    )
+    ids = {p["id"] for p in rev["form"]["parts"]}
+    for o in rev["form"]["measured"]["overlaps"]:
+        assert o["a"] in ids and o["b"] in ids
+
+
+def test_an_overlap_naming_a_part_the_form_does_not_send_is_left_out() -> None:
+    record = copy.deepcopy(RECORD)
+    record["measured"]["overlaps"] = [
+        {"a": "button", "b": "ghost", "volume_mm3": 1.0},
+        {"a": "button", "b": "usbc", "volume_mm3": 2.0},
+    ]
+    m = build_measured(record)["form"]["measured"]
+    assert m["overlaps"] == [{"a": "button", "b": "usbc", "volume_mm3": 2.0}]
+
+
+def test_a_form_that_is_not_authored_never_carries_measurements() -> None:
+    cfg = config()
+    cfg["form"] = {"template": "enclosure"}
+    rev = build_concept_revision(
+        "73491e61-8421-425c-a751-aad37a21269c",
+        3,
+        cfg,
+        _empty_collections(),
+        has_mesh=False,
+        measured=copy.deepcopy(RECORD),
+    )
+    assert "form" not in rev

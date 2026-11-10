@@ -436,9 +436,15 @@ geometry code never leaves the studio. A studio from before the enclosure templa
 removed sends no `form`, because the service refuses fields it does not know. If an
 authored block has no usable parts, none is sent.
 
-For an authored form the service adds two advisory findings and no blocking one:
+For an authored form the service adds advisory findings and no blocking one:
 `form.enclosure_checks` (`not_assessed`: the checks that need an enclosure were not
-run) and `form.confidence_mix` (every part is a bought component). Advisory findings
+run), `form.confidence_mix` (every part is a bought component) and, from what a look
+measured (see "Authored forms"), `form.measured` (`not_assessed` when nobody looked at
+this revision), `form.balance` (the tip angle against a stated 15 degree screening
+threshold, `fail` when it would tip over, `not_assessed` for a form with no flat base)
+and `form.component_overlap` (one `fail` per overlapping pair of components, or one
+`pass`). Overhang is carried and not judged. The measurement rides in the revision's
+`form.measured` only when it was recorded for that revision. Advisory findings
 cannot change the verdict, a gate or the level. The verification service must be a
 build that knows `form`; an older one refuses the request, so the pin MetaForge's CI
 installs has to move with this change.
@@ -723,8 +729,9 @@ is drawn, 2 when a part failed and 3 when the page published no authored form.
 ### What the verification service says
 
 The revision carries the form's parts (see "The form in the revision"), and the
-service adds two advisory findings: `form.enclosure_checks` (`not_assessed`) and
-`form.confidence_mix` (every part is a `component`). Neither can change a
+service adds advisory findings: `form.enclosure_checks` (`not_assessed`),
+`form.confidence_mix` (every part is a `component`), `form.measured` (`not_assessed`
+when nobody looked), `form.balance` and `form.component_overlap`. None can change a
 verdict, a gate or a level.
 
 ### Limits

@@ -74,7 +74,9 @@ _FORM_PART_KINDS = ("generated", "primitive", "component")
 _MAX_FORM_PARTS = 24
 
 
-def _form(config: dict[str, Any]) -> dict[str, Any] | None:
+def _form(
+    config: dict[str, Any], measured: dict[str, Any] | None = None, revision: int | None = None
+) -> dict[str, Any] | None:
     """The authored form as the contract's ``FormFacts``, or ``None`` when there is nothing to say.
 
     Only an authored form is described. An enclosure form, or no form, sends nothing: the
@@ -94,6 +96,7 @@ def _form(config: dict[str, Any]) -> dict[str, Any] | None:
         return None
     ids = _Ids()
     parts: list[dict[str, Any]] = []
+    sent: dict[str, str] = {}  # the id the agent wrote -> the id sent to the service
     body_taken = False
     for item in raw:
         if not isinstance(item, dict) or item.get("kind") not in _FORM_PART_KINDS:
@@ -102,8 +105,49 @@ def _form(config: dict[str, Any]) -> dict[str, Any] | None:
             break
         is_body = item.get("body") is True and not body_taken
         body_taken = body_taken or is_body
-        parts.append({"id": ids.take(item.get("id")), "kind": item["kind"], "body": is_body})
-    return {"kind": "authored", "parts": parts} if parts else None
+        safe = ids.take(item.get("id"))
+        sent.setdefault(str(item.get("id")), safe)
+        parts.append({"id": safe, "kind": item["kind"], "body": is_body})
+    if not parts:
+        return None
+    out: dict[str, Any] = {"kind": "authored", "parts": parts}
+    facts = _measured_facts(measured, revision, sent)
+    if facts is not None:
+        out["measured"] = facts
+    return out
+
+
+def _measured_facts(
+    record: dict[str, Any] | None, revision: int | None, sent: dict[str, str]
+) -> dict[str, Any] | None:
+    """What the gateway's own look recorded for this revision, in the contract's words.
+
+    Nothing is sent for a record of another revision, or one that is not the shape the
+    service records: a stale or odd figure is left out and the service says the form was not
+    measured. An overlap naming a part that was not sent is dropped, because the contract
+    refuses it.
+    """
+    if not isinstance(record, dict) or record.get("revision") != revision:
+        return None
+    m = record.get("measured")
+    if not isinstance(m, dict):
+        return None
+    support = m.get("support")
+    flat = isinstance(support, dict)
+    tip = support.get("tip_angle_deg") if isinstance(support, dict) else None
+    margin = support.get("margin_mm") if isinstance(support, dict) else None
+    overlaps = [
+        {"a": sent[str(o["a"])], "b": sent[str(o["b"])], "volume_mm3": o["volume_mm3"]}
+        for o in (m.get("overlaps") or [])
+        if isinstance(o, dict) and str(o.get("a")) in sent and str(o.get("b")) in sent
+    ]
+    return {
+        "overhang_share": m.get("overhang_share"),
+        "has_flat_base": flat,
+        "tip_angle_deg": tip,
+        "margin_mm": margin,
+        "overlaps": overlaps,
+    }
 
 
 def build_concept_revision(
@@ -113,8 +157,12 @@ def build_concept_revision(
     collections: dict[str, Any],
     *,
     has_mesh: bool,
+    measured: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The studio's facts as a ``ConceptRevision``."""
+    """The studio's facts as a ``ConceptRevision``.
+
+    ``measured`` is the record a look made for this revision, if one did.
+    """
     programme = _programme(config)
 
     ledger_ids = _Ids()
@@ -230,7 +278,7 @@ def build_concept_revision(
         "screening_stored": bool((collections.get("screening") or {}).get("latest")),
         "concept_mesh": bool(has_mesh),
     }
-    form = _form(config)
+    form = _form(config, measured, revision)
     if form is not None:
         out["form"] = form
     return out

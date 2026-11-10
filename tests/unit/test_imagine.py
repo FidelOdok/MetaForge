@@ -1552,3 +1552,46 @@ async def test_roundtrip_the_mcp_tool_returns_the_same_report(
     over_rest = (await _validate(client)).json()
     assert over_mcp["verdict"] == over_rest["verdict"] == "ready_for_handover"
     assert [f["id"] for f in over_mcp["findings"]] == [f["id"] for f in over_rest["findings"]]
+
+
+_TIPS_OVER = {
+    "total_area": 600.0,
+    "overhang_area": 60.0,
+    "overhang_share": 0.1,
+    "com": [6.0, 7.0, 0.0],
+    "support": {"points": 4, "margin_mm": -4.9, "tip_angle_deg": -35.0},
+    "overlaps": [],
+    "notes": [],
+}
+
+
+async def test_roundtrip_an_unmeasured_form_is_told_so_and_a_recorded_look_is_judged(
+    client: httpx.AsyncClient, real_service: ImagineService
+) -> None:
+    await _put(client)
+    before = (await _validate(client)).json()
+    note = _by_check(before, "form.measured")
+    assert len(note) == 1 and note[0]["status"] == "not_assessed"
+    assert note[0]["severity"] == "advisory" and not _by_check(before, "form.balance")
+
+    await real_service.record_measurement(PROJECT, 1, dict(_TIPS_OVER))
+    after = (await _validate(client)).json()
+    balance = _by_check(after, "form.balance")
+    assert len(balance) == 1 and balance[0]["status"] == "fail"
+    assert balance[0]["severity"] == "advisory" and "tip over" in balance[0]["message"]
+    assert not _by_check(after, "form.measured")
+    # Measuring a form moves no verdict and no gate.
+    assert after["verdict"] == before["verdict"]
+    assert {g["gate"]: g["decision"] for g in after["gates"]} == {
+        g["gate"]: g["decision"] for g in before["gates"]
+    }
+
+
+async def test_roundtrip_a_newer_write_goes_back_to_not_measured(
+    client: httpx.AsyncClient, real_service: ImagineService
+) -> None:
+    await _put(client)
+    await real_service.record_measurement(PROJECT, 1, dict(_TIPS_OVER))
+    await _put(client)  # revision 2: the figure was for revision 1
+    report = (await _validate(client)).json()
+    assert _by_check(report, "form.measured") and not _by_check(report, "form.balance")

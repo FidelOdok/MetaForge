@@ -380,3 +380,12 @@ def test_the_skill_says_every_form_is_authored_and_no_longer_offers_the_enclosur
     for stale in ("Use `enclosure` when", "The `enclosure` template draws one thing"):
         assert stale not in text, stale
     assert '"template": "enclosure"' not in text
+
+
+def test_the_skill_names_every_advisory_form_finding_the_service_can_return() -> None:
+    rules = pytest.importorskip("metaforge_verification.profile.rules")
+    text = " ".join(PLAYBOOK.read_text(encoding="utf-8").split())
+    names = [r.check_id for r in rules.RULES if r.check_id.startswith("form.")]
+    assert len(names) >= 5, names
+    missing = [n for n in names if f"`{n}`" not in text]
+    assert not missing, f"the skill does not name: {missing}"

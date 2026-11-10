@@ -1110,6 +1110,7 @@ class ImagineService:
                     config,
                     head.state["collections"],
                     has_mesh=has_mesh,
+                    measured=head.state.get("measured"),
                 ),
                 "supplied": [f.model_dump(mode="json") for f in supplied],
             }

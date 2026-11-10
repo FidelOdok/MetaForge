@@ -337,10 +337,14 @@ because it can hide a word: write plain text. Budgets: at most
   electronics, vents and heat, the manufacturing verdict and cost, assembly,
   product tests and the form's bill of materials. None of those ran on an
   authored form. Never say it passes any of them.
-- `twin.imagine_validate` adds two advisory findings: `form.enclosure_checks`
-  (not assessed; there is nothing for you to fix) and `form.confidence_mix`
-  (every part is a `component`; add geometry that is yours). Advisory findings
-  never change the verdict.
+- `twin.imagine_validate` adds advisory findings: `form.enclosure_checks` (not
+  assessed; there is nothing for you to fix), `form.confidence_mix` (every part is
+  a `component`; add geometry that is yours), `form.measured` (not assessed: no
+  one has looked at this revision, so run `twin.imagine_look` on it), and, once a
+  look has measured it, `form.balance` (the tip angle; a form that would tip over
+  or tips at under 15 degrees fails, advisory) and `form.component_overlap`
+  (components whose boxes overlap; move one). Advisory findings never change the
+  verdict. The measurements are estimates, never a verification.
 - Code that throws, loops or draws nothing shows on the page as "Form partly
   drawn" or "Form not drawn", with the part named. **Look after each write** with
   `twin.imagine_look`: pass `revision` set to the revision your write returned
