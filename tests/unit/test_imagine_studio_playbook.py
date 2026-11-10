@@ -255,3 +255,52 @@ def test_the_skill_lists_every_sector_the_checker_accepts() -> None:
     text = PLAYBOOK.read_text(encoding="utf-8")
     missing = [x for x in sectors if f"`{x}`" not in text]
     assert not missing, f"the skill does not name these sectors: {missing}"
+
+
+def test_the_skill_lists_every_fixed_list_word_the_checker_holds_a_field_to() -> None:
+    import json
+    import re
+
+    root = REPO / "api_gateway" / "imagine" / "formgraph"
+    source = (root / "build_page.py").read_text(encoding="utf-8")
+    catalogue = json.loads((root / "data" / "catalogue.json").read_text(encoding="utf-8"))
+    programme = json.loads((root / "data" / "programme.json").read_text(encoding="utf-8"))
+
+    def words(pattern: str) -> list[str]:
+        match = re.search(pattern, source)
+        assert match, f"the check moved, update this test: {pattern}"
+        return re.findall(r"'([A-Za-z_\-]+)'", match.group(1))
+
+    expected: dict[str, list[str]] = {
+        "environment.sun": words(r"env\.get\('sun', 'none'\) not in \(([^)]*)\)"),
+        "environment.vibration": words(r"env\.get\('vibration', 'fixed'\) not in \(([^)]*)\)"),
+        "programme.markets": words(r"str\(m\)\.upper\(\) not in \(([^)]*)\)"),
+        "programme.segment": words(r"pg\['segment'\] not in \(([^)]*)\)"),
+        "view.tryit": words(r"v\.get\('tryit', 'device'\) not in \(([^)]*)\)"),
+        "programme.phase": [p["id"] for p in programme["phases"]],
+        "simulations": list(catalogue["simulations"]),
+        "level": list(catalogue["levels"]),
+    }
+    status = re.search(r"LEDGER_STATUS = \{([^}]*)\}", source)
+    assert status
+    expected["programme.ledger[].status"] = re.findall(r"'([A-Za-z\-]+)'", status.group(1))
+    for key, options in catalogue["decisions"].items():
+        expected[f"decisions.{key}"] = list(options)
+    for req, spec in catalogue["requirements"].items():
+        for value in spec.values():
+            if isinstance(value, list):
+                expected[f"requirements.{req}"] = list(value)
+    environment_keys = re.search(r"known = \{([^}]*)\}", source)
+    assert environment_keys
+    expected["environment keys"] = re.findall(r"'([A-Za-z_]+)'", environment_keys.group(1))
+
+    text = PLAYBOOK.read_text(encoding="utf-8")
+    assert "### Words the checker holds to a list" in text
+    table = text.split("### Words the checker holds to a list", 1)[1].split("This skeleton", 1)[0]
+    missing = {
+        field: [w for w in options if f"`{w}`" not in table]
+        for field, options in expected.items()
+        if any(f"`{w}`" not in table for w in options)
+    }
+    assert all(len(v) > 0 for v in expected.values()), expected
+    assert not missing, f"the allowed-values table is missing: {missing}"

@@ -126,6 +126,34 @@ write:
   `datasheet`, `retrieved`, `interfaces` and `geometry.envelope` with a
   `source`.
 
+### Words the checker holds to a list
+
+These fields accept only the words below. A refusal names the list, but it still
+costs a write, so use exactly these:
+
+| Field | Accepted |
+|---|---|
+| `environment.sun` | `none`, `partial`, `full` |
+| `environment.vibration` | `fixed`, `handheld`, `vehicle`, `aircraft` |
+| `environment.altitude_m` | a number from -500 to 10000 |
+| `environment.humidity` | `[min, max]` in %RH, for example `[10, 90]` |
+| `environment` keys | `opMin`, `opMax`, `storeMin`, `storeMax`, `humidity`, `condensing`, `sun`, `altitude_m`, `salt`, `chemicals`, `uvHours`, `vibration`, `outdoor`, `ventMembrane` (`opMin` below `opMax`, `storeMin` below `storeMax`) |
+| `programme.phase` | `define`, `concept`, `evt`, `dvt`, `pvt`, `production`, `service` |
+| `programme.markets` | a list of `UK`, `EU`, `US`, `OTHER` |
+| `programme.segment` | `consumer`, `business`, `industrial` |
+| `programme.ledger[].status` | `unreviewed`, `mapped`, `custom`, `unrepresentable`, `out-of-scope` |
+| `simulations` | a list with at least one of `fill`, `drop`, `thermal`, `press` |
+| `decisions.usbbusy` | `finish` or `now` |
+| `decisions.lowbusy` | `finish` or `abort` |
+| `decisions.btnbusy` | `queue` or `ignore` |
+| `decisions.nosignal` | `store` or `forever` |
+| `requirements[].values` | numbers must be positive (`drop` is metres, not 0); `cov` is `good`, `fair` or `poor`; `ip` is `none`, `ip54` or `ip67`; `chgt` takes no value |
+| `level` | `simple` or `eng` |
+| `view.tryit` | `device` or `mission` |
+
+`color`, `programme.sector`, `process`, `power` and `requirements[].pri` have their
+own entries above.
+
 This skeleton passes the checks as written. Replace the values with the
 product's own, keep the shape:
 
