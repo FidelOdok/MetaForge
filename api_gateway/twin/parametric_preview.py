@@ -39,7 +39,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
-from twin_core.design_ir.feature_history import principal_placement
+from twin_core.design_ir.feature_history import PRINCIPAL_PLACEMENT_KEY, principal_placement
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.parametric_preview")
@@ -656,6 +656,12 @@ async def commit_parameters(
                     "component_id",
                     "comparison_tolerance",
                     PINS_KEY,
+                    # A reconstructed sketch has no plane node: its plane is the
+                    # principal placement accepted with the proposal. Dropping it
+                    # here left exact CAD refusing every edited revision.
+                    PRINCIPAL_PLACEMENT_KEY,
+                    "reconstruction_ref",
+                    "pending_features",
                 )
                 if k in meta
             }
