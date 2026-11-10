@@ -646,6 +646,12 @@ fit are not measured. `twin.imagine_look` returns the same block as `measured`, 
 reports in `compare.measured_changed` how the measurements moved. These are V2 screening measurements,
 never a verification.
 
+When `twin.imagine_look` runs in the gateway, it records the measurements of the stored form (never the
+what-if of a `set`) against the revision it measured, on the twin item's state, without making a new
+revision. No route accepts a measurement, so a person's browser cannot send one; a newer write starts
+without it, so a stale figure is never carried forward, and a handed-over studio refuses it. The record
+is kept for the validation step to read.
+
 Below the form card, a "Components" card lists every real part in `context.components.parts` (an
 excluded part is left out) with four yes or no readiness steps: **Defined** (an order code and a maker),
 **Real size** (an envelope that is not a typical or generic guess and not a placeholder), **Sourced** (a

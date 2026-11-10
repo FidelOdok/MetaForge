@@ -129,6 +129,68 @@ def engine_url(project_id: str) -> str:
     return path
 
 
+_MEASURED_KEYS = (
+    "total_area",
+    "overhang_area",
+    "overhang_share",
+    "com",
+    "support",
+    "overlaps",
+    "notes",
+)
+_MAX_MEASURED_BYTES = 16_000
+
+
+def _number(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        raise ValueError("a measurement must be a number")
+    if value in (float("inf"), float("-inf")):
+        raise ValueError("a measurement must be finite")
+    return float(value)
+
+
+def _clean_measured(value: Any) -> dict[str, Any]:
+    """The look's measurements, reduced to the fields the page reports and checked for shape.
+
+    Raises ``ValueError`` when the value is not that shape. Anything else a caller adds (a
+    ``verified`` flag, an ``authority``) is dropped, never stored.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("the measurement must be an object")
+    out: dict[str, Any] = {}
+    for key in ("total_area", "overhang_area", "overhang_share"):
+        out[key] = _number(value[key]) if value.get(key) is not None else None
+    com = value.get("com")
+    if com is None:
+        out["com"] = None
+    elif isinstance(com, list) and len(com) == 3:
+        out["com"] = [_number(x) for x in com]
+    else:
+        raise ValueError("com must be three numbers")
+    support = value.get("support")
+    if support is None:
+        out["support"] = None
+    elif isinstance(support, dict):
+        out["support"] = {k: _number(support[k]) for k in ("points", "margin_mm", "tip_angle_deg")}
+    else:
+        raise ValueError("support must be an object")
+    overlaps = value.get("overlaps")
+    if not isinstance(overlaps, list):
+        raise ValueError("overlaps must be a list")
+    out["overlaps"] = [
+        {"a": str(o["a"])[:64], "b": str(o["b"])[:64], "volume_mm3": _number(o["volume_mm3"])}
+        for o in overlaps
+        if isinstance(o, dict)
+    ]
+    if len(out["overlaps"]) != len(overlaps):
+        raise ValueError("each overlap must be an object")
+    notes = value.get("notes")
+    if not isinstance(notes, list) or not all(isinstance(n, str) for n in notes):
+        raise ValueError("notes must be a list of text")
+    out["notes"] = [n[:300] for n in notes[:12]]
+    return out
+
+
 class ImagineError(Exception):
     """A request the Imagine service refuses, with the HTTP status that says why."""
 
@@ -583,6 +645,60 @@ class ImagineService:
                 warnings=len(checked.warnings),
             )
             return self._response(project_id, new)
+
+    # -- measurements -----------------------------------------------------
+
+    async def record_measurement(self, project_id: str, revision: int, measured: Any) -> None:
+        """Keep what a look measured against the revision it measured.
+
+        Only the gateway's own headless browser calls this (``twin.imagine_look``); no route
+        accepts a measurement, so a person's browser cannot claim one. The record belongs to
+        one revision: a newer write starts a state without it, so a stale figure is never
+        carried forward. Writing it makes no new revision.
+        """
+        try:
+            cleaned = _clean_measured(measured)
+        except (ValueError, KeyError, TypeError) as exc:
+            _count("measure", "refused")
+            raise ImagineError(
+                f"The measurement is not in the shape the page reports: {exc}", 422
+            ) from exc
+        if len(json.dumps(cleaned)) > _MAX_MEASURED_BYTES:
+            _count("measure", "refused")
+            raise ImagineError("The measurement is too large (16 KB at most).", 413)
+        async with self._lock(project_id):
+            head = await self._head(project_id)
+            if head is None:
+                _count("measure", "refused")
+                raise ImagineError("No studio yet: an agent puts a config first.", 404)
+            if head.state.get("status") == "handed_over":
+                _count("measure", "refused")
+                raise ImagineError(f"{head.ref} is handed over and read-only.", 409)
+            if head.revision != revision:
+                _count("measure", "refused")
+                raise ImagineError(
+                    f"The studio is at revision {head.revision}, not {revision}: a measurement "
+                    "belongs to the revision it measured.",
+                    409,
+                )
+            head.state["measured"] = {
+                "revision": head.revision,
+                "at": _now(),
+                "method": "headless look run by the gateway",
+                "measured": cleaned,
+            }
+            await self._save(head)
+        _count("measure", "ok")
+
+    async def get_measurement(self, project_id: str) -> dict[str, Any] | None:
+        """The measurement recorded for the head revision, or ``None``."""
+        head = await self._head(project_id)
+        if head is None:
+            return None
+        record = head.state.get("measured")
+        if not isinstance(record, dict) or record.get("revision") != head.revision:
+            return None
+        return dict(record)
 
     async def engine_html(self, project_id: str) -> str:
         with tracer.start_as_current_span("imagine.engine_page") as span:

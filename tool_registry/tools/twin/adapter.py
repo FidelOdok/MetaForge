@@ -9925,6 +9925,15 @@ class TwinServer(McpToolServer):
             raise ValueError(f"{tool_id}: {exc}") from exc
 
         before, after = raw["before"], raw["after"]
+        if before.get("measured"):
+            # What the stored form measured, not the what-if of a `set`. Best effort: a
+            # failure here must never cost the agent its look.
+            try:
+                await self._imagine_studio.record_measurement(
+                    pid, base["revision"], before["measured"]
+                )
+            except Exception as exc:
+                logger.warning("imagine_measurement_not_recorded", project_id=pid, error=str(exc))
         statuses = [before["status"], (after or {}).get("status")]
         status = "error" if "error" in statuses else before["status"]
         views = ["first look", "after the change"]
