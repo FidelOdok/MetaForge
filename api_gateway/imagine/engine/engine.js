@@ -2619,7 +2619,18 @@ if(HOSTED){
     if(HOST_ORIGIN===null)HOST_ORIGIN=e.origin&&e.origin!=='null'?e.origin:'*';else if(HOST_ORIGIN!=='*'&&e.origin!==HOST_ORIGIN)return;
     if(m.type==='fg:snapshot'){hostApply(m.collections);HOSTQ.splice(0).forEach(f=>f());}
     else if(m.type==='fg:readonly'){READONLY=m.value===true;applyReadonly();}
-    else if(m.type==='fg:view')applyView(m);});
+    else if(m.type==='fg:view')applyView(m);
+    else if(m.type==='fg:form')applyForm(m);});
+  // MetaForge: a revision that changes only the authored form is pushed in and redrawn in place,
+  // keeping the camera, the panels, the hidden parts and the behaviour values. The host loads the
+  // revision as a new page when this says it could not.
+  function applyForm(m){let ok=false;
+    try{const f=m.form;if(AUTHORED&&f&&typeof f==='object'&&f.template==='authored'&&f.authored&&Array.isArray(f.authored.parts)){
+      const keep=AUTHORED_MOUNT?{hidden:AUTHORED_MOUNT.hiddenParts(),behave:AUTHORED_MOUNT.behaviours()}:null;
+      if(AUTHORED_MOUNT&&AUTHORED_MOUNT.dispose)AUTHORED_MOUNT.dispose();AUTHORED_MOUNT=null;CFG.form=f;buildPart(last&&last.shape);
+      if(AUTHORED_MOUNT&&keep){AUTHORED_MOUNT.setHiddenParts(keep.hidden);Object.entries(keep.behave).forEach(([k,v])=>AUTHORED_MOUNT.setBehaviour(k,v));}
+      ok=!!AUTHORED_MOUNT;}}catch(err){ok=false;}
+    hostPost('fg:applied',{revision:typeof m.revision==='number'?m.revision:-1,ok},true);}
   // MetaForge: a new revision loads in a fresh page; the host hands it the view the person
   // had (camera and scroll), so a regeneration does not throw the view away.
   const v3=a=>Array.isArray(a)&&a.length===3&&a.every(n=>typeof n==='number'&&isFinite(n)&&Math.abs(n)<1e6);

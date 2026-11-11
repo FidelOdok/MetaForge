@@ -88,7 +88,12 @@ describe('StudioFrame', () => {
     const el = screen.getByTestId('studio-frame');
     expect(el).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=dark');
     act(() => useThemeStore.setState({ resolvedTheme: 'light' }));
-    expect(el).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=light');
+    // The page in the new theme loads behind the one on screen and takes its place when ready.
+    const next = screen.getByTestId('studio-frame-pending') as HTMLIFrameElement;
+    expect(next).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=light');
+    fromPage({ fg: 1, type: 'fg:ready' }, next.contentWindow);
+    expect(screen.getByTestId('studio-frame')).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=light');
+    expect(screen.queryByTestId('studio-frame-pending')).toBeNull();
     view.unmount();
   });
 
@@ -142,5 +147,45 @@ describe('StudioFrame', () => {
     fromPage({ fg: 1, type: 'fg:ready' }, win);
     expect(posted).toHaveBeenNthCalledWith(1, { fg: 1, type: 'fg:snapshot', collections: SNAPSHOT }, '*');
     expect(posted).toHaveBeenNthCalledWith(2, { fg: 1, type: 'fg:readonly', value: true }, '*');
+  });
+
+  describe('a new revision', () => {
+    const form = (h: number) => ({ template: 'authored', params: { h }, authored: { parts: [{ id: 'a', name: 'A', kind: 'generated', code: 'return [];' }] } });
+    const cfg = (h: number, process = 'fdm') => ({ engine: 'formgraph@2', process: { id: process }, form: form(h) });
+
+    function live() {
+      const props = { projectId: P, src: 'https://engine.test/page', collections: SNAPSHOT, readOnly: false };
+      const view = render(<StudioFrame {...props} revision={1} config={cfg(10)} />);
+      const el = screen.getByTestId('studio-frame') as HTMLIFrameElement;
+      const win = el.contentWindow!;
+      const posted = vi.spyOn(win, 'postMessage').mockImplementation(() => undefined);
+      fromPage({ fg: 1, type: 'fg:ready' }, win);
+      return { view, el, win, posted, props };
+    }
+
+    it('that changes only the form is pushed into the running page, not reloaded', () => {
+      const { view, el, win, posted, props } = live();
+      const before = el.getAttribute('src');
+      view.rerender(<StudioFrame {...props} revision={2} config={cfg(12)} />);
+      expect(posted).toHaveBeenCalledWith({ fg: 1, type: 'fg:form', form: form(12), revision: 2 }, '*');
+      expect(screen.queryByTestId('studio-frame-pending')).toBeNull();
+      fromPage({ fg: 1, type: 'fg:applied', revision: 2, ok: true }, win);
+      expect(screen.queryByTestId('studio-frame-pending')).toBeNull();
+      expect(screen.getByTestId('studio-frame').getAttribute('src')).toBe(before);
+    });
+
+    it('that the page cannot apply loads behind the current page instead', () => {
+      const { view, win, props } = live();
+      view.rerender(<StudioFrame {...props} revision={2} config={cfg(12)} />);
+      fromPage({ fg: 1, type: 'fg:applied', revision: 2, ok: false }, win);
+      expect(screen.getByTestId('studio-frame-pending').getAttribute('src')).toContain('rev=2');
+    });
+
+    it('that changes more than the form loads behind the current page', () => {
+      const { view, posted, props } = live();
+      view.rerender(<StudioFrame {...props} revision={2} config={cfg(10, 'cnc')} />);
+      expect(posted).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fg:form' }), '*');
+      expect(screen.getByTestId('studio-frame-pending').getAttribute('src')).toContain('rev=2');
+    });
   });
 });

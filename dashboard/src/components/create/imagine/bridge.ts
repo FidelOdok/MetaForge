@@ -19,7 +19,8 @@ export type PageMessage =
   | { type: 'fg:height'; px: number }
   | { type: 'fg:select'; component_id: string }
   | { type: 'fg:download'; name: string; mime: string; base64: string }
-  | ({ type: 'fg:view' } & StudioView);
+  | ({ type: 'fg:view' } & StudioView)
+  | { type: 'fg:applied'; revision: number; ok: boolean };
 
 /** Where the person was looking: kept across a new revision's page (camera and scroll). */
 export interface StudioView {
@@ -37,7 +38,8 @@ export const MAX_VIEW_UI_CHARS = 8000;
 export type HostMessage =
   | { fg: 1; type: 'fg:snapshot'; collections: Record<string, unknown> }
   | { fg: 1; type: 'fg:readonly'; value: boolean }
-  | ({ fg: 1; type: 'fg:view' } & StudioView);
+  | ({ fg: 1; type: 'fg:view' } & StudioView)
+  | { fg: 1; type: 'fg:form'; form: Record<string, unknown>; revision: number };
 
 function vec3(x: unknown): x is [number, number, number] {
   return Array.isArray(x) && x.length === 3 && x.every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 1e6);
@@ -111,9 +113,41 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
       if (isRecord(raw.ui) && JSON.stringify(raw.ui).length <= MAX_VIEW_UI_CHARS) view.ui = raw.ui;
       return view;
     }
+    case 'fg:applied': {
+      const { revision, ok } = raw;
+      if (typeof revision !== 'number' || !Number.isFinite(revision) || typeof ok !== 'boolean') return null;
+      return { type: 'fg:applied', revision, ok };
+    }
     default:
       return null;
   }
+}
+
+/**
+ * True when a new revision differs from the one on the page only in its authored form
+ * (parameters, parts, makes, behaviours). Such a change is pushed into the running page
+ * (`fg:form`) and redrawn in place; anything else needs the page built again.
+ */
+export function onlyFormChanged(prev: Record<string, unknown>, next: Record<string, unknown>): boolean {
+  const isAuthored = (c: Record<string, unknown>) => {
+    const f = c.form;
+    return isRecord(f) && f.template === 'authored';
+  };
+  if (!isAuthored(prev) || !isAuthored(next)) return false;
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  keys.delete('form');
+  for (const k of keys) if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) return false;
+  return JSON.stringify(prev.form) !== JSON.stringify(next.form);
+}
+
+/** The page's address for one revision: the revision is only there to make the browser load it again. */
+export function revisedSrc(src: string, revision: number | null | undefined): string {
+  if (revision === null || revision === undefined || /^(about|data|blob|javascript):/i.test(src)) return src;
+  const hashAt = src.indexOf('#');
+  const hash = hashAt >= 0 ? src.slice(hashAt) : '';
+  const base = (hashAt >= 0 ? src.slice(0, hashAt) : src).replace(/([?&])rev=[^&]*(&|$)/, (_m, lead: string, tail: string) => (tail ? lead : ''));
+  const sep = base.includes('?') ? (/[?&]$/.test(base) ? '' : '&') : '?';
+  return `${base}${sep}rev=${revision}${hash}`;
 }
 
 /** The event a write becomes, with a fresh id so a retry is idempotent. */

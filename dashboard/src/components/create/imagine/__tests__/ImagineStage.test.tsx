@@ -83,15 +83,15 @@ function imagine(view: 'studio' | 'sketch' = 'studio') {
 }
 
 describe('studio frame follows the revision', () => {
-  it('reloads the frame when the agent saves a new revision', async () => {
+  it('loads a new revision the agent saves behind the page on screen', async () => {
     getStudio.mockReset().mockResolvedValue(studio({ revision: 2 }));
     imagine();
     const frame = await screen.findByTestId('studio-frame');
     expect(frame.getAttribute('src')).toContain('rev=2');
-    const before = frame.getAttribute('src');
     getStudio.mockResolvedValue(studio({ revision: 3 }));
-    await waitFor(() => expect(screen.getByTestId('studio-frame').getAttribute('src')).toContain('rev=3'), { timeout: 15000 });
-    expect(screen.getByTestId('studio-frame').getAttribute('src')).not.toBe(before);
+    // No config to compare, so the new revision loads as a new page behind the current one.
+    await waitFor(() => expect(screen.getByTestId('studio-frame-pending').getAttribute('src')).toContain('rev=3'), { timeout: 15000 });
+    expect(screen.getByTestId('studio-frame').getAttribute('src')).toContain('rev=2');
   }, 20000);
 });
 
@@ -119,7 +119,7 @@ describe('Imagine', () => {
     getStudio.mockResolvedValue(studio());
     imagine();
     const frame = await screen.findByTestId('studio-frame');
-    expect(frame).toHaveAttribute('src', '/api/v1/twin/projects/proj-imagine/imagine/engine?rev=2&theme=light');
+    expect(frame).toHaveAttribute('src', '/api/v1/twin/projects/proj-imagine/imagine/engine?theme=light&rev=2');
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
   });
 

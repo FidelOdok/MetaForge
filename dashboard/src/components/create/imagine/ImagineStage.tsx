@@ -30,9 +30,9 @@ interface ImagineStageProps {
 export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, onStartDeveloping }: ImagineStageProps) {
   const studio = useStudio(projectId);
   const data = studio.data;
-  // The revision is in the address so the page reloads when the agent saves a new one.
-  const base = data ? engineHref(data) : null;
-  const src = base ? `${base}${base.includes('?') ? '&' : '?'}rev=${data?.revision ?? 0}` : null;
+  // The frame puts the revision in the address when a new one must load as a new page;
+  // a change to the form alone is pushed into the running page instead.
+  const src = data ? engineHref(data) : null;
   const hasStudio = !!data && data.status !== 'none' && !!src;
 
   return (
@@ -56,6 +56,8 @@ export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, o
           src={src}
           collections={data.collections ?? EMPTY}
           readOnly={data.status === 'handed_over'}
+          revision={data.revision ?? 0}
+          config={data.config}
         />
       ) : (
         <div className="cv-empty" data-testid="studio-empty">

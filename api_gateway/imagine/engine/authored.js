@@ -1150,6 +1150,15 @@
       if (env.onView) env.onView();
     }
     function hiddenParts() { return Object.keys(hidden); }
+    // A new form replaces this one in place (MetaForge): stop drawing, take the meshes away.
+    function dispose() {
+      seq++;
+      if (timer) clearTimeout(timer);
+      playing = null;
+      clear();
+      if (env.scene && env.scene.remove) env.scene.remove(group);
+      if (panel && panel.parentNode && panel !== quick) panel.parentNode.removeChild(panel);
+    }
     // The twin's behaviours and the value each one is at.
     function behaviourList() { return ((((env.cfg || {}).form || {}).authored || {}).behaviours) || []; }
     function behaviourState() {
@@ -1626,7 +1635,7 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo };
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose };
   }
 
   return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };

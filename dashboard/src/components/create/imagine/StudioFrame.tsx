@@ -5,7 +5,9 @@ import { useThemeStore } from '../../../store/theme-store';
 import {
   START_HEIGHT,
   clampHeight,
+  onlyFormChanged,
   parsePageMessage,
+  revisedSrc,
   themedSrc,
   triggerDownload,
   writeToEvent,
@@ -15,6 +17,8 @@ import {
 
 /** A new revision that never says it is ready replaces the old one anyway after this. */
 const SWAP_TIMEOUT_MS = 20_000;
+/** A form pushed into the page that is not confirmed by then is loaded as a new page instead. */
+const APPLY_TIMEOUT_MS = 5_000;
 
 interface StudioFrameProps {
   projectId: string;
@@ -24,6 +28,9 @@ interface StudioFrameProps {
   collections: Record<string, unknown>;
   /** After handover the studio is read only: the page is told, and writes are not forwarded. */
   readOnly: boolean;
+  /** The studio revision and its config. A change to the form alone is pushed into the page. */
+  revision?: number | null;
+  config?: Record<string, unknown> | null;
 }
 
 /**
@@ -41,14 +48,24 @@ interface StudioFrameProps {
  * and takes the old one's place, so a regeneration neither blanks the studio
  * nor throws the view away.
  *
+ * A revision that changes only the authored form (sizes, parts, makes,
+ * behaviours) is not loaded at all: the form is pushed into the running page,
+ * which redraws in place and keeps everything else as it was. If the page
+ * cannot apply it, the new revision loads behind as above.
+ *
  * The frame takes the stage's full width. Its height is the one the page
  * asks for, within bounds, and never more than the window shows (CSS); the
  * page scrolls inside it beyond that. The page is given Create's theme.
  */
-export function StudioFrame({ projectId, src, collections, readOnly }: StudioFrameProps) {
+export function StudioFrame({ projectId, src, collections, readOnly, revision, config }: StudioFrameProps) {
   const [height, setHeight] = useState(START_HEIGHT);
   const theme = useThemeStore((s) => s.resolvedTheme);
-  const frameSrc = useMemo(() => themedSrc(src, theme), [src, theme]);
+  // The revision in the address only forces a load; a form pushed in place leaves it alone.
+  const [addrRev, setAddrRev] = useState(revision);
+  const frameSrc = useMemo(() => revisedSrc(themedSrc(src, theme), addrRev), [src, theme, addrRev]);
+  const pageRev = useRef(revision);
+  const pageConfig = useRef(config ?? null);
+  const applying = useRef<{ revision: number; config: Record<string, unknown>; timer: number } | null>(null);
   const [shown, setShown] = useState(frameSrc);
   const [pending, setPending] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -79,6 +96,12 @@ export function StudioFrame({ projectId, src, collections, readOnly }: StudioFra
     return () => window.clearTimeout(t);
   }, [pending, swap]);
 
+  const loadRevision = useCallback((rev: number, cfg: Record<string, unknown> | null) => {
+    pageRev.current = rev;
+    pageConfig.current = cfg;
+    setAddrRev(rev);
+  }, []);
+
   const sendTo = useCallback((src: string | null, msg: HostMessage) => {
     // A sandboxed frame has an opaque origin, so there is no origin to target.
     if (src) frames.current.get(src)?.contentWindow?.postMessage(msg, '*');
@@ -95,6 +118,19 @@ export function StudioFrame({ projectId, src, collections, readOnly }: StudioFra
       const msg = parsePageMessage(e.data);
       if (!msg) return;
       const { shown: current, pending: next } = state.current;
+      if (msg.type === 'fg:applied') {
+        const a = applying.current;
+        if (from !== current || !a || msg.revision !== a.revision) return;
+        window.clearTimeout(a.timer);
+        applying.current = null;
+        if (msg.ok) {
+          pageRev.current = a.revision;
+          pageConfig.current = a.config;
+        } else {
+          loadRevision(a.revision, a.config);
+        }
+        return;
+      }
       if (msg.type === 'fg:ready') {
         sendTo(from, { fg: 1, type: 'fg:snapshot', collections: state.current.collections });
         if (state.current.readOnly) sendTo(from, { fg: 1, type: 'fg:readonly', value: true });
@@ -129,7 +165,25 @@ export function StudioFrame({ projectId, src, collections, readOnly }: StudioFra
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [projectId, select, sendTo, swap]);
+  }, [projectId, select, sendTo, swap, loadRevision]);
+
+  // A new revision: push a form-only change into the page, or load the revision behind it.
+  useEffect(() => {
+    if (revision === undefined || revision === null || revision === pageRev.current) return;
+    const next = config ?? null;
+    const prev = pageConfig.current;
+    if (ready && prev && next && onlyFormChanged(prev, next)) {
+      if (applying.current) window.clearTimeout(applying.current.timer);
+      const timer = window.setTimeout(() => {
+        applying.current = null;
+        loadRevision(revision, next);
+      }, APPLY_TIMEOUT_MS);
+      applying.current = { revision, config: next, timer };
+      sendTo(state.current.shown, { fg: 1, type: 'fg:form', form: next.form as Record<string, unknown>, revision });
+      return;
+    }
+    loadRevision(revision, next);
+  }, [revision, config, ready, sendTo, loadRevision]);
 
   // A handover (or a rework) after the page is up is told to it at once.
   const told = useRef<boolean | null>(null);
