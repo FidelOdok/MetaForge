@@ -18,11 +18,25 @@ export type PageMessage =
   | { type: 'fg:write'; collection: StudioCollection; id: string; data: Record<string, unknown> }
   | { type: 'fg:height'; px: number }
   | { type: 'fg:select'; component_id: string }
-  | { type: 'fg:download'; name: string; mime: string; base64: string };
+  | { type: 'fg:download'; name: string; mime: string; base64: string }
+  | ({ type: 'fg:view' } & StudioView);
+
+/** Where the person was looking: kept across a new revision's page (camera and scroll). */
+export interface StudioView {
+  camera: [number, number, number];
+  target: [number, number, number];
+  moved: boolean;
+  scroll: number;
+}
 
 export type HostMessage =
   | { fg: 1; type: 'fg:snapshot'; collections: Record<string, unknown> }
-  | { fg: 1; type: 'fg:readonly'; value: boolean };
+  | { fg: 1; type: 'fg:readonly'; value: boolean }
+  | ({ fg: 1; type: 'fg:view' } & StudioView);
+
+function vec3(x: unknown): x is [number, number, number] {
+  return Array.isArray(x) && x.length === 3 && x.every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 1e6);
+}
 
 /** Each studio collection's event kind on `POST /imagine/events`. */
 export const COLLECTION_KIND: Record<StudioCollection, ImagineEventKind> = {
@@ -83,6 +97,12 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
       if (typeof base64 !== 'string' || base64.length === 0 || base64.length > MAX_DOWNLOAD_BASE64) return null;
       if (!/^[A-Za-z0-9+/=\s]+$/.test(base64)) return null;
       return { type: 'fg:download', name, mime, base64 };
+    }
+    case 'fg:view': {
+      const { camera, target, moved, scroll } = raw;
+      if (!vec3(camera) || !vec3(target) || typeof moved !== 'boolean') return null;
+      if (typeof scroll !== 'number' || !Number.isFinite(scroll)) return null;
+      return { type: 'fg:view', camera, target, moved, scroll: Math.max(0, Math.round(scroll)) };
     }
     default:
       return null;

@@ -2609,7 +2609,15 @@ if(HOSTED){
   window.addEventListener('message',e=>{if(e.source!==window.parent)return;const m=e.data;if(!m||typeof m!=='object'||m.fg!==1||typeof m.type!=='string')return;
     if(HOST_ORIGIN===null)HOST_ORIGIN=e.origin&&e.origin!=='null'?e.origin:'*';else if(HOST_ORIGIN!=='*'&&e.origin!==HOST_ORIGIN)return;
     if(m.type==='fg:snapshot'){hostApply(m.collections);HOSTQ.splice(0).forEach(f=>f());}
-    else if(m.type==='fg:readonly'){READONLY=m.value===true;applyReadonly();}});
+    else if(m.type==='fg:readonly'){READONLY=m.value===true;applyReadonly();}
+    else if(m.type==='fg:view')applyView(m);});
+  // MetaForge: a new revision loads in a fresh page; the host hands it the view the person
+  // had (camera and scroll), so a regeneration does not throw the view away.
+  const v3=a=>Array.isArray(a)&&a.length===3&&a.every(n=>typeof n==='number'&&isFinite(n)&&Math.abs(n)<1e6);
+  function applyView(m){if(m.moved&&v3(m.camera)&&v3(m.target)){camera.position.set(...m.camera);controls.target.set(...m.target);controls.update();camMoved=true;}
+    if(typeof m.scroll==='number'&&isFinite(m.scroll))requestAnimationFrame(()=>window.scrollTo(0,Math.max(0,m.scroll)));}
+  let viewT=0;const postView=()=>{clearTimeout(viewT);viewT=setTimeout(()=>hostPost('fg:view',{camera:camera.position.toArray(),target:controls.target.toArray(),moved:camMoved,scroll:Math.round(window.scrollY||0)},true),250);};
+  controls.addEventListener('end',postView);window.addEventListener('scroll',postView,{passive:true});
   $('#bomBody').addEventListener('click',e=>{const li=e.target.closest&&e.target.closest('[data-cmp]');if(li&&!e.target.closest('input,button,select'))hostPost('fg:select',{component_id:li.dataset.cmp});});
   // The height the page would like, from its width alone: the bar, the 3D
   // view at its bounded size and room for the panels, which scroll inside.
