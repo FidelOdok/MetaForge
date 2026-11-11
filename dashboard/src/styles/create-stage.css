@@ -165,9 +165,10 @@
   flex-direction: column;
   width: min(340px, 40%);
   min-height: 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(17, 19, 25, 0.96);
-  color: #e2e2eb;
+  /* Theme tokens, so the drawer matches the page in light and dark. */
+  border-left: 1px solid var(--cv-line);
+  background: var(--cv-panel);
+  color: var(--cv-text);
   font-size: 12px;
 }
 .cv-drawer.is-collapsed {
@@ -182,7 +183,7 @@
   padding: 10px 0;
   border: 0;
   background: transparent;
-  color: #e2e2eb;
+  color: var(--cv-text);
   cursor: pointer;
 }
 .cv-drawer-tab span {
@@ -194,14 +195,14 @@
   align-items: center;
   gap: 4px;
   padding: 8px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--cv-line);
 }
 .cv-drawer-head strong {
   flex: 1;
   font-size: 13px;
 }
 .cv-drawer-head .cv-icon-btn {
-  color: #b4b4c2;
+  color: var(--cv-muted);
 }
 .cv-drawer-body {
   flex: 1;
