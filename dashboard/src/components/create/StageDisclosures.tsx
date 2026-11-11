@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 export interface StageDisclosure {
@@ -21,11 +21,25 @@ interface StageDisclosuresProps {
 }
 
 /**
+ * Scrolls an element into view when `key` becomes set: a panel opened under a
+ * tall model would otherwise open below the window's edge, and the click
+ * would look like it did nothing.
+ */
+export function useRevealOnOpen<T extends HTMLElement>(key: string | null) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    if (key) ref.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [key]);
+  return ref;
+}
+
+/**
  * Under the model, everything else is a button that opens its detail in
  * place and closes it again. Nothing is open by default.
  */
 export function StageDisclosures({ items, open, onOpen, lead }: StageDisclosuresProps) {
   const shown = items.find((i) => i.id === open);
+  const panel = useRevealOnOpen<HTMLElement>(shown?.id ?? null);
   return (
     <>
       <div className="cv-stage-toolbar">
@@ -55,7 +69,7 @@ export function StageDisclosures({ items, open, onOpen, lead }: StageDisclosures
         )}
       </div>
       {shown && (
-        <section id={`cv-disclose-${shown.id}`} className="cv-card cv-disclose-panel" aria-label={shown.label}>
+        <section ref={panel} id={`cv-disclose-${shown.id}`} className="cv-card cv-disclose-panel" aria-label={shown.label}>
           {shown.content}
         </section>
       )}

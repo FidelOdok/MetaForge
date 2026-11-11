@@ -125,6 +125,16 @@ describe('Develop', () => {
     expect(screen.queryByTestId('develop-attention')).toBeNull();
   });
 
+  it('scrolls an opened detail into view, so a click under a tall model shows something', async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    develop([CAD], { view: creation([{ id: 'check:x', message: 'The wall is thinner than 1.2 mm', action: 'Ask for a thicker wall' }]) });
+    expect(scroll).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: /Needs attention/ }));
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest', behavior: 'smooth' });
+    delete (Element.prototype as Partial<Element>).scrollIntoView;
+  });
+
   it('puts the model first in a wide column', () => {
     develop([CAD]);
     const col = document.querySelector('.cv-stage-col');

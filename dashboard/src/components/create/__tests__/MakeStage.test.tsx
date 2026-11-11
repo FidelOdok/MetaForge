@@ -164,7 +164,7 @@ describe('Make shows the model each build makes', () => {
       return css.slice(at, css.indexOf('}', at));
     };
     expect(rule('.cv-stage-col.is-model')).toContain('max-width: none');
-    expect(rule('.cv-stage-col.is-model .cv-stage-canvas')).toContain('100dvh');
+    expect(rule('.cv-stage-col.is-model .cv-stage-canvas')).toMatch(/(^|\n)\s*height: max\(420px, calc\(100dvh/);
   });
 
   it('skips a cancelled build for the newest live one', () => {

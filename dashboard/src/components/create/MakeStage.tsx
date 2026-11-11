@@ -9,7 +9,7 @@ import { InspectPanel } from './InspectPanel';
 import { MakePanel } from './MakePanel';
 import { ProductStage } from './ProductStage';
 import { StageActions, type StageAction } from './StageActions';
-import { StageDisclosures } from './StageDisclosures';
+import { StageDisclosures, useRevealOnOpen } from './StageDisclosures';
 
 /**
  * The words Create may show for making the product (section 16.2 item 7).
@@ -85,6 +85,7 @@ export function MakeStage({ projectId, view, model, modelRevision, onAsk, nodes 
         : `${passed} of ${counted.length} pass`;
   const checklistTone = data?.applies ? (counted.length && passed === counted.length ? 'ok' : 'warn') : undefined;
   const actionOpen = detail === 'plan' || detail === 'inspect';
+  const actionPanel = useRevealOnOpen<HTMLElement>(actionOpen ? detail : null);
 
   return (
     <div className="cv-stage-col is-model">
@@ -172,7 +173,7 @@ export function MakeStage({ projectId, view, model, modelRevision, onAsk, nodes 
       />
 
       {actionOpen && view && (
-        <section className="cv-card" aria-label={detail === 'plan' ? 'Plan the making' : 'Inspect the result'}>
+        <section ref={actionPanel} className="cv-card" aria-label={detail === 'plan' ? 'Plan the making' : 'Inspect the result'}>
           <div className="cv-card-head">
             <h3>{detail === 'plan' ? 'Plan the making' : 'Inspect the result'}</h3>
             <button type="button" className="cv-link" onClick={() => setDetail(null)}>
