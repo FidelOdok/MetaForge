@@ -670,6 +670,18 @@ html[data-authored] #costBlk,html[data-authored] #handBlk,html[data-authored] #p
 .fg-part-spec.is-stand-in{color:#b45309}
 .mtip.fg-hover-info{white-space:normal;max-width:280px;border-radius:10px;padding:6px 10px;display:grid;gap:2px;font-size:12px;line-height:1.35}
 .mtip.fg-hover-info b{font-size:12.5px}
+/* One next step: the single thing to decide now, at the top of the studio. */
+.fg-next{margin:12px 0 14px;padding:12px 14px;border:1px solid var(--accent,#ff5a0a);border-radius:12px;background:var(--panel)}
+.fg-next-h{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent,#ff5a0a);font-weight:600}
+.fg-next-h small{text-transform:none;letter-spacing:0;color:var(--muted);font-weight:400}
+.fg-next h3{margin:6px 0 4px;font-size:15px;font-weight:600;color:var(--fg)}
+.fg-next-d{margin:0;font-size:13px;color:var(--fg)}
+.fg-next-why{margin:4px 0 0;font-size:12px;color:var(--muted)}
+.fg-next-a{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.fg-next-a button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);color:var(--fg);font:inherit;font-size:12.5px;cursor:pointer}
+.fg-next-a button.pri{border-color:var(--accent);background:var(--accent);color:var(--accent-ink)}
+.fg-next[data-kind=done]{border-color:var(--line)}
+.fg-next[data-kind=done] .fg-next-h{color:var(--muted)}
 .fg-authored-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:2px 0 6px}
 .fg-authored-facts .fg-fact{background:var(--panel2);border-radius:var(--r-md,10px);padding:9px 11px;min-width:0}
 .fg-authored-facts dt{color:var(--muted);font-size:11px;letter-spacing:.02em;margin-bottom:3px}

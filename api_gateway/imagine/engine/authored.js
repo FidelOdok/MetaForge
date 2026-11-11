@@ -660,6 +660,44 @@
       .filter(Boolean).join(' · ') || 'No part chosen yet';
   }
 
+  /* One next step (MetaForge, 2026-11-11): of everything still open, the one thing the person
+     should decide now, in plain words, with buttons. Order: what the agent assumed, what the
+     person said, parts with no real part, then looks the agent proposed. An action with ask
+     puts a request in the conversation for the person to send; the others act in the page. */
+  function nextStep(o) {
+    o = o || {};
+    var conf = o.confirmed || {}, lst = o.ledgerState || {};
+    var asm = (o.assumptions || []).filter(function (a) { return a && a.id && !conf[a.id]; });
+    var led = [];
+    (o.ledger || []).forEach(function (x, i) {
+      var st = lst['l' + i] || (x && x.status);
+      if (x && (!st || st === 'unreviewed')) led.push({ i: i, text: String(x.text || '') });
+    });
+    var parts = o.missingParts || [], made = o.proposed || [];
+    var remaining = asm.length + led.length + parts.length + made.length;
+    if (asm.length) {
+      var a = asm[0];
+      return { kind: 'assumption', id: a.id, remaining: remaining, title: 'Is this right?', detail: String(a.text || a.id), why: 'The assistant assumed this. Confirm it or change it.',
+        actions: [{ id: 'confirm', label: 'Yes, that is right' }, { id: 'change', label: 'Change it', ask: 'Change this assumption: "' + (a.text || a.id) + '". It should be: ' }] };
+    }
+    if (led.length) {
+      var l = led[0];
+      return { kind: 'ledger', index: l.i, remaining: remaining, title: 'Did the studio get this right?', detail: l.text, why: 'You said this. Check the studio covers it.',
+        actions: [{ id: 'mapped', label: 'Yes, it is covered' }, { id: 'out-of-scope', label: 'Leave it out' }, { id: 'explain', label: 'Explain it', ask: 'About "' + l.text + '": ' }] };
+    }
+    if (parts.length) {
+      var q = parts[0];
+      return { kind: 'part', id: q.fn, remaining: remaining, title: 'Choose a real part for ' + q.name, detail: 'Nothing real is chosen for this yet, so its size, power and price are unknown.', why: '',
+        actions: [{ id: 'find', label: 'Find real parts for me', ask: 'Find two real parts for the ' + q.name + ' and put the better one in the studio.' }] };
+    }
+    if (made.length) {
+      var m = made[0];
+      return { kind: 'make', id: m.part, remaining: remaining, title: 'How should the ' + m.name + ' be made?', detail: 'Proposed: ' + m.line, why: 'The assistant chose this. Keep it or change it.',
+        actions: [{ id: 'keep', label: 'Keep it', ask: 'Keep ' + m.line + ' for the ' + m.name + ' and mark it as my choice.' }, { id: 'change', label: 'Change it', ask: 'Make the ' + m.name + ' from ' }] };
+    }
+    return { kind: 'done', remaining: 0, title: 'Nothing to decide right now', detail: 'Keep refining it, or hand it over to engineering when you are ready.', why: '', actions: [] };
+  }
+
   /* Behaviours (MetaForge, 2026-11-11): how the twin moves, lights up and switches. */
   function behaviourValue(b, values) {
     var v = values && values[b.id] !== undefined ? values[b.id] : b['default'];
@@ -1304,6 +1342,14 @@
       if (b) lines.push(fmtMm(b.max[0] - b.min[0]) + ' × ' + fmtMm(b.max[2] - b.min[2]) + ' × ' + fmtMm(b.max[1] - b.min[1]) + ' mm drawn');
       return { title: String(d.name || id), lines: lines };
     }
+    // The parts whose make block the agent proposed and the person has not chosen yet.
+    function proposedMakes() {
+      var parts = ((((env.cfg || {}).form || {}).authored || {}).parts) || [];
+      return parts.filter(function (p) { return p && p.kind !== 'component' && p.make && p.make.source === 'proposed'; }).map(function (p) {
+        var lk = partLook(p.id);
+        return { part: p.id, name: String(p.name || p.id), line: lk ? [lk.process, lk.material, lk.finish, lk.color].filter(Boolean).join(' · ') : String(p.make.material || '') };
+      });
+    }
     function partMake(id) {
       var parts = ((((env.cfg || {}).form || {}).authored || {}).parts) || [];
       var p = parts.filter(function (x) { return x && x.id === id; })[0];
@@ -1635,8 +1681,8 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose };
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, proposedMakes: proposedMakes };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });

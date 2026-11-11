@@ -20,6 +20,8 @@ interface ImagineStageProps {
   onAskAssistant?: () => void;
   /** After handover: send a design turn in Develop (FORGE-824). */
   onStartDeveloping?: () => void;
+  /** Puts a request in the conversation for the person to send (the studio's next step). */
+  onAsk?: (text: string) => void;
 }
 
 /**
@@ -27,7 +29,7 @@ interface ImagineStageProps {
  * this product, or the sketch paper, then the handover to engineering.
  * Checks here are screening only; Develop, Check and Make follow the twin.
  */
-export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, onStartDeveloping }: ImagineStageProps) {
+export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, onStartDeveloping, onAsk }: ImagineStageProps) {
   const studio = useStudio(projectId);
   const data = studio.data;
   // The frame puts the revision in the address when a new one must load as a new page;
@@ -58,6 +60,7 @@ export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, o
           readOnly={data.status === 'handed_over'}
           revision={data.revision ?? 0}
           config={data.config}
+          onAsk={onAsk}
         />
       ) : (
         <div className="cv-empty" data-testid="studio-empty">

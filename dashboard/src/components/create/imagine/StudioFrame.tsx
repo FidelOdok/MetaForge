@@ -31,6 +31,8 @@ interface StudioFrameProps {
   /** The studio revision and its config. A change to the form alone is pushed into the page. */
   revision?: number | null;
   config?: Record<string, unknown> | null;
+  /** Puts a request from the page (its next step) in the conversation, for the person to send. */
+  onAsk?: (text: string) => void;
 }
 
 /**
@@ -57,7 +59,7 @@ interface StudioFrameProps {
  * asks for, within bounds, and never more than the window shows (CSS); the
  * page scrolls inside it beyond that. The page is given Create's theme.
  */
-export function StudioFrame({ projectId, src, collections, readOnly, revision, config }: StudioFrameProps) {
+export function StudioFrame({ projectId, src, collections, readOnly, revision, config, onAsk }: StudioFrameProps) {
   const [height, setHeight] = useState(START_HEIGHT);
   const theme = useThemeStore((s) => s.resolvedTheme);
   // The revision in the address only forces a load; a form pushed in place leaves it alone.
@@ -74,10 +76,10 @@ export function StudioFrame({ projectId, src, collections, readOnly, revision, c
   const frames = useRef(new Map<string, HTMLIFrameElement>());
   const view = useRef<StudioView | null>(null);
   // The latest values, read by the listener without re-subscribing.
-  const state = useRef({ collections, readOnly, shown, pending });
+  const state = useRef({ collections, readOnly, shown, pending, onAsk });
   useEffect(() => {
-    state.current = { collections, readOnly, shown, pending };
-  }, [collections, readOnly, shown, pending]);
+    state.current = { collections, readOnly, shown, pending, onAsk };
+  }, [collections, readOnly, shown, pending, onAsk]);
 
   // A new address loads behind the current page; going back to it cancels the load.
   useEffect(() => {
@@ -157,6 +159,9 @@ export function StudioFrame({ projectId, src, collections, readOnly, revision, c
           return;
         case 'fg:download':
           triggerDownload(msg);
+          return;
+        case 'fg:ask':
+          state.current.onAsk?.(msg.text);
           return;
         case 'fg:view':
           view.current = { camera: msg.camera, target: msg.target, moved: msg.moved, scroll: msg.scroll, ui: msg.ui };

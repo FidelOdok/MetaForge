@@ -188,4 +188,16 @@ describe('StudioFrame', () => {
       expect(screen.getByTestId('studio-frame-pending').getAttribute('src')).toContain('rev=2');
     });
   });
+
+  it("puts the page's next-step request in the conversation, only from the page on screen", () => {
+    const onAsk = vi.fn();
+    render(<StudioFrame projectId={P} src="about:blank" collections={SNAPSHOT} readOnly={false} onAsk={onAsk} />);
+    const win = (screen.getByTestId('studio-frame') as HTMLIFrameElement).contentWindow!;
+    fromPage({ fg: 1, type: 'fg:ask', text: 'Find two real parts for the GNSS receiver.' }, win);
+    expect(onAsk).toHaveBeenCalledWith('Find two real parts for the GNSS receiver.');
+    fromPage({ fg: 1, type: 'fg:ask', text: 'From elsewhere' }, window);
+    fromPage({ fg: 1, type: 'fg:ask', text: 'x'.repeat(3000) }, win);
+    expect(onAsk).toHaveBeenCalledTimes(1);
+  });
 });
+

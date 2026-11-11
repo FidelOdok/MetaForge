@@ -92,6 +92,7 @@ CHECKS = [
     "a_person_drives_each_behaviour_in_the_studio",
     "a_component_part_reads_its_specs_from_its_part_record",
     "the_parts_list_and_the_3d_hover_show_a_components_specs",
+    "the_next_step_is_the_most_important_open_decision_with_buttons",
 ]
 
 

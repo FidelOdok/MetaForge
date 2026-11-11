@@ -579,7 +579,7 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},looks:()=>({process:S.proc,finish:S.finish,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},looks:()=>({process:S.proc,finish:S.finish,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;renderNext();},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
@@ -1578,7 +1578,25 @@ function renderGates(){
   $('#gates').innerHTML=G4.map(g=>`<div class="gate${g.ok?' ok':''}${cur&&cur.n===g.n?' cur':''}"><span class="gnum">Gate ${g.n}</span><b>${g.name}</b><small>${esc(g.msg)}</small></div>`).join('');
   $('#gateMsg').textContent=cur?`Next: ${cur.msg.charAt(0).toLowerCase()+cur.msg.slice(1)}.`:'All four gates pass. Copy the validation pack to hand over to engineering.';
   $('#cpPack').disabled=!(G4[2].ok);
+  renderNext();
 }
+/* MetaForge: one next step at the top of the studio: the one thing to decide now, in plain
+   words, with buttons. Confirming acts in the page; asking puts a request in the person's
+   conversation (fg:ask) for them to send. */
+function renderNext(){if(!AUTHORED)return;const dfm=$('#dfm');if(!dfm)return;let box=$('#fgNext');
+  if(!box){box=document.createElement('section');box.id='fgNext';box.className='fg-next';box.setAttribute('aria-live','polite');}
+  if(dfm.firstChild!==box)dfm.insertBefore(box,dfm.firstChild);
+  S.prog=S.prog||{};S.prog.confirmed=S.prog.confirmed||{};S.prog.ledger=S.prog.ledger||{};
+  const comp=FGAuthored.describeComponents(CFG);
+  const n=FGAuthored.nextStep({assumptions:PCFG.assumptions||[],confirmed:S.prog.confirmed,ledger:PCFG.ledger||[],ledgerState:S.prog.ledger,
+    missingParts:(comp.missing||[]).map(f=>({fn:f,name:(EB[f]&&EB[f].name)||f})),proposed:AUTHORED_MOUNT&&AUTHORED_MOUNT.proposedMakes?AUTHORED_MOUNT.proposedMakes():[]});
+  box.setAttribute('data-kind',n.kind);
+  box.innerHTML=`<div class="fg-next-h"><span>Next step</span>${n.remaining>1?`<small>1 of ${n.remaining} to decide</small>`:''}</div><h3>${esc(n.title)}</h3><p class="fg-next-d">${esc(n.detail)}</p>${n.why?`<p class="fg-next-why">${esc(n.why)}</p>`:''}${n.actions.length?`<div class="fg-next-a">${n.actions.map((a,i)=>`<button type="button" class="${i?'':'pri'}" data-next="${i}">${esc(a.label)}</button>`).join('')}</div>`:''}`;
+  box.onclick=e=>{const b=e.target.closest&&e.target.closest('[data-next]');if(!b)return;const a=n.actions[+b.dataset.next];if(!a)return;
+    if(a.ask){if(HOSTED)hostPost('fg:ask',{text:a.ask});else toast('Ask the assistant: '+a.ask);return;}
+    if(n.kind==='assumption'&&a.id==='confirm'){S.prog.confirmed[n.id]=true;psetWrite('confirmed.'+n.id,true);}
+    else if(n.kind==='ledger'){S.prog.ledger['l'+n.index]=a.id;psetWrite('ledger.l'+n.index,a.id);}
+    save();renderGates();};}
 $('#cpPack').addEventListener('click',()=>{if(!last||!last.shape)return;const s=last.shape,L=[];
   L.push('FORMGRAPH VALIDATION PACK',`Product: ${CP.name||'Unnamed product'} (${CP.id||'default'})`,`Engine: ${ENGINE}`,'MetaForge, metaforge.uk','',`Fingerprint: sha256:${(last.bom&&last.bom.fp)||''}`,`Revision: ${(S.revs[S.revs.length-1]||{}).rev||'unreleased'}`,`Process: ${PROC[S.proc].name}, ${matOf().name}, ${finishOf().name}`,`Envelope: ${fmt(s.W,1)} x ${fmt(s.D,1)} x ${fmt(s.H,1)} mm, wall ${fmt(s.t||0,2)} mm`,'');
   L.push('GATES');gateState().forEach(g=>L.push(`  ${g.n}. ${g.name}: ${g.ok?'pass':'open'} (${g.msg})`));L.push('','REQUIREMENTS');

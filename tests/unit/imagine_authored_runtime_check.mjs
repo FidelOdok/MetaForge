@@ -1001,5 +1001,30 @@ await check('the_parts_list_and_the_3d_hover_show_a_components_specs', async () 
   return made && made.title === 'Base' ? true : 'a made part also has hover info: ' + JSON.stringify(made);
 });
 
+// One next step (MetaForge, 2026-11-11): the single most important thing for the person to
+// decide, in plain words, with buttons; never a list of gates.
+await check('the_next_step_is_the_most_important_open_decision_with_buttons', () => {
+  const base = {
+    assumptions: [{ id: 'a-size', text: 'Case about 40 mm across' }, { id: 'a-ip', text: 'No water resistance' }],
+    confirmed: { 'a-size': true },
+    ledger: [{ text: 'fitness smart watch', status: 'mapped' }, { text: 'see-through case' }],
+    ledgerState: {},
+    missingParts: [{ fn: 'e_hr', name: 'Heart-rate sensor' }],
+    proposed: [{ part: 'case', name: 'Watch case', line: 'FDM printing · PLA · Sanded' }],
+  };
+  let n = FG.nextStep(base);
+  if (n.kind !== 'assumption' || n.id !== 'a-ip' || !/No water resistance/.test(n.detail)) return 'first: ' + JSON.stringify(n);
+  if (n.remaining !== 4) return 'remaining ' + n.remaining;
+  if (!n.actions.some((a) => a.id === 'confirm') || !n.actions.some((a) => a.ask)) return 'assumption buttons ' + JSON.stringify(n.actions);
+  n = FG.nextStep({ ...base, confirmed: { 'a-size': true, 'a-ip': true } });
+  if (n.kind !== 'ledger' || n.index !== 1 || !n.actions.some((a) => a.id === 'mapped')) return 'second: ' + JSON.stringify(n);
+  n = FG.nextStep({ ...base, confirmed: { 'a-size': true, 'a-ip': true }, ledgerState: { l1: 'custom' } });
+  if (n.kind !== 'part' || !/Heart-rate sensor/.test(n.title) || !/Heart-rate sensor/.test(n.actions[0].ask)) return 'third: ' + JSON.stringify(n);
+  n = FG.nextStep({ ...base, confirmed: { 'a-size': true, 'a-ip': true }, ledgerState: { l1: 'custom' }, missingParts: [] });
+  if (n.kind !== 'make' || !/Watch case/.test(n.title) || !/PLA/.test(n.detail)) return 'fourth: ' + JSON.stringify(n);
+  n = FG.nextStep({ assumptions: [], confirmed: {}, ledger: [], ledgerState: {}, missingParts: [], proposed: [] });
+  return n.kind === 'done' && n.remaining === 0 && n.actions.length === 0 ? true : 'done: ' + JSON.stringify(n);
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

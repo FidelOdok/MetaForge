@@ -20,7 +20,8 @@ export type PageMessage =
   | { type: 'fg:select'; component_id: string }
   | { type: 'fg:download'; name: string; mime: string; base64: string }
   | ({ type: 'fg:view' } & StudioView)
-  | { type: 'fg:applied'; revision: number; ok: boolean };
+  | { type: 'fg:applied'; revision: number; ok: boolean }
+  | { type: 'fg:ask'; text: string };
 
 /** Where the person was looking: kept across a new revision's page (camera and scroll). */
 export interface StudioView {
@@ -70,6 +71,8 @@ export const START_HEIGHT = 720;
 /** Downloads larger than this (as base64 text) are refused. */
 export const MAX_DOWNLOAD_BASE64 = 28_000_000;
 const MAX_ID = 200;
+/** A request the page puts in the conversation is short; anything longer is ignored. */
+export const MAX_ASK_CHARS = 2000;
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return !!x && typeof x === 'object' && !Array.isArray(x);
@@ -113,6 +116,8 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
       if (isRecord(raw.ui) && JSON.stringify(raw.ui).length <= MAX_VIEW_UI_CHARS) view.ui = raw.ui;
       return view;
     }
+    case 'fg:ask':
+      return typeof raw.text === 'string' && raw.text.trim() && raw.text.length <= MAX_ASK_CHARS ? { type: 'fg:ask', text: raw.text } : null;
     case 'fg:applied': {
       const { revision, ok } = raw;
       if (typeof revision !== 'number' || !Number.isFinite(revision) || typeof ok !== 'boolean') return null;

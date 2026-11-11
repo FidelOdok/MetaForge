@@ -285,6 +285,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
               view={imagineView}
               onView={(v) => go('imagine', v)}
               onAskAssistant={() => startIn('imagine', START_IMAGINE_TEXT)}
+              onAsk={(text) => ask(text, 'design')}
               onStartDeveloping={() => {
                 go('develop');
                 startIn('develop', START_DEVELOP_TEXT);
