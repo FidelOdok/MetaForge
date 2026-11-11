@@ -2432,14 +2432,6 @@ def _build_machine_library() -> Any:
         from twin_core.library.material_resolver import install_material_source
 
         logger.info("mcp_library_binding_remote", gateway=gateway_url)
-        try:
-            # The sidecar's DFM reads the process library: make it the gateway's.
-            from api_gateway.library.routes import init_machine_library
-            from metaforge.mcp.remote_library import GatewayMachineView
-
-            init_machine_library(GatewayMachineView(gateway_url))  # type: ignore[arg-type]
-        except Exception as exc:  # noqa: BLE001 - reported, never fatal
-            logger.error("mcp_machine_view_unavailable", error=str(exc))
         # FORGE-446: material names resolve against the gateway's library too.
         install_material_source(remote_material_source(gateway_url))
         return RemoteMachineLibrary(gateway_url)
@@ -2645,9 +2637,37 @@ def _configure_logging_for_transport(transport: str) -> None:
         )
 
 
+def _install_gateway_machine_view(env: Any = None) -> bool:
+    """Make this sidecar process's machine library the gateway's (read-only).
+
+    The sidecar's DFM looks the selected machine up in the process library,
+    which here is otherwise an empty in-memory store: a printer registered
+    through ``library.*`` and selected in the manufacturing context read as
+    "no machine is selected". Called once by ``main``, never by ``_bootstrap``:
+    tests build the sidecar inside the same process as the gateway code they
+    exercise, and a process-wide install there would send that code to the
+    gateway URL. ``True`` when installed.
+    """
+    source = os.environ if env is None else env
+    gateway_url = (source.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if not gateway_url:
+        return False
+    try:
+        from api_gateway.library.routes import init_machine_library
+        from metaforge.mcp.remote_library import GatewayMachineView
+
+        init_machine_library(GatewayMachineView(gateway_url))  # type: ignore[arg-type]
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_machine_view_unavailable", error=str(exc))
+        return False
+    logger.info("mcp_machine_view_installed", gateway=gateway_url)
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     _configure_logging_for_transport(args.transport)
+    _install_gateway_machine_view()
 
     # Bootstrap and stdio loop must share one asyncio event loop because
     # remote adapters open aiohttp ClientSessions during bootstrap that

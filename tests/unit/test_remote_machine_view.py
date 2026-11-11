@@ -102,3 +102,21 @@ def test_a_machine_named_without_an_id_resolves_by_name(installed: None) -> None
 
 def test_an_unknown_machine_is_none_not_an_error(installed: None) -> None:
     assert _machine_context({"machine_id": "mi_nope"}) is None
+
+
+def test_the_sidecar_installs_the_view_only_from_main() -> None:
+    """``_bootstrap`` (what tests build) must not install it process-wide; ``main`` does."""
+    from metaforge.mcp import __main__ as sidecar
+
+    library_routes.init_machine_library(None)
+    assert sidecar._install_gateway_machine_view({}) is False
+    assert not isinstance(library_routes.get_machine_library(), GatewayMachineView)
+    try:
+        assert sidecar._install_gateway_machine_view({"METAFORGE_GATEWAY_URL": "http://gw"})
+        assert isinstance(library_routes.get_machine_library(), GatewayMachineView)
+    finally:
+        library_routes.init_machine_library(None)
+    source = open(sidecar.__file__).read()
+    build = source[source.index("def _build_machine_library") :]
+    build = build[: build.index("\ndef ", 1)]
+    assert "GatewayMachineView" not in build
