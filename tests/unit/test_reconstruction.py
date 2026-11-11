@@ -593,6 +593,43 @@ async def test_a_proposal_per_component_depends_on_what_it_read(
     }
 
 
+async def test_the_layout_of_the_chosen_concept_is_used_not_the_newest(twin: Any) -> None:
+    """Three concept sketches are drawn together; the decision picks one. The
+    reconstruction read the newest sketch, so a rejected concept's layout (here
+    with no Enclosure block) left the chosen concept's parts with nothing to
+    build from. The layout whose parts match the accepted assembly wins."""
+    chosen = await _layout(twin)
+    rejected = {
+        "concept_name": "Concept C",
+        "parts": [
+            {
+                "name": "Base",
+                "shape": "cylinder",
+                "size_mm": [140, 140, 20],
+                "position_mm": [-10, -25, 0],
+                "provenance": "assumption",
+            },
+            {
+                "name": "Post (printed, upright)",
+                "shape": "box",
+                "size_mm": [20, 20, 200],
+                "position_mm": [0, 0, 20],
+                "provenance": "assumption",
+            },
+        ],
+        "connections": [],
+    }
+    await _layout(twin, rejected)  # drawn last: the newest sketch
+    # The decision comes after all the concepts are drawn, as in a concept run.
+    await make_decision_recorder(twin)(
+        title="Concept A", rationale="chosen", assembly=ASSEMBLY, project_id=PROJECT
+    )
+    out = await rc.propose(twin, PROJECT, rc.ReconstructionProposeRequest())
+    enc = next(p for p in out.proposals if p.component_id == "CMP-enclosure")
+    assert enc.proposal["features"], enc.proposal["summary"]
+    assert enc.proposal["inputs"]["layout_ref"] == f"node:{chosen}"
+
+
 async def test_no_accepted_concept_is_refused(twin: Any) -> None:
     with pytest.raises(rc.ReconstructionError) as err:
         await rc.propose(twin, PROJECT, rc.ReconstructionProposeRequest())
