@@ -2432,6 +2432,14 @@ def _build_machine_library() -> Any:
         from twin_core.library.material_resolver import install_material_source
 
         logger.info("mcp_library_binding_remote", gateway=gateway_url)
+        try:
+            # The sidecar's DFM reads the process library: make it the gateway's.
+            from api_gateway.library.routes import init_machine_library
+            from metaforge.mcp.remote_library import GatewayMachineView
+
+            init_machine_library(GatewayMachineView(gateway_url))  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001 - reported, never fatal
+            logger.error("mcp_machine_view_unavailable", error=str(exc))
         # FORGE-446: material names resolve against the gateway's library too.
         install_material_source(remote_material_source(gateway_url))
         return RemoteMachineLibrary(gateway_url)
