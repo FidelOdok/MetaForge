@@ -38,6 +38,22 @@ export async function putStudio(projectId: string, config: Record<string, unknow
   return data;
 }
 
+/** One change of a studio patch: JSON Patch style, a list item may be named by its id. */
+export interface StudioPatchChange {
+  op: 'add' | 'replace' | 'remove';
+  path: string;
+  value?: unknown;
+}
+
+/**
+ * `PATCH .../imagine/studio`: the next revision from changes to `baseRevision`. Refused (409)
+ * when the studio has moved past it, so a newer revision is never overwritten.
+ */
+export async function patchStudio(projectId: string, baseRevision: number, changes: StudioPatchChange[]): Promise<ImagineStudio> {
+  const { data } = await apiClient.patch<ImagineStudio>(`${base(projectId)}/studio`, { base_revision: baseRevision, changes });
+  return data;
+}
+
 /** `POST .../imagine/events`: one write from the studio page, idempotent per `event_id`. */
 export async function postImagineEvent(projectId: string, event: ImagineEvent): Promise<ImagineEventReply> {
   const { data } = await apiClient.post<ImagineEventReply>(`${base(projectId)}/events`, event);

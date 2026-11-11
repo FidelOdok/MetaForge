@@ -53,7 +53,7 @@ whether components overlap. The stored entry also lists the enclosure checks as
 ## The studio
 
 An agent writes the studio with `twin.imagine_put_studio` (or `PUT
-/studio`), and changes it with `twin.imagine_patch_studio`: a list of edits
+/studio`), and changes it with `twin.imagine_patch_studio` (or `PATCH /studio`): a list of edits
 (JSON Patch style, a list item named by its `id`) applied to the revision the
 agent read, then checked and written exactly as a full config is, so a
 one-line change is not a whole-config rewrite. The config is a formgraph product config, checked with the merged
@@ -795,7 +795,10 @@ alone is pushed into the running page (`fg:form`) and redrawn in place, keeping 
 panels, hidden parts and behaviour values; the page confirms with `fg:applied`, or the
 revision loads behind the page on screen and replaces it when ready. A strip above the
 studio lists what the revision changed, with **Undo this change**, which saves the revision
-before it as a new one.
+before it as a new one. The undo is a `PATCH /studio` against the revision it undoes (each
+top-level section that differs replaced, added or removed), so if the assistant has written
+a newer revision in the meantime the gateway refuses it (409) and the strip says so, rather
+than overwriting the newer work.
 
 ### Looking at it
 

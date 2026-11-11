@@ -1,20 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { History, MessageSquare, X } from 'lucide-react';
-import { engineHref, imagineKeys, putStudio } from '../../../api/endpoints/imagine';
+import { engineHref, imagineKeys, patchStudio } from '../../../api/endpoints/imagine';
 import { refusalOf } from '../../../api/endpoints/create';
 import { useStudio } from '../../../hooks/use-imagine';
 import type { TwinNode } from '../../../types/twin';
 import { HandoverPanel } from './HandoverPanel';
 import { SketchWorkspace } from './SketchWorkspace';
 import { StudioFrame } from './StudioFrame';
-import { describeChanges } from './changes';
+import { describeChanges, undoChanges } from './changes';
 
 /** What the newest revision changed, against the one the person saw before it. */
 interface StudioChange {
   revision: number;
   lines: string[];
   previous: Record<string, unknown>;
+  /** The config of `revision`, which an undo patches back to `previous`. */
+  current: Record<string, unknown>;
 }
 
 export type ImagineView = 'studio' | 'sketch';
@@ -67,7 +69,7 @@ export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, o
     if (before && rev > before.revision) {
       const lines = describeChanges(before.config, cfg);
       if (lines.length) {
-        setChange({ revision: rev, lines, previous: before.config });
+        setChange({ revision: rev, lines, previous: before.config, current: cfg });
         setChangeOpen(false);
       }
     }
@@ -78,7 +80,9 @@ export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, o
     if (!change) return;
     setUndo({ busy: true, error: null });
     try {
-      await putStudio(projectId, change.previous);
+      // A patch against the revision being undone: if the assistant has written a newer one
+      // since, the gateway refuses (409) instead of overwriting it.
+      await patchStudio(projectId, change.revision, undoChanges(change.current, change.previous));
       setUndo({ busy: false, error: null });
       await qc.invalidateQueries({ queryKey: imagineKeys.studio(projectId) });
     } catch (err) {

@@ -25967,6 +25967,35 @@
         "title": "StructuredMeshResponse",
         "type": "object"
       },
+      "StudioPatch": {
+        "additionalProperties": false,
+        "description": "``PATCH /studio``: changes to the revision they were made against (studio_patch).",
+        "properties": {
+          "base_revision": {
+            "description": "The revision the changes were made against.",
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "changes": {
+            "description": "JSON Patch style changes: op add, replace or remove at a JSON Pointer path, with value (not for remove); a list item may be named by its id.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Changes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_revision",
+          "changes"
+        ],
+        "title": "StudioPatch",
+        "type": "object"
+      },
       "StudioPut": {
         "additionalProperties": false,
         "description": "``PUT /studio``: a formgraph product config.",
@@ -43516,6 +43545,57 @@
           }
         },
         "summary": "Get Studio",
+        "tags": [
+          "imagine"
+        ]
+      },
+      "patch": {
+        "description": "The next revision from changes to ``base_revision``, checked as a full config is.\n\n409 when the studio has moved past ``base_revision``, 400 when a change names something\nthat does not exist, 422 when the result fails the formgraph checks; nothing is written.",
+        "operationId": "patch_studio_v1_twin_projects__project_id__imagine_studio_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Studio",
         "tags": [
           "imagine"
         ]

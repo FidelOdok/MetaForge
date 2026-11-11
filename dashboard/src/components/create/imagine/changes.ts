@@ -49,6 +49,28 @@ function makeText(m: unknown): string {
   return [r.process, r.material, r.finish, r.color].filter((v) => typeof v === 'string' && v).join(' · ') || 'no make';
 }
 
+/** A key as one JSON Pointer segment (RFC 6901). */
+const pointer = (key: string) => '/' + key.replace(/~/g, '~0').replace(/\//g, '~1');
+
+/**
+ * The changes that take `current` back to `previous`, at the top level of the config: each
+ * section that differs is replaced, one only `current` has is removed, one only `previous`
+ * has is added. Sent as a patch against the current revision, so an undo never overwrites a
+ * revision written after it.
+ */
+export function undoChanges(current: unknown, previous: unknown): { op: 'add' | 'replace' | 'remove'; path: string; value?: unknown }[] {
+  const now = rec(current);
+  const back = rec(previous);
+  const out: { op: 'add' | 'replace' | 'remove'; path: string; value?: unknown }[] = [];
+  for (const k of Object.keys(now)) {
+    if (!(k in back)) out.push({ op: 'remove', path: pointer(k) });
+    else if (!same(now[k], back[k])) out.push({ op: 'replace', path: pointer(k), value: back[k] });
+  }
+  for (const k of Object.keys(back)) if (!(k in now)) out.push({ op: 'add', path: pointer(k), value: back[k] });
+  // Replacements first, then removals and additions, in key order within each.
+  return [...out.filter((c) => c.op === 'replace'), ...out.filter((c) => c.op === 'remove'), ...out.filter((c) => c.op === 'add')];
+}
+
 export function describeChanges(prevConfig: unknown, nextConfig: unknown): string[] {
   const prev = rec(prevConfig);
   const next = rec(nextConfig);

@@ -83,6 +83,22 @@ class StudioPut(BaseModel):
     config: dict[str, Any]
 
 
+class StudioPatch(BaseModel):
+    """``PATCH /studio``: changes to the revision they were made against (studio_patch)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_revision: int = Field(ge=1, description="The revision the changes were made against.")
+    changes: list[dict[str, Any]] = Field(
+        min_length=1,
+        max_length=64,
+        description=(
+            "JSON Patch style changes: op add, replace or remove at a JSON Pointer path, "
+            "with value (not for remove); a list item may be named by its id."
+        ),
+    )
+
+
 class ImagineEvent(BaseModel):
     """``POST /events``: one browser write, idempotent per ``event_id``."""
 

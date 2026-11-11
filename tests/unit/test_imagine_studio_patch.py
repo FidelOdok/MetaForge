@@ -262,3 +262,65 @@ def test_the_patch_is_imagine_work_and_additive() -> None:
     assert "twin.imagine_patch_studio" in CREATE_STAGE_TOOLS["imagine"]
     for stage in ("develop", "check", "make"):
         assert "twin.imagine_patch_studio" not in CREATE_STAGE_TOOLS[stage]
+
+
+# -- over REST: PATCH .../imagine/studio --------------------------------------------------
+
+
+@pytest.fixture
+async def client(service: ImagineService) -> Any:
+    import httpx
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(imagine_routes.router)
+    original = imagine_routes.get_service
+    imagine_routes.get_service = lambda: service  # type: ignore[assignment]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        yield c
+    imagine_routes.get_service = original  # type: ignore[assignment]
+
+
+URL = f"/v1/twin/projects/{PROJECT}/imagine/studio"
+
+
+async def test_the_patch_route_writes_the_next_revision(
+    client: Any, service: ImagineService
+) -> None:
+    first = await service.put_studio(PROJECT, full_config(), actor="test")
+    r = await client.patch(
+        URL,
+        json={
+            "base_revision": first.revision,
+            "changes": [{"op": "replace", "path": "/form/params/arm_len", "value": 300}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["revision"] == first.revision + 1
+    assert body["config"]["form"]["params"]["arm_len"] == 300
+
+
+@pytest.mark.parametrize(
+    ("base", "change", "status"),
+    [
+        (2, {"op": "replace", "path": "/form/params/arm_len", "value": 300}, 409),
+        (1, {"op": "replace", "path": "/form/params/nope", "value": 1}, 400),
+        (1, {"op": "replace", "path": "/process/material", "value": "unobtainium"}, 422),
+    ],
+)
+async def test_the_patch_route_refuses_with_the_reason(
+    client: Any, service: ImagineService, base: int, change: dict[str, Any], status: int
+) -> None:
+    await service.put_studio(PROJECT, full_config(), actor="test")
+    r = await client.patch(URL, json={"base_revision": base, "changes": [change]})
+    assert r.status_code == status, r.text
+    assert (await service.get_studio(PROJECT)).revision == 1
+
+
+async def test_the_patch_route_takes_only_its_two_fields(
+    client: Any, service: ImagineService
+) -> None:
+    await service.put_studio(PROJECT, full_config(), actor="test")
+    r = await client.patch(URL, json={"base_revision": 1, "changes": [], "config": {}})
+    assert r.status_code == 422

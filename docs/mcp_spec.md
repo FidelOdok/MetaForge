@@ -1383,8 +1383,9 @@ per-product formgraph config for Create's Imagine stage
   the next revision. A head that is no longer `base_revision`, a change that
   names something that does not exist, and a result that fails the checks are
   tool errors, and nothing is written. Returns `{project_id, status, revision,
-  config_ref, engine_url, applied, warnings}`, not the config. MCP only; there
-  is no REST route.
+  config_ref, engine_url, applied, warnings}`, not the config. REST: `PATCH
+  /v1/twin/projects/{id}/imagine/studio` with `{base_revision, changes}`
+  (409, 400 and 422 as above).
 - `twin.imagine_handover_status` (read-only): `{ready, items: [{id, label,
   status, detail}]}`, the checklist that gates Imagine to Develop.
 - `twin.imagine_validate` (read-only, never held for approval): a dry run of

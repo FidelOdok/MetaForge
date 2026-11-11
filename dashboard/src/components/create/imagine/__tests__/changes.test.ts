@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeChanges } from '../changes';
+import { describeChanges, undoChanges } from '../changes';
 
 const part = (id: string, name: string, extra: Record<string, unknown> = {}) => ({ id, name, kind: 'generated', code: 'return [];', ...extra });
 const cfg = (form: Record<string, unknown>, rest: Record<string, unknown> = {}) => ({ engine: 'formgraph@2', process: { id: 'fdm' }, ...rest, form: { template: 'authored', ...form } });
@@ -46,5 +46,22 @@ describe('describeChanges', () => {
     const lines = describeChanges(cfg({ params: many(12) }), cfg({ params: Object.fromEntries(Object.entries(many(12)).map(([k, v]) => [k, v + 1])) }));
     expect(lines).toHaveLength(9);
     expect(lines[8]).toBe('and 4 more changes');
+  });
+});
+
+describe('undoChanges', () => {
+  it('turns going back to the previous config into changes at the top level', () => {
+    const now = { engine: 'formgraph@2', form: { params: { case_d: 48 } }, product: { name: 'W' }, extra: 1 };
+    const before = { engine: 'formgraph@2', form: { params: { case_d: 40 } }, product: { name: 'W' }, gone: { a: 1 } };
+    expect(undoChanges(now, before)).toEqual([
+      { op: 'replace', path: '/form', value: { params: { case_d: 40 } } },
+      { op: 'remove', path: '/extra' },
+      { op: 'add', path: '/gone', value: { a: 1 } },
+    ]);
+  });
+
+  it('escapes a key as a JSON Pointer and gives nothing for no difference', () => {
+    expect(undoChanges({ 'a/b~c': 1 }, { 'a/b~c': 2 })).toEqual([{ op: 'replace', path: '/a~1b~0c', value: 2 }]);
+    expect(undoChanges({ a: 1 }, { a: 1 })).toEqual([]);
   });
 });
