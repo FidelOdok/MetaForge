@@ -32,6 +32,12 @@ logger = structlog.get_logger(__name__)
 INLINE_LIMIT_ENV = "METAFORGE_TOOL_RESULT_INLINE_CHARS"
 #: A result at or under this renders inline (about 2k tokens).
 DEFAULT_INLINE_LIMIT = 8_000
+#: Env var for the default read_tool_result window, in characters.
+READ_CHARS_ENV = "METAFORGE_TOOL_RESULT_READ_CHARS"
+#: A read that names no limit returns this many characters (about 750 tokens). Every
+#: window stays in the context for the rest of the turn, so the default is small; a read
+#: may still ask for up to the inline limit (2026-11-11).
+DEFAULT_READ_CHARS = 3_000
 #: Oldest results are evicted past this many, and reading one says so.
 MAX_STORED_RESULTS = 64
 #: Name of the native tool that reads a stored result.
@@ -55,6 +61,21 @@ def inline_limit() -> int:
         if value > 0:
             return value
     return DEFAULT_INLINE_LIMIT
+
+
+def read_chars() -> int:
+    """The default read window, never above the inline limit; a bad value falls back."""
+    raw = os.environ.get(READ_CHARS_ENV, "").strip()
+    value = DEFAULT_READ_CHARS
+    if raw:
+        try:
+            parsed = int(raw)
+        except ValueError:
+            logger.warning("tool_result_read_chars_invalid", value=raw)
+        else:
+            if parsed > 0:
+                value = parsed
+    return min(value, inline_limit())
 
 
 def _render(value: Any) -> str:
@@ -152,7 +173,7 @@ class ResultStore:
         """A window of a stored result, or of one of its top-level keys."""
         item = self.get(handle)
         cap = inline_limit()
-        width = cap if limit is None else max(1, min(int(limit), cap))
+        width = read_chars() if limit is None else max(1, min(int(limit), cap))
         start = max(0, int(offset))
         value = item.value
         if key is not None:
@@ -195,7 +216,9 @@ class ResultStore:
                 "note": (
                     f"Result is {item.size} chars, too large to inline. Read more with "
                     f"{READER_TOOL_NAME}(handle='{item.handle}', offset=0) or pass "
-                    "key='<top-level key>' for one field. Only read what you need."
+                    "key='<top-level key>' for one field. A read returns "
+                    f"{read_chars()} chars unless you pass limit (up to "
+                    f"{inline_limit()}). Only read what you need."
                 ),
             }
         )
@@ -206,7 +229,13 @@ READER_INPUT_SCHEMA: dict[str, object] = {
     "properties": {
         "handle": {"type": "string", "description": "A result_handle from an earlier tool result."},
         "offset": {"type": "integer", "description": "Character offset to start at (default 0)."},
-        "limit": {"type": "integer", "description": "Max characters to return (capped)."},
+        "limit": {
+            "type": "integer",
+            "description": (
+                "Max characters to return. Omit for a small default window; larger "
+                "values are capped."
+            ),
+        },
         "key": {"type": "string", "description": "Read one top-level key of the result instead."},
     },
     "required": ["handle"],

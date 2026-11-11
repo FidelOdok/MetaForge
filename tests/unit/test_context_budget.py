@@ -38,10 +38,13 @@ from orchestrator.harness.providers.usage import (
     usage_scope,
 )
 from orchestrator.harness.result_handles import (
+    DEFAULT_READ_CHARS,
     INLINE_LIMIT_ENV,
+    READ_CHARS_ENV,
     READER_TOOL_NAME,
     ResultStore,
     inline_limit,
+    read_chars,
     summarize,
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
@@ -77,6 +80,33 @@ class TestResultStore:
         store.offer("t", {"blob": "z" * 50_000})
         got = store.read("result-1", key="blob", limit=10**9)
         assert len(got["content"]) == inline_limit()
+
+    def test_a_read_without_a_limit_returns_the_smaller_default_window(self) -> None:
+        # Live 2026-11-11: three default reads at 8,000 chars added 15k tokens to the
+        # next call. The default window is smaller; a named limit still reaches the cap.
+        store = ResultStore()
+        store.offer("t", {"blob": "z" * 50_000})
+        got = store.read("result-1", key="blob")
+        assert len(got["content"]) == DEFAULT_READ_CHARS == 3_000
+        assert got["next_offset"] == 3_000
+        wide = store.read("result-1", key="blob", limit=6_000)
+        assert len(wide["content"]) == 6_000
+
+    def test_the_default_window_never_exceeds_the_inline_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(READ_CHARS_ENV, "20000")
+        assert read_chars() == inline_limit()
+        monkeypatch.setenv(READ_CHARS_ENV, "500")
+        store = ResultStore()
+        store.offer("t", {"blob": "z" * 50_000})
+        assert len(store.read("result-1", key="blob")["content"]) == 500
+        monkeypatch.setenv(READ_CHARS_ENV, "junk")
+        assert read_chars() == DEFAULT_READ_CHARS
+
+    def test_the_handle_note_names_the_default_window(self) -> None:
+        body = json.loads(ResultStore().offer("t", {"blob": "z" * 50_000}) or "{}")
+        assert "3000" in body["note"]
 
     def test_unknown_and_evicted_handles_say_so(self) -> None:
         store = ResultStore(max_entries=1)

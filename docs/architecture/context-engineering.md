@@ -445,7 +445,11 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   short summary (key names, list lengths, the first items, scalar fields such
   as `total`) plus a `result_handle`. The `read_tool_result` native tool reads
   more on demand, by `offset`/`limit` window or by one top-level `key`, capped
-  at the same limit so a read cannot undo the saving. The recorded trace step
+  at the same limit so a read cannot undo the saving. A read that names no
+  `limit` returns `METAFORGE_TOOL_RESULT_READ_CHARS` (default 3,000, never above
+  the inline limit), because every window stays in the context for the rest of
+  the turn: three default reads at 8,000 characters added about 15k tokens to
+  the next call. The recorded trace step
   keeps the full result. An evicted or unknown handle is an error that says
   so. This covers the native tool-calling loop; the JSON-ReAct fallback keeps
   its existing observation truncation.
