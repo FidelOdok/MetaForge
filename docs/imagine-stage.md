@@ -725,6 +725,43 @@ The page publishes what it drew as `window.FG_AUTHORED`: `status` (`running`,
 `kind`, `triangles`, `bbox`, `volume` and `error`. It dispatches an `fg-authored`
 event on every change.
 
+### A low-fidelity twin of the idea
+
+The studio shows more than the form's shape:
+
+- **Behaviours.** `form.authored.behaviours` says how the product moves, lights up and
+  switches: `rotate` (about `axis` through `origin`, within `range` degrees), `slide` (along
+  `axis`, within `range` mm), `glow` (in `color`) and `toggle` (shown or hidden), each acting
+  on named parts. The left panel has a control for each and **Play the motions**. Twelve at
+  most; a behaviour that names a missing part, an axis of zeros or a range that is not a
+  range is refused, naming it.
+- **Show or hide a part.** Each part in the parts list has **Hide**/**Show**, a view choice
+  only; the part stays in the form, its measures and the handover.
+- **Live component specs.** A `component` part linked to a record in
+  `context.components.parts` shows its maker, part number, size (marked when a placeholder),
+  power, buses, recorded price and the date its datasheet was read, in the parts list and on
+  hover in the 3D view. A value the record does not carry is left out, never guessed.
+- **Running cost.** A *Cost per unit (estimate)* card: each made part as solid material at
+  the catalogue's typical price per kg, each bought part at its recorded price when its
+  `cost.currency` is `GBP`; anything else is listed as not counted, with the reason. Machine
+  time, labour, assembly, finishing and shipping are not included.
+- **One next step.** A card at the top names the one thing to decide now: an assumption to
+  confirm, a statement to check, a part to choose or a proposed make to keep. Confirming acts
+  in the page; anything that changes the design puts a request in the person's conversation
+  (`fg:ask`), never sends it.
+- **Variants.** `form.authored.variants` (two to four) set other `params` (within
+  `form.ranges`) and/or `makes` on the same parts. **Show side by side** draws them in a row;
+  **Try it** shows one in place; **Use this one** puts a request in the conversation.
+
+### A new revision in an open studio
+
+Create compares each new revision with the one on screen. A change to the authored form
+alone is pushed into the running page (`fg:form`) and redrawn in place, keeping the camera,
+panels, hidden parts and behaviour values; the page confirms with `fg:applied`, or the
+revision loads behind the page on screen and replaces it when ready. A strip above the
+studio lists what the revision changed, with **Undo this change**, which saves the revision
+before it as a new one.
+
 ### Looking at it
 
 An agent looks with `twin.imagine_look` (see `docs/mcp_spec.md`). It renders the

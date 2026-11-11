@@ -199,3 +199,19 @@ def test_the_skills_example_makes_every_part_its_own_way_and_passes() -> None:
     assert len({p["make"].get("process", "fdm") for p in made}) > 1, "show parts made differently"
     errors, _ = _validate(form)
     assert not errors, errors
+
+
+def test_the_skill_teaches_the_whole_twin_and_its_example_passes() -> None:
+    """Slice 8: the agent learns behaviours, variants and priced parts from the playbook."""
+    from tests.unit.test_imagine_studio_playbook import PLAYBOOK, _authored_example
+
+    form = _authored_example()
+    block = form["authored"]
+    kinds = {b["kind"] for b in block.get("behaviours", [])}
+    assert {"rotate", "glow"} <= kinds, kinds
+    assert 2 <= len(block.get("variants", [])) <= 4
+    errors, _ = _validate(form)
+    assert not errors, errors
+    text = PLAYBOOK.read_text(encoding="utf-8")
+    for needle in ("`behaviours`", "`variants`", '"currency": "GBP"', "Use this one", "next step"):
+        assert needle in text, needle

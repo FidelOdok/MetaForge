@@ -331,6 +331,37 @@ and the parts in `form.authored.parts`. Each part has:
   why. The studio draws each part in its own material and colour, lists its
   process, material, finish and colour under the part, and sums the mass from
   each part's own material.
+- The studio is a low-fidelity twin of the idea, not only its shape. Two more
+  blocks sit beside `parts` in `form.authored`:
+  - `behaviours`: how the product moves, lights up and switches, so the
+    person can try it. Each has `id`, `name` (the words on its control),
+    `kind` and `parts` (ids of parts it acts on). `rotate` turns its parts
+    about `axis` (three numbers) through `origin` (mm) within `range`
+    (degrees); `slide` moves them along `axis` within `range` (mm); `glow`
+    lights them in `color` (`#RRGGBB`); `toggle` shows or hides them, with an
+    optional `default`. Give a product the behaviours its brief implies (an
+    arm that tilts, a lid that opens, a light, a screen) and no others. Twelve
+    at most.
+  - `variants`: two to four alternatives of the same parts for the person to
+    compare side by side, each with `id`, `name`, a short `why`, and
+    `params` (sizes, within `form.ranges`) and/or `makes` (a make block by
+    part id). Offer them when the brief leaves a real choice open (compact or
+    roomy, printed or machined); never more than four, never ones that change
+    nothing. The person tries one, then presses Use this one, which puts a
+    request in the conversation; only then write it into the form and drop
+    the variants that were not picked.
+- A component part shows its real part's specs (maker, part number, size,
+  power, buses, price) from its record in `context.components.parts`, and the
+  running cost adds its price only when the record says the currency:
+  `"cost": {"unit": 9.8, "qty": 250, "currency": "GBP", "source": "<link>"}`.
+  Record the currency the source states; never convert or guess one.
+- The studio puts one next step at the top (an assumption to confirm, a part
+  to choose, a material to keep). When the person's message is a next-step
+  request ("Keep ... and mark it as my choice", "Find two real parts for ..."),
+  do exactly that: set `source` to `person`, or find and link real parts.
+- A change to the form alone (sizes, parts, makes, behaviours, variants) is
+  pushed into the person's open studio without reloading it, so prefer
+  changing the form over rebuilding the whole config.
 
 Units are millimetres and Y is up. Stand the product on the floor at Y = 0,
 centred on the origin. A shape is made centred on its own origin (a box runs
@@ -519,6 +550,14 @@ USB-C port. Replace `form` in the skeleton with this and keep the rest:
         ],
         "code": "return [g.box(9, 3.2, 7.5).at(0, p.base_h / 2, -(p.base_r - 3))];"
       }
+    ],
+    "behaviours": [
+      {"id": "tilt", "name": "Tilt the arm", "kind": "rotate", "parts": ["arm", "shade", "panel"], "axis": [0, 0, 1], "origin": [0, 12, 0], "range": [-20, 20]},
+      {"id": "light", "name": "Light", "kind": "glow", "parts": ["panel"], "color": "#FFD27A"}
+    ],
+    "variants": [
+      {"id": "compact", "name": "Compact", "why": "fits a bedside table", "params": {"arm_len": 180, "head_r": 40}},
+      {"id": "all-printed", "name": "All printed", "why": "no machining, one printer", "makes": {"arm": {"process": "fdm", "material": "petgcf", "color": "graphite", "source": "proposed", "why": "carbon-filled PETG is stiff enough for a short arm"}}}
     ]
   }
 }
@@ -537,7 +576,10 @@ USB-C port. Replace `form` in the skeleton with this and keep the rest:
    (quantity, where it is used, how it is powered are the usual ones). Put
    every value you assumed in `programme.assumptions`. Give every part you
    make its own `make` block (process, material, finish, colour, `source`
-   and `why`): the person sees each part as what it is made from.
+   and `why`): the person sees each part as what it is made from. Add the
+   `behaviours` the brief implies, link each bought part to its record (with
+   its price and `currency` when the source gives them), and offer
+   `variants` when a real choice is open.
 3. **Write it** with `twin.imagine_put_studio` and the full config, including
    `programme` (ledger, assumptions, markets), `environment`, `scenarios`,
    `programme.interfaces` and `process.qty`.
