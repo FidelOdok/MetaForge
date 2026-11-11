@@ -185,28 +185,52 @@ def make_read_playbook_tool(playbooks: dict[str, Playbook]) -> NativeToolDef:
                 close = difflib.get_close_matches(name, list(playbooks), n=3, cutoff=0.4)
                 hint = f" Did you mean: {', '.join(close)}?" if close else ""
                 raise ValueError(f"chat.read_playbook: no playbook named {name!r}.{hint}")
-            body = playbook.body
-            truncated = len(body) > MAX_BODY_CHARS
-            if truncated:
-                body = body[:MAX_BODY_CHARS]
-            logger.info("chat_playbook_read", playbook=name, chars=len(body), truncated=truncated)
-            return {
+            # A long playbook is read in pages: the cap bounds one read, not the playbook.
+            try:
+                offset = max(0, int(arguments.get("offset") or 0))
+            except (TypeError, ValueError):
+                offset = 0
+            full = playbook.body
+            body = full[offset : offset + MAX_BODY_CHARS]
+            end = offset + len(body)
+            truncated = end < len(full)
+            logger.info(
+                "chat_playbook_read",
+                playbook=name,
+                offset=offset,
+                chars=len(body),
+                truncated=truncated,
+            )
+            result: dict[str, Any] = {
                 "name": playbook.name,
                 "description": playbook.description,
                 "procedure": body,
                 "truncated": truncated,
             }
+            if truncated:
+                result["next_offset"] = end
+                result["note"] = (
+                    f"This is characters {offset} to {end} of {len(full)}. Call "
+                    f"chat.read_playbook again with offset {end} to read the rest before acting."
+                )
+            return result
 
     return NativeToolDef(
         name="chat.read_playbook",
         description=(
             "Read one of MetaForge's playbooks (listed in the system prompt) before "
-            "multi-step work, and follow it. Read-only."
+            "multi-step work, and follow it. A long one comes in pages: when truncated, "
+            "read on from next_offset. Read-only."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "The playbook's name, as listed."}
+                "name": {"type": "string", "description": "The playbook's name, as listed."},
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Where to continue a long playbook: the last next_offset.",
+                },
             },
             "required": ["name"],
         },
