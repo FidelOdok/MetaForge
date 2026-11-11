@@ -94,6 +94,7 @@ CHECKS = [
     "the_parts_list_and_the_3d_hover_show_a_components_specs",
     "the_next_step_is_the_most_important_open_decision_with_buttons",
     "the_running_cost_adds_materials_and_recorded_prices_and_says_what_it_leaves_out",
+    "variants_can_be_tried_shown_side_by_side_and_picked_through_the_person",
 ]
 
 

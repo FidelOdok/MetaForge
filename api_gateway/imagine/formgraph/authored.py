@@ -451,3 +451,89 @@ def check_behaviours(form: Any) -> tuple[list[str], list[str]]:
         if kind == "glow" and not (isinstance(item.get("color"), str) and _HEX.fullmatch(item["color"])):
             errors.append(f"{label}: color must be the light's #RRGGBB colour.")
     return errors, warnings
+
+
+#: Variants (MetaForge, 2026-11-11): the same parts with other sizes and makes, offered side
+#: by side so the person can pick one.
+MAX_VARIANTS = 4
+VARIANT_KEYS = ("id", "name", "why", "params", "makes")
+
+
+def check_variants(
+    form: Any,
+    processes: dict[str, Any],
+    colors: list[str],
+    default_process: str | None,
+    extra_materials: dict[str, Any] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Errors and warnings for ``form.authored.variants``.
+
+    A variant may move declared sizes (``params``, within ``form.ranges``) and give real,
+    made parts another make (checked like a part's own ``make``). It must change something.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    block = form.get("authored") if isinstance(form, dict) else None
+    if not isinstance(block, dict) or "variants" not in block:
+        return errors, warnings
+    items = block.get("variants")
+    if not isinstance(items, list):
+        return ["form.authored.variants must be a list."], warnings
+    if len(items) > MAX_VARIANTS:
+        errors.append(f"form.authored.variants has {len(items)} variants; at most {MAX_VARIANTS}.")
+    params = form.get("params") or {}
+    ranges = form.get("ranges") or {}
+    parts = {
+        str(p.get("id")): p for p in block.get("parts") or [] if isinstance(p, dict) and p.get("id")
+    }
+    seen: set[str] = set()
+    for index, item in enumerate(items[: MAX_VARIANTS + 1]):
+        if not isinstance(item, dict):
+            errors.append(f"form.authored.variants[{index}] must be an object.")
+            continue
+        vid = str(item.get("id", ""))
+        label = f'variant "{vid}"' if vid else f"variant #{index}"
+        if not _BEHAVIOUR_ID.fullmatch(vid):
+            errors.append(f'{label}: id must be a lowercase slug such as "sporty".')
+        elif vid in seen:
+            errors.append(f'{label}: duplicate id "{vid}".')
+        seen.add(vid)
+        for key in sorted(set(item) - set(VARIANT_KEYS)):
+            errors.append(f"{label}: {key} is not known; use {', '.join(VARIANT_KEYS)}.")
+        if not isinstance(item.get("name"), str) or not item["name"].strip():
+            errors.append(f"{label}: name is required, the words a person sees on it.")
+        why = item.get("why")
+        if why is not None and (not isinstance(why, str) or len(why) > MAX_MAKE_WHY):
+            errors.append(f"{label}: why must be text of at most {MAX_MAKE_WHY} characters.")
+        vparams = item.get("params") or {}
+        makes = item.get("makes") or {}
+        if not isinstance(vparams, dict):
+            errors.append(f"{label}: params must map size names to numbers.")
+            vparams = {}
+        if not isinstance(makes, dict):
+            errors.append(f"{label}: makes must map part ids to make blocks.")
+            makes = {}
+        if not vparams and not makes:
+            errors.append(f"{label}: a variant must change something (params or makes).")
+        for key, value in vparams.items():
+            if key not in params:
+                errors.append(f'{label}: size "{key}" is not in form.params.')
+            elif isinstance(value, bool) or not isinstance(value, (int, float)):
+                errors.append(f"{label}: {key} must be a number.")
+            else:
+                rng = ranges.get(key)
+                if isinstance(rng, list) and len(rng) == 2 and not rng[0] <= value <= rng[1]:
+                    errors.append(f"{label}: {key} = {value} is outside its range {rng}.")
+        synthetic = []
+        for pid, make in makes.items():
+            part = parts.get(str(pid))
+            if part is None:
+                errors.append(f'{label}: part "{pid}" is not a part of this form.')
+                continue
+            synthetic.append({"id": pid, "kind": part.get("kind"), "make": make})
+        if synthetic:
+            make_errors, _ = check_make(
+                {"authored": {"parts": synthetic}}, processes, colors, default_process, extra_materials
+            )
+            errors.extend(f"{label}: {e}" for e in make_errors)
+    return errors, warnings

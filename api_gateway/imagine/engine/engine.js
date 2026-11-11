@@ -579,7 +579,7 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density,costKg:m.costKg};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},looks:()=>({process:S.proc,finish:S.finish,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;renderNext();},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density,costKg:m.costKg};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},onAsk:t=>{if(HOSTED)hostPost('fg:ask',{text:t});else toast('Ask the assistant: '+t);},onFit:()=>frame({W:100,D:100,H:100}),looks:()=>({process:S.proc,finish:S.finish,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;renderNext();},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
@@ -631,7 +631,7 @@ const FIT_DIR=new THREE.Vector3(0.55,0.5,0.75).normalize();
    until the part's bounding sphere fits both the height and the width of
    the view, whatever the view's aspect. */
 function fitDistance(r,fovDeg,aspect,margin){const v=fovDeg*DEG/2,h=Math.atan(Math.tan(v)*Math.max(aspect,0.05));return r*(margin||1.15)/Math.sin(Math.min(v,h));}
-function frame(s){if(!s)return;part.updateMatrixWorld(true);const box=new THREE.Box3().setFromObject(part);if(AUTHORED_MOUNT){AUTHORED_MOUNT.group.updateMatrixWorld(true);box.union(new THREE.Box3().setFromObject(AUTHORED_MOUNT.group));}
+function frame(s){if(!s)return;part.updateMatrixWorld(true);const box=new THREE.Box3().setFromObject(part);if(AUTHORED_MOUNT){const sg=AUTHORED_MOUNT.sideBySide&&AUTHORED_MOUNT.sideBySide(),fg=sg||AUTHORED_MOUNT.group;fg.updateMatrixWorld(true);box.union(new THREE.Box3().setFromObject(fg));}
   let c,r;if(box.isEmpty()){c=new THREE.Vector3(0,s.H/2,0);r=Math.max(s.W,s.D,s.H,AF?AFSPAN:0)/2;}
   else{const sp=box.getBoundingSphere(new THREE.Sphere());c=sp.center;r=sp.radius;}
   r=Math.max(r,1);const d=fitDistance(r,camera.fov,camera.aspect);
@@ -2624,7 +2624,7 @@ function hostApply(cols){if(!cols||typeof cols!=='object')return;DBH=DBH||{hoste
   if(ch){autoWire(null);renderNodes();renderComp();renderProcess();}
   schedule();}
 const RO_EDIT='input,select,textarea,button';
-const RO_OK='.fg-eye,.fg-behave input,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
+const RO_OK='.fg-eye,.fg-behave input,.fg-variant button,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
 function roBlocked(t){const c=t&&t.closest?t.closest(RO_EDIT):null;return !!(c&&!c.matches(RO_OK));}
 function applyReadonly(){const de=document.documentElement;if(READONLY)de.setAttribute('data-readonly','');else de.removeAttribute('data-readonly');
   document.querySelectorAll(RO_EDIT).forEach(el=>{if(READONLY&&!el.matches(RO_OK)){if(!el.disabled){el.disabled=true;el.setAttribute('data-fg-ro','');}}else if(!READONLY&&el.hasAttribute('data-fg-ro')){el.disabled=false;el.removeAttribute('data-fg-ro');}});

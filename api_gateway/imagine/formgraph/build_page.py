@@ -170,6 +170,11 @@ def validate(cfg, cat, ctx=None):
         behave_errors, behave_warnings = authored.check_behaviours(f)
         E.extend(behave_errors)
         W.extend(behave_warnings)
+        var_errors, var_warnings = authored.check_variants(
+            f, cat['processes'], list(cat.get('colors') or []), pr.get('id'), ext.get('materials') or {}
+        )
+        E.extend(var_errors)
+        W.extend(var_warnings)
         make_errors, make_warnings = authored.check_make(
             f, cat['processes'], list(cat.get('colors') or []), pr.get('id'), ext.get('materials') or {}
         )

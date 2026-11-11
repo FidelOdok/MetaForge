@@ -1138,6 +1138,7 @@
 
     var quick = env.quick || null;
     var partsBox = null, graphApi = null, selected = null, behave = {}, behaviourControls = {}, playing = null;
+    var makeOverride = null, variantOn = null, baseParams = null, sideGroup = null, sideOn = false, sideToken = null, variantControls = [];
     // Every slider for one parameter, in the controls panel and in the graph, stays in step.
     var regs = {};
     function setParam(key, v) {
@@ -1220,6 +1221,7 @@
       legendInto(pdet);
       quick.appendChild(pdet);
       behaviourControlsInto(quick);
+      variantControlsInto(quick);
       problems = el('div', 'fg-authored-errors'); quick.appendChild(problems);
     } else {
       panel = doc.createElement('div');
@@ -1258,6 +1260,8 @@
       seq++;
       if (timer) clearTimeout(timer);
       playing = null;
+      sideToken = null;
+      clearSide();
       clear();
       if (env.scene && env.scene.remove) env.scene.remove(group);
       if (panel && panel.parentNode && panel !== quick) panel.parentNode.removeChild(panel);
@@ -1380,6 +1384,118 @@
     // The product's own parts take the colour and finish chosen with the swatches; a bought
     // component keeps its own dark colour so it still reads as not made from that material.
     // A made part with its own make block is drawn as what it is made from (MetaForge).
+    // Variants (MetaForge): the same parts with other sizes and makes. Trying one changes the
+    // view only; using one asks the assistant, through the person, to make it the design.
+    function variantList() { return (((((env.cfg || {}).form || {}).authored || {}).variants) || []).filter(function (v) { return v && v.id; }); }
+    function syncSliders() {
+      Object.keys(regs).forEach(function (k) {
+        (regs[k] || []).forEach(function (r) { r.input.value = String(params[k]); r.valueEl.textContent = String(params[k]); });
+      });
+    }
+    function syncVariantControls() { variantControls.forEach(function (f) { f(); }); }
+    function tryVariant(id) {
+      var v = variantList().filter(function (x) { return x.id === id; })[0] || null;
+      if (baseParams) Object.keys(baseParams).forEach(function (k) { params[k] = baseParams[k]; });
+      if (v) {
+        if (!baseParams) baseParams = Object.assign({}, params);
+        Object.keys(v.params || {}).forEach(function (k) { if (k in params) params[k] = +v.params[k]; });
+      } else baseParams = null;
+      makeOverride = v ? (v.makes || null) : null;
+      variantOn = v ? v.id : null;
+      materials = {}; litMaterials = {}; glowMaterials = {};
+      syncSliders(); syncVariantControls();
+      return render();
+    }
+    function clearSide() {
+      if (!sideGroup) return;
+      if (env.scene && env.scene.remove) env.scene.remove(sideGroup);
+      sideGroup.children.forEach(function (g) { g.children.forEach(function (m) { if (m.geometry && m.geometry.dispose) m.geometry.dispose(); }); });
+      sideGroup = null;
+    }
+    function showSideBySide(on) {
+      clearSide();
+      sideOn = !!on;
+      var token = {};
+      sideToken = token;
+      if (!on) { group.visible = true; syncVariantControls(); if (env.onFit) env.onFit(); return Promise.resolve(); }
+      var list = variantList(), base = baseParams || params;
+      return Promise.all(list.map(function (v) { return run(parts, Object.assign({}, base, v.params || {}), env.options); })).then(function (results) {
+        if (sideToken !== token) return;
+        var row = new THREE.Group(); row.name = 'authored-variants';
+        var widths = results.map(function (r) { return r.bbox ? r.bbox.max[0] - r.bbox.min[0] : 0; });
+        var gap = Math.max(10, Math.max.apply(null, widths.concat([0])) * 0.3);
+        var x = -(widths.reduce(function (a, b) { return a + b; }, 0) + gap * (results.length - 1)) / 2;
+        results.forEach(function (r, i) {
+          var g = new THREE.Group(); g.name = 'variant-' + list[i].id;
+          var cx = r.bbox ? (r.bbox.max[0] + r.bbox.min[0]) / 2 : 0;
+          g.position.set(x + widths[i] / 2 - cx, 0, 0);
+          x += widths[i] + gap;
+          var saved = makeOverride;
+          makeOverride = list[i].makes || null;
+          r.parts.forEach(function (p) {
+            (p.shapes || []).forEach(function (sh) {
+              var mesh = new THREE.Mesh(geoOf(sh), make(p.kind, p.id));
+              mesh.castShadow = true; mesh.receiveShadow = true;
+              mesh.userData = { part: p.id, kind: p.kind, variant: list[i].id };
+              mesh.visible = !hidden[p.id] && !switchedOff(p.id);
+              g.add(mesh);
+            });
+          });
+          makeOverride = saved;
+          row.add(g);
+        });
+        sideGroup = row;
+        env.scene.add(row);
+        group.visible = false;
+        syncVariantControls();
+        if (env.onFit) env.onFit();
+      });
+    }
+    function variantText(v) {
+      var bits = [];
+      Object.keys(v.params || {}).forEach(function (k) { bits.push('set ' + k + ' ' + v.params[k]); });
+      Object.keys(v.makes || {}).forEach(function (pid) {
+        var d = partDef(pid), m = v.makes[pid] || {};
+        bits.push('make the ' + String((d && d.name) || pid) + ' ' + [m.process, m.material, m.finish, m.color].filter(Boolean).join(' · '));
+      });
+      return 'Use the variant "' + (v.name || v.id) + '" as the design: ' + bits.join('; ') + '.';
+    }
+    function useVariant(id) {
+      var v = variantList().filter(function (x) { return x.id === id; })[0];
+      if (v && env.onAsk) env.onAsk(variantText(v));
+    }
+    function variantControlsInto(container) {
+      var list = variantList();
+      if (!list.length) return;
+      var det = el('details', 'pp'), sum = el('summary');
+      det.open = true; det.setAttribute('open', ''); det.setAttribute('data-pps', 'variants');
+      sum.appendChild(el('span', '', 'Variants')); det.appendChild(sum);
+      var box = el('div', 'ppb fg-variants');
+      var side = el('button', 'fg-eye fg-side', '');
+      side.type = 'button'; side.setAttribute('data-variant-side', '');
+      side.addEventListener('click', function () { showSideBySide(!sideOn); });
+      variantControls.push(function () { side.textContent = sideOn ? 'Back to one' : 'Show side by side'; side.setAttribute('aria-pressed', String(sideOn)); });
+      box.appendChild(side);
+      list.forEach(function (v, i) {
+        var row = el('div', 'fg-variant');
+        row.setAttribute('data-variant', v.id);
+        var head = el('div', 'fg-variant-h');
+        head.appendChild(el('b', '', (i + 1) + '. ' + (v.name || v.id)));
+        row.appendChild(head);
+        if (v.why) row.appendChild(el('div', 'fg-variant-why', v.why));
+        var acts = el('div', 'fg-variant-a');
+        var t = el('button', 'fg-eye', ''), u = el('button', 'fg-eye fg-use', 'Use this one');
+        t.type = 'button'; u.type = 'button';
+        t.addEventListener('click', function () { tryVariant(variantOn === v.id ? null : v.id); });
+        u.addEventListener('click', function () { useVariant(v.id); });
+        variantControls.push(function () { t.textContent = variantOn === v.id ? 'Back to the design' : 'Try it'; t.setAttribute('aria-pressed', String(variantOn === v.id)); });
+        acts.appendChild(t); acts.appendChild(u); row.appendChild(acts);
+        box.appendChild(row);
+      });
+      det.appendChild(box);
+      container.appendChild(det);
+      syncVariantControls();
+    }
     function partDef(id) {
       var parts = ((((env.cfg || {}).form || {}).authored || {}).parts) || [];
       return parts.filter(function (x) { return x && x.id === id; })[0] || null;
@@ -1418,7 +1534,9 @@
     function partMake(id) {
       var parts = ((((env.cfg || {}).form || {}).authored || {}).parts) || [];
       var p = parts.filter(function (x) { return x && x.id === id; })[0];
-      return p && p.kind !== 'component' ? p.make || null : null;
+      if (!p || p.kind === 'component') return null;
+      if (makeOverride && makeOverride[id]) return makeOverride[id];
+      return p.make || null;
     }
     function partLook(id) { return lookOf(partMake(id), env.looks ? env.looks() : null); }
     function look(kind, part) {
@@ -1492,14 +1610,18 @@
       if (env.onSummary) env.onSummary(desc);
       try { GLOBAL.dispatchEvent(new GLOBAL.CustomEvent('fg-authored', { detail: summary })); } catch (e) { /* no events here */ }
     }
+    function geoOf(sh) {
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(sh.positions, 3));
+      if (sh.normals) geo.setAttribute('normal', new THREE.Float32BufferAttribute(sh.normals, 3)); else geo.computeVertexNormals();
+      geo.setIndex(sh.indices);
+      return geo;
+    }
     function draw(result) {
       clear();
       result.parts.forEach(function (p) {
         (p.shapes || []).forEach(function (sh) {
-          var geo = new THREE.BufferGeometry();
-          geo.setAttribute('position', new THREE.Float32BufferAttribute(sh.positions, 3));
-          if (sh.normals) geo.setAttribute('normal', new THREE.Float32BufferAttribute(sh.normals, 3)); else geo.computeVertexNormals();
-          geo.setIndex(sh.indices);
+          var geo = geoOf(sh);
           var mesh = new THREE.Mesh(geo, material(p.kind, p.id));
           mesh.name = sh.name || p.name; mesh.castShadow = true; mesh.receiveShadow = true;
           mesh.userData = { part: p.id, kind: p.kind };
@@ -1750,7 +1872,8 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, proposedMakes: proposedMakes };
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, proposedMakes: proposedMakes,
+      tryVariant: tryVariant, showSideBySide: showSideBySide, sideBySide: function () { return sideGroup; }, useVariant: useVariant };
   }
 
   return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, estimateCost: estimateCost, renderCost: renderCost, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };

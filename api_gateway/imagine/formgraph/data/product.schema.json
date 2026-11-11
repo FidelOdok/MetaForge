@@ -361,6 +361,41 @@
                   }
                 }
               }
+            },
+            "variants": {
+              "description": "Two to four variants of the idea: each sets other sizes (params, within form.ranges) and/or other makes (by part id) on the same parts. The studio shows them side by side; the person picks one.",
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "why": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "number"
+                    }
+                  },
+                  "makes": {
+                    "type": "object"
+                  }
+                }
+              }
             }
           }
         }

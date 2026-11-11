@@ -401,7 +401,7 @@ await check('graph_structure_is_built_from_the_forms_parameters_parts_and_uses',
 
 function mountGraph(extra = {}, form = LAMPFORM) {
   const { doc, mk } = graphDom();
-  class Group { constructor() { this.children = []; } add(c) { this.children.push(c); } }
+  class Group { constructor() { this.children = []; this.visible = true; this.position = { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; } }; } add(c) { this.children.push(c); } remove(c) { this.children = this.children.filter((x) => x !== c); } }
   const mats = [];
   const THREE = { Group, Mesh: class { constructor(geometry, material) { this.geometry = geometry; this.material = material; this.userData = {}; } },
     BufferGeometry: class { setAttribute() {} setIndex() {} computeVertexNormals() {} dispose() {} },
@@ -1050,6 +1050,38 @@ await check('the_running_cost_adds_materials_and_recorded_prices_and_says_what_i
   if (!/not included/.test(e.note) || !/solid/.test(e.note)) return 'note ' + e.note;
   const none = FG.estimateCost([{ id: 'x', name: 'X', kind: 'generated', volume: 1000 }], () => null, () => null, null);
   return none.total === 0 && none.lines.length === 0 && none.missing.length === 1 ? true : 'nothing known: ' + JSON.stringify(none);
+});
+
+// Variants (MetaForge, 2026-11-11): the same parts with other sizes and makes, side by side.
+const VARIED = { ...LAMPFORM, authored: { ...LAMPFORM.authored, variants: [
+  { id: 'short', name: 'Short', why: 'fits a shelf', params: { arm_len: 150 } },
+  { id: 'tall', name: 'Tall', params: { arm_len: 420 }, makes: { arm: { process: 'cnc', material: 'al6061', color: '#A7ABB0', source: 'proposed' } } },
+] } };
+
+await check('variants_can_be_tried_shown_side_by_side_and_picked_through_the_person', async () => {
+  const asked = [];
+  const { m, quick } = mountGraph({ looks: () => LOOKS, cfg: { form: VARIED }, onAsk: (t) => asked.push(t) }, VARIED);
+  await m.render();
+  const { withClass } = graphDom();
+  if (withClass(quick, 'fg-variant').length !== 2) return 'variant rows ' + withClass(quick, 'fg-variant').length;
+  // Try it: the main form takes the variant's sizes and makes.
+  await m.tryVariant('tall');
+  const arm = m.group.children.find((x) => x.userData.part === 'arm');
+  if (!arm || arm.material.o.color !== '#A7ABB0' || arm.material.o.metalness !== 0.9) return 'tall arm not in aluminium: ' + JSON.stringify(arm && arm.material.o);
+  if (m.params.arm_len !== 420) return 'arm_len ' + m.params.arm_len;
+  await m.tryVariant(null);
+  if (m.params.arm_len !== 260) return 'back to the design: arm_len ' + m.params.arm_len;
+  // Side by side: one group per variant, in a row, the main form hidden.
+  await m.showSideBySide(true);
+  const row = m.sideBySide();
+  if (!row || row.children.length !== 2) return 'side-by-side groups ' + (row && row.children.length);
+  if (!(row.children[1].position.x > row.children[0].position.x)) return 'not in a row';
+  if (m.group.visible !== false) return 'the main form still shows';
+  await m.showSideBySide(false);
+  if (m.group.visible === false) return 'the main form did not come back';
+  // Use this one: a request for the person to send, naming what it sets.
+  m.useVariant('tall');
+  return asked.length === 1 && /Tall/.test(asked[0]) && /arm_len 420/.test(asked[0]) && /al6061/.test(asked[0]) ? true : 'ask ' + JSON.stringify(asked);
 });
 
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
