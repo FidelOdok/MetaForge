@@ -633,3 +633,51 @@ def check_scene(form: Any) -> tuple[list[str], list[str]]:
             for e in code_errors
         )
     return errors, warnings
+
+
+MAX_JOINS = 24
+JOIN_KEYS = ("parts", "why")
+
+
+def check_joins(form: Any) -> tuple[list[str], list[str]]:
+    """Errors for ``form.authored.joins``: pairs of parts meant to meet, each with a reason.
+
+    The page tests whether parts clash on their drawn shapes; a declared join is shown as
+    joined, as declared, not as a clash (MetaForge, 2026-11-11).
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    block = form.get("authored") if isinstance(form, dict) else None
+    if not isinstance(block, dict) or "joins" not in block:
+        return errors, warnings
+    joins = block.get("joins")
+    if not isinstance(joins, list):
+        return ["form.authored.joins must be a list of {parts, why}."], warnings
+    if len(joins) > MAX_JOINS:
+        errors.append(f"form.authored.joins has {len(joins)} joins; at most {MAX_JOINS}.")
+    part_ids = {str(p.get("id")) for p in block.get("parts") or [] if isinstance(p, dict)}
+    seen: set[tuple[str, str]] = set()
+    for index, join in enumerate(joins[: MAX_JOINS + 1]):
+        label = f"form.authored.joins[{index}]"
+        if not isinstance(join, dict):
+            errors.append(f"{label}: a join must be an object with parts and why.")
+            continue
+        for key in sorted(set(join) - set(JOIN_KEYS)):
+            errors.append(f"{label}: {key} is not known in a join; use {', '.join(JOIN_KEYS)}.")
+        pair = join.get("parts")
+        if not (isinstance(pair, list) and len(pair) == 2 and all(isinstance(x, str) for x in pair)):
+            errors.append(f"{label}: parts must name two parts of the form, for example [\"button\", \"case\"].")
+            continue
+        if pair[0] == pair[1]:
+            errors.append(f"{label}: a join is between two different parts, not {pair[0]} and itself.")
+        for pid in pair:
+            if pid not in part_ids:
+                errors.append(f'{label}: "{pid}" is not a part of the form; known: {", ".join(sorted(part_ids))}.')
+        why = join.get("why")
+        if not (isinstance(why, str) and why.strip()):
+            errors.append(f"{label}: why must say why these parts meet (a hole, a seat, a press fit).")
+        key = (min(pair), max(pair))
+        if key in seen:
+            errors.append(f"{label}: the join {key[0]} and {key[1]} is declared twice.")
+        seen.add(key)
+    return errors, warnings

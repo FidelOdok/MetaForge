@@ -188,7 +188,10 @@ def _measured(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     keys = ("total_area", "overhang_area", "overhang_share", "com", "support", "overlaps", "notes")
-    return {k: value.get(k) for k in keys}
+    out = {k: value.get(k) for k in keys}
+    if value.get("fit") is not None:
+        out["fit"] = value.get("fit")  # which parts clash on their drawn shapes (MetaForge)
+    return out
 
 
 def _measured_changes(before: Any, after: Any) -> dict[str, list[Any]]:
@@ -207,6 +210,13 @@ def _measured_changes(before: Any, after: Any) -> dict[str, list[Any]]:
     pairs = (len(before.get("overlaps") or []), len(after.get("overlaps") or []))
     if pairs[0] != pairs[1]:
         moved["overlapping_pairs"] = [pairs[0], pairs[1]]
+
+    def clashes(m: dict[str, Any]) -> int | None:
+        fit = m.get("fit")
+        return len(fit.get("pairs") or []) if isinstance(fit, dict) else None
+
+    if clashes(before) != clashes(after):
+        moved["clashing_pairs"] = [clashes(before), clashes(after)]
     return moved
 
 

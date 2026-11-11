@@ -139,6 +139,51 @@ _MEASURED_KEYS = (
     "notes",
 )
 _MAX_MEASURED_BYTES = 16_000
+_MAX_FIT_PAIRS = 24
+
+
+def _vec3(value: Any) -> list[float]:
+    if not (isinstance(value, list) and len(value) == 3):
+        raise ValueError("a point must be three numbers")
+    return [_number(x) for x in value]
+
+
+def _clean_fit(value: Any) -> dict[str, Any] | None:
+    """The page's fit test (which parts clash on their drawn shapes), in its own shape only."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("fit must be an object")
+    pairs = value.get("pairs")
+    if not isinstance(pairs, list) or not all(isinstance(p, dict) for p in pairs):
+        raise ValueError("fit.pairs must be a list of objects")
+    not_closed = value.get("not_closed") or []
+    if not isinstance(not_closed, list):
+        raise ValueError("fit.not_closed must be a list")
+    clean_pairs = []
+    for p in pairs[:_MAX_FIT_PAIRS]:
+        region = p.get("region")
+        if not isinstance(region, dict):
+            raise ValueError("a fit pair needs its region")
+        clean_pairs.append(
+            {
+                "a": str(p["a"])[:64],
+                "b": str(p["b"])[:64],
+                "a_name": str(p.get("a_name") or p["a"])[:120],
+                "b_name": str(p.get("b_name") or p["b"])[:120],
+                "depth_mm": _number(p["depth_mm"]),
+                "points": int(_number(p.get("points") or 0)),
+                "region": {"min": _vec3(region.get("min")), "max": _vec3(region.get("max"))},
+            }
+        )
+    return {
+        "pairs": clean_pairs,
+        "checked_pairs": int(_number(value.get("checked_pairs") or 0)),
+        "not_closed": [str(x)[:64] for x in not_closed[:_MAX_FIT_PAIRS]],
+        "partial": bool(value.get("partial")),
+        "tolerance_mm": _number(value["tolerance_mm"]),
+        "step_mm": _number(value["step_mm"]),
+    }
 
 
 def _number(value: Any) -> float:
@@ -188,6 +233,12 @@ def _clean_measured(value: Any) -> dict[str, Any]:
     if not isinstance(notes, list) or not all(isinstance(n, str) for n in notes):
         raise ValueError("notes must be a list of text")
     out["notes"] = [n[:300] for n in notes[:12]]
+    try:
+        fit = _clean_fit(value.get("fit"))
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"fit is not the shape the page makes: {exc}") from exc
+    if fit is not None:
+        out["fit"] = fit
     return out
 
 

@@ -470,6 +470,34 @@
                   }
                 }
               }
+            },
+            "joins": {
+              "description": "Pairs of parts meant to meet (a button through a hole in the wall, a glass seated in a rim), each with a reason. The page tests whether parts clash on their drawn shapes and shows a declared join as joined, not as a clash.",
+              "type": "array",
+              "maxItems": 24,
+              "items": {
+                "type": "object",
+                "required": [
+                  "parts",
+                  "why"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "parts": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "why": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  }
+                }
+              }
             }
           }
         }

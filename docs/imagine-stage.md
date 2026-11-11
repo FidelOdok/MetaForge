@@ -676,10 +676,11 @@ The "Form drawn" card also shows what is measured from the drawn triangles, with
 from vertical) and does not rest on the floor; **Tips over at**, the angle at which the centre of mass
 would tip past the edge of the flat base the form stands on, or **Balance: Would tip over** when the
 centre of mass is already outside it, or **No flat base, so not assessed** for a form that hangs or
-rests on a point; and **Components overlap**, the pairs of `component` parts whose boxes overlap, with
-the volume. Overhang counts faces another part covers and the centre of mass counts overlapping parts
-twice, so both are estimates and the notes say so. Wall thickness, clearance round the electronics and
-fit are not measured. `twin.imagine_look` returns the same block as `measured`, and with `set` it
+rests on a point; and **Fit**, the pairs of parts that clash on their drawn shapes (see Fit below).
+`overlaps`, the pairs of `component` parts whose boxes overlap with the volume, is still measured for
+the concept revision. Overhang counts faces another part covers and the centre of mass counts
+overlapping parts twice, so both are estimates and the notes say so. Wall thickness and the gap
+between parts that do not touch are not measured. `twin.imagine_look` returns the same block as `measured`, and with `set` it
 reports in `compare.measured_changed` how the measurements moved. These are V2 screening measurements,
 never a verification.
 
@@ -716,7 +717,7 @@ the blocks are hidden and the verdicts relabelled.
 
 The page also shows what was measured (size, volume of the shapes with overlaps counted twice,
 parts, triangles and the mass if solid in the process material) beside a list of what was not
-assessed: wall thickness and moulding, the fit of the electronics, vents and heat, the
+assessed: wall thickness and moulding, vents and heat, the
 manufacturing verdict and cost, assembly, product tests and the form's bill of materials. That list
 never reads as a pass. A form that fails shows "Form not drawn" or "Form partly drawn" with each
 part's error and gives no size.
@@ -753,6 +754,19 @@ The studio shows more than the form's shape:
   steps aside for it. Behaviours may act on scene objects. A `light` behaviour casts a real
   spot light from its part (`at`, `direction`, `angle`, `color`, `intensity`) that follows the
   part's motions, and Try it has **Room light** (Day, Evening, Night) so a beam can be seen.
+- **Fit.** The page tests every pair of parts on their drawn triangles, not their boxes:
+  points about 0.5 mm apart on each part's surface where two parts' boxes meet, each tested
+  for being inside the other part's closed shape by counting ray crossings. A **Fit** card
+  lists each clash (*Display into Round case, about 0.48 mm deep*), deepest first, with
+  **Show** to select the part, and each clash is outlined in red in the 3D view, seen through
+  the other parts. The depth is an estimate on the sample spacing, at most half the thinner
+  part; parts that only touch (within 0.02 mm) do not clash, and a shape that is not closed
+  is listed and not tested as a solid. Parts meant to meet are declared in
+  `form.authored.joins` (`[{"parts": ["button", "case"], "why": "..."}]`, at most 24, two
+  different parts with a reason, each pair once) and shown as joined, as declared. The result
+  is `measured.fit` (returned by a look and kept with the revision's measurement) and the
+  `form.fit` screening rules, one per pair. `overlaps` (components whose boxes overlap) is
+  kept as before, because the concept revision sends it to the verification service.
 - **Cut-away.** Beside Try it: **Solid**, **Section** (one plane, side, front or top, moved
   with a slider) and **X-ray** (the product's own parts see-through, bought parts solid).
 - **Live component specs.** A `component` part linked to a record in

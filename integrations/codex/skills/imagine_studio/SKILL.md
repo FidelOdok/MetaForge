@@ -309,8 +309,7 @@ and the parts in `form.authored.parts`. Each part has:
   `g` builds shapes. Return a list of shapes, for example
   `return [g.box(10, 5, 5).at(0, 2.5, 0)];`
 - `uses`: the parameters the code reads. Each must be in `form.params`.
-- `body`: `true` on at most one part, the main body the electronics would sit
-  in. Without one, the page says the fit of the electronics is not assessed.
+- `body`: `true` on at most one part, the main body the electronics sit in.
 - `max_triangles`: an optional cap for the part.
 - `make`: how this part is manufactured and how it looks. Every part is made
   on its own, so give each `generated` and `primitive` part its own (never a
@@ -378,6 +377,22 @@ and the parts in `form.authored.parts`. Each part has:
     with the studio's **X-ray** (see-through shells) and **Section** (a
     movable cut) views and each part's **Hide**; when they ask "so I can see
     inside", point them there before changing the design.
+  - **Check the fit, and declare only real joins.** The page tests every pair
+    of parts on their drawn shapes, not their boxes, and lists each clash with
+    an estimated depth in a **Fit** card, outlined in red in 3D. It reaches you
+    as `measured.fit` from `twin.imagine_look` and as `form.fit` rules in the
+    studio's screening results (`twin.imagine_get_studio`, once the person has
+    opened the studio). A clash is a design problem: move, shrink or redraw a
+    part, or grow the housing, then write and look again. When two parts are
+    meant to meet (a button through a hole in the wall, a glass seated in a
+    rim, a part pressed into a socket), declare it in `form.authored.joins`:
+    `[{"parts": ["button", "case"], "why": "the button passes through a hole in
+    the case wall"}]`; the page then shows that pair as joined, as declared.
+    Never declare a join to hide a clash the product really has. Measure a
+    real outline before you call a part a fit: a rectangle in a round housing
+    needs its corners inside, not only its width. The depth is an estimate on
+    points about 0.5 mm apart, at most half the thinner part, and parts that
+    only touch do not clash.
   - **Behaviours go under Try it.** They are not listed in the side panel;
     the person presses Try it to move, light and switch the product.
   - **Author the scene the behaviours need.** `form.authored.scene` lists
@@ -436,8 +451,7 @@ because it can hide a word: write plain text. Budgets: at most
 **What the page and the report say, and what you must not.**
 
 - The page shows what was measured (size, volume, parts, triangles) and lists
-  what was not assessed: wall thickness and moulding, the fit of the
-  electronics, vents and heat, the manufacturing verdict and cost, assembly,
+  what was not assessed: wall thickness and moulding, vents and heat, the manufacturing verdict and cost, assembly,
   product tests and the form's bill of materials. None of those ran on an
   authored form. Never say it passes any of them.
 - `twin.imagine_validate` adds advisory findings: `form.enclosure_checks` (not
@@ -468,12 +482,14 @@ because it can hide a word: write plain text. Budgets: at most
   `support` is null when the form has no flat base to stand on, which is normal
   for something that hangs: say it was not assessed, do not call it stable.
   `overhang_share` is an upper bound on the share of the surface that looks
-  steeply downward. `overlaps` lists components whose boxes overlap. If the form
+  steeply downward. `overlaps` lists components whose boxes overlap, and
+  `fit.pairs` the parts that really clash on their drawn shapes (`a`, `b`,
+  `depth_mm`, `region`); a pair in `form.authored.joins` is shown as declared. If the form
   would tip over, or tips at under 15 degrees, change it (a wider or heavier
   base, a shorter or less leaned arm), write, look again and say how the angle
   moved. If components overlap, move one. Never call these measurements verified:
-  they are screening estimates, and wall thickness, clearance round the
-  electronics and fit are not measured. A revision nobody looked at is reported
+  they are screening estimates, and wall thickness and the gap between parts
+  that do not touch are not measured. A revision nobody looked at is reported
   by the service as not measured.
   **Look before you validate.** The service judges only the measurements a look
   recorded for the revision it is checking, so a validate that comes before the

@@ -783,13 +783,13 @@ await check('describe_shows_the_measurements_and_says_when_a_form_would_tip_over
   const ok = FG.describe({ ...base, measured: { overhang_share: 0.274, overhang_area: 50, total_area: 180, com: [0, 5, 0],
     support: { margin_mm: 5, tip_angle_deg: 45 }, overlaps: [], notes: [] } }, null);
   const bad = FG.describe({ ...base, measured: { overhang_share: 0, overhang_area: 0, total_area: 180, com: [6, 7, 0],
-    support: { margin_mm: -4.9, tip_angle_deg: -35.5 }, overlaps: [{ a: 'x', b: 'y', volume_mm3: 500 }], notes: [] } }, null);
+    support: { margin_mm: -4.9, tip_angle_deg: -35.5 }, fit: { pairs: [], checked_pairs: 1, not_closed: [], partial: false, tolerance_mm: 0.02, step_mm: 0.5 }, notes: [] } }, null);
   const facts = (d) => Object.fromEntries(d.facts);
   const f = facts(ok), g2 = facts(bad);
   if (f['Overhang (upper bound)'] !== '27% of the surface') return JSON.stringify(f);
   if (f['Tips over at'] !== '45°') return JSON.stringify(f);
   if (!/would tip over/i.test(g2['Balance'] || '')) return JSON.stringify(g2);
-  if (!/1 pair/.test(g2['Components overlap'] || '')) return JSON.stringify(g2);
+  if (g2['Fit'] !== 'No parts clash') return JSON.stringify(g2);
   return facts(FG.describe(base, null))['Tips over at'] === undefined ? true : 'a form with no measurements showed some';
 });
 
@@ -805,7 +805,7 @@ await check('screening_rules_report_only_what_was_measured', async () => {
   if (by(ok, 'form.draws').st !== 'pass') return JSON.stringify(by(ok, 'form.draws'));
   const enc = by(ok, 'form.enclosure_checks');
   if (!enc || enc.st !== 'na' || !/not run/i.test(enc.label)) return 'the enclosure checks must be listed as not run: ' + JSON.stringify(enc);
-  if (ok.some((r) => ['wall', 'draft', 'cost', 'fit'].some((w) => r.id.includes(w)))) return 'a rule claims an enclosure check';
+  if (ok.some((r) => ['wall', 'draft', 'cost'].some((w) => r.id.includes(w)))) return 'a rule claims an enclosure check';
   const low = FG.screeningRules({ ...base, measured: m({ margin_mm: 4, tip_angle_deg: 10 }) });
   if (by(low, 'form.balance').st !== 'warn') return 'under 15 degrees should warn: ' + JSON.stringify(by(low, 'form.balance'));
   const tip = FG.screeningRules({ ...base, measured: m({ margin_mm: -4, tip_angle_deg: -20 }) });
@@ -818,6 +818,112 @@ await check('screening_rules_report_only_what_was_measured', async () => {
   if (by(bad, 'form.draws').st !== 'fail') return 'a part that failed to draw should fail';
   if (FG.screeningRules({ status: 'pending', parts: [], errors: [], measured: null }) !== null) return 'nothing measured must give no screening';
   return FG.screeningRules(null) === null ? true : 'no summary must give no screening';
+});
+
+// -- fit: do the parts clash, on the drawn triangles (MetaForge, 2026-11-11) -------------------
+
+const fitOf = async (...parts) => (await FG.run(parts, {}, OPTS)).measured.fit;
+const CASE = 'return [g.lathe([[0, 0], [22, 0], [22, 15], [20, 15], [20, 1.5], [0, 1.5]], 64)];';
+
+await check('fit_a_part_inside_a_hollow_case_does_not_clash', async () => {
+  const f = await fitOf(P('case', 'generated', CASE), P('batt', 'component', 'return [g.box(26, 4, 20).at(0, 4, 0)];'));
+  if (!f) return 'no fit result';
+  return f.pairs.length === 0 && f.checked_pairs === 1 && !f.partial ? true : JSON.stringify(f);
+});
+
+await check('fit_a_box_whose_corners_reach_through_a_round_wall_clashes_with_it', async () => {
+  // The smartwatch display as first drawn: a 39.89 x 38.5 box in a 40 mm interior.
+  const f = await fitOf(P('case', 'generated', CASE), P('display', 'component', 'return [g.box(39.89, 5, 38.5).at(0, 10.8, 0)];'));
+  const p = f && f.pairs[0];
+  if (!p || f.pairs.length !== 1) return 'pairs: ' + JSON.stringify(f);
+  if (!(p.a === 'case' && p.b === 'display')) return 'pair ' + p.a + ' ' + p.b;
+  // Depth counts both ways, so it is capped by half the thinner part: 2.5 mm for this 5 mm box.
+  if (!(p.depth_mm > 0.5 && p.depth_mm <= 2.55)) return 'depth ' + p.depth_mm;
+  return p.region.min[1] >= 8.2 && p.region.max[1] <= 13.4 ? true : 'region ' + JSON.stringify(p.region);
+});
+
+await check('fit_the_depth_of_two_overlapping_boxes_is_about_how_far_they_overlap', async () => {
+  const f = await fitOf(P('a', 'generated', 'return [g.box(10, 10, 10).at(0, 5, 0)];'), P('b', 'generated', 'return [g.box(10, 10, 10).at(9, 5, 0)];'));
+  const p = f && f.pairs[0];
+  return p && Math.abs(p.depth_mm - 1) <= 0.1 ? true : 'pairs: ' + JSON.stringify(f);
+});
+
+await check('fit_parts_that_only_touch_do_not_clash', async () => {
+  const f = await fitOf(P('a', 'generated', 'return [g.box(10, 10, 10).at(0, 5, 0)];'), P('b', 'generated', 'return [g.box(10, 10, 10).at(10, 5, 0)];'),
+    P('lid', 'generated', 'return [g.box(10, 2, 10).at(0, 11, 0)];'));
+  return f && f.pairs.length === 0 ? true : JSON.stringify(f.pairs);
+});
+
+await check('fit_a_declared_join_is_shown_as_declared_not_as_a_clash', async () => {
+  const f = await fitOf(P('a', 'generated', 'return [g.box(10, 10, 10).at(0, 5, 0)];'), P('b', 'generated', 'return [g.box(10, 10, 10).at(9, 5, 0)];'));
+  const j = FG.fitWithJoins(f, [{ parts: ['b', 'a'], why: 'b is pressed into a' }]);
+  if (j.clashes !== 0 || !j.pairs[0].declared || j.pairs[0].why !== 'b is pressed into a') return JSON.stringify(j);
+  return FG.fitWithJoins(f, []).clashes === 1 ? true : 'an undeclared clash was not counted';
+});
+
+await check('fit_a_shape_that_is_not_closed_is_listed_and_not_tested_as_a_solid', async () => {
+  // Every shape g makes is closed, so this guards a future one: a bare square sheet, run
+  // straight through fitCheck, against a box it cuts across.
+  const sheet = { id: 'sheet', name: 'sheet', bbox: { min: [-5, 0, -5], max: [5, 1, 5] },
+    shapes: [{ positions: [-5, 0, -5, 5, 0, -5, 5, 1, 5, -5, 1, 5], indices: [0, 2, 1, 0, 3, 2] }] };
+  const boxR = (await FG.run([P('b', 'generated', 'return [g.box(4, 4, 4).at(0, 0, 0)];')], {}, OPTS)).parts[0];
+  const f = FG.fitCheck([sheet, boxR]);
+  if (!f.not_closed.includes('sheet') || f.not_closed.includes('b')) return 'not_closed ' + JSON.stringify(f.not_closed);
+  // The box is closed, so the sheet's points inside it still count against the box.
+  return f.pairs.length === 1 ? true : 'pairs ' + JSON.stringify(f.pairs);
+});
+
+await check('fit_is_described_and_screened_per_clash_and_no_longer_listed_as_not_assessed', async () => {
+  const base = { status: 'ready', parts: [{ id: 'a', name: 'a', kind: 'generated', triangles: 12, volume: 1000 }],
+    bbox: { min: [0, 0, 0], max: [1, 2, 3] }, triangles: 12, errors: [] };
+  const fit = { pairs: [{ a: 'case', b: 'display', a_name: 'Round case', b_name: 'Display', depth_mm: 0.56, points: 12, region: { min: [0, 0, 0], max: [1, 1, 1] } },
+    { a: 'case', b: 'button', a_name: 'Round case', b_name: 'Button', depth_mm: 1.2, points: 9, region: { min: [0, 0, 0], max: [1, 1, 1] } }],
+    checked_pairs: 4, not_closed: [], partial: false, tolerance_mm: 0.02, step_mm: 0.5 };
+  const measured = { overhang_share: 0.1, overhang_area: 10, total_area: 100, com: [0, 5, 0], support: { margin_mm: 40, tip_angle_deg: 22 }, fit, notes: [] };
+  const joins = [{ parts: ['button', 'case'], why: 'the button passes through a hole in the wall' }];
+  const d = FG.describe({ ...base, measured, joins }, null);
+  const facts = Object.fromEntries(d.facts);
+  if (facts['Fit'] !== '1 clash, 1 declared join') return JSON.stringify(facts);
+  if (d.notAssessed.some((n) => n.id === 'fit')) return 'fit is still listed as not assessed';
+  if (!d.fit || d.fit.clashes !== 1) return 'describe carries no fit: ' + JSON.stringify(d.fit);
+  const rules = FG.screeningRules({ ...base, measured, joins });
+  const by = (id) => rules.find((r) => r.id === id);
+  if (!by('form.fit') || by('form.fit').st !== 'fail' || !/1 clash/.test(by('form.fit').val)) return JSON.stringify(by('form.fit'));
+  const one = by('form.fit.case~display');
+  if (!one || one.st !== 'fail' || !/0\.56 mm/.test(one.val) || !/Display/.test(one.label)) return JSON.stringify(one);
+  const join = by('form.fit.button~case');
+  if (!join || join.st !== 'pass' || !/declared/.test(join.val)) return JSON.stringify(join);
+  const clear = FG.screeningRules({ ...base, measured: { ...measured, fit: { ...fit, pairs: [] } } });
+  return clear.find((r) => r.id === 'form.fit').st === 'pass' ? true : 'no clashes should pass';
+});
+
+await check('fit_outlines_each_undeclared_clash_and_the_card_lists_every_pair', async () => {
+  const fit = FG.fitWithJoins({ pairs: [
+    { a: 'case', b: 'display', a_name: 'Round case', b_name: 'Display', depth_mm: 0.56, points: 12, region: { min: [-20.6, 8.3, -5], max: [-20, 13.3, 5] } },
+    { a: 'case', b: 'button', a_name: 'Round case', b_name: 'Button', depth_mm: 1.2, points: 9, region: { min: [20, 4, -2], max: [22, 8, 2] } }],
+    checked_pairs: 4, not_closed: [], partial: false, tolerance_mm: 0.02, step_mm: 0.5 }, [{ parts: ['case', 'button'], why: 'through a hole in the wall' }]);
+  if (fit.pairs.map((p) => p.b).join() !== 'display,button') return 'clashes must come before declared joins: ' + fit.pairs.map((p) => p.b).join();
+  const marks = FG.fitMarkRegions(fit);
+  if (marks.length !== 1 || marks[0].b !== 'display') return 'marks ' + JSON.stringify(marks);
+  // 0.6 mm thick in x, widened to the 1 mm minimum about its middle.
+  if (Math.abs(marks[0].max[0] - marks[0].min[0] - 1) > 1e-9 || Math.abs(marks[0].min[0] + 20.8) > 1e-9) return 'widened ' + JSON.stringify(marks[0]);
+  const el = () => {
+    const e = { children: [], style: {}, className: '', textContent: '', attrs: {}, handlers: {}, firstChild: null,
+      appendChild(c) { e.children.push(c); return c; }, insertBefore(c) { e.children.unshift(c); return c; },
+      setAttribute(k, v) { e.attrs[k] = v; }, addEventListener(t, f) { e.handlers[t] = f; } };
+    return e;
+  };
+  const doc = { createElement: el, createTextNode: (t) => ({ textContent: t }) };
+  const host = el();
+  const picked = [];
+  FG.renderSummary(doc, host, { headline: 'Form drawn', dims: '1 x 1 x 1 mm', facts: [], notAssessed: [], problems: [], fit, onFitPick: (p) => picked.push(p.b) });
+  const ids = host.children.map((c) => c.id);
+  if (ids.join() !== 'authBlk,authFit,authNa') return 'order ' + ids.join();
+  const walk = (n, out = []) => { out.push(n); (n.children || []).forEach((c) => walk(c, out)); return out; };
+  const rows = walk(host.children[1]).filter((n) => n.attrs && n.attrs['data-fit']);
+  if (rows.length !== 2 || !/st-fail/.test(rows[0].className) || !/st-info/.test(rows[1].className)) return 'rows ' + rows.map((r) => r.className).join();
+  walk(rows[0]).find((n) => n.textContent === 'Show').handlers.click();
+  return picked.join() === 'display' ? true : 'picked ' + picked.join();
 });
 
 await check('the_summary_offers_a_button_for_a_person_to_say_they_have_seen_the_form', async () => {

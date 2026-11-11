@@ -459,12 +459,270 @@
     return { bbox: { min: min, max: max }, volume: vol };
   }
 
+  /* Fit (MetaForge, 2026-11-11): do the parts clash? Tested on the drawn triangles, not on
+     boxes round them. Points are sampled over each part's surface where two parts' boxes
+     meet; a point of one part that lies inside the other's closed shape, deeper than
+     FIT_TOL, is a clash. Inside is decided by casting three rays and counting crossings,
+     so it needs closed shapes: a shape that is not closed is listed and not tested. The
+     depth is the largest distance from such a point to the other part's surface, so it is
+     an estimate on the sample spacing (FIT_STEP), never more precise than that. */
+  var FIT_TOL = 0.02;          // mm: closer than this is touching, not a clash
+  var FIT_STEP = 0.5;          // mm between surface samples
+  var FIT_MAX_SAMPLES = 6000;  // per part, per pair
+  var FIT_MAX_DEPTH_POINTS = 400;
+  var FIT_BUDGET = 15e6;       // triangle tests for the whole form, then the result says partial
+  var FIT_DIRS = [[1, 0.0013, 0.0021], [0.0017, 1, 0.0011], [0.0019, 0.0023, 1]].map(function (d) {
+    var l = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    return [d[0] / l, d[1] / l, d[2] / l];
+  });
+
+  function fitPrep(r) {
+    var shapes = r.shapes.map(function (sh) {
+      var P = sh.positions, I = sh.indices, n = I.length / 3, B = new Float64Array(n * 6);
+      var min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity], edges = {}, key = {};
+      function vk(i) {
+        if (key[i] === undefined) key[i] = Math.round(P[i * 3] * 1e4) + ',' + Math.round(P[i * 3 + 1] * 1e4) + ',' + Math.round(P[i * 3 + 2] * 1e4);
+        return key[i];
+      }
+      for (var t = 0; t < n; t++) {
+        var v = [I[t * 3], I[t * 3 + 1], I[t * 3 + 2]];
+        for (var a = 0; a < 3; a++) {
+          var lo = Math.min(P[v[0] * 3 + a], P[v[1] * 3 + a], P[v[2] * 3 + a]), hi = Math.max(P[v[0] * 3 + a], P[v[1] * 3 + a], P[v[2] * 3 + a]);
+          B[t * 6 + a] = lo; B[t * 6 + 3 + a] = hi;
+          if (lo < min[a]) min[a] = lo;
+          if (hi > max[a]) max[a] = hi;
+        }
+        for (var e = 0; e < 3; e++) {
+          var k1 = vk(v[e]), k2 = vk(v[(e + 1) % 3]);
+          if (k1 === k2) continue;
+          var ek = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
+          edges[ek] = (edges[ek] || 0) + 1;
+        }
+      }
+      var closed = n > 0 && Object.keys(edges).every(function (k) { return edges[k] % 2 === 0; });
+      return { P: P, I: I, n: n, B: B, min: min, max: max, closed: closed };
+    });
+    return { id: r.id, name: r.name || r.id, kind: r.kind, bbox: r.bbox, shapes: shapes };
+  }
+
+  // Möller-Trumbore: does the ray from o along d cross triangle t (in front of o)?
+  function rayHits(sh, t, o, d) {
+    var P = sh.P, I = sh.I, a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+    var e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2];
+    var e2x = P[c] - P[a], e2y = P[c + 1] - P[a + 1], e2z = P[c + 2] - P[a + 2];
+    var px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+    var det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < 1e-12) return false;
+    var inv = 1 / det, tx = o[0] - P[a], ty = o[1] - P[a + 1], tz = o[2] - P[a + 2];
+    var u = (tx * px + ty * py + tz * pz) * inv;
+    if (u < 0 || u > 1) return false;
+    var qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+    var w = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
+    if (w < 0 || u + w > 1) return false;
+    return (e2x * qx + e2y * qy + e2z * qz) * inv > 1e-9;
+  }
+
+  // Does the ray meet the triangle's box at all (slab test)? Cheap, so most triangles stop here.
+  function rayBox(B, t, o, d) {
+    var t0 = 0, t1 = Infinity;
+    for (var a = 0; a < 3; a++) {
+      var lo = B[t * 6 + a], hi = B[t * 6 + 3 + a];
+      if (Math.abs(d[a]) < 1e-15) { if (o[a] < lo || o[a] > hi) return false; continue; }
+      var s0 = (lo - o[a]) / d[a], s1 = (hi - o[a]) / d[a];
+      if (s0 > s1) { var s = s0; s0 = s1; s1 = s; }
+      if (s0 > t0) t0 = s0;
+      if (s1 < t1) t1 = s1;
+      if (t0 > t1) return false;
+    }
+    return true;
+  }
+
+  /* Each ray runs almost along one axis (FIT_DIRS[k] along axis k), so across the shape it
+     drifts sideways by less than FIT_DRIFT of the shape's length. The triangles are bucketed
+     on a grid across the other two axes, with that drift as margin, and a ray tests only the
+     triangles in its own cell. Built once per shape and axis, when first needed. */
+  var FIT_GRID = 24, FIT_DRIFT = 0.003;
+  function rayGrid(sh, k) {
+    sh.grids = sh.grids || [];
+    if (sh.grids[k]) return sh.grids[k];
+    var u = (k + 1) % 3, v = (k + 2) % 3, span = sh.max[k] - sh.min[k], m = FIT_DRIFT * span + 1e-6;
+    var u0 = sh.min[u] - m, v0 = sh.min[v] - m, du = (sh.max[u] - sh.min[u] + 2 * m) / FIT_GRID || 1, dv = (sh.max[v] - sh.min[v] + 2 * m) / FIT_GRID || 1;
+    var cells = [];
+    for (var c = 0; c < FIT_GRID * FIT_GRID; c++) cells.push([]);
+    function ci(x, lo, d) { return Math.min(FIT_GRID - 1, Math.max(0, Math.floor((x - lo) / d))); }
+    for (var t = 0; t < sh.n; t++) {
+      var a0 = ci(sh.B[t * 6 + u] - m, u0, du), a1 = ci(sh.B[t * 6 + 3 + u] + m, u0, du);
+      var b0 = ci(sh.B[t * 6 + v] - m, v0, dv), b1 = ci(sh.B[t * 6 + 3 + v] + m, v0, dv);
+      for (var a = a0; a <= a1; a++) for (var b = b0; b <= b1; b++) cells[a * FIT_GRID + b].push(t);
+    }
+    sh.grids[k] = { u: u, v: v, u0: u0, v0: v0, du: du, dv: dv, cells: cells, ci: ci };
+    return sh.grids[k];
+  }
+
+  function insideShape(sh, p, ctr) {
+    if (p[0] < sh.min[0] || p[0] > sh.max[0] || p[1] < sh.min[1] || p[1] > sh.max[1] || p[2] < sh.min[2] || p[2] > sh.max[2]) return false;
+    var votes = 0;
+    for (var k = 0; k < FIT_DIRS.length; k++) {
+      var d = FIT_DIRS[k], hits = 0, g = rayGrid(sh, k);
+      var list = g.cells[g.ci(p[g.u], g.u0, g.du) * FIT_GRID + g.ci(p[g.v], g.v0, g.dv)];
+      for (var i = 0; i < list.length; i++) {
+        ctr.tests++;
+        if (rayBox(sh.B, list[i], p, d) && rayHits(sh, list[i], p, d)) hits++;
+      }
+      if (hits % 2 === 1) votes++;
+      if (votes >= 2 || votes + (FIT_DIRS.length - 1 - k) < 2) break;
+    }
+    return votes >= 2;
+  }
+
+  // The distance from p to the nearest point of triangle t (Ericson, Real-Time Collision Detection 5.1.5).
+  function triDist(P, I, t, p) {
+    var a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+    function sub(i, j) { return [P[i] - P[j], P[i + 1] - P[j + 1], P[i + 2] - P[j + 2]]; }
+    function dot(u, v) { return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]; }
+    var ab = sub(b, a), ac = sub(c, a), ap = [p[0] - P[a], p[1] - P[a + 1], p[2] - P[a + 2]], q;
+    var d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) q = [P[a], P[a + 1], P[a + 2]];
+    else {
+      var bp = [p[0] - P[b], p[1] - P[b + 1], p[2] - P[b + 2]], d3 = dot(ab, bp), d4 = dot(ac, bp);
+      var cp = [p[0] - P[c], p[1] - P[c + 1], p[2] - P[c + 2]], d5 = dot(ab, cp), d6 = dot(ac, cp);
+      var vc = d1 * d4 - d3 * d2, vb = d5 * d2 - d1 * d6, va = d3 * d6 - d5 * d4, v, w;
+      if (d3 >= 0 && d4 <= d3) q = [P[b], P[b + 1], P[b + 2]];
+      else if (d6 >= 0 && d5 <= d6) q = [P[c], P[c + 1], P[c + 2]];
+      else if (vc <= 0 && d1 >= 0 && d3 <= 0) { v = d1 / (d1 - d3); q = [P[a] + v * ab[0], P[a + 1] + v * ab[1], P[a + 2] + v * ab[2]]; }
+      else if (vb <= 0 && d2 >= 0 && d6 <= 0) { w = d2 / (d2 - d6); q = [P[a] + w * ac[0], P[a + 1] + w * ac[1], P[a + 2] + w * ac[2]]; }
+      else if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+        w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        q = [P[b] + w * (P[c] - P[b]), P[b + 1] + w * (P[c + 1] - P[b + 1]), P[b + 2] + w * (P[c + 2] - P[b + 2])];
+      } else {
+        var den = 1 / (va + vb + vc); v = vb * den; w = vc * den;
+        q = [P[a] + ab[0] * v + ac[0] * w, P[a + 1] + ab[1] * v + ac[1] * w, P[a + 2] + ab[2] * v + ac[2] * w];
+      }
+    }
+    var dx = p[0] - q[0], dy = p[1] - q[1], dz = p[2] - q[2];
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  function surfaceDist(part, p, ctr) {
+    var best = Infinity;
+    part.shapes.forEach(function (sh) {
+      for (var t = 0; t < sh.n; t++) { ctr.tests++; var d = triDist(sh.P, sh.I, t, p); if (d < best) best = d; }
+    });
+    return best;
+  }
+
+  // Points on a part's surface inside box Q, about FIT_STEP apart.
+  function surfaceSamples(part, Q) {
+    var out = [], E = 1e-6;
+    function inQ(x, y, z) { return x >= Q.min[0] - E && x <= Q.max[0] + E && y >= Q.min[1] - E && y <= Q.max[1] + E && z >= Q.min[2] - E && z <= Q.max[2] + E; }
+    part.shapes.forEach(function (sh) {
+      var P = sh.P, I = sh.I;
+      for (var t = 0; t < sh.n && out.length < 50000; t++) {
+        var inside = true;
+        for (var ax = 0; ax < 3; ax++) if (sh.B[t * 6 + 3 + ax] < Q.min[ax] - E || sh.B[t * 6 + ax] > Q.max[ax] + E) inside = false;
+        if (!inside) continue;
+        var a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+        var L = Math.max(
+          Math.hypot(P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]),
+          Math.hypot(P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]),
+          Math.hypot(P[c] - P[b], P[c + 1] - P[b + 1], P[c + 2] - P[b + 2]));
+        var n = Math.min(40, Math.max(1, Math.ceil(L / FIT_STEP)));
+        for (var i = 0; i <= n; i++) for (var j = 0; i + j <= n; j++) {
+          var u = i / n, v = j / n, w = 1 - u - v;
+          var x = w * P[a] + u * P[b] + v * P[c], y = w * P[a + 1] + u * P[b + 1] + v * P[c + 1], z = w * P[a + 2] + u * P[b + 2] + v * P[c + 2];
+          if (inQ(x, y, z)) out.push([x, y, z]);
+        }
+      }
+    });
+    if (out.length <= FIT_MAX_SAMPLES) return out;
+    var step = out.length / FIT_MAX_SAMPLES, picked = [];
+    for (var s = 0; s < FIT_MAX_SAMPLES; s++) picked.push(out[Math.floor(s * step)]);
+    return picked;
+  }
+
+  // Points of `from` inside `into` deeper than FIT_TOL, with their depth.
+  function intrusions(from, into, Q, ctr) {
+    var solids = into.shapes.filter(function (sh) { return sh.closed; });
+    if (!solids.length) return [];
+    var inside = surfaceSamples(from, Q).filter(function (p) {
+      if (ctr.tests > FIT_BUDGET) { ctr.partial = true; return false; }
+      return solids.some(function (sh) { return insideShape(sh, p, ctr); });
+    });
+    if (inside.length > FIT_MAX_DEPTH_POINTS) {
+      var step = inside.length / FIT_MAX_DEPTH_POINTS, picked = [];
+      for (var s = 0; s < FIT_MAX_DEPTH_POINTS; s++) picked.push(inside[Math.floor(s * step)]);
+      inside = picked;
+    }
+    var out = [];
+    inside.forEach(function (p) { var d = surfaceDist(into, p, ctr); if (d > FIT_TOL) out.push({ p: p, d: d }); });
+    return out;
+  }
+
+  function fitCheck(results) {
+    var round2 = function (x) { return Math.round(x * 100) / 100; };
+    var parts = (results || []).filter(function (r) { return r && !r.error && r.shapes && r.shapes.length && r.bbox; }).map(fitPrep);
+    var ctr = { tests: 0, partial: false }, pairs = [], checked = 0;
+    for (var i = 0; i < parts.length; i++) {
+      for (var j = i + 1; j < parts.length; j++) {
+        var A = parts[i], B = parts[j], Q = { min: [], max: [] }, meet = true;
+        for (var k = 0; k < 3; k++) {
+          Q.min[k] = Math.max(A.bbox.min[k], B.bbox.min[k]); Q.max[k] = Math.min(A.bbox.max[k], B.bbox.max[k]);
+          if (Q.max[k] - Q.min[k] <= FIT_TOL) meet = false;
+        }
+        if (!meet) continue;
+        checked++;
+        var hits = intrusions(A, B, Q, ctr).concat(intrusions(B, A, Q, ctr));
+        if (!hits.length) continue;
+        var depth = 0, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+        hits.forEach(function (h) {
+          if (h.d > depth) depth = h.d;
+          for (var a = 0; a < 3; a++) { if (h.p[a] < min[a]) min[a] = h.p[a]; if (h.p[a] > max[a]) max[a] = h.p[a]; }
+        });
+        pairs.push({ a: A.id, b: B.id, a_name: A.name, b_name: B.name, depth_mm: round2(depth), points: hits.length,
+          region: { min: min.map(round2), max: max.map(round2) } });
+      }
+    }
+    pairs.sort(function (x, y) { return y.depth_mm - x.depth_mm; });
+    var open = parts.filter(function (p) { return p.shapes.some(function (sh) { return !sh.closed; }); }).map(function (p) { return p.id; });
+    return { pairs: pairs, checked_pairs: checked, not_closed: open, partial: ctr.partial, tolerance_mm: FIT_TOL, step_mm: FIT_STEP };
+  }
+
+  // Each clash with the join the form declares for that pair, if any.
+  function fitWithJoins(fit, joins) {
+    if (!fit) return null;
+    var why = {};
+    (Array.isArray(joins) ? joins : []).forEach(function (j) {
+      if (j && Array.isArray(j.parts) && j.parts.length === 2) why[[String(j.parts[0]), String(j.parts[1])].sort().join('|')] = String(j.why || '');
+    });
+    var pairs = fit.pairs.map(function (p) {
+      var k = [p.a, p.b].sort().join('|');
+      return Object.assign({}, p, { declared: Object.prototype.hasOwnProperty.call(why, k), why: why[k] || null });
+    });
+    // Clashes first, deepest first; then the declared joins.
+    pairs.sort(function (x, y) { return (x.declared - y.declared) || (y.depth_mm - x.depth_mm); });
+    return Object.assign({}, fit, { pairs: pairs, clashes: pairs.filter(function (p) { return !p.declared; }).length });
+  }
+
+  // The boxes to outline in 3D, one per clash the form does not declare. A region thinner
+  // than FIT_MARK_MIN on an axis is widened so the outline can be seen.
+  var FIT_MARK_MIN = 1;
+  function fitMarkRegions(fit) {
+    if (!fit || !Array.isArray(fit.pairs)) return [];
+    return fit.pairs.filter(function (p) { return !p.declared; }).map(function (p) {
+      var min = [], max = [];
+      for (var a = 0; a < 3; a++) {
+        var lo = p.region.min[a], hi = p.region.max[a], pad = Math.max(0, (FIT_MARK_MIN - (hi - lo)) / 2);
+        min.push(lo - pad); max.push(hi + pad);
+      }
+      return { a: p.a, b: p.b, min: min, max: max };
+    });
+  }
+
   // What can be measured from the drawn triangles, and nothing more. Overhang is the area of
   // faces that look steeply downward and do not rest on the floor; it counts faces another
   // part covers, so it is an upper bound. Balance puts the centre of mass (uniform density, a
-  // part's overlap counted twice) against the flat base the form stands on. Components that
-  // overlap are listed with the volume. Wall thickness and the fit of the electronics are not
-  // measured, and the notes say so.
+  // part's overlap counted twice) against the flat base the form stands on. Fit says which
+  // parts clash and how deep (fitCheck). Wall thickness is not measured, and the notes say so.
   function measureForm(results) {
     var live = (results || []).filter(function (r) { return r && !r.error && r.shapes && r.shapes.length; });
     if (!live.length) return null;
@@ -502,7 +760,8 @@
       'Measured from the drawn triangles, with uniform density.',
       'Overhang is an upper bound: it counts faces that another part covers.',
       'The centre of mass counts overlapping parts twice.',
-      'Not measured: wall thickness, clearance round the electronics, and fit.',
+      'Not measured: wall thickness, and the gap between parts that do not touch.',
+      'Fit is tested on surface points about ' + FIT_STEP + ' mm apart: a clash thinner than that can be missed, and its depth is an estimate.',
     ];
     var com = vol > 0 ? [round(cx / vol), round(cy / vol), round(cz / vol)] : null;
     var support = null;
@@ -521,6 +780,8 @@
       }
     }
     if (!support) notes.push('The form has no flat base to stand on (it hangs, or rests on a point or an edge), so balance is not assessed.');
+    // Components whose boxes overlap, with the overlap's volume: kept as it was, because the
+    // concept revision sends it to the verification service. Fit is the test on the shapes.
     var overlaps = [], comps = live.filter(function (r) { return r.kind === 'component' && r.bbox; });
     for (var i = 0; i < comps.length; i++) {
       for (var j = i + 1; j < comps.length; j++) {
@@ -531,7 +792,7 @@
     }
     return {
       total_area: round(total), overhang_area: round(down), overhang_share: total > 0 ? round(down / total) : 0,
-      com: com, support: support, overlaps: overlaps, notes: notes,
+      com: com, support: support, overlaps: overlaps, fit: fitCheck(live), notes: notes,
     };
   }
 
@@ -619,13 +880,14 @@
      with its reason, never as a pass. */
   var NOT_ASSESSED = [
     { id: 'wall', label: 'Wall thickness, draft and moulding rules', why: 'They are computed from an enclosure shell; this form has none.' },
-    { id: 'fit', label: 'Fit of the electronics inside the form', why: 'The engine places parts only inside an enclosure.' },
     { id: 'thermal', label: 'Vents, heat and radio checks', why: 'They depend on the enclosure walls and openings.' },
     { id: 'verdict', label: 'Manufacturing verdict and unit cost', why: 'Cost and process fit are priced from the enclosure.' },
     { id: 'assembly', label: 'Assembly steps and time', why: 'The assembly model follows the enclosure and its fixings.' },
     { id: 'tests', label: 'Product tests and requirements met', why: 'Their inputs come from the enclosure model.' },
     { id: 'bom', label: 'Bill of materials for the form itself', why: 'The shell line is priced from the enclosure.' },
   ];
+
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
   function fmtMm(v) { return String(Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10); }
 
@@ -861,7 +1123,12 @@
         if (m.support.margin_mm < 0) d.facts.push(['Balance', 'Would tip over: its centre of mass is outside the base']);
         else d.facts.push(['Tips over at', Math.round(m.support.tip_angle_deg) + '°']);
       } else d.facts.push(['Balance', 'No flat base, so not assessed']);
-      if (m.overlaps && m.overlaps.length) d.facts.push(['Components overlap', m.overlaps.length + ' pair' + (m.overlaps.length === 1 ? '' : 's')]);
+      var fit = fitWithJoins(m.fit, sm.joins);
+      if (fit) {
+        d.fit = fit;
+        var declared = fit.pairs.length - fit.clashes;
+        d.facts.push(['Fit', fit.clashes || declared ? plural(fit.clashes, 'clash', 'clashes') + (declared ? ', ' + plural(declared, 'declared join', 'declared joins') : '') : 'No parts clash']);
+      }
     }
     return d;
   }
@@ -888,13 +1155,53 @@
     return { section: sec, body: body };
   }
 
+  /* Fit (MetaForge, 2026-11-11): each clash between two parts, deepest first, then each join
+     the form declares. A row's button picks the part that goes into the other. */
+  function renderFit(doc, fit, onPick) {
+    var declared = fit.pairs.length - fit.clashes;
+    var head = fit.clashes ? plural(fit.clashes, 'clash', 'clashes') : fit.partial ? 'test cut short' : 'no parts clash';
+    if (declared) head += ', ' + plural(declared, 'declared join', 'declared joins');
+    var card = makeCard(doc, 'authFit', 'Fit', head, fit.clashes ? 's-fail' : fit.partial ? 's-warn' : 's-pass', false);
+    var note = doc.createElement('p'); note.className = 'note';
+    note.textContent = 'Tested on the drawn shapes: ' + plural(fit.checked_pairs, 'pair of parts meets', 'pairs of parts meet') +
+      '. Points about ' + fit.step_mm + ' mm apart, so the depth is an estimate, at most half the thinner part. Outlined in red in the 3D view.';
+    card.body.appendChild(note);
+    if (fit.pairs.length) {
+      var ul = doc.createElement('ul'); ul.className = 'rlist';
+      fit.pairs.forEach(function (p) {
+        var li = doc.createElement('li'); li.className = 'rule ' + (p.declared ? 'st-info' : 'st-fail');
+        li.setAttribute('data-fit', p.a + '~' + p.b);
+        var chip = doc.createElement('span'); chip.className = 'chip'; chip.textContent = p.declared ? 'joined' : 'clash';
+        var rt = doc.createElement('div'); rt.className = 'rt';
+        var rl = doc.createElement('div'); rl.className = 'rl'; rl.textContent = p.b_name + ' into ' + p.a_name;
+        var rv = doc.createElement('div'); rv.className = 'rv';
+        rv.textContent = p.declared ? 'declared: ' + p.why : 'about ' + p.depth_mm + ' mm deep';
+        rt.appendChild(rl); rt.appendChild(rv);
+        li.appendChild(chip); li.appendChild(rt);
+        if (typeof onPick === 'function') {
+          var b = doc.createElement('button'); b.type = 'button'; b.className = 'fix'; b.textContent = 'Show';
+          b.addEventListener('click', function () { onPick(p); });
+          li.appendChild(b);
+        } else li.appendChild(doc.createElement('span'));
+        ul.appendChild(li);
+      });
+      card.body.appendChild(ul);
+    }
+    if (fit.not_closed.length) {
+      var nc = doc.createElement('p'); nc.className = 'note';
+      nc.textContent = 'Not tested as solids, their shapes are not closed: ' + fit.not_closed.join(', ') + '.';
+      card.body.appendChild(nc);
+    }
+    return card.section;
+  }
+
   function renderSummary(doc, host, d) {
     if (!host) return null;
     // Click to expand (MetaForge): the card starts closed and remembers a person opening it;
     // it opens itself only when the form has a problem to show.
     var blkWasOpen = false;
     if (typeof host.querySelector === 'function') {
-      ['authBlk', 'authNa'].forEach(function (id) {
+      ['authBlk', 'authFit', 'authNa'].forEach(function (id) {
         var old = host.querySelector('#' + id);
         if (old && id === 'authBlk') blkWasOpen = /\bopen\b/.test(old.className || '');
         if (old && old.parentNode) old.parentNode.removeChild(old);
@@ -938,6 +1245,7 @@
       d.problems.forEach(function (t) { var line = doc.createElement('div'); line.textContent = t; bad.appendChild(line); });
       body.appendChild(bad);
     }
+    var fitSec = d.fit ? renderFit(doc, d.fit, d.onFitPick) : null;
     var na = makeCard(doc, 'authNa', 'Not assessed', 'authored form, ' + d.notAssessed.length + ' checks', 's-warn', false);
     var ul = doc.createElement('ul'); ul.className = 'rlist';
     d.notAssessed.forEach(function (n) {
@@ -949,8 +1257,8 @@
       wrap.appendChild(l1); wrap.appendChild(l2); li.appendChild(chip); li.appendChild(wrap); ul.appendChild(li);
     });
     na.body.appendChild(ul);
-    // Inserted first, so the form card ends up above it.
-    [na.section, form.section].forEach(function (sec) {
+    // Inserted first, so the form card ends up above fit, and fit above not assessed.
+    [na.section, fitSec, form.section].filter(Boolean).forEach(function (sec) {
       if (typeof host.insertBefore === 'function') host.insertBefore(sec, host.firstChild); else host.appendChild(sec);
     });
     return form.section;
@@ -1130,9 +1438,18 @@
       rules.push({ id: 'form.balance', label: 'Tips over only past ' + SCREEN_TIP_DEG + ' degrees (uniform density)', st: st, val: val, lim: SCREEN_TIP_DEG + ' deg' });
       rules.push({ id: 'form.overhang', label: 'Overhang, an upper bound that counts covered faces', st: 'na', val: Math.round((m.overhang_share || 0) * 100) + '% of the surface', lim: null });
       var n = (m.overlaps || []).length;
-      rules.push({ id: 'form.component_overlap', label: 'Components do not overlap', st: n ? 'warn' : 'pass', val: n ? n + ' pair' + (n === 1 ? '' : 's') : 'none', lim: null });
+      rules.push({ id: 'form.component_overlap', label: "Components' boxes do not overlap", st: n ? 'warn' : 'pass', val: n ? n + ' pair' + (n === 1 ? '' : 's') : 'none', lim: null });
+      var fit = fitWithJoins(m.fit, summary.joins);
+      if (fit) {
+        rules.push({ id: 'form.fit', label: 'No two parts clash (tested on the drawn shapes)', st: fit.clashes ? 'fail' : fit.partial ? 'warn' : 'pass',
+          val: plural(fit.clashes, 'clash', 'clashes') + ' in ' + plural(fit.checked_pairs, 'pair that meets', 'pairs that meet') + (fit.partial ? ', test cut short' : ''), lim: 'deeper than ' + fit.tolerance_mm + ' mm' });
+        fit.pairs.slice(0, 12).forEach(function (p) {
+          rules.push({ id: 'form.fit.' + [p.a, p.b].sort().join('~'), label: p.b_name + ' clears ' + p.a_name,
+            st: p.declared ? 'pass' : 'fail', val: p.declared ? 'joined, as declared: ' + p.why : 'clash about ' + p.depth_mm + ' mm deep', lim: null });
+        });
+      }
     }
-    rules.push({ id: 'form.enclosure_checks', label: 'Enclosure checks (wall, draft, fit, cost) not run: this form is authored', st: 'na', val: 'not run', lim: null });
+    rules.push({ id: 'form.enclosure_checks', label: 'Enclosure checks (wall, draft, cost) not run: this form is authored', st: 'na', val: 'not run', lim: null });
     return rules;
   }
 
@@ -1150,6 +1467,25 @@
     var lightGroup = new THREE.Group();
     lightGroup.name = 'authored-lights';
     env.scene.add(lightGroup);
+    // Fit (MetaForge): a red outline round each clash, seen through the other parts.
+    var fitGroup = new THREE.Group();
+    fitGroup.name = 'authored-fit';
+    env.scene.add(fitGroup);
+    var fitMarks = [];
+    function drawFit(fit) {
+      while (fitGroup.children.length) { var o = fitGroup.children.pop(); if (o.geometry && o.geometry.dispose) o.geometry.dispose(); }
+      fitMarks = fitMarkRegions(fit);
+      if (!THREE.LineSegments || !THREE.EdgesGeometry || !THREE.BoxGeometry || !THREE.LineBasicMaterial) return;
+      fitMarks.forEach(function (r) {
+        var box = new THREE.BoxGeometry(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]);
+        var line = new THREE.LineSegments(new THREE.EdgesGeometry(box), new THREE.LineBasicMaterial({ color: 0xd93025, depthTest: false, transparent: true }));
+        box.dispose();
+        line.position.set((r.min[0] + r.max[0]) / 2, (r.min[1] + r.max[1]) / 2, (r.min[2] + r.max[2]) / 2);
+        line.renderOrder = 999;
+        line.userData.fit = r.a + '~' + r.b;
+        fitGroup.add(line);
+      });
+    }
     var sceneMat = null, lightMap = {};
 
     var quick = env.quick || null;
@@ -1315,7 +1651,7 @@
       clear();
       drawScene(null);
       Object.keys(lightMap).forEach(function (id) { lightGroup.remove(lightMap[id]); delete lightMap[id]; });
-      if (env.scene && env.scene.remove) { env.scene.remove(sceneGroup); env.scene.remove(lightGroup); }
+      if (env.scene && env.scene.remove) { env.scene.remove(sceneGroup); env.scene.remove(lightGroup); env.scene.remove(fitGroup); }
       if (env.scene && env.scene.remove) env.scene.remove(group);
       if (panel && panel.parentNode && panel !== quick) panel.parentNode.removeChild(panel);
     }
@@ -1824,6 +2160,7 @@
         triangles: result ? result.triangles : 0,
         errors: result ? result.errors : [],
         measured: result ? result.measured || null : null,
+        joins: ((((env.cfg || {}).form || {}).authored || {}).joins) || [],
       };
       GLOBAL.FG_AUTHORED = summary;
       var desc = describe(summary, env.material ? env.material() : null, function (id) {
@@ -1831,6 +2168,8 @@
         return l && l.density !== null ? { name: l.material, density: l.density } : null;
       });
       if (env.onSeen) { desc.onSeen = env.onSeen; desc.seen = !!(env.seenState && env.seenState()); }
+      if (status !== 'running') drawFit(desc.fit || null);
+      desc.onFitPick = function (p) { openPart(p.b); };
       if (env.summaryHost) renderSummary(doc, env.summaryHost, desc);
       if (env.summaryHost) renderComponents(doc, env.summaryHost, describeComponents(env.cfg));
       if (env.summaryHost && summary.status === 'ready') {
@@ -2129,10 +2468,10 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, sceneGroup: function () { return sceneGroup; }, lights: lightsNow, openedPart: function () { return openedPart; }, partPreview: function (id) { return previewMakes[id] || null; },
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, fitMarks: function () { return fitMarks.slice(); }, sceneGroup: function () { return sceneGroup; }, lights: lightsNow, openedPart: function () { return openedPart; }, partPreview: function (id) { return previewMakes[id] || null; },
       setViewMode: setViewMode, viewMode: function () { return viewMode; }, setCut: setCut, cut: function () { return { axis: cut.axis, t: cut.t }; }, cutAt: cutPosition, proposedMakes: proposedMakes,
       tryVariant: tryVariant, showSideBySide: showSideBySide, sideBySide: function () { return sideGroup; }, useVariant: useVariant };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, estimateCost: estimateCost, renderCost: renderCost, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, estimateCost: estimateCost, renderCost: renderCost, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, fitCheck: fitCheck, fitWithJoins: fitWithJoins, fitMarkRegions: fitMarkRegions, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });
