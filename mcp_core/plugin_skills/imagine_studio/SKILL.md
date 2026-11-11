@@ -300,8 +300,11 @@ and the parts in `form.authored.parts`. Each part has:
   `[x, y, z]` in millimetres (Y up, the box is centred there), and `rot` is an
   optional `[x, y, z]` rotation in degrees. Leave `code` out: the studio writes
   it from the part's size, so the shape and the sourced part cannot drift apart,
-  and writes it again from the part each time you write the studio. A part that
-  has its own `code` keeps it. A `component_ref` that names no part is refused.
+  and writes it again from the part each time you write the studio. The box is
+  only the part's bounding box: when the real outline is not a box (a round
+  display, a board with a tab), write the part's own `code` from its outline and
+  the studio keeps it, even on a part read back with `derived_from` set. A
+  `component_ref` that names no part is refused.
 - `code`: the body of `build(p, g)`. `p` holds the parameters, read only (`p.arm_len`);
   `g` builds shapes. Return a list of shapes, for example
   `return [g.box(10, 5, 5).at(0, 2.5, 0)];`

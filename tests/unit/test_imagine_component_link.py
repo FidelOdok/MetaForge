@@ -138,3 +138,26 @@ async def test_through_the_real_write_the_linked_part_is_stored_derived() -> Non
     )
     stored = _part(response.config or {}, "usb")
     assert stored["derived_from"] == "component_ref" and "g.box(9, 3.2, 7.5)" in stored["code"]
+
+
+def test_code_the_agent_rewrote_on_a_derived_part_is_kept_and_the_mark_dropped() -> None:
+    """MetaForge, 2026-11-11: the agent read a derived part back (mark included), redrew
+    it as a disc and a tab, and the next write replaced that with the bounding box again."""
+    drawn = (
+        "return [g.cylinder(19.25, 5, 64).at(0.695, 10.8, 0), "
+        "g.box(2.445, 5, 10).at(-18.7, 10.8, 0)];"
+    )
+    cfg = _config(_usb(code=drawn, derived_from="component_ref", uses=[]))
+    out, notes = expand_component_parts(cfg)
+    part = _part(out, "usb")
+    assert part["code"] == drawn
+    assert "derived_from" not in part
+    assert not [n for n in notes if '"usb"' in n]
+
+
+def test_a_derived_part_read_back_unchanged_is_derived_again_from_its_part() -> None:
+    stale = "return [g.box(1, 1, 1).at(1.5, 2.5, 3.5)];"
+    out, _ = expand_component_parts(_config(_usb(code=stale, derived_from="component_ref")))
+    part = _part(out, "usb")
+    assert part["code"] == "return [g.box(9, 3.2, 7.5).at(1.5, 2.5, 3.5)];"
+    assert part["derived_from"] == "component_ref"

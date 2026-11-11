@@ -655,8 +655,9 @@ A part of kind `component` can name its real part with `component_ref`, the `id`
 `context.components.parts`, and say where it sits with `at` (`[x, y, z]` in millimetres, Y up) and
 optionally `rot` (degrees). With no `code` of its own, the studio writes the drawing code from that
 part's size on every write, so the shape and the sourced part cannot drift apart. The write names each
-part drawn this way in its warnings. A part with its own code keeps it, a reference to a part that does
-not exist is refused, and a component with no reference is flagged as a stand-in.
+part drawn this way in its warnings. A part with its own code keeps it, including a part drawn this way
+whose code the agent has since rewritten (for a real outline that is not a box), a reference to a part
+that does not exist is refused, and a component with no reference is flagged as a stand-in.
 
 At the Engineer level the left pane shows the form's own graph instead: a column of parameter
 nodes (each with its slider), a column of part nodes, and the form node. A wire runs from a
