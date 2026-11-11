@@ -37,6 +37,7 @@ from api_gateway.imagine import (
     engine_page,
     part_model,
     resolve_part,
+    studio_patch,
     verification_client,
 )
 from api_gateway.imagine.schemas import (
@@ -645,64 +646,136 @@ class ImagineService:
     ) -> StudioResponse:
         with tracer.start_as_current_span("imagine.put_studio") as span:
             span.set_attribute("project_id", project_id)
-            # A part with no size gets a labelled 3D body, so every part exists in 3D.
-            # Reading a library and a model is file work: off the event loop.
-            config, drawn = await asyncio.to_thread(
-                resolve_part.fill_part_bodies,
-                config,
-                kicad_config=resolve_part.kicad_config_from_env(),
-            )
-            # A component in the form that names its real part is drawn from that part.
-            config, linked = component_link.expand_component_parts(config)
-            drawn = [*drawn, *linked]
-            try:
-                checked = engine_page.validate_config(config)
-            except engine_page.ConfigError as exc:
-                _count("put", "refused")
-                # ``errors`` and ``warnings`` stay for the dashboard; ``findings``
-                # is the same shape POST /validate returns, so an agent reads one
-                # format. There is no verdict here: the write is refused before
-                # anything is judged, and verdicts are the service's to give.
-                findings = config_findings(exc.errors, exc.warnings, None)
+            return await self._put(project_id, config, actor=actor, span=span)
+
+    async def patch_studio(
+        self, project_id: str, base_revision: int, changes: Any, *, actor: str
+    ) -> StudioResponse:
+        """The next revision: the head's config with ``changes`` applied (studio_patch).
+
+        Refused (409) when the head is no longer ``base_revision``, so a change is never
+        applied to a config its author did not read; (400) when a change cannot be applied;
+        and (422) when the changed config fails the formgraph checks, exactly as a full
+        write is. Nothing is written when it is refused.
+        """
+        with tracer.start_as_current_span("imagine.patch_studio") as span:
+            span.set_attribute("project_id", project_id)
+            span.set_attribute("studio.base_revision", base_revision)
+            head = await self._head(project_id)
+            if head is None or not isinstance(head.state.get("config"), dict):
+                _count("patch", "refused")
                 raise ImagineError(
-                    "The config does not pass the formgraph checks.",
-                    422,
-                    {
-                        "errors": exc.errors,
-                        "warnings": exc.warnings,
-                        "findings": [f.model_dump(mode="json") for f in findings],
-                    },
-                ) from exc
-            async with self._lock(project_id):
-                head = await self._head(project_id)
-                if head is not None and head.state.get("status") == "handed_over":
-                    _count("put", "refused")
-                    raise ImagineError(
-                        f"{head.ref} is handed over and read-only; rework it to change the config.",
-                        409,
-                    )
-                state = {
-                    "config": checked.config,
-                    "status": "draft",
-                    "collections": (head.state["collections"] if head else _empty_collections()),
-                    "events": (head.state["events"] if head else {}),
-                    "handover": None,
-                    "rework": head.state.get("rework") if head else None,
-                    "warnings": [*checked.warnings, *drawn],
-                }
-                new = await self._write_revision(
-                    project_id, state, actor=actor, reason="studio config from the agent"
+                    "There is no studio to change yet; write the first config with "
+                    "twin.imagine_put_studio.",
+                    404,
                 )
-            span.set_attribute("studio.revision", new.revision)
-            _count("put", "ok")
-            self._publish(project_id, f"put-{new.revision}", f"Studio config {new.ref} recorded")
-            logger.info(
-                "imagine_studio_put",
-                project_id=project_id,
-                ref=new.ref,
-                warnings=len(checked.warnings),
+            if head.revision != base_revision:
+                _count("patch", "refused")
+                raise ImagineError(
+                    f"The studio is at revision {head.revision}, not {base_revision}; read it "
+                    f"again (twin.imagine_get_studio) and make the change against "
+                    f"revision {head.revision}.",
+                    409,
+                )
+            try:
+                config, applied = studio_patch.apply_changes(head.state["config"], changes)
+            except studio_patch.PatchError as exc:
+                _count("patch", "refused")
+                raise ImagineError(str(exc), 400) from exc
+            span.set_attribute("studio.changes", len(applied))
+            out = await self._put(
+                project_id,
+                config,
+                actor=actor,
+                span=span,
+                expect_revision=base_revision,
+                reason="studio change from the agent",
+                metric="patch",
             )
-            return self._response(project_id, new)
+            logger.info(
+                "imagine_studio_patched",
+                project_id=project_id,
+                base_revision=base_revision,
+                revision=out.revision,
+                changes=applied,
+            )
+            return out
+
+    async def _put(
+        self,
+        project_id: str,
+        config: dict[str, Any],
+        *,
+        actor: str,
+        span: Any,
+        expect_revision: int | None = None,
+        reason: str = "studio config from the agent",
+        metric: str = "put",
+    ) -> StudioResponse:
+        # A part with no size gets a labelled 3D body, so every part exists in 3D.
+        # Reading a library and a model is file work: off the event loop.
+        config, drawn = await asyncio.to_thread(
+            resolve_part.fill_part_bodies,
+            config,
+            kicad_config=resolve_part.kicad_config_from_env(),
+        )
+        # A component in the form that names its real part is drawn from that part.
+        config, linked = component_link.expand_component_parts(config)
+        drawn = [*drawn, *linked]
+        try:
+            checked = engine_page.validate_config(config)
+        except engine_page.ConfigError as exc:
+            _count(metric, "refused")
+            # ``errors`` and ``warnings`` stay for the dashboard; ``findings``
+            # is the same shape POST /validate returns, so an agent reads one
+            # format. There is no verdict here: the write is refused before
+            # anything is judged, and verdicts are the service's to give.
+            findings = config_findings(exc.errors, exc.warnings, None)
+            raise ImagineError(
+                "The config does not pass the formgraph checks.",
+                422,
+                {
+                    "errors": exc.errors,
+                    "warnings": exc.warnings,
+                    "findings": [f.model_dump(mode="json") for f in findings],
+                },
+            ) from exc
+        async with self._lock(project_id):
+            head = await self._head(project_id)
+            if head is not None and head.state.get("status") == "handed_over":
+                _count(metric, "refused")
+                raise ImagineError(
+                    f"{head.ref} is handed over and read-only; rework it to change the config.",
+                    409,
+                )
+            now = head.revision if head is not None else 0
+            if expect_revision is not None and now != expect_revision:
+                _count(metric, "refused")
+                raise ImagineError(
+                    f"The studio moved to revision {now} while this change was checked; "
+                    f"read it again and make the change against revision {now}.",
+                    409,
+                )
+            state = {
+                "config": checked.config,
+                "status": "draft",
+                "collections": (head.state["collections"] if head else _empty_collections()),
+                "events": (head.state["events"] if head else {}),
+                "handover": None,
+                "rework": head.state.get("rework") if head else None,
+                "warnings": [*checked.warnings, *drawn],
+            }
+            new = await self._write_revision(project_id, state, actor=actor, reason=reason)
+        span.set_attribute("studio.revision", new.revision)
+        _count(metric, "ok")
+        self._publish(project_id, f"put-{new.revision}", f"Studio config {new.ref} recorded")
+        logger.info(
+            "imagine_studio_put",
+            project_id=project_id,
+            ref=new.ref,
+            warnings=len(checked.warnings),
+        )
+        return self._response(project_id, new)
 
     # -- measurements -----------------------------------------------------
 

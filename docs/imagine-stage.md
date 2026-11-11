@@ -16,7 +16,7 @@ its own copy; this one lives in `api_gateway/imagine/` (provenance in its
 |---|---|
 | Gateway | `/v1/twin/projects/{project_id}/imagine/...` (`api_gateway/imagine/`) |
 | Twin item | `IMG-STUDIO`, work product type `imagine_studio` (a definition: every config change or rework is its next revision) |
-| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_handover_status`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
+| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_patch_studio`, `twin.imagine_handover_status`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
 | Engine | `api_gateway/imagine/engine/` (HTML, CSS and JS), three.js r128 vendored under `engine/vendor/` |
 
 ## Verification levels
@@ -53,7 +53,10 @@ whether components overlap. The stored entry also lists the enclosure checks as
 ## The studio
 
 An agent writes the studio with `twin.imagine_put_studio` (or `PUT
-/studio`): a formgraph product config, checked with the merged
+/studio`), and changes it with `twin.imagine_patch_studio`: a list of edits
+(JSON Patch style, a list item named by its `id`) applied to the revision the
+agent read, then checked and written exactly as a full config is, so a
+one-line change is not a whole-config rewrite. The config is a formgraph product config, checked with the merged
 `build_page` and `fg_context` rules. One thing differs from the plugin: the
 product context (real parts, machines, options, models, scenarios, packed
 references, made parts) travels **inline** as `config.context`, never as a

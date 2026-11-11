@@ -468,6 +468,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.export_cad_step",
         # FORGE-821: the next IMG-STUDIO revision; earlier ones are kept.
         "twin.imagine_put_studio",
+        # MetaForge: the same next revision, from a list of changes.
+        "twin.imagine_patch_studio",
         # FORGE-687: a new design-files node (or the next revision of its
         # item); the files it reads on the workspace are not touched.
         "twin.record_design_files",

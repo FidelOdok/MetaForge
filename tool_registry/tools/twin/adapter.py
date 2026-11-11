@@ -9331,6 +9331,73 @@ class TwinServer(McpToolServer):
             ),
             handler=self.imagine_put_studio,
         )
+        # MetaForge (2026-11-11): a change as a list of edits, so a small change is not a
+        # whole-config rewrite (output tokens) and cannot be cut off at the output cap.
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_patch_studio",
+                adapter_id="twin",
+                name="Imagine: Patch Studio",
+                description=(
+                    "Change the Imagine studio without resending the whole config: the "
+                    "changes apply to revision base_revision and become the next IMG-STUDIO "
+                    "revision, checked exactly as twin.imagine_put_studio checks a full "
+                    "config. Each change is JSON Patch style: op add, replace or remove, "
+                    "path a JSON Pointer such as /form/params/case_d, and value (not for "
+                    "remove). In a list of items with an id (parts, behaviours, variants, "
+                    "scene objects, context.components.parts), name the item by its id: "
+                    "/form/authored/parts/display/code; - appends with add. Refused "
+                    "when the studio is no longer at base_revision (read it again), when a "
+                    "change names something that does not exist, or when the result fails "
+                    "the checks; nothing is written then. Returns the new revision, what "
+                    "was applied and the warnings, not the config. Use it for any change "
+                    "to an existing studio; write a whole config only for a new studio or "
+                    "a redesign."
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        **project,
+                        "base_revision": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "The revision the changes were made against.",
+                        },
+                        "changes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "op": {"enum": ["add", "replace", "remove"]},
+                                    "path": {"type": "string"},
+                                    "value": {},
+                                },
+                                "required": ["op", "path"],
+                            },
+                        },
+                    },
+                    "required": ["base_revision", "changes"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "revision": {"type": "integer"},
+                        "config_ref": {"type": ["string", "null"]},
+                        "engine_url": {"type": "string"},
+                        "applied": {"type": "array", "items": {"type": "string"}},
+                        "warnings": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.imagine_patch_studio,
+        )
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="twin.imagine_handover_status",
@@ -9805,6 +9872,42 @@ class TwinServer(McpToolServer):
                 raise ValueError(f"twin.imagine_put_studio: {message}") from exc
             raise
         return dict(studio.model_dump(mode="json"))
+
+    async def imagine_patch_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.imagine_patch_studio"
+        pid = self._imagine_project(arguments, tool)
+        base = arguments.get("base_revision")
+        if isinstance(base, bool) or not isinstance(base, int):
+            raise ValueError(
+                f"{tool}: 'base_revision' must be the revision number the changes were made "
+                "against (twin.imagine_get_studio returns it)"
+            )
+        actor = str(current_context().actor_id or "agent")
+        try:
+            studio = await self._imagine_studio.patch_studio(
+                pid, base, arguments.get("changes"), actor=actor
+            )
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            if isinstance(detail, dict) and detail.get("errors"):
+                raise ValueError(
+                    f"{tool}: the changed config does not pass the formgraph checks: "
+                    + "; ".join(str(e) for e in detail["errors"][:20])
+                ) from exc
+            message = getattr(exc, "message", None)
+            if message:
+                raise ValueError(f"{tool}: {message}") from exc
+            raise
+        changes = arguments.get("changes") or []
+        return {
+            "project_id": studio.project_id,
+            "status": studio.status,
+            "revision": studio.revision,
+            "config_ref": studio.config_ref,
+            "engine_url": studio.engine_url,
+            "applied": [f"{c.get('op')} {c.get('path')}" for c in changes if isinstance(c, dict)],
+            "warnings": list(studio.warnings),
+        }
 
     async def imagine_handover_status(self, arguments: dict[str, Any]) -> dict[str, Any]:
         pid = self._imagine_project(arguments, "twin.imagine_handover_status")

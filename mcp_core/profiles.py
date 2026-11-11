@@ -881,6 +881,8 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
     "imagine": _CREATE_READS
     | {
         "twin.imagine_put_studio",
+        # A change to the studio as a list of edits, not the whole config.
+        "twin.imagine_patch_studio",
         # A dry run of the Imagine gates. Imagine's own work, so it is not in the
         # reads every stage carries: Develop, Check and Make are near the cap.
         "twin.imagine_validate",

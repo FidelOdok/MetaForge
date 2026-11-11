@@ -6,7 +6,7 @@ Start or update the active project's Imagine studio, following the `imagine_stud
 
 Call `session.start` with the project first. If your client does not keep the MCP session (a headless run, or a 2026-07-28 client), pass the `session_handle` it returns as the `metaforge_session` argument on every later call, so each call stays in the project and its approval policy applies, including to tools with no `project_id` argument.
 
-Then call `twin.imagine_get_studio`. With no studio, or a draft, build the formgraph config from what the person said, using the skill's skeleton and rules, asking at most three questions. Write it with `twin.imagine_put_studio`. A refusal lists every failed check: fix all of them and write once more. If that is refused too, stop and say which checks still fail.
+Then call `twin.imagine_get_studio`. With no studio, or a draft, build the formgraph config from what the person said, using the skill's skeleton and rules, asking at most three questions. Write it with `twin.imagine_put_studio`. A refusal lists every failed check: fix all of them and write once more. If that is refused too, stop and say which checks still fail. Change an existing studio with `twin.imagine_patch_studio` (only the changes, against the revision you read), never by resending the whole config.
 
 If the form is authored, look at it with `twin.imagine_look` after each write, naming the `revision` the write returned. If it answers `unavailable` or you cannot look, say you could not look at the form and never claim it looks right. Read its `measured` block: if the form would tip over, or tips at under 15 degrees, change it, write and look again; if components overlap, move one. These are estimates, never verified.
 

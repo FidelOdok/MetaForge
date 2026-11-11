@@ -11,17 +11,18 @@ real parts, the process and quantity, where it lives, and the programme
 records (intent ledger, assumptions, markets). The person shapes it in the
 browser; the handover to engineering is theirs.
 
-You write the config and check it with five tools:
+You write the config and check it with six tools:
 
 | Tool | Does |
 |---|---|
 | `twin.imagine_get_studio` | Reads the studio: status (none, draft, handed_over), revision, config, and what the person did in the browser. Reads only. |
-| `twin.imagine_put_studio` | Writes the config as the next revision. The formgraph checks run first; any error refuses the write and lists every problem. |
+| `twin.imagine_put_studio` | Writes the config as the next revision. The formgraph checks run first; any error refuses the write and lists every problem. For a new studio or a redesign. |
+| `twin.imagine_patch_studio` | Changes the studio with a list of edits against `base_revision`, checked exactly as a full write; returns the new revision and what was applied, not the config. **Use it for every change to an existing studio.** |
 | `twin.imagine_handover_status` | The handover checklist: each item done, missing or assumed. Reads only. |
 | `twin.imagine_validate` | A dry run of every gate: all findings at once, who can clear each (you, the person, or something outside), and a verdict that says who acts next. Writes nothing. The verification service decides it, not you. |
 | `twin.imagine_look` | Looks at an authored form: what each part drew and a picture, and with `set` moves a parameter and looks again. Reads only; needs a browser where the tools run and says when it has none. |
 
-All five take `project_id` (defaults to the chat's project). Two more are a
+All six take `project_id` (defaults to the chat's project). Two more are a
 person's steps, open to you only in a delegated run (rule 2):
 
 | Tool | Does |
@@ -364,6 +365,21 @@ and the parts in `form.authored.parts`. Each part has:
 - A change to the form alone (sizes, parts, makes, behaviours, variants) is
   pushed into the person's open studio without reloading it, so prefer
   changing the form over rebuilding the whole config.
+- **Change a studio with `twin.imagine_patch_studio`, not a whole new config.**
+  Rewriting the config costs thousands of output tokens for a one-line change,
+  and a long one can be cut off before it is sent. Read the studio once
+  (`twin.imagine_get_studio`, or use the revision your last write returned),
+  then send only the changes against that `base_revision`:
+  `{"op": "replace", "path": "/form/params/case_d", "value": 44}`,
+  `{"op": "replace", "path": "/form/authored/parts/display/code", "value": "return [...];"}`,
+  `{"op": "add", "path": "/form/authored/parts/-", "value": {...a new part...}}`,
+  `{"op": "add", "path": "/context/components/parts/-", "value": {...a record...}}`,
+  `{"op": "remove", "path": "/form/authored/behaviours/press"}`. A list item is
+  named by its `id`; `-` appends. Put every change for one request in one
+  patch (up to 64): one request, one write. A refusal names the change that
+  failed; if it says the studio moved to another revision, read it again and
+  send the changes against that one. Use `twin.imagine_put_studio` only for a
+  new studio or a redesign of most of it.
 - The studio is calm by design: the page gives the person primitives (sizes,
   parts that open on a click, Try it, cut-away views) and you author what
   fills them. Generate the twin so those primitives have something true to
@@ -499,9 +515,10 @@ because it can hide a word: write plain text. Budgets: at most
 **How to work.** Choose the parameters first: every dimension a person might
 want to change is one, so a slider moves it and the form redraws with no
 further model call. Write one small part at a time from the shapes above. It is
-a concept, not exact geometry, and nothing here is claimed as exact. Write with
-`twin.imagine_put_studio`; a refusal lists every problem and names the parts, so
-fix those parts and write again. Then validate as in the steps below.
+a concept, not exact geometry, and nothing here is claimed as exact. Write the
+first config with `twin.imagine_put_studio`; a refusal lists every problem and
+names the parts, so fix those parts and write again. Every later change is a
+`twin.imagine_patch_studio`. Then validate as in the steps below.
 
 A desk lamp with a base, an arm, a shade, a light panel, a touch button and a
 USB-C port. Replace `form` in the skeleton with this and keep the rest:
@@ -644,8 +661,9 @@ USB-C port. Replace `form` in the skeleton with this and keep the rest:
    place in your config. It never carries a value, so the source you read
    supplies it.
 5. **Fix what is yours, then check only that.** While the verdict is
-   `needs_agent` or `invalid`, fix every finding whose `resolver` is `agent`,
-   write the config with `twin.imagine_put_studio`, then call
+   `needs_agent` or `invalid`, fix every finding whose `resolver` is `agent`
+   in one `twin.imagine_patch_studio` (the finding's `pointer` is where the
+   change goes), then call
    `twin.imagine_validate` with `revision` set to the revision that write
    returned, and `scope` set to the refs you changed (`{kind, id}` as the
    findings give them). Always name the `revision`: the chat repeats an

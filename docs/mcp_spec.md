@@ -1373,6 +1373,18 @@ per-product formgraph config for Create's Imagine stage
   reference `file` is refused. A config that fails the checks is a tool error
   listing every error; a handed-over studio is a tool error until a person
   reworks it.
+- `twin.imagine_patch_studio` (additive): takes `base_revision` and `changes`
+  (1 to 64), each `{op, path, value}` in the style of JSON Patch (RFC 6902):
+  `add`, `replace` or `remove` at a JSON Pointer. In a list of objects with an
+  `id`, a path segment may name an item by its `id`
+  (`/form/authored/parts/display/code`) as well as by its index; `-` appends
+  with `add`. The changes apply in order to the head's config and the result is
+  checked and written exactly as `twin.imagine_put_studio` writes a config, as
+  the next revision. A head that is no longer `base_revision`, a change that
+  names something that does not exist, and a result that fails the checks are
+  tool errors, and nothing is written. Returns `{project_id, status, revision,
+  config_ref, engine_url, applied, warnings}`, not the config. MCP only; there
+  is no REST route.
 - `twin.imagine_handover_status` (read-only): `{ready, items: [{id, label,
   status, detail}]}`, the checklist that gates Imagine to Develop.
 - `twin.imagine_validate` (read-only, never held for approval): a dry run of
