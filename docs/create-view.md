@@ -954,6 +954,13 @@ Make shows the release checklist and the builds, with one primary action:
 **Plan the making**, or **Inspect the result** once the latest build has
 finished. Each opens in place, one at a time.
 
+**The model a build makes.** Once there is a build, Make shows the revision
+it makes in the same read-only 3D view as Develop, titled with the build
+number and its revision label (for an assembly, the whole product with every
+part in place). It is the newest build that is not cancelled, so the released
+model is what a person sees here, not whatever Develop last showed. When that
+revision is not in the twin, Make says so instead of showing an empty view.
+
 **Release checklist.** Once a process with exact checks is chosen (today 3D
 printing), Make lists the manufacturing release checklist of the current
 revision (see [the release checklist](twin_schema.md#release-checklist)),

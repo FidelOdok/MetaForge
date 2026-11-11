@@ -301,7 +301,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
           ) : stageId === 'check' ? (
             <CheckStage projectId={projectId} onAsk={(text) => ask(text)} />
           ) : (
-            <MakeStage projectId={projectId} view={view.data} model={model} modelRevision={modelRevision} onAsk={(text) => ask(text)} />
+            <MakeStage projectId={projectId} view={view.data} nodes={projectNodes} model={model} modelRevision={modelRevision} onAsk={(text) => ask(text)} />
           )}
           {view.isError && <p className="cv-error">Where the creation stands could not be loaded: {refusalOf(view.error)}</p>}
         </main>

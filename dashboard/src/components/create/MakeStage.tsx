@@ -7,6 +7,7 @@ import type { TwinNode } from '../../types/twin';
 import { BUILD_STATUS_COPY, ROUTE_COPY } from './copy';
 import { InspectPanel } from './InspectPanel';
 import { MakePanel } from './MakePanel';
+import { ProductStage } from './ProductStage';
 import { StageActions, type StageAction } from './StageActions';
 
 /**
@@ -35,14 +36,16 @@ interface MakeStageProps {
   model: TwinNode | undefined;
   modelRevision: number | null;
   onAsk: (text: string) => void;
+  /** The project's twin nodes, so Make can show the model a build makes. */
+  nodes?: TwinNode[];
 }
 
 /**
- * Make: the release checklist and what has been made, with one primary
- * action. Planning a build (route, process, release) and inspecting the
- * result open in place, one at a time.
+ * Make: the model the newest live build makes, the release checklist and
+ * what has been made, with one primary action. Planning a build (route,
+ * process, release) and inspecting the result open in place, one at a time.
  */
-export function MakeStage({ projectId, view, model, modelRevision, onAsk }: MakeStageProps) {
+export function MakeStage({ projectId, view, model, modelRevision, onAsk, nodes = [] }: MakeStageProps) {
   const checklist = useQuery({
     queryKey: dfmKeys.checklist(projectId),
     queryFn: ({ signal }) => getReleaseChecklist(projectId, signal),
@@ -52,6 +55,10 @@ export function MakeStage({ projectId, view, model, modelRevision, onAsk }: Make
   const builds = [...(view?.creation.builds ?? [])].reverse();
   const latest = builds[0];
   const toInspect = !!latest && latest.status === 'completed' && !latest.acceptance;
+  // The revision a person released is the thing to look at here, not whatever
+  // Develop last showed: the newest build that is not cancelled.
+  const shown = builds.find((b) => b.status !== 'cancelled');
+  const shownNode = shown ? nodes.find((n) => n.id === shown.revision.work_product_id) : undefined;
 
   const plan: StageAction = { id: 'plan', label: 'Plan the making', onClick: () => setDetail('plan') };
   const inspect: StageAction = { id: 'inspect', label: 'Inspect the result', onClick: () => setDetail('inspect') };
@@ -67,6 +74,19 @@ export function MakeStage({ projectId, view, model, modelRevision, onAsk }: Make
   return (
     <div className="cv-stage-col">
       <StageActions primary={primary} more={more} />
+
+      {shown && (
+        <section className="cv-card cv-make-model" aria-labelledby="cv-make-model-title" data-testid="make-model">
+          <h3 id="cv-make-model-title">
+            Build {shown.number} · {shown.revision.label || shown.revision.work_product_id}
+          </h3>
+          {shownNode ? (
+            <ProductStage projectId={projectId} nodes={nodes} selectedId={shownNode.id} working={false} />
+          ) : (
+            <p className="cv-muted">This build's model is not in the twin, so it cannot be shown.</p>
+          )}
+        </section>
+      )}
 
       {detail && view && (
         <section className="cv-card" aria-label={detail === 'plan' ? 'Plan the making' : 'Inspect the result'}>

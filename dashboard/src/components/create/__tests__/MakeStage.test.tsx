@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../../test/test-utils';
 import type { CreationView } from '../../../api/endpoints/create';
 import type { Readiness } from '../../../api/endpoints/dfmFindings';
+import type { TwinNode } from '../../../types/twin';
 
 const getReleaseChecklist = vi.fn();
 vi.mock('../../../api/endpoints/dfmFindings', async (orig) => ({
@@ -14,6 +15,9 @@ vi.mock('../../../api/endpoints/dfmFindings', async (orig) => ({
 }));
 vi.mock('../MakePanel', () => ({ MakePanel: () => <div data-testid="make-panel" /> }));
 vi.mock('../InspectPanel', () => ({ InspectPanel: () => <div data-testid="inspect-panel" /> }));
+vi.mock('../ProductStage', () => ({
+  ProductStage: ({ selectedId }: { selectedId: string | null }) => <div data-testid="product-stage" data-selected={selectedId ?? ''} />,
+}));
 
 import { MakeStage, readinessText } from '../MakeStage';
 
@@ -109,5 +113,44 @@ describe('Make', () => {
     expect(readinessText(readiness({ production: true, prototype: true }))).toBe('Ready for production');
     expect(readinessText(readiness({ prototype: true }))).toBe('Ready for prototype');
     expect(readinessText(readiness({}))).toBe('Not ready to make yet');
+  });
+});
+
+describe('Make shows the model each build makes', () => {
+  const node = (id: string, name: string) => ({ id, name, type: 'work_product', properties: {} }) as unknown as TwinNode;
+  const ASSEMBLY = node('wp-asm', 'Smart desk lamp');
+  const build = (number: number, status: string, wp: string) => ({
+    ...BUILD,
+    id: `b${number}`,
+    number,
+    status,
+    revision: { work_product_id: wp, version: 2, label: `Lamp rev ${number}` },
+  });
+
+  it('shows the live build\'s own revision in the 3D view, named by the build', () => {
+    render(
+      <MakeStage projectId={P} view={creation([build(4, 'released', 'wp-asm')])} nodes={[ASSEMBLY]} model={undefined} modelRevision={null} onAsk={vi.fn()} />,
+    );
+    expect(screen.getByTestId('product-stage')).toHaveAttribute('data-selected', 'wp-asm');
+    expect(screen.getByTestId('make-model')).toHaveTextContent('Build 4 · Lamp rev 4');
+  });
+
+  it('skips a cancelled build for the newest live one', () => {
+    const builds = [build(3, 'released', 'wp-asm'), build(4, 'cancelled', 'wp-old')];
+    render(<MakeStage projectId={P} view={creation(builds)} nodes={[ASSEMBLY, node('wp-old', 'Old')]} model={undefined} modelRevision={null} onAsk={vi.fn()} />);
+    expect(screen.getByTestId('product-stage')).toHaveAttribute('data-selected', 'wp-asm');
+    expect(screen.getByTestId('make-model')).toHaveTextContent('Build 3');
+  });
+
+  it('shows no model before there is a build', () => {
+    render(<MakeStage projectId={P} view={creation()} nodes={[ASSEMBLY]} model={undefined} modelRevision={null} onAsk={vi.fn()} />);
+    expect(screen.queryByTestId('product-stage')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('make-model')).not.toBeInTheDocument();
+  });
+
+  it('says so when the build\'s model is not in the twin, instead of a blank view', () => {
+    render(<MakeStage projectId={P} view={creation([build(4, 'released', 'wp-gone')])} nodes={[ASSEMBLY]} model={undefined} modelRevision={null} onAsk={vi.fn()} />);
+    expect(screen.queryByTestId('product-stage')).not.toBeInTheDocument();
+    expect(screen.getByTestId('make-model')).toHaveTextContent('not in the twin');
   });
 });
