@@ -407,9 +407,9 @@ function mountGraph(extra = {}, form = LAMPFORM) {
     BufferGeometry: class { setAttribute() {} setIndex() {} computeVertexNormals() {} dispose() {} },
     MeshStandardMaterial: class { constructor(o) { this.o = o; mats.push(this); } clone() { return new THREE.MeshStandardMaterial({ ...this.o }); } },
     Float32BufferAttribute: class {} };
-  const graph = mk('div'), quick = mk('div');
-  const m = FG.mount({ THREE, scene: new Group(), cfg: { form }, document: doc, quick, graph, options: OPTS, ...extra });
-  return { m, doc, graph, quick, THREE, mats, all: (r) => graphDom().all.call(null, r) };
+  const graph = mk('div'), quick = mk('div'), tryHost = mk('div');
+  const m = FG.mount({ THREE, scene: new Group(), cfg: { form }, document: doc, quick, graph, tryHost, options: OPTS, ...extra });
+  return { m, doc, graph, quick, tryHost, THREE, mats, all: (r) => graphDom().all.call(null, r) };
 }
 
 await check('graph_renders_nodes_ports_and_wires_in_the_engines_styles', async () => {
@@ -941,11 +941,13 @@ await check('a_behaviour_moves_its_parts_about_its_own_axis_and_origin', () => {
 });
 
 await check('a_person_drives_each_behaviour_in_the_studio', async () => {
-  const { m, quick } = mountGraph({ cfg: { form: BEHAVED } }, BEHAVED);
+  const { m, quick, tryHost } = mountGraph({ cfg: { form: BEHAVED } }, BEHAVED);
   await m.render();
   const { withClass } = graphDom();
-  const controls = withClass(quick, 'fg-behave');
-  if (controls.length !== 4) return 'behaviour controls ' + controls.length;
+  // Behaviours live under Try it, never in the left panel.
+  if (withClass(quick, 'fg-behave').length) return 'behaviour controls in the left panel';
+  const controls = withClass(tryHost, 'fg-behave');
+  if (controls.length !== 4) return 'behaviour controls under Try it ' + controls.length;
   if (!m.setBehaviour || !m.behaviours) return 'no behaviour api';
   m.setBehaviour('tilt', 90);
   const arm = m.group.children.find((x) => x.userData.part === 'arm');
@@ -1082,6 +1084,17 @@ await check('variants_can_be_tried_shown_side_by_side_and_picked_through_the_per
   // Use this one: a request for the person to send, naming what it sets.
   m.useVariant('tall');
   return asked.length === 1 && /Tall/.test(asked[0]) && /arm_len 420/.test(asked[0]) && /al6061/.test(asked[0]) ? true : 'ask ' + JSON.stringify(asked);
+});
+
+await check('try_it_offers_to_ask_for_behaviours_when_the_form_has_none', async () => {
+  const asked = [];
+  const { m, tryHost } = mountGraph({ onAsk: (t) => asked.push(t) });
+  await m.render();
+  const { withClass } = graphDom();
+  const btn = withClass(tryHost, 'fg-ask-behave')[0];
+  if (!btn) return 'no ask button under Try it';
+  btn.fire('click', {});
+  return asked.length === 1 && /behaviours/.test(asked[0]) ? true : 'ask ' + JSON.stringify(asked);
 });
 
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));

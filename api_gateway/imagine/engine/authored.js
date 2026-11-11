@@ -1220,7 +1220,7 @@
       partsBox = el('div', 'ppb'); pdet.appendChild(partsBox);
       legendInto(pdet);
       quick.appendChild(pdet);
-      behaviourControlsInto(quick);
+      behaviourControlsInto(env.tryHost || null);
       variantControlsInto(quick);
       problems = el('div', 'fg-authored-errors'); quick.appendChild(problems);
     } else {
@@ -1323,13 +1323,25 @@
         applyBehaviours(); syncBehaviourControls(); raf(step);
       })();
     }
+    // Behaviours live under Try it (MetaForge): the person tries the product there. With none,
+    // Try it offers to ask the assistant for them; the page never invents one.
     function behaviourControlsInto(container) {
+      if (!container) return;
+      container.textContent = '';
+      behaviourControls = {};
       var list = behaviourList().filter(function (b) { return b && b.id; });
-      if (!list.length) return;
-      var det = el('details', 'pp'), sum = el('summary');
-      det.open = true; det.setAttribute('open', ''); det.setAttribute('data-pps', 'behaviours');
-      sum.appendChild(el('span', '', 'Behaviours')); det.appendChild(sum);
-      var box = el('div', 'ppb fg-behaviours');
+      var box = el('div', 'fg-behaviours');
+      if (!list.length) {
+        box.appendChild(el('p', 'fg-behave-none', 'No behaviours yet: how it moves, lights up or switches.'));
+        var ask = el('button', 'fg-eye fg-ask-behave', 'Ask the assistant to add them');
+        ask.type = 'button';
+        ask.addEventListener('click', function () {
+          if (env.onAsk) env.onAsk('Add the behaviours this product needs to the studio: how it moves, lights up and switches, so I can try them.');
+        });
+        box.appendChild(ask);
+        container.appendChild(box);
+        return;
+      }
       if (list.some(function (b) { return b.kind === 'rotate' || b.kind === 'slide'; })) {
         var pl = el('button', 'fg-eye fg-play', 'Play the motions');
         pl.type = 'button'; pl.setAttribute('data-behave-play', '');
@@ -1363,8 +1375,7 @@
         }
         box.appendChild(row);
       });
-      det.appendChild(box);
-      container.appendChild(det);
+      container.appendChild(box);
       syncBehaviourControls();
     }
     function setHiddenParts(list) {
