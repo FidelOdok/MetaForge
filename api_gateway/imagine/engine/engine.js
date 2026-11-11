@@ -584,10 +584,14 @@ if(AUTHORED){const dp=$('#devp'),hd=dp&&dp.querySelector('.dhead');
     [...dp.children].filter(c=>c!==hd&&c!==b).forEach(c=>more.appendChild(c));dp.appendChild(more);}}
 /* MetaForge: room light, part of the scene's environment: a lamp's beam or a screen's glow
    only shows in a dimmer room. Day keeps the studio's light; Evening and Night dim it. */
-const ROOM={day:1,evening:0.3,night:0.06};let ROOM_ENV=null,ROOM_NOW='day';
+const ROOM={day:1,evening:0.3,night:0.06};const ROOM_ENV={day:1,evening:0.35,night:0.12};var ROOM_NOW='day';
+/* The room's reflections are dimmed with its lights, never removed: a metal shows mostly by
+   what it reflects, and with none it read as black. */
+function roomEnv(){return ROOM_ENV[ROOM_NOW]!=null?ROOM_ENV[ROOM_NOW]:1;}
 function setRoom(r){const k=ROOM[r]!=null?ROOM[r]:1;ROOM_NOW=r;
-  if(k<1){if(scene.environment)ROOM_ENV=scene.environment;scene.environment=null;}else if(ROOM_ENV){scene.environment=ROOM_ENV;}
-  hemi.intensity=0.35*k;key.intensity=1.25*k;rimL.intensity=0.45*k;}
+  hemi.intensity=0.35*k;key.intensity=1.25*k;rimL.intensity=0.45*k;
+  scene.traverse(o=>{if(o.isMesh&&o.material&&'envMapIntensity' in o.material)o.material.envMapIntensity=roomEnv();});
+  if(AUTHORED_MOUNT&&AUTHORED_MOUNT.recolour)AUTHORED_MOUNT.recolour();}
 if(AUTHORED){const bh=$('#devBehave');if(bh&&!$('#roomLight')){const rl=document.createElement('div');rl.id='roomLight';rl.className='drow';
   rl.innerHTML='<span>Room light</span><div class="seg sm" role="group" aria-label="Room light"><button type="button" data-room="day" aria-pressed="true">Day</button><button type="button" data-room="evening" aria-pressed="false">Evening</button><button type="button" data-room="night" aria-pressed="false">Night</button></div>';
   bh.after(rl);rl.addEventListener('click',e=>{const b=e.target.closest('[data-room]');if(!b)return;setRoom(b.dataset.room);rl.querySelectorAll('[data-room]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));});}}
@@ -605,7 +609,7 @@ if(AUTHORED){const db=$('#devBtn');if(db&&!$('#cutSeg')){
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),tryHost:document.getElementById('devBehave'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density,costKg:m.costKg};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},onAsk:t=>{if(HOSTED)hostPost('fg:ask',{text:t});else toast('Ask the assistant: '+t);},onFit:()=>frame({W:100,D:100,H:100}),onScene:has=>{SCENE_GROUND=has;ground.visible=SHOW_PART&&!has;if(grid)grid.visible=SHOW_PART&&!has;},looks:()=>({process:S.proc,finish:S.finish,material:S.mat,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;renderNext();},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),tryHost:document.getElementById('devBehave'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density,costKg:m.costKg};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},onAsk:t=>{if(HOSTED)hostPost('fg:ask',{text:t});else toast('Ask the assistant: '+t);},onFit:()=>frame({W:100,D:100,H:100}),envIntensity:()=>roomEnv(),onScene:has=>{SCENE_GROUND=has;ground.visible=SHOW_PART&&!has;if(grid)grid.visible=SHOW_PART&&!has;},looks:()=>({process:S.proc,finish:S.finish,material:S.mat,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;renderNext();},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});

@@ -1719,6 +1719,7 @@
     function make(kind, part, extra) {
       var l = look(kind, part);
       var o = { color: paint(l.color), roughness: l.rough, metalness: l.metal };
+      if (env.envIntensity) o.envMapIntensity = env.envIntensity();
       if (l.cc) o.clearcoat = l.cc;
       // Cut-away (MetaForge): X-ray makes the product's own shells see-through so the bought
       // parts inside show; Section cuts everything with one movable plane.
