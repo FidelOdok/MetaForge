@@ -686,6 +686,10 @@ details.pp>summary .pp-sum{margin-left:auto;padding-left:8px;font-size:11.5px;fo
 .fg-part-body .fg-part-spec,.fg-part-body .fg-part-make{margin:0}
 .fg-part-why{font-style:italic}
 .fg-part-acts{display:flex;gap:6px;margin-top:2px}
+/* Cut-away: Solid, Section, X-ray beside Try it; the section control floats over the view. */
+#cutSeg{margin-left:4px}
+.cutp{position:absolute;left:16px;top:60px;z-index:5;display:grid;gap:8px;padding:10px;width:min(230px,calc(100% - 32px));background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
+html[data-authored] .seg [data-view="section"]{display:none}
 /* Live component specs: the real part's record, in the parts list and on hover. */
 .fg-part-spec{margin:2px 0 0 13px;font-size:11.5px;color:var(--muted)}
 .fg-part-spec.is-stand-in{color:#b45309}

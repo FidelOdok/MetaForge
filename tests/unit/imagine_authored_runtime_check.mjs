@@ -406,7 +406,10 @@ function mountGraph(extra = {}, form = LAMPFORM) {
   const THREE = { Group, Mesh: class { constructor(geometry, material) { this.geometry = geometry; this.material = material; this.userData = {}; } },
     BufferGeometry: class { setAttribute() {} setIndex() {} computeVertexNormals() {} dispose() {} },
     MeshStandardMaterial: class { constructor(o) { this.o = o; mats.push(this); } clone() { return new THREE.MeshStandardMaterial({ ...this.o }); } },
-    Float32BufferAttribute: class {} };
+    Float32BufferAttribute: class {},
+    Vector3: class { constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; } set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; } },
+    Plane: class { constructor(normal, constant) { this.normal = normal; this.constant = constant; } },
+    DoubleSide: 2 };
   const graph = mk('div'), quick = mk('div'), tryHost = mk('div');
   const m = FG.mount({ THREE, scene: new Group(), cfg: { form }, document: doc, quick, graph, tryHost, options: OPTS, ...extra });
   return { m, doc, graph, quick, tryHost, THREE, mats, all: (r) => graphDom().all.call(null, r) };
@@ -1155,6 +1158,31 @@ await check('a_part_row_is_one_line_and_a_click_opens_it_and_highlights_the_part
   if (m.openedPart() !== 'base' || m.graph.selected() !== 'part:base') return 'openPart from 3D';
   withClass(withClass(quick, 'fg-part')[0], 'fg-part-head')[0].fire('click', {});
   return m.openedPart() === null && m.graph.selected() === null ? true : 'closing did not clear: ' + m.openedPart();
+});
+
+// Cut-away (MetaForge, 2026-11-11): solid, a section through the form, or X-ray shells so the
+// parts inside show. A view choice only.
+await check('cut_away_views_show_inside_the_form', async () => {
+  const form = { ...LAMPFORM, authored: { parts: [...LAMPFORM.authored.parts, { ...part('chip', 'return [g.box(4, 2, 4)];', { kind: 'component' }), name: 'Chip', uses: [] }] } };
+  const { m } = mountGraph({ cfg: { form } }, form);
+  await m.render();
+  const mesh = (id) => m.group.children.find((x) => x.userData.part === id);
+  m.setViewMode('xray');
+  if (m.viewMode() !== 'xray') return 'mode ' + m.viewMode();
+  const base = mesh('base').material.o, chip = mesh('chip').material.o;
+  if (!base.transparent || !(base.opacity < 0.5) || base.depthWrite !== false) return 'a made part is not see-through: ' + JSON.stringify(base);
+  if (chip.transparent) return 'a bought part should stay solid inside the x-ray';
+  m.setViewMode('section');
+  m.setCut('side', 0.5);
+  const o = mesh('base').material.o;
+  if (!o.clippingPlanes || o.clippingPlanes.length !== 1) return 'no clipping plane in section';
+  const pl = o.clippingPlanes[0];
+  if (pl.normal.x !== -1 || Math.abs(pl.constant - m.cutAt()) > 1e-9) return 'plane ' + JSON.stringify(pl) + ' at ' + m.cutAt();
+  m.setCut('top', 0.25);
+  if (pl.normal.y !== -1) return 'top cut should face down: ' + JSON.stringify(pl.normal);
+  m.setViewMode('solid');
+  const back = mesh('base').material.o;
+  return !back.transparent && !back.clippingPlanes ? true : 'solid did not restore: ' + JSON.stringify(back);
 });
 
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));

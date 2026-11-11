@@ -99,6 +99,7 @@ CHECKS = [
     "parts_and_variants_start_closed_with_a_one_line_summary",
     "the_summary_cards_start_closed_unless_something_is_wrong",
     "a_part_row_is_one_line_and_a_click_opens_it_and_highlights_the_part",
+    "cut_away_views_show_inside_the_form",
 ]
 
 

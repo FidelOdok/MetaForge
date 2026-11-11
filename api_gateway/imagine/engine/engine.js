@@ -582,6 +582,17 @@ if(AUTHORED){const dp=$('#devp'),hd=dp&&dp.querySelector('.dhead');
   if(dp&&hd&&!$('#devBehave')){const b=document.createElement('div');b.id='devBehave';b.className='dbehave';hd.after(b);
     const more=document.createElement('details');more.className='dmore dsim';const sm=document.createElement('summary');sm.textContent='Battery and a week of use';more.appendChild(sm);
     [...dp.children].filter(c=>c!==hd&&c!==b).forEach(c=>more.appendChild(c));dp.appendChild(more);}}
+/* MetaForge: cut-away for an authored form: Solid, Section (one plane, side, front or top,
+   moved with a slider) and X-ray (the product's shells see-through). A view choice only. */
+if(AUTHORED){const db=$('#devBtn');if(db&&!$('#cutSeg')){
+  const seg=document.createElement('div');seg.className='seg sm';seg.id='cutSeg';seg.setAttribute('role','group');seg.setAttribute('aria-label','Cut-away');
+  seg.innerHTML='<button type="button" data-cut="solid" aria-pressed="true">Solid</button><button type="button" data-cut="section" aria-pressed="false">Section</button><button type="button" data-cut="xray" aria-pressed="false">X-ray</button>';db.after(seg);
+  const cp=document.createElement('div');cp.className='cutp';cp.id='cutp';cp.hidden=true;
+  cp.innerHTML='<div class="seg sm" role="group" aria-label="Cut direction"><button type="button" data-cutaxis="side" aria-pressed="true">Side</button><button type="button" data-cutaxis="front" aria-pressed="false">Front</button><button type="button" data-cutaxis="top" aria-pressed="false">Top</button></div><input type="range" class="rng" id="cutRange" min="0" max="1" step="0.01" value="0.5" aria-label="Where to cut">';
+  host.appendChild(cp);
+  seg.addEventListener('click',e=>{const b=e.target.closest('[data-cut]');if(!b||!AUTHORED_MOUNT)return;AUTHORED_MOUNT.setViewMode(b.dataset.cut);seg.querySelectorAll('[data-cut]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));cp.hidden=b.dataset.cut!=='section';});
+  cp.addEventListener('click',e=>{const b=e.target.closest('[data-cutaxis]');if(!b||!AUTHORED_MOUNT)return;AUTHORED_MOUNT.setCut(b.dataset.cutaxis);cp.querySelectorAll('[data-cutaxis]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));});
+  cp.querySelector('#cutRange').addEventListener('input',e=>{if(AUTHORED_MOUNT)AUTHORED_MOUNT.setCut(null,+e.target.value);});}}
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
@@ -2636,7 +2647,7 @@ function hostApply(cols){if(!cols||typeof cols!=='object')return;DBH=DBH||{hoste
   if(ch){autoWire(null);renderNodes();renderComp();renderProcess();}
   schedule();}
 const RO_EDIT='input,select,textarea,button';
-const RO_OK='.fg-eye,.fg-behave input,.fg-variant button,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
+const RO_OK='[data-cut],[data-cutaxis],#cutRange,.fg-part-head,.fg-eye,.fg-behave input,.fg-variant button,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
 function roBlocked(t){const c=t&&t.closest?t.closest(RO_EDIT):null;return !!(c&&!c.matches(RO_OK));}
 function applyReadonly(){const de=document.documentElement;if(READONLY)de.setAttribute('data-readonly','');else de.removeAttribute('data-readonly');
   document.querySelectorAll(RO_EDIT).forEach(el=>{if(READONLY&&!el.matches(RO_OK)){if(!el.disabled){el.disabled=true;el.setAttribute('data-fg-ro','');}}else if(!READONLY&&el.hasAttribute('data-fg-ro')){el.disabled=false;el.removeAttribute('data-fg-ro');}});
@@ -2658,9 +2669,9 @@ if(HOSTED){
   // revision as a new page when this says it could not.
   function applyForm(m){let ok=false;
     try{const f=m.form;if(AUTHORED&&f&&typeof f==='object'&&f.template==='authored'&&f.authored&&Array.isArray(f.authored.parts)){
-      const keep=AUTHORED_MOUNT?{hidden:AUTHORED_MOUNT.hiddenParts(),behave:AUTHORED_MOUNT.behaviours()}:null;
+      const keep=AUTHORED_MOUNT?{hidden:AUTHORED_MOUNT.hiddenParts(),behave:AUTHORED_MOUNT.behaviours(),mode:AUTHORED_MOUNT.viewMode(),cut:AUTHORED_MOUNT.cut()}:null;
       if(AUTHORED_MOUNT&&AUTHORED_MOUNT.dispose)AUTHORED_MOUNT.dispose();AUTHORED_MOUNT=null;CFG.form=f;buildPart(last&&last.shape);
-      if(AUTHORED_MOUNT&&keep){AUTHORED_MOUNT.setHiddenParts(keep.hidden);Object.entries(keep.behave).forEach(([k,v])=>AUTHORED_MOUNT.setBehaviour(k,v));}
+      if(AUTHORED_MOUNT&&keep){AUTHORED_MOUNT.setHiddenParts(keep.hidden);Object.entries(keep.behave).forEach(([k,v])=>AUTHORED_MOUNT.setBehaviour(k,v));AUTHORED_MOUNT.setCut(keep.cut.axis,keep.cut.t);AUTHORED_MOUNT.setViewMode(keep.mode);}
       ok=!!AUTHORED_MOUNT;}}catch(err){ok=false;}
     hostPost('fg:applied',{revision:typeof m.revision==='number'?m.revision:-1,ok},true);}
   // MetaForge: a new revision loads in a fresh page; the host hands it the view the person

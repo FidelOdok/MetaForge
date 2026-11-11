@@ -1145,6 +1145,7 @@
 
     var quick = env.quick || null;
     var partsBox = null, graphApi = null, selected = null, behave = {}, behaviourControls = {}, playing = null;
+    var viewMode = 'solid', cut = { axis: 'side', t: 0.5 }, clipPlane = null;
     var openedPart = null, partsSum = null, variantsSum = null, makeOverride = null, variantOn = null, baseParams = null, sideGroup = null, sideOn = false, sideToken = null, variantControls = [];
     // Every slider for one parameter, in the controls panel and in the graph, stays in step.
     var regs = {};
@@ -1264,6 +1265,31 @@
       if (env.onView) env.onView();
     }
     function hiddenParts() { return Object.keys(hidden); }
+    var CUT_AXES = { side: [0, [-1, 0, 0]], top: [1, [0, -1, 0]], front: [2, [0, 0, -1]] };
+    function cutPosition() {
+      var b = lastResult && lastResult.bbox, ax = (CUT_AXES[cut.axis] || CUT_AXES.side)[0];
+      if (!b) return 0;
+      return b.min[ax] + (b.max[ax] - b.min[ax]) * cut.t;
+    }
+    function placeCut() {
+      if (!clipPlane) return;
+      var n = (CUT_AXES[cut.axis] || CUT_AXES.side)[1];
+      if (clipPlane.normal.set) clipPlane.normal.set(n[0], n[1], n[2]); else clipPlane.normal = { x: n[0], y: n[1], z: n[2] };
+      // three.js clips where normal . p + constant < 0: the side past the cut goes away.
+      clipPlane.constant = cutPosition();
+    }
+    function setViewMode(mode) {
+      viewMode = mode === 'xray' || mode === 'section' ? mode : 'solid';
+      clipPlane = null;
+      if (viewMode === 'section' && THREE.Plane && THREE.Vector3) { clipPlane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0); placeCut(); }
+      recolour();
+      if (env.onView) env.onView();
+    }
+    function setCut(axis, t) {
+      if (axis && CUT_AXES[axis]) cut.axis = axis;
+      if (typeof t === 'number' && isFinite(t)) cut.t = Math.min(1, Math.max(0, t));
+      placeCut();
+    }
     // A new form replaces this one in place (MetaForge): stop drawing, take the meshes away.
     function dispose() {
       seq++;
@@ -1576,6 +1602,10 @@
       var l = look(kind, part);
       var o = { color: paint(l.color), roughness: l.rough, metalness: l.metal };
       if (l.cc) o.clearcoat = l.cc;
+      // Cut-away (MetaForge): X-ray makes the product's own shells see-through so the bought
+      // parts inside show; Section cuts everything with one movable plane.
+      if (viewMode === 'xray' && kind !== 'component') { o.transparent = true; o.opacity = 0.22; o.depthWrite = false; }
+      if (viewMode === 'section' && clipPlane) { o.clippingPlanes = [clipPlane]; if (THREE.DoubleSide !== undefined) o.side = THREE.DoubleSide; }
       Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
       return new THREE.MeshStandardMaterial(o);
     }
@@ -1662,6 +1692,7 @@
         });
       });
       lastResult = result;
+      placeCut();
       renderParts(result);
       problems.textContent = '';
       result.errors.forEach(function (e) { var d = doc.createElement('div'); d.textContent = e; problems.appendChild(d); });
@@ -1922,7 +1953,8 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, openedPart: function () { return openedPart; }, proposedMakes: proposedMakes,
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, openedPart: function () { return openedPart; },
+      setViewMode: setViewMode, viewMode: function () { return viewMode; }, setCut: setCut, cut: function () { return { axis: cut.axis, t: cut.t }; }, cutAt: cutPosition, proposedMakes: proposedMakes,
       tryVariant: tryVariant, showSideBySide: showSideBySide, sideBySide: function () { return sideGroup; }, useVariant: useVariant };
   }
 
