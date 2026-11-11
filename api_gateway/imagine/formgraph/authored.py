@@ -212,7 +212,9 @@ def check_links(form: Any, context_parts: dict[str, Any]) -> tuple[list[str], li
             if key in part and not _is_vector(part[key]):
                 errors.append(f"{label}: {key} must be [x, y, z], three numbers.")
         real = context_parts[ref]
-        env = ((real or {}).get("geometry") or {}).get("envelope") if isinstance(real, dict) else None
+        env = (
+            ((real or {}).get("geometry") or {}).get("envelope") if isinstance(real, dict) else None
+        )
         sized = (
             isinstance(env, list)
             and len(env) == 3
@@ -302,7 +304,7 @@ def check_make(
             errors.append(f"{label}: make must be an object.")
             continue
         for key in sorted(set(make) - set(MAKE_KEYS)):
-            errors.append(f'{label}: make.{key} is not known; use {", ".join(MAKE_KEYS)}.')
+            errors.append(f"{label}: make.{key} is not known; use {', '.join(MAKE_KEYS)}.")
         proc_id = str(make.get("process") or default_process or "")
         proc = processes.get(proc_id)
         if not proc:
@@ -364,8 +366,22 @@ def check_make(
 
 #: How the twin behaves (MetaForge, 2026-11-11): a form says how its parts move, light up
 #: and switch, so the studio can show the product working, not only its shape.
-BEHAVIOUR_KINDS = ("rotate", "slide", "glow", "toggle")
-BEHAVIOUR_KEYS = ("id", "name", "kind", "parts", "axis", "origin", "range", "color", "default")
+BEHAVIOUR_KINDS = ("rotate", "slide", "glow", "toggle", "light")
+BEHAVIOUR_KEYS = (
+    "id",
+    "name",
+    "kind",
+    "parts",
+    "axis",
+    "origin",
+    "range",
+    "color",
+    "default",
+    "at",
+    "direction",
+    "angle",
+    "intensity",
+)
 MAX_BEHAVIOURS = 12
 MAX_ROTATE_DEG = 360.0
 MAX_SLIDE_MM = 1000.0
@@ -401,7 +417,9 @@ def check_behaviours(form: Any) -> tuple[list[str], list[str]]:
             f"form.authored.behaviours has {len(items)} behaviours; at most {MAX_BEHAVIOURS}."
         )
     part_ids = {
-        str(p.get("id")) for p in block.get("parts") or [] if isinstance(p, dict) and p.get("id")
+        str(p.get("id"))
+        for p in [*(block.get("parts") or []), *(block.get("scene") or [])]
+        if isinstance(p, dict) and p.get("id")
     }
     seen: set[str] = set()
     for index, item in enumerate(items[: MAX_BEHAVIOURS + 1]):
@@ -432,7 +450,9 @@ def check_behaviours(form: Any) -> tuple[list[str], list[str]]:
         if kind in ("rotate", "slide"):
             axis = item.get("axis")
             if not _vec3(axis) or not any(float(v) for v in axis):
-                errors.append(f"{label}: axis must be three numbers, not all zero, such as [0, 1, 0].")
+                errors.append(
+                    f"{label}: axis must be three numbers, not all zero, such as [0, 1, 0]."
+                )
             if "origin" in item and not _vec3(item.get("origin")):
                 errors.append(f"{label}: origin must be three numbers in millimetres.")
             rng = item.get("range")
@@ -448,8 +468,30 @@ def check_behaviours(form: Any) -> tuple[list[str], list[str]]:
                 errors.append(
                     f"{label}: range must be [min, max] with min below max, within ±{limit:g} {unit}."
                 )
-        if kind == "glow" and not (isinstance(item.get("color"), str) and _HEX.fullmatch(item["color"])):
+        if kind in ("glow", "light") and not (
+            isinstance(item.get("color"), str) and _HEX.fullmatch(item["color"])
+        ):
             errors.append(f"{label}: color must be the light's #RRGGBB colour.")
+        if kind == "light":
+            if "at" in item and not _vec3(item.get("at")):
+                errors.append(
+                    f"{label}: at must be three numbers in millimetres, where the light is."
+                )
+            d = item.get("direction", [0, -1, 0])
+            if not _vec3(d) or not any(float(v) for v in d):
+                errors.append(
+                    f"{label}: direction must be three numbers, not all zero, such as [0, -1, 0]."
+                )
+            ang = item.get("angle", 45)
+            if isinstance(ang, bool) or not isinstance(ang, (int, float)) or not 5 <= ang <= 90:
+                errors.append(f"{label}: angle must be the beam's half-angle, 5 to 90 degrees.")
+            inten = item.get("intensity", 1)
+            if (
+                isinstance(inten, bool)
+                or not isinstance(inten, (int, float))
+                or not 0 < inten <= 10
+            ):
+                errors.append(f"{label}: intensity must be above 0 and at most 10.")
     return errors, warnings
 
 
@@ -533,7 +575,61 @@ def check_variants(
             synthetic.append({"id": pid, "kind": part.get("kind"), "make": make})
         if synthetic:
             make_errors, _ = check_make(
-                {"authored": {"parts": synthetic}}, processes, colors, default_process, extra_materials
+                {"authored": {"parts": synthetic}},
+                processes,
+                colors,
+                default_process,
+                extra_materials,
             )
             errors.extend(f"{label}: {e}" for e in make_errors)
+    return errors, warnings
+
+
+#: The scene (MetaForge, 2026-11-11): what the product lives with (a desk, a wrist, a hand), so
+#: its behaviours have something to act on. Written as code like parts and run in the same
+#: sandbox; never measured, costed or handed over.
+MAX_SCENE = 8
+SCENE_ROLES = ("surface", "body", "hand", "object", "wall")
+SCENE_KEYS = ("id", "name", "role", "code", "uses", "max_triangles")
+
+
+def check_scene(form: Any) -> tuple[list[str], list[str]]:
+    """Errors and warnings for ``form.authored.scene``: the same code checks as a part's."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    block = form.get("authored") if isinstance(form, dict) else None
+    if not isinstance(block, dict) or "scene" not in block:
+        return errors, warnings
+    items = block.get("scene")
+    if not isinstance(items, list):
+        return ["form.authored.scene must be a list."], warnings
+    if len(items) > MAX_SCENE:
+        errors.append(f"form.authored.scene has {len(items)} objects; at most {MAX_SCENE}.")
+    part_ids = {str(p.get("id")) for p in block.get("parts") or [] if isinstance(p, dict)}
+    synthetic = []
+    for index, item in enumerate(items[: MAX_SCENE + 1]):
+        if not isinstance(item, dict):
+            errors.append(f"form.authored.scene[{index}] must be an object.")
+            continue
+        sid = str(item.get("id", ""))
+        label = f'scene object "{sid}"'
+        for key in sorted(set(item) - set(SCENE_KEYS)):
+            errors.append(f"{label}: {key} is not known; use {', '.join(SCENE_KEYS)}.")
+        if sid in part_ids:
+            errors.append(f"{label}: has the same id as a part; give it its own.")
+        role = item.get("role", "object")
+        if role not in SCENE_ROLES:
+            errors.append(f"{label}: role must be one of {', '.join(SCENE_ROLES)}.")
+        synthetic.append(
+            {k: v for k, v in item.items() if k in ("id", "name", "code", "uses", "max_triangles")}
+            | {"kind": "primitive"}
+        )
+    if synthetic:
+        code_errors, _ = check(
+            {"params": form.get("params") or {}, "authored": {"parts": synthetic}}
+        )
+        errors.extend(
+            e.replace('part "', 'scene object "').replace("form.authored", "form.authored.scene")
+            for e in code_errors
+        )
     return errors, warnings

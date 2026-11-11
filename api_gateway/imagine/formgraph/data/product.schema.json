@@ -290,7 +290,7 @@
               }
             },
             "behaviours": {
-              "description": "How the twin behaves: rotate turns parts about axis through origin within range (degrees); slide moves them along axis (mm); glow lights them in color; toggle shows or hides them. A person drives each one in the studio.",
+              "description": "How the twin behaves: rotate turns parts about axis through origin within range (degrees); slide moves them along axis (mm); glow lights them in color; toggle shows or hides them. A person drives each one in the studio. light casts real light from its part: at (mm), direction, angle (half-angle, degrees), color, intensity.",
               "type": "array",
               "maxItems": 12,
               "items": {
@@ -315,7 +315,8 @@
                       "rotate",
                       "slide",
                       "glow",
-                      "toggle"
+                      "toggle",
+                      "light"
                     ]
                   },
                   "parts": {
@@ -358,6 +359,32 @@
                       "number",
                       "boolean"
                     ]
+                  },
+                  "at": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "direction": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "angle": {
+                    "type": "number",
+                    "minimum": 5,
+                    "maximum": 90
+                  },
+                  "intensity": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10
                   }
                 }
               }
@@ -393,6 +420,53 @@
                   },
                   "makes": {
                     "type": "object"
+                  }
+                }
+              }
+            },
+            "scene": {
+              "description": "What the product lives with (a desk, a wrist, a hand, a wall), so its behaviours have something to act on. Written as code like parts and run in the same sandbox; drawn as context, never measured, costed or handed over.",
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name",
+                  "code"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "enum": [
+                      "surface",
+                      "body",
+                      "hand",
+                      "object",
+                      "wall"
+                    ]
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 6000
+                  },
+                  "uses": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "max_triangles": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20000
                   }
                 }
               }

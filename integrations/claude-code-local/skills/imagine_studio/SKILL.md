@@ -377,6 +377,21 @@ and the parts in `form.authored.parts`. Each part has:
     inside", point them there before changing the design.
   - **Behaviours go under Try it.** They are not listed in the side panel;
     the person presses Try it to move, light and switch the product.
+  - **Author the scene the behaviours need.** `form.authored.scene` lists
+    what the product lives with: a desk for a lamp, a wrist for a watch, a
+    hand for a remote, a wall for a switch. Each has `id`, `name`, `role`
+    (`surface`, `body`, `hand`, `object`, `wall`) and `code` like a part's
+    (same sandbox, same checks), at most eight; it is drawn as context and
+    never measured, costed or handed over. Put a surface's top just below
+    Y = 0 (for example a desk at `.at(0, -12.5, 0)`, 24 mm thick) so the
+    product stands on it; the studio's own floor steps aside for it.
+    Behaviours may act on scene objects (a wrist that turns).
+  - **A `light` behaviour casts real light** from its part (`parts`, the
+    source part): `at` (mm, just outside the part's opening, never inside a
+    closed shade), `direction`, `angle` (half-angle, 5 to 90 degrees), `color`
+    and `intensity` (above 0, at most 10). It follows its part's motions. Try
+    it has Day, Evening and Night room light so the beam can be seen; use
+    `glow` only for a part that is itself bright (a screen, an LED).
   - **Part properties are proposed in the page and kept through you.** The
     person can preview another process, material, finish or colour on an open
     part; Keep it sends you "Make the <part> <process · material · finish ·

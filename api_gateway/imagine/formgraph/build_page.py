@@ -167,6 +167,9 @@ def validate(cfg, cat, ctx=None):
 
     # MetaForge (2026-11-11): each authored part names how it is made and how it looks.
     if template == authored.TEMPLATE_ID:
+        scene_errors, scene_warnings = authored.check_scene(f)
+        E.extend(scene_errors)
+        W.extend(scene_warnings)
         behave_errors, behave_warnings = authored.check_behaviours(f)
         E.extend(behave_errors)
         W.extend(behave_warnings)

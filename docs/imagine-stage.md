@@ -745,6 +745,13 @@ The studio shows more than the form's shape:
   previewed live on that part; **Keep it** puts a request in the conversation for the
   assistant to write it into the form, **Reset** drops the preview. Hiding is a view choice
   only; the part stays in the form, its measures and the handover.
+- **Scene.** `form.authored.scene` (at most eight) lists what the product lives with, a desk,
+  a wrist, a hand or a wall, written as code like parts and run in the same sandbox with the
+  same checks. It is drawn as matte grey context, listed in a closed **Scene** section with
+  **Hide**, and never measured, costed or handed over; when present, the studio's own floor
+  steps aside for it. Behaviours may act on scene objects. A `light` behaviour casts a real
+  spot light from its part (`at`, `direction`, `angle`, `color`, `intensity`) that follows the
+  part's motions, and Try it has **Room light** (Day, Evening, Night) so a beam can be seen.
 - **Cut-away.** Beside Try it: **Solid**, **Section** (one plane, side, front or top, moved
   with a slider) and **X-ray** (the product's own parts see-through, bought parts solid).
 - **Live component specs.** A `component` part linked to a record in

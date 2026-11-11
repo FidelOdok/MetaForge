@@ -533,15 +533,15 @@ const controls=new THREE.OrbitControls(camera,renderer.domElement);controls.enab
   const s2=new THREE.Mesh(new THREE.PlaneGeometry(20,60),new THREE.MeshBasicMaterial({color:new THREE.Color(2,2.1,2.3),side:THREE.DoubleSide}));s2.position.set(80,30,-60);s2.rotation.y=-Math.PI/3;es.add(s2);
   scene.environment=pm.fromScene(es,0.04).texture;})();
 
-scene.add(new THREE.HemisphereLight(0xffffff,0x3a4250,0.35));
+const hemi=new THREE.HemisphereLight(0xffffff,0x3a4250,0.35);scene.add(hemi);
 const key=new THREE.DirectionalLight(0xffffff,1.25);key.position.set(140,260,160);key.castShadow=true;key.shadow.mapSize.set(2048,2048);
 Object.assign(key.shadow.camera,{left:-260,right:260,top:260,bottom:-260,near:20,far:900});key.shadow.bias=-0.0004;key.shadow.radius=4;scene.add(key);
 const rimL=new THREE.DirectionalLight(0xdfe6ff,0.45);rimL.position.set(-180,90,-220);scene.add(rimL);
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(3000,3000),new THREE.ShadowMaterial({opacity:0.22}));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
-let grid=null;
+let grid=null;var SCENE_GROUND=false;/* MetaForge: an authored scene brings its own ground */
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 function themeScene(){if(grid){scene.remove(grid);grid.geometry.dispose();}
-  grid=new THREE.GridHelper(600,60,new THREE.Color(css('--grid-a')),new THREE.Color(css('--grid-b')));grid.material.transparent=true;grid.material.opacity=0.55;grid.position.y=0.01;grid.visible=SHOW_PART;scene.add(grid);
+  grid=new THREE.GridHelper(600,60,new THREE.Color(css('--grid-a')),new THREE.Color(css('--grid-b')));grid.material.transparent=true;grid.material.opacity=0.55;grid.position.y=0.01;grid.visible=SHOW_PART&&!SCENE_GROUND;scene.add(grid);
   matCut.color.set(css('--cut')).convertSRGBToLinear();}
 
 const plane=new THREE.Plane(new THREE.Vector3(0,0,-1),0);
@@ -582,6 +582,15 @@ if(AUTHORED){const dp=$('#devp'),hd=dp&&dp.querySelector('.dhead');
   if(dp&&hd&&!$('#devBehave')){const b=document.createElement('div');b.id='devBehave';b.className='dbehave';hd.after(b);
     const more=document.createElement('details');more.className='dmore dsim';const sm=document.createElement('summary');sm.textContent='Battery and a week of use';more.appendChild(sm);
     [...dp.children].filter(c=>c!==hd&&c!==b).forEach(c=>more.appendChild(c));dp.appendChild(more);}}
+/* MetaForge: room light, part of the scene's environment: a lamp's beam or a screen's glow
+   only shows in a dimmer room. Day keeps the studio's light; Evening and Night dim it. */
+const ROOM={day:1,evening:0.3,night:0.06};let ROOM_ENV=null,ROOM_NOW='day';
+function setRoom(r){const k=ROOM[r]!=null?ROOM[r]:1;ROOM_NOW=r;
+  if(k<1){if(scene.environment)ROOM_ENV=scene.environment;scene.environment=null;}else if(ROOM_ENV){scene.environment=ROOM_ENV;}
+  hemi.intensity=0.35*k;key.intensity=1.25*k;rimL.intensity=0.45*k;}
+if(AUTHORED){const bh=$('#devBehave');if(bh&&!$('#roomLight')){const rl=document.createElement('div');rl.id='roomLight';rl.className='drow';
+  rl.innerHTML='<span>Room light</span><div class="seg sm" role="group" aria-label="Room light"><button type="button" data-room="day" aria-pressed="true">Day</button><button type="button" data-room="evening" aria-pressed="false">Evening</button><button type="button" data-room="night" aria-pressed="false">Night</button></div>';
+  bh.after(rl);rl.addEventListener('click',e=>{const b=e.target.closest('[data-room]');if(!b)return;setRoom(b.dataset.room);rl.querySelectorAll('[data-room]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));});}}
 /* MetaForge: cut-away for an authored form: Solid, Section (one plane, side, front or top,
    moved with a slider) and X-ray (the product's shells see-through). A view choice only. */
 if(AUTHORED){const db=$('#devBtn');if(db&&!$('#cutSeg')){
@@ -596,7 +605,7 @@ if(AUTHORED){const db=$('#devBtn');if(db&&!$('#cutSeg')){
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),tryHost:document.getElementById('devBehave'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density,costKg:m.costKg};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},onAsk:t=>{if(HOSTED)hostPost('fg:ask',{text:t});else toast('Ask the assistant: '+t);},onFit:()=>frame({W:100,D:100,H:100}),looks:()=>({process:S.proc,finish:S.finish,material:S.mat,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;renderNext();},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),tryHost:document.getElementById('devBehave'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density,costKg:m.costKg};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},onAsk:t=>{if(HOSTED)hostPost('fg:ask',{text:t});else toast('Ask the assistant: '+t);},onFit:()=>frame({W:100,D:100,H:100}),onScene:has=>{SCENE_GROUND=has;ground.visible=SHOW_PART&&!has;if(grid)grid.visible=SHOW_PART&&!has;},looks:()=>({process:S.proc,finish:S.finish,material:S.mat,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;renderNext();},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
@@ -2647,7 +2656,7 @@ function hostApply(cols){if(!cols||typeof cols!=='object')return;DBH=DBH||{hoste
   if(ch){autoWire(null);renderNodes();renderComp();renderProcess();}
   schedule();}
 const RO_EDIT='input,select,textarea,button';
-const RO_OK='.fg-prop,.fg-keep,.fg-reset,[data-cut],[data-cutaxis],#cutRange,.fg-part-head,.fg-eye,.fg-behave input,.fg-variant button,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
+const RO_OK='[data-room],.fg-prop,.fg-keep,.fg-reset,[data-cut],[data-cutaxis],#cutRange,.fg-part-head,.fg-eye,.fg-behave input,.fg-variant button,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
 function roBlocked(t){const c=t&&t.closest?t.closest(RO_EDIT):null;return !!(c&&!c.matches(RO_OK));}
 function applyReadonly(){const de=document.documentElement;if(READONLY)de.setAttribute('data-readonly','');else de.removeAttribute('data-readonly');
   document.querySelectorAll(RO_EDIT).forEach(el=>{if(READONLY&&!el.matches(RO_OK)){if(!el.disabled){el.disabled=true;el.setAttribute('data-fg-ro','');}}else if(!READONLY&&el.hasAttribute('data-fg-ro')){el.disabled=false;el.removeAttribute('data-fg-ro');}});
@@ -3049,7 +3058,7 @@ function recompute(){
 let saveT=0;function save(){clearTimeout(saveT);saveT=setTimeout(()=>{if(!RESETTING)store.set(SKEY,{G,S,product:CP.id||'default',engine:ENGINE,cfg:CFGH});},300);if(VIEW_HOOK)VIEW_HOOK();}
 
 /* The part, or the calm empty state when the config has nothing to draw. */
-function applyShown(){part.visible=SHOW_PART;if(grid)grid.visible=SHOW_PART;ground.visible=SHOW_PART;$('#viewEmpty').hidden=SHOW_PART;
+function applyShown(){part.visible=SHOW_PART;if(grid)grid.visible=SHOW_PART&&!SCENE_GROUND;ground.visible=SHOW_PART&&!SCENE_GROUND;$('#viewEmpty').hidden=SHOW_PART;
   ['#dims','#cmf','#legend'].forEach(q=>{const el=$(q);if(el)el.classList.toggle('fg-off',!SHOW_PART);});}
 function startShaping(){if(SHOW_PART||READONLY)return;SHOW_PART=true;framedFor=null;}
 ['#quick','#nodes'].forEach(q=>['input','change'].forEach(t=>$(q).addEventListener(t,startShaping,true)));

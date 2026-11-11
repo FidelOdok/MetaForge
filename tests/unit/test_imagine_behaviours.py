@@ -116,4 +116,4 @@ def test_the_schema_names_the_behaviours() -> None:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     block = schema["properties"]["form"]["properties"]["authored"]["properties"]
     item = block["behaviours"]["items"]
-    assert item["properties"]["kind"]["enum"] == ["rotate", "slide", "glow", "toggle"]
+    assert item["properties"]["kind"]["enum"] == ["rotate", "slide", "glow", "toggle", "light"]

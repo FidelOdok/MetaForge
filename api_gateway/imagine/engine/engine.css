@@ -703,6 +703,9 @@ html[data-authored] #quick .qs .qt{align-items:baseline}
 .fg-prop-row{display:contents}
 .fg-prop-label{font-size:12px;color:var(--muted)}
 .fg-prop{min-width:0;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg);font:inherit;font-size:12.5px}
+/* Scene: what the product lives with, one line each. */
+.fg-scene-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:4px 6px;font-size:13px}
+.fg-scene-row.is-hidden .fg-part-name{opacity:.5}
 #cutSeg{margin-left:4px}
 .cutp{position:absolute;left:16px;top:60px;z-index:5;display:grid;gap:8px;padding:10px;width:min(230px,calc(100% - 32px));background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
 html[data-authored] .seg [data-view="section"]{display:none}

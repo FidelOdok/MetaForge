@@ -409,6 +409,7 @@ function mountGraph(extra = {}, form = LAMPFORM) {
     Float32BufferAttribute: class {},
     Vector3: class { constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; } set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; } },
     Plane: class { constructor(normal, constant) { this.normal = normal; this.constant = constant; } },
+    SpotLight: class { constructor(color, intensity) { this.color = color; this.intensity = intensity; this.position = { set(x, y, z) { this.x = x; this.y = y; this.z = z; } }; this.target = { position: { set(x, y, z) { this.x = x; this.y = y; this.z = z; } }, updateMatrixWorld() {} }; this.isLight = true; } },
     DoubleSide: 2 };
   const graph = mk('div'), quick = mk('div'), tryHost = mk('div');
   const m = FG.mount({ THREE, scene: new Group(), cfg: { form }, document: doc, quick, graph, tryHost, options: OPTS, ...extra });
@@ -1216,6 +1217,40 @@ await check('a_parts_properties_preview_live_and_keep_it_goes_through_the_assist
   if (asked.length !== 1 || !/Weighted base|Base/.test(asked[0]) || !/al6061/.test(asked[0])) return 'ask ' + JSON.stringify(asked);
   withClass(quick, 'fg-reset')[0].fire('click', {});
   return m.partPreview('base') === null ? true : 'reset did not clear the preview';
+});
+
+// The scene (MetaForge, 2026-11-11): what the product lives with, authored as code, drawn as
+// context and never measured; behaviours act on it, and a light behaviour casts real light.
+await check('the_scene_is_drawn_as_context_and_lights_follow_their_part', async () => {
+  const form = { ...LAMPFORM, authored: { ...LAMPFORM.authored,
+    scene: [{ id: 'desk', name: 'Desk', role: 'surface', code: 'return [g.box(600, 20, 400).at(0, -10.5, 0)];' }],
+    behaviours: [
+      { id: 'tilt', name: 'Tilt', kind: 'rotate', parts: ['shade'], axis: [0, 0, 1], origin: [0, 0, 0], range: [-90, 90] },
+      { id: 'lamp', name: 'Lamp light', kind: 'light', parts: ['shade'], at: [10, 300, 0], direction: [0, -1, 0], angle: 40, color: '#FFE2B0', intensity: 2 },
+    ] } };
+  const { m, quick, tryHost } = mountGraph({ cfg: { form } }, form);
+  await m.render();
+  const sg = m.sceneGroup();
+  if (!sg || sg.children.length !== 1) return 'scene meshes ' + (sg && sg.children.length);
+  const desk = sg.children[0];
+  if (!desk.userData.scene || desk.material.o.metalness !== 0 || desk.material.o.roughness < 0.8) return 'the desk is not drawn as context: ' + JSON.stringify(desk.material.o);
+  if (m.group.children.some((x) => x.userData.part === 'desk')) return 'the desk is among the product parts';
+  if ((globalThis.FG_AUTHORED || {}).parts && globalThis.FG_AUTHORED.parts.some((p) => p.id === 'desk')) return 'the desk was measured';
+  const { withClass, all } = graphDom();
+  const sec = all(quick).find((n) => n.attrs && n.attrs['data-pps'] === 'scene');
+  if (!sec || sec.open) return 'no closed Scene section';
+  if (!withClass(tryHost, 'fg-behave').some((r) => r.attrs['data-behave'] === 'lamp')) return 'the light is not under Try it';
+  if (m.lights().length) return 'a light is on before it is switched on';
+  m.setBehaviour('lamp', true);
+  let L = m.lights();
+  if (L.length !== 1 || L[0].position.join() !== '10,300,0' || L[0].direction.join() !== '0,-1,0') return 'light ' + JSON.stringify(L);
+  // Tilting the shade 90 degrees about z carries its light with it.
+  m.setBehaviour('tilt', 90);
+  L = m.lights();
+  const close = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  if (!close(L[0].position, [-300, 10, 0]) || !close(L[0].direction, [1, 0, 0])) return 'the light did not follow the shade: ' + JSON.stringify(L[0]);
+  m.setBehaviour('lamp', false);
+  return m.lights().length === 0 ? true : 'the light stayed on';
 });
 
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));

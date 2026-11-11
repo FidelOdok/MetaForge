@@ -101,6 +101,7 @@ CHECKS = [
     "a_part_row_is_one_line_and_a_click_opens_it_and_highlights_the_part",
     "cut_away_views_show_inside_the_form",
     "a_parts_properties_preview_live_and_keep_it_goes_through_the_assistant",
+    "the_scene_is_drawn_as_context_and_lights_follow_their_part",
 ]
 
 

@@ -765,7 +765,7 @@
   /* Behaviours (MetaForge, 2026-11-11): how the twin moves, lights up and switches. */
   function behaviourValue(b, values) {
     var v = values && values[b.id] !== undefined ? values[b.id] : b['default'];
-    if (b.kind === 'glow') return v === true;
+    if (b.kind === 'glow' || b.kind === 'light') return v === true;
     if (b.kind === 'toggle') return v !== false;
     var r = Array.isArray(b.range) ? b.range : [0, 0], n = typeof v === 'number' && isFinite(v) ? v : (r[0] <= 0 && r[1] >= 0 ? 0 : r[0]);
     return Math.min(r[1], Math.max(r[0], n));
@@ -1142,6 +1142,15 @@
     var group = new THREE.Group();
     group.name = 'authored-form';
     env.scene.add(group);
+    // The scene (MetaForge): what the product lives with, drawn as context; and the lights
+    // its light behaviours cast. Neither is part of the product.
+    var sceneGroup = new THREE.Group();
+    sceneGroup.name = 'authored-scene';
+    env.scene.add(sceneGroup);
+    var lightGroup = new THREE.Group();
+    lightGroup.name = 'authored-lights';
+    env.scene.add(lightGroup);
+    var sceneMat = null, lightMap = {};
 
     var quick = env.quick || null;
     var partsBox = null, graphApi = null, selected = null, behave = {}, behaviourControls = {}, playing = null;
@@ -1235,6 +1244,7 @@
       legendInto(pdet);
       quick.appendChild(pdet);
       behaviourControlsInto(env.tryHost || null);
+      sceneControlsInto(quick);
       variantControlsInto(quick);
       problems = el('div', 'fg-authored-errors'); quick.appendChild(problems);
     } else {
@@ -1264,8 +1274,9 @@
     // choice only: the part is still in the form, measured and handed over.
     function setPartHidden(id, hide) {
       if (hide) hidden[id] = true; else delete hidden[id];
-      group.children.forEach(function (mesh) { if (mesh.userData && mesh.userData.part === id) mesh.visible = !hide && !switchedOff(id); });
+      applyBehaviours();
       if (lastResult) renderParts(lastResult);
+      renderScene();
       if (env.onView) env.onView();
     }
     function hiddenParts() { return Object.keys(hidden); }
@@ -1302,6 +1313,9 @@
       sideToken = null;
       clearSide();
       clear();
+      drawScene(null);
+      Object.keys(lightMap).forEach(function (id) { lightGroup.remove(lightMap[id]); delete lightMap[id]; });
+      if (env.scene && env.scene.remove) { env.scene.remove(sceneGroup); env.scene.remove(lightGroup); }
       if (env.scene && env.scene.remove) env.scene.remove(group);
       if (panel && panel.parentNode && panel !== quick) panel.parentNode.removeChild(panel);
     }
@@ -1317,12 +1331,75 @@
     }
     function glowOf(id) {
       var g = null;
-      behaviourList().forEach(function (b) { if (b && b.kind === 'glow' && (b.parts || []).indexOf(id) >= 0 && behaviourValue(b, behave)) g = b.color; });
+      behaviourList().forEach(function (b) { if (b && (b.kind === 'glow' || b.kind === 'light') && (b.parts || []).indexOf(id) >= 0 && behaviourValue(b, behave)) g = b.color; });
       return g;
+    }
+    function sceneList() { return (((((env.cfg || {}).form || {}).authored || {}).scene) || []).filter(function (o) { return o && o.id; }); }
+    function sceneMaterial() {
+      // Opaque mid grey, matte: plainly there, plainly not the product. (A see-through material
+      // did not show against the studio's backdrop.)
+      return sceneMat || (sceneMat = new THREE.MeshStandardMaterial({ color: paint('#8E96A1'), roughness: 0.9, metalness: 0 }));
+    }
+    function drawScene(result) {
+      while (sceneGroup.children.length) { var old = sceneGroup.children.pop(); if (old.geometry && old.geometry.dispose) old.geometry.dispose(); }
+      // A scene brings its own ground (a desk, a wrist): the page's floor steps aside for it.
+      if (env.onScene) env.onScene(!!(result && result.parts.length));
+      if (!result) return;
+      result.parts.forEach(function (p) {
+        (p.shapes || []).forEach(function (sh) {
+          var mesh = new THREE.Mesh(geoOf(sh), sceneMaterial());
+          mesh.receiveShadow = true;
+          mesh.name = sh.name || p.name;
+          mesh.userData = { part: p.id, kind: 'scene', scene: true };
+          sceneGroup.add(mesh);
+        });
+      });
+    }
+    // Where each light that is on sits and points, carried by its part's motions.
+    function lightsNow() {
+      var list = behaviourList(), st = behaviourState(), out = [];
+      list.forEach(function (b) {
+        if (!b || b.kind !== 'light' || !st[b.id]) return;
+        var pid = (b.parts || [])[0], at = b.at;
+        if (!at) {
+          var r = lastResult && lastResult.parts.filter(function (x) { return x.id === pid; })[0], bb = r && r.bbox;
+          at = bb ? [(bb.min[0] + bb.max[0]) / 2, bb.min[1], (bb.min[2] + bb.max[2]) / 2] : [0, 0, 0];
+        }
+        var d = b.direction || [0, -1, 0], m = behaviourMatrix(list, pid, st);
+        var pos = m ? [m[0] * at[0] + m[4] * at[1] + m[8] * at[2] + m[12], m[1] * at[0] + m[5] * at[1] + m[9] * at[2] + m[13], m[2] * at[0] + m[6] * at[1] + m[10] * at[2] + m[14]] : at.slice();
+        var dir = m ? [m[0] * d[0] + m[4] * d[1] + m[8] * d[2], m[1] * d[0] + m[5] * d[1] + m[9] * d[2], m[2] * d[0] + m[6] * d[1] + m[10] * d[2]] : d.slice();
+        out.push({ id: b.id, position: pos, direction: dir, angle: b.angle || 45, color: b.color, intensity: b.intensity || 1 });
+      });
+      return out;
+    }
+    function applyLights() {
+      if (!THREE.SpotLight) return;
+      var want = lightsNow(), keep = {};
+      want.forEach(function (L) {
+        keep[L.id] = true;
+        var sl = lightMap[L.id];
+        if (!sl) {
+          sl = lightMap[L.id] = new THREE.SpotLight(paint(L.color), L.intensity);
+          // No shadows from the lamp's own light: its own shade would block it.
+          sl.castShadow = false; sl.penumbra = 0.45;
+          lightGroup.add(sl); lightGroup.add(sl.target);
+        }
+        // The studio's lights are strong; a lamp's 1 to 3 is scaled so its pool reads on a desk.
+        sl.intensity = L.intensity * 3;
+        sl.angle = L.angle * Math.PI / 180;
+        sl.position.set(L.position[0], L.position[1], L.position[2]);
+        sl.target.position.set(L.position[0] + L.direction[0] * 100, L.position[1] + L.direction[1] * 100, L.position[2] + L.direction[2] * 100);
+        if (sl.target.updateMatrixWorld) sl.target.updateMatrixWorld();
+      });
+      Object.keys(lightMap).forEach(function (id) {
+        if (keep[id]) return;
+        lightGroup.remove(lightMap[id]); lightGroup.remove(lightMap[id].target);
+        delete lightMap[id];
+      });
     }
     function applyBehaviours() {
       var list = behaviourList(), state = behaviourState();
-      group.children.forEach(function (mesh) {
+      group.children.concat(sceneGroup.children).forEach(function (mesh) {
         var id = mesh.userData && mesh.userData.part, mtx = behaviourMatrix(list, id, state);
         if (mtx) {
           mesh.matrixAutoUpdate = false;
@@ -1336,6 +1413,7 @@
         mesh.visible = !hidden[id] && !switchedOff(id);
       });
       applySelection();
+      applyLights();
     }
     function setBehaviour(id, value) {
       behave[id] = value;
@@ -1406,7 +1484,8 @@
           btn.type = 'button'; btn.setAttribute('data-behave-toggle', b.id);
           btn.addEventListener('click', function () { setBehaviour(b.id, !behaviourValue(b, behave)); });
           behaviourControls[b.id] = function (v) {
-            btn.textContent = v ? (b.kind === 'glow' ? 'On' : 'Shown') : (b.kind === 'glow' ? 'Off' : 'Hidden');
+            var lit = b.kind === 'glow' || b.kind === 'light';
+            btn.textContent = v ? (lit ? 'On' : 'Shown') : (lit ? 'Off' : 'Hidden');
             btn.setAttribute('aria-pressed', String(!!v));
             btn.setAttribute('aria-label', (b.name || b.id) + (v ? ': on' : ': off'));
           };
@@ -1551,6 +1630,40 @@
       det.appendChild(box);
       container.appendChild(det);
       syncVariantControls();
+    }
+    // The Scene section: what the product lives with, one line each, closed by default.
+    var sceneRows = null, sceneSum = null;
+    function sceneControlsInto(container) {
+      var list = sceneList();
+      if (!list.length) return;
+      var det = el('details', 'pp'), sum = el('summary');
+      det.setAttribute('data-pps', 'scene');
+      sum.appendChild(el('span', '', 'Scene'));
+      sceneSum = el('small', 'pp-sum', '');
+      sum.appendChild(sceneSum); det.appendChild(sum);
+      sceneRows = el('div', 'ppb fg-scene');
+      det.appendChild(sceneRows);
+      container.appendChild(det);
+      renderScene();
+    }
+    function renderScene() {
+      if (!sceneRows) return;
+      var list = sceneList();
+      sceneSum.textContent = list.length + ' object' + (list.length === 1 ? '' : 's') + ' · not part of the product';
+      sceneRows.textContent = '';
+      // Built with the panel, before the view's hidden set exists.
+      var off = hidden || {};
+      list.forEach(function (o) {
+        var row = el('div', 'fg-scene-row' + (off[o.id] ? ' is-hidden' : ''));
+        row.setAttribute('data-scene', o.id);
+        row.appendChild(el('span', 'fg-part-name', o.name || o.id));
+        row.appendChild(el('small', 'fg-part-tag', o.role || 'object'));
+        var eye = el('button', 'fg-eye', off[o.id] ? 'Show' : 'Hide');
+        eye.type = 'button'; eye.setAttribute('data-eye', o.id);
+        eye.addEventListener('click', function () { setPartHidden(o.id, !hidden[o.id]); });
+        row.appendChild(eye);
+        sceneRows.appendChild(row);
+      });
     }
     function partDef(id) {
       var parts = ((((env.cfg || {}).form || {}).authored || {}).parts) || [];
@@ -1827,8 +1940,12 @@
     function render() {
       var mine = ++seq;
       publish('running', null);
-      return run(parts, params, env.options).then(function (result) {
+      var sc = sceneList();
+      var sceneRun = sc.length ? run(sc.map(function (o) { return Object.assign({ kind: 'primitive' }, o); }), params, env.options) : Promise.resolve(null);
+      return Promise.all([run(parts, params, env.options), sceneRun]).then(function (rs) {
+        var result = rs[0];
         if (mine !== seq) return;
+        drawScene(rs[1]);
         draw(result);
         publish(result.errors.length ? 'error' : 'ready', result);
       });
@@ -2011,7 +2128,7 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, openedPart: function () { return openedPart; }, partPreview: function (id) { return previewMakes[id] || null; },
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, sceneGroup: function () { return sceneGroup; }, lights: lightsNow, openedPart: function () { return openedPart; }, partPreview: function (id) { return previewMakes[id] || null; },
       setViewMode: setViewMode, viewMode: function () { return viewMode; }, setCut: setCut, cut: function () { return { axis: cut.axis, t: cut.t }; }, cutAt: cutPosition, proposedMakes: proposedMakes,
       tryVariant: tryVariant, showSideBySide: showSideBySide, sideBySide: function () { return sideGroup; }, useVariant: useVariant };
   }
