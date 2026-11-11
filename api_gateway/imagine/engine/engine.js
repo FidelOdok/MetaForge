@@ -2605,6 +2605,7 @@ function applyReadonly(){const de=document.documentElement;if(READONLY)de.setAtt
   if(t==='submit'||roBlocked(tg)||(t==='pointerdown'&&tg.closest&&tg.closest('#nodes'))){e.preventDefault();e.stopImmediatePropagation();}},true));
 document.addEventListener('keydown',e=>{if(READONLY&&(e.key==='Delete'||e.key==='Backspace')&&!(e.target&&e.target.closest&&e.target.closest('input,textarea'))){e.preventDefault();e.stopImmediatePropagation();}},true);
 let roT=0;new MutationObserver(()=>{if(!READONLY||roT)return;roT=requestAnimationFrame(()=>{roT=0;applyReadonly();});}).observe(document.body,{childList:true,subtree:true});
+var VIEW_HOOK=null;
 if(HOSTED){
   window.addEventListener('message',e=>{if(e.source!==window.parent)return;const m=e.data;if(!m||typeof m!=='object'||m.fg!==1||typeof m.type!=='string')return;
     if(HOST_ORIGIN===null)HOST_ORIGIN=e.origin&&e.origin!=='null'?e.origin:'*';else if(HOST_ORIGIN!=='*'&&e.origin!==HOST_ORIGIN)return;
@@ -2614,10 +2615,25 @@ if(HOSTED){
   // MetaForge: a new revision loads in a fresh page; the host hands it the view the person
   // had (camera and scroll), so a regeneration does not throw the view away.
   const v3=a=>Array.isArray(a)&&a.length===3&&a.every(n=>typeof n==='number'&&isFinite(n)&&Math.abs(n)<1e6);
+  // The panes that scroll on their own, and the page's own choices of what to show (never the design).
+  const PANES=['dfm','quick','progView','graphPane'];
+  const uiNow=()=>({view:S.view,level:S.level,gtab:S.gtab,pview:S.pview,open:Object.assign({},S.open||{}),
+    panes:Object.fromEntries(PANES.map(id=>[id,Math.round(($('#'+id)||{}).scrollTop||0)]))});
+  function applyUi(u){if(!u||typeof u!=='object')return;const str=v=>typeof v==='string'&&v.length<40;
+    if(str(u.level)){S.level=u.level;applyLevel();}
+    if(str(u.gtab)){S.gtab=u.gtab;applyGtab();}
+    if(str(u.pview)){S.pview=u.pview;applyPview();}
+    if(str(u.view)&&u.view!==S.view){S.view=u.view;renderProcess();if(S.view==='sim'){renderSimInputs();startSim();}}
+    if(u.open&&typeof u.open==='object'){S.open=Object.assign(S.open||{},u.open);
+      document.querySelectorAll('#dfm > section.blk[data-acc]').forEach(sec=>{const o=S.open[sec.dataset.acc];if(typeof o!=='boolean')return;
+        sec.classList.toggle('open',o);const h=sec.querySelector(':scope > .acc-h');if(h)h.setAttribute('aria-expanded',String(o));});}
+    if(u.panes&&typeof u.panes==='object')requestAnimationFrame(()=>requestAnimationFrame(()=>PANES.forEach(id=>{const el=$('#'+id),v=u.panes[id];if(el&&typeof v==='number'&&isFinite(v))el.scrollTop=v;})));}
   function applyView(m){if(m.moved&&v3(m.camera)&&v3(m.target)){camera.position.set(...m.camera);controls.target.set(...m.target);controls.update();camMoved=true;}
+    try{applyUi(m.ui);}catch(err){/* a view from another engine version: keep this page's own */}
     if(typeof m.scroll==='number'&&isFinite(m.scroll))requestAnimationFrame(()=>window.scrollTo(0,Math.max(0,m.scroll)));}
-  let viewT=0;const postView=()=>{clearTimeout(viewT);viewT=setTimeout(()=>hostPost('fg:view',{camera:camera.position.toArray(),target:controls.target.toArray(),moved:camMoved,scroll:Math.round(window.scrollY||0)},true),250);};
-  controls.addEventListener('end',postView);window.addEventListener('scroll',postView,{passive:true});
+  let viewT=0;const postView=()=>{clearTimeout(viewT);viewT=setTimeout(()=>hostPost('fg:view',{camera:camera.position.toArray(),target:controls.target.toArray(),moved:camMoved,scroll:Math.round(window.scrollY||0),ui:uiNow()},true),250);};
+  VIEW_HOOK=postView;
+  controls.addEventListener('end',postView);document.addEventListener('scroll',postView,{passive:true,capture:true});
   $('#bomBody').addEventListener('click',e=>{const li=e.target.closest&&e.target.closest('[data-cmp]');if(li&&!e.target.closest('input,button,select'))hostPost('fg:select',{component_id:li.dataset.cmp});});
   // The height the page would like, from its width alone: the bar, the 3D
   // view at its bounded size and room for the panels, which scroll inside.
@@ -2964,7 +2980,7 @@ function recompute(){
   hostScreening(ev);
   save();
 }
-let saveT=0;function save(){clearTimeout(saveT);saveT=setTimeout(()=>{if(!RESETTING)store.set(SKEY,{G,S,product:CP.id||'default',engine:ENGINE,cfg:CFGH});},300);}
+let saveT=0;function save(){clearTimeout(saveT);saveT=setTimeout(()=>{if(!RESETTING)store.set(SKEY,{G,S,product:CP.id||'default',engine:ENGINE,cfg:CFGH});},300);if(VIEW_HOOK)VIEW_HOOK();}
 
 /* The part, or the calm empty state when the config has nothing to draw. */
 function applyShown(){part.visible=SHOW_PART;if(grid)grid.visible=SHOW_PART;ground.visible=SHOW_PART;$('#viewEmpty').hidden=SHOW_PART;

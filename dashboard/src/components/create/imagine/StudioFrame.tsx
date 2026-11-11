@@ -123,7 +123,7 @@ export function StudioFrame({ projectId, src, collections, readOnly }: StudioFra
           triggerDownload(msg);
           return;
         case 'fg:view':
-          view.current = { camera: msg.camera, target: msg.target, moved: msg.moved, scroll: msg.scroll };
+          view.current = { camera: msg.camera, target: msg.target, moved: msg.moved, scroll: msg.scroll, ui: msg.ui };
           return;
       }
     };

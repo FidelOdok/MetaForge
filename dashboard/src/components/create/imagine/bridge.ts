@@ -27,7 +27,12 @@ export interface StudioView {
   target: [number, number, number];
   moved: boolean;
   scroll: number;
+  /** The page's own choices of what to show (tabs, open cards, pane scroll); passed back as is. */
+  ui?: Record<string, unknown>;
 }
+
+/** A view's ui is handed back to the page untouched, so it is only bounded here. */
+export const MAX_VIEW_UI_CHARS = 8000;
 
 export type HostMessage =
   | { fg: 1; type: 'fg:snapshot'; collections: Record<string, unknown> }
@@ -102,7 +107,9 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
       const { camera, target, moved, scroll } = raw;
       if (!vec3(camera) || !vec3(target) || typeof moved !== 'boolean') return null;
       if (typeof scroll !== 'number' || !Number.isFinite(scroll)) return null;
-      return { type: 'fg:view', camera, target, moved, scroll: Math.max(0, Math.round(scroll)) };
+      const view: PageMessage = { type: 'fg:view', camera, target, moved, scroll: Math.max(0, Math.round(scroll)) };
+      if (isRecord(raw.ui) && JSON.stringify(raw.ui).length <= MAX_VIEW_UI_CHARS) view.ui = raw.ui;
+      return view;
     }
     default:
       return null;
