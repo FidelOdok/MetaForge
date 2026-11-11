@@ -610,3 +610,40 @@ async def test_the_loop_logs_what_its_tool_list_costs_and_when_it_changes() -> N
     rows = [row for row in logs if row.get("event") == "native_tool_schemas"]
     assert len(rows) == 1, rows  # three steps, one unchanged list: logged once
     assert rows[0]["tools"] >= 1 and rows[0]["approx_tokens"] > 0 and rows[0]["step"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_cut_off_reply_that_still_made_a_call_tells_the_model_it_was_cut_off() -> None:
+    """MetaForge, 2026-11-11: a studio write was cut off after a complete call;
+    the adapter drops the half-written call, so the model must be told, or it
+    never learns that its write did not happen."""
+    rt = _runtime_with_double()
+    seen: list[list[dict[str, Any]]] = []
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        seen.append(list(request["messages"]))
+        if len(seen) == 1:
+            call = {"id": "c1", "name": "double", "arguments": {"x": 2}}
+            return {"model": spec.model, "text": "", "tool_calls": [call], "truncated": True}
+        return {"model": spec.model, "text": "done", "tool_calls": []}
+
+    result = await run_native_tools(rt, "go", invoke=invoke, max_steps=5)
+    assert result.status == "completed"
+    last = seen[1][-1]
+    assert last["role"] == "user" and "truncated at the output token limit" in last["content"]
+
+
+@pytest.mark.asyncio
+async def test_a_finished_reply_gets_no_cut_off_note() -> None:
+    rt = _runtime_with_double()
+    seen: list[list[dict[str, Any]]] = []
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        seen.append(list(request["messages"]))
+        if len(seen) == 1:
+            call = {"id": "c1", "name": "double", "arguments": {"x": 2}}
+            return {"model": spec.model, "text": "", "tool_calls": [call]}
+        return {"model": spec.model, "text": "done", "tool_calls": []}
+
+    await run_native_tools(rt, "go", invoke=invoke, max_steps=5)
+    assert seen[1][-1]["role"] == "tool"

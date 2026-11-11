@@ -801,6 +801,22 @@ async def run_native_tools(
                 steps.append(step)
                 await _emit(step)
                 messages.append({"role": "tool", "tool_call_id": call_id, "content": content})
+            if truncated:
+                # Cut off after at least one complete call: the adapter dropped
+                # the half-written one, so say so, or the model never learns
+                # that call did not happen (MetaForge, 2026-11-11).
+                logger.warning("native_tools_output_truncated", steps=step_no, calls=len(calls))
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was truncated at the output token "
+                            "limit: the calls above ran, but the call you were writing "
+                            "when it was cut off did not. Make that call again, with a "
+                            "shorter argument if you can."
+                        ),
+                    }
+                )
 
         # Step cap, deadline, or spend cap hit — force a final text answer (no
         # tools) so we never return empty.
