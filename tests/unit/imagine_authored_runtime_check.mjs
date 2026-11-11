@@ -1185,5 +1185,35 @@ await check('cut_away_views_show_inside_the_form', async () => {
   return !back.transparent && !back.clippingPlanes ? true : 'solid did not restore: ' + JSON.stringify(back);
 });
 
+// Part property controls (MetaForge, 2026-11-11): an open part has pickers for its process,
+// material, finish and colour from the catalogue. A change previews live; Keep it asks the
+// assistant (the agent authors the change); Reset drops the preview.
+await check('a_parts_properties_preview_live_and_keep_it_goes_through_the_assistant', async () => {
+  const asked = [];
+  const { m, quick } = mountGraph({ looks: () => LOOKS, cfg: { form: DRESSED }, onAsk: (t) => asked.push(t) }, DRESSED);
+  await m.render();
+  m.openPart('base');
+  const { withClass } = graphDom();
+  const pick = (name) => withClass(quick, 'fg-prop').find((x) => x.attrs['data-prop'] === name);
+  for (const k of ['process', 'material', 'finish', 'color']) if (!pick(k)) return 'no ' + k + ' picker';
+  const mat = pick('material');
+  if (mat.value !== 'petg') return 'material shows ' + mat.value;
+  mat.value = 'asa'; mat.fire('change', {});
+  const base = m.group.children.find((x) => x.userData.part === 'base');
+  const preview = m.partPreview('base');
+  if (!preview || preview.material !== 'asa') return 'no preview: ' + JSON.stringify(preview);
+  // The process picker resets the material to one of that process.
+  const proc = pick('process'); proc.value = 'cnc'; proc.fire('change', {});
+  if (m.partPreview('base').material !== 'al6061') return 'material after process change ' + m.partPreview('base').material;
+  const after = m.group.children.find((x) => x.userData.part === 'base');
+  if (after.material.o.metalness !== 0.9) return 'the preview is not drawn: ' + JSON.stringify(after.material.o);
+  const keep = withClass(quick, 'fg-keep')[0];
+  if (!keep) return 'no Keep it';
+  keep.fire('click', {});
+  if (asked.length !== 1 || !/Weighted base|Base/.test(asked[0]) || !/al6061/.test(asked[0])) return 'ask ' + JSON.stringify(asked);
+  withClass(quick, 'fg-reset')[0].fire('click', {});
+  return m.partPreview('base') === null ? true : 'reset did not clear the preview';
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

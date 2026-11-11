@@ -100,6 +100,7 @@ CHECKS = [
     "the_summary_cards_start_closed_unless_something_is_wrong",
     "a_part_row_is_one_line_and_a_click_opens_it_and_highlights_the_part",
     "cut_away_views_show_inside_the_form",
+    "a_parts_properties_preview_live_and_keep_it_goes_through_the_assistant",
 ]
 
 

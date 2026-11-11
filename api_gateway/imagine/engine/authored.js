@@ -1146,6 +1146,7 @@
     var quick = env.quick || null;
     var partsBox = null, graphApi = null, selected = null, behave = {}, behaviourControls = {}, playing = null;
     var viewMode = 'solid', cut = { axis: 'side', t: 0.5 }, clipPlane = null;
+    var previewMakes = {}, focusProp = null;
     var openedPart = null, partsSum = null, variantsSum = null, makeOverride = null, variantOn = null, baseParams = null, sideGroup = null, sideOn = false, sideToken = null, variantControls = [];
     // Every slider for one parameter, in the controls panel and in the graph, stays in step.
     var regs = {};
@@ -1588,6 +1589,7 @@
       var p = parts.filter(function (x) { return x && x.id === id; })[0];
       if (!p || p.kind === 'component') return null;
       if (makeOverride && makeOverride[id]) return makeOverride[id];
+      if (previewMakes[id]) return previewMakes[id];
       return p.make || null;
     }
     function partLook(id) { return lookOf(partMake(id), env.looks ? env.looks() : null); }
@@ -1627,6 +1629,55 @@
         mesh.material = selected !== null && selected === 'part:' + part ? litMaterial(kind, part)
           : glow ? glowMaterial(kind, part, glow) : material(kind, part);
       });
+    }
+    // Part properties (MetaForge): the pickers preview a make on the part, live; Keep it asks
+    // the assistant to write it into the design, so the agent stays the author.
+    function setPreview(id, mk) {
+      if (mk) previewMakes[id] = mk; else delete previewMakes[id];
+      recolour();
+      if (lastResult) renderParts(lastResult);
+    }
+    function propControlsInto(body, p, acts) {
+      var t = env.looks ? env.looks() : null;
+      if (!t || !t.processes) return;
+      var cur = partMake(p.id) || { process: t.process, material: t.material, finish: t.finish, color: ((t.colors || [])[0] || {}).id };
+      var procId = cur.process || t.process, mats = (t.materials || {})[procId] || [], fins = ((t.processes[procId] || {}).finishes) || [];
+      var grid = el('div', 'fg-props');
+      function picker(name, label, options, value, onChange) {
+        var row = el('label', 'fg-prop-row');
+        row.appendChild(el('span', 'fg-prop-label', label));
+        var sel = el('select', 'fg-prop');
+        sel.setAttribute('data-prop', name);
+        options.forEach(function (o) { var op = el('option', '', o[1]); op.value = o[0]; sel.appendChild(op); });
+        sel.value = value || '';
+        sel.addEventListener('change', function () { focusProp = name; onChange(sel.value); });
+        row.appendChild(sel);
+        grid.appendChild(row);
+        // The row is rebuilt after a change: keep the person on the picker they were using.
+        if (focusProp === name && sel.focus) { focusProp = null; sel.focus(); }
+      }
+      function next(change) { return Object.assign({ process: procId, material: cur.material, finish: cur.finish, color: cur.color }, change, { source: 'person' }); }
+      picker('process', 'Process', Object.keys(t.processes).map(function (k) { return [k, t.processes[k].name || k]; }), procId, function (v) {
+        var ms = (t.materials || {})[v] || [], fs = ((t.processes[v] || {}).finishes) || [];
+        setPreview(p.id, next({ process: v, material: ms[0] && ms[0].id, finish: fs[0] && fs[0].id }));
+      });
+      picker('material', 'Material', mats.map(function (m) { return [m.id, m.name]; }), cur.material, function (v) { setPreview(p.id, next({ material: v })); });
+      picker('finish', 'Finish', fins.map(function (f) { return [f.id, f.name]; }), cur.finish || (procId === t.process ? t.finish : fins[0] && fins[0].id), function (v) { setPreview(p.id, next({ finish: v })); });
+      var cols = (t.colors || []).map(function (c) { return [c.id, c.name]; });
+      if (cur.color && !cols.some(function (c) { return c[0] === cur.color; })) cols.unshift([cur.color, cur.color]);
+      picker('color', 'Colour', cols, cur.color, function (v) { setPreview(p.id, next({ color: v })); });
+      body.appendChild(grid);
+      if (previewMakes[p.id]) {
+        var keep = el('button', 'fg-eye fg-keep', 'Keep it'), reset = el('button', 'fg-eye fg-reset', 'Reset');
+        keep.type = 'button'; reset.type = 'button';
+        keep.addEventListener('click', function () {
+          var m = previewMakes[p.id] || {}, lk = partLook(p.id) || {};
+          if (env.onAsk) env.onAsk('Make the ' + p.name + ' ' + [m.process, m.material, m.finish, m.color].filter(Boolean).join(' · ') +
+            ' (' + [lk.process, lk.material, lk.finish, lk.color].filter(Boolean).join(', ') + ') and mark it as my choice.');
+        });
+        reset.addEventListener('click', function () { setPreview(p.id, null); });
+        acts.appendChild(keep); acts.appendChild(reset);
+      }
     }
     // Open a part's row and highlight it (a click on the row, or on the part in 3D); null closes.
     function openPart(id) {
@@ -1722,7 +1773,10 @@
           sw.style.background = '#' + (KIND_STYLE[p.kind] || KIND_STYLE.generated).color.toString(16).padStart(6, '0');
           head.appendChild(sw);
           var lk = p.kind === 'component' ? null : partLook(p.id);
-          if (lk) { var chip = doc.createElement('i'); chip.className = 'fg-make-swatch'; chip.style.background = lk.hex; head.appendChild(chip); }
+          // Always five cells, so every row's size lines up in one column.
+          var chip = doc.createElement('i'); chip.className = 'fg-make-swatch' + (lk ? '' : ' is-none');
+          if (lk) chip.style.background = lk.hex;
+          head.appendChild(chip);
           head.appendChild(el('span', 'fg-part-name', p.name));
           if (hidden[p.id]) head.appendChild(el('small', 'fg-part-tag', 'hidden'));
           var b = p.bbox;
@@ -1745,6 +1799,7 @@
               if (why) body.appendChild(el('div', 'fg-part-why', why));
             }
             var acts = el('div', 'fg-part-acts');
+            if (p.kind !== 'component') propControlsInto(body, p, acts);
             var eye = el('button', 'fg-eye', hidden[p.id] ? 'Show' : 'Hide');
             eye.type = 'button';
             eye.setAttribute('data-eye', p.id);
@@ -1953,7 +2008,7 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, openedPart: function () { return openedPart; },
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, openedPart: function () { return openedPart; }, partPreview: function (id) { return previewMakes[id] || null; },
       setViewMode: setViewMode, viewMode: function () { return viewMode; }, setCut: setCut, cut: function () { return { axis: cut.axis, t: cut.t }; }, cutAt: cutPosition, proposedMakes: proposedMakes,
       tryVariant: tryVariant, showSideBySide: showSideBySide, sideBySide: function () { return sideGroup; }, useVariant: useVariant };
   }
