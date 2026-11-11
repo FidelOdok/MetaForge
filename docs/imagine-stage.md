@@ -654,6 +654,16 @@ the roughness of its finish and a metallic look for a metal, and the mass is sum
 part's own material. A part without one takes the product colour from the swatches. Moving a slider runs the code again with no model call. The enclosure's
 own node graph editor is hidden, because it edits parameters a form made of code has none.
 
+### Real parts and the component library
+
+A real part in `context.components.parts` can name its entry in the component library with
+`library` (the entry's `name`). The Imagine stage carries `library.list_components`,
+`library.get_component` and `library.register_component`, and the playbook tells the assistant to
+look a part up before researching it and to register a new one once. Each write warns, in one note,
+about the real parts with no `library` link, and about a link to an entry the library does not have
+(a registration can still be waiting for approval, or the name is wrong). Stand-ins are not asked.
+These are warnings, never a refusal. Code: `api_gateway/imagine/library_link.py`.
+
 A part of kind `component` can name its real part with `component_ref`, the `id` of a part in
 `context.components.parts`, and say where it sits with `at` (`[x, y, z]` in millimetres, Y up) and
 optionally `rot` (degrees). With no `code` of its own, the studio writes the drawing code from that

@@ -136,6 +136,18 @@ write:
   `id`, `role` (`fn:<function>`, `board` or `battery`), `mpn`, `manufacturer`,
   `datasheet`, `retrieved`, `interfaces` and `geometry.envelope` with a
   `source`.
+- **Real parts live in the component library.** Before researching a part,
+  look for it with `library.list_components` (family `module`, `battery` or
+  `electronic`) and use what it holds: the entry's specs carry their sources.
+  The first time you choose a part the library does not have, register it once
+  with `library.register_component`: `family` (`module` for a bought board or
+  module, `battery`, `electronic` for a single chip, button or connector),
+  `origin: purchased`, `manufacturer`, `mpn`, `datasheet`, `interfaces`, and
+  the sizes you read as `specs` (`length_mm`, `width_mm`, `height_mm`) each with
+  its source; a size you did not read is `source_kind: assumption`. Then set
+  the part's `"library"` to the entry's `name`. A write lists the real parts
+  that are not linked, and a link to an entry that is not there yet (a
+  registration can wait for the person's approval).
 - **Every part gets a 3D body, and says how it was made.** For each part you
   record, call `twin.imagine_resolve_part` with it. Pass the KiCad symbol
   (for example `{"kicad": {"symbol": "Sensor_Pressure:BMP280"}}`) when you know it, and a

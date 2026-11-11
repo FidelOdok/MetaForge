@@ -35,6 +35,7 @@ from pydantic import ValidationError
 from api_gateway.imagine import (
     component_link,
     engine_page,
+    library_link,
     part_model,
     resolve_part,
     studio_patch,
@@ -721,7 +722,11 @@ class ImagineService:
         )
         # A component in the form that names its real part is drawn from that part.
         config, linked = component_link.expand_component_parts(config)
-        drawn = [*drawn, *linked]
+        # Real parts the component library does not hold yet: register once, reuse later.
+        library = await asyncio.to_thread(
+            library_link.library_notes, config, library_link.catalog_exists
+        )
+        drawn = [*drawn, *linked, *library]
         try:
             checked = engine_page.validate_config(config)
         except engine_page.ConfigError as exc:

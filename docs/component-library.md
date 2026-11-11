@@ -10,6 +10,17 @@ engineering verification. Missing specifications remain unknown.
 
 - `library.list_components`, `library.get_component`, and the register/update
   tools manage reusable entries with sourced specs and revision history.
+  Besides mechanical families, an entry can be a `module` (a bought board or
+  module, such as a display or a GNSS module), a `battery` or an `electronic`
+  part (a single chip, button or connector). Such an entry also carries
+  `manufacturer`, `mpn` (the maker's order code), `datasheet` (an http(s) link)
+  and `interfaces` (`[{id, bus, dir}]`, `dir` one of `in`, `out`, `bi`); a
+  battery's `capacity_mah` is a typed spec. Entries saved before these fields
+  load with them empty.
+- The Imagine studio links a real part to its entry with the part's `library`
+  field, and the Imagine stage can list, read and register components, so a
+  part researched in one project is found by the next. See
+  [the Imagine stage](imagine-stage.md#real-parts-and-the-component-library).
 - `component.search_parametric` searches typed specifications. Without
   `DATABASE_URL`, the gateway and local MCP entry point use SQLite at
   `~/.metaforge/component_catalog.db` (override with
