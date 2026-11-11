@@ -21,11 +21,16 @@ import { GatewaySetup } from './GatewaySetup';
  *                       it. A visible failure belongs in the app, not here.
  *   error, unchosen  -> setup. Nothing has ever worked and they have never
  *                       been asked. This is the app.metaforge.uk visitor.
+ *   error, answered  -> app. It answered earlier in this session, so it has
+ *                       worked; swapping the app out would throw away the
+ *                       person's place (it looked like a full page reload).
  */
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
-  const { isError, isLoading } = useHealth();
+  const { isError, isLoading, data } = useHealth();
 
-  const neverWorked = isError && !isLoading && !isGatewayUserConfigured();
+  // A gateway that has answered once in this session has worked: a later failed poll (a busy
+  // gateway during a studio regeneration) shows in the app, never by swapping the app out.
+  const neverWorked = isError && !isLoading && !data && !isGatewayUserConfigured();
   if (neverWorked) return <GatewaySetup />;
 
   return <>{children}</>;

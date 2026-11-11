@@ -805,6 +805,37 @@ body.cv-resizing {
   flex-direction: column;
   gap: 8px;
 }
+/* What the newest revision changed, with an undo (it saves the revision before as a new one). */
+.cv-studio-changes {
+  padding: 10px 12px;
+  border: 1px solid var(--cv-line);
+  border-left: 3px solid var(--cv-accent);
+  border-radius: 10px;
+  background: var(--cv-panel);
+  font-size: 13px;
+}
+.cv-studio-changes-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cv-studio-changes-head svg {
+  color: var(--cv-accent);
+}
+.cv-studio-changes-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.cv-studio-changes ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0 0;
+  padding: 0 0 0 22px;
+  color: var(--cv-muted);
+}
 /* A new revision loads behind the one on screen and takes its place once it
    is ready, so a regeneration never blanks the studio. */
 .cv-studio-frame.is-pending {

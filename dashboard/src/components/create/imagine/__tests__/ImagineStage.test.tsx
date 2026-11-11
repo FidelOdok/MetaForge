@@ -8,6 +8,7 @@ const getHandover = vi.fn();
 const getValidation = vi.fn();
 const postHandover = vi.fn();
 const postRework = vi.fn();
+const putStudio = vi.fn();
 vi.mock('../../../../api/endpoints/imagine', async (orig) => ({
   ...(await orig<typeof import('../../../../api/endpoints/imagine')>()),
   getStudio: (...a: unknown[]) => getStudio(...a),
@@ -15,6 +16,7 @@ vi.mock('../../../../api/endpoints/imagine', async (orig) => ({
   getValidation: (...a: unknown[]) => getValidation(...a),
   postHandover: (...a: unknown[]) => postHandover(...a),
   postRework: (...a: unknown[]) => postRework(...a),
+  putStudio: (...a: unknown[]) => putStudio(...a),
 }));
 vi.mock('../SketchWorkspace', () => ({ SketchWorkspace: () => <div data-testid="sketch-workspace" /> }));
 
@@ -83,6 +85,34 @@ function imagine(view: 'studio' | 'sketch' = 'studio') {
 }
 
 describe('studio frame follows the revision', () => {
+  it('says what a new revision changed, and undoes it by saving the one before as a new revision', async () => {
+    const before = { engine: 'formgraph@2', form: { template: 'authored', params: { case_d: 40 }, authored: { parts: [] } } };
+    const after = { engine: 'formgraph@2', form: { template: 'authored', params: { case_d: 48 }, authored: { parts: [] } } };
+    getStudio.mockReset().mockResolvedValue(studio({ revision: 2, config: before }));
+    putStudio.mockReset().mockResolvedValue(studio({ revision: 4, config: before }));
+    imagine();
+    await screen.findByTestId('studio-frame');
+    expect(screen.queryByTestId('studio-changes')).toBeNull();
+    getStudio.mockResolvedValue(studio({ revision: 3, config: after }));
+    const strip = await screen.findByTestId('studio-changes', {}, { timeout: 15000 });
+    expect(strip).toHaveTextContent('Changed in revision 3');
+    expect(strip).toHaveTextContent('Case d: 40 → 48');
+    await userEvent.click(within(strip).getByRole('button', { name: 'Undo this change' }));
+    expect(putStudio).toHaveBeenCalledWith(P, before);
+    await userEvent.click(within(screen.getByTestId('studio-changes')).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByTestId('studio-changes')).toBeNull();
+  }, 20000);
+
+  it('offers no undo once the studio is handed over', async () => {
+    const before = { form: { template: 'authored', params: { h: 1 } } };
+    getStudio.mockReset().mockResolvedValue(studio({ revision: 2, config: before, status: 'handed_over' }));
+    imagine();
+    await screen.findByTestId('studio-frame');
+    getStudio.mockResolvedValue(studio({ revision: 3, config: { form: { template: 'authored', params: { h: 2 } } }, status: 'handed_over' }));
+    const strip = await screen.findByTestId('studio-changes', {}, { timeout: 15000 });
+    expect(within(strip).queryByRole('button', { name: 'Undo this change' })).toBeNull();
+  }, 20000);
+
   it('loads a new revision the agent saves behind the page on screen', async () => {
     getStudio.mockReset().mockResolvedValue(studio({ revision: 2 }));
     imagine();

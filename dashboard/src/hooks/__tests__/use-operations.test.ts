@@ -135,6 +135,43 @@ describe('useOperations', () => {
     expect(getOperations).not.toHaveBeenCalled();
   });
 
+  it('closes the stream while the tab is hidden and picks up from its cursor when it is shown', async () => {
+    // Every open tab held a stream for good, and Chrome allows six connections per host, so
+    // background tabs starved the one on screen: health failed and requests timed out.
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    visibility.mockReturnValue('visible');
+    getOperations.mockResolvedValue(snapshotResponse([], 10));
+    renderHook(() => useOperations('p1', { retryMinMs: 5 }));
+    await waitFor(() => expect(streams).toHaveLength(1));
+
+    visibility.mockReturnValue('hidden');
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(streams[0]?.options.signal?.aborted).toBe(true);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(streams).toHaveLength(1);
+    expect(getOperations).toHaveBeenCalledTimes(1);
+
+    visibility.mockReturnValue('visible');
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(streams).toHaveLength(2));
+    expect(getOperations).toHaveBeenCalledTimes(2);
+    expect(streams[1]?.options.headers?.['Last-Event-ID']).toBe('10');
+    visibility.mockRestore();
+  });
+
+  it('does not open a stream for a tab that starts hidden', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    getOperations.mockResolvedValue(snapshotResponse([], 10));
+    renderHook(() => useOperations('p1', { retryMinMs: 5 }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(getOperations).not.toHaveBeenCalled();
+    visibility.mockRestore();
+  });
+
   it('aborts the stream on unmount', async () => {
     getOperations.mockResolvedValue(snapshotResponse([], 10));
     const { unmount } = renderHook(() => useOperations('p1'));
