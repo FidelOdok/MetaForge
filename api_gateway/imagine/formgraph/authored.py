@@ -238,3 +238,125 @@ def _is_vector(value: Any) -> bool:
         and len(value) == 3
         and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in value)
     )
+
+
+#: How a part is made and how it looks (MetaForge, 2026-11-11): each part is manufactured
+#: on its own, so it names its own process, material, finish and colour.
+MAKE_KEYS = ("process", "material", "finish", "color", "source", "why")
+MAKE_SOURCES = ("proposed", "person")
+MAX_MAKE_WHY = 200
+_HEX = re.compile(r"#[0-9A-Fa-f]{6}")
+
+
+def _names(table: Any) -> set[str]:
+    if isinstance(table, dict):
+        return {str(k) for k in table}
+    if isinstance(table, list):
+        return {str(m.get("id") if isinstance(m, dict) else m) for m in table}
+    return set()
+
+
+def check_make(
+    form: Any,
+    processes: dict[str, Any],
+    colors: list[str],
+    default_process: str | None,
+    extra_materials: dict[str, Any] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Errors and warnings for each part's ``make`` block.
+
+    ``processes`` is the catalogue's process table (each with ``name``, ``materials`` and
+    ``finishes``), ``colors`` the catalogue's colour ids and ``default_process`` the
+    product's own ``process.id``, used when a part names none. Every value must be one the
+    page can draw with; an invented one is refused naming the part. A look the agent
+    proposed is listed as waiting for the person, never as chosen.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    block = form.get("authored") if isinstance(form, dict) else None
+    parts = block.get("parts") if isinstance(block, dict) else None
+    if not isinstance(parts, list):
+        return errors, warnings
+    extra = extra_materials or {}
+    proposed: list[str] = []
+    without: list[str] = []
+    any_make = False
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        pid = str(part.get("id", ""))
+        label = f'part "{pid}"'
+        make = part.get("make")
+        if make is None:
+            if part.get("kind") != "component":
+                without.append(f'"{pid}"')
+            continue
+        any_make = True
+        if part.get("kind") == "component":
+            errors.append(
+                f"{label}: a bought component keeps its own look and is not manufactured "
+                "here; remove its make block."
+            )
+            continue
+        if not isinstance(make, dict):
+            errors.append(f"{label}: make must be an object.")
+            continue
+        for key in sorted(set(make) - set(MAKE_KEYS)):
+            errors.append(f'{label}: make.{key} is not known; use {", ".join(MAKE_KEYS)}.')
+        proc_id = str(make.get("process") or default_process or "")
+        proc = processes.get(proc_id)
+        if not proc:
+            errors.append(
+                f'{label}: make.process "{proc_id}" is not a process; choose from: '
+                f"{', '.join(sorted(processes)) or 'none'}."
+            )
+        else:
+            pname = proc.get("name", proc_id)
+            mats = _names(proc.get("materials")) | _names(extra.get(proc_id))
+            material = make.get("material")
+            if not material:
+                errors.append(f"{label}: make.material is required.")
+            elif str(material) not in mats:
+                errors.append(
+                    f'{label}: make.material "{material}" is not available for {pname}. '
+                    f"Choose from: {', '.join(sorted(mats))}."
+                )
+            finish = make.get("finish")
+            finishes = _names(proc.get("finishes"))
+            if finish is not None and str(finish) not in finishes:
+                errors.append(
+                    f'{label}: make.finish "{finish}" is not available for {pname}. '
+                    f"Choose from: {', '.join(sorted(finishes))}."
+                )
+        color = make.get("color")
+        if not color:
+            errors.append(f"{label}: make.color is required, a catalogue colour or #RRGGBB.")
+        elif str(color) not in colors and not _HEX.fullmatch(str(color)):
+            errors.append(
+                f'{label}: make.color "{color}" is neither a catalogue colour '
+                f"({', '.join(colors)}) nor a #RRGGBB value."
+            )
+        source = make.get("source")
+        if source not in MAKE_SOURCES:
+            errors.append(
+                f"{label}: make.source must say who chose it: "
+                f'"proposed" (the agent, for the person to confirm) or "person".'
+            )
+        elif source == "proposed":
+            proposed.append(f'"{pid}"')
+        why = make.get("why")
+        if why is not None and (not isinstance(why, str) or len(why) > MAX_MAKE_WHY):
+            errors.append(f"{label}: make.why must be text of at most {MAX_MAKE_WHY} characters.")
+    if proposed:
+        warnings.append(
+            f"How {', '.join(proposed)} {'is' if len(proposed) == 1 else 'are'} made and look "
+            "is proposed by the agent, not chosen: the person confirms the process, material "
+            "and colour of each."
+        )
+    if any_make and without:
+        warnings.append(
+            f"{', '.join(without)} {'has' if len(without) == 1 else 'have'} no make block, so "
+            "the studio draws it in the product colour and the product's process; give each "
+            "made part its own."
+        )
+    return errors, warnings

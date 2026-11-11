@@ -165,6 +165,14 @@ def validate(cfg, cat, ctx=None):
         if q and pr['id'] == 'sls' and q > 5000:
             W.append(f'{q} units is high for SLS printing; the page will suggest moulding.')
 
+    # MetaForge (2026-11-11): each authored part names how it is made and how it looks.
+    if template == authored.TEMPLATE_ID:
+        make_errors, make_warnings = authored.check_make(
+            f, cat['processes'], list(cat.get('colors') or []), pr.get('id'), ext.get('materials') or {}
+        )
+        E.extend(make_errors)
+        W.extend(make_warnings)
+
     # power
     pw = cfg['power']
     boards = set(cat['boards']) | set((ext.get('boards') or {}).keys())

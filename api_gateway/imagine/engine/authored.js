@@ -629,7 +629,28 @@
 
   function fmtMm(v) { return String(Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10); }
 
-  function describe(summary, material) {
+  /* How a part is made and how it looks (MetaForge, 2026-11-11). A part's make block names
+     its process, material, finish and colour; the page hands over its own tables (the
+     process rule books, their materials and the catalogue colours), so the part is drawn as
+     what it is made from. null when the part has no make block or there are no tables. */
+  function lookOf(make, t) {
+    if (!make || !t) return null;
+    var procId = make.process || t.process, proc = (t.processes || {})[procId] || {};
+    var mat = ((t.materials || {})[procId] || []).filter(function (m) { return m.id === make.material; })[0] || null;
+    var fins = proc.finishes || [], finId = make.finish || (procId === t.process ? t.finish : null);
+    var fin = fins.filter(function (f) { return f.id === finId; })[0] || fins[0] || { rough: 0.6, name: '' };
+    var c = String(make.color || ''), col = (t.colors || []).filter(function (x) { return x.id === c; })[0] || null;
+    var hex = col ? col.hex : /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#9AA0A6';
+    var metal = proc.metal || (mat && mat.metal) ? 0.9 : 0;
+    return {
+      hex: hex, metal: metal, rough: metal ? Math.max(0.22, fin.rough) : fin.rough, cc: fin.cc || 0,
+      process: proc.name || procId, processId: procId, material: mat ? mat.name : String(make.material || ''),
+      finish: fin.name || '', color: col ? col.name : hex,
+      density: mat && typeof mat.density === 'number' ? mat.density : null, proposed: make.source === 'proposed',
+    };
+  }
+
+  function describe(summary, material, partMaterial) {
     var sm = summary || {}, parts = sm.parts || [], errors = sm.errors || [];
     var drawn = parts.filter(function (p) { return !p.error && p.triangles > 0; }).length;
     var d = { headline: '', dims: '', facts: [], notAssessed: NOT_ASSESSED.slice(), problems: errors.slice() };
@@ -645,7 +666,15 @@
     d.facts.push(['Volume of the shapes', (Math.round(vol * 10) / 10) + ' cm³, overlaps counted twice']);
     d.facts.push(['Parts', String(parts.length)]);
     d.facts.push(['Triangles', String(sm.triangles)]);
-    if (material && typeof material.density === 'number') d.facts.push(['Mass if solid in ' + material.name, Math.round(vol * material.density) + ' g']);
+    // Each part in its own material when it names one, the product's otherwise.
+    var own = 0, grams = 0, known = true;
+    parts.forEach(function (p) {
+      var m = (partMaterial && partMaterial(p.id)) || null;
+      if (m) own++; else m = material;
+      if (m && typeof m.density === 'number') grams += (p.volume || 0) / 1000 * m.density; else known = false;
+    });
+    if (own && known) d.facts.push(['Mass if solid, each part in its own material', Math.round(grams) + ' g']);
+    else if (material && typeof material.density === 'number') d.facts.push(['Mass if solid in ' + material.name, Math.round(vol * material.density) + ' g']);
     var m = sm.measured;
     if (m) {
       d.facts.push(['Overhang (upper bound)', Math.round((m.overhang_share || 0) * 100) + '% of the surface']);
@@ -1045,28 +1074,38 @@
     }
     // The product's own parts take the colour and finish chosen with the swatches; a bought
     // component keeps its own dark colour so it still reads as not made from that material.
-    function look(kind) {
+    // A made part with its own make block is drawn as what it is made from (MetaForge).
+    function partMake(id) {
+      var parts = ((((env.cfg || {}).form || {}).authored || {}).parts) || [];
+      var p = parts.filter(function (x) { return x && x.id === id; })[0];
+      return p && p.kind !== 'component' ? p.make || null : null;
+    }
+    function partLook(id) { return lookOf(partMake(id), env.looks ? env.looks() : null); }
+    function look(kind, part) {
       var cmf = env.cmf ? env.cmf() : null, st = KIND_STYLE[kind] || KIND_STYLE.generated;
+      var own = kind === 'component' ? null : partLook(part);
+      if (own) return { color: own.hex, rough: own.rough, metal: own.metal, cc: own.cc };
       if (!cmf || kind === 'component') return { color: st.color, rough: 0.6, metal: 0.05, cc: 0 };
       return { color: cmf.hex, rough: cmf.rough, metal: cmf.metal, cc: cmf.cc || 0 };
     }
-    function make(kind, extra) {
-      var l = look(kind);
+    function make(kind, part, extra) {
+      var l = look(kind, part);
       var o = { color: paint(l.color), roughness: l.rough, metalness: l.metal };
       if (l.cc) o.clearcoat = l.cc;
       Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
       return new THREE.MeshStandardMaterial(o);
     }
-    function litMaterial(kind) {
-      return litMaterials[kind] || (litMaterials[kind] = make(kind, { emissive: 0x2f6fff, emissiveIntensity: 0.55 }));
+    function litMaterial(kind, part) {
+      var key = kind + '|' + (partMake(part) ? part : '');
+      return litMaterials[key] || (litMaterials[key] = make(kind, part, { emissive: 0x2f6fff, emissiveIntensity: 0.55 }));
     }
     // The swatches or the finish changed: rebuild the materials and put them on the meshes.
     function recolour() { materials = {}; litMaterials = {}; applySelection(); }
     // The selected part glows in the 3D view; everything else keeps its kind's colour.
     function applySelection() {
       group.children.forEach(function (mesh) {
-        var kind = mesh.userData && mesh.userData.kind;
-        mesh.material = selected !== null && selected === 'part:' + (mesh.userData && mesh.userData.part) ? litMaterial(kind) : material(kind);
+        var kind = mesh.userData && mesh.userData.kind, part = mesh.userData && mesh.userData.part;
+        mesh.material = selected !== null && selected === 'part:' + part ? litMaterial(kind, part) : material(kind, part);
       });
     }
     function setSelected(id) {
@@ -1074,7 +1113,11 @@
       if (graphApi) graphApi.refresh();
       applySelection();
     }
-    function material(kind) { return materials[kind] || (materials[kind] = make(kind)); }
+    // One material per part that is made its own way; parts without a make block share their kind's.
+    function material(kind, part) {
+      var key = kind + '|' + (partMake(part) ? part : '');
+      return materials[key] || (materials[key] = make(kind, part));
+    }
     function clear() {
       while (group.children.length) { var m = group.children.pop(); if (m.geometry) m.geometry.dispose(); }
     }
@@ -1089,7 +1132,10 @@
         measured: result ? result.measured || null : null,
       };
       GLOBAL.FG_AUTHORED = summary;
-      var desc = describe(summary, env.material ? env.material() : null);
+      var desc = describe(summary, env.material ? env.material() : null, function (id) {
+        var l = partLook(id);
+        return l && l.density !== null ? { name: l.material, density: l.density } : null;
+      });
       if (env.onSeen) { desc.onSeen = env.onSeen; desc.seen = !!(env.seenState && env.seenState()); }
       if (env.summaryHost) renderSummary(doc, env.summaryHost, desc);
       if (env.summaryHost) renderComponents(doc, env.summaryHost, describeComponents(env.cfg));
@@ -1104,7 +1150,7 @@
           geo.setAttribute('position', new THREE.Float32BufferAttribute(sh.positions, 3));
           if (sh.normals) geo.setAttribute('normal', new THREE.Float32BufferAttribute(sh.normals, 3)); else geo.computeVertexNormals();
           geo.setIndex(sh.indices);
-          var mesh = new THREE.Mesh(geo, material(p.kind));
+          var mesh = new THREE.Mesh(geo, material(p.kind, p.id));
           mesh.name = sh.name || p.name; mesh.castShadow = true; mesh.receiveShadow = true;
           mesh.userData = { part: p.id, kind: p.kind };
           group.add(mesh);
@@ -1122,6 +1168,16 @@
           qt.appendChild(name);
           qt.appendChild(el('b', '', p.error ? 'not drawn' : b ? fmtMm(b.max[0] - b.min[0]) + ' \u00d7 ' + fmtMm(b.max[2] - b.min[2]) + ' \u00d7 ' + fmtMm(b.max[1] - b.min[1]) + ' mm' : ''));
           row.appendChild(qt);
+          var lk = p.kind === 'component' ? null : partLook(p.id);
+          if (lk) {
+            var mk = el('div', 'fg-part-make'), chip = doc.createElement('i');
+            chip.className = 'fg-make-swatch'; chip.style.background = lk.hex;
+            mk.appendChild(chip);
+            mk.appendChild(doc.createTextNode(' ' + [lk.process, lk.material, lk.finish, lk.color].filter(Boolean).join(' \u00b7 ')));
+            if (lk.proposed) mk.appendChild(el('span', 'fg-make-proposed', 'proposed'));
+            row.setAttribute('title', (partMake(p.id) || {}).why || '');
+            row.appendChild(mk);
+          }
           partsBox.appendChild(row);
         });
       }
@@ -1322,5 +1378,5 @@
     return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });

@@ -247,6 +247,44 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 20000
+                  },
+                  "make": {
+                    "description": "How this part is manufactured and how it looks. Each part is made on its own: its process, a material and finish of that process, and its colour. source says who chose them: proposed (the agent, for the person to confirm) or person. Not for a bought component.",
+                    "type": "object",
+                    "required": [
+                      "material",
+                      "color",
+                      "source"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "process": {
+                        "type": "string",
+                        "description": "A process id from the catalogue (fdm, cnc, sls, im); the product's process.id when left out."
+                      },
+                      "material": {
+                        "type": "string",
+                        "description": "A material of that process."
+                      },
+                      "finish": {
+                        "type": "string",
+                        "description": "A finish of that process; the product's finish when left out and the process is the product's."
+                      },
+                      "color": {
+                        "type": "string",
+                        "description": "A catalogue colour id or #RRGGBB."
+                      },
+                      "source": {
+                        "enum": [
+                          "proposed",
+                          "person"
+                        ]
+                      },
+                      "why": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    }
                   }
                 }
               }

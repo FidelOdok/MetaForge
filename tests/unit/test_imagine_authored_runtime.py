@@ -84,6 +84,10 @@ CHECKS = [
     "describe_shows_the_measurements_and_says_when_a_form_would_tip_over",
     "screening_rules_report_only_what_was_measured",
     "the_summary_offers_a_button_for_a_person_to_say_they_have_seen_the_form",
+    "a_part_look_comes_from_its_own_process_material_finish_and_colour",
+    "each_part_is_drawn_in_its_own_material",
+    "a_part_with_no_make_block_keeps_the_product_look",
+    "describe_sums_the_mass_from_each_parts_own_material",
 ]
 
 

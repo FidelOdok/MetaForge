@@ -96,7 +96,9 @@ write:
   refused. It paints the product's own parts in the drawing and the look
   picture; a bought component keeps its dark colour. Set it only when the brief
   names a colour, pick the nearest of the four, and say which you picked. The
-  person can change it with the swatches.
+  person can change it with the swatches. It is the fallback: a part with its
+  own `make` block (see "Authoring a form") is drawn in its own colour and
+  material instead.
 - **`programme.sector`** is optional and is one of `ict`, `industrial`,
   `luminaire`, `household`, `medical`, `automotive` or `aircraft`, nothing else.
   Words like `consumer`, `stationery` or `furniture` are refused. Pick the
@@ -307,6 +309,28 @@ and the parts in `form.authored.parts`. Each part has:
 - `body`: `true` on at most one part, the main body the electronics would sit
   in. Without one, the page says the fit of the electronics is not assessed.
 - `max_triangles`: an optional cap for the part.
+- `make`: how this part is manufactured and how it looks. Every part is made
+  on its own, so give each `generated` and `primitive` part its own (never a
+  `component`: a bought part keeps its own look, and a `make` on one is
+  refused):
+  - `process`: the process this part is made with (`fdm`, `cnc`, `sls`,
+    `im`); the product's `process.id` when left out. Parts may differ: a
+    printed shade on a machined arm.
+  - `material` and `finish`: a material and finish of that process, from the
+    table below (an invented one is refused, naming the part and listing the
+    choices). Left out, the finish is the product's when the process is.
+  - `color`: one of the four catalogue colours or a `#RRGGBB` value.
+  - `source`: `proposed` when you chose it, `person` only when the person
+    named it for this part. A proposed `make` is reported as waiting for the
+    person to confirm, never as chosen.
+  - `why`: one short reason, 200 characters at most, tied to what the part
+    does (it is load bearing, it is touched, it gets warm, it must be heavy).
+  Choose for the part's job, not for variety: a weighted base, a stiff arm, a
+  shade that gets warm. Where the person named a material or colour for the
+  whole product, use it on the parts it fits and say which parts differ and
+  why. The studio draws each part in its own material and colour, lists its
+  process, material, finish and colour under the part, and sums the mass from
+  each part's own material.
 
 Units are millimetres and Y is up. Stand the product on the floor at Y = 0,
 centred on the origin. A shape is made centred on its own origin (a box runs
@@ -433,7 +457,8 @@ USB-C port. Replace `form` in the skeleton with this and keep the rest:
           "base_h"
         ],
         "code": "return [g.cylinder(p.base_r, p.base_h, 48).at(0, p.base_h / 2, 0)];",
-        "body": true
+        "body": true,
+        "make": {"process": "fdm", "material": "petg", "finish": "sanded", "color": "graphite", "source": "proposed", "why": "printed solid and heavy so the lamp does not tip"}
       },
       {
         "id": "arm",
@@ -444,7 +469,8 @@ USB-C port. Replace `form` in the skeleton with this and keep the rest:
           "arm_len",
           "arm_lean"
         ],
-        "code": "const top = p.base_h + p.arm_len;return [g.tube([[0, p.base_h, 0], [p.arm_lean * 0.2, p.base_h + p.arm_len * 0.5, 0], [p.arm_lean, top, 0]], 4, 16)];"
+        "code": "const top = p.base_h + p.arm_len;return [g.tube([[0, p.base_h, 0], [p.arm_lean * 0.2, p.base_h + p.arm_len * 0.5, 0], [p.arm_lean, top, 0]], 4, 16)];",
+        "make": {"process": "cnc", "material": "al6061", "finish": "anod", "color": "#A7ABB0", "source": "proposed", "why": "a thin arm carries the shade, so it is machined aluminium"}
       },
       {
         "id": "shade",
@@ -457,7 +483,8 @@ USB-C port. Replace `form` in the skeleton with this and keep the rest:
           "head_r",
           "head_h"
         ],
-        "code": "return [g.frustum(p.head_r, 12, p.head_h, 48).at(p.arm_lean, p.base_h + p.arm_len + p.head_h / 2, 0)];"
+        "code": "return [g.frustum(p.head_r, 12, p.head_h, 48).at(p.arm_lean, p.base_h + p.arm_len + p.head_h / 2, 0)];",
+        "make": {"process": "fdm", "material": "asa", "finish": "fine", "color": "arctic", "source": "proposed", "why": "the shade sits near the light and gets warm; ASA holds its shape"}
       },
       {
         "id": "panel",
@@ -469,7 +496,8 @@ USB-C port. Replace `form` in the skeleton with this and keep the rest:
           "arm_lean",
           "head_r"
         ],
-        "code": "return [g.cylinder(p.head_r * 0.85, 3, 48).at(p.arm_lean, p.base_h + p.arm_len + 1.5, 0)];"
+        "code": "return [g.cylinder(p.head_r * 0.85, 3, 48).at(p.arm_lean, p.base_h + p.arm_len + 1.5, 0)];",
+        "make": {"process": "fdm", "material": "petg", "color": "arctic", "source": "proposed", "why": "a diffuser behind the shade"}
       },
       {
         "id": "button",
@@ -507,7 +535,9 @@ USB-C port. Replace `form` in the skeleton with this and keep the rest:
    "Authoring a form"). Ask at
    most three questions, in one message, and only for what you cannot infer
    (quantity, where it is used, how it is powered are the usual ones). Put
-   every value you assumed in `programme.assumptions`.
+   every value you assumed in `programme.assumptions`. Give every part you
+   make its own `make` block (process, material, finish, colour, `source`
+   and `why`): the person sees each part as what it is made from.
 3. **Write it** with `twin.imagine_put_studio` and the full config, including
    `programme` (ledger, assumptions, markets), `environment`, `scenarios`,
    `programme.interfaces` and `process.qty`.

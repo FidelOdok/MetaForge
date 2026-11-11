@@ -839,5 +839,80 @@ await check('the_summary_offers_a_button_for_a_person_to_say_they_have_seen_the_
   return b2 && b2.disabled && /seen/i.test(b2.textContent) ? true : 'a seen form should show a disabled, recorded button';
 });
 
+// Each part is drawn in its own material (MetaForge, 2026-11-11). The page hands the runtime
+// the engine's process, material and colour tables; a part's make block picks from them,
+// so each part is drawn as the process and material it is made with.
+const LOOKS = {
+  process: 'fdm', finish: 'asp',
+  processes: {
+    fdm: { finishes: [{ id: 'asp', name: 'As printed', rough: 0.9 }, { id: 'sanded', name: 'Sanded and primed', rough: 0.35 }] },
+    cnc: { metal: true, finishes: [{ id: 'asm', name: 'As machined', rough: 0.32 }, { id: 'anod', name: 'Bead blast and anodise', rough: 0.5 }] },
+  },
+  materials: {
+    fdm: [{ id: 'petg', name: 'PETG', density: 1.27 }, { id: 'asa', name: 'ASA', density: 1.07 }],
+    cnc: [{ id: 'al6061', name: 'Aluminium 6061-T6', density: 2.7, metal: true }],
+  },
+  colors: [{ id: 'arctic', name: 'Arctic white', hex: '#E4E6E8' }, { id: 'graphite', name: 'Graphite', hex: '#30343B' }],
+};
+const DRESSED = {
+  ...LAMPFORM,
+  authored: { parts: [
+    { ...LAMPFORM.authored.parts[0], make: { material: 'petg', finish: 'sanded', color: 'graphite', source: 'proposed', why: 'a heavy, dark base' } },
+    { ...LAMPFORM.authored.parts[1], make: { process: 'cnc', material: 'al6061', finish: 'anod', color: '#A7ABB0', source: 'person' } },
+    { ...LAMPFORM.authored.parts[2], make: { material: 'asa', color: 'arctic', source: 'proposed' } },
+  ] },
+};
+
+await check('a_part_look_comes_from_its_own_process_material_finish_and_colour', () => {
+  const al = FG.lookOf(DRESSED.authored.parts[1].make, LOOKS);
+  if (!al || al.hex !== '#A7ABB0' || al.metal !== 0.9 || al.rough !== 0.5) return 'aluminium arm: ' + JSON.stringify(al);
+  if (al.material !== 'Aluminium 6061-T6' || al.finish !== 'Bead blast and anodise' || al.density !== 2.7 || al.proposed) return 'arm labels: ' + JSON.stringify(al);
+  const base = FG.lookOf(DRESSED.authored.parts[0].make, LOOKS);
+  if (!base || base.hex !== '#30343B' || base.metal !== 0 || base.rough !== 0.35 || !base.proposed) return 'PETG base: ' + JSON.stringify(base);
+  // No finish: the product's own finish when the part shares its process.
+  const shade = FG.lookOf(DRESSED.authored.parts[2].make, LOOKS);
+  if (!shade || shade.rough !== 0.9 || shade.material !== 'ASA') return 'ASA shade: ' + JSON.stringify(shade);
+  if (FG.lookOf(null, LOOKS) !== null || FG.lookOf(DRESSED.authored.parts[0].make, null) !== null) return 'no make block or no tables must give null';
+  return true;
+});
+
+await check('each_part_is_drawn_in_its_own_material', async () => {
+  const { m } = mountGraph({ looks: () => LOOKS, cfg: { form: DRESSED } }, DRESSED);
+  await m.render();
+  const byPart = {};
+  m.group.children.forEach((mesh) => { byPart[mesh.userData.part] = mesh.material; });
+  const want = { base: ['#30343B', 0], arm: ['#A7ABB0', 0.9], shade: ['#E4E6E8', 0] };
+  for (const [id, [hex, metal]] of Object.entries(want)) {
+    const mat = byPart[id];
+    if (!mat) return 'no mesh for ' + id;
+    if (mat.o.color !== hex || mat.o.metalness !== metal) return id + ' drawn as ' + JSON.stringify(mat.o);
+  }
+  if (byPart.base === byPart.shade) return 'two parts share one material';
+  return true;
+});
+
+await check('a_part_with_no_make_block_keeps_the_product_look', async () => {
+  const cmf = () => ({ hex: '#123456', rough: 0.5, metal: 0, cc: 0 });
+  const form = { ...DRESSED, authored: { parts: [LAMPFORM.authored.parts[0], DRESSED.authored.parts[1], LAMPFORM.authored.parts[2]] } };
+  const { m } = mountGraph({ looks: () => LOOKS, cmf, cfg: { form } }, form);
+  await m.render();
+  const by = {};
+  m.group.children.forEach((mesh) => { by[mesh.userData.part] = mesh.material.o; });
+  if (by.base.color !== '#123456') return 'base should take the product colour, got ' + by.base.color;
+  if (by.arm.color !== '#A7ABB0') return 'arm should keep its own, got ' + by.arm.color;
+  return true;
+});
+
+await check('describe_sums_the_mass_from_each_parts_own_material', () => {
+  const sm = { status: 'ready', bbox: { min: [0, 0, 0], max: [10, 10, 10] }, triangles: 36, errors: [],
+    parts: [{ id: 'base', name: 'Base', kind: 'generated', triangles: 12, volume: 10000 }, { id: 'arm', name: 'Arm', kind: 'generated', triangles: 12, volume: 10000 }] };
+  const dens = { base: { name: 'PETG', density: 1.27 }, arm: { name: 'Aluminium 6061-T6', density: 2.7 } };
+  const d = FG.describe(sm, { name: 'PETG', density: 1.27 }, (id) => dens[id] || null);
+  const row = d.facts.find((f) => /^Mass if solid/.test(f[0]));
+  if (!row) return 'no mass row: ' + JSON.stringify(d.facts);
+  // 10 cm3 x 1.27 + 10 cm3 x 2.7 = 39.7 g, rounded to 40
+  return row[0] === "Mass if solid, each part in its own material" && row[1] === '40 g' ? true : 'mass row ' + JSON.stringify(row);
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

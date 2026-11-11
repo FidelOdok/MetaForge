@@ -583,11 +583,18 @@ and the page treat it.
 |---|---|
 | `form.params` | The dimensions, as numbers. A name is letters, digits and underscores, starting with a letter, 32 characters at most. |
 | `form.ranges` | `[min, max]` for the parameters a person may move. |
-| `form.authored.parts[]` | `id` (a slug), `name`, `kind` (`generated`, `primitive` or `component`), `code`, `uses` (parameters the code reads, each declared), `body` (at most one part), `max_triangles` (optional). |
+| `form.authored.parts[]` | `id` (a slug), `name`, `kind` (`generated`, `primitive` or `component`), `code`, `uses` (parameters the code reads, each declared), `body` (at most one part), `max_triangles` (optional), `make` (optional; see below). |
+| `form.authored.parts[].make` | How the part is manufactured and how it looks: `process` (the product's `process.id` when left out), `material` and `finish` (of that process), `color` (a catalogue colour or `#RRGGBB`), `source` (`proposed` or `person`) and `why` (200 characters at most). Not on a `component`. |
 
 `kind` says how far to trust a part as geometry, and the page colours the three
 differently. A `component` is a stand in for a bought part drawn from its
 envelope, not the part's real mesh. `form.template` must be `authored`.
+
+Each part is manufactured on its own, so each made part carries its own `make`:
+a printed PETG base, a machined aluminium arm and an ASA shade in one product.
+The agent proposes one for every `generated` and `primitive` part
+(`source: "proposed"`, with a `why`); `person` means the person named it for that
+part. A part with no `make` takes the product's `process` and `color`.
 
 ### Checks when it is written
 
@@ -600,7 +607,14 @@ checks, so `PUT /studio` refuses the config, naming the part, when a part's code
 - declares more than 20000 triangles for a part or 100000 in all.
 
 More than 24 parts, a duplicate id, an unknown kind, two bodies or a
-parameter the code uses but `form.params` does not declare are refused too. With
+parameter the code uses but `form.params` does not declare are refused too. A
+part's `make` is refused, naming the part and listing the choices, when its
+process, material or finish is not in the catalogue for that process, its colour is
+neither a catalogue colour nor `#RRGGBB`, its `source` is missing or unknown, it
+has an unknown key or a `why` over 200 characters, or the part is a `component`.
+A `proposed` make passes with a warning naming the parts that wait for the
+person, and a made part with no `make` beside ones that have one is named in a
+warning too. With
 no `body` part the write passes and warns that the checks that need an enclosure
 will read `not_assessed`. This is the first of two layers: a word list is never
 the safety boundary.
@@ -631,7 +645,10 @@ without trusting it:
 The page keeps the studio's own look and controls. The left pane is the engine's own controls
 panel, filled with the form's parameters: the same sections and sliders as any studio, with
 readable labels (`slot_len` reads "Slot len"), and a Parts list that gives each part's colour
-(its kind) and size. Moving a slider runs the code again with no model call. The enclosure's
+(its kind) and size, and under a part with a `make` its process, material, finish and colour,
+marked *proposed* until the person chooses. Each such part is drawn in its own colour, with
+the roughness of its finish and a metallic look for a metal, and the mass is summed from each
+part's own material. A part without one takes the product colour from the swatches. Moving a slider runs the code again with no model call. The enclosure's
 own node graph editor is hidden, because it edits parameters a form made of code has none.
 
 A part of kind `component` can name its real part with `component_ref`, the `id` of a part in
