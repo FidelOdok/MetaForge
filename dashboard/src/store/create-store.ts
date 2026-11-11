@@ -58,6 +58,11 @@ export interface Instruction {
   state: InstructionState;
   error?: string;
   createdAt: string;
+  /** Which tab is sending it, and since when (one send, many tabs). */
+  sendingTab?: string;
+  sendingSince?: number;
+  /** Another tab is sending it: shown as such here, never retried from this tab. */
+  elsewhere?: boolean;
   /**
    * The turn's operation on the project stream (FORGE-788, RT-001). Set when
    * the instruction is sent (the gateway names it after this instruction), so
@@ -169,6 +174,64 @@ const threadCreation = new Map<string, Promise<string>>();
 // Tools chosen when an instruction was submitted, kept out of persisted state.
 const turnTools = new Map<string, string[]>();
 
+/*
+ * One send, many tabs (MetaForge, 2026-11-11). Every tab saved an in-flight message as failed
+ * ("the page closed"), so a second tab opened during a send showed it failed and offered a
+ * Retry that would send it twice. A send now records its tab. This tab's id lives in
+ * sessionStorage, which survives a reload of the same tab and is new in every other tab.
+ */
+export const STALE_SEND_MS = 10 * 60 * 1000;
+const PAGE_CLOSED = 'The page closed while this was being sent. Check the conversation before retrying.';
+const STORE_KEY = 'metaforge.create';
+
+export const TAB_ID: string = (() => {
+  const fresh = `tab-${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    const have = window.sessionStorage.getItem('metaforge.tab');
+    if (have) return have;
+    window.sessionStorage.setItem('metaforge.tab', fresh);
+  } catch {
+    // No session storage: this page is its own tab.
+  }
+  return fresh;
+})();
+
+/** What a tab saves: a send in progress stays one, with its tab; anything else unsent comes back as failed. */
+export function persistQueue(queue: Instruction[]): Instruction[] {
+  return queue.map((i) =>
+    i.state === 'sending' && i.sendingTab && !i.elsewhere
+      ? { ...i }
+      : i.elsewhere
+        ? { ...i, elsewhere: false }
+        : { ...i, state: 'failed' as const, error: i.state === 'sending' ? PAGE_CLOSED : (i.error ?? 'Not sent before the page closed') },
+  );
+}
+
+/** What a tab reads back: another tab's live send shows as such; this tab's own, or a stale one, failed. */
+export function restoreQueue(queue: Instruction[], tabId: string, now: number): Instruction[] {
+  return queue.map((i) => {
+    if (i.state !== 'sending') return i;
+    const theirs = !!i.sendingTab && i.sendingTab !== tabId && typeof i.sendingSince === 'number' && now - i.sendingSince < STALE_SEND_MS;
+    return theirs ? { ...i, elsewhere: true } : { ...i, state: 'failed' as const, elsewhere: false, error: PAGE_CLOSED };
+  });
+}
+
+/** Follow another tab's send: drop it once sent, show its failure, leave this tab's own items alone. */
+export function syncQueue(mine: Instruction[], stored: Instruction[]): Instruction[] {
+  const byId = new Map(stored.map((i) => [i.id, i]));
+  const out: Instruction[] = [];
+  for (const i of mine) {
+    if (!i.elsewhere) {
+      out.push(i);
+      continue;
+    }
+    const there = byId.get(i.id);
+    if (!there) continue;
+    out.push(there.state === 'sending' ? i : { ...there, elsewhere: false });
+  }
+  return out;
+}
+
 export const useCreateStore = create<CreateStore>()(
   persist(
     (set, get) => {
@@ -205,7 +268,14 @@ export const useCreateStore = create<CreateStore>()(
         if (!next) return;
         // A retried instruction is a new turn: a fresh id, so its operation is new too.
         const turnId = next.operationId ? nextId('turn') : next.id;
-        updateInstruction(projectId, next.id, { state: 'sending', error: undefined, operationId: `chat:${turnId}` });
+        updateInstruction(projectId, next.id, {
+          state: 'sending',
+          error: undefined,
+          operationId: `chat:${turnId}`,
+          sendingTab: TAB_ID,
+          sendingSince: Date.now(),
+          elsewhere: false,
+        });
         try {
           const threadId = await ensureThread(projectId);
           const roles = new Map((next.referenceRoles ?? []).map((r) => [r.id, r.role]));
@@ -424,7 +494,7 @@ export const useCreateStore = create<CreateStore>()(
       };
     },
     {
-      name: 'metaforge.create',
+      name: STORE_KEY,
       storage: createJSONStorage(() => localStorage),
       // Files and in-flight sends do not survive a reload; the text does.
       partialize: (st) => ({
@@ -437,19 +507,37 @@ export const useCreateStore = create<CreateStore>()(
               intent: s.intent,
               threadId: s.threadId,
               selectedNodeId: s.selectedNodeId,
-              // An unsent instruction comes back as a failed one to retry, never resent on its own.
-              queue: s.queue.map((i) => ({
-                ...i,
-                state: 'failed' as const,
-                error:
-                  i.state === 'sending'
-                    ? 'The page closed while this was being sent. Check the conversation before retrying.'
-                    : (i.error ?? 'Not sent before the page closed'),
-              })),
+              // An unsent instruction comes back as a failed one to retry, never resent on its own;
+              // a send in progress is kept with its tab, so another tab can tell it is still going.
+              queue: persistQueue(s.queue),
             },
           ]),
         ),
       }),
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<CreateStore>;
+        const sessions = Object.fromEntries(
+          Object.entries(p.sessions ?? {}).map(([id, sess]) => [id, { ...sess, queue: restoreQueue(sess.queue ?? [], TAB_ID, Date.now()) }]),
+        );
+        return { ...current, ...p, sessions: { ...current.sessions, ...sessions } };
+      },
     },
   ),
 );
+
+// Another tab saved: follow its sends that this tab shows as "sending in another tab".
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== STORE_KEY || !e.newValue) return;
+    try {
+      const stored = (JSON.parse(e.newValue) as { state?: { sessions?: Record<string, { queue?: Instruction[] }> } }).state?.sessions ?? {};
+      useCreateStore.setState((st) => ({
+        sessions: Object.fromEntries(
+          Object.entries(st.sessions).map(([id, sess]) => [id, sess.queue.some((i) => i.elsewhere) ? { ...sess, queue: syncQueue(sess.queue, stored[id]?.queue ?? []) } : sess]),
+        ),
+      }));
+    } catch {
+      // A value this tab cannot read: keep what it shows.
+    }
+  });
+}
