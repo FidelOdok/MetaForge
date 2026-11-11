@@ -670,6 +670,8 @@ html[data-authored] #costBlk,html[data-authored] #handBlk,html[data-authored] #p
 .dbehave .fg-behaviours{gap:10px}
 .fg-behave-none{margin:0 0 6px;font-size:12.5px;color:var(--muted)}
 .devp .dsim>summary{font-size:12px}
+/* Click to expand: a closed section says what is inside in one line. */
+details.pp>summary .pp-sum{margin-left:auto;padding-left:8px;font-size:11.5px;font-weight:400;color:var(--muted)}
 /* Live component specs: the real part's record, in the parts list and on hover. */
 .fg-part-spec{margin:2px 0 0 13px;font-size:11.5px;color:var(--muted)}
 .fg-part-spec.is-stand-in{color:#b45309}

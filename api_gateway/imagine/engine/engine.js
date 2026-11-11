@@ -2271,7 +2271,7 @@ $('#envList').addEventListener('click',e=>{const b=e.target.closest('[data-vfix]
 function creepageEnv(c){if(!ENVM||ENVM.aF<=1)return c;return Object.assign({},c,{cl:+(c.cl*ENVM.aF).toFixed(2),note:c.note+` Clearance raised x${fmt(ENVM.aF,2)} for ${ENV.altitude_m} m altitude.`,st:c.st==='pass'?'pass':c.st});}
 
 /* ================= Clean layout: collapsible sections, short lists, menus ================= */
-const ACC_OPEN={'Readiness':true};const openLists=new Set();
+const ACC_OPEN={};/* MetaForge: click to expand; the next step card is the guide */const openLists=new Set();
 function accInit(){
   S.open=S.open||{};
   document.querySelectorAll('#dfm > section.blk').forEach(sec=>{

@@ -96,6 +96,8 @@ CHECKS = [
     "the_running_cost_adds_materials_and_recorded_prices_and_says_what_it_leaves_out",
     "variants_can_be_tried_shown_side_by_side_and_picked_through_the_person",
     "try_it_offers_to_ask_for_behaviours_when_the_form_has_none",
+    "parts_and_variants_start_closed_with_a_one_line_summary",
+    "the_summary_cards_start_closed_unless_something_is_wrong",
 ]
 
 

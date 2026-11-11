@@ -1097,5 +1097,41 @@ await check('try_it_offers_to_ask_for_behaviours_when_the_form_has_none', async 
   return asked.length === 1 && /behaviours/.test(asked[0]) ? true : 'ask ' + JSON.stringify(asked);
 });
 
+// Click to expand (MetaForge, 2026-11-11): the left panel opens on the sizes only; Parts and
+// Variants start closed with a one-line summary, so a person is not met by everything at once.
+await check('parts_and_variants_start_closed_with_a_one_line_summary', async () => {
+  const { m, quick } = mountGraph({ looks: () => LOOKS, cfg: { form: VARIED } }, VARIED);
+  await m.render();
+  const { all } = graphDom();
+  const secs = all(quick).filter((n) => n.attrs && n.attrs['data-pps']);
+  const by = (k) => secs.find((n) => n.attrs['data-pps'] === k);
+  if (!by('form') || !by('form').open) return 'the sizes should start open';
+  if (!by('parts') || by('parts').open) return 'Parts should start closed';
+  if (!by('variants') || by('variants').open) return 'Variants should start closed';
+  const text = (n) => all(n).map((x) => x.textContent || '').join(' ');
+  if (!/3 parts/.test(text(by('parts')))) return 'parts summary: ' + text(by('parts')).slice(0, 120);
+  if (!/2 variants/.test(text(by('variants')))) return 'variants summary: ' + text(by('variants')).slice(0, 120);
+  return true;
+});
+
+await check('the_summary_cards_start_closed_unless_something_is_wrong', () => {
+  const el = () => { const e = { children: [], style: {}, className: '', textContent: '', id: '', attrs: {}, handlers: {},
+    classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); }, toggle(c, v) { if (v === undefined ? !this._s.has(c) : v) this._s.add(c); else this._s.delete(c); } },
+    appendChild(c) { e.children.push(c); c.parentNode = e; return c; }, insertBefore(c) { e.children.unshift(c); c.parentNode = e; return c; }, removeChild(c) { e.children = e.children.filter((x) => x !== c); },
+    setAttribute(k, v) { e.attrs[k] = v; }, addEventListener(t, f) { e.handlers[t] = f; }, get firstChild() { return e.children[0] || null; },
+    querySelector(q) { const id = q.replace('#', ''); const f = (n) => { for (const c of n.children || []) { if (c.id === id) return c; const r = f(c); if (r) return r; } return null; }; return f(e); } };
+    return e; };
+  const doc = { createElement: el, createTextNode: (t) => ({ textContent: t }) };
+  const ok = FG.describe({ status: 'ready', parts: [{ id: 'a', name: 'a', kind: 'generated', triangles: 12, volume: 1000 }], bbox: { min: [0, 0, 0], max: [1, 2, 3] }, triangles: 12, errors: [] }, null);
+  const host = el(); FG.renderSummary(doc, host, ok);
+  const blk = host.querySelector('#authBlk');
+  if (!blk) return 'no summary card';
+  const isOpen = (n) => /\bopen\b/.test(n.className || '');
+  if (isOpen(blk)) return 'the form card should start closed';
+  const bad = FG.describe({ status: 'error', parts: [{ id: 'a', name: 'a', kind: 'generated', triangles: 0, error: 'x' }], bbox: null, triangles: 0, errors: ['part a: x'] }, null);
+  const h2 = el(); FG.renderSummary(doc, h2, bad);
+  return isOpen(h2.querySelector('#authBlk')) ? true : 'a form with problems should open its card';
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

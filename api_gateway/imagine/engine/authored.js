@@ -890,12 +890,19 @@
 
   function renderSummary(doc, host, d) {
     if (!host) return null;
+    // Click to expand (MetaForge): the card starts closed and remembers a person opening it;
+    // it opens itself only when the form has a problem to show.
+    var blkWasOpen = false;
     if (typeof host.querySelector === 'function') {
-      ['authBlk', 'authNa'].forEach(function (id) { var old = host.querySelector('#' + id); if (old && old.parentNode) old.parentNode.removeChild(old); });
+      ['authBlk', 'authNa'].forEach(function (id) {
+        var old = host.querySelector('#' + id);
+        if (old && id === 'authBlk') blkWasOpen = /\bopen\b/.test(old.className || '');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+      });
     }
     var form = makeCard(doc, 'authBlk', d.headline,
       d.problems.length ? d.problems.length + ' problem' + (d.problems.length > 1 ? 's' : '') : (d.dims || ''),
-      d.problems.length ? 's-fail' : d.dims ? 's-pass' : '', true);
+      d.problems.length ? 's-fail' : d.dims ? 's-pass' : '', blkWasOpen || d.problems.length > 0);
     var body = form.body;
     if (d.dims) { var note = doc.createElement('p'); note.className = 'note'; note.textContent = 'The size and volume are measured from the shapes the code makes.'; body.appendChild(note); }
     if (d.facts.length) {
@@ -1001,8 +1008,8 @@
 
   function renderComponents(doc, host, d) {
     if (!host) return null;
-    var old = typeof host.querySelector === 'function' ? host.querySelector('#authComp') : null, wasOpen = true;
-    if (old) { wasOpen = !old.classList || old.classList.contains('open'); if (old.parentNode) old.parentNode.removeChild(old); }
+    var old = typeof host.querySelector === 'function' ? host.querySelector('#authComp') : null, wasOpen = false;
+    if (old) { wasOpen = !!(old.classList && old.classList.contains('open')); if (old.parentNode) old.parentNode.removeChild(old); }
     if (!d.rows.length && !d.missing.length) return null;
     var open = wasOpen;
     var card = makeCard(doc, 'authComp', 'Components', d.headline, d.rows.some(function (r) { return r.state === 'warn'; }) || d.missing.length ? 's-warn' : 's-pass', open);
@@ -1138,7 +1145,7 @@
 
     var quick = env.quick || null;
     var partsBox = null, graphApi = null, selected = null, behave = {}, behaviourControls = {}, playing = null;
-    var makeOverride = null, variantOn = null, baseParams = null, sideGroup = null, sideOn = false, sideToken = null, variantControls = [];
+    var partsSum = null, variantsSum = null, makeOverride = null, variantOn = null, baseParams = null, sideGroup = null, sideOn = false, sideToken = null, variantControls = [];
     // Every slider for one parameter, in the controls panel and in the graph, stays in step.
     var regs = {};
     function setParam(key, v) {
@@ -1215,8 +1222,10 @@
       });
       body.appendChild(grp); det.appendChild(body); quick.appendChild(det);
       var pdet = el('details', 'pp'), psum = el('summary');
-      pdet.open = true; pdet.setAttribute('open', ''); pdet.setAttribute('data-pps', 'parts');
-      psum.appendChild(el('span', '', 'Parts')); pdet.appendChild(psum);
+      pdet.setAttribute('data-pps', 'parts');
+      psum.appendChild(el('span', '', 'Parts'));
+      partsSum = el('small', 'pp-sum', '');
+      psum.appendChild(partsSum); pdet.appendChild(psum);
       partsBox = el('div', 'ppb'); pdet.appendChild(partsBox);
       legendInto(pdet);
       quick.appendChild(pdet);
@@ -1479,8 +1488,14 @@
       var list = variantList();
       if (!list.length) return;
       var det = el('details', 'pp'), sum = el('summary');
-      det.open = true; det.setAttribute('open', ''); det.setAttribute('data-pps', 'variants');
-      sum.appendChild(el('span', '', 'Variants')); det.appendChild(sum);
+      det.setAttribute('data-pps', 'variants');
+      sum.appendChild(el('span', '', 'Variants'));
+      variantsSum = el('small', 'pp-sum', '');
+      sum.appendChild(variantsSum); det.appendChild(sum);
+      variantControls.push(function () {
+        var on = list.filter(function (v) { return v.id === variantOn; })[0];
+        variantsSum.textContent = list.length + ' variant' + (list.length === 1 ? '' : 's') + (sideOn ? ' · side by side' : on ? ' · trying ' + (on.name || on.id) : '');
+      });
       var box = el('div', 'ppb fg-variants');
       var side = el('button', 'fg-eye fg-side', '');
       side.type = 'button'; side.setAttribute('data-variant-side', '');
@@ -1650,6 +1665,10 @@
       if (env.onDraw) env.onDraw(result);
     }
     function renderParts(result) {
+      if (partsSum) {
+        var n = result.parts.length, off = hiddenParts().length;
+        partsSum.textContent = n + ' part' + (n === 1 ? '' : 's') + (off ? ' · ' + off + ' hidden' : '');
+      }
       if (partsBox) {
         partsBox.textContent = '';
         result.parts.forEach(function (p) {

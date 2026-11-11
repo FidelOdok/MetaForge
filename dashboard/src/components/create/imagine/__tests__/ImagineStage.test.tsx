@@ -95,7 +95,10 @@ describe('studio frame follows the revision', () => {
     expect(screen.queryByTestId('studio-changes')).toBeNull();
     getStudio.mockResolvedValue(studio({ revision: 3, config: after }));
     const strip = await screen.findByTestId('studio-changes', {}, { timeout: 15000 });
-    expect(strip).toHaveTextContent('Changed in revision 3');
+    // One line first: the list opens on a click.
+    expect(strip).toHaveTextContent('Changed in revision 3 · 1 change');
+    expect(strip).not.toHaveTextContent('Case d: 40 → 48');
+    await userEvent.click(within(strip).getByRole('button', { name: 'Show' }));
     expect(strip).toHaveTextContent('Case d: 40 → 48');
     await userEvent.click(within(strip).getByRole('button', { name: 'Undo this change' }));
     expect(putStudio).toHaveBeenCalledWith(P, before);
