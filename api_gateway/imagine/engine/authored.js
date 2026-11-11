@@ -1145,7 +1145,7 @@
 
     var quick = env.quick || null;
     var partsBox = null, graphApi = null, selected = null, behave = {}, behaviourControls = {}, playing = null;
-    var partsSum = null, variantsSum = null, makeOverride = null, variantOn = null, baseParams = null, sideGroup = null, sideOn = false, sideToken = null, variantControls = [];
+    var openedPart = null, partsSum = null, variantsSum = null, makeOverride = null, variantOn = null, baseParams = null, sideGroup = null, sideOn = false, sideToken = null, variantControls = [];
     // Every slider for one parameter, in the controls panel and in the graph, stays in step.
     var regs = {};
     function setParam(key, v) {
@@ -1598,6 +1598,12 @@
           : glow ? glowMaterial(kind, part, glow) : material(kind, part);
       });
     }
+    // Open a part's row and highlight it (a click on the row, or on the part in 3D); null closes.
+    function openPart(id) {
+      openedPart = id || null;
+      setSelected(openedPart ? 'part:' + openedPart : null);
+      if (lastResult) renderParts(lastResult);
+    }
     function setSelected(id) {
       selected = id;
       if (graphApi) graphApi.refresh();
@@ -1671,38 +1677,52 @@
       }
       if (partsBox) {
         partsBox.textContent = '';
+        // Click to show (MetaForge): a part is one line, its name and size; a click opens what
+        // it is made of, its real part's specs and Hide, and highlights it in the 3D view.
         result.parts.forEach(function (p) {
-          var row = el('div', 'qs' + (hidden[p.id] ? ' is-hidden' : '')), qt = el('div', 'qt'), name = doc.createElement('span'), sw = doc.createElement('i');
+          var open = openedPart === p.id;
+          var row = el('div', 'fg-part' + (open ? ' is-open' : '') + (hidden[p.id] ? ' is-hidden' : ''));
           row.setAttribute('data-part', p.id);
-          var eye = el('button', 'fg-eye', hidden[p.id] ? 'Show' : 'Hide');
-          eye.type = 'button';
-          eye.setAttribute('data-eye', p.id);
-          eye.setAttribute('aria-pressed', String(!hidden[p.id]));
-          eye.setAttribute('aria-label', (hidden[p.id] ? 'Show ' : 'Hide ') + p.name);
-          eye.addEventListener('click', function () { setPartHidden(p.id, !hidden[p.id]); });
-          qt.appendChild(eye);
-          sw.style.background = '#' + (KIND_STYLE[p.kind] || KIND_STYLE.generated).color.toString(16).padStart(6, '0');
+          var head = el('button', 'fg-part-head'), sw = doc.createElement('i');
+          head.type = 'button';
+          head.setAttribute('aria-expanded', String(open));
+          head.addEventListener('click', function () { openPart(openedPart === p.id ? null : p.id); });
           sw.className = 'fg-authored-swatch';
-          name.appendChild(sw); name.appendChild(doc.createTextNode(' ' + p.name));
-          var b = p.bbox;
-          qt.appendChild(name);
-          qt.appendChild(el('b', '', p.error ? 'not drawn' : b ? fmtMm(b.max[0] - b.min[0]) + ' \u00d7 ' + fmtMm(b.max[2] - b.min[2]) + ' \u00d7 ' + fmtMm(b.max[1] - b.min[1]) + ' mm' : ''));
-          row.appendChild(qt);
-          var sp = p.kind === 'component' ? partSpecs(p.id) : null;
-          if (sp || p.kind === 'component') {
-            var spl = el('div', 'fg-part-spec' + (sp && sp.standIn ? ' is-stand-in' : ''), sp ? specLine(sp) : 'No part chosen yet');
-            if (sp) row.setAttribute('title', [sp.sizeSource && 'Size: ' + sp.sizeSource, sp.priceSource && 'Price: ' + sp.priceSource, sp.datasheet && 'Datasheet: ' + sp.datasheet].filter(Boolean).join('\n'));
-            row.appendChild(spl);
-          }
+          sw.style.background = '#' + (KIND_STYLE[p.kind] || KIND_STYLE.generated).color.toString(16).padStart(6, '0');
+          head.appendChild(sw);
           var lk = p.kind === 'component' ? null : partLook(p.id);
-          if (lk) {
-            var mk = el('div', 'fg-part-make'), chip = doc.createElement('i');
-            chip.className = 'fg-make-swatch'; chip.style.background = lk.hex;
-            mk.appendChild(chip);
-            mk.appendChild(doc.createTextNode(' ' + [lk.process, lk.material, lk.finish, lk.color].filter(Boolean).join(' \u00b7 ')));
-            if (lk.proposed) mk.appendChild(el('span', 'fg-make-proposed', 'proposed'));
-            row.setAttribute('title', (partMake(p.id) || {}).why || '');
-            row.appendChild(mk);
+          if (lk) { var chip = doc.createElement('i'); chip.className = 'fg-make-swatch'; chip.style.background = lk.hex; head.appendChild(chip); }
+          head.appendChild(el('span', 'fg-part-name', p.name));
+          if (hidden[p.id]) head.appendChild(el('small', 'fg-part-tag', 'hidden'));
+          var b = p.bbox;
+          head.appendChild(el('b', 'fg-part-size', p.error ? 'not drawn' : b ? fmtMm(b.max[0] - b.min[0]) + ' \u00d7 ' + fmtMm(b.max[2] - b.min[2]) + ' \u00d7 ' + fmtMm(b.max[1] - b.min[1]) + ' mm' : ''));
+          row.appendChild(head);
+          if (open) {
+            var body = el('div', 'fg-part-body');
+            var sp = p.kind === 'component' ? partSpecs(p.id) : null;
+            if (sp || p.kind === 'component') {
+              var spl = el('div', 'fg-part-spec' + (sp && sp.standIn ? ' is-stand-in' : ''), sp ? specLine(sp) : 'No part chosen yet');
+              if (sp) spl.setAttribute('title', [sp.sizeSource && 'Size: ' + sp.sizeSource, sp.priceSource && 'Price: ' + sp.priceSource, sp.datasheet && 'Datasheet: ' + sp.datasheet].filter(Boolean).join('\n'));
+              body.appendChild(spl);
+            }
+            if (lk) {
+              var mk = el('div', 'fg-part-make');
+              mk.appendChild(doc.createTextNode([lk.process, lk.material, lk.finish, lk.color].filter(Boolean).join(' \u00b7 ')));
+              if (lk.proposed) mk.appendChild(el('span', 'fg-make-proposed', 'proposed'));
+              body.appendChild(mk);
+              var why = (partMake(p.id) || {}).why;
+              if (why) body.appendChild(el('div', 'fg-part-why', why));
+            }
+            var acts = el('div', 'fg-part-acts');
+            var eye = el('button', 'fg-eye', hidden[p.id] ? 'Show' : 'Hide');
+            eye.type = 'button';
+            eye.setAttribute('data-eye', p.id);
+            eye.setAttribute('aria-pressed', String(!hidden[p.id]));
+            eye.setAttribute('aria-label', (hidden[p.id] ? 'Show ' : 'Hide ') + p.name);
+            eye.addEventListener('click', function () { setPartHidden(p.id, !hidden[p.id]); });
+            acts.appendChild(eye);
+            body.appendChild(acts);
+            row.appendChild(body);
           }
           partsBox.appendChild(row);
         });
@@ -1902,7 +1922,7 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, proposedMakes: proposedMakes,
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, openedPart: function () { return openedPart; }, proposedMakes: proposedMakes,
       tryVariant: tryVariant, showSideBySide: showSideBySide, sideBySide: function () { return sideGroup; }, useVariant: useVariant };
   }
 

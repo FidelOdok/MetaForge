@@ -2390,6 +2390,12 @@ cvs.addEventListener('pointermove',e=>{if(e.buttons){mtip.hidden=true;return;}co
 cvs.addEventListener('pointerleave',()=>{mtip.hidden=true;cvs.style.cursor='';matBtnCap.emissiveIntensity=0;});
 // MetaForge: hovering a part of an authored form says what it is: the real part's specs, or how
 // the part is made. It reads the part record; nothing is fetched or guessed.
+// MetaForge: a click on a part of an authored form opens its row in Parts; a click on empty space closes it.
+let partDown=null;cvs.addEventListener('pointerdown',e=>{partDown={x:e.clientX,y:e.clientY,t:performance.now()};});
+cvs.addEventListener('pointerup',e=>{if(!AUTHORED||!AUTHORED_MOUNT||!AUTHORED_MOUNT.openPart||!partDown)return;const d=Math.hypot(e.clientX-partDown.x,e.clientY-partDown.y),dt=performance.now()-partDown.t;partDown=null;if(d>5||dt>500)return;
+  const r=cvs.getBoundingClientRect();ndc.set((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1);ray.setFromCamera(ndc,camera);
+  const h=ray.intersectObjects(AUTHORED_MOUNT.group.children,false).filter(x=>x.object.visible)[0];AUTHORED_MOUNT.openPart(h?h.object.userData.part:null);
+  if(h){const det=document.querySelector('[data-pps=parts]');if(det&&!det.open){det.open=true;}const row=document.querySelector('.fg-part.is-open');if(row&&row.scrollIntoView)row.scrollIntoView({block:'nearest'});}});
 let infoAt=0;cvs.addEventListener('pointermove',e=>{if(!AUTHORED||!AUTHORED_MOUNT||!AUTHORED_MOUNT.partInfo)return;if(e.buttons){mtip.hidden=true;return;}
   const now=performance.now();if(now-infoAt<60)return;infoAt=now;const r=cvs.getBoundingClientRect();ndc.set((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1);ray.setFromCamera(ndc,camera);
   const h=ray.intersectObjects(AUTHORED_MOUNT.group.children,false).filter(x=>x.object.visible)[0],info=h&&AUTHORED_MOUNT.partInfo(h.object.userData&&h.object.userData.part);

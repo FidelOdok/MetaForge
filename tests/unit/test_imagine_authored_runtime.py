@@ -98,6 +98,7 @@ CHECKS = [
     "try_it_offers_to_ask_for_behaviours_when_the_form_has_none",
     "parts_and_variants_start_closed_with_a_one_line_summary",
     "the_summary_cards_start_closed_unless_something_is_wrong",
+    "a_part_row_is_one_line_and_a_click_opens_it_and_highlights_the_part",
 ]
 
 

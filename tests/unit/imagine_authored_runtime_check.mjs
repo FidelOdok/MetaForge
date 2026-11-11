@@ -992,6 +992,9 @@ await check('the_parts_list_and_the_3d_hover_show_a_components_specs', async () 
   const { m, quick } = mountGraph({ cfg: { form: SPECFORM, _context: { parts: [GNSS_REC] } } }, SPECFORM);
   await m.render();
   const { withClass } = graphDom();
+  // Click to show: a closed row has no detail; opening the part shows its specs.
+  if (withClass(quick, 'fg-part-spec').length) return 'a closed row shows its specs';
+  m.openPart('gnss');
   const lines = withClass(quick, 'fg-part-spec');
   if (lines.length !== 1) return 'spec lines ' + lines.length;
   const text = String(lines[0].textContent || '');
@@ -1131,6 +1134,27 @@ await check('the_summary_cards_start_closed_unless_something_is_wrong', () => {
   const bad = FG.describe({ status: 'error', parts: [{ id: 'a', name: 'a', kind: 'generated', triangles: 0, error: 'x' }], bbox: null, triangles: 0, errors: ['part a: x'] }, null);
   const h2 = el(); FG.renderSummary(doc, h2, bad);
   return isOpen(h2.querySelector('#authBlk')) ? true : 'a form with problems should open its card';
+});
+
+await check('a_part_row_is_one_line_and_a_click_opens_it_and_highlights_the_part', async () => {
+  const { m, quick } = mountGraph({ looks: () => LOOKS, cfg: { form: DRESSED } }, DRESSED);
+  await m.render();
+  const { withClass } = graphDom();
+  const rows = withClass(quick, 'fg-part');
+  if (rows.length !== 3) return 'rows ' + rows.length;
+  if (withClass(quick, 'fg-part-make').length || withClass(quick, 'fg-eye').filter((b) => b.attrs['data-eye']).length) return 'closed rows show details';
+  const head = withClass(rows[1], 'fg-part-head')[0];
+  if (!head) return 'no clickable row head';
+  head.fire('click', {});
+  if (m.openedPart() !== 'arm') return 'opened ' + m.openedPart();
+  if (m.graph.selected() !== 'part:arm') return 'the part is not highlighted: ' + m.graph.selected();
+  if (withClass(quick, 'fg-part-make').length !== 1) return 'the open part shows its make';
+  if (!withClass(quick, 'fg-eye').some((b) => b.attrs['data-eye'] === 'arm')) return 'the open part has its Hide button';
+  // A click on the part in 3D opens its row; a second click on the row closes it.
+  m.openPart('base');
+  if (m.openedPart() !== 'base' || m.graph.selected() !== 'part:base') return 'openPart from 3D';
+  withClass(withClass(quick, 'fg-part')[0], 'fg-part-head')[0].fire('click', {});
+  return m.openedPart() === null && m.graph.selected() === null ? true : 'closing did not clear: ' + m.openedPart();
 });
 
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
