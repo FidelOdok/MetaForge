@@ -90,6 +90,8 @@ CHECKS = [
     "describe_sums_the_mass_from_each_parts_own_material",
     "a_behaviour_moves_its_parts_about_its_own_axis_and_origin",
     "a_person_drives_each_behaviour_in_the_studio",
+    "a_component_part_reads_its_specs_from_its_part_record",
+    "the_parts_list_and_the_3d_hover_show_a_components_specs",
 ]
 
 

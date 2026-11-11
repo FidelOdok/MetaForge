@@ -2362,6 +2362,14 @@ cvs.addEventListener('pointermove',e=>{if(e.buttons){mtip.hidden=true;return;}co
   cvs.style.cursor=k?'pointer':'';if(k){const r=host.getBoundingClientRect();mtip.textContent=k==='button'?'Press the button':dev.usb?'Unplug USB-C':'Plug in USB-C';mtip.style.left=(e.clientX-r.left+14)+'px';mtip.style.top=(e.clientY-r.top+14)+'px';mtip.hidden=false;}else mtip.hidden=true;
   if(k==='button'){matBtnCap.emissive.set(css('--accent'));matBtnCap.emissiveIntensity=0.35;}else matBtnCap.emissiveIntensity=0;});
 cvs.addEventListener('pointerleave',()=>{mtip.hidden=true;cvs.style.cursor='';matBtnCap.emissiveIntensity=0;});
+// MetaForge: hovering a part of an authored form says what it is: the real part's specs, or how
+// the part is made. It reads the part record; nothing is fetched or guessed.
+let infoAt=0;cvs.addEventListener('pointermove',e=>{if(!AUTHORED||!AUTHORED_MOUNT||!AUTHORED_MOUNT.partInfo)return;if(e.buttons){mtip.hidden=true;return;}
+  const now=performance.now();if(now-infoAt<60)return;infoAt=now;const r=cvs.getBoundingClientRect();ndc.set((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1);ray.setFromCamera(ndc,camera);
+  const h=ray.intersectObjects(AUTHORED_MOUNT.group.children,false).filter(x=>x.object.visible)[0],info=h&&AUTHORED_MOUNT.partInfo(h.object.userData&&h.object.userData.part);
+  mtip.classList.toggle('fg-hover-info',!!info);if(!info){mtip.hidden=true;return;}
+  mtip.textContent='';const b=document.createElement('b');b.textContent=info.title;mtip.appendChild(b);info.lines.slice(0,8).forEach(l=>{const d=document.createElement('div');d.textContent=l;mtip.appendChild(d);});
+  const hr=host.getBoundingClientRect();mtip.style.left=(e.clientX-hr.left+14)+'px';mtip.style.top=(e.clientY-hr.top+14)+'px';mtip.hidden=false;});
 window.__formgraphPick=(x,y)=>pickAt(x,y);
 
 /* ================= Context: options, assembly, models, scenarios, edits, shared record (formgraph@2) ================= */

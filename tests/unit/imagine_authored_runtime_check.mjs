@@ -962,5 +962,44 @@ await check('a_person_drives_each_behaviour_in_the_studio', async () => {
   return again.userData.behaviourMatrix ? true : 'a redraw lost the behaviour';
 });
 
+// Live component specs (MetaForge, 2026-11-11): a component part shows its real part's
+// specs, from the part record, with where each came from.
+const GNSS_REC = {
+  id: 'gnss-a', role: 'fn:e_gnss', name: 'GNSS antenna module', mpn: 'SAM-M10Q', manufacturer: 'u-blox',
+  datasheet: 'https://example.com/sam-m10q.pdf', retrieved: '2026-11-11',
+  cost: { unit: 9.8, qty: 250, source: 'https://distributor.example/sam-m10q' }, mass: 1.8,
+  interfaces: [{ id: 'vcc', bus: 'pwr', dir: 'in', v: [2.7, 3.6], imax_mA: 40 }, { id: 'uart', bus: 'uart', dir: 'bi' }],
+  geometry: { envelope: [15.5, 15.5, 6.3], source: 'product summary', size_basis: 'read', fidelity: 'approximation' },
+};
+const SPECFORM = { ...LAMPFORM, authored: { parts: [...LAMPFORM.authored.parts,
+  { id: 'gnss', name: 'GNSS', kind: 'component', component_ref: 'gnss-a', code: 'return [g.box(15.5, 6.3, 15.5)];', uses: [] }] } };
+
+await check('a_component_part_reads_its_specs_from_its_part_record', () => {
+  const sp = FG.specsOf({ _context: { parts: [GNSS_REC] } }, 'gnss-a');
+  if (!sp) return 'no specs';
+  const want = { maker: 'u-blox', mpn: 'SAM-M10Q', size: '15.5 × 15.5 × 6.3 mm', power: '2.7–3.6 V, up to 40 mA', buses: 'UART', price: '9.80 each at 250', mass: '1.8 g', read: '2026-11-11' };
+  for (const [k, v] of Object.entries(want)) if (sp[k] !== v) return k + ': ' + JSON.stringify(sp[k]);
+  if (FG.specsOf({ _context: { parts: [GNSS_REC] } }, 'nope') !== null) return 'an unknown ref should give null';
+  const ph = FG.specsOf({ _context: { parts: [{ id: 'p', geometry: { envelope: [10, 10, 5], fidelity: 'placeholder' } }] } }, 'p');
+  if (ph.size !== '10 × 10 × 5 mm (placeholder size)') return 'a placeholder size must say so: ' + ph.size;
+  const bare = FG.specsOf({ _context: { parts: [{ id: 'x', name: 'X' }] } }, 'x');
+  return bare && bare.price === '' && bare.mpn === '' ? true : 'missing values must be empty, never invented: ' + JSON.stringify(bare);
+});
+
+await check('the_parts_list_and_the_3d_hover_show_a_components_specs', async () => {
+  const { m, quick } = mountGraph({ cfg: { form: SPECFORM, _context: { parts: [GNSS_REC] } } }, SPECFORM);
+  await m.render();
+  const { withClass } = graphDom();
+  const lines = withClass(quick, 'fg-part-spec');
+  if (lines.length !== 1) return 'spec lines ' + lines.length;
+  const text = String(lines[0].textContent || '');
+  if (!/SAM-M10Q/.test(text) || !/9\.80 each at 250/.test(text)) return 'spec line ' + text.slice(0, 300);
+  if (!m.partInfo) return 'no partInfo';
+  const info = m.partInfo('gnss');
+  if (!info || info.title !== 'GNSS' || !info.lines.some((l) => /u-blox SAM-M10Q/.test(l))) return 'hover ' + JSON.stringify(info);
+  const made = m.partInfo('base');
+  return made && made.title === 'Base' ? true : 'a made part also has hover info: ' + JSON.stringify(made);
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

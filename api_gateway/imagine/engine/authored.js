@@ -629,6 +629,37 @@
 
   function fmtMm(v) { return String(Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10); }
 
+  /* Live component specs (MetaForge, 2026-11-11): what the part record says about a real
+     part, in plain words. A value the record does not carry is empty, never guessed. */
+  function specsOf(cfg, ref) {
+    var ctx = (cfg && cfg._context) || {}, all = Array.isArray(ctx.parts) ? ctx.parts : [];
+    var p = all.filter(function (x) { return x && x.id === ref; })[0];
+    if (!p) return null;
+    function txt(v) { return typeof v === 'string' && v.trim() ? v.trim() : ''; }
+    function num(v) { return typeof v === 'number' && isFinite(v); }
+    var g = p.geometry || {}, e = g.envelope, ifs = Array.isArray(p.interfaces) ? p.interfaces : [];
+    var pw = ifs.filter(function (i) { return i && i.bus === 'pwr' && i.dir !== 'out'; })[0];
+    var buses = [];
+    ifs.forEach(function (i) { if (i && i.bus && i.bus !== 'pwr' && buses.indexOf(String(i.bus).toUpperCase()) < 0) buses.push(String(i.bus).toUpperCase()); });
+    var cost = p.cost || {};
+    return {
+      name: txt(p.name) || String(ref), maker: txt(p.manufacturer), mpn: txt(p.mpn),
+      size: Array.isArray(e) && e.length === 3 && e.every(num)
+        ? e.map(fmtMm).join(' × ') + ' mm' + (g.fidelity === 'placeholder' || (g.size_basis && g.size_basis !== 'read') ? ' (placeholder size)' : '')
+        : '',
+      sizeSource: txt(g.source),
+      power: pw && Array.isArray(pw.v) && pw.v.length === 2 && pw.v.every(num) ? pw.v[0] + '–' + pw.v[1] + ' V' + (num(pw.imax_mA) ? ', up to ' + pw.imax_mA + ' mA' : '') : '',
+      buses: buses.join(', '),
+      price: num(cost.unit) ? cost.unit.toFixed(2) + ' each' + (num(cost.qty) ? ' at ' + cost.qty : '') : '',
+      priceSource: txt(cost.source), mass: num(p.mass) ? p.mass + ' g' : '',
+      datasheet: txt(p.datasheet), read: txt(p.retrieved), standIn: !!p.standIn,
+    };
+  }
+  function specLine(sp) {
+    return [[sp.maker, sp.mpn].filter(Boolean).join(' '), sp.power, sp.buses, sp.price, sp.read ? 'read ' + sp.read : '']
+      .filter(Boolean).join(' · ') || 'No part chosen yet';
+  }
+
   /* Behaviours (MetaForge, 2026-11-11): how the twin moves, lights up and switches. */
   function behaviourValue(b, values) {
     var v = values && values[b.id] !== undefined ? values[b.id] : b['default'];
@@ -1237,6 +1268,33 @@
     // The product's own parts take the colour and finish chosen with the swatches; a bought
     // component keeps its own dark colour so it still reads as not made from that material.
     // A made part with its own make block is drawn as what it is made from (MetaForge).
+    function partDef(id) {
+      var parts = ((((env.cfg || {}).form || {}).authored || {}).parts) || [];
+      return parts.filter(function (x) { return x && x.id === id; })[0] || null;
+    }
+    function partSpecs(id) {
+      var d = partDef(id);
+      return d && d.kind === 'component' && typeof d.component_ref === 'string' ? specsOf(env.cfg, d.component_ref) : null;
+    }
+    // What hovering a part in the 3D view shows: its name and what it is.
+    function partInfo(id) {
+      var d = partDef(id);
+      if (!d) return null;
+      var lines = [], sp = partSpecs(id), lk = d.kind === 'component' ? null : partLook(id);
+      if (sp) {
+        if (sp.standIn) lines.push('Stand-in: not a real part yet');
+        if (sp.maker || sp.mpn) lines.push([sp.maker, sp.mpn].filter(Boolean).join(' '));
+        [sp.size, sp.power, sp.buses, sp.mass].forEach(function (v) { if (v) lines.push(v); });
+        if (sp.price) lines.push(sp.price + ' (recorded price)');
+        if (sp.read) lines.push('Datasheet read ' + sp.read);
+      } else if (d.kind === 'component') {
+        lines.push('No part chosen yet');
+      }
+      if (lk) lines.push([lk.process, lk.material, lk.finish, lk.color].filter(Boolean).join(' · ') + (lk.proposed ? ' (proposed)' : ''));
+      var r = lastResult && lastResult.parts.filter(function (x) { return x.id === id; })[0], b = r && r.bbox;
+      if (b) lines.push(fmtMm(b.max[0] - b.min[0]) + ' × ' + fmtMm(b.max[2] - b.min[2]) + ' × ' + fmtMm(b.max[1] - b.min[1]) + ' mm drawn');
+      return { title: String(d.name || id), lines: lines };
+    }
     function partMake(id) {
       var parts = ((((env.cfg || {}).form || {}).authored || {}).parts) || [];
       var p = parts.filter(function (x) { return x && x.id === id; })[0];
@@ -1354,6 +1412,12 @@
           qt.appendChild(name);
           qt.appendChild(el('b', '', p.error ? 'not drawn' : b ? fmtMm(b.max[0] - b.min[0]) + ' \u00d7 ' + fmtMm(b.max[2] - b.min[2]) + ' \u00d7 ' + fmtMm(b.max[1] - b.min[1]) + ' mm' : ''));
           row.appendChild(qt);
+          var sp = p.kind === 'component' ? partSpecs(p.id) : null;
+          if (sp || p.kind === 'component') {
+            var spl = el('div', 'fg-part-spec' + (sp && sp.standIn ? ' is-stand-in' : ''), sp ? specLine(sp) : 'No part chosen yet');
+            if (sp) row.setAttribute('title', [sp.sizeSource && 'Size: ' + sp.sizeSource, sp.priceSource && 'Price: ' + sp.priceSource, sp.datasheet && 'Datasheet: ' + sp.datasheet].filter(Boolean).join('\n'));
+            row.appendChild(spl);
+          }
           var lk = p.kind === 'component' ? null : partLook(p.id);
           if (lk) {
             var mk = el('div', 'fg-part-make'), chip = doc.createElement('i');
@@ -1562,8 +1626,8 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play };
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });
