@@ -360,3 +360,94 @@ def check_make(
             "made part its own."
         )
     return errors, warnings
+
+
+#: How the twin behaves (MetaForge, 2026-11-11): a form says how its parts move, light up
+#: and switch, so the studio can show the product working, not only its shape.
+BEHAVIOUR_KINDS = ("rotate", "slide", "glow", "toggle")
+BEHAVIOUR_KEYS = ("id", "name", "kind", "parts", "axis", "origin", "range", "color", "default")
+MAX_BEHAVIOURS = 12
+MAX_ROTATE_DEG = 360.0
+MAX_SLIDE_MM = 1000.0
+_BEHAVIOUR_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
+
+
+def _vec3(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)
+        and all(abs(float(v)) < 1e6 for v in value)
+    )
+
+
+def check_behaviours(form: Any) -> tuple[list[str], list[str]]:
+    """Errors and warnings for ``form.authored.behaviours``.
+
+    ``rotate`` turns its parts about ``axis`` through ``origin`` (degrees, within
+    ``range``); ``slide`` moves them along ``axis`` (millimetres); ``glow`` lights them in
+    ``color``; ``toggle`` shows or hides them. Each names real parts of the form.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    block = form.get("authored") if isinstance(form, dict) else None
+    if not isinstance(block, dict) or "behaviours" not in block:
+        return errors, warnings
+    items = block.get("behaviours")
+    if not isinstance(items, list):
+        return ["form.authored.behaviours must be a list."], warnings
+    if len(items) > MAX_BEHAVIOURS:
+        errors.append(
+            f"form.authored.behaviours has {len(items)} behaviours; at most {MAX_BEHAVIOURS}."
+        )
+    part_ids = {
+        str(p.get("id")) for p in block.get("parts") or [] if isinstance(p, dict) and p.get("id")
+    }
+    seen: set[str] = set()
+    for index, item in enumerate(items[: MAX_BEHAVIOURS + 1]):
+        if not isinstance(item, dict):
+            errors.append(f"form.authored.behaviours[{index}] must be an object.")
+            continue
+        bid = str(item.get("id", ""))
+        label = f'behaviour "{bid}"' if bid else f"behaviour #{index}"
+        if not _BEHAVIOUR_ID.fullmatch(bid):
+            errors.append(f'{label}: id must be a lowercase slug such as "tilt".')
+        elif bid in seen:
+            errors.append(f'{label}: duplicate id "{bid}".')
+        seen.add(bid)
+        for key in sorted(set(item) - set(BEHAVIOUR_KEYS)):
+            errors.append(f"{label}: {key} is not known; use {', '.join(BEHAVIOUR_KEYS)}.")
+        if not isinstance(item.get("name"), str) or not item["name"].strip():
+            errors.append(f"{label}: name is required, the words a person sees on its control.")
+        kind = item.get("kind")
+        if kind not in BEHAVIOUR_KINDS:
+            errors.append(f"{label}: kind must be one of {', '.join(BEHAVIOUR_KINDS)}.")
+        parts = item.get("parts")
+        if not isinstance(parts, list) or not parts:
+            errors.append(f"{label}: parts must list the ids of the parts it acts on.")
+        else:
+            for pid in parts:
+                if str(pid) not in part_ids:
+                    errors.append(f'{label}: part "{pid}" is not a part of this form.')
+        if kind in ("rotate", "slide"):
+            axis = item.get("axis")
+            if not _vec3(axis) or not any(float(v) for v in axis):
+                errors.append(f"{label}: axis must be three numbers, not all zero, such as [0, 1, 0].")
+            if "origin" in item and not _vec3(item.get("origin")):
+                errors.append(f"{label}: origin must be three numbers in millimetres.")
+            rng = item.get("range")
+            limit = MAX_ROTATE_DEG if kind == "rotate" else MAX_SLIDE_MM
+            unit = "degrees" if kind == "rotate" else "mm"
+            if (
+                not isinstance(rng, list)
+                or len(rng) != 2
+                or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in rng)
+                or not float(rng[0]) < float(rng[1])
+                or max(abs(float(v)) for v in rng) > limit
+            ):
+                errors.append(
+                    f"{label}: range must be [min, max] with min below max, within ±{limit:g} {unit}."
+                )
+        if kind == "glow" and not (isinstance(item.get("color"), str) and _HEX.fullmatch(item["color"])):
+            errors.append(f"{label}: color must be the light's #RRGGBB colour.")
+    return errors, warnings

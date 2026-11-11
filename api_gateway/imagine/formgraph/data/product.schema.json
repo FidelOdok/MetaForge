@@ -288,6 +288,79 @@
                   }
                 }
               }
+            },
+            "behaviours": {
+              "description": "How the twin behaves: rotate turns parts about axis through origin within range (degrees); slide moves them along axis (mm); glow lights them in color; toggle shows or hides them. A person drives each one in the studio.",
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name",
+                  "kind",
+                  "parts"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "rotate",
+                      "slide",
+                      "glow",
+                      "toggle"
+                    ]
+                  },
+                  "parts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "axis": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "origin": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "range": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9A-Fa-f]{6}$"
+                  },
+                  "default": {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                }
+              }
             }
           }
         }

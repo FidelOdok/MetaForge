@@ -629,6 +629,51 @@
 
   function fmtMm(v) { return String(Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10); }
 
+  /* Behaviours (MetaForge, 2026-11-11): how the twin moves, lights up and switches. */
+  function behaviourValue(b, values) {
+    var v = values && values[b.id] !== undefined ? values[b.id] : b['default'];
+    if (b.kind === 'glow') return v === true;
+    if (b.kind === 'toggle') return v !== false;
+    var r = Array.isArray(b.range) ? b.range : [0, 0], n = typeof v === 'number' && isFinite(v) ? v : (r[0] <= 0 && r[1] >= 0 ? 0 : r[0]);
+    return Math.min(r[1], Math.max(r[0], n));
+  }
+  function mul4(a, b) { // row-major 4x4: a * b
+    var o = new Array(16);
+    for (var i = 0; i < 4; i++) for (var j = 0; j < 4; j++) {
+      var t = 0; for (var k = 0; k < 4; k++) t += a[i * 4 + k] * b[k * 4 + j]; o[i * 4 + j] = t;
+    }
+    return o;
+  }
+  /* The transform the motions (rotate, slide) put on one part, as a column-major 4x4 array
+     (three.js Matrix4.fromArray order), or null when no motion acts on it. Motions apply in
+     the order they are listed. */
+  function behaviourMatrix(list, partId, values) {
+    var m = null;
+    (list || []).forEach(function (b) {
+      if (!b || (b.kind !== 'rotate' && b.kind !== 'slide') || !Array.isArray(b.parts) || b.parts.indexOf(partId) < 0) return;
+      var ax = b.axis || [0, 1, 0], len = Math.sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+      if (!len) return;
+      var u = [ax[0] / len, ax[1] / len, ax[2] / len], v = behaviourValue(b, values), t;
+      if (b.kind === 'slide') {
+        t = [1, 0, 0, u[0] * v, 0, 1, 0, u[1] * v, 0, 0, 1, u[2] * v, 0, 0, 0, 1];
+      } else {
+        var a = v * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a), C = 1 - c, o = b.origin || [0, 0, 0];
+        var R = [c + u[0] * u[0] * C, u[0] * u[1] * C - u[2] * sn, u[0] * u[2] * C + u[1] * sn,
+          u[1] * u[0] * C + u[2] * sn, c + u[1] * u[1] * C, u[1] * u[2] * C - u[0] * sn,
+          u[2] * u[0] * C - u[1] * sn, u[2] * u[1] * C + u[0] * sn, c + u[2] * u[2] * C];
+        var tx = o[0] - (R[0] * o[0] + R[1] * o[1] + R[2] * o[2]);
+        var ty = o[1] - (R[3] * o[0] + R[4] * o[1] + R[5] * o[2]);
+        var tz = o[2] - (R[6] * o[0] + R[7] * o[1] + R[8] * o[2]);
+        t = [R[0], R[1], R[2], tx, R[3], R[4], R[5], ty, R[6], R[7], R[8], tz, 0, 0, 0, 1];
+      }
+      m = m ? mul4(t, m) : t;
+    });
+    if (!m) return null;
+    var cm = new Array(16);
+    for (var i = 0; i < 4; i++) for (var j = 0; j < 4; j++) cm[j * 4 + i] = m[i * 4 + j];
+    return cm;
+  }
+
   /* How a part is made and how it looks (MetaForge, 2026-11-11). A part's make block names
      its process, material, finish and colour; the page hands over its own tables (the
      process rule books, their materials and the catalogue colours), so the part is drawn as
@@ -958,7 +1003,7 @@
     env.scene.add(group);
 
     var quick = env.quick || null;
-    var partsBox = null, graphApi = null, selected = null;
+    var partsBox = null, graphApi = null, selected = null, behave = {}, behaviourControls = {}, playing = null;
     // Every slider for one parameter, in the controls panel and in the graph, stays in step.
     var regs = {};
     function setParam(key, v) {
@@ -1040,6 +1085,7 @@
       partsBox = el('div', 'ppb'); pdet.appendChild(partsBox);
       legendInto(pdet);
       quick.appendChild(pdet);
+      behaviourControlsInto(quick);
       problems = el('div', 'fg-authored-errors'); quick.appendChild(problems);
     } else {
       panel = doc.createElement('div');
@@ -1068,15 +1114,116 @@
     // choice only: the part is still in the form, measured and handed over.
     function setPartHidden(id, hide) {
       if (hide) hidden[id] = true; else delete hidden[id];
-      group.children.forEach(function (mesh) { if (mesh.userData && mesh.userData.part === id) mesh.visible = !hide; });
+      group.children.forEach(function (mesh) { if (mesh.userData && mesh.userData.part === id) mesh.visible = !hide && !switchedOff(id); });
       if (lastResult) renderParts(lastResult);
       if (env.onView) env.onView();
     }
     function hiddenParts() { return Object.keys(hidden); }
+    // The twin's behaviours and the value each one is at.
+    function behaviourList() { return ((((env.cfg || {}).form || {}).authored || {}).behaviours) || []; }
+    function behaviourState() {
+      var out = {};
+      behaviourList().forEach(function (b) { if (b && b.id) out[b.id] = behaviourValue(b, behave); });
+      return out;
+    }
+    function switchedOff(id) {
+      return behaviourList().some(function (b) { return b && b.kind === 'toggle' && (b.parts || []).indexOf(id) >= 0 && !behaviourValue(b, behave); });
+    }
+    function glowOf(id) {
+      var g = null;
+      behaviourList().forEach(function (b) { if (b && b.kind === 'glow' && (b.parts || []).indexOf(id) >= 0 && behaviourValue(b, behave)) g = b.color; });
+      return g;
+    }
+    function applyBehaviours() {
+      var list = behaviourList(), state = behaviourState();
+      group.children.forEach(function (mesh) {
+        var id = mesh.userData && mesh.userData.part, mtx = behaviourMatrix(list, id, state);
+        if (mtx) {
+          mesh.matrixAutoUpdate = false;
+          if (mesh.matrix && mesh.matrix.fromArray) mesh.matrix.fromArray(mtx);
+          mesh.userData.behaviourMatrix = mtx;
+        } else if (mesh.userData && mesh.userData.behaviourMatrix) {
+          mesh.matrixAutoUpdate = true;
+          if (mesh.matrix && mesh.matrix.identity) mesh.matrix.identity();
+          delete mesh.userData.behaviourMatrix;
+        }
+        mesh.visible = !hidden[id] && !switchedOff(id);
+      });
+      applySelection();
+    }
+    function setBehaviour(id, value) {
+      behave[id] = value;
+      applyBehaviours();
+      syncBehaviourControls();
+      if (env.onView) env.onView();
+    }
+    function syncBehaviourControls() {
+      var st = behaviourState();
+      Object.keys(behaviourControls).forEach(function (id) { behaviourControls[id](st[id]); });
+    }
+    // Play every motion through its range and back, so the person sees the twin move.
+    function play() {
+      var raf = GLOBAL.requestAnimationFrame, list = behaviourList().filter(function (b) { return b && (b.kind === 'rotate' || b.kind === 'slide'); });
+      if (!raf || !list.length) return;
+      if (playing) { playing = null; return; }
+      var start = Date.now(), before = behaviourState(), token = {};
+      playing = token;
+      (function step() {
+        if (playing !== token) { list.forEach(function (b) { behave[b.id] = before[b.id]; }); applyBehaviours(); syncBehaviourControls(); return; }
+        var t = (Date.now() - start) / 3000;
+        if (t >= 1) { playing = null; list.forEach(function (b) { behave[b.id] = before[b.id]; }); applyBehaviours(); syncBehaviourControls(); return; }
+        list.forEach(function (b) { var r = b.range; behave[b.id] = r[0] + (r[1] - r[0]) * (0.5 - 0.5 * Math.cos(t * 2 * Math.PI)); });
+        applyBehaviours(); syncBehaviourControls(); raf(step);
+      })();
+    }
+    function behaviourControlsInto(container) {
+      var list = behaviourList().filter(function (b) { return b && b.id; });
+      if (!list.length) return;
+      var det = el('details', 'pp'), sum = el('summary');
+      det.open = true; det.setAttribute('open', ''); det.setAttribute('data-pps', 'behaviours');
+      sum.appendChild(el('span', '', 'Behaviours')); det.appendChild(sum);
+      var box = el('div', 'ppb fg-behaviours');
+      if (list.some(function (b) { return b.kind === 'rotate' || b.kind === 'slide'; })) {
+        var pl = el('button', 'fg-eye fg-play', 'Play the motions');
+        pl.type = 'button'; pl.setAttribute('data-behave-play', '');
+        pl.addEventListener('click', play);
+        box.appendChild(pl);
+      }
+      list.forEach(function (b) {
+        var row = el('div', 'fg-behave'), name = el('span', 'fg-behave-name', b.name || b.id);
+        row.setAttribute('data-behave', b.id);
+        row.appendChild(name);
+        if (b.kind === 'rotate' || b.kind === 'slide') {
+          var unit = b.kind === 'rotate' ? '°' : ' mm', val = el('b', 'fg-behave-val', '');
+          var input = el('input', 'rng');
+          input.type = 'range'; input.min = String(b.range[0]); input.max = String(b.range[1]);
+          input.step = String(Math.max(0.1, (b.range[1] - b.range[0]) / 200));
+          input.setAttribute('aria-label', b.name || b.id);
+          input.setAttribute('data-behave-input', b.id);
+          input.addEventListener('input', function () { setBehaviour(b.id, +input.value); });
+          behaviourControls[b.id] = function (v) { input.value = String(v); val.textContent = (Math.round(v * 10) / 10) + unit; };
+          row.appendChild(val); row.appendChild(input);
+        } else {
+          var btn = el('button', 'fg-eye', '');
+          btn.type = 'button'; btn.setAttribute('data-behave-toggle', b.id);
+          btn.addEventListener('click', function () { setBehaviour(b.id, !behaviourValue(b, behave)); });
+          behaviourControls[b.id] = function (v) {
+            btn.textContent = v ? (b.kind === 'glow' ? 'On' : 'Shown') : (b.kind === 'glow' ? 'Off' : 'Hidden');
+            btn.setAttribute('aria-pressed', String(!!v));
+            btn.setAttribute('aria-label', (b.name || b.id) + (v ? ': on' : ': off'));
+          };
+          row.appendChild(btn);
+        }
+        box.appendChild(row);
+      });
+      det.appendChild(box);
+      container.appendChild(det);
+      syncBehaviourControls();
+    }
     function setHiddenParts(list) {
       hidden = {};
       (Array.isArray(list) ? list : []).forEach(function (id) { if (typeof id === 'string') hidden[id] = true; });
-      group.children.forEach(function (mesh) { mesh.visible = !(mesh.userData && hidden[mesh.userData.part]); });
+      group.children.forEach(function (mesh) { var id = mesh.userData && mesh.userData.part; mesh.visible = !hidden[id] && !switchedOff(id); });
       if (lastResult) renderParts(lastResult);
     }
     // Colours are given as sRGB hex. three.js (r128) lights in linear space, so a hex passed
@@ -1110,17 +1257,23 @@
       Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
       return new THREE.MeshStandardMaterial(o);
     }
+    var glowMaterials = {};
+    function glowMaterial(kind, part, color) {
+      var key = kind + '|' + part + '|' + color;
+      return glowMaterials[key] || (glowMaterials[key] = make(kind, part, { emissive: paint(color), emissiveIntensity: 0.9 }));
+    }
     function litMaterial(kind, part) {
       var key = kind + '|' + (partMake(part) ? part : '');
       return litMaterials[key] || (litMaterials[key] = make(kind, part, { emissive: 0x2f6fff, emissiveIntensity: 0.55 }));
     }
     // The swatches or the finish changed: rebuild the materials and put them on the meshes.
-    function recolour() { materials = {}; litMaterials = {}; applySelection(); }
+    function recolour() { materials = {}; litMaterials = {}; glowMaterials = {}; applySelection(); }
     // The selected part glows in the 3D view; everything else keeps its kind's colour.
     function applySelection() {
       group.children.forEach(function (mesh) {
-        var kind = mesh.userData && mesh.userData.kind, part = mesh.userData && mesh.userData.part;
-        mesh.material = selected !== null && selected === 'part:' + part ? litMaterial(kind, part) : material(kind, part);
+        var kind = mesh.userData && mesh.userData.kind, part = mesh.userData && mesh.userData.part, glow = glowOf(part);
+        mesh.material = selected !== null && selected === 'part:' + part ? litMaterial(kind, part)
+          : glow ? glowMaterial(kind, part, glow) : material(kind, part);
       });
     }
     function setSelected(id) {
@@ -1168,7 +1321,7 @@
           var mesh = new THREE.Mesh(geo, material(p.kind, p.id));
           mesh.name = sh.name || p.name; mesh.castShadow = true; mesh.receiveShadow = true;
           mesh.userData = { part: p.id, kind: p.kind };
-          mesh.visible = !hidden[p.id];
+          mesh.visible = !hidden[p.id] && !switchedOff(p.id);
           group.add(mesh);
         });
       });
@@ -1178,7 +1331,7 @@
       result.errors.forEach(function (e) { var d = doc.createElement('div'); d.textContent = e; problems.appendChild(d); });
       problems.style.display = result.errors.length ? 'block' : 'none';
       if (graphApi) graphApi.update(result);
-      applySelection();
+      applyBehaviours();
       if (env.onDraw) env.onDraw(result);
     }
     function renderParts(result) {
@@ -1409,8 +1562,8 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts };
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });

@@ -167,6 +167,9 @@ def validate(cfg, cat, ctx=None):
 
     # MetaForge (2026-11-11): each authored part names how it is made and how it looks.
     if template == authored.TEMPLATE_ID:
+        behave_errors, behave_warnings = authored.check_behaviours(f)
+        E.extend(behave_errors)
+        W.extend(behave_warnings)
         make_errors, make_warnings = authored.check_make(
             f, cat['processes'], list(cat.get('colors') or []), pr.get('id'), ext.get('materials') or {}
         )

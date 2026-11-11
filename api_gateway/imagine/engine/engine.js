@@ -2596,7 +2596,7 @@ function hostApply(cols){if(!cols||typeof cols!=='object')return;DBH=DBH||{hoste
   if(ch){autoWire(null);renderNodes();renderComp();renderProcess();}
   schedule();}
 const RO_EDIT='input,select,textarea,button';
-const RO_OK='.fg-eye,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
+const RO_OK='.fg-eye,.fg-behave input,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
 function roBlocked(t){const c=t&&t.closest?t.closest(RO_EDIT):null;return !!(c&&!c.matches(RO_OK));}
 function applyReadonly(){const de=document.documentElement;if(READONLY)de.setAttribute('data-readonly','');else de.removeAttribute('data-readonly');
   document.querySelectorAll(RO_EDIT).forEach(el=>{if(READONLY&&!el.matches(RO_OK)){if(!el.disabled){el.disabled=true;el.setAttribute('data-fg-ro','');}}else if(!READONLY&&el.hasAttribute('data-fg-ro')){el.disabled=false;el.removeAttribute('data-fg-ro');}});
@@ -2619,9 +2619,11 @@ if(HOSTED){
   const PANES=['dfm','quick','progView','graphPane'];
   const uiNow=()=>({view:S.view,level:S.level,gtab:S.gtab,pview:S.pview,open:Object.assign({},S.open||{}),
     hidden:AUTHORED_MOUNT&&AUTHORED_MOUNT.hiddenParts?AUTHORED_MOUNT.hiddenParts():[],
+    behave:AUTHORED_MOUNT&&AUTHORED_MOUNT.behaviours?AUTHORED_MOUNT.behaviours():{},
     panes:Object.fromEntries(PANES.map(id=>[id,Math.round(($('#'+id)||{}).scrollTop||0)]))});
   function applyUi(u){if(!u||typeof u!=='object')return;const str=v=>typeof v==='string'&&v.length<40;
     if(Array.isArray(u.hidden)&&AUTHORED_MOUNT&&AUTHORED_MOUNT.setHiddenParts)AUTHORED_MOUNT.setHiddenParts(u.hidden.filter(x=>typeof x==='string').slice(0,24));
+    if(u.behave&&typeof u.behave==='object'&&AUTHORED_MOUNT&&AUTHORED_MOUNT.setBehaviour)Object.entries(u.behave).slice(0,12).forEach(([k,v])=>{if(typeof v==='number'||typeof v==='boolean')AUTHORED_MOUNT.setBehaviour(k,v);});
     if(str(u.level)){S.level=u.level;applyLevel();}
     if(str(u.gtab)){S.gtab=u.gtab;applyGtab();}
     if(str(u.pview)){S.pview=u.pview;applyPview();}

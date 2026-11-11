@@ -659,6 +659,12 @@ html[data-authored] #costBlk,html[data-authored] #handBlk,html[data-authored] #p
 .qs.is-hidden .fg-eye{border-color:var(--muted);color:var(--muted)}
 .fg-eye-all{justify-self:start;margin-top:2px}
 .qs .qt .fg-eye + span{flex:1}
+/* Behaviours: how the twin moves, lights and switches; a person drives each one. */
+.fg-behaviours{display:grid;gap:8px}
+.fg-behave{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px;font-size:13px}
+.fg-behave .rng{grid-column:1 / -1}
+.fg-behave-val{font-family:var(--f-mono);font-weight:500;font-size:12.5px}
+.fg-play{justify-self:start}
 .fg-authored-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:2px 0 6px}
 .fg-authored-facts .fg-fact{background:var(--panel2);border-radius:var(--r-md,10px);padding:9px 11px;min-width:0}
 .fg-authored-facts dt{color:var(--muted);font-size:11px;letter-spacing:.02em;margin-bottom:3px}

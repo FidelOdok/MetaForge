@@ -914,5 +914,53 @@ await check('describe_sums_the_mass_from_each_parts_own_material', () => {
   return row[0] === "Mass if solid, each part in its own material" && row[1] === '40 g' ? true : 'mass row ' + JSON.stringify(row);
 });
 
+// Behaviours (MetaForge, 2026-11-11): the studio is a low-fidelity twin, so a form says how
+// its parts move, light up and switch, and a person can drive each behaviour.
+const apply = (m, p) => [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]];
+const close3 = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+const BEHAVES = [
+  { id: 'tilt', name: 'Tilt the arm', kind: 'rotate', parts: ['arm', 'shade'], axis: [0, 0, 1], origin: [0, 12, 0], range: [-90, 90] },
+  { id: 'raise', name: 'Raise', kind: 'slide', parts: ['shade'], axis: [0, 2, 0], range: [0, 30] },
+  { id: 'light', name: 'Light', kind: 'glow', parts: ['shade'], color: '#FFD27A' },
+  { id: 'base', name: 'Base shown', kind: 'toggle', parts: ['base'], default: true },
+];
+const BEHAVED = { ...LAMPFORM, authored: { ...LAMPFORM.authored, behaviours: BEHAVES } };
+
+await check('a_behaviour_moves_its_parts_about_its_own_axis_and_origin', () => {
+  const r = FG.behaviourMatrix(BEHAVES, 'arm', { tilt: 90 });
+  if (!r) return 'no matrix for the arm';
+  // 90 degrees about z through (0, 12, 0): (1, 12, 0) goes to (0, 13, 0)
+  if (!close3(apply(r, [1, 12, 0]), [0, 13, 0])) return 'rotate: ' + apply(r, [1, 12, 0]);
+  const s = FG.behaviourMatrix(BEHAVES, 'shade', { tilt: 0, raise: 20 });
+  if (!close3(apply(s, [0, 0, 0]), [0, 20, 0])) return 'slide along a normalised axis: ' + apply(s, [0, 0, 0]);
+  if (FG.behaviourMatrix(BEHAVES, 'base', { tilt: 90 }) !== null) return 'a part with no motion has no matrix';
+  // out of range is held to the range
+  const c = FG.behaviourMatrix(BEHAVES, 'arm', { tilt: 400 });
+  const at90 = FG.behaviourMatrix(BEHAVES, 'arm', { tilt: 90 });
+  return close3(c, at90) ? true : 'a value outside the range is not clamped';
+});
+
+await check('a_person_drives_each_behaviour_in_the_studio', async () => {
+  const { m, quick } = mountGraph({ cfg: { form: BEHAVED } }, BEHAVED);
+  await m.render();
+  const { withClass } = graphDom();
+  const controls = withClass(quick, 'fg-behave');
+  if (controls.length !== 4) return 'behaviour controls ' + controls.length;
+  if (!m.setBehaviour || !m.behaviours) return 'no behaviour api';
+  m.setBehaviour('tilt', 90);
+  const arm = m.group.children.find((x) => x.userData.part === 'arm');
+  if (!arm.userData.behaviourMatrix || !close3(apply(arm.userData.behaviourMatrix, [1, 12, 0]), [0, 13, 0])) return 'the arm did not turn';
+  m.setBehaviour('light', true);
+  const shade = m.group.children.find((x) => x.userData.part === 'shade');
+  if (!shade.material.o.emissive || shade.material.o.emissive !== '#FFD27A') return 'the shade did not light: ' + JSON.stringify(shade.material.o);
+  m.setBehaviour('base', false);
+  const base = m.group.children.find((x) => x.userData.part === 'base');
+  if (base.visible !== false) return 'the base was not switched off';
+  if (m.behaviours().tilt !== 90 || m.behaviours().light !== true) return 'state ' + JSON.stringify(m.behaviours());
+  await m.render();
+  const again = m.group.children.find((x) => x.userData.part === 'arm');
+  return again.userData.behaviourMatrix ? true : 'a redraw lost the behaviour';
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

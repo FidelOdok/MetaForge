@@ -88,6 +88,8 @@ CHECKS = [
     "each_part_is_drawn_in_its_own_material",
     "a_part_with_no_make_block_keeps_the_product_look",
     "describe_sums_the_mass_from_each_parts_own_material",
+    "a_behaviour_moves_its_parts_about_its_own_axis_and_origin",
+    "a_person_drives_each_behaviour_in_the_studio",
 ]
 
 
