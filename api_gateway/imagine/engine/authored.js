@@ -1063,7 +1063,22 @@
       (env.host || doc.body).appendChild(panel);
     }
 
-    var seq = 0, timer = null, materials = {}, litMaterials = {};
+    var seq = 0, timer = null, materials = {}, litMaterials = {}, hidden = {}, lastResult = null;
+    // A person can hide a part to see inside or behind it (MetaForge). Hiding is a view
+    // choice only: the part is still in the form, measured and handed over.
+    function setPartHidden(id, hide) {
+      if (hide) hidden[id] = true; else delete hidden[id];
+      group.children.forEach(function (mesh) { if (mesh.userData && mesh.userData.part === id) mesh.visible = !hide; });
+      if (lastResult) renderParts(lastResult);
+      if (env.onView) env.onView();
+    }
+    function hiddenParts() { return Object.keys(hidden); }
+    function setHiddenParts(list) {
+      hidden = {};
+      (Array.isArray(list) ? list : []).forEach(function (id) { if (typeof id === 'string') hidden[id] = true; });
+      group.children.forEach(function (mesh) { mesh.visible = !(mesh.userData && hidden[mesh.userData.part]); });
+      if (lastResult) renderParts(lastResult);
+    }
     // Colours are given as sRGB hex. three.js (r128) lights in linear space, so a hex passed
     // straight in comes out washed out; convert it the way the engine does for its own body.
     function paint(hex) {
@@ -1153,14 +1168,32 @@
           var mesh = new THREE.Mesh(geo, material(p.kind, p.id));
           mesh.name = sh.name || p.name; mesh.castShadow = true; mesh.receiveShadow = true;
           mesh.userData = { part: p.id, kind: p.kind };
+          mesh.visible = !hidden[p.id];
           group.add(mesh);
         });
       });
+      lastResult = result;
+      renderParts(result);
+      problems.textContent = '';
+      result.errors.forEach(function (e) { var d = doc.createElement('div'); d.textContent = e; problems.appendChild(d); });
+      problems.style.display = result.errors.length ? 'block' : 'none';
+      if (graphApi) graphApi.update(result);
+      applySelection();
+      if (env.onDraw) env.onDraw(result);
+    }
+    function renderParts(result) {
       if (partsBox) {
         partsBox.textContent = '';
         result.parts.forEach(function (p) {
-          var row = el('div', 'qs'), qt = el('div', 'qt'), name = doc.createElement('span'), sw = doc.createElement('i');
+          var row = el('div', 'qs' + (hidden[p.id] ? ' is-hidden' : '')), qt = el('div', 'qt'), name = doc.createElement('span'), sw = doc.createElement('i');
           row.setAttribute('data-part', p.id);
+          var eye = el('button', 'fg-eye', hidden[p.id] ? 'Show' : 'Hide');
+          eye.type = 'button';
+          eye.setAttribute('data-eye', p.id);
+          eye.setAttribute('aria-pressed', String(!hidden[p.id]));
+          eye.setAttribute('aria-label', (hidden[p.id] ? 'Show ' : 'Hide ') + p.name);
+          eye.addEventListener('click', function () { setPartHidden(p.id, !hidden[p.id]); });
+          qt.appendChild(eye);
           sw.style.background = '#' + (KIND_STYLE[p.kind] || KIND_STYLE.generated).color.toString(16).padStart(6, '0');
           sw.className = 'fg-authored-swatch';
           name.appendChild(sw); name.appendChild(doc.createTextNode(' ' + p.name));
@@ -1180,13 +1213,14 @@
           }
           partsBox.appendChild(row);
         });
+        if (hiddenParts().length) {
+          var all = el('button', 'fg-eye fg-eye-all', 'Show all parts');
+          all.type = 'button';
+          all.setAttribute('data-eye-all', '');
+          all.addEventListener('click', function () { setHiddenParts([]); if (env.onView) env.onView(); });
+          partsBox.appendChild(all);
+        }
       }
-      problems.textContent = '';
-      result.errors.forEach(function (e) { var d = doc.createElement('div'); d.textContent = e; problems.appendChild(d); });
-      problems.style.display = result.errors.length ? 'block' : 'none';
-      if (graphApi) graphApi.update(result);
-      applySelection();
-      if (env.onDraw) env.onDraw(result);
     }
     function render() {
       var mine = ++seq;
@@ -1375,7 +1409,7 @@
 
     if (env.graph) graphApi = buildGraphUi();
     render();
-    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour };
+    return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts };
   }
 
   return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };

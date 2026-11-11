@@ -579,7 +579,7 @@ function colorize(g,pull,minD){const n=g.attributes.normal,col=new Float32Array(
 function clearPart(){while(part.children.length){const m=part.children.pop();if(m.geometry)m.geometry.dispose();}}
 function buildPart(s){
   clearPart();
-  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},looks:()=>({process:S.proc,finish:S.finish,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
+  if(AUTHORED){if(!AUTHORED_MOUNT)AUTHORED_MOUNT=FGAuthored.mount({THREE,scene,cfg:CFG,onSeen:()=>{dbWrite('formSeen','latest',{seen:true});toast('Recorded: you have seen this form.');},seenState:formSeenNow,quick:document.getElementById('quick'),graph:document.getElementById('authGraph'),host:document.getElementById('graphPane')||document.body,summaryHost:document.getElementById('dfm'),material:()=>{const m=matOf();return{name:m.name,density:m.density};},onView:()=>{if(VIEW_HOOK)VIEW_HOOK();},looks:()=>({process:S.proc,finish:S.finish,processes:Object.fromEntries(Object.entries(PROC).map(([k,v])=>[k,{name:v.name,metal:!!v.metal,finishes:v.finishes}])),materials:MATS,colors:CMF}),cmf:()=>{const P=PROC[S.proc],fin=finishOf(),c=CMF.find(x=>x.id===S.color)||CMF[0];return{hex:c.hex,metal:P.metal?0.9:0,rough:P.metal?Math.max(.22,fin.rough):fin.rough,cc:fin.cc||0};},onSummary:d=>{$('#dims').textContent=d.dims||d.headline;},onDraw:()=>{if(!camMoved)frame({W:100,D:100,H:100});}});return;}
   if(!s)return;
   const P=PROC[S.proc],fin=finishOf(),minD=P.draft+fin.draft,tan=Math.tan(s.A*DEG),seg=12;const items=[];
   const add=(g,pull,kind,mat,name)=>items.push({g,pull,kind,mat,name});
@@ -2596,7 +2596,7 @@ function hostApply(cols){if(!cols||typeof cols!=='object')return;DBH=DBH||{hoste
   if(ch){autoWire(null);renderNodes();renderComp();renderProcess();}
   schedule();}
 const RO_EDIT='input,select,textarea,button';
-const RO_OK='[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
+const RO_OK='.fg-eye,[data-pview],[data-level],[data-view],[data-gtab],[data-speed],[data-cov],[data-pcard],[data-open],[data-ref],[data-sim],[data-play],[data-mc],[data-unclamp],#fit,#flip,#frame,#edgeL,#edgeR,.ibtn,.x,#simRun,#devBtn,#misPlay,#cpSpec,#cpReport,#cpPack,#cpGraph,[data-cpbom],#cadExport,#ioClose,.acc-h,#simIn *,#devp *,#misBody *';
 function roBlocked(t){const c=t&&t.closest?t.closest(RO_EDIT):null;return !!(c&&!c.matches(RO_OK));}
 function applyReadonly(){const de=document.documentElement;if(READONLY)de.setAttribute('data-readonly','');else de.removeAttribute('data-readonly');
   document.querySelectorAll(RO_EDIT).forEach(el=>{if(READONLY&&!el.matches(RO_OK)){if(!el.disabled){el.disabled=true;el.setAttribute('data-fg-ro','');}}else if(!READONLY&&el.hasAttribute('data-fg-ro')){el.disabled=false;el.removeAttribute('data-fg-ro');}});
@@ -2618,8 +2618,10 @@ if(HOSTED){
   // The panes that scroll on their own, and the page's own choices of what to show (never the design).
   const PANES=['dfm','quick','progView','graphPane'];
   const uiNow=()=>({view:S.view,level:S.level,gtab:S.gtab,pview:S.pview,open:Object.assign({},S.open||{}),
+    hidden:AUTHORED_MOUNT&&AUTHORED_MOUNT.hiddenParts?AUTHORED_MOUNT.hiddenParts():[],
     panes:Object.fromEntries(PANES.map(id=>[id,Math.round(($('#'+id)||{}).scrollTop||0)]))});
   function applyUi(u){if(!u||typeof u!=='object')return;const str=v=>typeof v==='string'&&v.length<40;
+    if(Array.isArray(u.hidden)&&AUTHORED_MOUNT&&AUTHORED_MOUNT.setHiddenParts)AUTHORED_MOUNT.setHiddenParts(u.hidden.filter(x=>typeof x==='string').slice(0,24));
     if(str(u.level)){S.level=u.level;applyLevel();}
     if(str(u.gtab)){S.gtab=u.gtab;applyGtab();}
     if(str(u.pview)){S.pview=u.pview;applyPview();}

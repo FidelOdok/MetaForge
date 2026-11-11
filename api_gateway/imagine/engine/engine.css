@@ -651,6 +651,14 @@ html[data-authored] #costBlk,html[data-authored] #handBlk,html[data-authored] #p
 .fg-part-make{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:2px 0 0 13px;font-size:11.5px;color:var(--muted)}
 .fg-make-swatch{display:inline-block;width:10px;height:10px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
 .fg-make-proposed{margin-left:4px;padding:0 6px;border-radius:999px;font-size:10.5px;color:#b45309;box-shadow:inset 0 0 0 1px rgba(180,83,9,.5)}
+/* Show or hide a part in the 3D view (a view choice; the part stays in the form). */
+.fg-eye{flex:none;padding:1px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);color:var(--fg);font:inherit;font-size:11px;line-height:16px;cursor:pointer}
+.fg-eye:hover{border-color:var(--muted)}
+.fg-eye:focus-visible{outline:2px solid var(--accent,#ff5a0a);outline-offset:1px}
+.qs.is-hidden .qt span,.qs.is-hidden .qt b,.qs.is-hidden .fg-part-make{opacity:.45}
+.qs.is-hidden .fg-eye{border-color:var(--muted);color:var(--muted)}
+.fg-eye-all{justify-self:start;margin-top:2px}
+.qs .qt .fg-eye + span{flex:1}
 .fg-authored-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:2px 0 6px}
 .fg-authored-facts .fg-fact{background:var(--panel2);border-radius:var(--r-md,10px);padding:9px 11px;min-width:0}
 .fg-authored-facts dt{color:var(--muted);font-size:11px;letter-spacing:.02em;margin-bottom:3px}
