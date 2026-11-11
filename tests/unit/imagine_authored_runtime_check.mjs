@@ -1026,5 +1026,31 @@ await check('the_next_step_is_the_most_important_open_decision_with_buttons', ()
   return n.kind === 'done' && n.remaining === 0 && n.actions.length === 0 ? true : 'done: ' + JSON.stringify(n);
 });
 
+// Running cost (MetaForge, 2026-11-11): an estimate per unit from each part's material and the
+// components' recorded prices, every line with its basis, and what is not in it said plainly.
+await check('the_running_cost_adds_materials_and_recorded_prices_and_says_what_it_leaves_out', () => {
+  const parts = [
+    { id: 'case', name: 'Watch case', kind: 'generated', volume: 10000 },
+    { id: 'bezel', name: 'Bezel', kind: 'generated', volume: 2000 },
+    { id: 'gnss', name: 'GNSS', kind: 'component', volume: 1500 },
+    { id: 'ble', name: 'BLE module', kind: 'component', volume: 300 },
+    { id: 'lcd', name: 'Display', kind: 'component', volume: 500 },
+  ];
+  const look = { case: { material: 'PLA', density: 1.24, costKg: 20 } };
+  const product = { name: 'PETG', density: 1.27, costKg: 22 };
+  const specs = { gnss: { priceUnit: 9.8, currency: 'GBP', price: '9.80 each at 250', priceSource: 'distributor' }, ble: { priceUnit: 6.5, currency: '', price: '6.50 each' }, lcd: { priceUnit: null } };
+  const e = FG.estimateCost(parts, (id) => look[id] || null, (id) => specs[id] || null, product);
+  // case: 10 cm3 x 1.24 = 12.4 g x £20/kg = £0.248; bezel (product PETG): 2 cm3 x 1.27 = 2.54 g x £22/kg = £0.0559; gnss £9.80
+  if (Math.abs(e.total - (0.248 + 0.05588 + 9.8)) > 1e-6) return 'total ' + e.total;
+  const caseLine = e.lines.find((l) => l.name === 'Watch case');
+  if (!caseLine || !/12 g of PLA at £20\/kg/.test(caseLine.basis)) return 'case basis ' + JSON.stringify(caseLine);
+  if (!e.lines.some((l) => l.name === 'GNSS' && Math.abs(l.amount - 9.8) < 1e-9)) return 'gnss line';
+  const ble = e.missing.find((m) => m.name === 'BLE module'), lcd = e.missing.find((m) => m.name === 'Display');
+  if (!ble || !/currency/.test(ble.why) || !lcd || !/no recorded price/.test(lcd.why)) return 'missing ' + JSON.stringify(e.missing);
+  if (!/not included/.test(e.note) || !/solid/.test(e.note)) return 'note ' + e.note;
+  const none = FG.estimateCost([{ id: 'x', name: 'X', kind: 'generated', volume: 1000 }], () => null, () => null, null);
+  return none.total === 0 && none.lines.length === 0 && none.missing.length === 1 ? true : 'nothing known: ' + JSON.stringify(none);
+});
+
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));
 process.exit(0);

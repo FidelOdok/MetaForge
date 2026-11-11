@@ -651,6 +651,7 @@
       power: pw && Array.isArray(pw.v) && pw.v.length === 2 && pw.v.every(num) ? pw.v[0] + '–' + pw.v[1] + ' V' + (num(pw.imax_mA) ? ', up to ' + pw.imax_mA + ' mA' : '') : '',
       buses: buses.join(', '),
       price: num(cost.unit) ? cost.unit.toFixed(2) + ' each' + (num(cost.qty) ? ' at ' + cost.qty : '') : '',
+      priceUnit: num(cost.unit) ? cost.unit : null, currency: txt(cost.currency).toUpperCase(),
       priceSource: txt(cost.source), mass: num(p.mass) ? p.mass + ' g' : '',
       datasheet: txt(p.datasheet), read: txt(p.retrieved), standIn: !!p.standIn,
     };
@@ -658,6 +659,69 @@
   function specLine(sp) {
     return [[sp.maker, sp.mpn].filter(Boolean).join(' '), sp.power, sp.buses, sp.price, sp.read ? 'read ' + sp.read : '']
       .filter(Boolean).join(' · ') || 'No part chosen yet';
+  }
+
+  /* Running cost (MetaForge, 2026-11-11): an estimate per unit. Each made part is its volume,
+     solid, in its own material (the product's when it names none) at the catalogue's typical
+     price; each bought part is its recorded price when that is in pounds. Anything else is
+     listed with the reason it is not in the total. */
+  function estimateCost(parts, lookFor, specFor, productMaterial) {
+    var lines = [], missing = [], total = 0;
+    (parts || []).forEach(function (p) {
+      if (!p) return;
+      var name = String(p.name || p.id);
+      if (p.kind === 'component') {
+        var sp = specFor(p.id);
+        if (!sp || typeof sp.priceUnit !== 'number') { missing.push({ name: name, why: 'no recorded price' }); return; }
+        if (sp.currency !== 'GBP') { missing.push({ name: name, why: 'recorded price ' + sp.price + ' has no currency in pounds, so it is not added' }); return; }
+        total += sp.priceUnit;
+        lines.push({ name: name, kind: 'component', amount: sp.priceUnit, basis: 'Recorded price, ' + sp.price + (sp.priceSource ? ' (' + sp.priceSource + ')' : '') });
+        return;
+      }
+      var m = lookFor(p.id) || productMaterial;
+      var dens = m && typeof m.density === 'number' ? m.density : null, kg = m && typeof m.costKg === 'number' ? m.costKg : null;
+      if (dens === null || kg === null) { missing.push({ name: name, why: 'no material price' }); return; }
+      var grams = (p.volume || 0) / 1000 * dens, amount = grams / 1000 * kg;
+      total += amount;
+      lines.push({ name: name, kind: 'material', amount: amount, basis: (grams < 10 ? Math.round(grams * 10) / 10 : Math.round(grams)) + ' g of ' + (m.material || m.name || 'material') + ' at £' + kg + '/kg (catalogue typical)' });
+    });
+    return {
+      lines: lines, missing: missing, total: total,
+      note: 'Estimate: made parts as solid material at typical prices, bought parts at their recorded prices. Machine time, labour, assembly, finishing and shipping are not included.',
+    };
+  }
+  function money(v) { return '£' + (v < 100 ? v.toFixed(2) : Math.round(v).toLocaleString('en-GB')); }
+  function renderCost(doc, host, e) {
+    if (!host) return null;
+    var old = typeof host.querySelector === 'function' ? host.querySelector('#authCost') : null, wasOpen = false;
+    if (old) { wasOpen = !!(old.classList && old.classList.contains('open')); if (old.parentNode) old.parentNode.removeChild(old); }
+    if (!e.lines.length && !e.missing.length) return null;
+    var card = makeCard(doc, 'authCost', 'Cost per unit (estimate)', money(e.total) + (e.missing.length ? ' · ' + e.missing.length + ' not counted' : ''), e.missing.length ? 's-warn' : 's-pass', wasOpen);
+    var ul = doc.createElement('ul'); ul.className = 'rlist';
+    e.lines.forEach(function (l) {
+      // Neutral, not a pass: the simple level hides passing rows, and a cost is neither.
+      var li = doc.createElement('li'); li.className = 'rule st-info';
+      var chip = doc.createElement('span'); chip.className = 'chip'; chip.textContent = money(l.amount);
+      var wrap = doc.createElement('div'); wrap.className = 'rt';
+      var l1 = doc.createElement('div'); l1.className = 'rl'; l1.textContent = l.name;
+      var l2 = doc.createElement('div'); l2.className = 'rv'; l2.textContent = l.basis;
+      wrap.appendChild(l1); wrap.appendChild(l2); li.appendChild(chip); li.appendChild(wrap); ul.appendChild(li);
+    });
+    e.missing.forEach(function (mm) {
+      var li = doc.createElement('li'); li.className = 'rule st-warn';
+      var chip = doc.createElement('span'); chip.className = 'chip'; chip.textContent = 'not counted';
+      var wrap = doc.createElement('div'); wrap.className = 'rt';
+      var l1 = doc.createElement('div'); l1.className = 'rl'; l1.textContent = mm.name;
+      var l2 = doc.createElement('div'); l2.className = 'rv'; l2.textContent = mm.why;
+      wrap.appendChild(l1); wrap.appendChild(l2); li.appendChild(chip); li.appendChild(wrap); ul.appendChild(li);
+    });
+    card.body.appendChild(ul);
+    var note = doc.createElement('p'); note.className = 'note'; note.textContent = e.note; card.body.appendChild(note);
+    var comp = typeof host.querySelector === 'function' ? host.querySelector('#authComp') : null;
+    var na = typeof host.querySelector === 'function' ? host.querySelector('#authNa') : null;
+    var after = comp ? comp.nextSibling : na;
+    if (after && typeof host.insertBefore === 'function') host.insertBefore(card.section, after); else host.appendChild(card.section);
+    return card.section;
   }
 
   /* One next step (MetaForge, 2026-11-11): of everything still open, the one thing the person
@@ -760,7 +824,8 @@
       hex: hex, metal: metal, rough: metal ? Math.max(0.22, fin.rough) : fin.rough, cc: fin.cc || 0,
       process: proc.name || procId, processId: procId, material: mat ? mat.name : String(make.material || ''),
       finish: fin.name || '', color: col ? col.name : hex,
-      density: mat && typeof mat.density === 'number' ? mat.density : null, proposed: make.source === 'proposed',
+      density: mat && typeof mat.density === 'number' ? mat.density : null, costKg: mat && typeof mat.costKg === 'number' ? mat.costKg : null,
+      proposed: make.source === 'proposed',
     };
   }
 
@@ -1420,6 +1485,10 @@
       if (env.onSeen) { desc.onSeen = env.onSeen; desc.seen = !!(env.seenState && env.seenState()); }
       if (env.summaryHost) renderSummary(doc, env.summaryHost, desc);
       if (env.summaryHost) renderComponents(doc, env.summaryHost, describeComponents(env.cfg));
+      if (env.summaryHost && summary.status === 'ready') {
+        var pm = env.material ? env.material() : null;
+        renderCost(doc, env.summaryHost, estimateCost(summary.parts, partLook, partSpecs, pm ? { name: pm.name, material: pm.name, density: pm.density, costKg: pm.costKg } : null));
+      }
       if (env.onSummary) env.onSummary(desc);
       try { GLOBAL.dispatchEvent(new GLOBAL.CustomEvent('fg-authored', { detail: summary })); } catch (e) { /* no events here */ }
     }
@@ -1684,5 +1753,5 @@
     return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, proposedMakes: proposedMakes };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, estimateCost: estimateCost, renderCost: renderCost, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });
