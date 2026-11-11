@@ -564,11 +564,14 @@ await check('quick_panel_uses_the_engines_own_markup_and_still_redraws', async (
   const all = [];
   (function walk(n) { all.push(n); (n.children || []).forEach(walk); })(quick);
   const byClass = (c) => all.filter((n) => (n.className || '').split(' ').includes(c));
-  const needs = { qintro: 1, pp: 2, ppb: 2, qgrp: 1, qs: 2, qt: 2, rng: 2 };
+  // A calm panel (MetaForge): no intro paragraph; each section names itself and says what is in it.
+  if (byClass('qintro').length) return 'the intro paragraph is back';
+  const needs = { pp: 2, ppb: 2, qgrp: 1, qs: 2, qt: 2, rng: 2 };
   for (const [c, n] of Object.entries(needs)) if (byClass(c).length < n) return 'class ' + c + ' x' + byClass(c).length + ', wanted ' + n;
   if (all.some((n) => (n.className || '').includes('fg-authored-panel'))) return 'the floating panel was used';
   const summary = all.find((n) => n.tag === 'summary');
-  if (!summary || !JSON.stringify(summary, (k, v) => (k === 'handlers' ? undefined : v)).includes('Phone stand')) return 'the form is not named in the summary';
+  const sumText = summary ? JSON.stringify(summary, (k, v) => (k === 'handlers' || k === 'parent' ? undefined : v)) : '';
+  if (!/Size and shape/.test(sumText) || !/2 sizes/.test(sumText)) return 'the sizes section does not say what is in it: ' + sumText.slice(0, 200);
   const rows = byClass('qs');
   const keys = rows.slice(0, 2).map((r) => r.attrs['data-q']);
   if (keys.join() !== 'base_w,tilt') return 'rows ' + keys;

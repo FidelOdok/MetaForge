@@ -3027,7 +3027,7 @@ function ctxCompute(s){if(!CTX)return;REFC=refChecks(s);AFC=afChecks(s);levelChe
   // size the form around the real parts once, on first load; the user can change it afterwards
   if(EL&&!S.fitDone){const L0=layout(s),bc=last&&last.bom?last.bom.checks:bomChecks(s,bomLines(s),L0);
     const r=EL.checks.find(c=>/^room/.test(c.id)&&c.st==='fail'&&c.fix)||bc.filter(c=>['fitBoard','bossClr','fitBatt','stack'].includes(c.id)&&c.st==='fail'&&c.role).map(c=>({fix:{act:'role',role:c.role,target:c.target}}))[0];
-    if(r&&(S.fitN||0)<12){S.fitN=(S.fitN||0)+1;setTimeout(()=>applyFix(r.fix),0);}else{S.fitDone=true;if(S.fitN)toast(`Sized the form around the parts: ${fmt(s.W,0)} × ${fmt(s.D,0)} × ${fmt(s.H,0)} mm.`);}}}
+    if(r&&(S.fitN||0)<12){S.fitN=(S.fitN||0)+1;setTimeout(()=>applyFix(r.fix),0);}else{S.fitDone=true;if(S.fitN&&!AUTHORED)toast(`Sized the form around the parts: ${fmt(s.W,0)} × ${fmt(s.D,0)} × ${fmt(s.H,0)} mm.`);/* MetaForge: an authored form is not this placeholder; its size would mislead */}}}
 function renderCtx(){if(!CTX)return;renderOptions();const ul=$('#dfaList');$('#dfaBlk').hidden=!DFA;
   if(DFA)ul.innerHTML=DFA.C.map(c=>`<li class="rule st-${c.st}"><span class="chip">${c.st}</span><div class="rt"><div class="rl">${esc(c.label)}</div><div class="rv"><b>${esc(c.val)}</b> · ${esc(c.lim)}</div>${c.why&&c.st!=='pass'?`<div class="rv">${esc(c.why)}</div>`:''}</div><span></span></li>`).join('');
   renderModels();renderContextPanel();renderRefs();renderAirframe();renderMfg();renderKQ();renderMission();applyView();}

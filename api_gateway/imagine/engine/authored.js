@@ -1195,14 +1195,17 @@
       // behaves like every other studio: the same sections, sliders and headings.
       panel = quick;
       quick.textContent = '';
-      quick.appendChild(el('p', 'qintro', 'This form is built from code. Drag a slider and it is redrawn with no model call.'));
+      // A calm panel (MetaForge): three sections in one rhythm, each naming what is inside;
+      // the sizes open, the rest closed. Sliders redraw with no model call.
       var det = el('details', 'pp');
       det.open = true; det.setAttribute('open', ''); det.setAttribute('data-pps', 'form');
       var sum = el('summary');
-      sum.appendChild(el('span', '', form.label || (env.cfg.product && env.cfg.product.name) || 'Form'));
+      sum.setAttribute('title', 'Drag a slider and the form is redrawn, with no model call');
+      sum.appendChild(el('span', '', 'Size and shape'));
+      var nSizes = Object.keys(params).length;
+      sum.appendChild(el('small', 'pp-sum', nSizes + ' size' + (nSizes === 1 ? '' : 's')));
       det.appendChild(sum);
       var body = el('div', 'ppb'), grp = el('div', 'qgrp');
-      grp.appendChild(el('h3', '', 'Size and shape'));
       Object.keys(params).forEach(function (key) {
         var v = +params[key], grid = gridOf(key);
         var q = el('div', 'qs');

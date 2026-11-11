@@ -370,7 +370,7 @@ def test_the_authored_studio_keeps_the_persons_controls_and_claims_nothing_about
     # The controls look and behave like every other studio: the engine's own panel and slider.
     assert facts["quick_sections"] >= 2 and facts["slider_classes"] == ["rng"], facts
     assert sorted(facts["sliders"]) == sorted(authored_lamp_form()["params"]), facts["sliders"]
-    assert facts["intro"].startswith("This form is built from code")
+    assert facts["intro"] == "", "the panel opens on the sizes, with no intro paragraph"
     assert facts["parts_listed"] == 6 and facts["graph_editor_visible"] is False
     # What carries the person's controls and records is there.
     assert all(facts["visible"].values()), facts["visible"]
