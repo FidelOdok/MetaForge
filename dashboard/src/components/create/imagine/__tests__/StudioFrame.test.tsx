@@ -70,6 +70,8 @@ describe('StudioFrame', () => {
   });
 
   it('starts at a sensible height and resizes on fg:height, within bounds', () => {
+    // A tall window, so only the frame's own bounds apply here.
+    const inner = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(2400);
     const { el, win } = frame();
     expect(el.style.height).toBe(`${START_HEIGHT}px`);
     fromPage({ fg: 1, type: 'fg:height', px: 812 }, win);
@@ -80,6 +82,7 @@ describe('StudioFrame', () => {
     fromPage({ fg: 1, type: 'fg:height', px: 3 }, win);
     expect(el.style.height).toBe(`${MIN_HEIGHT}px`);
     expect(MAX_HEIGHT).toBeLessThanOrEqual(1000);
+    inner.mockRestore();
   });
 
   it("gives the page Create's theme, and a new theme reloads it in that theme", () => {
@@ -198,6 +201,17 @@ describe('StudioFrame', () => {
     fromPage({ fg: 1, type: 'fg:ask', text: 'From elsewhere' }, window);
     fromPage({ fg: 1, type: 'fg:ask', text: 'x'.repeat(3000) }, win);
     expect(onAsk).toHaveBeenCalledTimes(1);
+  });
+
+  it('fits the window from where the frame actually starts, so its bottom is never cut off', () => {
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: 300, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 300, toJSON() {} } as DOMRect);
+    const inner = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(900);
+    const { win } = frame();
+    fromPage({ fg: 1, type: 'fg:height', px: MAX_HEIGHT }, win);
+    // 900 window - 300 from the top - 16 margin = 584, though the page asked for more.
+    expect(screen.getByTestId('studio-frame')).toHaveStyle({ height: '584px' });
+    rect.mockRestore();
+    inner.mockRestore();
   });
 });
 

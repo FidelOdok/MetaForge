@@ -857,8 +857,7 @@ body.cv-resizing {
 .cv-studio-frame {
   display: block;
   width: 100%;
-  max-height: max(420px, calc(100vh - 140px));
-  max-height: max(420px, calc(100dvh - 140px));
+  /* The height is set from where the frame starts (StudioFrame measures it). */
   border: 1px solid var(--cv-line);
   border-radius: 12px;
   background: var(--cv-bg);

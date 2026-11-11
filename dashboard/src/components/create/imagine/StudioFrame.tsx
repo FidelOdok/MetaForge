@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { newId, postImagineEvent } from '../../../api/endpoints/imagine';
 import { useComponentSelection } from '../../../store/component-selection-store';
 import { useThemeStore } from '../../../store/theme-store';
 import {
+  MIN_HEIGHT,
   START_HEIGHT,
   clampHeight,
   onlyFormChanged,
@@ -61,6 +62,27 @@ interface StudioFrameProps {
  */
 export function StudioFrame({ projectId, src, collections, readOnly, revision, config, onAsk }: StudioFrameProps) {
   const [height, setHeight] = useState(START_HEIGHT);
+  // The frame never runs past the window's bottom edge: its room is the window's height less
+  // where the frame starts on the page (header, stages and tabs above it), measured, not assumed.
+  const wrap = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = wrap.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      setRoom(Math.max(MIN_HEIGHT, Math.round(window.innerHeight - top - 16)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(document.body);
+    return () => {
+      window.removeEventListener('resize', measure);
+      ro?.disconnect();
+    };
+  }, []);
+  const shownHeight = room === null ? height : Math.min(height, room);
   const theme = useThemeStore((s) => s.resolvedTheme);
   // The revision in the address only forces a load; a form pushed in place leaves it alone.
   const [addrRev, setAddrRev] = useState(revision);
@@ -205,7 +227,7 @@ export function StudioFrame({ projectId, src, collections, readOnly, revision, c
   }, [ready, readOnly, sendTo]);
 
   return (
-    <div className="cv-studio">
+    <div className="cv-studio" ref={wrap}>
       {[shown, pending].filter((s): s is string => !!s).map((s) => {
         const onScreen = s === shown;
         return (
@@ -220,7 +242,7 @@ export function StudioFrame({ projectId, src, collections, readOnly, revision, c
             src={s}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
-            style={{ height }}
+            style={{ height: shownHeight }}
             aria-hidden={onScreen ? undefined : true}
             tabIndex={onScreen ? undefined : -1}
             data-testid={onScreen ? 'studio-frame' : 'studio-frame-pending'}
