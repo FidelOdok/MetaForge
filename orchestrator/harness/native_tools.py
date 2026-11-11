@@ -35,6 +35,7 @@ from orchestrator.harness.providers.pipeline import Invoke, StreamEvents
 from orchestrator.harness.providers.pricing import DEFAULT_PRICING, TokenPricing, estimate_cost_usd
 from orchestrator.harness.providers.usage import reported_cost_usd
 from orchestrator.harness.react import OnStep, ReActResult, ReActStep, ToolCall
+from orchestrator.harness.result_handles import READER_TOOL_NAME, clear_stale_results
 from orchestrator.harness.runtime import HarnessRuntime
 from orchestrator.harness.tool_exec import (
     TurnToolCache,
@@ -677,6 +678,10 @@ async def run_native_tools(
                 break
             if max_context_tokens is not None:
                 messages = compact_native_messages(messages, max_tokens=max_context_tokens)
+            # MetaForge (2026-11-11): old results are cleared in batches once they are
+            # large, kept behind a handle; only where the model can read them back.
+            if READER_TOOL_NAME in runtime.tools.names():
+                messages = clear_stale_results(messages, runtime.results)
             # MET-747 follow-up: recomputed every round-trip (not hoisted
             # before the loop) so a tool registered mid-turn -- e.g. by the
             # `search_tools` meta-tool's handler calling
