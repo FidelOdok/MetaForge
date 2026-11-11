@@ -1583,8 +1583,14 @@ function renderGates(){
 /* MetaForge: one next step at the top of the studio: the one thing to decide now, in plain
    words, with buttons. Confirming acts in the page; asking puts a request in the person's
    conversation (fg:ask) for them to send. */
+var NEXT_STEP=null;
 function renderNext(){if(!AUTHORED)return;const dfm=$('#dfm');if(!dfm)return;let box=$('#fgNext');
-  if(!box){box=document.createElement('section');box.id='fgNext';box.className='fg-next';box.setAttribute('aria-live','polite');}
+  if(!box){box=document.createElement('section');box.id='fgNext';box.className='fg-next';box.setAttribute('aria-live','polite');
+    box.addEventListener('click',e=>{const n=NEXT_STEP,b=e.target.closest&&e.target.closest('[data-next]');if(!b||!n)return;const a=n.actions[+b.dataset.next];if(!a)return;
+      if(a.ask){if(HOSTED)hostPost('fg:ask',{text:a.ask});else toast('Ask the assistant: '+a.ask);return;}
+      if(n.kind==='assumption'&&a.id==='confirm'){S.prog.confirmed[n.id]=true;psetWrite('confirmed.'+n.id,true);}
+      else if(n.kind==='ledger'){S.prog.ledger['l'+n.index]=a.id;psetWrite('ledger.l'+n.index,a.id);}
+      save();renderGates();});}
   if(dfm.firstChild!==box)dfm.insertBefore(box,dfm.firstChild);
   S.prog=S.prog||{};S.prog.confirmed=S.prog.confirmed||{};S.prog.ledger=S.prog.ledger||{};
   const comp=FGAuthored.describeComponents(CFG);
@@ -1592,11 +1598,7 @@ function renderNext(){if(!AUTHORED)return;const dfm=$('#dfm');if(!dfm)return;let
     missingParts:(comp.missing||[]).map(f=>({fn:f,name:(EB[f]&&EB[f].name)||f})),proposed:AUTHORED_MOUNT&&AUTHORED_MOUNT.proposedMakes?AUTHORED_MOUNT.proposedMakes():[]});
   box.setAttribute('data-kind',n.kind);
   box.innerHTML=`<div class="fg-next-h"><span>Next step</span>${n.remaining>1?`<small>1 of ${n.remaining} to decide</small>`:''}</div><h3>${esc(n.title)}</h3><p class="fg-next-d">${esc(n.detail)}</p>${n.why?`<p class="fg-next-why">${esc(n.why)}</p>`:''}${n.actions.length?`<div class="fg-next-a">${n.actions.map((a,i)=>`<button type="button" class="${i?'':'pri'}" data-next="${i}">${esc(a.label)}</button>`).join('')}</div>`:''}`;
-  box.onclick=e=>{const b=e.target.closest&&e.target.closest('[data-next]');if(!b)return;const a=n.actions[+b.dataset.next];if(!a)return;
-    if(a.ask){if(HOSTED)hostPost('fg:ask',{text:a.ask});else toast('Ask the assistant: '+a.ask);return;}
-    if(n.kind==='assumption'&&a.id==='confirm'){S.prog.confirmed[n.id]=true;psetWrite('confirmed.'+n.id,true);}
-    else if(n.kind==='ledger'){S.prog.ledger['l'+n.index]=a.id;psetWrite('ledger.l'+n.index,a.id);}
-    save();renderGates();};}
+  NEXT_STEP=n;}
 $('#cpPack').addEventListener('click',()=>{if(!last||!last.shape)return;const s=last.shape,L=[];
   L.push('FORMGRAPH VALIDATION PACK',`Product: ${CP.name||'Unnamed product'} (${CP.id||'default'})`,`Engine: ${ENGINE}`,'MetaForge, metaforge.uk','',`Fingerprint: sha256:${(last.bom&&last.bom.fp)||''}`,`Revision: ${(S.revs[S.revs.length-1]||{}).rev||'unreleased'}`,`Process: ${PROC[S.proc].name}, ${matOf().name}, ${finishOf().name}`,`Envelope: ${fmt(s.W,1)} x ${fmt(s.D,1)} x ${fmt(s.H,1)} mm, wall ${fmt(s.t||0,2)} mm`,'');
   L.push('GATES');gateState().forEach(g=>L.push(`  ${g.n}. ${g.name}: ${g.ok?'pass':'open'} (${g.msg})`));L.push('','REQUIREMENTS');
