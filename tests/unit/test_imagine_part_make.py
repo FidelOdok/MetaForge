@@ -215,3 +215,12 @@ def test_the_skill_teaches_the_whole_twin_and_its_example_passes() -> None:
     text = PLAYBOOK.read_text(encoding="utf-8")
     for needle in ("`behaviours`", "`variants`", '"currency": "GBP"', "Use this one", "next step"):
         assert needle in text, needle
+
+
+def test_the_skill_teaches_the_calm_authored_twin() -> None:
+    """Round 2: behaviours under Try it, part pickers kept through the assistant, cut-away."""
+    from tests.unit.test_imagine_studio_playbook import PLAYBOOK
+
+    text = PLAYBOOK.read_text(encoding="utf-8")
+    for needle in ("Try it", "X-ray", "Section", "mark it as my choice", "hollow", "own part"):
+        assert needle in text, needle

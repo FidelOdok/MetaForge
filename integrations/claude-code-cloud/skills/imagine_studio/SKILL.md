@@ -362,6 +362,26 @@ and the parts in `form.authored.parts`. Each part has:
 - A change to the form alone (sizes, parts, makes, behaviours, variants) is
   pushed into the person's open studio without reloading it, so prefer
   changing the form over rebuilding the whole config.
+- The studio is calm by design: the page gives the person primitives (sizes,
+  parts that open on a click, Try it, cut-away views) and you author what
+  fills them. Generate the twin so those primitives have something true to
+  show:
+  - **Every real thing is its own part.** A case, a lid, a bezel, a button,
+    each bought module: one part each, named for what it is, never one merged
+    solid. Bought parts are `component` parts linked to their record.
+  - **Hollow where the product is hollow.** A housing that holds parts is a
+    shell with a wall (`wall_t` in `form.params`), not a solid block, and the
+    parts inside sit inside it at their real sizes. The person looks inside
+    with the studio's **X-ray** (see-through shells) and **Section** (a
+    movable cut) views and each part's **Hide**; when they ask "so I can see
+    inside", point them there before changing the design.
+  - **Behaviours go under Try it.** They are not listed in the side panel;
+    the person presses Try it to move, light and switch the product.
+  - **Part properties are proposed in the page and kept through you.** The
+    person can preview another process, material, finish or colour on an open
+    part; Keep it sends you "Make the <part> <process · material · finish ·
+    colour> ... and mark it as my choice". Write exactly that `make` block on
+    that part with `source: "person"` and change nothing else.
 
 Units are millimetres and Y is up. Stand the product on the floor at Y = 0,
 centred on the origin. A shape is made centred on its own origin (a box runs

@@ -732,11 +732,21 @@ The studio shows more than the form's shape:
 - **Behaviours.** `form.authored.behaviours` says how the product moves, lights up and
   switches: `rotate` (about `axis` through `origin`, within `range` degrees), `slide` (along
   `axis`, within `range` mm), `glow` (in `color`) and `toggle` (shown or hidden), each acting
-  on named parts. The left panel has a control for each and **Play the motions**. Twelve at
+  on named parts. **Try it** shows a control for each and **Play the motions**, with the
+  battery simulation folded beneath; with none, it offers to ask the assistant for them. Twelve at
   most; a behaviour that names a missing part, an axis of zeros or a range that is not a
   range is refused, naming it.
-- **Show or hide a part.** Each part in the parts list has **Hide**/**Show**, a view choice
+- **A calm panel.** The left panel has three sections in one rhythm, **Size and shape**
+  (open), **Parts** and **Variants** (closed), each naming what is inside; the right-hand
+  cards start closed except the next step.
+- **Parts, click to show.** A part is one line (name and size). A click on the row, or on the
+  part in the 3D view, opens what it is made of, its real part's specs, **Hide**/**Show** and
+  pickers for its process, material, finish and colour from the catalogue. A picked value is
+  previewed live on that part; **Keep it** puts a request in the conversation for the
+  assistant to write it into the form, **Reset** drops the preview. Hiding is a view choice
   only; the part stays in the form, its measures and the handover.
+- **Cut-away.** Beside Try it: **Solid**, **Section** (one plane, side, front or top, moved
+  with a slider) and **X-ray** (the product's own parts see-through, bought parts solid).
 - **Live component specs.** A `component` part linked to a record in
   `context.components.parts` shows its maker, part number, size (marked when a placeholder),
   power, buses, recorded price and the date its datasheet was read, in the parts list and on
