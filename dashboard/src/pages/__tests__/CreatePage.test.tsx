@@ -14,7 +14,7 @@ import { useApprovals } from '../../hooks/use-approvals';
 import { useHarnessTools } from '../../hooks/use-harness';
 import { useProjectStore } from '../../store/project-store';
 import { useCreateStore } from '../../store/create-store';
-import { PANELS_KEY, useCreateLayoutStore } from '../../store/create-layout-store';
+import { CHAT_WIDTH_DEFAULT, PANELS_KEY, useCreateLayoutStore } from '../../store/create-layout-store';
 import { ApprovalNotifier } from '../../components/approvals/ApprovalNotifier';
 import { resetSampleCreation, routeSampleCreate } from '../../lib/sample-create';
 import type { CreationView } from '../../api/endpoints/create';
@@ -290,5 +290,28 @@ describe('CreatePage', () => {
     expect(screen.getByRole('tabpanel').contains(badge)).toBe(false);
     expect(screen.getAllByTestId('decisions-badge')).toHaveLength(1);
     expect(screen.queryByRole('status', { name: 'Approvals waiting' })).toBeNull();
+  });
+
+  it('lets the conversation be dragged wider or narrower, and reset with a double-click', async () => {
+    renderAt(`/create/${P}?stage=develop`);
+    const handle = screen.getByRole('separator', { name: 'Resize the conversation' });
+    const body = handle.closest('.cv-body') as HTMLElement;
+    expect(body.style.getPropertyValue('--cv-chat-w')).toBe(`${CHAT_WIDTH_DEFAULT}px`);
+    expect(handle).toHaveAttribute('aria-valuenow', String(CHAT_WIDTH_DEFAULT));
+
+    act(() => {
+      handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 400 }));
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 520 }));
+      window.dispatchEvent(new PointerEvent('pointerup', { clientX: 520 }));
+    });
+    expect(useCreateLayoutStore.getState().chatWidth).toBe(CHAT_WIDTH_DEFAULT + 120);
+    expect(body.style.getPropertyValue('--cv-chat-w')).toBe(`${CHAT_WIDTH_DEFAULT + 120}px`);
+
+    handle.focus();
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(useCreateLayoutStore.getState().chatWidth).toBe(CHAT_WIDTH_DEFAULT + 120 - 16);
+
+    await userEvent.dblClick(handle);
+    expect(useCreateLayoutStore.getState().chatWidth).toBe(CHAT_WIDTH_DEFAULT);
   });
 });

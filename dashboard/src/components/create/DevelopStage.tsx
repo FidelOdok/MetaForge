@@ -11,6 +11,7 @@ import { BuildExactNotice } from './BuildExactNotice';
 import { MakeEditablePanel } from './MakeEditablePanel';
 import { ProductStage, defaultStageNode, isEngineering, isVisual } from './ProductStage';
 import { StageActions, type StageAction } from './StageActions';
+import { StageDisclosures } from './StageDisclosures';
 import { DEVELOP_LABEL, developPrimary, latestParametricSketch } from './stage-logic';
 
 interface DevelopStageProps {
@@ -52,6 +53,7 @@ export function DevelopStage({
     retry: false,
   });
   const [editableOpen, setEditableOpen] = useState(false);
+  const [openDetail, setOpenDetail] = useState<string | null>(null);
   const [partsState, setPartsState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
 
   const visual = nodes.filter(isVisual);
@@ -106,7 +108,7 @@ export function DevelopStage({
   const blockers = view?.readiness.blockers ?? [];
 
   return (
-    <div className="cv-stage-col">
+    <div className="cv-stage-col is-model">
       <ProductStage
         projectId={projectId}
         nodes={nodes}
@@ -115,14 +117,44 @@ export function DevelopStage({
         engineeringChecks={engineeringChecks}
       />
 
-      <StageActions
-        primary={{
-          id: action,
-          label: DEVELOP_LABEL[action],
-          onClick: () => run(action),
-          disabled: action === 'build_exact' && exact.state.phase !== 'idle' && exact.state.phase !== 'started',
-        }}
-        more={more}
+      <StageDisclosures
+        open={openDetail}
+        onOpen={setOpenDetail}
+        lead={
+          <StageActions
+            primary={{
+              id: action,
+              label: DEVELOP_LABEL[action],
+              onClick: () => run(action),
+              disabled: action === 'build_exact' && exact.state.phase !== 'idle' && exact.state.phase !== 'started',
+            }}
+            more={more}
+          />
+        }
+        items={[
+          {
+            id: 'attention',
+            label: 'Needs attention',
+            badge: String(blockers.length),
+            tone: blockers.length ? 'warn' : 'ok',
+            icon: <CircleAlert size={14} aria-hidden="true" />,
+            content: blockers.length ? (
+              <ul className="cv-blockers" data-testid="develop-attention">
+                {blockers.map((b) => (
+                  <li key={b.id}>
+                    <CircleAlert size={13} aria-hidden="true" />
+                    <span>
+                      {b.message}
+                      {b.action && <span className="cv-muted"> · {b.action}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="cv-muted">Nothing needs you right now.</p>
+            ),
+          },
+        ]}
       />
 
       {exact.state.phase !== 'idle' && (
@@ -148,24 +180,6 @@ export function DevelopStage({
       )}
       {editableOpen && <MakeEditablePanel projectId={projectId} onClose={() => setEditableOpen(false)} />}
 
-      <section className="cv-card" aria-labelledby="cv-attention-title">
-        <h3 id="cv-attention-title">Needs attention</h3>
-        {blockers.length ? (
-          <ul className="cv-blockers" data-testid="develop-attention">
-            {blockers.map((b) => (
-              <li key={b.id}>
-                <CircleAlert size={13} aria-hidden="true" />
-                <span>
-                  {b.message}
-                  {b.action && <span className="cv-muted"> · {b.action}</span>}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="cv-muted">Nothing needs you right now.</p>
-        )}
-      </section>
     </div>
   );
 }

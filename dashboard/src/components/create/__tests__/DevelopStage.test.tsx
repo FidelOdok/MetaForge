@@ -112,9 +112,24 @@ describe('Develop', () => {
     expect(props.onAsk).toHaveBeenCalledWith('');
   });
 
-  it('lists what needs attention from the twin', () => {
+  it('keeps what needs attention behind one button that opens and closes it', async () => {
     develop([CAD], { view: creation([{ id: 'check:x', message: 'The wall is thinner than 1.2 mm', action: 'Ask for a thicker wall' }]) });
+    const button = screen.getByRole('button', { name: /Needs attention/ });
+    expect(button).toHaveTextContent('1');
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('develop-attention')).toBeNull();
+    await userEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByTestId('develop-attention')).toHaveTextContent('The wall is thinner than 1.2 mm');
+    await userEvent.click(button);
+    expect(screen.queryByTestId('develop-attention')).toBeNull();
+  });
+
+  it('puts the model first in a wide column', () => {
+    develop([CAD]);
+    const col = document.querySelector('.cv-stage-col');
+    expect(col).toHaveClass('is-model');
+    expect(col?.firstElementChild).toHaveAttribute('aria-label', 'Product');
   });
 
   it('offers Make it editable for an accepted concept', async () => {

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 /**
  * How the Create view is laid out: the sketch drawer in Imagine and whether
- * the conversation is collapsed (VIEW-010).
+ * the conversation is collapsed (VIEW-010), and how wide it is.
  *
  * The drawer lives per creation and outside any component, so a switch to
  * Engineering and back finds it as it was (3D-RC-009). The collapsed
@@ -58,9 +58,46 @@ function writeCollapsed(value: CollapsedPanels): void {
   }
 }
 
+/**
+ * The conversation's width, dragged by the person and kept in this browser.
+ * Wider than the old fixed 320 px by default; held between limits so the
+ * stage always keeps room for the model.
+ */
+export const CHAT_WIDTH_KEY = 'metaforge.create.chatWidth';
+export const CHAT_WIDTH_DEFAULT = 400;
+export const CHAT_WIDTH_MIN = 280;
+export const CHAT_WIDTH_MAX = 760;
+
+export function clampChatWidth(width: number): number {
+  return Math.round(Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, width)));
+}
+
+/** The stored width, or the default when storage is unavailable or holds nonsense. */
+export function readChatWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(CHAT_WIDTH_KEY);
+    const n = raw === null ? NaN : Number(raw);
+    return Number.isFinite(n) ? clampChatWidth(n) : CHAT_WIDTH_DEFAULT;
+  } catch {
+    return CHAT_WIDTH_DEFAULT;
+  }
+}
+
+function writeChatWidth(width: number): void {
+  try {
+    window.localStorage.setItem(CHAT_WIDTH_KEY, String(width));
+  } catch {
+    // Storage unavailable: the width lasts for this page only.
+  }
+}
+
 interface LayoutStore {
   stages: Record<string, StageLayout>;
   collapsed: CollapsedPanels;
+  /** The conversation's width in px. */
+  chatWidth: number;
+  /** Set the width (clamped) and keep it in this browser. */
+  setChatWidth: (width: number) => void;
   stage: (projectId: string) => StageLayout;
   /** Open one panel in the drawer; any other panel closes. */
   openDrawer: (projectId: string, panel: DrawerPanel) => void;
@@ -78,6 +115,12 @@ export const useCreateLayoutStore = create<LayoutStore>()((set, get) => {
   return {
     stages: {},
     collapsed: readCollapsed(),
+    chatWidth: readChatWidth(),
+    setChatWidth: (width) => {
+      const next = clampChatWidth(width);
+      writeChatWidth(next);
+      set({ chatWidth: next });
+    },
     stage: (projectId) => get().stages[projectId] ?? EMPTY_STAGE,
     openDrawer: (projectId, panel) => patch(projectId, { drawer: panel, drawerCollapsed: false }),
     closeDrawer: (projectId) => patch(projectId, { drawer: null, drawerCollapsed: false }),
@@ -88,6 +131,6 @@ export const useCreateLayoutStore = create<LayoutStore>()((set, get) => {
       set({ collapsed: next });
     },
     reloadCollapsed: () => set({ collapsed: readCollapsed() }),
-    reset: () => set({ stages: {}, collapsed: readCollapsed() }),
+    reset: () => set({ stages: {}, collapsed: readCollapsed(), chatWidth: readChatWidth() }),
   };
 });

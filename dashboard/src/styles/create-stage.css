@@ -574,7 +574,9 @@
 .cv-body {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  /* The conversation's width is the person's own, dragged at its edge
+     (--cv-chat-w, set by the page); never more than 55% of the body. */
+  grid-template-columns: min(var(--cv-chat-w, 400px), 55%) minmax(0, 1fr);
   gap: 16px;
   min-height: 0;
 }
@@ -594,6 +596,43 @@
 }
 .cv-rail {
   align-self: start;
+}
+/* The drag handle sits in the gap at the conversation's right edge. */
+.cv-chat-resizer {
+  position: absolute;
+  top: 0;
+  right: -13px;
+  bottom: 0;
+  width: 10px;
+  border-radius: 4px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 5;
+}
+.cv-chat-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 4px;
+  height: 40px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: var(--cv-line);
+  transition: background 0.15s;
+}
+.cv-chat-resizer:hover::after,
+.cv-chat-resizer:focus-visible::after,
+body.cv-resizing .cv-chat-resizer::after {
+  background: var(--cv-accent);
+  height: 72px;
+}
+.cv-chat-resizer:focus-visible {
+  outline: none;
+}
+body.cv-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 .cv-main {
   min-width: 0;
@@ -615,6 +654,93 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* Develop and Make: the model is the stage. It takes the full width beside
+   the conversation and most of the window's height; everything else is a
+   button under it that opens its detail in place. */
+.cv-stage-col.is-model {
+  max-width: none;
+  gap: 12px;
+}
+.cv-stage-col.is-model .cv-stage-canvas {
+  min-height: max(420px, calc(100vh - 290px));
+  min-height: max(420px, calc(100dvh - 290px));
+}
+.cv-make-model {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cv-make-model-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+}
+.cv-stage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+}
+.cv-disclosures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cv-disclose {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid var(--cv-line);
+  border-radius: 999px;
+  background: var(--cv-raised);
+  color: var(--cv-text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.cv-disclose:hover {
+  background: var(--cv-high);
+}
+.cv-disclose:focus-visible {
+  outline: 2px solid var(--cv-accent-soft);
+  outline-offset: 2px;
+}
+.cv-disclose.is-open {
+  border-color: var(--cv-accent);
+  background: var(--cv-high);
+}
+.cv-disclose > svg:first-child {
+  color: var(--cv-muted);
+}
+.cv-disclose.is-ok > svg:first-child {
+  color: var(--cv-ok);
+}
+.cv-disclose.is-warn > svg:first-child {
+  color: var(--cv-warn);
+}
+.cv-disclose.is-bad > svg:first-child {
+  color: var(--cv-bad);
+}
+.cv-disclose-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--cv-panel);
+  color: var(--cv-muted);
+  font-size: 11px;
+}
+.cv-disclose-chevron {
+  color: var(--cv-muted);
+  transition: transform 0.15s;
+}
+.cv-disclose.is-open .cv-disclose-chevron {
+  transform: rotate(180deg);
+}
+.cv-disclose-panel .cv-blockers {
+  margin-top: 0;
 }
 
 /* One primary action, everything else in More. */
@@ -944,6 +1070,11 @@
   .cv-journey-step.is-active .cv-journey-dot {
     animation: none;
   }
+  .cv-disclose,
+  .cv-disclose-chevron,
+  .cv-chat-resizer::after {
+    transition: none;
+  }
 }
 
 /* ── Phone width (375 px and up): one column, the stage first ─────────── */
@@ -966,6 +1097,12 @@
   }
   .cv-chat {
     max-height: none;
+  }
+  .cv-chat-resizer {
+    display: none;
+  }
+  .cv-stage-col.is-model .cv-stage-canvas {
+    min-height: 300px;
   }
   .cv-rail {
     flex-direction: row;

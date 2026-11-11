@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import userEvent from '@testing-library/user-event';
-import { render, screen } from '../../../test/test-utils';
+import { render, screen, waitFor } from '../../../test/test-utils';
 import type { CreationView } from '../../../api/endpoints/create';
 import type { Readiness } from '../../../api/endpoints/dfmFindings';
 import type { TwinNode } from '../../../types/twin';
@@ -52,10 +52,21 @@ beforeEach(() => {
 });
 
 describe('Make', () => {
-  it('shows the release checklist and the builds', async () => {
+  it('shows the release checklist and the builds behind buttons, one open at a time', async () => {
     render(<MakeStage projectId={P} view={creation([BUILD])} model={undefined} modelRevision={null} onAsk={vi.fn()} />);
-    expect(await screen.findByText('Not ready to make yet: 1 next step')).toBeInTheDocument();
+    const checklist = await screen.findByRole('button', { name: /Release checklist/ });
+    await waitFor(() => expect(checklist).toHaveTextContent('1 of 2 pass'));
+    const builds = screen.getByRole('button', { name: /Builds/ });
+    expect(builds).toHaveTextContent('1');
+    expect(screen.queryByTestId('release-checklist')).toBeNull();
+    expect(screen.queryByTestId('make-outputs')).toBeNull();
+
+    await userEvent.click(checklist);
+    expect(screen.getByTestId('release-checklist')).toHaveTextContent('Not ready to make yet: 1 next step');
     expect(screen.getByTestId('release-checklist')).toHaveTextContent('Manufacturing checks pass · 1 blocking');
+
+    await userEvent.click(builds);
+    expect(screen.queryByTestId('release-checklist')).toBeNull();
     expect(screen.getByTestId('make-outputs')).toHaveTextContent('Build 1');
   });
 
@@ -86,6 +97,7 @@ describe('Make', () => {
       ],
     });
     render(<MakeStage projectId={P} view={creation()} model={undefined} modelRevision={null} onAsk={vi.fn()} />);
+    await userEvent.click(screen.getByRole('button', { name: /Release checklist/ }));
     const row = await screen.findByTestId('release-item-dfm');
     // One icon and one text block per row: the label and its detail sit in the
     // same block, so the text wraps beside the icon instead of under it.
@@ -133,6 +145,26 @@ describe('Make shows the model each build makes', () => {
     );
     expect(screen.getByTestId('product-stage')).toHaveAttribute('data-selected', 'wp-asm');
     expect(screen.getByTestId('make-model')).toHaveTextContent('Build 4 · Lamp rev 4');
+  });
+
+  it('puts the build\'s model first, in a wide column', () => {
+    const { container } = render(
+      <MakeStage projectId={P} view={creation([build(4, 'released', 'wp-asm')])} nodes={[ASSEMBLY]} model={undefined} modelRevision={null} onAsk={vi.fn()} />,
+    );
+    const col = container.querySelector('.cv-stage-col');
+    expect(col).toHaveClass('is-model');
+    expect(col?.firstElementChild).toHaveAttribute('data-testid', 'make-model');
+  });
+
+  it('gives the model the room: a full-width column and a canvas sized to the window', () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../styles/create-stage.css'), 'utf8').replace(/\r\n/g, '\n');
+    const rule = (selector: string) => {
+      const at = css.indexOf(`${selector} {`);
+      expect(at, selector).toBeGreaterThanOrEqual(0);
+      return css.slice(at, css.indexOf('}', at));
+    };
+    expect(rule('.cv-stage-col.is-model')).toContain('max-width: none');
+    expect(rule('.cv-stage-col.is-model .cv-stage-canvas')).toContain('100dvh');
   });
 
   it('skips a cancelled build for the newest live one', () => {
