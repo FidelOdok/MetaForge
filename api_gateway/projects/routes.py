@@ -10,7 +10,7 @@ Endpoints live under ``/v1/projects``.
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from api_gateway.projects.backend import InMemoryProjectBackend, ProjectBackend
 from api_gateway.projects.schemas import (
@@ -85,16 +85,44 @@ async def unlink_work_product_from_all_projects(wp_id: str) -> int:
 router = APIRouter(prefix="/v1/projects", tags=["projects"])
 
 
+async def _register_with_account(request: Request, project_id: str) -> None:
+    """On a gateway shared by several accounts, give the new project to its creator.
+
+    FORGE-849. Without this the creator could not reach the project they just
+    made. If registration fails the project is deleted again: a project nobody
+    can reach is worse than a failed request.
+    """
+    from api_gateway.auth.scope import supports_project_scope
+
+    provider = getattr(request.app.state, "auth_provider", None)
+    principal = getattr(request.state, "principal", None)
+    if principal is None or not supports_project_scope(provider):
+        return
+    try:
+        await provider.project_created(principal, project_id)  # type: ignore[union-attr]
+    except Exception as exc:
+        await _backend.delete_project(project_id)
+        logger.error("project_registration_failed", project_id=project_id, error=str(exc))
+        raise HTTPException(
+            status_code=503, detail="The project could not be registered to your account"
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
 @router.get("", response_model=ProjectListResponse)
-async def list_projects() -> ProjectListResponse:
-    """List all hardware projects."""
+async def list_projects(request: Request) -> ProjectListResponse:
+    """List hardware projects: all of them, or the caller's on a shared gateway."""
     with tracer.start_as_current_span("projects.list"):
         projects = await _backend.list_projects()
+        # FORGE-849: set by the auth middleware when the gateway is shared by
+        # several accounts.
+        scope = getattr(request.state, "project_scope", None)
+        if scope is not None:
+            projects = [p for p in projects if scope.allows(p.id)]
         logger.info("projects_listed", count=len(projects))
         return ProjectListResponse(projects=projects, total=len(projects))
 
@@ -111,7 +139,7 @@ async def get_project(project_id: str) -> ProjectResponse:
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
-async def create_project(body: CreateProjectRequest) -> ProjectResponse:
+async def create_project(body: CreateProjectRequest, request: Request) -> ProjectResponse:
     """Create a new hardware project (starts with no work products)."""
     with tracer.start_as_current_span("projects.create") as span:
         try:
@@ -123,6 +151,7 @@ async def create_project(body: CreateProjectRequest) -> ProjectResponse:
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         span.set_attribute("project.id", project.id)
+        await _register_with_account(request, project.id)
         # A project starts empty: work products are produced by the design flow
         # and agents. (We used to seed an empty CAD_MODEL here — a phantom that
         # falsely satisfied cad_model gates and misled the design brain into

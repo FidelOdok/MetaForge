@@ -29,6 +29,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from api_gateway.auth.provider import AuthProvider, AuthUnavailable, InvalidToken
+from api_gateway.auth.scope import decide, supports_project_scope
 
 logger = structlog.get_logger(__name__)
 
@@ -100,6 +101,31 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         request.state.principal = principal
+
+        # FORGE-849: on a gateway shared by several accounts the provider also
+        # confines the caller to their projects. Fail closed: a route that is
+        # not confined to a project is refused, not answered across accounts.
+        if supports_project_scope(self._provider):
+            try:
+                scope = await self._provider.project_scope(principal)  # type: ignore[attr-defined]
+            except AuthUnavailable as exc:
+                logger.error("gateway_scope_unavailable", path=request.url.path, error=str(exc))
+                return JSONResponse(
+                    {"detail": "Authorization is temporarily unavailable"}, status_code=503
+                )
+            decision = await decide(request.app, request, scope)
+            if not decision.allowed:
+                logger.info(
+                    "gateway_scope_refused",
+                    path=request.url.path,
+                    method=request.method,
+                    status=decision.status,
+                    tenancy=decision.tenancy.value if decision.tenancy else None,
+                    subject=principal.subject,
+                )
+                return JSONResponse({"detail": decision.detail}, status_code=decision.status)
+            request.state.project_scope = scope
+
         return await call_next(request)
 
     # -- internals ---------------------------------------------------------
