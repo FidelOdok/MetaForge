@@ -1,0 +1,96 @@
+name: commit image tags
+
+# Every push to main ends with every MetaForge image tagged :<sha> (FORGE-852),
+# so a deployment pins the whole stack to one commit: METAFORGE_GATEWAY_TAG,
+# METAFORGE_ADAPTER_TAG and METAFORGE_DASHBOARD_TAG all set to the same SHA.
+#
+# Images rebuilt at this commit already carry the tag (release.yml,
+# adapter-images.yml). The rest get the signed digest of their nearest tagged
+# ancestor; see scripts/ci/tag_commit_images.sh. This job waits for this
+# commit's publishing runs first, and tags nothing if any of them failed, so a
+# commit whose gateway did not build never gets a stack tag pointing at an
+# older gateway.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit on main to tag (default the branch head)
+        required: false
+
+# One commit at a time, in push order, so an ancestor is tagged before its
+# child looks for it.
+concurrency:
+  group: commit-image-tags
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SHA: ${{ inputs.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 200
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Wait for this commit's image builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Adapter builds take up to an hour; poll for 110 minutes.
+          for i in $(seq 1 220); do
+            runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=100" \
+              --jq '[.workflow_runs[] | select(.path == ".github/workflows/release.yml"
+                       or .path == ".github/workflows/adapter-images.yml")
+                     | select(.event == "push" or .event == "workflow_dispatch")
+                     | {path, status, conclusion}]')
+            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            if [ "$pending" = "0" ]; then
+              # release.yml also builds CLI binaries on three OSes; one of those
+              # failing says nothing about the images, so release.yml is judged
+              # by its gateway image instead (REQUIRE_BUILT below).
+              bad=$(jq -r '[.[] | select(.path == ".github/workflows/adapter-images.yml")
+                            | select(.conclusion != "success" and .conclusion != "skipped")
+                            | "\(.path)=\(.conclusion)"] | join(", ")' <<<"$runs")
+              if [ -n "$bad" ]; then
+                echo "::error::image builds for ${SHA} did not succeed: ${bad}; no stack tag"
+                exit 1
+              fi
+              jq -r '.[] | "\(.path): \(.conclusion)"' <<<"$runs"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::timed out waiting for the image builds of ${SHA}"
+          exit 1
+
+      - name: Install cosign
+        uses: ./.github/actions/install-cosign
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag every image with the commit
+        env:
+          COSIGN_PUBKEY: ${{ vars.COSIGN_PUBLIC_KEY }}
+          # The gateway is rebuilt on every push; a commit without its own
+          # gateway image gets no stack tag rather than an older gateway.
+          REQUIRE_BUILT: metaforge-gateway
+        run: bash scripts/ci/tag_commit_images.sh "$SHA" | tee -a "$GITHUB_STEP_SUMMARY"

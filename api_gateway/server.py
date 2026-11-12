@@ -346,8 +346,9 @@ async def _init_database() -> None:
     Boot policy (MET-305):
 
     * If ``DATABASE_URL`` is set, the gateway connects on startup and
-      calls ``Base.metadata.create_all`` so chat / projects tables
-      exist.
+      runs :func:`api_gateway.db.schema.ensure_schema`: new tables and
+      additive columns, then numbered migrations, under an advisory lock
+      shared by every gateway process (FORGE-856).
     * If ``METAFORGE_REQUIRE_POSTGRES=true`` is set, a connection
       failure is fatal — production deployments opt into this so a
       silent fall-back to in-memory cannot mask data loss for chat
@@ -385,15 +386,11 @@ async def _init_database() -> None:
             logger.debug("pg_init_skipped", reason="DATABASE_URL not set")
             return
 
-        from sqlalchemy import text
+        # FORGE-856: additive DDL and numbered migrations, serialised across
+        # every process of the release by an advisory lock.
+        from api_gateway.db.schema import ensure_schema
 
-        from api_gateway.db.models import ADDITIVE_COLUMNS, Base
-
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            if conn.dialect.name == "postgresql":
-                for statement in ADDITIVE_COLUMNS:
-                    await conn.execute(text(statement))
+        await ensure_schema(engine)
         logger.info("pg_tables_created")
         _register_postgres_health_check()
     except Exception as exc:
