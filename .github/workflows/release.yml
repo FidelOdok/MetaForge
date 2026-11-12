@@ -270,7 +270,11 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           image="$IMAGE"
-          tags="${image}:latest"
+          # :<sha> lets a deployment pin the gateway to the commit it was built
+          # from (FORGE-852); commit-image-tags.yml gives every other image the
+          # same tag, so one SHA names the whole stack.
+          tags="${image}:latest
+          ${image}:${GITHUB_SHA}"
           [ "$SHOULD_RELEASE" = "true" ] && tags="${tags}
           ${image}:${VERSION}"
           {
