@@ -593,16 +593,71 @@ def parse_link(where: str, raw: Any) -> str:
     return text
 
 
-def parse_suppliers(raw: Any) -> list[dict[str, str]]:
+_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+_CURRENCY = re.compile(r"[A-Z]{3}")
+MAX_PRICE_BREAKS = 20
+
+
+def _whole(where: str, value: Any, *, low: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < low:
+        raise CatalogError(f"{where} must be a whole number of at least {low}")
+    return value
+
+
+def parse_offer(where: str, raw: Any) -> dict[str, Any]:
+    """A supplier's dated offer (2026-11-12): price breaks, stock, lead time, when and how read.
+
+    Prices go stale, so ``read_on`` (YYYY-MM-DD) and ``via`` (the tool or page it was read
+    from) are required. ``confirmed`` is false for a search snapshot or a cached page.
+    """
+    if not isinstance(raw, dict):
+        raise CatalogError(f"{where}.offer must be an object")
+    day = str(raw.get("read_on") or "")
+    if not _ISO_DAY.fullmatch(day):
+        raise CatalogError(f"{where}.offer.read_on must be the day it was read, YYYY-MM-DD")
+    via = str(raw.get("via") or "").strip()
+    if not via:
+        raise CatalogError(f"{where}.offer.via must say where it was read (a tool or a page)")
+    out: dict[str, Any] = {"read_on": day, "via": via[:200]}
+    breaks = raw.get("breaks")
+    if breaks not in (None, []):
+        currency = str(raw.get("currency") or "")
+        if not _CURRENCY.fullmatch(currency):
+            raise CatalogError(f"{where}.offer.currency must be an ISO code such as GBP")
+        if not isinstance(breaks, list) or len(breaks) > MAX_PRICE_BREAKS:
+            raise CatalogError(f"{where}.offer.breaks must be a list of up to {MAX_PRICE_BREAKS}")
+        rows: list[dict[str, Any]] = []
+        for i, b in enumerate(breaks):
+            label = f"{where}.offer.breaks[{i}]"
+            if not isinstance(b, dict):
+                raise CatalogError(f"{label} must be {{qty, unit_price}}")
+            qty = _whole(f"{label}.qty", b.get("qty"), low=1)
+            if rows and qty <= rows[-1]["qty"]:
+                raise CatalogError(f"{label}.qty must rise from one break to the next")
+            price = _number(f"{label}.unit_price", b.get("unit_price"))
+            rows.append({"qty": qty, "unit_price": price})
+        out["currency"] = currency
+        out["breaks"] = rows
+    for key in ("stock", "lead_time_days"):
+        if raw.get(key) is not None:
+            out[key] = _whole(f"{where}.offer.{key}", raw.get(key), low=0)
+    out["confirmed"] = raw.get("confirmed", True) is not False
+    return out
+
+
+def parse_suppliers(raw: Any) -> list[dict[str, Any]]:
     if raw in (None, []):
         return []
     if not isinstance(raw, list):
-        raise CatalogError("suppliers must be a list of {supplier, sku, url}")
-    out = []
-    for item in raw:
+        raise CatalogError("suppliers must be a list of {supplier, sku, url, offer}")
+    out: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
         if not isinstance(item, dict) or not item.get("supplier") or not item.get("sku"):
             raise CatalogError("each supplier needs supplier and sku")
-        out.append({k: str(item[k]) for k in ("supplier", "sku", "url") if item.get(k)})
+        row: dict[str, Any] = {k: str(item[k]) for k in ("supplier", "sku", "url") if item.get(k)}
+        if item.get("offer") is not None:
+            row["offer"] = parse_offer(f"suppliers[{i}]", item["offer"])
+        out.append(row)
     return out
 
 
@@ -708,7 +763,7 @@ class ComponentEntry:
     specs: dict[str, Sourced]
     geometry: dict[str, Any]
     material: str
-    suppliers: list[dict[str, str]]
+    suppliers: list[dict[str, Any]]
     models: list[dict[str, Any]] = field(default_factory=list)
     manufacturer: str = ""
     mpn: str = ""
@@ -808,7 +863,7 @@ class AppearanceEntry:
     properties: dict[str, Sourced]
     materials: list[str]
     processes: list[str]
-    suppliers: list[dict[str, str]]
+    suppliers: list[dict[str, Any]]
     notes: str = ""
     version: int = 1
     updated_at: float = 0.0

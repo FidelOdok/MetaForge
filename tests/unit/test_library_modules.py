@@ -226,3 +226,59 @@ def test_the_studio_and_the_library_refuse_the_same_words() -> None:
     from twin_core.library import form_code
 
     assert authored.BANNED_TOKENS is form_code.BANNED_TOKENS
+
+
+# A supplier carries a dated offer (2026-11-12): price breaks in one currency, stock and
+# lead time, the day it was read and how, and whether it was confirmed on the live page.
+# Prices go stale, so an offer without its date is refused.
+
+OFFER = {
+    "read_on": "2026-11-12",
+    "via": "mouser.get_pricing",
+    "currency": "GBP",
+    "breaks": [{"qty": 1, "unit_price": 0.32}, {"qty": 10, "unit_price": 0.274}],
+    "stock": 1835,
+    "lead_time_days": 126,
+}
+
+
+def _with_offer(**over: Any) -> dict[str, Any]:
+    return gnss(suppliers=[{"supplier": "Mouser", "sku": "688-SKRTLA", "offer": {**OFFER, **over}}])
+
+
+def test_a_supplier_keeps_its_dated_offer() -> None:
+    entry = SqliteCatalog().register("component", _with_offer()).as_dict()
+    offer = entry["suppliers"][0]["offer"]
+    assert offer["breaks"] == [{"qty": 1, "unit_price": 0.32}, {"qty": 10, "unit_price": 0.274}]
+    assert offer["currency"] == "GBP" and offer["read_on"] == "2026-11-12"
+    assert offer["stock"] == 1835 and offer["lead_time_days"] == 126
+    assert offer["confirmed"] is True
+
+
+def test_a_search_snapshot_is_kept_as_unconfirmed() -> None:
+    entry = SqliteCatalog().register("component", _with_offer(confirmed=False)).as_dict()
+    assert entry["suppliers"][0]["offer"]["confirmed"] is False
+
+
+def test_a_supplier_without_an_offer_still_registers() -> None:
+    plain = [{"supplier": "Mouser", "sku": "x"}]
+    entry = SqliteCatalog().register("component", gnss(suppliers=plain))
+    assert entry.as_dict()["suppliers"] == [{"supplier": "Mouser", "sku": "x"}]
+
+
+@pytest.mark.parametrize(
+    ("over", "message"),
+    [
+        ({"read_on": None}, "read_on"),
+        ({"read_on": "12/11/2026"}, "read_on"),
+        ({"via": ""}, "via"),
+        ({"currency": "pounds"}, "currency"),
+        ({"breaks": [{"qty": 0, "unit_price": 1}]}, "qty"),
+        ({"breaks": [{"qty": 1, "unit_price": -1}]}, "unit_price"),
+        ({"breaks": [{"qty": 1, "unit_price": 1}, {"qty": 1, "unit_price": 2}]}, "qty"),
+        ({"stock": -3}, "stock"),
+    ],
+)
+def test_a_malformed_offer_is_refused(over: dict[str, Any], message: str) -> None:
+    with pytest.raises(CatalogError, match=message):
+        SqliteCatalog().register("component", _with_offer(**over))

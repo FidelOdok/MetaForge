@@ -25,6 +25,12 @@ engineering verification. Missing specifications remain unknown.
   which an Imagine studio places with `g.model(name)`. It is refused for the
   same words a studio part's code is. See
   [Imagine stage](imagine-stage.md#library-models-gmodelname).
+- A supplier of an entry (`suppliers`, `[{supplier, sku, url}]`) can carry the
+  `offer` read from it: `read_on` (`YYYY-MM-DD`) and `via` (the tool or page it
+  came from), both required because prices go stale; `currency` (an ISO code)
+  with `breaks` (`[{qty, unit_price}]`, quantities rising); `stock`;
+  `lead_time_days`; and `confirmed`, false for a search snippet or a cached
+  page. An offer is a dated reading, not a live price.
 - The Imagine studio links a real part to its entry with the part's `library`
   field, and the Imagine stage can list, read and register components, so a
   part researched in one project is found by the next. See
