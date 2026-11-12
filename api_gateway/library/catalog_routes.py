@@ -176,6 +176,34 @@ async def get_component(ref: str) -> dict[str, Any]:
     return _get("component", ref)
 
 
+@router.get("/components/{ref}/mesh")
+async def component_mesh(ref: str) -> dict[str, Any]:
+    """The entry's attached maker model as a coloured, Y-up, centred mesh (2026-11-12).
+
+    For drawing in the studio and the library viewer only. A model whose licence MetaForge
+    does not accept is shown for internal work, never handed to an engineering tool.
+    """
+    import asyncio
+
+    from api_gateway.library import model_mesh
+
+    try:
+        entry = get_catalog().get(ref, "component").as_dict()
+    except CatalogNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return await asyncio.to_thread(
+            model_mesh.make_mesh,
+            entry,
+            fetch=model_mesh.http_fetch,
+            convert=model_mesh.occt_convert,
+            cache_dir=model_mesh.cache_root(),
+        )
+    except model_mesh.MeshError as exc:
+        logger.info("library_model_mesh_refused", ref=ref, reason=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/components", status_code=201)
 async def register_component(body: dict[str, Any], request: Request) -> dict[str, Any]:
     return _register("component", body, request)

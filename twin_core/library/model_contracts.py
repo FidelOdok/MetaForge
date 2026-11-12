@@ -67,6 +67,9 @@ class ModelRepresentation(BaseModel):
     artifacts: list[ModelArtifact] = Field(min_length=1, max_length=1000)
     dependencies: list[ModelDependency] = Field(default_factory=list, max_length=100)
     status: Literal["active", "deprecated", "withdrawn"] = "active"
+    #: Which of the file's axes points up (2026-11-12): makers' files differ (Seeed's XIAO
+    #: is Y up, Waveshare's display Z up). The studio turns it to +Y. None means "z".
+    up_axis: Literal["x", "y", "z", "-x", "-y", "-z"] | None = None
     status_reason: str = ""
 
     @model_validator(mode="after")
@@ -88,4 +91,9 @@ def validate_models(raw: object) -> list[dict]:
     keys = [(m.model_id, m.version) for m in models]
     if len(set(keys)) != len(keys):
         raise ValueError("model id/version pairs must be unique")
-    return [m.model_dump(mode="json") for m in models]
+    out = [m.model_dump(mode="json") for m in models]
+    for dumped in out:
+        if dumped.get("up_axis") is None:
+            # Models published before up_axis keep their exact content (they are immutable).
+            dumped.pop("up_axis", None)
+    return out
