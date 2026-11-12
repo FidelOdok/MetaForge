@@ -99,6 +99,32 @@ does not claim to discover undeclared runtime imports inside executable code.
 A future replay must resolve the pinned metadata and check current withdrawal
 policy, not silently select a newer model.
 
+## Viewing a maker's model as a mesh
+
+`GET /v1/library/components/{ref}/mesh` turns an entry's active STEP model into a mesh
+the Imagine studio and the library viewer can draw. The gateway fetches the artifact once,
+checks its size and sha256, takes the member named by the artifact's `path` from a zip,
+and sends the STEP to the OCCT converter's `POST /faces` route.
+
+That route reads the STEP through OCCT's XDE layer and gives every face the colour the
+file states for it: the face's own style first, then the placed instance's, the part's,
+and the enclosing assembly's. Colours are returned as the sRGB values the STEP writes. A
+face with no stated colour comes back with `colour: null` and `colour_source: "none"`;
+it is never painted a default grey. The converter's GLB route (`/convert`) keeps one
+colour per part, so it is not used here.
+
+The model's `up_axis` (`x`, `y`, `z` or their negatives; `z` when absent) is turned to the
+studio's +Y, the mesh is centred, and a model over 20,000 triangles is reduced by vertex
+clustering. Each part in the response carries `name`, `colour`, `colour_source`,
+`positions` (mm) and `indices`. Meshes are cached by artifact digest, up axis and recipe
+version under `METAFORGE_LIBRARY_MESH_DIR` (default `~/.metaforge/library-meshes`).
+
+The route answers 404 for an unknown entry and 422 with the reason when the entry has no
+active STEP model, the file changed upstream, or the converter is down or refuses the
+file. Showing a model here does not clear its licence: a model whose licence MetaForge
+does not accept is still refused by `library.resolve_component_model`, which is the route
+into engineering tools and deliverables.
+
 ## Download integrity and cache
 
 Shared `VerifiedAssetCache` objects live under the adapter workspace's

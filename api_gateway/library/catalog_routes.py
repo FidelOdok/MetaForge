@@ -196,7 +196,7 @@ async def component_mesh(ref: str) -> dict[str, Any]:
             model_mesh.make_mesh,
             entry,
             fetch=model_mesh.http_fetch,
-            convert=model_mesh.occt_convert,
+            convert=model_mesh.occt_faces,
             cache_dir=model_mesh.cache_root(),
         )
     except model_mesh.MeshError as exc:

@@ -12,9 +12,13 @@ The mesh is made here, never on the page (which has no network):
 
 1. the artifact is fetched once, checked against its size and sha256, and kept by digest;
    a zip is opened and the member named by the artifact's ``path`` is taken;
-2. the STEP goes through the gateway's OCCT conversion service to GLB, and a stub written
-   while the converter is down is discarded, never shown as a model;
-3. the GLB's nodes are flattened with their transforms into one list of coloured parts;
+2. the STEP goes to the OCCT converter's ``/faces`` route, which returns its triangles in
+   one group per part and colour, each face carrying the colour its STEP states (its own
+   style, else its placed instance's, its part's or its assembly's) as sRGB screen values,
+   or no colour when the file states none; nothing is painted grey. (The GLB route kept
+   one colour per part and dropped every face colour, so a blue board with gold pads
+   came out grey; recipe 2 replaces it.)
+3. each group is kept as a part of its own, with its ``colour_source``;
 4. the part is turned so its ``up_axis`` points up the studio's Y, and centred on its
    bounding box, so x is its length, y its height and z its width, like a drawn model;
 5. a mesh over the per-part triangle budget is reduced by vertex clustering.
@@ -29,7 +33,6 @@ import io
 import json
 import math
 import os
-import struct
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -43,14 +46,14 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.library.model_mesh")
 
 #: Bump when the mesh recipe changes, so cached meshes are made again.
-RECIPE = 1
+RECIPE = 2
 #: The studio's per-part triangle budget (IMG-FORM-006).
 MAX_TRIANGLES = 20_000
 #: Coordinates are kept to a micrometre.
 PLACES = 3
 
 Fetch = Callable[[str], bytes]
-Convert = Callable[[bytes, str], bytes]
+Convert = Callable[[bytes, str], list[dict[str, Any]]]
 
 
 class MeshError(Exception):
@@ -109,109 +112,27 @@ def step_bytes(data: bytes, member: str) -> bytes:
         return zf.read(info)
 
 
-# -- GLB ------------------------------------------------------------------------------
-
-_COMPONENTS = {5120: "b", 5121: "B", 5122: "h", 5123: "H", 5125: "I", 5126: "f"}
-_WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+# -- the converter's colour groups -----------------------------------------------------
 
 
-def _matmul(a: list[float], b: list[float]) -> list[float]:
-    """Column-major 4x4 product a * b."""
-    out = [0.0] * 16
-    for c in range(4):
-        for r in range(4):
-            out[c * 4 + r] = sum(a[k * 4 + r] * b[c * 4 + k] for k in range(4))
-    return out
-
-
-def _node_matrix(node: dict[str, Any]) -> list[float]:
-    if "matrix" in node:
-        return [float(v) for v in node["matrix"]]
-    tx, ty, tz = node.get("translation", [0, 0, 0])
-    qx, qy, qz, qw = node.get("rotation", [0, 0, 0, 1])
-    sx, sy, sz = node.get("scale", [1, 1, 1])
-    r = [
-        1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy + qz * qw), 2 * (qx * qz - qy * qw), 0,
-        2 * (qx * qy - qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz + qx * qw), 0,
-        2 * (qx * qz + qy * qw), 2 * (qy * qz - qx * qw), 1 - 2 * (qx * qx + qy * qy), 0,
-        0, 0, 0, 1,
-    ]  # fmt: skip
-    for i in range(3):
-        r[i] *= sx
-        r[4 + i] *= sy
-        r[8 + i] *= sz
-    r[12], r[13], r[14] = tx, ty, tz
-    return [float(v) for v in r]
-
-
-def parse_glb(data: bytes) -> list[dict[str, Any]]:
-    """Every triangle primitive in the GLB's scene, in world space: name, colour, points."""
-    if len(data) < 20 or data[:4] != b"glTF":
-        raise MeshError("the converter returned no model")
-    json_len = struct.unpack_from("<I", data, 12)[0]
-    doc = json.loads(data[20 : 20 + json_len])
-    rest = 20 + json_len
-    binary = b""
-    if rest + 8 <= len(data):
-        bin_len = struct.unpack_from("<I", data, rest)[0]
-        binary = data[rest + 8 : rest + 8 + bin_len]
-
-    def read(index: int) -> list[Any]:
-        acc = doc["accessors"][index]
-        view = doc["bufferViews"][acc["bufferView"]]
-        kind, width = _COMPONENTS[acc["componentType"]], _WIDTH[acc["type"]]
-        item = struct.calcsize("<" + kind)
-        stride = view.get("byteStride") or item * width
-        base = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
-        out: list[Any] = []
-        for n in range(acc["count"]):
-            at = base + n * stride
-            out.append(struct.unpack_from("<" + kind * width, binary, at))
-        return out
-
+def parts_from_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The converter's groups as parts with point tuples; an empty group is dropped."""
     parts: list[dict[str, Any]] = []
-    nodes = doc.get("nodes") or []
-
-    def visit(i: int, parent: list[float]) -> None:
-        node = nodes[i]
-        world = _matmul(parent, _node_matrix(node))
-        if "mesh" in node:
-            for prim in doc["meshes"][node["mesh"]].get("primitives", []):
-                if prim.get("mode", 4) != 4 or "POSITION" not in prim.get("attributes", {}):
-                    continue
-                raw = read(prim["attributes"]["POSITION"])
-                pts = [
-                    (
-                        world[0] * x + world[4] * y + world[8] * z + world[12],
-                        world[1] * x + world[5] * y + world[9] * z + world[13],
-                        world[2] * x + world[6] * y + world[10] * z + world[14],
-                    )
-                    for x, y, z in raw
-                ]
-                idx = (
-                    [v[0] for v in read(prim["indices"])]
-                    if "indices" in prim
-                    else list(range(len(pts)))
-                )
-                colour = [0.6, 0.6, 0.6]
-                if "material" in prim:
-                    mat = doc["materials"][prim["material"]]
-                    rgba = mat.get("pbrMetallicRoughness", {}).get("baseColorFactor")
-                    if rgba:
-                        colour = [float(c) for c in rgba[:3]]
-                parts.append({"name": str(node.get("name") or ""), "colour": colour,
-                              "points": pts, "indices": idx})  # fmt: skip
-        for child in node.get("children") or []:
-            visit(child, world)
-
-    identity = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
-    scene = (doc.get("scenes") or [{}])[doc.get("scene", 0)] if doc.get("scenes") else {}
-    roots = scene.get("nodes")
-    if roots is None:
-        children = {c for n in nodes for c in n.get("children") or []}
-        roots = [i for i in range(len(nodes)) if i not in children]
-    for root in roots:
-        visit(root, identity)
+    for g in groups:
+        flat = [float(v) for v in g.get("positions") or []]
+        idx = [int(i) for i in g.get("indices") or []]
+        if len(flat) < 9 or len(idx) < 3:
+            continue
+        colour = g.get("colour")
+        parts.append(
+            {
+                "name": str(g.get("name") or ""),
+                "colour": [float(c) for c in colour[:3]] if colour else None,
+                "colour_source": str(g.get("colour_source") or ("part" if colour else "none")),
+                "points": [tuple(flat[i : i + 3]) for i in range(0, len(flat) - 2, 3)],
+                "indices": idx,
+            }
+        )
     if not parts:
         raise MeshError("the model has no triangles")
     return parts
@@ -302,7 +223,8 @@ def to_json(placed: dict[str, Any], *, source: dict[str, Any]) -> dict[str, Any]
     parts = [
         {
             "name": p["name"],
-            "colour": [round(c, 3) for c in p["colour"]],
+            "colour": [round(c, 3) for c in p["colour"]] if p["colour"] else None,
+            "colour_source": p.get("colour_source", "none"),
             "positions": [round(v, PLACES) for pt in p["points"] for v in pt],
             "indices": list(p["indices"]),
         }
@@ -337,8 +259,8 @@ def make_mesh(
         span.set_attribute("entry", str(entry.get("name")))
         data = verified_bytes(artifact, fetch, cache_dir)
         step = step_bytes(data, str(artifact["path"]))
-        glb = convert(step, str(artifact["path"]))
-        parts = reduce(parse_glb(glb), MAX_TRIANGLES)
+        groups = convert(step, str(artifact["path"]))
+        parts = reduce(parts_from_groups(groups), MAX_TRIANGLES)
         placed = place(parts, up)
         out = to_json(
             placed,
@@ -377,20 +299,35 @@ def http_fetch(url: str) -> bytes:
         return bytes(resp.content)
 
 
-def occt_convert(step: bytes, filename: str) -> bytes:
-    """STEP to GLB through the gateway's conversion service; a stub is discarded."""
-    from api_gateway.convert.routes import get_service
+def occt_faces(step: bytes, filename: str) -> list[dict[str, Any]]:
+    """The STEP's triangles grouped by each face's stated colour, from the OCCT converter."""
+    import httpx
 
-    service = get_service()
-    result = service.convert(step, filename if "." in filename else filename + ".step")
-    meta = result.get("metadata") or {}
-    if meta.get("converter_unavailable"):
-        service.discard(result["hash"], "standard")
-        raise MeshError("the CAD converter is not running; try again when it is")
-    path = service.get_glb_path(result["hash"], "standard")
-    if path is None or not path.is_file() or path.stat().st_size == 0:
-        raise MeshError("the converter produced no model")
-    return path.read_bytes()
+    from api_gateway.convert.service import _OCCT_URL
+
+    name = filename.rsplit("/", 1)[-1]
+    if not name.lower().endswith((".step", ".stp")):
+        name += ".step"
+    try:
+        resp = httpx.post(
+            f"{_OCCT_URL}/faces?quality=standard",
+            files={"file": (name, step, "application/octet-stream")},
+            timeout=300.0,
+        )
+    except httpx.ConnectError as exc:
+        raise MeshError("the CAD converter is not running; try again when it is") from exc
+    except httpx.RequestError as exc:
+        raise MeshError(f"the CAD converter failed on this file ({type(exc).__name__})") from exc
+    if resp.status_code != 200:
+        try:
+            why = str(resp.json().get("error") or resp.text)
+        except ValueError:
+            why = resp.text
+        raise MeshError(f"the CAD converter refused the file: {why[:300]}")
+    groups = resp.json().get("groups")
+    if not isinstance(groups, list):
+        raise MeshError("the CAD converter returned no colour groups")
+    return groups
 
 
 def cache_root() -> Path:

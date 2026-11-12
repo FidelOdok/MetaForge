@@ -2,8 +2,9 @@
 
 The owner chose (2026-11-12) to store and show a maker's own model even when no licence is
 stated, for internal design work, while the route into engineering tools and deliverables
-keeps refusing such a licence. These tests build GLB files by hand, so the parser is
-checked against geometry whose answer is known.
+keeps refusing such a licence. The converter's ``/faces``
+route gives each face the colour its STEP states (tools/occt-converter/test_faces.py); these
+tests hand the pipeline such groups, so the answer is known.
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import struct
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -27,42 +27,23 @@ FACES = [
     (0, 1, 3), (0, 3, 2), (4, 6, 7), (4, 7, 5), (0, 4, 5), (0, 5, 1),
     (2, 3, 7), (2, 7, 6), (0, 2, 6), (0, 6, 4), (1, 5, 7), (1, 7, 3),
 ]  # fmt: skip
+BLUE = [0.2745, 0.3333, 0.7647]  # the XIAO's solder mask, as its STEP states it
 
 
-def glb(
-    nodes: list[dict[str, Any]], *, colour: list[float] | None = None, scene: bool = True
-) -> bytes:
-    """A GLB with one box mesh, used by every node given."""
-    pos = b"".join(struct.pack("<fff", *p) for p in CORNERS)
-    idx = b"".join(struct.pack("<HHH", *f) for f in FACES)
-    pad = b"\0" * ((4 - len(idx) % 4) % 4)
-    binary = idx + pad + pos
-    doc: dict[str, Any] = {
-        "asset": {"version": "2.0"},
-        "buffers": [{"byteLength": len(binary)}],
-        "bufferViews": [
-            {"buffer": 0, "byteOffset": 0, "byteLength": len(idx)},
-            {"buffer": 0, "byteOffset": len(idx) + len(pad), "byteLength": len(pos)},
-        ],
-        "accessors": [
-            {"bufferView": 0, "componentType": 5123, "count": 36, "type": "SCALAR"},
-            {"bufferView": 1, "componentType": 5126, "count": 8, "type": "VEC3"},
-        ],
-        "meshes": [{"primitives": [{"attributes": {"POSITION": 1}, "indices": 0, "material": 0}]}],
-        "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [*(colour or [0, 0.5, 0]), 1]}}],
-        "nodes": nodes,
+def group(
+    name: str = "body",
+    colour: list[float] | None = BLUE,
+    source: str = "part",
+    shift: tuple[float, float, float] = (0, 0, 0),
+) -> dict[str, Any]:
+    """One colour group as the converter's /faces returns it: the box, moved by shift."""
+    return {
+        "name": name,
+        "colour": colour,
+        "colour_source": source,
+        "positions": [c + s for p in CORNERS for c, s in zip(p, shift, strict=True)],
+        "indices": [i for f in FACES for i in f],
     }
-    if scene:
-        doc["scenes"] = [{"nodes": [0]}]
-    text = json.dumps(doc).encode()
-    text += b" " * ((4 - len(text) % 4) % 4)
-    body = (
-        struct.pack("<II", len(text), 0x4E4F534A)
-        + text
-        + struct.pack("<II", len(binary), 0x004E4942)
-        + binary
-    )
-    return b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body
 
 
 STEP = b"ISO-10303-21; a stand-in STEP for the tests"
@@ -101,35 +82,53 @@ class Recorder:
         return self.data
 
 
-def make(e: dict[str, Any], fetch: Any, made: bytes, tmp_path: Path) -> dict[str, Any]:
+def make(
+    e: dict[str, Any], fetch: Any, made: list[dict[str, Any]], tmp_path: Path
+) -> dict[str, Any]:
     return model_mesh.make_mesh(e, fetch=fetch, convert=lambda b, n: made, cache_dir=tmp_path)
 
 
 def test_a_z_up_box_comes_out_y_up_centred_with_its_colour(tmp_path: Path) -> None:
-    mesh = make(entry(STEP), Recorder(STEP), glb([{"mesh": 0, "name": "body"}]), tmp_path)
+    mesh = make(entry(STEP), Recorder(STEP), [group()], tmp_path)
     assert mesh["size_mm"] == [10.0, 3.0, 20.0]  # length, height (was z), width
     assert mesh["triangles"] == 12
     part = mesh["parts"][0]
-    assert part["name"] == "body" and part["colour"] == [0.0, 0.5, 0.0]
+    assert part["name"] == "body"
+    # The colour is the screen value the STEP states, passed through unchanged.
+    assert part["colour"] == [0.275, 0.333, 0.765] and part["colour_source"] == "part"
     ys = part["positions"][1::3]
     assert min(ys) == -1.5 and max(ys) == 1.5
     assert mesh["source"]["licence"].startswith("none stated")
 
 
 def test_a_y_up_file_is_left_standing(tmp_path: Path) -> None:
-    mesh = make(entry(STEP, up="y"), Recorder(STEP), glb([{"mesh": 0}]), tmp_path)
+    mesh = make(entry(STEP, up="y"), Recorder(STEP), [group()], tmp_path)
     assert mesh["size_mm"] == [10.0, 20.0, 3.0]
 
 
-def test_node_transforms_and_children_are_applied(tmp_path: Path) -> None:
-    nodes = [
-        {"children": [1, 2], "translation": [100, 0, 0]},
-        {"mesh": 0, "name": "a"},
-        {"mesh": 0, "name": "b", "translation": [0, 0, 10]},
-    ]
-    mesh = make(entry(STEP, up="y"), Recorder(STEP), glb(nodes), tmp_path)
+def test_each_colour_group_stays_a_part_of_its_own(tmp_path: Path) -> None:
+    red = group("body", [0.8431, 0.0588, 0.0588], "face", shift=(0, 0, 10))
+    mesh = make(entry(STEP, up="y"), Recorder(STEP), [group(), red], tmp_path)
     assert mesh["size_mm"] == [10.0, 20.0, 13.0]
-    assert [p["name"] for p in mesh["parts"]] == ["a", "b"]
+    assert [p["colour"] for p in mesh["parts"]] == [[0.275, 0.333, 0.765], [0.843, 0.059, 0.059]]
+    assert [p["colour_source"] for p in mesh["parts"]] == ["part", "face"]
+
+
+def test_a_face_with_no_stated_colour_is_left_uncoloured_not_painted_grey(
+    tmp_path: Path,
+) -> None:
+    mesh = make(entry(STEP), Recorder(STEP), [group(colour=None, source="none")], tmp_path)
+    assert mesh["parts"][0]["colour"] is None
+    assert mesh["parts"][0]["colour_source"] == "none"
+
+
+def test_a_mesh_made_by_the_old_recipe_is_made_again(tmp_path: Path) -> None:
+    old = tmp_path / "meshes" / f"{hashlib.sha256(STEP).hexdigest()}-z-r1.json"
+    old.parent.mkdir(parents=True)
+    old.write_text(json.dumps({"recipe": 1, "parts": [{"colour": [0.353, 0.353, 0.353]}]}))
+    mesh = make(entry(STEP), Recorder(STEP), [group()], tmp_path)
+    assert mesh["recipe"] == model_mesh.RECIPE >= 2
+    assert mesh["parts"][0]["colour"] == [0.275, 0.333, 0.765]
 
 
 def test_the_step_is_taken_from_a_zip_by_its_path(tmp_path: Path) -> None:
@@ -140,9 +139,9 @@ def test_the_step_is_taken_from_a_zip_by_its_path(tmp_path: Path) -> None:
     data = buf.getvalue()
     seen: list[bytes] = []
 
-    def convert(b: bytes, name: str) -> bytes:
+    def convert(b: bytes, name: str) -> list[dict[str, Any]]:
         seen.append(b)
-        return glb([{"mesh": 0}])
+        return [group()]
 
     model_mesh.make_mesh(
         entry(data, path="SKRTLA.STEP"),
@@ -155,13 +154,13 @@ def test_the_step_is_taken_from_a_zip_by_its_path(tmp_path: Path) -> None:
 
 def test_a_changed_file_is_refused_not_shown(tmp_path: Path) -> None:
     with pytest.raises(model_mesh.MeshError, match="sha256"):
-        make(entry(STEP), Recorder(b"X" * len(STEP)), glb([{"mesh": 0}]), tmp_path)
+        make(entry(STEP), Recorder(b"X" * len(STEP)), [group()], tmp_path)
 
 
 def test_the_file_and_the_mesh_are_made_once(tmp_path: Path) -> None:
     fetch = Recorder(STEP)
-    first = make(entry(STEP), fetch, glb([{"mesh": 0}]), tmp_path)
-    second = make(entry(STEP), fetch, b"not used", tmp_path)
+    first = make(entry(STEP), fetch, [group()], tmp_path)
+    second = make(entry(STEP), fetch, [], tmp_path)
     assert first == second and fetch.calls == 1
 
 
@@ -184,24 +183,31 @@ def test_a_heavy_mesh_is_reduced_to_the_budget() -> None:
 
 def test_an_entry_without_a_step_model_says_so(tmp_path: Path) -> None:
     with pytest.raises(model_mesh.MeshError, match="no active STEP"):
-        model_mesh.make_mesh({"models": []}, fetch=Recorder(b""), convert=lambda b, n: b"",
+        model_mesh.make_mesh({"models": []}, fetch=Recorder(b""), convert=lambda b, n: [],
                              cache_dir=tmp_path)  # fmt: skip
 
 
-def test_a_converter_stub_is_discarded_not_drawn(monkeypatch: pytest.MonkeyPatch) -> None:
-    discarded: list[str] = []
+def test_a_converter_that_is_down_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
 
-    class Stub:
-        def convert(self, data: bytes, name: str) -> dict[str, Any]:
-            return {"hash": "h", "metadata": {"converter_unavailable": True}}
+    def refused(*a: Any, **k: Any) -> Any:
+        raise httpx.ConnectError("refused")
 
-        def discard(self, h: str, quality: str) -> None:
-            discarded.append(h)
-
-    monkeypatch.setattr("api_gateway.convert.routes.get_service", lambda: Stub())
+    monkeypatch.setattr(httpx, "post", refused)
     with pytest.raises(model_mesh.MeshError, match="not running"):
-        model_mesh.occt_convert(STEP, "x.step")
-    assert discarded == ["h"]
+        model_mesh.occt_faces(STEP, "x.step")
+
+
+def test_a_converter_refusal_is_explained(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    def failed(url: str, **k: Any) -> httpx.Response:
+        assert url.endswith("/faces?quality=standard")
+        return httpx.Response(500, json={"error": "Failed to read STEP file"})
+
+    monkeypatch.setattr(httpx, "post", failed)
+    with pytest.raises(model_mesh.MeshError, match="Failed to read STEP"):
+        model_mesh.occt_faces(STEP, "x.step")
 
 
 def test_the_library_keeps_a_model_with_no_stated_licence_and_its_up_axis() -> None:
@@ -255,7 +261,7 @@ def test_the_route_serves_the_mesh_and_explains_a_refusal(
 
     monkeypatch.setenv("METAFORGE_LIBRARY_MESH_DIR", str(tmp_path))
     monkeypatch.setattr(model_mesh, "http_fetch", Recorder(STEP))
-    monkeypatch.setattr(model_mesh, "occt_convert", lambda b, n: glb([{"mesh": 0}]))
+    monkeypatch.setattr(model_mesh, "occt_faces", lambda b, n: [group()])
     catalog_routes.init_catalog(SqliteCatalog())
     try:
         e = entry(STEP)
