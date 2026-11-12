@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from api_gateway.library.routes import history_with_authority
@@ -256,3 +256,60 @@ async def update_ergonomic_limit(
     ref: str, body: UpdateEntryRequest, request: Request
 ) -> dict[str, Any]:
     return _update("ergonomic_limit", ref, body, request)
+
+
+# -- the whole library as one file (2026-11-12) ------------------------------------------
+
+
+@router.get("/export")
+async def export_library(history: bool = False) -> dict[str, Any]:
+    """Every current catalog entry and machine as one JSON document, to keep or move.
+
+    ``history=true`` adds each entry's versions. Nothing secret is in it: a machine's
+    connection names only the environment variable that holds its credential.
+    """
+    from api_gateway.library.routes import get_machine_library
+    from twin_core.library.transfer import export_library as export
+
+    with tracer.start_as_current_span("library.export") as span:
+        doc = export(get_catalog(), get_machine_library(), history=history)
+        span.set_attribute("library.entries", sum(doc["counts"].values()))
+    return doc
+
+
+@router.post("/import")
+async def import_library(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    """Add what an export holds and this library lacks; an entry already here is skipped."""
+    from api_gateway.library.routes import get_machine_library
+    from twin_core.library.transfer import import_library as load
+
+    by = _by(request, str(body.pop("by", "") or "")) if isinstance(body, dict) else "unknown"
+    with tracer.start_as_current_span("library.import") as span:
+        try:
+            report = load(body, get_catalog(), get_machine_library(), by=f"import by {by}")
+        except ValueError as exc:
+            span.record_exception(exc)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return report
+
+
+@router.get(
+    "/engine/{name}",
+    response_class=Response,
+    responses={200: {"content": {"text/javascript": {}, "text/css": {}}}},
+)
+async def get_engine_asset(name: str) -> Response:
+    """The drawing engine (``authored.js``) and its assets, for drawing an entry's form code.
+
+    The same files the Imagine studio loads; served here so a page that shows the library
+    needs no project.
+    """
+    from api_gateway.imagine import engine_page
+
+    if name not in engine_page.ASSETS:
+        raise HTTPException(status_code=404, detail="No such engine asset")
+    return Response(
+        engine_page.asset_bytes(name),
+        media_type=engine_page.asset_media_type(name),
+        headers=engine_page.asset_headers(),
+    )

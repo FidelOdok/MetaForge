@@ -142,6 +142,32 @@ there, or the converter is down or refuses the file. Showing a model here does n
 does not accept is still refused by `library.resolve_component_model`, which is the route
 into engineering tools and deliverables.
 
+## Saving and loading the whole library
+
+The catalog and the machine library live in one SQLite file on the
+gateway's machine (`METAFORGE_MACHINE_LIBRARY_PATH`, default
+`~/.metaforge/machine_library.db`). `GET /v1/library/export` writes every
+current entry of every kind (processes, materials, components, appearances,
+ergonomic limits) and every machine as one JSON document
+(`format: metaforge-library`, `version: 1`); `?history=true` adds each
+entry's versions. A machine's connection carries only the name of the
+environment variable that holds its credential, so the file holds nothing
+secret.
+
+`POST /v1/library/import` loads such a document and only adds: an entry
+whose name is already there (the same kind and name for a catalog entry,
+the same kind, make and model for a machine model, the same name for a
+machine instance) is skipped and counted, never overwritten. An imported
+entry starts again at version 1, recorded as made by the import; the
+exported history stays in the file as the record. A machine instance's
+`model_id` is pointed at its model in the new library. The answer lists
+what was added, what was skipped and anything refused with the reason. The
+dashboard's `/library` page has **Export** and **Import** buttons for both.
+
+`GET /v1/library/engine/{name}` serves the drawing engine (`authored.js`)
+that runs an entry's `form_code`, the same file the Imagine studio loads,
+so a page that shows the library needs no project.
+
 ## Download integrity and cache
 
 Shared `VerifiedAssetCache` objects live under the adapter workspace's

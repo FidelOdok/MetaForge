@@ -34995,6 +34995,51 @@
         ]
       }
     },
+    "/v1/library/components/{ref}/mesh": {
+      "get": {
+        "description": "The entry's attached maker model as a coloured, Y-up, centred mesh (2026-11-12).\n\nFor drawing in the studio and the library viewer only. A model whose licence MetaForge\ndoes not accept is shown for internal work, never handed to an engineering tool.",
+        "operationId": "component_mesh_v1_library_components__ref__mesh_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Component Mesh V1 Library Components  Ref  Mesh Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Component Mesh",
+        "tags": [
+          "library"
+        ]
+      }
+    },
     "/v1/library/discover": {
       "post": {
         "description": "Read a printer's controller into a proposed instance. Registers nothing.",
@@ -35034,6 +35079,46 @@
           }
         },
         "summary": "Discover Machine",
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/v1/library/engine/{name}": {
+      "get": {
+        "description": "The drawing engine (``authored.js``) and its assets, for drawing an entry's form code.\n\nThe same files the Imagine studio loads; served here so a page that shows the library\nneeds no project.",
+        "operationId": "get_engine_asset_v1_library_engine__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/css": {},
+              "text/javascript": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Engine Asset",
         "tags": [
           "library"
         ]
@@ -35225,6 +35310,98 @@
           }
         },
         "summary": "Update Ergonomic Limit",
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/v1/library/export": {
+      "get": {
+        "description": "Every current catalog entry and machine as one JSON document, to keep or move.\n\n``history=true`` adds each entry's versions. Nothing secret is in it: a machine's\nconnection names only the environment variable that holds its credential.",
+        "operationId": "export_library_v1_library_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "history",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "History",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Export Library V1 Library Export Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Library",
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/v1/library/import": {
+      "post": {
+        "description": "Add what an export holds and this library lacks; an entry already here is skipped.",
+        "operationId": "import_library_v1_library_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Import Library V1 Library Import Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Library",
         "tags": [
           "library"
         ]
