@@ -130,3 +130,55 @@ def test_an_update_changes_the_module_fields_and_keeps_the_old_version() -> None
 
 def test_the_tool_offers_the_same_families_and_the_new_fields() -> None:
     assert catalog_tools.COMPONENT_FAMILIES == list(COMPONENT_FAMILIES)
+
+
+# A module's body height has one name (2026-11-12). The first backfill recorded three of
+# four bodies as thickness_mm and one as height_mm, so a step that fits parts from the
+# library would miss three heights.
+
+
+def _mm(value: float) -> dict[str, Any]:
+    return {"value": value, "unit": "mm", "source_kind": "datasheet", "source_ref": DATASHEET}
+
+
+@pytest.mark.parametrize("family", ["module", "battery", "electronic"])
+def test_a_body_height_given_as_thickness_is_refused_naming_height(family: str) -> None:
+    specs = {"length_mm": _mm(10.1), "width_mm": _mm(9.7), "thickness_mm": _mm(2.5)}
+    with pytest.raises(CatalogError, match="height_mm"):
+        SqliteCatalog().register("component", gnss(family=family, specs=specs))
+
+
+def test_a_washer_still_takes_thickness() -> None:
+    entry = SqliteCatalog().register(
+        "component",
+        {
+            "name": "washer_m3",
+            "family": "washer",
+            "origin": "standard",
+            "standard": "ISO 7089",
+            "specs": {"thickness_mm": _mm(0.5)},
+        },
+    )
+    assert entry.as_dict()["specs"]["thickness_mm"]["value"] == 0.5
+
+
+def test_an_update_cannot_add_thickness_to_a_module() -> None:
+    catalog = SqliteCatalog()
+    entry = catalog.register("component", gnss())
+    with pytest.raises(CatalogError, match="height_mm"):
+        catalog.update(entry.id, {"specs": {"thickness_mm": _mm(3.0)}})
+
+
+def test_an_entry_saved_with_thickness_moves_to_height_when_height_is_given() -> None:
+    catalog = SqliteCatalog()
+    entry = catalog.register("component", gnss())
+    legacy = entry.as_dict()
+    specs = legacy["specs"]
+    legacy["specs"] = {"length_mm": specs["length_mm"], "thickness_mm": specs["height_mm"]}
+    legacy["version"] = entry.version + 1
+    old = catalog._load(legacy)
+    assert "thickness_mm" in old.as_dict()["specs"]
+    catalog._save(old, "test", new=False)
+    fixed = catalog.update(entry.id, {"specs": {"height_mm": _mm(2.5)}}).as_dict()
+    assert fixed["specs"]["height_mm"]["value"] == 2.5
+    assert "thickness_mm" not in fixed["specs"]

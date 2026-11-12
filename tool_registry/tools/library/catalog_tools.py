@@ -148,6 +148,8 @@ _SPECS = (
     "outer_diameter_mm, thickness_mm, bore_mm, width_mm, travel_mm (mm); dynamic_load_kn, "
     "static_load_kn, fatigue_load_limit_kn (kN); reference_speed_rpm, limiting_speed_rpm "
     "(rpm); mass_kg (kg); force_n (N); torque_nm (N m); voltage_v (V); capacity_mah (mAh). "
+    "A module, battery or electronic part is length_mm x width_mm x height_mm: its height "
+    "is height_mm, never thickness_mm (that is for plates and washers). "
 )
 _PROPERTIES = (
     "properties is an object keyed by name: density_kg_m3 (kg/m3), youngs_modulus_mpa, "

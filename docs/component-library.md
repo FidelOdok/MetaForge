@@ -16,7 +16,10 @@ engineering verification. Missing specifications remain unknown.
   `manufacturer`, `mpn` (the maker's order code), `datasheet` (an http(s) link)
   and `interfaces` (`[{id, bus, dir}]`, `dir` one of `in`, `out`, `bi`); a
   battery's `capacity_mah` is a typed spec. Entries saved before these fields
-  load with them empty.
+  load with them empty. The body of a module, battery or electronic part is
+  `length_mm` x `width_mm` x `height_mm`: `thickness_mm` (for plates and
+  washers) is refused for these families. An older entry that named its height
+  `thickness_mm` drops it when an update sends `height_mm`.
 - The Imagine studio links a real part to its entry with the part's `library`
   field, and the Imagine stage can list, read and register components, so a
   part researched in one project is found by the next. See

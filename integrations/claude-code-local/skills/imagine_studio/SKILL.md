@@ -143,7 +143,8 @@ write:
   with `library.register_component`: `family` (`module` for a bought board or
   module, `battery`, `electronic` for a single chip, button or connector),
   `origin: purchased`, `manufacturer`, `mpn`, `datasheet`, `interfaces`, and
-  the sizes you read as `specs` (`length_mm`, `width_mm`, `height_mm`) each with
+  the sizes you read as `specs` (`length_mm`, `width_mm`, `height_mm`; the
+  height is never `thickness_mm`, which the library refuses for these) each with
   its source; a size you did not read is `source_kind: assumption`. Then set
   the part's `"library"` to the entry's `name`. A write lists the real parts
   that are not linked, and a link to an entry that is not there yet (a

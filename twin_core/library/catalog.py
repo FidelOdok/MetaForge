@@ -172,6 +172,9 @@ COMPONENT_FAMILIES: tuple[str, ...] = (
     "electronic",
     "other",
 )
+#: Families whose part is a body with a length, width and height (a board, a module, a
+#: cell). Its height is always ``height_mm``; ``thickness_mm`` is for plates and washers.
+BODY_FAMILIES: tuple[str, ...] = ("module", "battery", "electronic")
 #: An interface's bus and direction, the same words the Imagine studio's parts use.
 INTERFACE_DIRS: tuple[str, ...] = ("in", "out", "bi")
 MAX_INTERFACES = 32
@@ -387,6 +390,22 @@ def parse_specs(raw: Any) -> dict[str, Sourced]:
         kind, ref = _source(f"spec {key}", item)
         out[key] = Sourced(value, unit, kind, ref, kind == "assumption")
     return out
+
+
+def check_body_specs(family: str, specs: dict[str, Any]) -> None:
+    """A module, battery or electronic part gives its body height as height_mm."""
+    if family in BODY_FAMILIES and "thickness_mm" in specs:
+        raise CatalogError(
+            f"a {family} gives its body as length_mm x width_mm x height_mm: "
+            "send its height as height_mm, not thickness_mm (thickness_mm is for plates "
+            "and washers)"
+        )
+
+
+def _body_specs(family: str, raw: Any) -> dict[str, Sourced]:
+    specs = parse_specs(raw)
+    check_body_specs(family, specs)
+    return specs
 
 
 def parse_appearance_properties(raw: Any) -> dict[str, Sourced]:
@@ -1024,7 +1043,7 @@ class SqliteCatalog:
                 origin=origin,
                 standard=standard,
                 size=str(data.get("size") or "").strip(),
-                specs=parse_specs(data.get("specs")),
+                specs=_body_specs(family, data.get("specs")),
                 geometry=parse_geometry(data.get("geometry")),
                 models=parse_models(data.get("models")),
                 manufacturer=str(data.get("manufacturer") or "").strip(),
@@ -1178,7 +1197,12 @@ class SqliteCatalog:
                     )
                 entry.models = proposed
             if "specs" in changes:
-                entry.specs = {**entry.specs, **parse_specs(changes["specs"])}
+                incoming = _body_specs(entry.family, changes["specs"])
+                kept = dict(entry.specs)
+                if entry.family in BODY_FAMILIES and "height_mm" in incoming:
+                    # An entry saved before the rule named its height thickness_mm.
+                    kept.pop("thickness_mm", None)
+                entry.specs = {**kept, **incoming}
             for key in ("manufacturer", "mpn"):
                 if key in changes:
                     setattr(entry, key, str(changes[key] or "").strip())
