@@ -22,6 +22,29 @@ class ModelArtifact(BaseModel):
     size: int = Field(strict=True, ge=0)
     licence: str = Field(min_length=1)
     source_revision: str = Field(min_length=1)
+    #: 2026-11-12: some makers publish a part's model only inside a larger file. These say
+    #: how to reach it, so the pin stays the maker's own HTTPS file and its sha256:
+    #: ``embedded`` walks streams of an OLE compound file (an Altium IntLib or PcbDoc),
+    #: each inflated when compressed; ``part`` keeps one named product of an assembly STEP
+    #: (a chip inside a board's model); ``extracted_sha256`` pins the STEP that comes out.
+    #: An artifact with either selector is for viewing only, never for engineering tools.
+    embedded: list[str] | None = Field(default=None, min_length=1, max_length=8)
+    part: str | None = Field(default=None, min_length=1, max_length=200)
+    extracted_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("embedded")
+    @classmethod
+    def stream_paths(cls, value: list[str] | None) -> list[str] | None:
+        for step in value or []:
+            parts = step.split("/")
+            if not step or len(step) > 200 or any(p in {"", ".", ".."} for p in parts):
+                raise ValueError("each embedded step is a stream path such as Library/Models/6")
+        return value
+
+    @property
+    def selected(self) -> bool:
+        """True when the STEP is reached inside the file rather than being the file."""
+        return bool(self.embedded or self.part)
 
     @field_validator("path")
     @classmethod
@@ -96,4 +119,8 @@ def validate_models(raw: object) -> list[dict]:
         if dumped.get("up_axis") is None:
             # Models published before up_axis keep their exact content (they are immutable).
             dumped.pop("up_axis", None)
+        for artifact in dumped.get("artifacts") or []:
+            for key in ("embedded", "part", "extracted_sha256"):
+                if artifact.get(key) is None:
+                    artifact.pop(key, None)
     return out

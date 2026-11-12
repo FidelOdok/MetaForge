@@ -11,7 +11,10 @@ tools and deliverables).
 The mesh is made here, never on the page (which has no network):
 
 1. the artifact is fetched once, checked against its size and sha256, and kept by digest;
-   a zip is opened and the member named by the artifact's ``path`` is taken;
+   a zip is opened and the member named by the artifact's ``path`` is taken; when the
+   maker ships the model inside a larger file, ``embedded`` walks the streams of an OLE
+   compound file (an Altium library) to the STEP, ``extracted_sha256`` checks what comes
+   out, and ``part`` asks the converter for one named product of an assembly STEP;
 2. the STEP goes to the OCCT converter's ``/faces`` route, which returns its triangles in
    one group per part and colour, each face carrying the colour its STEP states (its own
    style, else its placed instance's, its part's or its assembly's) as sRGB screen values,
@@ -53,7 +56,7 @@ MAX_TRIANGLES = 20_000
 PLACES = 3
 
 Fetch = Callable[[str], bytes]
-Convert = Callable[[bytes, str], list[dict[str, Any]]]
+Convert = Callable[..., list[dict[str, Any]]]
 
 
 class MeshError(Exception):
@@ -110,6 +113,134 @@ def step_bytes(data: bytes, member: str) -> bytes:
         if info.file_size > 200 * 1024 * 1024:
             raise MeshError("the model in the zip is over 200 MB")
         return zf.read(info)
+
+
+# -- a model inside a larger maker file (2026-11-12) -----------------------------------
+
+_OLE_MAGIC = bytes.fromhex("D0CF11E0A1B11AE1")
+_END = 0xFFFFFFF0  # sector ids at or above this end a chain
+
+
+def ole_streams(data: bytes) -> dict[str, bytes]:
+    """Every stream of an OLE compound file (Altium's IntLib, PcbLib, PcbDoc), by path.
+
+    Read only, and only the parts of the format the files need: the FAT and DIFAT, the
+    directory tree and the mini stream for small streams.
+    """
+    import struct
+
+    if not data.startswith(_OLE_MAGIC):
+        raise MeshError("the embedded file is not an OLE compound file")
+    ssz = 1 << struct.unpack_from("<H", data, 30)[0]
+    mini = 1 << struct.unpack_from("<H", data, 32)[0]
+    n_fat, dir_start = struct.unpack_from("<II", data, 44)
+    cutoff, minifat_start = struct.unpack_from("<II", data, 56)
+    dif_start, n_dif = struct.unpack_from("<II", data, 68)
+    per = ssz // 4
+
+    def sector(n: int) -> bytes:
+        return data[ssz * (n + 1) : ssz * (n + 2)]
+
+    difat = list(struct.unpack_from("<109I", data, 76))
+    s = dif_start
+    for _ in range(n_dif):
+        if s >= _END:
+            break
+        vals = struct.unpack(f"<{per}I", sector(s))
+        difat += vals[:-1]
+        s = vals[-1]
+    fat: list[int] = []
+    for f in difat[:n_fat]:
+        if f < _END:
+            fat += struct.unpack(f"<{per}I", sector(f))
+
+    def chain(start: int, table: list[int], read: Callable[[int], bytes]) -> bytes:
+        out, seen, n = [], set(), start
+        while n < _END:
+            if n in seen or n >= len(table):
+                raise MeshError("the embedded file's sector chain is broken")
+            seen.add(n)
+            out.append(read(n))
+            n = table[n]
+        return b"".join(out)
+
+    directory = chain(dir_start, fat, sector)
+    entries = []
+    for i in range(len(directory) // 128):
+        e = directory[i * 128 : (i + 1) * 128]
+        name_len = struct.unpack_from("<H", e, 64)[0]
+        left, right, child = struct.unpack_from("<III", e, 68)
+        start, size = struct.unpack_from("<II", e, 116)
+        name = e[: max(name_len - 2, 0)].decode("utf-16le", "replace")
+        entries.append(
+            {"name": name, "type": e[66], "start": start, "size": size}
+            | {"left": left, "right": right, "child": child}
+        )
+    root = entries[0]
+    ministream = chain(root["start"], fat, sector) if root["start"] < _END else b""
+    minifat: list[int] = []
+    if minifat_start < _END:
+        raw = chain(minifat_start, fat, sector)
+        minifat = list(struct.unpack(f"<{len(raw) // 4}I", raw))
+
+    streams: dict[str, bytes] = {}
+
+    def walk(i: int, prefix: str, depth: int = 0) -> None:
+        if i >= len(entries) or depth > 64:
+            return
+        e = entries[i]
+        walk(e["left"], prefix, depth + 1)
+        walk(e["right"], prefix, depth + 1)
+        path = f"{prefix}/{e['name']}" if prefix else e["name"]
+        if e["type"] == 2:
+            if e["size"] < cutoff:
+                body = chain(e["start"], minifat, lambda n: ministream[n * mini : (n + 1) * mini])
+            else:
+                body = chain(e["start"], fat, sector)
+            streams[path] = body[: e["size"]]
+        elif e["type"] == 1:
+            walk(e["child"], path, depth + 1)
+
+    walk(root["child"], "")
+    return streams
+
+
+def _inflated(data: bytes) -> bytes:
+    """``data`` decompressed when it is zlib data (Altium puts a byte or two in front)."""
+    import zlib
+
+    for offset in range(0, 8):
+        head = data[offset : offset + 2]
+        if len(head) == 2 and head[0] == 0x78 and head[1] in (0x01, 0x5E, 0x9C, 0xDA):
+            try:
+                return zlib.decompressobj().decompress(data[offset:], 300 * 1024 * 1024)
+            except zlib.error:
+                continue
+    return data
+
+
+def embedded_step(data: bytes, steps: list[str]) -> bytes:
+    """The STEP reached by walking ``steps``: each a stream of the OLE file in hand."""
+    for step in steps:
+        streams = ole_streams(_inflated(data))
+        if step not in streams:
+            raise MeshError(f"the embedded file has no stream {step!r}")
+        data = streams[step]
+    data = _inflated(data)
+    if not data.lstrip().startswith(b"ISO-10303-21"):
+        raise MeshError("the embedded stream is not a STEP file")
+    return data
+
+
+def selected_step(data: bytes, artifact: dict[str, Any]) -> bytes:
+    """The artifact's STEP: the zip member, then any embedded stream, checked if pinned."""
+    step = step_bytes(data, str(artifact["path"]))
+    if artifact.get("embedded"):
+        step = embedded_step(step, list(artifact["embedded"]))
+    pinned = artifact.get("extracted_sha256")
+    if pinned and hashlib.sha256(step).hexdigest() != pinned:
+        raise MeshError("the STEP taken from the file does not match its recorded sha256")
+    return step
 
 
 # -- the converter's colour groups -----------------------------------------------------
@@ -251,15 +382,23 @@ def make_mesh(
         raise MeshError("the entry has no active STEP model attached")
     model, artifact = chosen["model"], chosen["artifact"]
     up = str(model.get("up_axis") or "z")
-    key = f"{artifact['sha256']}-{up}-r{RECIPE}"
+    picked = "|".join([*(artifact.get("embedded") or []), str(artifact.get("part") or "")])
+    pick = f"-{hashlib.sha256(picked.encode()).hexdigest()[:12]}" if picked.strip("|") else ""
+    key = f"{artifact['sha256']}{pick}-{up}-r{RECIPE}"
     cached = cache_dir / "meshes" / f"{key}.json"
     if cached.is_file():
         return dict(json.loads(cached.read_text()))
     with tracer.start_as_current_span("library.model_mesh") as span:
         span.set_attribute("entry", str(entry.get("name")))
         data = verified_bytes(artifact, fetch, cache_dir)
-        step = step_bytes(data, str(artifact["path"]))
-        groups = convert(step, str(artifact["path"]))
+        step = selected_step(data, artifact)
+        part = artifact.get("part")
+        name = str(artifact["path"]).rsplit("/", 1)[-1]
+        if artifact.get("embedded"):
+            name = str(artifact["embedded"][-1]).rsplit("/", 1)[-1] + ".step"
+        groups = convert(step, name, part=str(part)) if part else convert(step, name)
+        if part and not groups:
+            raise MeshError(f"the STEP has no part named {part!r}")
         parts = reduce(parts_from_groups(groups), MAX_TRIANGLES)
         placed = place(parts, up)
         out = to_json(
@@ -299,7 +438,7 @@ def http_fetch(url: str) -> bytes:
         return bytes(resp.content)
 
 
-def occt_faces(step: bytes, filename: str) -> list[dict[str, Any]]:
+def occt_faces(step: bytes, filename: str, part: str | None = None) -> list[dict[str, Any]]:
     """The STEP's triangles grouped by each face's stated colour, from the OCCT converter."""
     import httpx
 
@@ -310,7 +449,8 @@ def occt_faces(step: bytes, filename: str) -> list[dict[str, Any]]:
         name += ".step"
     try:
         resp = httpx.post(
-            f"{_OCCT_URL}/faces?quality=standard",
+            f"{_OCCT_URL}/faces",
+            params={"quality": "standard", **({"part": part} if part else {})},
             files={"file": (name, step, "application/octet-stream")},
             timeout=300.0,
         )

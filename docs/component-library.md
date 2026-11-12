@@ -119,9 +119,26 @@ clustering. Each part in the response carries `name`, `colour`, `colour_source`,
 `positions` (mm) and `indices`. Meshes are cached by artifact digest, up axis and recipe
 version under `METAFORGE_LIBRARY_MESH_DIR` (default `~/.metaforge/library-meshes`).
 
+### A model inside a larger maker file
+
+Some makers publish a part's 3D model only inside a larger file. Nordic ships its chips'
+bodies inside the Altium libraries of its reference layouts, and Raspberry Pi its chips
+only as named parts of a board's STEP. The artifact stays pinned to the maker's own HTTPS
+file and its sha256, and says how to reach the model:
+
+| Field | Meaning |
+|---|---|
+| `embedded` | Stream paths, walked in order through OLE compound files (an Altium IntLib, PcbLib or PcbDoc); each stream is inflated when it is zlib data. Nordic's nRF52840: `["PCBLib/0.pcblib", "Library/Models/6"]`. |
+| `part` | The product name to keep from an assembly STEP, matched at any depth without regard to case. The converter's `/faces?part=` reads that product alone, at its own origin. |
+| `extracted_sha256` | Optional pin on the STEP that comes out, so a changed library is refused. |
+
+Meshes of different selections from one file are cached apart. An artifact with
+`embedded` or `part` is for viewing only: `library.resolve_component_model` refuses it
+whatever its licence, because the file it pins is not the part's model on its own.
+
 The route answers 404 for an unknown entry and 422 with the reason when the entry has no
-active STEP model, the file changed upstream, or the converter is down or refuses the
-file. Showing a model here does not clear its licence: a model whose licence MetaForge
+active STEP model, the file changed upstream, the embedded stream or named part is not
+there, or the converter is down or refuses the file. Showing a model here does not clear its licence: a model whose licence MetaForge
 does not accept is still refused by `library.resolve_component_model`, which is the route
 into engineering tools and deliverables.
 

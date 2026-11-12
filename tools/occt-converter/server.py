@@ -6,6 +6,7 @@ it over the network instead of shelling out ``docker run``.
 Endpoints:
     POST /convert  — multipart upload (file + quality) → GLB + metadata
     POST /faces    — multipart STEP upload → triangles grouped by each face's own colour
+                     (?part=NAME keeps one named product of an assembly, e.g. a chip on a board)
     GET  /health   — liveness probe
 """
 
@@ -115,7 +116,8 @@ class ConvertHandler(BaseHTTPRequestHandler):
                     self._json_response(400, {"error": "/faces reads STEP files only"})
                     return
                 try:
-                    groups = read_coloured_faces(str(input_path), QUALITY_TIERS[quality])
+                    part = (qs.get("part", [""])[0] or "").strip() or None
+                    groups = read_coloured_faces(str(input_path), QUALITY_TIERS[quality], part=part)
                 except Exception as exc:
                     logger.error("Face read failed: %s", exc)
                     self._json_response(500, {"error": str(exc)})

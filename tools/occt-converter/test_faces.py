@@ -140,3 +140,38 @@ def test_a_part_placed_twice_is_drawn_at_both_places_in_its_instance_colour(
     red = [g for g in groups if close(g["colour"], RED)]
     assert len(red) == 1 and red[0]["colour_source"] == "instance"
     assert min(red[0]["positions"][0::3]) == pytest.approx(10)
+
+
+def test_a_named_part_is_read_alone_at_its_own_origin(tmp_path: Path) -> None:
+    """A chip taken out of a maker's board model (Raspberry Pi's Pico STEPs, 2026-11-12)."""
+    from OCC.Core.gp import gp_Trsf, gp_Vec
+    from OCC.Core.TDataStd import TDataStd_Name
+    from OCC.Core.TopLoc import TopLoc_Location
+
+    doc = TDocStd_Document("test")
+    shapes = XCAFDoc_DocumentTool.ShapeTool(doc.Main())
+    colours = XCAFDoc_DocumentTool.ColorTool(doc.Main())
+    board = shapes.AddShape(BRepPrimAPI_MakeBox(51, 1.6, 21).Shape(), False)
+    chip = shapes.AddShape(BRepPrimAPI_MakeBox(7, 0.9, 7).Shape(), False)
+    TDataStd_Name.Set(board, "PCB")
+    TDataStd_Name.Set(chip, "RPI_RP2040")
+    colours.SetColor(chip, srgb(GREY), XCAFDoc_ColorGen)
+    top = shapes.NewShape()
+    shapes.AddComponent(top, board, TopLoc_Location())
+    move = gp_Trsf()
+    move.SetTranslation(gp_Vec(20, 1.6, 7))
+    shapes.AddComponent(top, chip, TopLoc_Location(move))
+    shapes.UpdateAssemblies()
+    step = tmp_path / "board.step"
+    writer = STEPCAFControl_Writer()
+    writer.SetColorMode(True)
+    writer.SetNameMode(True)
+    writer.Transfer(doc, STEPControl_AsIs)
+    writer.Write(str(step))
+    whole = read_coloured_faces(str(step), 0.1)
+    assert max(x for g in whole for x in g["positions"][0::3]) == pytest.approx(51)  # control
+    groups = read_coloured_faces(str(step), 0.1, part="rpi_rp2040")
+    xs = [x for g in groups for x in g["positions"][0::3]]
+    assert (min(xs), max(xs)) == pytest.approx((0, 7))  # the chip alone, at its own origin
+    assert all(close(g["colour"], GREY) for g in groups)
+    assert read_coloured_faces(str(step), 0.1, part="RP9999") == []

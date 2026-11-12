@@ -202,7 +202,7 @@ def test_a_converter_refusal_is_explained(monkeypatch: pytest.MonkeyPatch) -> No
     import httpx
 
     def failed(url: str, **k: Any) -> httpx.Response:
-        assert url.endswith("/faces?quality=standard")
+        assert url.endswith("/faces") and k["params"] == {"quality": "standard"}
         return httpx.Response(500, json={"error": "Failed to read STEP file"})
 
     monkeypatch.setattr(httpx, "post", failed)

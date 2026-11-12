@@ -123,8 +123,14 @@ def _triangles(face: Any, trsf: Any) -> tuple[list[float], list[int]]:
     return pts, idx
 
 
-def read_coloured_faces(path: str, deflection: float) -> list[dict[str, Any]]:
-    """Every part of the STEP at ``path``, split into one group per stated colour."""
+def read_coloured_faces(
+    path: str, deflection: float, part: str | None = None
+) -> list[dict[str, Any]]:
+    """Every part of the STEP at ``path``, split into one group per stated colour.
+
+    With ``part``, only the first product of that name (any depth, case-insensitive) is
+    read, at its own origin: a chip taken out of a maker's board model. No match gives [].
+    """
     from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
     from OCC.Core.IFSelect import IFSelect_RetDone
     from OCC.Core.STEPCAFControl import STEPCAFControl_Reader
@@ -204,6 +210,25 @@ def read_coloured_faces(path: str, deflection: float) -> list[dict[str, Any]]:
             return
         emit(label, loc, name or _name(label), inherited, instance)
 
+    if part:
+        from OCC.Core.TDF import TDF_ChildIterator
+
+        want = part.strip().lower()
+        found = None
+        it = TDF_ChildIterator(shape_tool.BaseLabel(), True)
+        while it.More() and found is None:
+            lab = it.Value()
+            if _name(lab).lower() == want:
+                ref = TDF_Label()
+                referred = shape_tool.IsReference(lab) and shape_tool.GetReferredShape(lab, ref)
+                found = ref if referred else lab
+            it.Next()
+        if found is None:
+            logger.info("No part named %r in %s", part, path)
+            return []
+        visit(found, TopLoc_Location(), _name(found), _label_colour(color_tool, found), None)
+        logger.info("Read %d coloured groups of part %r from %s", len(out), part, path)
+        return out
     roots = TDF_LabelSequence()
     shape_tool.GetFreeShapes(roots)
     for i in range(1, roots.Length() + 1):
