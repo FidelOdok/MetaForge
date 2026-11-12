@@ -36647,7 +36647,7 @@
     },
     "/v1/projects": {
       "get": {
-        "description": "List all hardware projects.",
+        "description": "List hardware projects: all of them, or the caller's on a shared gateway.",
         "operationId": "list_projects_v1_projects_get",
         "responses": {
           "200": {

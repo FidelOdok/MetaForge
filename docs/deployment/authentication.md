@@ -142,6 +142,46 @@ Callers present the credential as a bearer token:
 Authorization: Bearer <access-token>
 ```
 
+## Several accounts on one gateway
+
+Authentication says *who* is calling. A gateway shared by several accounts
+must also confine each caller to their own projects. A provider that can
+answer that implements a second, optional protocol,
+`ProjectAuthorizer` (`api_gateway/auth/scope.py`):
+
+```python
+async def project_scope(self, principal) -> ProjectScope: ...
+async def project_created(self, principal, project_id: str) -> None: ...
+```
+
+With it installed, the middleware matches every request to its route before
+the route runs, and the route's shape decides how the project is found:
+
+| Route shape | Example | On a shared gateway |
+|---|---|---|
+| `{project_id}` in the path | `GET /v1/twin/projects/{project_id}/…` | answered only for the caller's projects |
+| `project_id` / `projectId` query parameter | `GET /v1/knowledge/search?project_id=…` | parameter required, then checked |
+| `project_id` / `projectId` in the JSON body | `POST /v1/runs` | field required, then checked |
+| `GET /v1/projects` | | filtered to the caller's projects |
+| `POST /v1/projects` | | the new project is registered to its creator via `project_created`; if that fails the project is deleted again and the call returns 503 |
+| `GET` under `/v1/library/`, `/v1/examples`, `/v1/features` | shared reference data | readable; writes refused |
+| anything else | | **refused with 403** |
+
+A project outside the caller's scope gets **404**, the same as one that does
+not exist, so ids cannot be probed. A provider that cannot reach its answer
+raises `AuthUnavailable` and the caller gets **503**, never an empty scope.
+
+The last row is the point: routes are classified from their signatures, so a
+new route that takes `project_id` is confined automatically, and a new route
+that does not is unavailable on a shared gateway until someone decides how it
+is scoped. It is never answered across accounts by default.
+
+A scope marked `unrestricted` is for the deployment's own services (a worker
+calling back into the gateway), never a person: it skips all of the above.
+
+A provider without `ProjectAuthorizer` changes nothing, and a local gateway
+(`auth_mode: off`) never loads any of this.
+
 ## Responses
 
 | Status | Meaning |
