@@ -17,17 +17,30 @@ from __future__ import annotations
 
 import copy
 import re
+from collections.abc import Callable
 from typing import Any
 
 MARK = "component_ref"
 
 # The only code this module writes: one box, maybe turned, then placed. A derived part
 # whose code no longer has this form was redrawn by the agent (MetaForge, 2026-11-11).
-_DERIVED_CODE = re.compile(r"^return \[g\.box\([^()]*\)(\.rot\([^()]*\))?\.at\([^()]*\)\];$")
+# A real part whose library entry has a model is drawn with it (2026-11-12): the derived
+# code is then one g.model call, maybe turned, then placed.
+_DERIVED_CODE = re.compile(
+    r'^return \[g\.(box\([^()]*\)|model\("[A-Za-z0-9_.-]+"\))'
+    r"(\.rot\([^()]*\))?\.at\([^()]*\)\];$"
+)
 
 
-def expand_component_parts(config: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """Return a copy of ``config`` with each linked component's code derived, and a note each."""
+def expand_component_parts(
+    config: dict[str, Any], *, has_model: Callable[[str], bool] | None = None
+) -> tuple[dict[str, Any], list[str]]:
+    """Return a copy of ``config`` with each linked component's code derived, and a note each.
+
+    ``has_model(name)`` says whether the component library entry ``name`` carries a model.
+    A real part linked to such an entry (its ``library`` field) is drawn with
+    ``g.model(name)``; otherwise it is drawn as its bounding box.
+    """
     out = copy.deepcopy(config)
     form = out.get("form") if isinstance(out, dict) else None
     block = form.get("authored") if isinstance(form, dict) else None
@@ -54,19 +67,43 @@ def expand_component_parts(config: dict[str, Any]) -> tuple[dict[str, Any], list
         if size is None or place is None or ("rot" in part and rot is None):
             continue  # the checker says what is wrong
         length, width, height = size
-        shape = f"g.box({_n(length)}, {_n(height)}, {_n(width)})"
+        entry = str((real or {}).get("library") or "").strip()
+        model = bool(entry) and has_model is not None and _safe(has_model, entry)
+        if model:
+            shape = f'g.model("{entry}")'
+        else:
+            shape = f"g.box({_n(length)}, {_n(height)}, {_n(width)})"
         if rot is not None:
             shape += f".rot({', '.join(_n(v) for v in rot)})"
         shape += f".at({', '.join(_n(v) for v in place)})"
         part["code"] = f"return [{shape}];"
         part["derived_from"] = MARK
         part["uses"] = []
+        if model:
+            notes.append(
+                f'part "{part.get("id")}": drawn with library model {entry} '
+                f'for context part "{part[MARK]}"'
+            )
+            continue
         fidelity = (real or {}).get("geometry", {}).get("fidelity") or "not stated"
         notes.append(
             f'part "{part.get("id")}": drawn from context part "{part[MARK]}" '
             f"({_n(length)} x {_n(width)} x {_n(height)} mm, fidelity {fidelity})"
         )
     return out, notes
+
+
+_ENTRY_NAME = re.compile(r"[A-Za-z0-9_.-]{1,80}")
+
+
+def _safe(has_model: Callable[[str], bool], entry: str) -> bool:
+    """Whether to draw with the model: a usable name and a lookup that answers yes."""
+    if not _ENTRY_NAME.fullmatch(entry):
+        return False
+    try:
+        return bool(has_model(entry))
+    except Exception:
+        return False  # the library could not be read: the box still draws
 
 
 def _context_parts(config: dict[str, Any]) -> dict[str, dict[str, Any]]:

@@ -36,6 +36,7 @@ from api_gateway.imagine import (
     component_link,
     engine_page,
     library_link,
+    library_models,
     part_model,
     resolve_part,
     studio_patch,
@@ -720,13 +721,20 @@ class ImagineService:
             config,
             kicad_config=resolve_part.kicad_config_from_env(),
         )
-        # A component in the form that names its real part is drawn from that part.
-        config, linked = component_link.expand_component_parts(config)
+        # A component in the form that names its real part is drawn from that part: with
+        # the part's library model when its entry has one, else as its bounding box.
+        model = library_models.cached(library_models.catalog_model)
+        modelled_entries = await asyncio.to_thread(library_models.linked_models, config, model)
+        config, linked = component_link.expand_component_parts(
+            config, has_model=modelled_entries.__contains__
+        )
+        # Library models the parts name travel with the revision (the page has no network).
+        config, modelled = await asyncio.to_thread(library_models.embed, config, model)
         # Real parts the component library does not hold yet: register once, reuse later.
         library = await asyncio.to_thread(
             library_link.library_notes, config, library_link.catalog_exists
         )
-        drawn = [*drawn, *linked, *library]
+        drawn = [*drawn, *linked, *modelled, *library]
         try:
             checked = engine_page.validate_config(config)
         except engine_page.ConfigError as exc:

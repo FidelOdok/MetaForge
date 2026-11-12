@@ -402,6 +402,16 @@ def check_body_specs(family: str, specs: dict[str, Any]) -> None:
         )
 
 
+def parse_form_code(raw: Any) -> str:
+    """An entry's drawing code, refused by the same rules a studio part's code is."""
+    from twin_core.library.form_code import check_model_code
+
+    try:
+        return check_model_code(raw)
+    except ValueError as exc:
+        raise CatalogError(str(exc)) from exc
+
+
 def _body_specs(family: str, raw: Any) -> dict[str, Sourced]:
     specs = parse_specs(raw)
     check_body_specs(family, specs)
@@ -704,6 +714,9 @@ class ComponentEntry:
     mpn: str = ""
     datasheet: str = ""
     interfaces: list[dict[str, str]] = field(default_factory=list)
+    #: The body of a function of g that draws the part in mm, centred on it: x its length,
+    #: y its height, z its width. A studio places it with g.model(name). "" for none.
+    form_code: str = ""
     notes: str = ""
     version: int = 1
     updated_at: float = 0.0
@@ -1050,6 +1063,7 @@ class SqliteCatalog:
                 mpn=str(data.get("mpn") or "").strip(),
                 datasheet=parse_link("datasheet", data.get("datasheet")),
                 interfaces=parse_interfaces(data.get("interfaces")),
+                form_code=parse_form_code(data.get("form_code")),
                 material=str(data.get("material") or "").strip().lower(),
                 suppliers=parse_suppliers(data.get("suppliers")),
                 notes=str(data.get("notes") or ""),
@@ -1108,6 +1122,7 @@ class SqliteCatalog:
                 "mpn",
                 "datasheet",
                 "interfaces",
+                "form_code",
             }
         elif isinstance(entry, ErgonomicLimitEntry):
             allowed = {
@@ -1210,6 +1225,8 @@ class SqliteCatalog:
                 entry.datasheet = parse_link("datasheet", changes["datasheet"])
             if "interfaces" in changes:
                 entry.interfaces = parse_interfaces(changes["interfaces"])
+            if "form_code" in changes:
+                entry.form_code = parse_form_code(changes["form_code"])
             if "geometry" in changes:
                 entry.geometry = parse_geometry(changes["geometry"])
             if "material" in changes:

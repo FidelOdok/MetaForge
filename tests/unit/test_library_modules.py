@@ -182,3 +182,47 @@ def test_an_entry_saved_with_thickness_moves_to_height_when_height_is_given() ->
     fixed = catalog.update(entry.id, {"specs": {"height_mm": _mm(2.5)}}).as_dict()
     assert fixed["specs"]["height_mm"]["value"] == 2.5
     assert "thickness_mm" not in fixed["specs"]
+
+
+# A library part carries the code that draws it once (2026-11-12): the body of a function
+# of g, in mm, centred on the part, x its length, y its height, z its width. Any studio
+# places it with g.model(name), so the part is drawn once and reused.
+
+XIAO_CODE = "return [g.box(21, 3, 17.8).name('pcb'), g.box(9, 3.2, 7.4).at(-8, 3, 0).name('usb')];"
+
+
+def test_a_module_carries_its_form_code_and_an_update_versions_it() -> None:
+    catalog = SqliteCatalog()
+    entry = catalog.register("component", gnss(form_code=XIAO_CODE)).as_dict()
+    assert entry["form_code"] == XIAO_CODE
+    changed = catalog.update(entry["id"], {"form_code": "return [g.box(1, 1, 1)];"}).as_dict()
+    assert changed["form_code"] == "return [g.box(1, 1, 1)];"
+    assert changed["version"] == 2
+
+
+def test_an_entry_saved_before_form_code_loads_with_none() -> None:
+    catalog = SqliteCatalog()
+    entry = catalog.register("component", gnss()).as_dict()
+    old = {k: v for k, v in entry.items() if k != "form_code"}
+    assert catalog._load(old).as_dict()["form_code"] == ""
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("return [fetch('x')];", "fetch"),
+        ("return [g.box(1,1,1)]; // `x`", "template"),
+        ("x" * 6_001, "6000"),
+        (42, "text"),
+    ],
+)
+def test_form_code_the_studio_would_refuse_is_refused_here(code: Any, message: str) -> None:
+    with pytest.raises(CatalogError, match=message):
+        SqliteCatalog().register("component", gnss(form_code=code))
+
+
+def test_the_studio_and_the_library_refuse_the_same_words() -> None:
+    from api_gateway.imagine.formgraph import authored
+    from twin_core.library import form_code
+
+    assert authored.BANNED_TOKENS is form_code.BANNED_TOKENS

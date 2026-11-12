@@ -20,6 +20,11 @@ engineering verification. Missing specifications remain unknown.
   `length_mm` x `width_mm` x `height_mm`: `thickness_mm` (for plates and
   washers) is refused for these families. An older entry that named its height
   `thickness_mm` drops it when an update sends `height_mm`.
+  An entry can also carry `form_code`, the agent-written code that draws the
+  part once (mm, centred, x length, y height, z width; at most 6,000 bytes),
+  which an Imagine studio places with `g.model(name)`. It is refused for the
+  same words a studio part's code is. See
+  [Imagine stage](imagine-stage.md#library-models-gmodelname).
 - The Imagine studio links a real part to its entry with the part's `library`
   field, and the Imagine stage can list, read and register components, so a
   part researched in one project is found by the next. See

@@ -672,6 +672,29 @@ part drawn this way in its warnings. A part with its own code keeps it, includin
 whose code the agent has since rewritten (for a real outline that is not a box), a reference to a part
 that does not exist is refused, and a component with no reference is flagged as a stand-in.
 
+#### Library models: `g.model(name)`
+
+A component library entry can carry `form_code`: the body of a function of `g` that draws the part once,
+in millimetres, centred on its body, with x its length, y its height and z its width. A studio part places
+it with `g.model("name")`, which returns one shape that takes `.at`, `.rot`, `.scale` and `.name` like any
+other. A `component` part linked to a real part whose library entry has a model is drawn with
+`g.model(entry)` instead of the part's bounding box.
+
+The engine page has no network, so each studio write copies every model its parts name into
+`form.authored.models` as `{name: {code, version, entry}}`. The revision therefore holds the exact code it
+drew with; an update to the library entry reaches a studio on its next write. A name the library lacks, or
+an entry with no `form_code`, is a warning on the write, and the part shows the error on the page.
+
+In the page each part's worker gets only the models its code names, placed after the sandbox is set up,
+like the part's own code. A model's triangles count against the part's budget, and a model may not call
+`g.model` itself. All models in one studio together are capped at 36,000 bytes. The library refuses
+`form_code` with the same words the studio refuses (`twin_core/library/form_code.py`). Code:
+`api_gateway/imagine/library_models.py`, `g.model` in `api_gateway/imagine/engine/authored.js`.
+
+Not yet: a model from a maker's STEP file. Imported geometry is accepted only under a licence on the
+accepted list (`twin_core/library/licences.py`), which KiCad's 3D models (CC-BY-SA) and most makers'
+files are not, so that route needs a person's licence review first.
+
 At the Engineer level the left pane shows the form's own graph instead: a column of parameter
 nodes (each with its slider), a column of part nodes, and the form node. A wire runs from a
 parameter to each part that uses it, and from each part to the form. Sliders here and in the

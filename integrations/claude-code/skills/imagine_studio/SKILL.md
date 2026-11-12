@@ -149,6 +149,17 @@ write:
   the part's `"library"` to the entry's `name`. A write lists the real parts
   that are not linked, and a link to an entry that is not there yet (a
   registration can wait for the person's approval).
+- **Draw a library part once, in the library.** Give the entry a `form_code`
+  (on `library.register_component`, or later with `library.update_component`):
+  the body of a function of `g` that draws the part in mm, centred on its body,
+  x its length, y its height, z its width, from the sizes you read (for a board:
+  the PCB, its connectors, its largest chips; for a display: the glass, the
+  active area, the flex). It has no `p`. Then any studio places it with
+  `g.model("entry_name")`, and a `component` part linked to a real part whose
+  entry has a model is drawn with it instead of its box. The write copies each
+  model into the revision and says which names the library lacks or has no
+  `form_code` for. A library model counts against the part's triangle budget
+  and may not call `g.model` itself.
 - **Every part gets a 3D body, and says how it was made.** For each part you
   record, call `twin.imagine_resolve_part` with it. Pass the KiCad symbol
   (for example `{"kicad": {"symbol": "Sensor_Pressure:BMP280"}}`) when you know it, and a
@@ -463,6 +474,7 @@ with `.at(x, y, z)`.
 | `g.lathe(profile, seg)` | `[[radius, y], ...]` turned about Y |
 | `g.extrude(outline, depth)` | `[[x, z], ...]` pushed along Y and centred; a simple outline that does not cross itself |
 | `g.tube(path, r, seg)` | a round bar along `[[x, y, z], ...]` |
+| `g.model(name)` | a library part, drawn by its entry's `form_code`, as one shape; `name` written as plain text |
 
 `seg` is optional (3 to 96). Every shape takes `.at(x, y, z)`, `.rot(x, y, z)`
 in degrees (about x, then y, then z), `.scale(x, y, z)` or `.scale(s)`, and

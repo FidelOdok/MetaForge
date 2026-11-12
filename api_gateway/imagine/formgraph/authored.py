@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from twin_core.library import form_code
+
 TEMPLATE_ID = "authored"
 KINDS = ("generated", "primitive", "component")
 
@@ -28,34 +30,11 @@ MAX_TOTAL_CODE_BYTES = 40_000
 MAX_PART_TRIANGLES = 20_000
 MAX_TOTAL_TRIANGLES = 100_000
 
-# Words the sandbox must never be asked to run. Matching is on whole words, so
-# "important" is fine and "import" is not. Naming one anywhere in the code is
-# refused, in a comment or a string too: refusing a harmless mention costs the
-# agent a rewording, and allowing a hidden one costs the page its sandbox.
-BANNED_TOKENS = (
-    "fetch",
-    "XMLHttpRequest",
-    "WebSocket",
-    "importScripts",
-    "import",
-    "eval",
-    "Function",
-    "document",
-    "window",
-    "self",
-    "globalThis",
-    "postMessage",
-    "constructor",
-    "prototype",
-    "__proto__",
-    "require",
-    "process",
-    "this",
-)
-_BANNED = re.compile(r"(?<![A-Za-z0-9_$])(" + "|".join(BANNED_TOKENS) + r")(?![A-Za-z0-9_$])")
-
-# Escapes and template strings let code spell a banned name without writing it.
-_HIDING = re.compile(r"\\[ux]|`")
+# Words the sandbox must never be asked to run, shared with the component library's
+# form_code check so a library model is refused by the same list (2026-11-12).
+BANNED_TOKENS = form_code.BANNED_TOKENS
+_BANNED = form_code.BANNED
+_HIDING = form_code.HIDING
 
 _PARAM_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,31}")
 _PART_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")

@@ -136,8 +136,8 @@ await check('sandbox_parameters_are_frozen', async () => {
 await check('sandbox_builder_offers_only_the_documented_methods', async () => {
   const r = await FG.run(
     [part('p', "throw new Error(Object.keys(g).sort().join(','));")], {}, OPTS);
-  const want = ['box', 'cone', 'cylinder', 'extrude', 'frustum', 'lathe', 'sphere', 'torus', 'tube'].join(',');
-  return r.parts[0].error && r.parts[0].error.includes(want) && r.parts[0].error.split(',').length === 9
+  const want = ['box', 'cone', 'cylinder', 'extrude', 'frustum', 'lathe', 'model', 'sphere', 'torus', 'tube'].join(',');
+  return r.parts[0].error && r.parts[0].error.includes(want) && r.parts[0].error.split(',').length === 10
     ? true : 'got ' + r.parts[0].error;
 });
 
@@ -1357,6 +1357,45 @@ await check('the_scene_is_drawn_as_context_and_lights_follow_their_part', async 
   if (!close(L[0].position, [-300, 10, 0]) || !close(L[0].direction, [1, 0, 0])) return 'the light did not follow the shade: ' + JSON.stringify(L[0]);
   m.setBehaviour('lamp', false);
   return m.lights().length === 0 ? true : 'the light stayed on';
+});
+
+// -- library models (2026-11-12) ------------------------------------------------
+// A library entry carries the code that draws its part once; a studio places it with
+// g.model(name). The model's code runs in the part's own sandbox.
+const XIAO = "return [g.box(21, 3, 17.8).name('pcb'), g.box(9, 3.2, 7.4).at(-8, 3, 0).name('usb')];";
+const MODELS = { seeed_xiao: XIAO };
+
+await check('a_library_model_draws_as_one_shape_that_moves_like_any_other', async () => {
+  const r = await FG.run([part('mcu', "return [g.model('seeed_xiao').at(100, 0, 0)];")], {}, { ...OPTS, models: MODELS });
+  const p = r.parts[0];
+  if (p.error) return p.error;
+  if (p.shapes.length !== 1) return 'shapes ' + p.shapes.length;
+  if (p.triangles !== 24) return 'triangles ' + p.triangles;
+  const b = p.bbox;
+  return near(b.min[0], 100 - 12.5) && near(b.max[0], 110.5) && near(b.max[1], 4.6) ? true : JSON.stringify(b);
+});
+
+await check('a_model_the_studio_was_not_given_is_an_error_naming_it', async () => {
+  const r = await FG.run([part('mcu', "return [g.model('nope')];")], {}, { ...OPTS, models: MODELS });
+  const e = r.parts[0].error || '';
+  return e.includes('nope') && e.includes('library') ? true : 'got ' + e;
+});
+
+await check('a_library_model_cannot_use_g_model_itself', async () => {
+  const r = await FG.run([part('mcu', "return [g.model('loop')];")], {}, { ...OPTS, models: { loop: "return [g.model('loop')];" } });
+  const e = r.parts[0].error || '';
+  return e.includes('g.model') ? true : 'got ' + e;
+});
+
+await check('a_library_model_counts_against_the_part_triangle_budget', async () => {
+  const r = await FG.run([part('mcu', "return [g.model('big')];", { max_triangles: 20 })], {}, { ...OPTS, models: { big: 'return [g.box(1, 1, 1), g.box(1, 1, 1)];' } });
+  const e = r.parts[0].error || '';
+  return e.includes('20') ? true : 'got ' + (e || 'no error');
+});
+
+await check('a_part_gets_only_the_models_its_code_names', async () => {
+  const src = FG.workerSource(part('mcu', "return [g.model('seeed_xiao')];"), NODE_PRE, NODE_POST, { seeed_xiao: XIAO, other_part: "return [g.box(1,1,1).name('SECRET_OTHER')];" });
+  return src.includes('seeed_xiao') && !src.includes('SECRET_OTHER') ? true : 'models leaked or missing';
 });
 
 console.log(results.map((r) => JSON.stringify(r)).join('\n'));

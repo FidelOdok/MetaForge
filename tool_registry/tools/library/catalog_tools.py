@@ -375,7 +375,11 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "be an accepted one), material (a library material name), and suppliers "
                 "[{supplier, sku, url}]. For a bought part also give manufacturer, mpn (the "
                 "maker's order code), datasheet (an http(s) link) and interfaces [{id, bus, "
-                "dir}] (dir in, out or bi). Register a real part the first time you choose it, "
+                "dir}] (dir in, out or bi), and form_code: the body of a function of g "
+                "that draws the part once, in mm, centred on its body, x its length, y its "
+                "height, z its width, with the same g primitives as a studio part (for a "
+                "board: the PCB, its connectors and largest chips). A studio places it with "
+                "g.model(name). Register a real part the first time you choose it, "
                 "so later projects find it with library.list_components instead of "
                 "researching it again. " + _SPECS + _SOURCES + " For a standard part, "
                 "build the entry with library.standard_part and register what it returns. "
@@ -414,6 +418,13 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                         },
                         "required": ["id", "bus"],
                     },
+                },
+                "form_code": {
+                    "type": "string",
+                    "description": (
+                        "Drawing code for g.model(name): the body of a function of g, "
+                        "mm, centred, x length, y height, z width. At most 6000 bytes."
+                    ),
                 },
                 "notes": {"type": "string"},
             }

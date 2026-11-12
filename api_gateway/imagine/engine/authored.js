@@ -60,9 +60,10 @@
     }
   }
 
-  function workerMain(PARTS, post, listen) {
+  function workerMain(PARTS, post, listen, MODELS) {
     'use strict';
     var made = new WeakSet();
+    var modelDepth = 0;
 
     function fail(msg) { throw new Error(msg); }
     function isNum(v) { return typeof v === 'number' && isFinite(v); }
@@ -200,6 +201,28 @@
     }
 
     var g = {
+      // A library part, drawn by the code its library entry carries (MetaForge, 2026-11-12).
+      // The model runs here, in this part's sandbox, and becomes one shape.
+      model: function (name) {
+        var fn = MODELS && Object.prototype.hasOwnProperty.call(MODELS, name) ? MODELS[name] : null;
+        if (typeof fn !== 'function') fail('g.model: the studio has no library model "' + String(name).slice(0, 80) + '"; register it with form_code in the component library, or draw the part with g.box and the others');
+        if (modelDepth) fail('g.model: a library model cannot use g.model');
+        var out;
+        modelDepth++;
+        try { out = fn(g); } finally { modelDepth--; }
+        if (!Array.isArray(out)) fail('g.model("' + name + '"): the library model must return a list of shapes');
+        var P = [], I = [];
+        for (var k = 0; k < out.length; k++) {
+          var sh = out[k];
+          if (!sh || !made.has(sh)) fail('g.model("' + name + '"): the library model returned something that is not a shape');
+          var base = P.length / 3;
+          for (var a = 0; a < sh.pos.length; a++) P.push(sh.pos[a]);
+          for (var b = 0; b < sh.idx.length; b++) I.push(sh.idx[b] + base);
+          made.delete(sh);
+        }
+        if (!I.length) fail('g.model("' + name + '"): the library model drew nothing');
+        return shape(P, I).name(name);
+      },
       box: function (w, h, d) {
         pos(w, 'width', 'box'); pos(h, 'height', 'box'); pos(d, 'depth', 'box'); charge(12, 'box');
         var x = w / 2, y = h / 2, z = d / 2, P = [], I = [];
@@ -394,13 +417,34 @@
   var BROWSER_POST = '__main(__PARTS, __post, __listen);';
 
   // The worker's source: the sandbox first, the agent's code last.
-  function workerSource(part, pre, post) {
+  // The library models a part's code names with a plain g.model("name"), and no others.
+  var MODEL_CALL = /g\.model\(\s*['"]([A-Za-z0-9_.-]{1,80})['"]\s*\)/g;
+  function modelsFor(code, models) {
+    var out = [], seen = {}, m;
+    if (!models) return out;
+    MODEL_CALL.lastIndex = 0;
+    while ((m = MODEL_CALL.exec(String(code))) !== null) {
+      var n = m[1];
+      if (!seen[n] && Object.prototype.hasOwnProperty.call(models, n) && typeof models[n] === 'string') { seen[n] = true; out.push(n); }
+    }
+    return out;
+  }
+
+  // The worker's source: the sandbox first, the agent's code last. A library model's code is
+  // the agent's too, so it goes in after the sandbox, as the body of its own function.
+  function workerSource(part, pre, post, models) {
+    var names = modelsFor(part.code, models);
+    var lib = names.map(function (n) {
+      return JSON.stringify(n) + ': function (g) { "use strict";\n' + String(models[n]) + '\n}';
+    }).join(',\n');
     return (
       "'use strict';\n" + (pre === undefined ? BROWSER_PRE : pre) + '\n' +
       '(' + harden.toString() + ')(' + JSON.stringify(HARDEN_NAMES) + ');\n' +
-      'const __main = ' + workerMain.toString() + ';\n' +
+      'const __main0 = ' + workerMain.toString() + ';\n' +
       'const __PARTS = { ' + JSON.stringify(String(part.id)) + ': function (p, g) { "use strict";\n' +
       String(part.code) + '\n} };\n' +
+      'const __MODELS = {' + (lib ? '\n' + lib + '\n' : '') + '};\n' +
+      'const __main = function (a, b, c) { return __main0(a, b, c, __MODELS); };\n' +
       (post === undefined ? BROWSER_POST : post)
     );
   }
@@ -820,7 +864,7 @@
         resolve(Object.assign({ id: part.id, name: part.name, kind: part.kind, body: !!part.body, triangles: 0 }, extra));
       }
       try {
-        w = o.makeWorker(workerSource(part, o.pre, o.post));
+        w = o.makeWorker(workerSource(part, o.pre, o.post, o.models));
       } catch (e) {
         return finish({ error: 'the sandbox could not start: ' + String((e && e.message) || e).slice(0, 200) });
       }
@@ -1453,8 +1497,16 @@
     return rules;
   }
 
+  // The library models the gateway copied into the form when it was written: {name: code}.
+  function modelCode(form) {
+    var raw = (form && form.authored && form.authored.models) || {}, out = {};
+    Object.keys(raw).forEach(function (n) { if (raw[n] && typeof raw[n].code === 'string') out[n] = raw[n].code; });
+    return out;
+  }
+
   function mount(env) {
     var THREE = env.THREE, doc = env.document || document, form = env.cfg.form, parts = form.authored.parts;
+    env.options = Object.assign({}, env.options, { models: modelCode(form) });
     var params = Object.assign({}, form.params), ranges = form.ranges || {};
     var group = new THREE.Group();
     group.name = 'authored-form';
@@ -2473,5 +2525,5 @@
       tryVariant: tryVariant, showSideBySide: showSideBySide, sideBySide: function () { return sideGroup; }, useVariant: useVariant };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, estimateCost: estimateCost, renderCost: renderCost, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, fitCheck: fitCheck, fitWithJoins: fitWithJoins, fitMarkRegions: fitMarkRegions, screeningRules: screeningRules, workerSource: workerSource, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, estimateCost: estimateCost, renderCost: renderCost, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, fitCheck: fitCheck, fitWithJoins: fitWithJoins, fitMarkRegions: fitMarkRegions, screeningRules: screeningRules, workerSource: workerSource, modelCode: modelCode, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });
