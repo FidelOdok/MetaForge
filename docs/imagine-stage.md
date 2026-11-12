@@ -672,6 +672,18 @@ part drawn this way in its warnings. A part with its own code keeps it, includin
 whose code the agent has since rewritten (for a real outline that is not a box), a reference to a part
 that does not exist is refused, and a component with no reference is flagged as a stand-in.
 
+#### Prices from the library
+
+A real part linked to a library entry (`library`) that has no `cost` of its own is priced on each write
+from the entry's supplier offers: the cheapest offer confirmed on a live page, at the price break that
+applies to the build quantity (`process.qty`, else 1), preferring pounds because the cost estimate adds only
+pounds. With no pound offer the cheapest confirmed offer is kept in its own currency, and the page says it is
+not added; no exchange rate is assumed. An offer marked `confirmed: false` (a search snippet or cached page)
+never sets a price. The derived `cost` carries `derived_from: "library"` and its source (library entry and
+version, supplier, SKU, the day it was read and how), and is derived again on every write; a `cost` the agent
+wrote is left alone. One warning lists the linked parts that have no confirmed price. Code:
+`api_gateway/imagine/library_cost.py`.
+
 #### Library models: `g.model(name)`
 
 A component library entry can carry `form_code`: the body of a function of `g` that draws the part once,

@@ -35,6 +35,7 @@ from pydantic import ValidationError
 from api_gateway.imagine import (
     component_link,
     engine_page,
+    library_cost,
     library_link,
     library_models,
     part_model,
@@ -730,11 +731,15 @@ class ImagineService:
         )
         # Library models the parts name travel with the revision (the page has no network).
         config, modelled = await asyncio.to_thread(library_models.embed, config, model)
+        # A linked part with no cost of its own is priced from the library's confirmed offers.
+        config, priced = await asyncio.to_thread(
+            library_cost.price_parts, config, library_cost.cached(library_cost.catalog_entry)
+        )
         # Real parts the component library does not hold yet: register once, reuse later.
         library = await asyncio.to_thread(
             library_link.library_notes, config, library_link.catalog_exists
         )
-        drawn = [*drawn, *linked, *modelled, *library]
+        drawn = [*drawn, *linked, *modelled, *priced, *library]
         try:
             checked = engine_page.validate_config(config)
         except engine_page.ConfigError as exc:

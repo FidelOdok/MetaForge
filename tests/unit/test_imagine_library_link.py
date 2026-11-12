@@ -96,7 +96,9 @@ async def test_a_studio_write_carries_the_note_until_the_part_is_linked() -> Non
         for p in linked["context"]["components"]["parts"]:
             p["library"] = f"lib_{p['id']}"
         second = await svc.put_studio(project, linked, actor="test")
-        assert not [w for w in second.warnings if "library" in w], second.warnings
+        # Link notes only; the parts have no price yet, which library_cost says separately.
+        links = [w for w in second.warnings if "library" in w and "price" not in w]
+        assert not links, second.warnings
     finally:
         catalog_routes.init_catalog(None)
         ops.init_operations(None)
