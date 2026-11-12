@@ -31,7 +31,7 @@ class FakeProvider:
     name = "fake"
 
     def __init__(self, *, scoped: bool = True, down: bool = False) -> None:
-        self.scopes = {"alice": {ALICE_P}, "bob": {BOB_P}}
+        self.scopes: dict[str, set[str]] = {"alice": {ALICE_P}, "bob": {BOB_P}, "svc": set()}
         self.created: list[tuple[str, str]] = []
         self.down = down
         self.fail_create = False
@@ -47,6 +47,8 @@ class FakeProvider:
     async def project_scope(self, principal: Principal) -> ProjectScope:
         if self.down:
             raise AuthUnavailable("control plane down")
+        if principal.subject == "svc":
+            return ProjectScope(unrestricted=True)
         return ProjectScope(frozenset(self.scopes[principal.subject]))
 
     async def project_created(self, principal: Principal, project_id: str) -> None:
@@ -217,3 +219,8 @@ def test_every_real_gateway_route_has_a_tenancy() -> None:
     assert not any(
         t is RouteTenancy.SHARED_READ and m not in ("GET", "HEAD") for (m, _), t in table.items()
     )
+
+
+def test_the_deployments_own_services_are_unrestricted(client: TestClient) -> None:
+    assert client.get("/v1/memory/insights", headers=h("svc")).status_code == 200
+    assert client.get(f"/v1/twin/projects/{BOB_P}/nodes", headers=h("svc")).status_code == 200

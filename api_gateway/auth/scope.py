@@ -66,8 +66,13 @@ class ProjectScope:
     """The projects one principal may access."""
 
     project_ids: frozenset[str] = field(default_factory=frozenset)
+    #: The deployment's own services (a worker calling back into the gateway),
+    #: never a person: every project and every route, as without scoping.
+    unrestricted: bool = False
 
     def allows(self, project_id: str | None) -> bool:
+        if self.unrestricted:
+            return True
         return project_id is not None and project_id in self.project_ids
 
 
@@ -238,6 +243,8 @@ async def _body_project(request: Request) -> str | None:
 
 async def decide(app: ASGIApp, request: Request, scope: ProjectScope) -> ScopeDecision:
     """Whether ``request`` stays inside ``scope``."""
+    if scope.unrestricted:
+        return ScopeDecision(allowed=True)
     with tracer.start_as_current_span("auth.project_scope") as span:
         route, path_params = _match(app, request)
         if route is None:

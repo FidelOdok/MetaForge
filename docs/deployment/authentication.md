@@ -176,6 +176,9 @@ new route that takes `project_id` is confined automatically, and a new route
 that does not is unavailable on a shared gateway until someone decides how it
 is scoped. It is never answered across accounts by default.
 
+A scope marked `unrestricted` is for the deployment's own services (a worker
+calling back into the gateway), never a person: it skips all of the above.
+
 A provider without `ProjectAuthorizer` changes nothing, and a local gateway
 (`auth_mode: off`) never loads any of this.
 
