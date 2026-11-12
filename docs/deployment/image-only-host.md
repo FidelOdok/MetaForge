@@ -14,8 +14,10 @@ published to GitHub Container Registry and signed:
 | `metaforge-occt`, `metaforge-dashboard` | `adapter-images.yml`, when their folder changes |
 | `metaforge-seaweedfs` (the object store) | `mirror-images.yml`: the signed upstream release, copied and re-signed as ours |
 
-Each is tagged `:latest` and `:<commit sha>`. So a host keeps a small deploy
-folder and updates by pulling, never by building.
+Each is tagged `:latest`, and every image is tagged `:<commit sha>` for every
+commit on `main`, whether or not it was rebuilt at that commit (see
+[One SHA pins the whole stack](#one-sha-pins-the-whole-stack)). So a host keeps
+a small deploy folder and updates by pulling, never by building.
 
 The OpenFOAM adapter is opt-in. Its image is about 4 GB, so it runs only
 under the `cfd` compose profile: add `cfd` to `COMPOSE_PROFILES` in the host's `.env`
@@ -148,7 +150,26 @@ copy them once. Each run:
    every service to be healthy.
 
 To pin images to one build instead of `latest`, set `METAFORGE_GATEWAY_TAG`,
-`METAFORGE_ADAPTER_TAG` and `METAFORGE_DASHBOARD_TAG` in `.env`.
+`METAFORGE_ADAPTER_TAG` and `METAFORGE_DASHBOARD_TAG` in `.env` to the same
+commit SHA, and pass that SHA as `--ref` so the bundle matches.
+
+### One SHA pins the whole stack
+
+Images are rebuilt only when their inputs change, so most commits build a new
+gateway and nothing else. The `commit image tags` workflow
+(`.github/workflows/commit-image-tags.yml`) runs after every push to `main`. It
+waits for that commit's image builds, then gives every image pulled at
+`latest` a `:<sha>` tag:
+
+- an image built at that commit already has it;
+- any other image gets the digest of its nearest tagged ancestor on `main`,
+  which is exactly what `:latest` named once that commit's builds finished.
+
+Nothing is rebuilt or re-signed: the tag points at a digest CI already signed,
+and each digest is verified before it is tagged. A commit whose gateway image
+did not build, or whose adapter build failed, gets no stack tag at all, so a
+`:<sha>` that exists always names a complete, signed stack. The logic is in
+`scripts/ci/tag_commit_images.sh`.
 
 ### Accepting key-signed images
 
