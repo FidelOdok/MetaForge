@@ -103,7 +103,7 @@ jobs:
       # instead of skipping them.
       - name: Install the verification service (pinned)
         env:
-          VERIFICATION_REF: f7886f30fa99ad0c26d2607352ff5c6eb77c49ef
+          VERIFICATION_REF: 33b25fb4bdc971009d10c0a43e490f7cbb1d493d
         run: pip install "metaforge-verification @ git+https://github.com/FidelOdok/MetaForge-Verification@${VERIFICATION_REF}"
       - run: pytest tests/unit/ -x --tb=short -q
         env:
