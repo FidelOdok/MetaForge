@@ -56,6 +56,11 @@ async def resolve(
         if model.engine_versions and engine_version not in model.engine_versions:
             raise ValueError("an explicitly supported engine version is required")
         for asset in model.artifacts:
+            if asset.selected:
+                raise ValueError(
+                    f"asset {asset.path} is reached inside a larger maker file "
+                    "(embedded or part selector); it is for viewing only"
+                )
             if not is_accepted(asset.licence):
                 raise ValueError(f"asset licence requires review: {asset.licence}")
         visiting.add(key)

@@ -36,6 +36,7 @@ from api_gateway.imagine.schemas import (
     HandoverResult,
     ImagineEvent,
     ReworkPost,
+    StudioPatch,
     StudioPut,
     StudioResponse,
 )
@@ -183,6 +184,23 @@ async def put_studio(project_id: str, body: StudioPut, request: Request) -> Stud
         "put_studio",
         project_id,
         lambda: get_service().put_studio(project_id, body.config, actor=actor),
+    )
+
+
+@router.patch(f"{_BASE}/studio", response_model=StudioResponse)
+async def patch_studio(project_id: str, body: StudioPatch, request: Request) -> StudioResponse:
+    """The next revision from changes to ``base_revision``, checked as a full config is.
+
+    409 when the studio has moved past ``base_revision``, 400 when a change names something
+    that does not exist, 422 when the result fails the formgraph checks; nothing is written.
+    """
+    actor = _actor(request)
+    return await _call(
+        "patch_studio",
+        project_id,
+        lambda: get_service().patch_studio(
+            project_id, body.base_revision, body.changes, actor=actor
+        ),
     )
 
 

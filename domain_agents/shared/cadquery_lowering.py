@@ -501,24 +501,18 @@ def _lower_one(
 
     if isinstance(entity, RevolveEntity):
         sketch_var = var_map[entity.sketch_ref]
-        axis_dir_attr = "xDir" if entity.axis == "H" else "yDir"
-        start_var = f"{var}_axis_start"
-        end_var = f"{var}_axis_end"
-        # Derive the axis from the sketch workplane's OWN local coordinate
-        # system at runtime -- xDir/yDir already account for which plane
-        # (XY/XZ/YZ) and offset the sketch is on, so this reuses CadQuery's
-        # own plane math instead of hand-deriving world-space axis vectors
-        # per plane by hand (the same class of unverified-sign-convention
-        # mistake that produced the pocket bug, MET-692).
-        script_lines.append(f"{start_var} = {sketch_var}.plane.origin")
-        op = "-" if entity.reversed else "+"
-        script_lines.append(f"{end_var} = {start_var} {op} {sketch_var}.plane.{axis_dir_attr}")
+        # Workplane.revolve takes its axis in the workplane's LOCAL coordinates
+        # and maps them to world itself (plane.toWorldCoords), so the axis is
+        # the sketch's own H (local x) or V (local y) through its origin, on
+        # every plane and offset. Passing world points (plane.origin +
+        # plane.yDir) only matched on XY: on XZ the world yDir (0, 0, 1) was
+        # read as the local normal and the solid came out with zero volume.
+        unit = -1 if entity.reversed else 1
+        end = (unit, 0, 0) if entity.axis == "H" else (0, unit, 0)
         current = body_current.get(entity.body_ref)
         revolved_var = f"{var}_revolved" if current is not None else var
         script_lines.append(
-            f"{revolved_var} = {sketch_var}.revolve({_fmt(entity.angle)}, "
-            f"({start_var}.x, {start_var}.y, {start_var}.z), "
-            f"({end_var}.x, {end_var}.y, {end_var}.z))"
+            f"{revolved_var} = {sketch_var}.revolve({_fmt(entity.angle)}, (0, 0, 0), {end!r})"
         )
         if current is not None:
             script_lines.append(f"{var} = {current}.union({revolved_var})")

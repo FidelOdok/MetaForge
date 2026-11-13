@@ -32,6 +32,12 @@ logger = structlog.get_logger(__name__)
 INLINE_LIMIT_ENV = "METAFORGE_TOOL_RESULT_INLINE_CHARS"
 #: A result at or under this renders inline (about 2k tokens).
 DEFAULT_INLINE_LIMIT = 8_000
+#: Env var for the default read_tool_result window, in characters.
+READ_CHARS_ENV = "METAFORGE_TOOL_RESULT_READ_CHARS"
+#: A read that names no limit returns this many characters (about 750 tokens). Every
+#: window stays in the context for the rest of the turn, so the default is small; a read
+#: may still ask for up to the inline limit (2026-11-11).
+DEFAULT_READ_CHARS = 3_000
 #: Oldest results are evicted past this many, and reading one says so.
 MAX_STORED_RESULTS = 64
 #: Name of the native tool that reads a stored result.
@@ -55,6 +61,21 @@ def inline_limit() -> int:
         if value > 0:
             return value
     return DEFAULT_INLINE_LIMIT
+
+
+def read_chars() -> int:
+    """The default read window, never above the inline limit; a bad value falls back."""
+    raw = os.environ.get(READ_CHARS_ENV, "").strip()
+    value = DEFAULT_READ_CHARS
+    if raw:
+        try:
+            parsed = int(raw)
+        except ValueError:
+            logger.warning("tool_result_read_chars_invalid", value=raw)
+        else:
+            if parsed > 0:
+                value = parsed
+    return min(value, inline_limit())
 
 
 def _render(value: Any) -> str:
@@ -152,7 +173,7 @@ class ResultStore:
         """A window of a stored result, or of one of its top-level keys."""
         item = self.get(handle)
         cap = inline_limit()
-        width = cap if limit is None else max(1, min(int(limit), cap))
+        width = read_chars() if limit is None else max(1, min(int(limit), cap))
         start = max(0, int(offset))
         value = item.value
         if key is not None:
@@ -195,7 +216,9 @@ class ResultStore:
                 "note": (
                     f"Result is {item.size} chars, too large to inline. Read more with "
                     f"{READER_TOOL_NAME}(handle='{item.handle}', offset=0) or pass "
-                    "key='<top-level key>' for one field. Only read what you need."
+                    "key='<top-level key>' for one field. A read returns "
+                    f"{read_chars()} chars unless you pass limit (up to "
+                    f"{inline_limit()}). Only read what you need."
                 ),
             }
         )
@@ -206,8 +229,117 @@ READER_INPUT_SCHEMA: dict[str, object] = {
     "properties": {
         "handle": {"type": "string", "description": "A result_handle from an earlier tool result."},
         "offset": {"type": "integer", "description": "Character offset to start at (default 0)."},
-        "limit": {"type": "integer", "description": "Max characters to return (capped)."},
+        "limit": {
+            "type": "integer",
+            "description": (
+                "Max characters to return. Omit for a small default window; larger "
+                "values are capped."
+            ),
+        },
         "key": {"type": "string", "description": "Read one top-level key of the result instead."},
     },
     "required": ["handle"],
 }
+
+
+# -- clearing old results from a long turn (MetaForge, 2026-11-11) ------------------------
+
+#: Env var for the threshold, in characters of old results; 0 turns clearing off.
+CLEAR_CHARS_ENV = "METAFORGE_TOOL_RESULT_CLEAR_CHARS"
+#: Old results (all but the newest few) are cleared once they pass this many characters
+#: together (about 12k tokens). High on purpose: clearing breaks the prompt cache after the
+#: first cleared message, so it should happen a few times in a long turn, not every step.
+DEFAULT_CLEAR_CHARS = 48_000
+#: The newest results stay verbatim: the model is usually still working from them.
+KEEP_RECENT_RESULTS = 3
+#: A result this small stays: its stub would save little.
+MIN_CLEAR_CHARS = 1_000
+
+
+def clear_chars() -> int:
+    """The configured clearing threshold; 0 means never clear."""
+    raw = os.environ.get(CLEAR_CHARS_ENV, "").strip()
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            logger.warning("tool_result_clear_chars_invalid", value=raw)
+    return DEFAULT_CLEAR_CHARS
+
+
+def _is_stub(content: str) -> bool:
+    return content.startswith('{"cleared": true')
+
+
+def _existing_handle(content: str) -> str | None:
+    """The handle of a result that is already a summary plus a handle (``offer``)."""
+    if not content.startswith("{") or '"result_handle"' not in content:
+        return None
+    try:
+        value = json.loads(content)
+    except ValueError:
+        return None
+    handle = value.get("result_handle") if isinstance(value, dict) else None
+    return handle if isinstance(handle, str) else None
+
+
+def clear_stale_results(
+    messages: list[dict[str, Any]],
+    store: ResultStore,
+    *,
+    keep_recent: int = KEEP_RECENT_RESULTS,
+    min_chars: int = MIN_CLEAR_CHARS,
+) -> list[dict[str, Any]]:
+    """``messages`` with old tool results cleared, once they pass the threshold together.
+
+    Old means every ``tool`` message but the newest ``keep_recent``. When those, counting
+    only results of at least ``min_chars``, pass :func:`clear_chars` characters, each is
+    stored behind a handle (or keeps the one it already has) and replaced by a stub naming
+    the tool, the size and how to read it again with ``read_tool_result``. The tool call
+    and the model's own words about the result stay. Returns ``messages`` itself when
+    nothing is cleared; never changes it in place.
+    """
+    limit = clear_chars()
+    if limit <= 0:
+        return messages
+    names: dict[str, str] = {}
+    for m in messages:
+        for call in m.get("tool_calls") or []:
+            names[str(call.get("id"))] = str((call.get("function") or {}).get("name") or "tool")
+    results = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    old = results[: max(0, len(results) - keep_recent)]
+    targets = [
+        i
+        for i in old
+        if isinstance(messages[i].get("content"), str)
+        and len(messages[i]["content"]) >= min_chars
+        and not _is_stub(messages[i]["content"])
+    ]
+    total = sum(len(messages[i]["content"]) for i in targets)
+    if total < limit:
+        return messages
+    out = list(messages)
+    for i in targets:
+        content = messages[i]["content"]
+        tool = names.get(str(messages[i].get("tool_call_id")), "tool")
+        handle = _existing_handle(content) or store.put(tool, content, len(content)).handle
+        stub = {
+            "cleared": True,
+            "tool": tool,
+            "result_handle": handle,
+            "size_chars": len(content),
+            "note": (
+                "This result was cleared from the conversation to save context; what you "
+                "concluded from it above still stands. Read it again with "
+                f"{READER_TOOL_NAME}(handle='{handle}') only if you need a detail you did "
+                "not note."
+            ),
+        }
+        out[i] = {**messages[i], "content": json.dumps(stub)}
+    logger.info(
+        "tool_results_cleared",
+        results=len(targets),
+        chars=total,
+        kept_recent=min(keep_recent, len(results)),
+    )
+    return out

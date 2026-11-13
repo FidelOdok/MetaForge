@@ -16,7 +16,7 @@ its own copy; this one lives in `api_gateway/imagine/` (provenance in its
 |---|---|
 | Gateway | `/v1/twin/projects/{project_id}/imagine/...` (`api_gateway/imagine/`) |
 | Twin item | `IMG-STUDIO`, work product type `imagine_studio` (a definition: every config change or rework is its next revision) |
-| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_handover_status`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
+| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_patch_studio`, `twin.imagine_handover_status`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
 | Engine | `api_gateway/imagine/engine/` (HTML, CSS and JS), three.js r128 vendored under `engine/vendor/` |
 
 ## Verification levels
@@ -43,10 +43,20 @@ version; decisions, requirements and entities are written at their default,
 proposed authority; manufacturing context fields are `assumption` or
 `user_stated`, never `decision`; interface contract values are `estimated`.
 
+**Screening an authored form.** The enclosure checks (wall thickness, draft, fit,
+cost) are not run for an authored form, so the page screens it from what its drawn
+triangles measured: that every part draws, the tip angle against a 15 degree
+screening choice, the overhang share (an upper bound, reported without a limit) and
+whether components overlap. The stored entry also lists the enclosure checks as
+`na`, "not run", never as passed. Nothing is stored until a measurement exists.
+
 ## The studio
 
 An agent writes the studio with `twin.imagine_put_studio` (or `PUT
-/studio`): a formgraph product config, checked with the merged
+/studio`), and changes it with `twin.imagine_patch_studio` (or `PATCH /studio`): a list of edits
+(JSON Patch style, a list item named by its `id`) applied to the revision the
+agent read, then checked and written exactly as a full config is, so a
+one-line change is not a whole-config rewrite. The config is a formgraph product config, checked with the merged
 `build_page` and `fg_context` rules. One thing differs from the plugin: the
 product context (real parts, machines, options, models, scenarios, packed
 references, made parts) travels **inline** as `config.context`, never as a
@@ -214,7 +224,8 @@ the person must be the authenticated principal. An agent's "confirm" of an
 assumption is recorded as an acceptance there too.
 
 **The concept mesh without a person.** The checklist's `concept_assembly`
-item needs an illustrative concept mesh in the project. An agent makes one
+item is cleared by a person having seen the form, or by an illustrative concept
+mesh in the project. An agent makes a mesh
 with `twin.render_concept_image` and then `twin.generate_concept_mesh` from
 that image (a job; poll `twin.job_status`). Both are illustrative writes, so
 a project policy of `auto_clean` or `auto` approves them within the spend cap
@@ -331,8 +342,13 @@ parity test keeps the two equal:
 5. `parts`: one chosen part per function, each with a source, a retrieved
    date, interfaces and a 3D envelope.
 6. `manufacturing_context`: process, material and quantity recorded.
-7. `concept_assembly`: a chosen part for every function, and an illustrative
-   concept mesh for the project.
+7. `concept_assembly`: a chosen part for every function, and the form seen:
+   either a person has said "I have seen this form" for this revision (the
+   studio's button; the server stamps the revision, so a form the agent changed
+   since is not covered, and an agent cannot record it), or an illustrative
+   concept mesh exists. The mesh is optional: nothing downstream reads it, it can
+   never be evidence, and a paid provider should not decide whether a design is
+   ready.
 8. `interfaces`: interfaces described, so contracts can be proposed.
 9. `screening`: screening results stored at V2.
 
@@ -426,6 +442,28 @@ An invalid config is a `422` whose body is the service's report with verdict
 `invalid`. Over MCP, `twin.imagine_validate` returns that report, and the
 blocked report, as a result and not as an error. It is read-only, so it is never
 held for approval.
+
+### The form in the revision
+
+When the studio's form is authored (`form.template` is `authored`), the revision
+sent to the service carries `form`: `kind: "authored"` and each part's `id`, its
+`kind` (`generated`, `primitive` or `component`) and whether it is the `body`. The
+geometry code never leaves the studio. A studio from before the enclosure template was
+removed sends no `form`, because the service refuses fields it does not know. If an
+authored block has no usable parts, none is sent.
+
+For an authored form the service adds advisory findings and no blocking one:
+`form.enclosure_checks` (`not_assessed`: the checks that need an enclosure were not
+run), `form.confidence_mix` (every part is a bought component) and, from what a look
+measured (see "Authored forms"), `form.measured` (`not_assessed` when nobody looked at
+this revision), `form.balance` (the tip angle against a stated 15 degree screening
+threshold, `fail` when it would tip over, `not_assessed` for a form with no flat base)
+and `form.component_overlap` (one `fail` per overlapping pair of components, or one
+`pass`). Overhang is carried and not judged. The measurement rides in the revision's
+`form.measured` only when it was recorded for that revision. Advisory findings
+cannot change the verdict, a gate or the level. The verification service must be a
+build that knows `form`; an older one refuses the request, so the pin MetaForge's CI
+installs has to move with this change.
 
 ## Rework
 
@@ -530,6 +568,331 @@ files in a sandboxed frame in Chromium and checks the empty state, the
 labels, the bounding-box fit through a resize, the one-column layout and the
 bounded height (`npx playwright test imagine-engine`).
 
+## Authored forms
+
+Every form is authored. The enclosure template was removed: the checker refuses it with a
+message saying so, and a studio written before the removal stays readable but cannot be
+drawn (the engine page answers 410 and `twin.imagine_look` answers `not_authored`). Nothing
+deletes stored studios; write a new authored studio instead. A form sets `form.template` to
+`authored` and describes the form as parts, each carrying the body of a geometry function,
+`build(p, g)`. A box around electronics is a form whose body part is a `g.box`. The agent skill
+(`mcp_core/plugin_skills/imagine_studio/SKILL.md`) is the reference for writing
+one, with the shape builder and a worked lamp; this section says how the gateway
+and the page treat it.
+
+### The config
+
+| Field | Meaning |
+|---|---|
+| `form.params` | The dimensions, as numbers. A name is letters, digits and underscores, starting with a letter, 32 characters at most. |
+| `form.ranges` | `[min, max]` for the parameters a person may move. |
+| `form.authored.parts[]` | `id` (a slug), `name`, `kind` (`generated`, `primitive` or `component`), `code`, `uses` (parameters the code reads, each declared), `body` (at most one part), `max_triangles` (optional), `make` (optional; see below). |
+| `form.authored.parts[].make` | How the part is manufactured and how it looks: `process` (the product's `process.id` when left out), `material` and `finish` (of that process), `color` (a catalogue colour or `#RRGGBB`), `source` (`proposed` or `person`) and `why` (200 characters at most). Not on a `component`. |
+
+`kind` says how far to trust a part as geometry, and the page colours the three
+differently. A `component` is a stand in for a bought part drawn from its
+envelope, not the part's real mesh. `form.template` must be `authored`.
+
+Each part is manufactured on its own, so each made part carries its own `make`:
+a printed PETG base, a machined aluminium arm and an ASA shade in one product.
+The agent proposes one for every `generated` and `primitive` part
+(`source: "proposed"`, with a `why`); `person` means the person named it for that
+part. A part with no `make` takes the product's `process` and `color`.
+
+### Checks when it is written
+
+`api_gateway/imagine/formgraph/authored.py` is pure and runs inside the formgraph
+checks, so `PUT /studio` refuses the config, naming the part, when a part's code:
+
+- contains any of `fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `import`, `eval`, `Function`, `document`, `window`, `self`, `globalThis`, `postMessage`, `constructor`, `prototype`, `__proto__`, `require`, `process`, `this`, in code, a comment or a string;
+- contains a backslash escape or a backtick template string, which can hide a word;
+- is over 6000 bytes, or the parts together are over 40000;
+- declares more than 20000 triangles for a part or 100000 in all.
+
+More than 24 parts, a duplicate id, an unknown kind, two bodies or a
+parameter the code uses but `form.params` does not declare are refused too. A
+part's `make` is refused, naming the part and listing the choices, when its
+process, material or finish is not in the catalogue for that process, its colour is
+neither a catalogue colour nor `#RRGGBB`, its `source` is missing or unknown, it
+has an unknown key or a `why` over 200 characters, or the part is a `component`.
+A `proposed` make passes with a warning naming the parts that wait for the
+person, and a made part with no `make` beside ones that have one is named in a
+warning too. With
+no `body` part the write passes and warns that the checks that need an enclosure
+will read `not_assessed`. This is the first of two layers: a word list is never
+the safety boundary.
+
+### The sandbox
+
+`engine/authored.js` is loaded before `engine.js` and runs the code on the page
+without trusting it:
+
+- **Isolation.** There is one worker per part, so a syntax error, a crash or an
+  endless loop belongs to one named part and stops no other.
+- **The sandbox first.** Each worker's source removes the network, storage,
+  timers, messaging and `eval` from its scope (18 names) before the part's code is
+  placed in it. The code is the body of a function in the worker's source text,
+  never passed to `eval`, so the page's Content Security Policy is unchanged:
+  `script-src 'self'`, `worker-src blob:` and `connect-src 'none'` still apply, and
+  `Function(...)` inside a worker dies with an `EvalError` (checked in Chromium).
+- **A time limit on the code, not the page.** The page solves on its own thread,
+  so a busy page cannot read a worker's reply for seconds. The limit (3 seconds)
+  starts when the worker reports that it has started; a separate 20 second limit
+  covers a worker that never starts.
+- **Nothing it sends back is trusted.** Every number must be finite and within
+  100000 mm, every index must point at a real vertex, and the triangle count must
+  fit the part's budget, or the part reports an error.
+
+### What the page shows
+
+The page keeps the studio's own look and controls. The left pane is the engine's own controls
+panel, filled with the form's parameters: the same sections and sliders as any studio, with
+readable labels (`slot_len` reads "Slot len"), and a Parts list that gives each part's colour
+(its kind) and size, and under a part with a `make` its process, material, finish and colour,
+marked *proposed* until the person chooses. Each such part is drawn in its own colour, with
+the roughness of its finish and a metallic look for a metal, and the mass is summed from each
+part's own material. A part without one takes the product colour from the swatches. Moving a slider runs the code again with no model call. The enclosure's
+own node graph editor is hidden, because it edits parameters a form made of code has none.
+
+### Real parts and the component library
+
+A real part in `context.components.parts` can name its entry in the component library with
+`library` (the entry's `name`). The Imagine stage carries `library.list_components`,
+`library.get_component` and `library.register_component`, and the playbook tells the assistant to
+look a part up before researching it and to register a new one once. Each write warns, in one note,
+about the real parts with no `library` link, and about a link to an entry the library does not have
+(a registration can still be waiting for approval, or the name is wrong). Stand-ins are not asked.
+These are warnings, never a refusal. Code: `api_gateway/imagine/library_link.py`.
+
+A part of kind `component` can name its real part with `component_ref`, the `id` of a part in
+`context.components.parts`, and say where it sits with `at` (`[x, y, z]` in millimetres, Y up) and
+optionally `rot` (degrees). With no `code` of its own, the studio writes the drawing code from that
+part's size on every write, so the shape and the sourced part cannot drift apart. The write names each
+part drawn this way in its warnings. A part with its own code keeps it, including a part drawn this way
+whose code the agent has since rewritten (for a real outline that is not a box), a reference to a part
+that does not exist is refused, and a component with no reference is flagged as a stand-in.
+
+#### Prices from the library
+
+A real part linked to a library entry (`library`) that has no `cost` of its own is priced on each write
+from the entry's supplier offers: the cheapest offer confirmed on a live page, at the price break that
+applies to the build quantity (`process.qty`, else 1), preferring pounds because the cost estimate adds only
+pounds. With no pound offer the cheapest confirmed offer is kept in its own currency, and the page says it is
+not added; no exchange rate is assumed. An offer marked `confirmed: false` (a search snippet or cached page)
+never sets a price. The derived `cost` carries `derived_from: "library"` and its source (library entry and
+version, supplier, SKU, the day it was read and how), and is derived again on every write; a `cost` the agent
+wrote is left alone. One warning lists the linked parts that have no confirmed price. Code:
+`api_gateway/imagine/library_cost.py`.
+
+#### Library models: `g.model(name)`
+
+A component library entry can carry `form_code`: the body of a function of `g` that draws the part once,
+in millimetres, centred on its body, with x its length, y its height and z its width. A studio part places
+it with `g.model("name")`, which returns one shape that takes `.at`, `.rot`, `.scale` and `.name` like any
+other. A `component` part linked to a real part whose library entry has a model is drawn with
+`g.model(entry)` instead of the part's bounding box.
+
+The engine page has no network, so each studio write copies every model its parts name into
+`form.authored.models` as `{name: {code, version, entry}}`. The revision therefore holds the exact code it
+drew with; an update to the library entry reaches a studio on its next write. A name the library lacks, or
+an entry with no `form_code`, is a warning on the write, and the part shows the error on the page.
+
+In the page each part's worker gets only the models its code names, placed after the sandbox is set up,
+like the part's own code. A model's triangles count against the part's budget, and a model may not call
+`g.model` itself. All models in one studio together are capped at 36,000 bytes. The library refuses
+`form_code` with the same words the studio refuses (`twin_core/library/form_code.py`). Code:
+`api_gateway/imagine/library_models.py`, `g.model` in `api_gateway/imagine/engine/authored.js`.
+
+Not yet: a model from a maker's STEP file. Imported geometry is accepted only under a licence on the
+accepted list (`twin_core/library/licences.py`), which KiCad's 3D models (CC-BY-SA) and most makers'
+files are not, so that route needs a person's licence review first.
+
+At the Engineer level the left pane shows the form's own graph instead: a column of parameter
+nodes (each with its slider), a column of part nodes, and the form node. A wire runs from a
+parameter to each part that uses it, and from each part to the form. Sliders here and in the
+Simple panel stay in step. Selecting a part (its title bar) lights its node, its wires and its
+mesh. Scroll zooms, dragging the background pans, and Fit frames everything. The page has three
+panes, the graph, the model and the summary, and the left and right panes each minimise with
+the edge buttons (or `[` and `]`), also when the page sits inside the dashboard's frame.
+
+At the top of the right pane, a "Form drawn" card shows the measured envelope, volume, part count,
+triangles and mass as tiles, and a collapsed "Not assessed" card lists the checks the engine cannot
+make for a coded form. Both open and close like the engine's own cards.
+
+The "Form drawn" card also shows what is measured from the drawn triangles, with uniform density:
+**Overhang (upper bound)**, the share of the surface that looks steeply downward (more than 45 degrees
+from vertical) and does not rest on the floor; **Tips over at**, the angle at which the centre of mass
+would tip past the edge of the flat base the form stands on, or **Balance: Would tip over** when the
+centre of mass is already outside it, or **No flat base, so not assessed** for a form that hangs or
+rests on a point; and **Fit**, the pairs of parts that clash on their drawn shapes (see Fit below).
+`overlaps`, the pairs of `component` parts whose boxes overlap with the volume, is still measured for
+the concept revision. Overhang counts faces another part covers and the centre of mass counts
+overlapping parts twice, so both are estimates and the notes say so. Wall thickness and the gap
+between parts that do not touch are not measured. `twin.imagine_look` returns the same block as `measured`, and with `set` it
+reports in `compare.measured_changed` how the measurements moved. These are V2 screening measurements,
+never a verification.
+
+When `twin.imagine_look` runs in the gateway, it records the measurements of the stored form (never the
+what-if of a `set`) against the revision it measured, on the twin item's state, without making a new
+revision. No route accepts a measurement, so a person's browser cannot send one; a newer write starts
+without it, so a stale figure is never carried forward, and a handed-over studio refuses it. The record
+is kept for the validation step to read.
+
+Below the form card, a "Components" card lists every real part in `context.components.parts` (an
+excluded part is left out) with four yes or no readiness steps: **Defined** (an order code and a maker),
+**Real size** (an envelope that is not a typical or generic guess and not a placeholder), **Sourced** (a
+datasheet link and a date) and **Drawn in the form** (a form part names it with `component_ref`). Each row
+shows its fidelity, size basis and the basis in words. A function with no part chosen is listed as "no
+part", because the handover stays open on it. The card keeps its open or closed state when a slider
+redraws the form.
+
+The right pane keeps what carries the person's controls and records, and labels what the engine
+cannot say about this form:
+
+- **Readiness**: gate 1 names the assumptions still to confirm. Gates 2 to 4 read "Not assessed for
+  an authored form", because the engine decides them from checks of the enclosure.
+- **Requirements**: the priorities and values, the situations it must handle, and "Confirm these
+  assumptions". Each requirement's chip reads "Not assessed", never Met, and the header says so.
+- **Options, Context, Models and scenarios, Manufacturing process** work as for any studio.
+- The **Programme** tab works as for any studio.
+
+It hides what asserts something about the placeholder enclosure that the engine solves for every
+studio, which is not this product: validation in the background, assembly, where it lives, the
+manufacturing verdict, product tests (a drop test of the placeholder), electronics and wiring,
+checks, the bill of materials (a top shell and a lid the form does not have), part, cost, hand off,
+and Readiness's parts table. Giving the engine no shape instead would break the Programme tab, so
+the blocks are hidden and the verdicts relabelled.
+
+The page also shows what was measured (size, volume of the shapes with overlaps counted twice,
+parts, triangles and the mass if solid in the process material) beside a list of what was not
+assessed: wall thickness and moulding, vents and heat, the
+manufacturing verdict and cost, assembly, product tests and the form's bill of materials. That list
+never reads as a pass. A form that fails shows "Form not drawn" or "Form partly drawn" with each
+part's error and gives no size.
+
+The page publishes what it drew as `window.FG_AUTHORED`: `status` (`running`,
+`ready` or `error`), `params`, `bbox`, `triangles`, `errors`, and for each part its
+`kind`, `triangles`, `bbox`, `volume` and `error`. It dispatches an `fg-authored`
+event on every change.
+
+### A low-fidelity twin of the idea
+
+The studio shows more than the form's shape:
+
+- **Behaviours.** `form.authored.behaviours` says how the product moves, lights up and
+  switches: `rotate` (about `axis` through `origin`, within `range` degrees), `slide` (along
+  `axis`, within `range` mm), `glow` (in `color`) and `toggle` (shown or hidden), each acting
+  on named parts. **Try it** shows a control for each and **Play the motions**, with the
+  battery simulation folded beneath; with none, it offers to ask the assistant for them. Twelve at
+  most; a behaviour that names a missing part, an axis of zeros or a range that is not a
+  range is refused, naming it.
+- **A calm panel.** The left panel has three sections in one rhythm, **Size and shape**
+  (open), **Parts** and **Variants** (closed), each naming what is inside; the right-hand
+  cards start closed except the next step.
+- **Parts, click to show.** A part is one line (name and size). A click on the row, or on the
+  part in the 3D view, opens what it is made of, its real part's specs, **Hide**/**Show** and
+  pickers for its process, material, finish and colour from the catalogue. A picked value is
+  previewed live on that part; **Keep it** puts a request in the conversation for the
+  assistant to write it into the form, **Reset** drops the preview. Hiding is a view choice
+  only; the part stays in the form, its measures and the handover.
+- **Scene.** `form.authored.scene` (at most eight) lists what the product lives with, a desk,
+  a wrist, a hand or a wall, written as code like parts and run in the same sandbox with the
+  same checks. It is drawn as matte grey context, listed in a closed **Scene** section with
+  **Hide**, and never measured, costed or handed over; when present, the studio's own floor
+  steps aside for it. Behaviours may act on scene objects. A `light` behaviour casts a real
+  spot light from its part (`at`, `direction`, `angle`, `color`, `intensity`) that follows the
+  part's motions, and Try it has **Room light** (Day, Evening, Night) so a beam can be seen.
+- **Fit.** The page tests every pair of parts on their drawn triangles, not their boxes:
+  points about 0.5 mm apart on each part's surface where two parts' boxes meet, each tested
+  for being inside the other part's closed shape by counting ray crossings. A **Fit** card
+  lists each clash (*Display into Round case, about 0.48 mm deep*), deepest first, with
+  **Show** to select the part, and each clash is outlined in red in the 3D view, seen through
+  the other parts. The depth is an estimate on the sample spacing, at most half the thinner
+  part; parts that only touch (within 0.02 mm) do not clash, and a shape that is not closed
+  is listed and not tested as a solid. Parts meant to meet are declared in
+  `form.authored.joins` (`[{"parts": ["button", "case"], "why": "..."}]`, at most 24, two
+  different parts with a reason, each pair once) and shown as joined, as declared. The result
+  is `measured.fit` (returned by a look and kept with the revision's measurement) and the
+  `form.fit` screening rules, one per pair. `overlaps` (components whose boxes overlap) is
+  kept as before, because the concept revision sends it to the verification service.
+- **Cut-away.** Beside Try it: **Solid**, **Section** (one plane, side, front or top, moved
+  with a slider) and **X-ray** (the product's own parts see-through, bought parts solid).
+- **Live component specs.** A `component` part linked to a record in
+  `context.components.parts` shows its maker, part number, size (marked when a placeholder),
+  power, buses, recorded price and the date its datasheet was read, in the parts list and on
+  hover in the 3D view. A value the record does not carry is left out, never guessed.
+- **Running cost.** A *Cost per unit (estimate)* card: each made part as solid material at
+  the catalogue's typical price per kg, each bought part at its recorded price when its
+  `cost.currency` is `GBP`; anything else is listed as not counted, with the reason. Machine
+  time, labour, assembly, finishing and shipping are not included.
+- **One next step.** A card at the top names the one thing to decide now: an assumption to
+  confirm, a statement to check, a part to choose or a proposed make to keep. Confirming acts
+  in the page; anything that changes the design puts a request in the person's conversation
+  (`fg:ask`), never sends it.
+- **Variants.** `form.authored.variants` (two to four) set other `params` (within
+  `form.ranges`) and/or `makes` on the same parts. **Show side by side** draws them in a row;
+  **Try it** shows one in place; **Use this one** puts a request in the conversation.
+
+### A new revision in an open studio
+
+Create compares each new revision with the one on screen. A change to the authored form
+alone is pushed into the running page (`fg:form`) and redrawn in place, keeping the camera,
+panels, hidden parts and behaviour values; the page confirms with `fg:applied`, or the
+revision loads behind the page on screen and replaces it when ready. A strip above the
+studio lists what the revision changed, with **Undo this change**, which saves the revision
+before it as a new one. The undo is a `PATCH /studio` against the revision it undoes (each
+top-level section that differs replaced, added or removed), so if the assistant has written
+a newer revision in the meantime the gateway refuses it (409) and the strip says so, rather
+than overwriting the newer work.
+
+### Looking at it
+
+An agent looks with `twin.imagine_look` (see `docs/mcp_spec.md`). It renders the
+stored studio's engine page in headless Chromium inside the process: the page and
+its assets are answered from memory with the gateway's own Content Security Policy
+and every other request is aborted, so no gateway has to be running and it works in
+the stdio plugin. It returns the status, each part's size and error and the
+screenshots as images. `set` moves a parameter in the page and looks again, never
+saved; `revision` names the head after a write, so a repeat is not answered from
+the earlier result. It reads and writes nothing in the twin and is never held.
+`playwright` and a Chromium build are not installed with MetaForge
+(`pip install playwright pillow && playwright install chromium`): without them the
+result is `unavailable` with that line, and the agent must say it could not look.
+A studio from before the enclosure template was removed answers `not_authored` without starting a
+browser.
+
+`scripts/imagine_look.py` is the same look from a shell. It opens an engine page in
+a real browser (it needs the `playwright` package and a Chromium build), waits for
+`window.FG_AUTHORED`, prints each part's size and takes a screenshot:
+
+```bash
+python scripts/imagine_look.py --gateway http://127.0.0.1:8000 --project <id> \
+    --out look --set arm_len=400
+```
+
+With `--set` it moves that parameter's slider and looks again, and reports what
+changed, how much of the picture changed and every request the page made after
+the change: the sandbox workers start from `blob:` URLs, so a change that redraws
+the form shows no network request and no call to a model. It exits 0 when the form
+is drawn, 2 when a part failed and 3 when the page published no authored form.
+
+### What the verification service says
+
+The revision carries the form's parts (see "The form in the revision"), and the
+service adds advisory findings: `form.enclosure_checks` (`not_assessed`),
+`form.confidence_mix` (every part is a `component`), `form.measured` (`not_assessed`
+when nobody looked), `form.balance` and `form.component_overlap`. None can change a
+verdict, a gate or a level.
+
+### Limits
+
+- The electronics are not placed in an authored form, so the fit of the
+  electronics is not assessed. There are no component meshes yet: a `component`
+  is a box.
+- Shapes compose and do not subtract: there are no boolean cuts.
+- The page's measured size is not sent to the service, so no fit check runs.
+- The look needs a browser. A client with none must say it could not look.
+
 ## Observability
 
 `metaforge_imagine_studio_total{operation, outcome}` counts each `put`,
@@ -563,13 +926,9 @@ Read the studio again to get a fresh URL. Nothing here names a provider.
 
 ## Known limits
 
-- The form catalogue (`api_gateway/imagine/formgraph/data/catalogue.json`)
-  has one template, `enclosure`: a rounded, shelled box with a lid. It can
-  stand for a lamp's base housing but not an arm, a hinge or a shade, and the
-  engine labels every product's shell *Fuselage shell* (`engine/engine.js`,
-  the parts panel and the readiness row), wording from the multirotor
-  reference. Non-box products need more templates, or their made parts in the
-  inline context.
+- The enclosure template was removed (see "Authored forms"). The engine page still carries the
+  enclosure solver and its checks in `engine/engine.js`, which no new studio reaches; that
+  dead code has not been deleted yet, and the catalogue still lists the template's data.
 - The concept assembly decision records each part's envelope in its text and
   the studio's handover record; a concept layout with sizes and positions is
   still drawn by `twin.render_concept_sketch`.

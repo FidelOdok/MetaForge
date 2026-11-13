@@ -10,6 +10,31 @@ engineering verification. Missing specifications remain unknown.
 
 - `library.list_components`, `library.get_component`, and the register/update
   tools manage reusable entries with sourced specs and revision history.
+  Besides mechanical families, an entry can be a `module` (a bought board or
+  module, such as a display or a GNSS module), a `battery` or an `electronic`
+  part (a single chip, button or connector). Such an entry also carries
+  `manufacturer`, `mpn` (the maker's order code), `datasheet` (an http(s) link)
+  and `interfaces` (`[{id, bus, dir}]`, `dir` one of `in`, `out`, `bi`); a
+  battery's `capacity_mah` is a typed spec. Entries saved before these fields
+  load with them empty. The body of a module, battery or electronic part is
+  `length_mm` x `width_mm` x `height_mm`: `thickness_mm` (for plates and
+  washers) is refused for these families. An older entry that named its height
+  `thickness_mm` drops it when an update sends `height_mm`.
+  An entry can also carry `form_code`, the agent-written code that draws the
+  part once (mm, centred, x length, y height, z width; at most 6,000 bytes),
+  which an Imagine studio places with `g.model(name)`. It is refused for the
+  same words a studio part's code is. See
+  [Imagine stage](imagine-stage.md#library-models-gmodelname).
+- A supplier of an entry (`suppliers`, `[{supplier, sku, url}]`) can carry the
+  `offer` read from it: `read_on` (`YYYY-MM-DD`) and `via` (the tool or page it
+  came from), both required because prices go stale; `currency` (an ISO code)
+  with `breaks` (`[{qty, unit_price}]`, quantities rising); `stock`;
+  `lead_time_days`; and `confirmed`, false for a search snippet or a cached
+  page. An offer is a dated reading, not a live price.
+- The Imagine studio links a real part to its entry with the part's `library`
+  field, and the Imagine stage can list, read and register components, so a
+  part researched in one project is found by the next. See
+  [the Imagine stage](imagine-stage.md#real-parts-and-the-component-library).
 - `component.search_parametric` searches typed specifications. Without
   `DATABASE_URL`, the gateway and local MCP entry point use SQLite at
   `~/.metaforge/component_catalog.db` (override with
@@ -73,6 +98,75 @@ The lockfile records the actual selected model definitions and artifacts; it
 does not claim to discover undeclared runtime imports inside executable code.
 A future replay must resolve the pinned metadata and check current withdrawal
 policy, not silently select a newer model.
+
+## Viewing a maker's model as a mesh
+
+`GET /v1/library/components/{ref}/mesh` turns an entry's active STEP model into a mesh
+the Imagine studio and the library viewer can draw. The gateway fetches the artifact once,
+checks its size and sha256, takes the member named by the artifact's `path` from a zip,
+and sends the STEP to the OCCT converter's `POST /faces` route.
+
+That route reads the STEP through OCCT's XDE layer and gives every face the colour the
+file states for it: the face's own style first, then the placed instance's, the part's,
+and the enclosing assembly's. Colours are returned as the sRGB values the STEP writes. A
+face with no stated colour comes back with `colour: null` and `colour_source: "none"`;
+it is never painted a default grey. The converter's GLB route (`/convert`) keeps one
+colour per part, so it is not used here.
+
+The model's `up_axis` (`x`, `y`, `z` or their negatives; `z` when absent) is turned to the
+studio's +Y, the mesh is centred, and a model over 20,000 triangles is reduced by vertex
+clustering. Each part in the response carries `name`, `colour`, `colour_source`,
+`positions` (mm) and `indices`. Meshes are cached by artifact digest, up axis and recipe
+version under `METAFORGE_LIBRARY_MESH_DIR` (default `~/.metaforge/library-meshes`).
+
+### A model inside a larger maker file
+
+Some makers publish a part's 3D model only inside a larger file. Nordic ships its chips'
+bodies inside the Altium libraries of its reference layouts, and Raspberry Pi its chips
+only as named parts of a board's STEP. The artifact stays pinned to the maker's own HTTPS
+file and its sha256, and says how to reach the model:
+
+| Field | Meaning |
+|---|---|
+| `embedded` | Stream paths, walked in order through OLE compound files (an Altium IntLib, PcbLib or PcbDoc); each stream is inflated when it is zlib data. Nordic's nRF52840: `["PCBLib/0.pcblib", "Library/Models/6"]`. |
+| `part` | The product name to keep from an assembly STEP, matched at any depth without regard to case. The converter's `/faces?part=` reads that product alone, at its own origin. |
+| `extracted_sha256` | Optional pin on the STEP that comes out, so a changed library is refused. |
+
+Meshes of different selections from one file are cached apart. An artifact with
+`embedded` or `part` is for viewing only: `library.resolve_component_model` refuses it
+whatever its licence, because the file it pins is not the part's model on its own.
+
+The route answers 404 for an unknown entry and 422 with the reason when the entry has no
+active STEP model, the file changed upstream, the embedded stream or named part is not
+there, or the converter is down or refuses the file. Showing a model here does not clear its licence: a model whose licence MetaForge
+does not accept is still refused by `library.resolve_component_model`, which is the route
+into engineering tools and deliverables.
+
+## Saving and loading the whole library
+
+The catalog and the machine library live in one SQLite file on the
+gateway's machine (`METAFORGE_MACHINE_LIBRARY_PATH`, default
+`~/.metaforge/machine_library.db`). `GET /v1/library/export` writes every
+current entry of every kind (processes, materials, components, appearances,
+ergonomic limits) and every machine as one JSON document
+(`format: metaforge-library`, `version: 1`); `?history=true` adds each
+entry's versions. A machine's connection carries only the name of the
+environment variable that holds its credential, so the file holds nothing
+secret.
+
+`POST /v1/library/import` loads such a document and only adds: an entry
+whose name is already there (the same kind and name for a catalog entry,
+the same kind, make and model for a machine model, the same name for a
+machine instance) is skipped and counted, never overwritten. An imported
+entry starts again at version 1, recorded as made by the import; the
+exported history stays in the file as the record. A machine instance's
+`model_id` is pointed at its model in the new library. The answer lists
+what was added, what was skipped and anything refused with the reason. The
+dashboard's `/library` page has **Export** and **Import** buttons for both.
+
+`GET /v1/library/engine/{name}` serves the drawing engine (`authored.js`)
+that runs an entry's `form_code`, the same file the Imagine studio loads,
+so a page that shows the library needs no project.
 
 ## Download integrity and cache
 

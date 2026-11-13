@@ -1,0 +1,235 @@
+"""One call that gives a real part a 3D body, and says where the body came from.
+
+Imagine wants every part to exist in 3D, and never to look better than it is. The rungs,
+best first:
+
+1. ``existing``: the part already carries an exact or generated model. Kept as it is.
+2. ``kicad``: the KiCad library's own 3D model, sized by a CAD kernel when one is
+   available (exact) or estimated from the file (approximation).
+3. ``datasheet_package``: the size read from the datasheet's package outline text, which
+   the agent passes in. A rule-based parser reads standard IC outlines only, and says so
+   when it does not recognise the text.
+4. ``approximation``: the closest shape that can be defended, or a placeholder block when
+   nothing is known. Always labelled, with its basis.
+
+The answer lists every rung and what happened at it, so an agent can say exactly why a
+part is not exact. Nothing is written anywhere: the agent copies ``geometry`` into the
+part itself.
+"""
+
+from __future__ import annotations
+
+import copy
+import os
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from api_gateway.imagine.datasheet_package import package_geometry
+from api_gateway.imagine.kicad_part import Measure, kicad_geometry, measure_step
+from api_gateway.imagine.part_model import BETTER, approximate_geometry
+from tool_registry.tools.kicad.config import KicadConfig
+
+LIBRARY_ENV = "METAFORGE_KICAD_LIBRARY_DIR"
+
+
+def kicad_config_from_env(env: Mapping[str, str] | None = None) -> KicadConfig | None:
+    """The KiCad folders, from one variable naming the folder that holds ``symbols``,
+    ``footprints`` and ``3dmodels``. ``None`` when it is unset or the folder is missing."""
+    source = os.environ if env is None else env
+    root = str(source.get(LIBRARY_ENV, "")).strip()
+    if not root or not (Path(root) / "symbols").is_dir():
+        return None
+    return KicadConfig(
+        symbol_dir=str(Path(root) / "symbols"),
+        footprint_dir=str(Path(root) / "footprints"),
+        model_dir=str(Path(root) / "3dmodels"),
+    )
+
+
+def resolve_part(
+    part: Any,
+    *,
+    kicad_config: KicadConfig | None = None,
+    measure: Measure | None = None,
+    package_text: Any = None,
+) -> dict[str, Any]:
+    """Give ``part`` a 3D body from the best rung available. Never raises on bad input."""
+    safe = _clean(part)
+    tried: list[dict[str, str]] = []
+
+    existing = safe.get("geometry") or {}
+    if existing.get("fidelity") in BETTER and _has_size(existing):
+        tried.append(
+            {
+                "rung": "existing",
+                "outcome": "used",
+                "why": f"the part already has a {existing['fidelity']} model; kept as it is",
+            }
+        )
+        return _answer(safe, "existing", existing, tried)
+
+    geometry: dict[str, Any] | None = None
+    if kicad_config is None:
+        tried.append(
+            {
+                "rung": "kicad",
+                "outcome": "skipped",
+                "why": (
+                    "the KiCad libraries are not installed where this runs "
+                    f"(set {LIBRARY_ENV} to the folder that holds symbols, footprints and 3dmodels)"
+                ),
+            }
+        )
+    else:
+        geometry, note = kicad_geometry(safe, kicad_config, measure=measure or measure_step)
+        if geometry is None:
+            tried.append({"rung": "kicad", "outcome": "skipped", "why": note})
+        else:
+            tried.append(
+                {
+                    "rung": "kicad",
+                    "outcome": "used",
+                    "why": f"found in the KiCad library; its fidelity is {geometry['fidelity']}",
+                }
+            )
+
+    if geometry is not None and geometry.get("fidelity") == "exact":
+        tried.append(
+            {
+                "rung": "datasheet_package",
+                "outcome": "not_needed",
+                "why": "KiCad gave an exact body",
+            }
+        )
+    elif package_text is None:
+        tried.append(
+            {
+                "rung": "datasheet_package",
+                "outcome": "not_provided",
+                "why": (
+                    "no package_text was given; pass the package outline section of the "
+                    "datasheet to read the size from it"
+                ),
+            }
+        )
+    else:
+        drawn, why = package_geometry(safe, package_text)
+        if drawn is None:
+            tried.append({"rung": "datasheet_package", "outcome": "skipped", "why": why})
+        else:
+            tried.append(
+                {
+                    "rung": "datasheet_package",
+                    "outcome": "used",
+                    "why": "the size was read from the datasheet's package outline",
+                }
+            )
+            if geometry is not None:
+                for entry in tried:
+                    if entry["rung"] == "kicad" and entry["outcome"] == "used":
+                        entry["outcome"] = "superseded"
+                        entry["why"] = (
+                            "KiCad gave only an estimate; the datasheet outline gave a size "
+                            "read from a drawing, which is used instead"
+                        )
+            geometry = drawn
+
+    if geometry is not None:
+        tried.append(
+            {"rung": "approximation", "outcome": "not_needed", "why": "a better rung gave a body"}
+        )
+        return _answer(safe, geometry["fidelity"], geometry, tried)
+
+    geometry = approximate_geometry(safe)
+    tried.append({"rung": "approximation", "outcome": "used", "why": geometry["fidelity_basis"]})
+    return _answer(safe, geometry["fidelity"], geometry, tried)
+
+
+def fill_part_bodies(
+    config: dict[str, Any],
+    *,
+    kicad_config: KicadConfig | None = None,
+    measure: Measure | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Give every part in ``context.components.parts`` that has no size a 3D body.
+
+    Returns a copy of the config and one note per part drawn. A part that already has a
+    size is left exactly as written, and an excluded part is never touched: the studio
+    adds a body only where there is none, and the note and the part's own ``fidelity``
+    say how it was made.
+    """
+    out = copy.deepcopy(config)
+    context = out.get("context") if isinstance(out, dict) else None
+    components = context.get("components") if isinstance(context, dict) else None
+    parts = components.get("parts") if isinstance(components, dict) else None
+    notes: list[str] = []
+    if not isinstance(parts, list):
+        return out, notes
+    for part in parts:
+        if not isinstance(part, dict) or part.get("excluded"):
+            continue
+        geometry = part.get("geometry")
+        if isinstance(geometry, dict) and _has_size(geometry):
+            continue
+        result = resolve_part(part, kicad_config=kicad_config, measure=measure)
+        part["geometry"] = result["geometry"]
+        basis = result["geometry"].get("fidelity_basis", "")
+        label = str(part.get("id") or "?")
+        notes.append(
+            f'context part "{label}": it had no size, so the studio drew its 3D '
+            f"({result['rung']}): {basis}"
+        )
+    return out, notes
+
+
+_MESSAGES = {
+    "existing": "The part already has a better model. Nothing to change.",
+    "exact": (
+        "Exact: the size is from the library's own 3D model, drawn as its bounding box. "
+        "Copy `geometry` into the part."
+    ),
+    "approximation": (
+        "An approximation, not the real part. Copy `geometry` into the part and say in "
+        "your report that it is an approximation, with its basis."
+    ),
+    "placeholder": (
+        "A placeholder: nothing was known about this part's size, so a generic block "
+        "stands in. Copy `geometry` into the part and say in your report that it is generic."
+    ),
+}
+
+
+def _answer(
+    part: dict[str, Any], rung: str, geometry: dict[str, Any], tried: list[dict[str, str]]
+) -> dict[str, Any]:
+    return {
+        "part_id": part.get("id", ""),
+        "rung": rung,
+        "geometry": geometry,
+        "tried": tried,
+        "message": _MESSAGES.get(rung, ""),
+    }
+
+
+def _clean(part: Any) -> dict[str, Any]:
+    """Keep only the fields this module reads, and only when they have the right type."""
+    if not isinstance(part, Mapping):
+        return {}
+    out: dict[str, Any] = {}
+    for key in ("id", "role", "name", "mpn", "package"):
+        if isinstance(part.get(key), str):
+            out[key] = part[key]
+    for key in ("geometry", "specs", "kicad"):
+        if isinstance(part.get(key), Mapping):
+            out[key] = dict(part[key])
+    return out
+
+
+def _has_size(geometry: Mapping[str, Any]) -> bool:
+    env = geometry.get("envelope")
+    return (
+        isinstance(env, list)
+        and len(env) == 3
+        and all(isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 for x in env)
+    )

@@ -19,6 +19,7 @@ EventKind = Literal[
     "requirement",
     "ledger",
     "screening",
+    "form_seen",
 ]
 
 #: Browser collection (``fg:write``) to event kind.
@@ -30,6 +31,7 @@ COLLECTION_KINDS: dict[str, str] = {
     "requirements": "requirement",
     "ledger": "ledger",
     "screening": "screening",
+    "formSeen": "form_seen",
 }
 #: Event kind to browser collection, for the snapshot the host sends back.
 KIND_COLLECTIONS: dict[str, str] = {v: k for k, v in COLLECTION_KINDS.items()}
@@ -79,6 +81,22 @@ class StudioPut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     config: dict[str, Any]
+
+
+class StudioPatch(BaseModel):
+    """``PATCH /studio``: changes to the revision they were made against (studio_patch)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_revision: int = Field(ge=1, description="The revision the changes were made against.")
+    changes: list[dict[str, Any]] = Field(
+        min_length=1,
+        max_length=64,
+        description=(
+            "JSON Patch style changes: op add, replace or remove at a JSON Pointer path, "
+            "with value (not for remove); a list item may be named by its id."
+        ),
+    )
 
 
 class ImagineEvent(BaseModel):

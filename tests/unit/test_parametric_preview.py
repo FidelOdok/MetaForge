@@ -536,6 +536,47 @@ async def test_a_parameter_commit_schedules_exactly_one_build_with_its_base(
     assert node.metadata["approved"] is True
 
 
+async def test_a_parameter_commit_keeps_a_reconstructed_sketchs_plane(h: Harness) -> None:
+    """A reconstructed sketch has no plane node: its plane is the principal placement
+    accepted with the proposal. A parameter edit must carry it, or exact CAD refuses
+    the next revision with "the sketch is not placed on a plane yet"."""
+    from twin_core.design_ir.feature_history import PRINCIPAL_PLACEMENT_KEY, principal_placement
+    from twin_core.models.enums import WorkProductType
+
+    sketch = {**_slot_sketch(depth=5), "plane_id": None}
+    placed = {"plane": "XY", "offset": 0.0, "status": "estimated"}
+    await _definition(
+        h,
+        item_type="parametric_sketch",
+        wp_type=WorkProductType.PARAMETRIC_SKETCH,
+        name="Parametric sketch: Slot",
+        key="PSK-SLOT",
+        metadata={
+            "parametric_sketch": sketch,
+            "approved": True,
+            "plane_id": None,
+            PRINCIPAL_PLACEMENT_KEY: placed,
+        },
+    )
+    out = await commit_parameters(
+        h.twin,
+        h.service,
+        project_id=PROJECT,
+        sketch_key="PSK-SLOT",
+        request=ParameterCommitRequest(
+            base_revision=1, values={"depth": 8, "material": "PLA"}, source="numeric"
+        ),
+    )
+    assert out["sketch_ref"] == "PSK-SLOT@2"
+    psk = await find_item(h.twin, "PSK-SLOT", PROJECT)
+    node = await h.node(str(psk.head_node_id))
+    assert node.metadata[PRINCIPAL_PLACEMENT_KEY] == placed
+    assert principal_placement(node.metadata) == {"plane": "XY", "offset": 0.0}
+    # And the build it scheduled gets past the plane check.
+    job = await h.runner.wait(out["build"]["job_id"], 5.0)
+    assert job.status == "succeeded", job.error
+
+
 async def test_a_stale_commit_and_a_stale_result_are_rejected(h: Harness) -> None:
     await _parametric(h, depth=5)
     await _build(h)

@@ -44,6 +44,7 @@ VENDOR_DIR = ENGINE_DIR / "vendor"
 ASSETS: dict[str, Path] = {
     "engine.css": ENGINE_DIR / "engine.css",
     "engine.js": ENGINE_DIR / "engine.js",
+    "authored.js": ENGINE_DIR / "authored.js",
     "three.min.js": VENDOR_DIR / "three.min.js",
     "OrbitControls.js": VENDOR_DIR / "OrbitControls.js",
     "GLTFExporter.js": VENDOR_DIR / "GLTFExporter.js",

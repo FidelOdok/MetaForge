@@ -21,7 +21,7 @@ For every function, the board, the battery and any other bought part, find **at 
   "id": "gnss-a", "role": "fn:e_gnss",
   "name": "GNSS module, multi-band", "mpn": "<exact order code>", "manufacturer": "<maker>",
   "datasheet": "https://...", "retrieved": "2026-11-06",
-  "cost": { "unit": 9.80, "qty": 250, "source": "https://distributor/..." },
+  "cost": { "unit": 9.80, "qty": 250, "currency": "GBP", "source": "https://distributor/..." },
   "mass": 3.2,
   "specs": { "cur": { "sleep": 0.015, "locate": 25 }, "fix": 30 },
   "interfaces": [

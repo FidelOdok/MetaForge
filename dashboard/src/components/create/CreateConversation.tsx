@@ -142,9 +142,11 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
                 {ins.state === 'sending' ? (
                   <>
                     <Loader2 size={12} className="cv-spin" aria-hidden="true" />{' '}
-                    {ins.operationId && operations.ops.byId[ins.operationId]
-                      ? 'Received · working on it'
-                      : 'Sending…'}
+                    {ins.elsewhere
+                      ? 'Sending in another tab'
+                      : ins.operationId && operations.ops.byId[ins.operationId]
+                        ? 'Received · working on it'
+                        : 'Sending…'}
                   </>
                 ) : ins.state === 'queued' ? (
                   'Queued · sent when the current pass ends'
@@ -176,7 +178,7 @@ export function CreateConversation({ projectId, tools }: CreateConversationProps
               </footer>
             )}
           </article>
-          {ins.state === 'sending' && (
+          {ins.state === 'sending' && !ins.elsewhere && (
             <TurnInProgress events={events} startedAt={startedAt.current.get(ins.id) ?? Date.now()} />
           )}
         </Fragment>

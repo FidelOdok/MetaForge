@@ -437,11 +437,38 @@ def _heads(nodes: list[Any]) -> list[Any]:
     return out + list(best.values())
 
 
-async def _layout(twin: Any, pid: UUID) -> tuple[dict[str, Any] | None, Any | None, Any | None]:
-    """``(layout, layout node, structured mesh node)``: the newest L1 layout."""
+def _layout_match(layout: dict[str, Any], wanted: set[str]) -> int:
+    """How many of the accepted assembly's part names the layout has a block for."""
+    names = {
+        str(p.get("name") or "").strip().lower()
+        for p in layout.get("parts") or []
+        if isinstance(p, dict)
+    }
+    return len(names & wanted)
+
+
+async def _layout(
+    twin: Any, pid: UUID, assembly: dict[str, Any] | None = None
+) -> tuple[dict[str, Any] | None, Any | None, Any | None]:
+    """``(layout, layout node, structured mesh node)``: the L1 layout of the chosen concept.
+
+    A concept run draws every option, then a decision picks one. The layout
+    whose blocks best match the accepted assembly's parts is the chosen one;
+    taking the newest instead read a rejected concept whenever it was drawn
+    last, and the chosen concept's parts had nothing to build from. Without an
+    assembly, or on a tie, a mesh-backed layout comes first, then the newest.
+    """
     from twin_core.models.enums import WorkProductType
     from twin_core.representation import STRUCTURED_MESH_TOOL
 
+    wanted = {
+        str(p.get("name") or "").strip().lower()
+        for p in (assembly or {}).get("parts") or []
+        if isinstance(p, dict) and p.get("name")
+    }
+    # (match, has mesh, created, layout, node, mesh)
+    candidates: list[tuple[int, int, str, dict[str, Any], Any, Any | None]] = []
+    seen: set[str] = set()
     meshes = sorted(
         (
             r
@@ -453,7 +480,7 @@ async def _layout(twin: Any, pid: UUID) -> tuple[dict[str, Any] | None, Any | No
     )
     for mesh in meshes:
         raw = (mesh.metadata or {}).get("source_layout_node_id")
-        if not raw:
+        if not raw or str(raw) in seen:
             continue
         try:
             node = await twin.get_work_product(UUID(str(raw)))
@@ -461,19 +488,20 @@ async def _layout(twin: Any, pid: UUID) -> tuple[dict[str, Any] | None, Any | No
             node = None
         layout = (getattr(node, "metadata", None) or {}).get("concept_layout") if node else None
         if isinstance(layout, dict):
-            return layout, node, mesh
-    sketches = sorted(
-        (
-            s
-            for s in await _list(twin, WorkProductType.DESIGN_SKETCH, pid)
-            if isinstance((s.metadata or {}).get("concept_layout"), dict)
-        ),
-        key=_created,
-        reverse=True,
-    )
-    if sketches:
-        return sketches[0].metadata["concept_layout"], sketches[0], None
-    return None, None, None
+            seen.add(str(raw))
+            candidates.append(
+                (_layout_match(layout, wanted), 1, _created(node), layout, node, mesh)
+            )
+    for sketch in await _list(twin, WorkProductType.DESIGN_SKETCH, pid):
+        layout = (sketch.metadata or {}).get("concept_layout")
+        if isinstance(layout, dict) and str(sketch.id) not in seen:
+            candidates.append(
+                (_layout_match(layout, wanted), 0, _created(sketch), layout, sketch, None)
+            )
+    if not candidates:
+        return None, None, None
+    best = max(candidates, key=lambda c: (c[0], c[1], c[2]))
+    return best[3], best[4], best[5]
 
 
 async def _segmented_extents(twin: Any, pid: UUID) -> tuple[dict[str, dict[str, Any]], Any | None]:
@@ -850,7 +878,7 @@ async def _propose_all(
         except Exception:  # noqa: BLE001
             decision = None
         assembly = dict(((getattr(decision, "metadata", None) or {}).get("assembly")) or {})
-        layout, layout_node, mesh_node = await _layout(twin, pid)
+        layout, layout_node, mesh_node = await _layout(twin, pid, assembly)
         layout_ref = _ref(dict(layout_node.metadata or {})) if layout_node is not None else None
         if layout_node is not None and layout_ref is None:
             layout_ref = f"node:{layout_node.id}"

@@ -81,6 +81,15 @@ describe('OnboardingGate', () => {
     expect(screen.getByText('APP')).toBeInTheDocument();
   });
 
+  it('never swaps the app for setup once the gateway has answered in this session', () => {
+    // A health poll that times out while the gateway is busy (a studio regeneration) must
+    // not unmount the app: it looked like the whole page reloading and lost the view.
+    mockHealth.mockReturnValue({ isError: true, isLoading: false, data: { status: 'healthy' } });
+    renderGate();
+    expect(screen.getByText('APP')).toBeInTheDocument();
+    expect(screen.queryByText('SETUP SCREEN')).not.toBeInTheDocument();
+  });
+
   it('local proxy setups are never gated', () => {
     // Docker and `npm run dev` have an empty base (same-origin, proxied) and
     // a healthy gateway. isGatewayUserConfigured() is false for them, so only

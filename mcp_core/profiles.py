@@ -881,9 +881,21 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
     "imagine": _CREATE_READS
     | {
         "twin.imagine_put_studio",
+        # A change to the studio as a list of edits, not the whole config.
+        "twin.imagine_patch_studio",
         # A dry run of the Imagine gates. Imagine's own work, so it is not in the
         # reads every stage carries: Develop, Check and Make are near the cap.
         "twin.imagine_validate",
+        # A look at the authored form: what each part drew, and a picture. Imagine's
+        # own work, so it is not in the reads every stage carries.
+        "twin.imagine_look",
+        # A real part's 3D body and its fidelity, from KiCad's own model or an approximation.
+        "twin.imagine_resolve_part",
+        # The component library: find a real part chosen before, and register a new one
+        # once so later projects reuse it (2026-11-11).
+        "library.list_components",
+        "library.get_component",
+        "library.register_component",
         # FORGE-824: a person's steps, refused unless the owner delegates
         # human authority, and then held for an approval like any such step.
         "twin.imagine_handover",

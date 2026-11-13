@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from collections.abc import AsyncIterator
 from typing import Any, cast
@@ -104,7 +105,7 @@ def _usage_from(
     if u is None:
         return None
     try:
-        out: dict[str, int | bool] = {
+        out: dict[str, Any] = {
             "input_tokens": int(getattr(u, in_key, 0) or 0),
             "output_tokens": int(getattr(u, out_key, 0) or 0),
         }
@@ -126,9 +127,34 @@ def _usage_from(
             written = getattr(details, "cache_write_tokens", None)
             if isinstance(written, int):
                 out["cache_creation_input_tokens"] = written
+        # A router that bills per call (OpenRouter) reports the cost it charged. That is exact,
+        # so it is kept beside the tokens; anything that is not a usable amount is dropped.
+        # With a key brought to the router (BYOK) ``cost`` is only the router's own fee, often
+        # 0, and the real spend is the upstream provider's cost, reported separately. Both are
+        # spent, so both count; otherwise a 60,000 token call would read as free.
+        cost = _usable_cost(getattr(u, "cost", None))
+        if cost is not None:
+            if getattr(u, "is_byok", None) is True:
+                details = getattr(u, "cost_details", None)
+                upstream = _usable_cost(
+                    details.get("upstream_inference_cost")
+                    if isinstance(details, dict)
+                    else getattr(details, "upstream_inference_cost", None)
+                )
+                cost += upstream or 0.0
+            out["cost_usd"] = cost
         return out
     except (TypeError, ValueError):
         return None
+
+
+def _usable_cost(value: Any) -> float | None:
+    """A cost amount from a provider's usage block, or ``None`` when it is not a usable one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
 
 
 def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], int, float]:
@@ -220,6 +246,9 @@ def _apply_openai_cache(
         )
     if caching.routes_claude_cache_control(spec.name, spec.base_url, spec.model):
         extra["cache_control"] = caching.automatic_cache_control()
+    if caching.is_openrouter(spec.name, spec.base_url):
+        # Ask for the cost OpenRouter billed for this call (usage accounting).
+        extra["usage"] = {"include": True}
     if extra:
         kwargs["extra_body"] = extra
 
@@ -1009,12 +1038,14 @@ async def openai_stream_events(
     acc: dict[int, dict[str, str]] = {}
     announced: set[int] = set()
     usage: dict[str, int | bool] | None = None
+    finish_reason: str | None = None
     try:
         stream = await client.chat.completions.create(**kwargs)
         async for chunk in stream:
             usage = _usage_from(chunk, "prompt_tokens", "completion_tokens") or usage
             if not getattr(chunk, "choices", None):
                 continue
+            finish_reason = getattr(chunk.choices[0], "finish_reason", None) or finish_reason
             delta = chunk.choices[0].delta
             content = getattr(delta, "content", None)
             if content:
@@ -1044,12 +1075,19 @@ async def openai_stream_events(
     except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
         raise _classify_error(exc) from exc
 
+    # A reply cut off at the output cap (finish_reason "length") is flagged so
+    # the loop tells the model, and a call whose arguments were cut mid-JSON is
+    # dropped: parsed as {} it reached the tool as a call with no arguments and
+    # the model never learned why (MetaForge, 2026-11-11).
+    truncated = finish_reason == "length"
     tool_calls: list[dict[str, Any]] = []
     for idx in sorted(acc):
         slot = acc[idx]
         try:
             args = json.loads(slot["arguments"] or "{}")
         except (ValueError, TypeError):
+            if truncated:
+                continue
             args = {}
         tool_calls.append(
             {
@@ -1061,6 +1099,8 @@ async def openai_stream_events(
     result: dict[str, Any] = {"text": "".join(text_parts), "model": spec.model}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    if truncated:
+        result["truncated"] = True
     if usage:
         result["usage"] = usage
     yield {"type": "response", "result": result}
@@ -1134,9 +1174,16 @@ async def anthropic_stream_events(
         for block in final.content
         if getattr(block, "type", None) == "tool_use"
     ]
+    # Cut off at the output cap: the last tool_use is the one being written, so
+    # its input is incomplete; drop it and flag the reply (as the OpenAI path).
+    truncated = getattr(final, "stop_reason", None) == "max_tokens"
+    if truncated and tool_calls:
+        tool_calls.pop()
     result: dict[str, Any] = {"text": text, "model": getattr(final, "model", spec.model)}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    if truncated:
+        result["truncated"] = True
     usage = _usage_from(final)
     if usage:
         result["usage"] = usage

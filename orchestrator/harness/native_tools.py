@@ -33,7 +33,9 @@ from orchestrator.harness.compression import compact_native_messages, truncate_o
 from orchestrator.harness.providers import default_invoke
 from orchestrator.harness.providers.pipeline import Invoke, StreamEvents
 from orchestrator.harness.providers.pricing import DEFAULT_PRICING, TokenPricing, estimate_cost_usd
+from orchestrator.harness.providers.usage import reported_cost_usd
 from orchestrator.harness.react import OnStep, ReActResult, ReActStep, ToolCall
+from orchestrator.harness.result_handles import READER_TOOL_NAME, clear_stale_results
 from orchestrator.harness.runtime import HarnessRuntime
 from orchestrator.harness.tool_exec import (
     TurnToolCache,
@@ -235,6 +237,16 @@ def _select_tools(
     kept = [s for s in specs if id(s) in kept_set]
     dropped = [s.name for s in specs if id(s) not in kept_set]
     return kept, dropped
+
+
+def schema_tokens(schemas: list[dict[str, Any]]) -> int:
+    """About how many input tokens a tool list costs on every model call.
+
+    Four characters a token, the rule the context meter uses. The list rides on every call of
+    a turn, so its size multiplies by the number of steps; it is logged so that cost is seen
+    before a key's budget runs out.
+    """
+    return len(json.dumps(schemas, separators=(",", ":"), default=str)) // 4 if schemas else 0
 
 
 def _tool_schemas(
@@ -568,16 +580,37 @@ async def run_native_tools(
     # see ``TurnToolCache`` for why the scope is the turn.
     tool_cache = TurnToolCache()
     # MET-596: sum provider-reported usage across the turn's model calls.
-    usage_total = {"input_tokens": 0, "output_tokens": 0}
+    usage_total: dict[str, Any] = {"input_tokens": 0, "output_tokens": 0}
     usage_seen = False
+    # A provider-reported cost is exact, but a sum of some calls would understate the spend, so
+    # the total is shown, and the cap enforced from it, only when every call reported one.
+    calls_with_usage = 0
+    reported_costs: list[float] = []
 
     def _tally(resp: Any) -> None:
-        nonlocal usage_seen
+        nonlocal usage_seen, calls_with_usage
         u = resp.get("usage") if isinstance(resp, dict) else None
         if isinstance(u, dict):
             usage_seen = True
+            calls_with_usage += 1
             usage_total["input_tokens"] += int(u.get("input_tokens", 0) or 0)
             usage_total["output_tokens"] += int(u.get("output_tokens", 0) or 0)
+            cost = reported_cost_usd(u)
+            if cost is not None:
+                reported_costs.append(cost)
+
+    def _reported_total() -> float | None:
+        if calls_with_usage and len(reported_costs) == calls_with_usage:
+            return sum(reported_costs)
+        return None
+
+    def _usage_view() -> dict[str, Any] | None:
+        if not usage_seen:
+            return None
+        total = _reported_total()
+        if total is None:
+            return dict(usage_total)
+        return {**usage_total, "cost_usd": round(total, 6)}
 
     async def _emit(step: ReActStep) -> None:
         # MET-590: live progress — a broken observer must never break the turn.
@@ -625,14 +658,17 @@ async def run_native_tools(
     def _budget_exceeded() -> bool:
         if max_cost_usd is None:
             return False
-        spent = estimate_cost_usd(
-            active_pricing, cost_provider, cost_model, usage_total if usage_seen else None
-        )
+        spent = _reported_total()
+        if spent is None:
+            spent = estimate_cost_usd(
+                active_pricing, cost_provider, cost_model, usage_total if usage_seen else None
+            )
         return spent is not None and spent >= max_cost_usd
 
     with tracer.start_as_current_span("harness.native_loop") as span:
         hit_deadline = False
         hit_budget = False
+        last_logged_tools = -1
         for step_no in range(1, max_steps + 1):
             if deadline is not None and time.monotonic() >= deadline:
                 hit_deadline = True
@@ -642,6 +678,10 @@ async def run_native_tools(
                 break
             if max_context_tokens is not None:
                 messages = compact_native_messages(messages, max_tokens=max_context_tokens)
+            # MetaForge (2026-11-11): old results are cleared in batches once they are
+            # large, kept behind a handle; only where the model can read them back.
+            if READER_TOOL_NAME in runtime.tools.names():
+                messages = clear_stale_results(messages, runtime.results)
             # MET-747 follow-up: recomputed every round-trip (not hoisted
             # before the loop) so a tool registered mid-turn -- e.g. by the
             # `search_tools` meta-tool's handler calling
@@ -654,6 +694,17 @@ async def run_native_tools(
             tools = _tool_schemas(
                 runtime, max_tools=max_tools, on_truncate=dropped_this_round.extend
             )
+            if len(tools) != last_logged_tools:
+                # The first step, and again whenever the list changes (a tool added mid-turn
+                # by search_tools makes every later call bigger).
+                logger.info(
+                    "native_tool_schemas",
+                    step=step_no,
+                    tools=len(tools),
+                    approx_tokens=schema_tokens(tools),
+                    previous_tools=last_logged_tools,
+                )
+                last_logged_tools = len(tools)
             # FORGE-94 remainder: the structured log already records a
             # truncation, but the MODEL never saw it -- it just found a tool
             # missing with no explanation, indistinguishable from "this
@@ -726,7 +777,7 @@ async def run_native_tools(
                     status="completed",
                     output=text,
                     steps=steps,
-                    usage=usage_total if usage_seen else None,
+                    usage=_usage_view(),
                     stop_reason="done",
                 )
 
@@ -755,6 +806,22 @@ async def run_native_tools(
                 steps.append(step)
                 await _emit(step)
                 messages.append({"role": "tool", "tool_call_id": call_id, "content": content})
+            if truncated:
+                # Cut off after at least one complete call: the adapter dropped
+                # the half-written one, so say so, or the model never learns
+                # that call did not happen (MetaForge, 2026-11-11).
+                logger.warning("native_tools_output_truncated", steps=step_no, calls=len(calls))
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was truncated at the output token "
+                            "limit: the calls above ran, but the call you were writing "
+                            "when it was cut off did not. Make that call again, with a "
+                            "shorter argument if you can."
+                        ),
+                    }
+                )
 
         # Step cap, deadline, or spend cap hit — force a final text answer (no
         # tools) so we never return empty.
@@ -785,6 +852,6 @@ async def run_native_tools(
             status="completed",
             output=final,
             steps=steps,
-            usage=usage_total if usage_seen else None,
+            usage=_usage_view(),
             stop_reason=stop_reason,
         )

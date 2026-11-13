@@ -70,6 +70,8 @@ describe('StudioFrame', () => {
   });
 
   it('starts at a sensible height and resizes on fg:height, within bounds', () => {
+    // A tall window, so only the frame's own bounds apply here.
+    const inner = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(2400);
     const { el, win } = frame();
     expect(el.style.height).toBe(`${START_HEIGHT}px`);
     fromPage({ fg: 1, type: 'fg:height', px: 812 }, win);
@@ -80,6 +82,7 @@ describe('StudioFrame', () => {
     fromPage({ fg: 1, type: 'fg:height', px: 3 }, win);
     expect(el.style.height).toBe(`${MIN_HEIGHT}px`);
     expect(MAX_HEIGHT).toBeLessThanOrEqual(1000);
+    inner.mockRestore();
   });
 
   it("gives the page Create's theme, and a new theme reloads it in that theme", () => {
@@ -88,7 +91,12 @@ describe('StudioFrame', () => {
     const el = screen.getByTestId('studio-frame');
     expect(el).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=dark');
     act(() => useThemeStore.setState({ resolvedTheme: 'light' }));
-    expect(el).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=light');
+    // The page in the new theme loads behind the one on screen and takes its place when ready.
+    const next = screen.getByTestId('studio-frame-pending') as HTMLIFrameElement;
+    expect(next).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=light');
+    fromPage({ fg: 1, type: 'fg:ready' }, next.contentWindow);
+    expect(screen.getByTestId('studio-frame')).toHaveAttribute('src', '/api/v1/engine?t=tok&theme=light');
+    expect(screen.queryByTestId('studio-frame-pending')).toBeNull();
     view.unmount();
   });
 
@@ -143,4 +151,67 @@ describe('StudioFrame', () => {
     expect(posted).toHaveBeenNthCalledWith(1, { fg: 1, type: 'fg:snapshot', collections: SNAPSHOT }, '*');
     expect(posted).toHaveBeenNthCalledWith(2, { fg: 1, type: 'fg:readonly', value: true }, '*');
   });
+
+  describe('a new revision', () => {
+    const form = (h: number) => ({ template: 'authored', params: { h }, authored: { parts: [{ id: 'a', name: 'A', kind: 'generated', code: 'return [];' }] } });
+    const cfg = (h: number, process = 'fdm') => ({ engine: 'formgraph@2', process: { id: process }, form: form(h) });
+
+    function live() {
+      const props = { projectId: P, src: 'https://engine.test/page', collections: SNAPSHOT, readOnly: false };
+      const view = render(<StudioFrame {...props} revision={1} config={cfg(10)} />);
+      const el = screen.getByTestId('studio-frame') as HTMLIFrameElement;
+      const win = el.contentWindow!;
+      const posted = vi.spyOn(win, 'postMessage').mockImplementation(() => undefined);
+      fromPage({ fg: 1, type: 'fg:ready' }, win);
+      return { view, el, win, posted, props };
+    }
+
+    it('that changes only the form is pushed into the running page, not reloaded', () => {
+      const { view, el, win, posted, props } = live();
+      const before = el.getAttribute('src');
+      view.rerender(<StudioFrame {...props} revision={2} config={cfg(12)} />);
+      expect(posted).toHaveBeenCalledWith({ fg: 1, type: 'fg:form', form: form(12), revision: 2 }, '*');
+      expect(screen.queryByTestId('studio-frame-pending')).toBeNull();
+      fromPage({ fg: 1, type: 'fg:applied', revision: 2, ok: true }, win);
+      expect(screen.queryByTestId('studio-frame-pending')).toBeNull();
+      expect(screen.getByTestId('studio-frame').getAttribute('src')).toBe(before);
+    });
+
+    it('that the page cannot apply loads behind the current page instead', () => {
+      const { view, win, props } = live();
+      view.rerender(<StudioFrame {...props} revision={2} config={cfg(12)} />);
+      fromPage({ fg: 1, type: 'fg:applied', revision: 2, ok: false }, win);
+      expect(screen.getByTestId('studio-frame-pending').getAttribute('src')).toContain('rev=2');
+    });
+
+    it('that changes more than the form loads behind the current page', () => {
+      const { view, posted, props } = live();
+      view.rerender(<StudioFrame {...props} revision={2} config={cfg(10, 'cnc')} />);
+      expect(posted).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fg:form' }), '*');
+      expect(screen.getByTestId('studio-frame-pending').getAttribute('src')).toContain('rev=2');
+    });
+  });
+
+  it("puts the page's next-step request in the conversation, only from the page on screen", () => {
+    const onAsk = vi.fn();
+    render(<StudioFrame projectId={P} src="about:blank" collections={SNAPSHOT} readOnly={false} onAsk={onAsk} />);
+    const win = (screen.getByTestId('studio-frame') as HTMLIFrameElement).contentWindow!;
+    fromPage({ fg: 1, type: 'fg:ask', text: 'Find two real parts for the GNSS receiver.' }, win);
+    expect(onAsk).toHaveBeenCalledWith('Find two real parts for the GNSS receiver.');
+    fromPage({ fg: 1, type: 'fg:ask', text: 'From elsewhere' }, window);
+    fromPage({ fg: 1, type: 'fg:ask', text: 'x'.repeat(3000) }, win);
+    expect(onAsk).toHaveBeenCalledTimes(1);
+  });
+
+  it('fits the window from where the frame actually starts, so its bottom is never cut off', () => {
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: 300, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 300, toJSON() {} } as DOMRect);
+    const inner = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(900);
+    const { win } = frame();
+    fromPage({ fg: 1, type: 'fg:height', px: MAX_HEIGHT }, win);
+    // 900 window - 300 from the top - 16 margin = 584, though the page asked for more.
+    expect(screen.getByTestId('studio-frame')).toHaveStyle({ height: '584px' });
+    rect.mockRestore();
+    inner.mockRestore();
+  });
 });
+
