@@ -27,7 +27,10 @@ vi.mock('metaforge:auth', () => ({
   },
 }));
 
-const mockAuth = vi.hoisted(() => ({ status: 'signed-out' as string }));
+const mockAuth = vi.hoisted(() => ({
+  status: 'signed-out' as string,
+  signedOutReason: null as string | null,
+}));
 vi.mock('../AuthProvider', () => ({
   useAuth: () => mockAuth,
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -67,6 +70,7 @@ describe('AuthGate', () => {
     vi.clearAllMocks();
     fake.client = client();
     mockAuth.status = 'signed-out';
+    mockAuth.signedOutReason = null;
   });
 
   it('renders the app on a local gateway, with no sign-in screen', () => {
@@ -132,5 +136,15 @@ describe('AuthGate', () => {
     fake.client = client({ isConfigured: false });
     app();
     expect(screen.getByText(/STAND-IN HINT/)).toBeInTheDocument();
+  });
+
+  it('tells the sign-in screen when the session expired', () => {
+    health({ auth_mode: 'stand-in' });
+    mockAuth.signedOutReason = 'expired';
+    fake.client = client({
+      SignInView: ({ reason }) => <div>{`SIGN IN (${reason ?? 'none'})`}</div>,
+    });
+    app();
+    expect(screen.getByText('SIGN IN (expired)')).toBeInTheDocument();
   });
 });

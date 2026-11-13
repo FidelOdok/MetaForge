@@ -26,6 +26,11 @@ export interface AuthSession {
   user: AuthUser;
 }
 
+/** Why the user is looking at the sign-in screen, when it is not obvious. */
+export type SignedOutReason =
+  /** The gateway stopped accepting the session's token mid-use. */
+  'expired';
+
 export type AuthStatus =
   /** Restoring a persisted session; we do not yet know if there is one. */
   | 'loading'
@@ -68,5 +73,5 @@ export interface AuthClient {
 
   /** The sign-in screen. Owned by the client because its copy and its fields
    *  are provider-specific. */
-  SignInView: ComponentType<{ gatewayLabel?: string }>;
+  SignInView: ComponentType<{ gatewayLabel?: string; reason?: SignedOutReason }>;
 }

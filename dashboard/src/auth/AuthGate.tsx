@@ -21,7 +21,7 @@ import { useAuth } from './AuthProvider';
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { data: health, isLoading: healthLoading } = useHealth();
-  const { status } = useAuth();
+  const { status, signedOutReason } = useAuth();
 
   const gatewayMode = health?.auth_mode;
   const gatewayRequiresAuth = Boolean(gatewayMode) && gatewayMode !== 'off';
@@ -45,7 +45,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (status === 'signed-out') {
     const SignInView = authClient!.SignInView;
-    return <SignInView gatewayLabel={getGatewayBase() || undefined} />;
+    return (
+      <SignInView
+        gatewayLabel={getGatewayBase() || undefined}
+        reason={signedOutReason ?? undefined}
+      />
+    );
   }
 
   return <>{children}</>;

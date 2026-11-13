@@ -1,6 +1,6 @@
 import { context as otelContext, propagation } from '@opentelemetry/api';
 import axios from 'axios';
-import { getAccessToken } from '../auth/accessToken';
+import { getAccessToken, notifyUnauthorized } from '../auth/accessToken';
 import { logger } from '../lib/logger';
 import { apiBase, getGatewayBase } from '../lib/gatewayConfig';
 import { installSampleAdapter } from '../lib/sample-workspace';
@@ -107,6 +107,12 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
+    // A 401 to a request that carried a token: the session is over. One that
+    // carried none is a gateway wanting sign-in, which AuthGate already shows.
+    const sentToken = Boolean(error.config?.headers?.Authorization);
+    if (error.response?.status === 401 && sentToken) {
+      notifyUnauthorized();
+    }
     logger.error('api_error', {
       status: error.response?.status,
       url: error.config?.url,
