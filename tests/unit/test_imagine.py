@@ -537,6 +537,7 @@ async def test_the_dashboard_forwards_the_whole_page_write(client: httpx.AsyncCl
         "requirements",
         "ledger",
         "screening",
+        "formSeen",
     }
 
 
@@ -1282,6 +1283,51 @@ async def test_validate_is_an_mcp_read_that_returns_the_report(service: ImagineS
     assert (await srv.imagine_get_studio({"project_id": PROJECT}))["revision"] == 1
 
 
+async def test_validate_takes_a_revision_and_its_description_tells_the_agent_why(
+    service: ImagineService,
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    tool = srv._tools["twin.imagine_validate"].manifest
+    props = tool.input_schema["properties"]
+    assert props["revision"]["type"] == "integer"
+    assert set(props["gates"]["items"]["enum"]) == {"config_valid", "handover", "define_exit"}
+    # The agent is told to name the revision after a write, and why.
+    assert "revision" in tool.description and "not run again" in tool.description
+
+
+async def test_a_recheck_that_names_the_revision_is_not_a_repeat_of_the_earlier_call() -> None:
+    """The chat answers a byte-identical call in a turn from the earlier result, without running it.
+
+    Naming the revision a write returned is what makes the re-check after a fix a new call, so
+    it cannot be answered with the report from before the fix.
+    """
+    from orchestrator.harness.tool_exec import dedup_key
+
+    name = "mcp_twin_imagine_validate"
+    first = {"scope": [{"kind": "part", "id": "usbc-a"}]}
+    again = {"scope": [{"kind": "part", "id": "usbc-a"}], "revision": 2}
+    assert dedup_key(name, first) != dedup_key(name, again)
+    assert dedup_key(name, {"revision": 2}) != dedup_key(name, {"revision": 3})
+
+
+async def test_validate_over_mcp_accepts_the_head_revision_and_refuses_another(
+    service: ImagineService,
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    sent = _fake_verification(service, report=_report())
+    report = await srv.imagine_validate({"project_id": PROJECT, "revision": 1})
+    assert report["verdict"] == "ready_for_handover" and sent[0]["revision"]["number"] == 1
+    with pytest.raises(ValueError, match="Only the head revision"):
+        await srv.imagine_validate({"project_id": PROJECT, "revision": 9})
+    with pytest.raises(ValueError, match="revision"):
+        await srv.imagine_validate({"project_id": PROJECT, "revision": "two"})
+
+
 async def test_validate_over_mcp_returns_the_invalid_report_not_an_error(
     service: ImagineService,
 ) -> None:
@@ -1507,3 +1553,111 @@ async def test_roundtrip_the_mcp_tool_returns_the_same_report(
     over_rest = (await _validate(client)).json()
     assert over_mcp["verdict"] == over_rest["verdict"] == "ready_for_handover"
     assert [f["id"] for f in over_mcp["findings"]] == [f["id"] for f in over_rest["findings"]]
+
+
+_TIPS_OVER = {
+    "total_area": 600.0,
+    "overhang_area": 60.0,
+    "overhang_share": 0.1,
+    "com": [6.0, 7.0, 0.0],
+    "support": {"points": 4, "margin_mm": -4.9, "tip_angle_deg": -35.0},
+    "overlaps": [],
+    "notes": [],
+}
+
+
+async def test_roundtrip_an_unmeasured_form_is_told_so_and_a_recorded_look_is_judged(
+    client: httpx.AsyncClient, real_service: ImagineService
+) -> None:
+    await _put(client)
+    before = (await _validate(client)).json()
+    note = _by_check(before, "form.measured")
+    assert len(note) == 1 and note[0]["status"] == "not_assessed"
+    assert note[0]["severity"] == "advisory" and not _by_check(before, "form.balance")
+
+    await real_service.record_measurement(PROJECT, 1, dict(_TIPS_OVER))
+    after = (await _validate(client)).json()
+    balance = _by_check(after, "form.balance")
+    assert len(balance) == 1 and balance[0]["status"] == "fail"
+    assert balance[0]["severity"] == "advisory" and "tip over" in balance[0]["message"]
+    assert not _by_check(after, "form.measured")
+    # Measuring a form moves no verdict and no gate.
+    assert after["verdict"] == before["verdict"]
+    assert {g["gate"]: g["decision"] for g in after["gates"]} == {
+        g["gate"]: g["decision"] for g in before["gates"]
+    }
+
+
+async def test_roundtrip_a_newer_write_goes_back_to_not_measured(
+    client: httpx.AsyncClient, real_service: ImagineService
+) -> None:
+    await _put(client)
+    await real_service.record_measurement(PROJECT, 1, dict(_TIPS_OVER))
+    await _put(client)  # revision 2: the figure was for revision 1
+    report = (await _validate(client)).json()
+    assert _by_check(report, "form.measured") and not _by_check(report, "form.balance")
+
+
+# -- the form seen, instead of a mesh that nothing downstream reads ------------------
+#
+# Item 7 used to need a paid concept mesh that no later stage consumes and that can never
+# be evidence. It is now satisfied by a person having seen this revision of the form, or
+# by a mesh (spec 5.1, concept.form_seen). The acknowledgement is the person's own and is
+# tied to the revision, so a form the agent changed since is not covered.
+
+
+async def test_a_person_having_seen_the_form_clears_the_concept_item_without_a_mesh(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    before = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert before["status"] == "missing"
+    assert "seen the form" in before["detail"]
+    res = await _event(client, "form_seen", {"id": "latest", "seen": True})
+    assert res.status_code == 200, res.text
+    after = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert after["status"] == "done", after
+    assert "seen" in after["detail"] and "mesh" not in after["detail"].replace("no mesh", "")
+
+
+async def test_seeing_the_form_does_not_cover_a_revision_the_agent_saved_afterwards(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    assert (await _event(client, "form_seen", {"id": "latest", "seen": True})).status_code == 200
+    cfg = full_config()
+    cfg["product"]["name"] = "A changed product"
+    await _put(client, cfg)
+    item = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert item["status"] == "missing", item
+
+
+async def test_the_form_seen_is_stamped_by_the_server_not_taken_from_the_page(
+    client: httpx.AsyncClient,
+) -> None:
+    await _put(client)
+    rev = (await client.get(f"{BASE}/studio")).json()["revision"]
+    await _event(client, "form_seen", {"id": "latest", "seen": True, "revision": 999})
+    seen = (await client.get(f"{BASE}/studio")).json()["collections"]["formSeen"]["latest"]
+    assert seen["revision"] == rev and seen["seen"] is True
+
+
+async def test_an_agent_cannot_say_a_person_has_seen_the_form(client: httpx.AsyncClient) -> None:
+    await _put(client)
+    res = await client.post(
+        f"{BASE}/events",
+        json={"event_id": uuid4().hex, "kind": "form_seen", "data": {"id": "latest", "seen": True}},
+        headers=AGENT,
+    )
+    assert res.status_code == 403, res.text
+    item = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert item["status"] == "missing"
+
+
+async def test_a_mesh_still_clears_the_concept_item(
+    client: httpx.AsyncClient, twin: InMemoryTwinAPI
+) -> None:
+    await _put(client)
+    await _add_mesh(twin)
+    item = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
+    assert item["status"] == "done" and "concept mesh exists" in item["detail"]

@@ -4,6 +4,7 @@ import {
   MIN_HEIGHT,
   base64ToBlob,
   clampHeight,
+  onlyFormChanged,
   parsePageMessage,
   safeFileName,
   safeMime,
@@ -60,6 +61,7 @@ describe('writeToEvent', () => {
     expect(writeToEvent({ ...msg, collection: 'assumptions' }, 'e').kind).toBe('assumption_confirmed');
     expect(writeToEvent({ ...msg, collection: 'choices' }, 'e').kind).toBe('choice');
     expect(writeToEvent({ ...msg, collection: 'screening' }, 'e').kind).toBe('screening');
+    expect(writeToEvent({ ...msg, collection: 'formSeen' }, 'e').kind).toBe('form_seen');
   });
 });
 
@@ -92,3 +94,24 @@ describe('downloads and sizes', () => {
     expect(await blob.text()).toBe('hello');
   });
 });
+
+describe('onlyFormChanged', () => {
+  const authored = (h: number) => ({ template: 'authored', params: { h } });
+  it('is true when an authored form is all that changed', () => {
+    expect(onlyFormChanged({ engine: 'x', process: { id: 'fdm' }, form: authored(1) }, { engine: 'x', process: { id: 'fdm' }, form: authored(2) })).toBe(true);
+  });
+  it('is false when anything else changed, or the form is not authored, or nothing changed', () => {
+    expect(onlyFormChanged({ process: { id: 'fdm' }, form: authored(1) }, { process: { id: 'cnc' }, form: authored(2) })).toBe(false);
+    expect(onlyFormChanged({ form: authored(1) }, { form: authored(1), context: {} })).toBe(false);
+    expect(onlyFormChanged({ form: { template: 'enclosure' } }, { form: { template: 'enclosure', x: 1 } })).toBe(false);
+    expect(onlyFormChanged({ form: authored(1) }, { form: authored(1) })).toBe(false);
+  });
+});
+
+describe('fg:applied', () => {
+  it('is read with its revision and outcome', () => {
+    expect(parsePageMessage({ fg: 1, type: 'fg:applied', revision: 3, ok: true })).toEqual({ type: 'fg:applied', revision: 3, ok: true });
+    expect(parsePageMessage({ fg: 1, type: 'fg:applied', revision: 'x', ok: true })).toBeNull();
+  });
+});
+

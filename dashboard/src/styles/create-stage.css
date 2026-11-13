@@ -165,9 +165,10 @@
   flex-direction: column;
   width: min(340px, 40%);
   min-height: 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(17, 19, 25, 0.96);
-  color: #e2e2eb;
+  /* Theme tokens, so the drawer matches the page in light and dark. */
+  border-left: 1px solid var(--cv-line);
+  background: var(--cv-panel);
+  color: var(--cv-text);
   font-size: 12px;
 }
 .cv-drawer.is-collapsed {
@@ -182,7 +183,7 @@
   padding: 10px 0;
   border: 0;
   background: transparent;
-  color: #e2e2eb;
+  color: var(--cv-text);
   cursor: pointer;
 }
 .cv-drawer-tab span {
@@ -194,14 +195,14 @@
   align-items: center;
   gap: 4px;
   padding: 8px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--cv-line);
 }
 .cv-drawer-head strong {
   flex: 1;
   font-size: 13px;
 }
 .cv-drawer-head .cv-icon-btn {
-  color: #b4b4c2;
+  color: var(--cv-muted);
 }
 .cv-drawer-body {
   flex: 1;
@@ -574,7 +575,9 @@
 .cv-body {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  /* The conversation's width is the person's own, dragged at its edge
+     (--cv-chat-w, set by the page); never more than 55% of the body. */
+  grid-template-columns: min(var(--cv-chat-w, 400px), 55%) minmax(0, 1fr);
   gap: 16px;
   min-height: 0;
 }
@@ -586,7 +589,9 @@
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  max-height: calc(100vh - 200px);
+  /* Ends at the window's bottom edge instead of running past it. */
+  max-height: calc(100vh - 260px);
+  max-height: calc(100dvh - 260px);
   padding: 10px;
   border: 1px solid var(--cv-line);
   border-radius: 10px;
@@ -594,6 +599,43 @@
 }
 .cv-rail {
   align-self: start;
+}
+/* The drag handle sits in the gap at the conversation's right edge. */
+.cv-chat-resizer {
+  position: absolute;
+  top: 0;
+  right: -13px;
+  bottom: 0;
+  width: 10px;
+  border-radius: 4px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 5;
+}
+.cv-chat-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 4px;
+  height: 40px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: var(--cv-line);
+  transition: background 0.15s;
+}
+.cv-chat-resizer:hover::after,
+.cv-chat-resizer:focus-visible::after,
+body.cv-resizing .cv-chat-resizer::after {
+  background: var(--cv-accent);
+  height: 72px;
+}
+.cv-chat-resizer:focus-visible {
+  outline: none;
+}
+body.cv-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 .cv-main {
   min-width: 0;
@@ -615,6 +657,95 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* Develop and Make: the model is the stage. It takes the full width beside
+   the conversation and most of the window's height; everything else is a
+   button under it that opens its detail in place. */
+.cv-stage-col.is-model {
+  max-width: none;
+  gap: 12px;
+}
+/* A fixed height, not a minimum: the viewer inside sizes itself to 100% of
+   it. It ends just above the button row, so the buttons stay on screen. */
+.cv-stage-col.is-model .cv-stage-canvas {
+  height: max(420px, calc(100vh - 390px));
+  height: max(420px, calc(100dvh - 390px));
+}
+.cv-make-model {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cv-make-model-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+}
+.cv-stage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+}
+.cv-disclosures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cv-disclose {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid var(--cv-line);
+  border-radius: 999px;
+  background: var(--cv-raised);
+  color: var(--cv-text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.cv-disclose:hover {
+  background: var(--cv-high);
+}
+.cv-disclose:focus-visible {
+  outline: 2px solid var(--cv-accent-soft);
+  outline-offset: 2px;
+}
+.cv-disclose.is-open {
+  border-color: var(--cv-accent);
+  background: var(--cv-high);
+}
+.cv-disclose > svg:first-child {
+  color: var(--cv-muted);
+}
+.cv-disclose.is-ok > svg:first-child {
+  color: var(--cv-ok);
+}
+.cv-disclose.is-warn > svg:first-child {
+  color: var(--cv-warn);
+}
+.cv-disclose.is-bad > svg:first-child {
+  color: var(--cv-bad);
+}
+.cv-disclose-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--cv-panel);
+  color: var(--cv-muted);
+  font-size: 11px;
+}
+.cv-disclose-chevron {
+  color: var(--cv-muted);
+  transition: transform 0.15s;
+}
+.cv-disclose.is-open .cv-disclose-chevron {
+  transform: rotate(180deg);
+}
+.cv-disclose-panel .cv-blockers {
+  margin-top: 0;
 }
 
 /* One primary action, everything else in More. */
@@ -669,9 +800,50 @@
   color: var(--cv-text);
 }
 .cv-studio {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+/* What the newest revision changed, with an undo (it saves the revision before as a new one). */
+.cv-studio-changes {
+  padding: 10px 12px;
+  border: 1px solid var(--cv-line);
+  border-left: 3px solid var(--cv-accent);
+  border-radius: 10px;
+  background: var(--cv-panel);
+  font-size: 13px;
+}
+.cv-studio-changes-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cv-studio-changes-head svg {
+  color: var(--cv-accent);
+}
+.cv-studio-changes-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.cv-studio-changes ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0 0;
+  padding: 0 0 0 22px;
+  color: var(--cv-muted);
+}
+/* A new revision loads behind the one on screen and takes its place once it
+   is ready, so a regeneration never blanks the studio. */
+.cv-studio-frame.is-pending {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 /* The studio takes the stage's full width (the column is not held to
    920 px), and never more height than the window shows: the page asks for
@@ -685,8 +857,7 @@
 .cv-studio-frame {
   display: block;
   width: 100%;
-  max-height: max(420px, calc(100vh - 140px));
-  max-height: max(420px, calc(100dvh - 140px));
+  /* The height is set from where the frame starts (StudioFrame measures it). */
   border: 1px solid var(--cv-line);
   border-radius: 12px;
   background: var(--cv-bg);
@@ -944,6 +1115,11 @@
   .cv-journey-step.is-active .cv-journey-dot {
     animation: none;
   }
+  .cv-disclose,
+  .cv-disclose-chevron,
+  .cv-chat-resizer::after {
+    transition: none;
+  }
 }
 
 /* ── Phone width (375 px and up): one column, the stage first ─────────── */
@@ -966,6 +1142,12 @@
   }
   .cv-chat {
     max-height: none;
+  }
+  .cv-chat-resizer {
+    display: none;
+  }
+  .cv-stage-col.is-model .cv-stage-canvas {
+    height: 360px;
   }
   .cv-rail {
     flex-direction: row;

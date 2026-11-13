@@ -35,6 +35,7 @@ def _part(pid: str, role: str, name: str, env: list[float], bus: str) -> dict[st
 
 def base_config() -> dict[str, Any]:
     data: dict[str, Any] = json.loads(_EXAMPLE.read_text(encoding="utf-8"))
+    data["form"] = authored_lamp_form()
     return data
 
 
@@ -71,3 +72,81 @@ def full_config() -> dict[str, Any]:
 def mesh_glb() -> dict[str, Any]:
     """Metadata of an illustrative concept mesh, as concept_mesh records it."""
     return {"authority": "illustrative", "generated_by": "twin.generate_concept_mesh"}
+
+
+def authored_lamp_form() -> dict[str, Any]:
+    """A desk lamp written by hand as an authored form (spec 23.6, IMG-FORM-001).
+
+    Base, arm, shade, light panel, touch button and USB-C port. Units are millimetres
+    and Y is up. The shade's top is at base_h + arm_len + head_h.
+    """
+
+    def part(
+        pid: str, name: str, kind: str, uses: list[str], code: str, **extra: Any
+    ) -> dict[str, Any]:
+        return {"id": pid, "name": name, "kind": kind, "uses": uses, "code": code, **extra}
+
+    return {
+        "template": "authored",
+        "params": {
+            "base_r": 55,
+            "base_h": 12,
+            "arm_len": 260,
+            "arm_lean": 40,
+            "head_r": 50,
+            "head_h": 70,
+        },
+        "ranges": {"arm_len": [120, 480], "arm_lean": [-80, 80], "head_r": [30, 80]},
+        "authored": {
+            "parts": [
+                part(
+                    "base",
+                    "Weighted base",
+                    "generated",
+                    ["base_r", "base_h"],
+                    "return [g.cylinder(p.base_r, p.base_h, 48).at(0, p.base_h / 2, 0)];",
+                    body=True,
+                ),
+                part(
+                    "arm",
+                    "Arm",
+                    "generated",
+                    ["base_h", "arm_len", "arm_lean"],
+                    "const top = p.base_h + p.arm_len;"
+                    "return [g.tube([[0, p.base_h, 0],"
+                    " [p.arm_lean * 0.2, p.base_h + p.arm_len * 0.5, 0],"
+                    " [p.arm_lean, top, 0]], 4, 16)];",
+                ),
+                part(
+                    "shade",
+                    "Shade",
+                    "generated",
+                    ["base_h", "arm_len", "arm_lean", "head_r", "head_h"],
+                    "return [g.frustum(p.head_r, 12, p.head_h, 48)"
+                    ".at(p.arm_lean, p.base_h + p.arm_len + p.head_h / 2, 0)];",
+                ),
+                part(
+                    "panel",
+                    "Light panel",
+                    "primitive",
+                    ["base_h", "arm_len", "arm_lean", "head_r"],
+                    "return [g.cylinder(p.head_r * 0.85, 3, 48)"
+                    ".at(p.arm_lean, p.base_h + p.arm_len + 1.5, 0)];",
+                ),
+                part(
+                    "button",
+                    "Touch button",
+                    "component",
+                    ["base_r", "base_h"],
+                    "return [g.cylinder(7, 4, 24).at(p.base_r * 0.55, p.base_h + 2, 0)];",
+                ),
+                part(
+                    "usbc",
+                    "USB-C receptacle",
+                    "component",
+                    ["base_r", "base_h"],
+                    "return [g.box(9, 3.2, 7.5).at(0, p.base_h / 2, -(p.base_r - 3))];",
+                ),
+            ]
+        },
+    }

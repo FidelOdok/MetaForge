@@ -1373,11 +1373,27 @@ per-product formgraph config for Create's Imagine stage
   reference `file` is refused. A config that fails the checks is a tool error
   listing every error; a handed-over studio is a tool error until a person
   reworks it.
+- `twin.imagine_patch_studio` (additive): takes `base_revision` and `changes`
+  (1 to 64), each `{op, path, value}` in the style of JSON Patch (RFC 6902):
+  `add`, `replace` or `remove` at a JSON Pointer. In a list of objects with an
+  `id`, a path segment may name an item by its `id`
+  (`/form/authored/parts/display/code`) as well as by its index; `-` appends
+  with `add`. The changes apply in order to the head's config and the result is
+  checked and written exactly as `twin.imagine_put_studio` writes a config, as
+  the next revision. A head that is no longer `base_revision`, a change that
+  names something that does not exist, and a result that fails the checks are
+  tool errors, and nothing is written. Returns `{project_id, status, revision,
+  config_ref, engine_url, applied, warnings}`, not the config. REST: `PATCH
+  /v1/twin/projects/{id}/imagine/studio` with `{base_revision, changes}`
+  (409, 400 and 422 as above).
 - `twin.imagine_handover_status` (read-only): `{ready, items: [{id, label,
   status, detail}]}`, the checklist that gates Imagine to Develop.
 - `twin.imagine_validate` (read-only, never held for approval): a dry run of
   every Imagine gate. Takes `config` (a draft to check), `scope` (refs to
-  re-check, `{kind, id}`) and `gates`. Returns the verification service's
+  re-check, `{kind, id}`), `revision` (the head revision; after a write, name
+  the revision it returned, because the chat answers an identical repeat of an
+  earlier call from that call's result, so a plain repeat would show the report
+  from before the fix) and `gates`. Returns the verification service's
   report: `verdict` (`invalid`, `needs_agent`, `blocked_external`,
   `needs_person`, `ready_for_handover`), `level` (V0 to V2), `gates` and
   `findings`, each with a `target`, a `status`, a `resolver` (`agent`, `person`
@@ -1396,6 +1412,32 @@ decisions, taken in the dashboard (`POST .../imagine/handover`, `POST
 These tools let an agent take a validated design to a release without
 handling file bytes. Each takes `project_id`.
 
+- `twin.imagine_resolve_part` (read-only, never held for approval): give one real
+  part a 3D body. Takes `part` (the object as it goes in `context.components.parts`:
+  `id`, `role`, `name`, `mpn`, optionally `geometry` and `kicad.symbol`, and optionally `package_text`) and returns
+  `rung` (`existing`, `exact`, `approximation` or `placeholder`), `geometry`
+  (envelope, body, `fidelity`, `fidelity_basis`, `source`), `tried` (each rung and why
+  it was or was not used) and `message`. `exact` means a CAD kernel measured the KiCad
+  library's own model; a size only estimated from the file is an `approximation`.
+  Pass `package_text` (the package outline section of the datasheet, at most 30000 characters) and a rule-based parser reads the size from it: standard IC outlines in the TI/JEDEC millimetre format, an `approximation` whose size is read (`size_basis` `read`); text it does not recognise is skipped with a reason. The KiCad rung reads the folder named by
+  `METAFORGE_KICAD_LIBRARY_DIR` (holding `symbols`, `footprints` and `3dmodels`) and is
+  skipped with a reason when it is unset. Nothing is written: copy `geometry` into the
+  part.
+- `twin.imagine_look` (read-only, never held for approval): look at an authored
+  form. Renders the stored studio's engine page in headless Chromium and returns
+  `status` (`ready`, `error`, `none`, `not_authored` or `unavailable`), each
+  part's `kind`, `size`, `triangles` and `error`, and the screenshots as image
+  blocks. Takes `revision` (the head; after a write, name the revision it
+  returned, for the same reason as `twin.imagine_validate`) and `set`
+  (`{parameter: number}`, moved in the page and never saved, then it looks
+  again and adds `after`, `compare` and `requests_after_change`). A part that
+  fails is named and the rest is still drawn. It also returns `measured`: `overhang_share`
+  (an upper bound), `support` (`margin_mm` and `tip_angle_deg` of the centre of mass against the flat base,
+  negative when it would tip over, `null` with no flat base), `overlaps` (component boxes that overlap)
+  and `notes`, and `compare.measured_changed` after a `set`. V2 screening, never a verification.
+  fails is named and the rest is still drawn. `unavailable` carries `install`:
+  the `playwright` package and a Chromium build are not part of MetaForge, and
+  the agent must say it could not look rather than claim the form is right.
 - `twin.measure_dfm` (additive, registered with the DFM tools): `{item_key |
   node_id, build_direction?}`. The gateway reads the committed revision's
   STEP from the twin and calls `cadquery.dfm_measure` itself, then stores the

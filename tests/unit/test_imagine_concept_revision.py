@@ -69,7 +69,8 @@ def by_id(items: list[dict[str, Any]], id_: str) -> dict[str, Any]:
 
 def test_the_output_is_exactly_the_contracts_top_level_fields_and_json_safe() -> None:
     rev = build()
-    assert set(rev) == CONTRACT_KEYS
+    # Every studio is authored now, so every revision carries the form block.
+    assert set(rev) == CONTRACT_KEYS | {"form"}
     assert json.loads(json.dumps(rev)) == rev
 
 
@@ -394,3 +395,174 @@ def test_every_mapped_id_fits_the_services_alphabet() -> None:
             assert pattern.match(item["id"]), (key, item["id"])
             if item.get("part_id"):
                 assert pattern.match(item["part_id"])
+
+
+# -- the form (spec 23.6): sent only for an authored form ------------------------------
+
+
+def authored_config() -> dict[str, Any]:
+    from tests.unit.imagine_fixtures import authored_lamp_form
+
+    cfg = config()
+    cfg["form"] = authored_lamp_form()
+    return cfg
+
+
+def test_an_authored_form_is_sent_with_each_part_and_how_far_to_trust_it() -> None:
+    form = build(authored_config())["form"]
+    assert form["kind"] == "authored"
+    assert form["parts"] == [
+        {"id": "base", "kind": "generated", "body": True},
+        {"id": "arm", "kind": "generated", "body": False},
+        {"id": "shade", "kind": "generated", "body": False},
+        {"id": "panel", "kind": "primitive", "body": False},
+        {"id": "button", "kind": "component", "body": False},
+        {"id": "usbc", "kind": "component", "body": False},
+    ]
+
+
+def test_the_code_never_leaves_the_studio() -> None:
+    sent = json.dumps(build(authored_config())["form"])
+    assert "cylinder" not in sent and "return" not in sent and "code" not in sent
+
+
+def test_a_config_with_a_form_that_is_not_authored_sends_no_form_block() -> None:
+    """A stored studio from before the enclosure template was removed has no authored form."""
+    cfg = config()
+    cfg["form"] = {"template": "enclosure"}
+    assert "form" not in build(cfg)
+
+
+def test_an_authored_revision_adds_exactly_one_key() -> None:
+    assert set(build(authored_config())) == CONTRACT_KEYS | {"form"}
+
+
+def test_part_ids_are_made_safe_and_unique() -> None:
+    cfg = authored_config()
+    parts = cfg["form"]["authored"]["parts"]
+    parts[1]["id"] = "Arm 1!"
+    parts[2]["id"] = "arm-1_"
+    ids = [p["id"] for p in build(cfg)["form"]["parts"]]
+    assert len(set(ids)) == len(ids)
+    assert all(safe_id(i) == i for i in ids)
+
+
+def test_a_part_with_a_kind_the_contract_does_not_know_is_left_out_not_invented() -> None:
+    cfg = authored_config()
+    cfg["form"]["authored"]["parts"][1]["kind"] = "magic"
+    ids = [p["id"] for p in build(cfg)["form"]["parts"]]
+    assert "arm" not in ids and "base" in ids
+
+
+def test_a_malformed_authored_block_does_not_break_the_revision() -> None:
+    for bad in (None, [], {"parts": None}, {"parts": ["x", 3]}, "text"):
+        cfg = config()
+        cfg["form"] = {"template": "authored", "authored": bad}
+        assert "form" not in build(cfg), "an authored form with no usable parts is not sent"
+
+
+def test_an_enclosure_that_carries_a_stray_authored_block_sends_no_form() -> None:
+    """The template decides, not a block's presence: an enclosure is never sent as authored."""
+    cfg = authored_config()
+    cfg["form"]["template"] = "enclosure"
+    assert "form" not in build(cfg)
+
+
+# -- what a look measured ----------------------------------------------------------------
+
+RECORD: dict[str, Any] = {
+    "revision": 3,
+    "at": "2026-11-10T13:00:00+00:00",
+    "method": "headless look run by the gateway",
+    "measured": {
+        "total_area": 600.0,
+        "overhang_area": 60.0,
+        "overhang_share": 0.1,
+        "com": [0.0, 5.0, 0.0],
+        "support": {"points": 4, "margin_mm": 22.0, "tip_angle_deg": 31.0},
+        "overlaps": [{"a": "button", "b": "usbc", "volume_mm3": 12.5}],
+        "notes": ["Measured from the drawn triangles, with uniform density."],
+    },
+}
+
+
+def build_measured(record: dict[str, Any] | None, revision: int = 3) -> dict[str, Any]:
+    return build_concept_revision(
+        "73491e61-8421-425c-a751-aad37a21269c",
+        revision,
+        authored_config(),
+        _empty_collections(),
+        has_mesh=False,
+        measured=record,
+    )
+
+
+def test_without_a_record_the_form_carries_no_measurements() -> None:
+    assert "measured" not in build_measured(None)["form"]
+
+
+def test_a_recorded_measurement_is_sent_in_the_contracts_words() -> None:
+    m = build_measured(copy.deepcopy(RECORD))["form"]["measured"]
+    assert m == {
+        "overhang_share": 0.1,
+        "has_flat_base": True,
+        "tip_angle_deg": 31.0,
+        "margin_mm": 22.0,
+        "overlaps": [{"a": "button", "b": "usbc", "volume_mm3": 12.5}],
+    }
+
+
+def test_a_form_with_no_flat_base_is_sent_as_such() -> None:
+    record = copy.deepcopy(RECORD)
+    record["measured"]["support"] = None
+    m = build_measured(record)["form"]["measured"]
+    assert m["has_flat_base"] is False
+    assert m["tip_angle_deg"] is None and m["margin_mm"] is None
+
+
+def test_a_measurement_of_another_revision_is_not_sent() -> None:
+    assert "measured" not in build_measured(copy.deepcopy(RECORD), revision=4)["form"]
+
+
+def test_overlaps_follow_the_ids_the_part_list_was_given() -> None:
+    cfg = authored_config()
+    for p in cfg["form"]["authored"]["parts"]:
+        if p["id"] == "usbc":
+            p["id"] = "usb-c"
+    record = copy.deepcopy(RECORD)
+    record["measured"]["overlaps"] = [{"a": "button", "b": "usb-c", "volume_mm3": 1.0}]
+    rev = build_concept_revision(
+        "73491e61-8421-425c-a751-aad37a21269c",
+        3,
+        cfg,
+        _empty_collections(),
+        has_mesh=False,
+        measured=record,
+    )
+    ids = {p["id"] for p in rev["form"]["parts"]}
+    for o in rev["form"]["measured"]["overlaps"]:
+        assert o["a"] in ids and o["b"] in ids
+
+
+def test_an_overlap_naming_a_part_the_form_does_not_send_is_left_out() -> None:
+    record = copy.deepcopy(RECORD)
+    record["measured"]["overlaps"] = [
+        {"a": "button", "b": "ghost", "volume_mm3": 1.0},
+        {"a": "button", "b": "usbc", "volume_mm3": 2.0},
+    ]
+    m = build_measured(record)["form"]["measured"]
+    assert m["overlaps"] == [{"a": "button", "b": "usbc", "volume_mm3": 2.0}]
+
+
+def test_a_form_that_is_not_authored_never_carries_measurements() -> None:
+    cfg = config()
+    cfg["form"] = {"template": "enclosure"}
+    rev = build_concept_revision(
+        "73491e61-8421-425c-a751-aad37a21269c",
+        3,
+        cfg,
+        _empty_collections(),
+        has_mesh=False,
+        measured=copy.deepcopy(RECORD),
+    )
+    assert "form" not in rev

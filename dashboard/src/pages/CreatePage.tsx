@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ClipboardCheck, MessageSquare, PanelLeftClose, X } from 'lucide-react';
 import { useProject } from '../hooks/use-projects';
@@ -14,6 +15,7 @@ import { refusalOf } from '../api/endpoints/create';
 import { CreationsHome } from '../components/create/CreationsHome';
 import { CreateConversation } from '../components/create/CreateConversation';
 import { CreateComposer } from '../components/create/CreateComposer';
+import { ChatResizer } from '../components/create/ChatResizer';
 import { defaultStageNode, isEngineering, isVisual } from '../components/create/ProductStage';
 import { JourneyRail } from '../components/create/JourneyRail';
 import { DecisionsPanel } from '../components/create/DecisionsPanel';
@@ -131,6 +133,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
   }, [projectId, setStage, stageId]);
 
   const collapsed = useCreateLayoutStore((s) => s.collapsed);
+  const chatWidth = useCreateLayoutStore((s) => s.chatWidth);
   const setCollapsed = useCreateLayoutStore((s) => s.setCollapsed);
 
   const go = useCallback(
@@ -236,7 +239,10 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
         active={working}
       />
 
-      <div className={`cv-body${chatCollapsed ? ' is-chat-collapsed' : ''}`}>
+      <div
+        className={`cv-body${chatCollapsed ? ' is-chat-collapsed' : ''}`}
+        style={{ '--cv-chat-w': `${chatWidth}px` } as CSSProperties}
+      >
         {chatCollapsed ? (
           <aside className="cv-rail" aria-label="Conversation" data-testid="chat-rail">
             <button type="button" className="cv-icon-btn" aria-label="Show the conversation" title="Show the conversation" onClick={() => setCollapsed('chat', false)}>
@@ -261,6 +267,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
             </button>
             <CreateConversation projectId={projectId} tools={tools} />
             <CreateComposer projectId={projectId} tools={tools} busy={working} />
+            <ChatResizer />
           </aside>
         )}
 
@@ -278,6 +285,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
               view={imagineView}
               onView={(v) => go('imagine', v)}
               onAskAssistant={() => startIn('imagine', START_IMAGINE_TEXT)}
+              onAsk={(text) => ask(text, 'design')}
               onStartDeveloping={() => {
                 go('develop');
                 startIn('develop', START_DEVELOP_TEXT);
@@ -301,7 +309,7 @@ function CreateWorkspace({ projectId }: { projectId: string }) {
           ) : stageId === 'check' ? (
             <CheckStage projectId={projectId} onAsk={(text) => ask(text)} />
           ) : (
-            <MakeStage projectId={projectId} view={view.data} model={model} modelRevision={modelRevision} onAsk={(text) => ask(text)} />
+            <MakeStage projectId={projectId} view={view.data} nodes={projectNodes} model={model} modelRevision={modelRevision} onAsk={(text) => ask(text)} />
           )}
           {view.isError && <p className="cv-error">Where the creation stands could not be loaded: {refusalOf(view.error)}</p>}
         </main>

@@ -618,3 +618,173 @@ li.clip{display:none!important}
   .fg-hosted .bar{gap:6px;padding:8px 10px}
   .fg-hosted .bar .seg button{padding:4px 9px;font-size:11.5px}
 }
+
+/* MetaForge: the parameter panel of an agent-authored form (authored.js). */
+.fg-authored-panel{position:absolute;left:12px;bottom:12px;z-index:5;width:240px;max-height:60%;overflow:auto;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.93);box-shadow:0 2px 12px rgba(0,0,0,.14);font:12px/1.35 system-ui,sans-serif;color:#222}
+.fg-authored-title{font-weight:600;margin-bottom:6px}
+.fg-authored-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin-bottom:6px}
+.fg-authored-row input{grid-column:1 / -1;width:100%}
+.fg-authored-val{font-variant-numeric:tabular-nums;color:#555}
+.fg-authored-legend{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:8px;font-size:11px;color:#555}
+.fg-authored-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.fg-authored-errors{display:none;margin-top:8px;padding:6px 8px;border-radius:6px;background:#fdecea;color:#8a1c14;font-size:11px}
+
+/* MetaForge: an authored form uses the engine's own controls panel (#quick) at every level, so it
+   looks and behaves like every other studio. The node graph is for the enclosure's parameters and
+   does not apply to a form made of code. */
+/* Simple level shows the controls panel; Engineer level shows the graph (parameters, parts, the form). */
+html[data-authored] #authGraph{display:none}
+html[data-authored]:not([data-level="simple"]) #authGraph{display:flex}
+html[data-authored][data-level="simple"] #quick{display:grid}
+html[data-authored] #graphPane .gtools,html[data-authored] #graphPane #canvas{display:none}
+/* These blocks assert something about the placeholder enclosure the engine solves for every studio
+   (a drop test, a bill of materials with a top shell, cables routed inside it). For an authored form
+   that enclosure is not the product, so they would read as assurance about a form never analysed.
+   What carries the person's controls and records (Readiness gate 1, Requirements, Confirm these
+   assumptions, Options, Context) stays, with its verdicts labelled not assessed. */
+html[data-authored] #valBlk,html[data-authored] #dfaBlk,html[data-authored] #envBlk,
+html[data-authored] #verdictBlk,html[data-authored] #testBlk,html[data-authored] #elecBlk,
+html[data-authored] #rulesBlk,html[data-authored] #bomBlk,html[data-authored] #partBlk,
+html[data-authored] #costBlk,html[data-authored] #handBlk,html[data-authored] #partReady{display:none}
+.fg-authored-swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:2px;vertical-align:-1px}
+/* How each part is made and how it looks (MetaForge): process, material, finish, colour. */
+.fg-part-make{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:2px 0 0 13px;font-size:11.5px;color:var(--muted)}
+.fg-make-swatch{display:inline-block;width:10px;height:10px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
+.fg-make-proposed{margin-left:4px;padding:0 6px;border-radius:999px;font-size:10.5px;color:#b45309;box-shadow:inset 0 0 0 1px rgba(180,83,9,.5)}
+/* Show or hide a part in the 3D view (a view choice; the part stays in the form). */
+.fg-eye{flex:none;padding:1px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);color:var(--fg);font:inherit;font-size:11px;line-height:16px;cursor:pointer}
+.fg-eye:hover{border-color:var(--muted)}
+.fg-eye:focus-visible{outline:2px solid var(--accent,#ff5a0a);outline-offset:1px}
+.qs.is-hidden .qt span,.qs.is-hidden .qt b,.qs.is-hidden .fg-part-make{opacity:.45}
+.qs.is-hidden .fg-eye{border-color:var(--muted);color:var(--muted)}
+.fg-eye-all{justify-self:start;margin-top:2px}
+.qs .qt .fg-eye + span{flex:1}
+/* Behaviours: how the twin moves, lights and switches; a person drives each one. */
+.fg-behaviours{display:grid;gap:8px}
+.fg-behave{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px;font-size:13px}
+.fg-behave .rng{grid-column:1 / -1}
+.fg-behave-val{font-family:var(--f-mono);font-weight:500;font-size:12.5px}
+.fg-play{justify-self:start}
+/* Try it, for an authored form: the behaviours, then the simulation folded away. */
+.dbehave{padding:4px 0 8px}
+.dbehave .fg-behaviours{gap:10px}
+.fg-behave-none{margin:0 0 6px;font-size:12.5px;color:var(--muted)}
+.devp .dsim>summary{font-size:12px}
+/* Click to expand: a closed section says what is inside in one line. */
+details.pp>summary .pp-sum{margin-left:auto;padding-left:8px;font-size:11.5px;font-weight:400;color:var(--muted)}
+/* One rhythm for the left panel of an authored form: sections 12 px apart, a 32 px header
+   row, rows 10 px apart, labels and values on one baseline. */
+html[data-authored] #quick{gap:4px;padding:12px 16px 20px}
+html[data-authored] #quick .pp{padding-top:0}
+html[data-authored] #quick .pp>summary{min-height:32px;align-items:center;padding:4px 0}
+html[data-authored] #quick .pp>.ppb{gap:10px;margin:2px 0 12px}
+html[data-authored] #quick .qgrp{display:grid;gap:10px}
+html[data-authored] #quick .qs{gap:4px}
+html[data-authored] #quick .qs .qt{align-items:baseline}
+/* Parts, click to show: one line per part; a click opens what it is made of, its specs and Hide. */
+.fg-part{border-radius:8px}
+.fg-part-head{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto;align-items:center;gap:6px;width:100%;padding:5px 6px;border:0;border-radius:8px;background:transparent;color:var(--fg);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.fg-part-head:hover{background:var(--panel2)}
+.fg-part-head:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.fg-part.is-open{background:var(--panel2)}
+.fg-part-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fg-part-size{font-family:var(--f-mono);font-weight:500;font-size:12px;color:var(--muted);white-space:nowrap}
+.fg-part-tag{font-size:11px;color:var(--muted)}
+.fg-part.is-hidden .fg-part-name{opacity:.5}
+.fg-part-body{display:grid;gap:4px;padding:0 8px 8px 22px;font-size:12px;color:var(--muted)}
+.fg-part-body .fg-part-spec,.fg-part-body .fg-part-make{margin:0}
+.fg-part-why{font-style:italic}
+.fg-part-acts{display:flex;gap:6px;margin-top:2px}
+.fg-make-swatch.is-none{visibility:hidden}
+.fg-keep{border-color:var(--accent)}
+/* Cut-away: Solid, Section, X-ray beside Try it; the section control floats over the view. */
+/* Part properties: label and picker in two aligned columns. */
+.fg-props{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 10px;align-items:center;margin-top:4px}
+.fg-prop-row{display:contents}
+.fg-prop-label{font-size:12px;color:var(--muted)}
+.fg-prop{min-width:0;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg);font:inherit;font-size:12.5px}
+/* Scene: what the product lives with, one line each. */
+.fg-scene-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:4px 6px;font-size:13px}
+.fg-scene-row.is-hidden .fg-part-name{opacity:.5}
+#cutSeg{margin-left:4px}
+.cutp{position:absolute;left:16px;top:60px;z-index:5;display:grid;gap:8px;padding:10px;width:min(230px,calc(100% - 32px));background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
+html[data-authored] .seg [data-view="section"]{display:none}
+/* Live component specs: the real part's record, in the parts list and on hover. */
+.fg-part-spec{margin:2px 0 0 13px;font-size:11.5px;color:var(--muted)}
+.fg-part-spec.is-stand-in{color:#b45309}
+.mtip.fg-hover-info{white-space:normal;max-width:280px;border-radius:10px;padding:6px 10px;display:grid;gap:2px;font-size:12px;line-height:1.35}
+.mtip.fg-hover-info b{font-size:12.5px}
+/* One next step: the single thing to decide now, at the top of the studio. */
+.fg-next{margin:12px 0 14px;padding:12px 14px;border:1px solid var(--accent,#ff5a0a);border-radius:12px;background:var(--panel)}
+.fg-next-h{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent,#ff5a0a);font-weight:600}
+.fg-next-h small{text-transform:none;letter-spacing:0;color:var(--muted);font-weight:400}
+.fg-next h3{margin:6px 0 4px;font-size:15px;font-weight:600;color:var(--fg)}
+.fg-next-d{margin:0;font-size:13px;color:var(--fg)}
+.fg-next-why{margin:4px 0 0;font-size:12px;color:var(--muted)}
+.fg-next-a{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.fg-next-a button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);color:var(--fg);font:inherit;font-size:12.5px;cursor:pointer}
+.fg-next-a button.pri{border-color:var(--accent);background:var(--accent);color:var(--accent-ink)}
+.fg-next[data-kind=done]{border-color:var(--line)}
+.fg-next[data-kind=done] .fg-next-h{color:var(--muted)}
+/* Running cost: a line is information, never a pass or a fail. */
+.st-info .chip{color:var(--fg);box-shadow:inset 0 0 0 1px var(--line)}
+/* Variants: the same parts with other sizes and makes; try one, show them side by side, pick one. */
+.fg-variants{display:grid;gap:8px}
+.fg-side{justify-self:start}
+.fg-variant{display:grid;gap:4px;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.fg-variant-h{font-size:13px}
+.fg-variant-why{font-size:12px;color:var(--muted)}
+.fg-variant-a{display:flex;flex-wrap:wrap;gap:6px}
+.fg-use{border-color:var(--accent);color:var(--fg)}
+.fg-authored-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:2px 0 6px}
+.fg-authored-facts .fg-fact{background:var(--panel2);border-radius:var(--r-md,10px);padding:9px 11px;min-width:0}
+.fg-authored-facts dt{color:var(--muted);font-size:11px;letter-spacing:.02em;margin-bottom:3px}
+.fg-authored-facts dd{margin:0;font-size:15px;font-weight:600;font-family:var(--f-mono);overflow-wrap:anywhere}
+.fg-authored-facts dd small{display:block;font-size:11px;font-weight:400;color:var(--muted);font-family:inherit}
+#authBlk > .acc-b,#authNa > .acc-b{align-content:start}
+.fg-authored-facts .fg-fact:first-child{grid-column:1/-1}
+
+/* The Engineer graph of an authored form (authored.js). It borrows the engine's own node, port and wire
+   styles (.node, .nh, .port, .wire) and adds only what they do not have: fixed row heights, so a wire's
+   end is computed from the layout rather than measured. */
+.agx{flex:1;flex-direction:column;min-height:0}
+.agx-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+.agx-hint{flex:1;line-height:1.4}
+.agx-fit{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+.agx-canvas{position:relative;flex:1;min-height:200px;overflow:hidden;touch-action:none;cursor:grab;
+  background-image:radial-gradient(var(--dot) 1.2px, transparent 1.3px);background-size:20px 20px}
+.agx-world{position:absolute;left:0;top:0;transform-origin:0 0}
+.agx-wires{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
+.wire.hl{stroke-width:3.5;opacity:1}
+.agx-pbody{position:relative;height:44px;padding:6px 12px 0;box-sizing:border-box}
+.agx-row{position:relative;height:24px;display:flex;align-items:center;padding:0 12px;font-size:12px;box-sizing:border-box}
+.agx-row.out{justify-content:flex-end}
+.agx-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agx-foot{height:22px;display:flex;align-items:center;padding:0 12px;font-family:var(--f-mono);font-size:10.5px;color:var(--muted);border-top:1px solid var(--line);box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agx-foot.agx-err{color:var(--fail)}
+.agx-foot2{border-top:0}
+.node.t-part .nh .dot,.node.t-out .nh .dot{border-radius:2px}
+
+/* An authored form: three panes, graph | view | results, with the left and right minimisable, in the
+   standalone page and inside the dashboard. The engine stacks the results under the view when hosted and
+   switches the edge buttons off; that is undone here, for an authored form only, at 900 px and wider. */
+@media (min-width:900px){
+  html[data-authored] main,html[data-authored] main.hideL,html[data-authored] main.hideR,html[data-authored] main.hideL.hideR,
+  html[data-authored].fg-hosted main,html[data-authored].fg-hosted main.hideL,html[data-authored].fg-hosted main.hideR,
+  html[data-authored].fg-hosted main.hideL.hideR{grid-template-rows:minmax(0,1fr);grid-template-areas:"graph view dfm";min-height:0}
+  html[data-authored] main,html[data-authored].fg-hosted main{grid-template-columns:minmax(300px,28%) minmax(0,1fr) minmax(320px,30%)}
+  html[data-authored] main.hideL,html[data-authored].fg-hosted main.hideL{grid-template-columns:0 minmax(0,1fr) minmax(320px,30%)}
+  html[data-authored] main.hideR,html[data-authored].fg-hosted main.hideR{grid-template-columns:minmax(300px,28%) minmax(0,1fr) 0}
+  html[data-authored] main.hideL.hideR,html[data-authored].fg-hosted main.hideL.hideR{grid-template-columns:0 minmax(0,1fr) 0}
+  html[data-authored] #graphPane,html[data-authored].fg-hosted #graphPane{grid-area:graph;display:flex;flex-direction:column;height:auto;min-height:0;overflow:auto}
+  html[data-authored] #viewPane,html[data-authored].fg-hosted #viewPane{grid-area:view;height:auto;min-height:0;border-bottom:0}
+  html[data-authored] #dfm,html[data-authored].fg-hosted #dfm{grid-area:dfm;display:block;min-height:0;overflow:auto;columns:auto}
+  html[data-authored] main.hideL #graphPane,html[data-authored] main.hideR #dfm,
+  html[data-authored].fg-hosted main.hideL #graphPane,html[data-authored].fg-hosted main.hideR #dfm{display:none}
+  html[data-authored] .edge,html[data-authored].fg-hosted .edge{display:block}
+  /* The graph needs room to be read, so Engineer level gives the left pane more of the width. */
+  html[data-authored]:not([data-level="simple"]) main,html[data-authored].fg-hosted:not([data-level="simple"]) main{grid-template-columns:minmax(420px,44%) minmax(0,1fr) minmax(300px,26%)}
+  html[data-authored]:not([data-level="simple"]) main.hideL,html[data-authored].fg-hosted:not([data-level="simple"]) main.hideL{grid-template-columns:0 minmax(0,1fr) minmax(300px,26%)}
+  html[data-authored]:not([data-level="simple"]) main.hideR,html[data-authored].fg-hosted:not([data-level="simple"]) main.hideR{grid-template-columns:minmax(420px,44%) minmax(0,1fr) 0}
+  html[data-authored]:not([data-level="simple"]) main.hideL.hideR,html[data-authored].fg-hosted:not([data-level="simple"]) main.hideL.hideR{grid-template-columns:0 minmax(0,1fr) 0}
+}

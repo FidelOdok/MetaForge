@@ -259,6 +259,11 @@ READ_ONLY: frozenset[str] = frozenset(
         # A dry run of the Imagine gates: reads, writes nothing, so a human
         # is never asked to approve it.
         "twin.imagine_validate",
+        # A look at an authored form in a headless browser: it renders the stored
+        # studio's page and returns what it drew and a picture. Nothing is written.
+        "twin.imagine_look",
+        # A part's 3D body and how trustworthy it is: reads libraries, writes nothing.
+        "twin.imagine_resolve_part",
         # FORGE-523: an item's revision history, read from REVISION_OF edges.
         "twin.item_history",
         "twin.rank_sensitivity",
@@ -463,6 +468,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.export_cad_step",
         # FORGE-821: the next IMG-STUDIO revision; earlier ones are kept.
         "twin.imagine_put_studio",
+        # MetaForge: the same next revision, from a list of changes.
+        "twin.imagine_patch_studio",
         # FORGE-687: a new design-files node (or the next revision of its
         # item); the files it reads on the workspace are not touched.
         "twin.record_design_files",

@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from api_gateway.imagine import part_model
 from api_gateway.imagine.service import (
     _agent_label,
     _chosen_parts,
@@ -69,6 +70,86 @@ def _quantity(value: Any) -> int | None:
     return number if number >= 0 else None
 
 
+_FORM_PART_KINDS = ("generated", "primitive", "component")
+_MAX_FORM_PARTS = 24
+
+
+def _form(
+    config: dict[str, Any], measured: dict[str, Any] | None = None, revision: int | None = None
+) -> dict[str, Any] | None:
+    """The authored form as the contract's ``FormFacts``, or ``None`` when there is nothing to say.
+
+    Only an authored form is described. An enclosure form, or no form, sends nothing: the
+    contract refuses fields it does not know, so the block must be absent unless it is
+    needed, and the service's report for an enclosure studio stays exactly what it was.
+    The code of each part stays here; the service is told what each part is and how far to
+    trust it as geometry. A part whose kind the contract does not know is left out, not
+    given one. If nothing usable remains, no form is sent, because an authored form with
+    no parts is something the contract refuses.
+    """
+    form = config.get("form")
+    if not isinstance(form, dict) or form.get("template") != "authored":
+        return None
+    block = form.get("authored")
+    raw = block.get("parts") if isinstance(block, dict) else None
+    if not isinstance(raw, list):
+        return None
+    ids = _Ids()
+    parts: list[dict[str, Any]] = []
+    sent: dict[str, str] = {}  # the id the agent wrote -> the id sent to the service
+    body_taken = False
+    for item in raw:
+        if not isinstance(item, dict) or item.get("kind") not in _FORM_PART_KINDS:
+            continue
+        if len(parts) >= _MAX_FORM_PARTS:
+            break
+        is_body = item.get("body") is True and not body_taken
+        body_taken = body_taken or is_body
+        safe = ids.take(item.get("id"))
+        sent.setdefault(str(item.get("id")), safe)
+        parts.append({"id": safe, "kind": item["kind"], "body": is_body})
+    if not parts:
+        return None
+    out: dict[str, Any] = {"kind": "authored", "parts": parts}
+    facts = _measured_facts(measured, revision, sent)
+    if facts is not None:
+        out["measured"] = facts
+    return out
+
+
+def _measured_facts(
+    record: dict[str, Any] | None, revision: int | None, sent: dict[str, str]
+) -> dict[str, Any] | None:
+    """What the gateway's own look recorded for this revision, in the contract's words.
+
+    Nothing is sent for a record of another revision, or one that is not the shape the
+    service records: a stale or odd figure is left out and the service says the form was not
+    measured. An overlap naming a part that was not sent is dropped, because the contract
+    refuses it.
+    """
+    if not isinstance(record, dict) or record.get("revision") != revision:
+        return None
+    m = record.get("measured")
+    if not isinstance(m, dict):
+        return None
+    support = m.get("support")
+    flat = isinstance(support, dict)
+    tip = support.get("tip_angle_deg") if isinstance(support, dict) else None
+    margin = support.get("margin_mm") if isinstance(support, dict) else None
+    overlaps = [
+        {"a": sent[str(o["a"])], "b": sent[str(o["b"])], "volume_mm3": o["volume_mm3"]}
+        for o in (m.get("overlaps") or [])
+        if isinstance(o, dict) and str(o.get("a")) in sent and str(o.get("b")) in sent
+    ]
+    return {
+        "overhang_share": m.get("overhang_share"),
+        "has_flat_base": flat,
+        "tip_angle_deg": tip,
+        "margin_mm": margin,
+        "overlaps": overlaps,
+    }
+
+
 def build_concept_revision(
     project_id: str,
     revision: int,
@@ -76,8 +157,12 @@ def build_concept_revision(
     collections: dict[str, Any],
     *,
     has_mesh: bool,
+    measured: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The studio's facts as a ``ConceptRevision``."""
+    """The studio's facts as a ``ConceptRevision``.
+
+    ``measured`` is the record a look made for this revision, if one did.
+    """
     programme = _programme(config)
 
     ledger_ids = _Ids()
@@ -140,11 +225,18 @@ def build_concept_revision(
             key = id(part)
             if key not in part_key:
                 geometry = part.get("geometry") or {}
-                source = (
-                    part.get("datasheet")
-                    or part.get("url")
-                    or (part.get("cost") or {}).get("source")
-                    or geometry.get("source")
+                source = next(
+                    (
+                        c
+                        for c in (
+                            part.get("datasheet"),
+                            part.get("url"),
+                            (part.get("cost") or {}).get("source"),
+                            geometry.get("source"),
+                        )
+                        if part_model.is_real_source(c)
+                    ),
+                    None,
                 )
                 interfaces = part.get("interfaces")
                 part_key[key] = part_ids.take(part.get("id"))
@@ -160,7 +252,7 @@ def build_concept_revision(
                             if isinstance(interfaces, (list, dict))
                             else (1 if interfaces else 0)
                         ),
-                        "has_envelope": bool(geometry.get("envelope")),
+                        "has_envelope": part_model.size_is_read(geometry),
                     }
                 )
             chosen = part_key[key]
@@ -173,7 +265,7 @@ def build_concept_revision(
         1 for p in _chosen_parts(config, collections).values() if p and p.get("interfaces")
     )
 
-    return {
+    out: dict[str, Any] = {
         "twin_id": safe_id(project_id),
         "revision_id": f"r{revision}",
         "number": revision,
@@ -193,3 +285,7 @@ def build_concept_revision(
         "screening_stored": bool((collections.get("screening") or {}).get("latest")),
         "concept_mesh": bool(has_mesh),
     }
+    form = _form(config, measured, revision)
+    if form is not None:
+        out["form"] = form
+    return out

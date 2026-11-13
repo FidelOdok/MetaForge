@@ -66,6 +66,10 @@ export function useOperations(projectId: string | null | undefined, timing: UseO
     let cursor = store.projects[projectId]?.ops.cursor ?? 0;
     let failures = 0;
     let delay = retryMinMs;
+    // A hidden tab holds no stream. Chrome allows six connections per host across all tabs, and
+    // a stream per open tab starved the tab on screen (health and every request timed out).
+    const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    let paused = hidden();
 
     const flush = () => {
       frame?.cancel();
@@ -88,7 +92,7 @@ export function useOperations(projectId: string | null | undefined, timing: UseO
     };
 
     const connect = async (): Promise<void> => {
-      if (root.signal.aborted) return;
+      if (root.signal.aborted || paused) return;
       const current = new AbortController();
       attempt = current;
       const onRootAbort = () => current.abort();
@@ -148,6 +152,7 @@ export function useOperations(projectId: string | null | undefined, timing: UseO
       }
       if (root.signal.aborted) return;
       flush();
+      if (paused) return;
       if (unavailable) {
         setHealth('offline');
         return;
@@ -165,9 +170,26 @@ export function useOperations(projectId: string | null | undefined, timing: UseO
 
     // A view switch remounts this hook; the shared state it left keeps its
     // health until the new snapshot answers, so the card does not flash.
+    const onVisibility = () => {
+      if (hidden()) {
+        if (paused) return;
+        paused = true;
+        if (retryTimer) clearTimeout(retryTimer);
+        attempt?.abort();
+      } else if (paused) {
+        // Back on screen: reconnect now; the snapshot and the cursor catch up what was missed.
+        paused = false;
+        failures = 0;
+        delay = retryMinMs;
+        void connect();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     if (!store.projects[projectId]) setHealth('connecting');
     void connect();
     return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
       root.abort();
       attempt?.abort();
       frame?.cancel();

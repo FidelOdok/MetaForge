@@ -61,6 +61,7 @@ __all__ = [
     "get_usage_store",
     "load_prices",
     "price_cost_usd",
+    "reported_cost_usd",
     "record_call",
     "run_usage",
     "usage_report",
@@ -158,6 +159,23 @@ class TokenUsage:
         # cache (OpenAI, Codex); Anthropic's excludes it.
         prompt = raw_in if usage.get("input_includes_cached") else raw_in + cached + written
         return cls(prompt=prompt, completion=out, cached_input=cached, cache_write=written)
+
+
+def reported_cost_usd(usage: Mapping[str, Any] | None) -> float | None:
+    """The cost a provider reported for one call, or ``None`` when it did not.
+
+    A router that bills per call (OpenRouter) says what it charged. That is exact, so it
+    wins over the price table, and it covers models the table does not list. A value that
+    is not a usable amount (negative, NaN, text) is treated as not reported, never as 0.
+    """
+    if not usage:
+        return None
+    value = usage.get("cost_usd")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or value in (float("inf"), float("-inf")) or value < 0:
+        return None
+    return float(value)
 
 
 def price_cost_usd(provider: str, model: str, tokens: TokenUsage | None) -> float | None:
@@ -531,7 +549,11 @@ def record_call(
             prompt_tokens=tokens.prompt if tokens else None,
             completion_tokens=tokens.completion if tokens else None,
             cached_input_tokens=tokens.cached_input if tokens else None,
-            cost_usd=price_cost_usd(provider, model, tokens),
+            cost_usd=(
+                billed
+                if (billed := reported_cost_usd(usage) if tokens else None) is not None
+                else price_cost_usd(provider, model, tokens)
+            ),
         )
         logger.info(
             "llm_usage",

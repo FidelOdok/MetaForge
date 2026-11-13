@@ -5,6 +5,8 @@ it over the network instead of shelling out ``docker run``.
 
 Endpoints:
     POST /convert  — multipart upload (file + quality) → GLB + metadata
+    POST /faces    — multipart STEP upload → triangles grouped by each face's own colour
+                     (?part=NAME keeps one named product of an assembly, e.g. a chip on a board)
     GET  /health   — liveness probe
 """
 
@@ -19,6 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from convert import QUALITY_TIERS, convert
+from faces import read_coloured_faces
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("occt-server")
@@ -77,7 +80,8 @@ class ConvertHandler(BaseHTTPRequestHandler):
             self._json_response(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/convert":
+        route = urlparse(self.path).path
+        if route not in ("/convert", "/faces"):
             self._json_response(404, {"error": "not found"})
             return
 
@@ -106,6 +110,20 @@ class ConvertHandler(BaseHTTPRequestHandler):
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = Path(tmpdir) / filename
             input_path.write_bytes(file_bytes)
+
+            if route == "/faces":
+                if input_path.suffix.lower() not in (".step", ".stp"):
+                    self._json_response(400, {"error": "/faces reads STEP files only"})
+                    return
+                try:
+                    part = (qs.get("part", [""])[0] or "").strip() or None
+                    groups = read_coloured_faces(str(input_path), QUALITY_TIERS[quality], part=part)
+                except Exception as exc:
+                    logger.error("Face read failed: %s", exc)
+                    self._json_response(500, {"error": str(exc)})
+                    return
+                self._json_response(200, {"groups": groups})
+                return
 
             try:
                 metadata = convert(str(input_path), quality, tmpdir)

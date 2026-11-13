@@ -44,6 +44,7 @@ export const STUDIO_COLLECTIONS = [
   'requirements',
   'ledger',
   'screening',
+  'formSeen',
 ] as const;
 export type StudioCollection = (typeof STUDIO_COLLECTIONS)[number];
 
@@ -55,7 +56,8 @@ export type ImagineEventKind =
   | 'assumption_confirmed'
   | 'requirement'
   | 'ledger'
-  | 'screening';
+  | 'screening'
+  | 'form_seen';
 
 export interface ImagineEvent {
   event_id: string;

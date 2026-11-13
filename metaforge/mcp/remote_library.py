@@ -16,7 +16,7 @@ import httpx
 
 from metaforge.mcp.remote_flows import _Gateway
 
-__all__ = ["RemoteMachineLibrary"]
+__all__ = ["GatewayMachineView", "RemoteMachineLibrary"]
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
@@ -151,6 +151,63 @@ class RemoteMachineLibrary:
             "GET", f"/v1/library/components/standard?{urlencode(params)}"
         )
         return result
+
+
+class GatewayMachineView:
+    """A read-only, synchronous view of the gateway's machines for this process.
+
+    The sidecar's DFM looks a selected machine up in the process library
+    (``library.get`` and ``library.list``, the ``SqliteMachineLibrary``
+    surface). Without this view that library was an empty in-memory store,
+    so a printer registered through ``library.*`` and selected in the
+    manufacturing context read as "no machine is selected" and the exact
+    build-volume check never ran in the sidecar. Reads only: writes go
+    through ``RemoteMachineLibrary``.
+    """
+
+    def __init__(
+        self,
+        gateway_url: str,
+        *,
+        client: httpx.Client | None = None,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
+        self._base = gateway_url.rstrip("/")
+        self._client = client
+        self._timeout = timeout_seconds
+
+    def _get(self, path: str) -> Any:
+        url = f"{self._base}{path}"
+        if self._client is not None:
+            response = self._client.get(url)
+        else:
+            with httpx.Client(timeout=self._timeout) as http:
+                response = http.get(url)
+        if response.status_code == 404:
+            raise KeyError(path)
+        response.raise_for_status()
+        return response.json()
+
+    @staticmethod
+    def _entry(row: dict[str, Any]) -> Any:
+        from twin_core.library.machines import Capability, MachineInstance, MachineModel
+
+        body = dict(row)
+        layer = body.pop("layer", None)
+        caps = {k: Capability(**v) for k, v in (body.pop("capabilities", None) or {}).items()}
+        cls = MachineModel if layer == "model" else MachineInstance
+        fields = getattr(cls, "__dataclass_fields__", {})
+        return cls(capabilities=caps, **{k: v for k, v in body.items() if k in fields})
+
+    def get(self, machine_id: str) -> Any:
+        data = self._get(f"/v1/library/machines/{quote(machine_id, safe='')}")
+        return self._entry(data.get("machine", data))
+
+    def list(self, *, layer: str | None = None, kind: str | None = None) -> list[Any]:
+        query = {k: v for k, v in (("layer", layer), ("kind", kind)) if v}
+        suffix = f"?{urlencode(query)}" if query else ""
+        data = self._get(f"/v1/library/machines{suffix}")
+        return [self._entry(r) for r in data.get("machines", [])]
 
 
 def remote_material_source(gateway_url: str, *, client: httpx.AsyncClient | None = None) -> Any:

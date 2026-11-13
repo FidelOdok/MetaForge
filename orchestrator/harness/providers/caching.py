@@ -135,6 +135,13 @@ def is_claude_model(model: str | None) -> bool:
     return m.startswith(("anthropic/", "claude")) or "/claude" in m
 
 
+def is_openrouter(provider: str | None, base_url: str | None) -> bool:
+    """Is this request going to OpenRouter?"""
+    if (provider or "").strip().lower() == "openrouter":
+        return True
+    return bool(base_url) and any(host in str(base_url) for host in _CLAUDE_CACHE_ROUTERS)
+
+
 def routes_claude_cache_control(
     provider: str | None, base_url: str | None, model: str | None
 ) -> bool:

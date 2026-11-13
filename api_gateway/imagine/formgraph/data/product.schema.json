@@ -163,7 +163,7 @@
       "properties": {
         "template": {
           "enum": [
-            "enclosure"
+            "authored"
           ]
         },
         "params": {
@@ -193,6 +193,313 @@
             ]
           },
           "uniqueItems": true
+        },
+        "authored": {
+          "description": "Only with template \"authored\". Parts whose code builds the form: the body of build(p, g), where p is form.params and g is the shape builder. Checked at write time (banned names, byte and triangle budgets) and run in a sandbox by the page.",
+          "type": "object",
+          "required": [
+            "parts"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "parts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 24,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name",
+                  "kind",
+                  "code"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "generated",
+                      "primitive",
+                      "component"
+                    ]
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 6000
+                  },
+                  "uses": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "body": {
+                    "type": "boolean"
+                  },
+                  "max_triangles": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20000
+                  },
+                  "make": {
+                    "description": "How this part is manufactured and how it looks. Each part is made on its own: its process, a material and finish of that process, and its colour. source says who chose them: proposed (the agent, for the person to confirm) or person. Not for a bought component.",
+                    "type": "object",
+                    "required": [
+                      "material",
+                      "color",
+                      "source"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "process": {
+                        "type": "string",
+                        "description": "A process id from the catalogue (fdm, cnc, sls, im); the product's process.id when left out."
+                      },
+                      "material": {
+                        "type": "string",
+                        "description": "A material of that process."
+                      },
+                      "finish": {
+                        "type": "string",
+                        "description": "A finish of that process; the product's finish when left out and the process is the product's."
+                      },
+                      "color": {
+                        "type": "string",
+                        "description": "A catalogue colour id or #RRGGBB."
+                      },
+                      "source": {
+                        "enum": [
+                          "proposed",
+                          "person"
+                        ]
+                      },
+                      "why": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "behaviours": {
+              "description": "How the twin behaves: rotate turns parts about axis through origin within range (degrees); slide moves them along axis (mm); glow lights them in color; toggle shows or hides them. A person drives each one in the studio. light casts real light from its part: at (mm), direction, angle (half-angle, degrees), color, intensity.",
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name",
+                  "kind",
+                  "parts"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "rotate",
+                      "slide",
+                      "glow",
+                      "toggle",
+                      "light"
+                    ]
+                  },
+                  "parts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "axis": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "origin": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "range": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9A-Fa-f]{6}$"
+                  },
+                  "default": {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "at": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "direction": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "angle": {
+                    "type": "number",
+                    "minimum": 5,
+                    "maximum": 90
+                  },
+                  "intensity": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10
+                  }
+                }
+              }
+            },
+            "variants": {
+              "description": "Two to four variants of the idea: each sets other sizes (params, within form.ranges) and/or other makes (by part id) on the same parts. The studio shows them side by side; the person picks one.",
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "why": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "number"
+                    }
+                  },
+                  "makes": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "scene": {
+              "description": "What the product lives with (a desk, a wrist, a hand, a wall), so its behaviours have something to act on. Written as code like parts and run in the same sandbox; drawn as context, never measured, costed or handed over.",
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name",
+                  "code"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "enum": [
+                      "surface",
+                      "body",
+                      "hand",
+                      "object",
+                      "wall"
+                    ]
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 6000
+                  },
+                  "uses": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "max_triangles": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20000
+                  }
+                }
+              }
+            },
+            "joins": {
+              "description": "Pairs of parts meant to meet (a button through a hole in the wall, a glass seated in a rim), each with a reason. The page tests whether parts clash on their drawn shapes and shows a declared join as joined, not as a clash.",
+              "type": "array",
+              "maxItems": 24,
+              "items": {
+                "type": "object",
+                "required": [
+                  "parts",
+                  "why"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "parts": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "why": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

@@ -16,7 +16,7 @@ import json
 import os
 import re
 
-from . import fg_context
+from . import authored, fg_context
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = HERE
@@ -110,32 +110,29 @@ def validate(cfg, cat, ctx=None):
 
     # form
     f = cfg['form']
-    tpl = cat['templates'].get(f.get('template'))
-    if not tpl:
-        E.append(f'form.template "{f.get("template")}" is not available. Choose from: {", ".join(cat["templates"])}.')
+    template = f.get('template') if isinstance(f, dict) else None
+    if template == 'enclosure':
+        E.append(
+            'form.template "enclosure" was removed: every form is authored now. Set '
+            'form.template to "authored" and build the form from parts, around the real '
+            'components in context.components.parts.'
+        )
+    elif template != authored.TEMPLATE_ID:
+        E.append(f'form.template must be "authored" (got {template!r}).')
     else:
-        feats = f.get('features', tpl['features'])
-        for ft in feats:
-            if ft not in tpl['features']:
-                E.append(f'form.features: unknown feature "{ft}".')
-        for k, v in (f.get('params') or {}).items():
-            spec = tpl['params'].get(k)
-            if not spec:
-                E.append(f'form.params: unknown parameter "{k}". Known: {", ".join(tpl["params"])}.')
-                continue
-            if not isinstance(v, (int, float)):
-                E.append(f'form.params.{k} must be a number.')
-                continue
-            if spec.get('feature') and spec['feature'] not in feats:
-                W.append(f'form.params.{k} is set but the "{spec["feature"]}" feature is not enabled; it will be ignored.')
-            lo, hi = spec['range']
-            if v < lo or v > hi:
-                W.append(f'form.params.{k} = {v} is outside the usual range {lo} to {hi}; the slider range will be widened.')
-        for k, r in (f.get('ranges') or {}).items():
-            if k not in tpl['params']:
-                E.append(f'form.ranges: unknown parameter "{k}".')
-            elif not (isinstance(r, list) and len(r) == 2 and r[0] < r[1]):
-                E.append(f'form.ranges.{k} must be [min, max] with min below max.')
+        # MetaForge: an agent-authored form (spec 23.6). Its parts carry code, so it is
+        # checked by its own module.
+        form_errors, form_warnings = authored.check(f)
+        E.extend(form_errors)
+        W.extend(form_warnings)
+        by_id = {
+            str(p['id']): p
+            for p in (((ctx or {}).get('components') or {}).get('parts') or [])
+            if isinstance(p, dict) and p.get('id')
+        }
+        link_errors, link_warnings = authored.check_links(f, by_id)
+        E.extend(link_errors)
+        W.extend(link_warnings)
 
     # process
     pr = cfg['process']
@@ -167,6 +164,28 @@ def validate(cfg, cat, ctx=None):
             W.append(f'{q} units is high for desktop FDM printing; the page will suggest another route.')
         if q and pr['id'] == 'sls' and q > 5000:
             W.append(f'{q} units is high for SLS printing; the page will suggest moulding.')
+
+    # MetaForge (2026-11-11): each authored part names how it is made and how it looks.
+    if template == authored.TEMPLATE_ID:
+        scene_errors, scene_warnings = authored.check_scene(f)
+        E.extend(scene_errors)
+        W.extend(scene_warnings)
+        join_errors, join_warnings = authored.check_joins(f)
+        E.extend(join_errors)
+        W.extend(join_warnings)
+        behave_errors, behave_warnings = authored.check_behaviours(f)
+        E.extend(behave_errors)
+        W.extend(behave_warnings)
+        var_errors, var_warnings = authored.check_variants(
+            f, cat['processes'], list(cat.get('colors') or []), pr.get('id'), ext.get('materials') or {}
+        )
+        E.extend(var_errors)
+        W.extend(var_warnings)
+        make_errors, make_warnings = authored.check_make(
+            f, cat['processes'], list(cat.get('colors') or []), pr.get('id'), ext.get('materials') or {}
+        )
+        E.extend(make_errors)
+        W.extend(make_warnings)
 
     # power
     pw = cfg['power']

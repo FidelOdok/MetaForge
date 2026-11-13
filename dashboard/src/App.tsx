@@ -37,6 +37,7 @@ const SourceDetailPage = page(() => import('./pages/SourceDetailPage'), 'SourceD
 const CompliancePage = page(() => import('./pages/CompliancePage'), 'CompliancePage');
 const EvalsPage = page(() => import('./pages/EvalsPage'), 'EvalsPage');
 const SettingsPage = page(() => import('./pages/SettingsPage'), 'SettingsPage');
+const LibraryPage = page(() => import('./pages/LibraryPage'), 'LibraryPage');
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -60,6 +61,7 @@ const ROUTES: Array<[path: string, Page: ComponentType]> = [
   ['sim', SimPage],
   ['twin', TwinViewerPage],
   ['files', FilesPage],
+  ['library', LibraryPage],
   ['knowledge', KnowledgePage],
   ['knowledge/sources/:id', SourceDetailPage],
   ['compliance', CompliancePage],

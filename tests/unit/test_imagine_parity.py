@@ -122,7 +122,24 @@ def process(s: State, **fields: Any) -> None:
             s["config"]["process"][k] = v
 
 
+def authored_form(s: State) -> None:
+    from tests.unit.imagine_fixtures import authored_lamp_form
+
+    s["config"]["form"] = authored_lamp_form()
+
+
+def authored_form_of_bought_parts(s: State) -> None:
+    from tests.unit.imagine_fixtures import authored_lamp_form
+
+    form = authored_lamp_form()
+    form["authored"]["parts"] = [p for p in form["authored"]["parts"] if p["kind"] == "component"]
+    s["config"]["form"] = form
+
+
 MUTATORS: dict[str, Mutator] = {
+    # the form (spec 23.6): never one of the nine items, so no outcome may move
+    "form:authored": authored_form,
+    "form:authored-only-bought": authored_form_of_bought_parts,
     # ledger
     "ledger:none": lambda s: s["config"]["programme"].update(ledger=[]),
     "ledger:unreviewed": lambda s: s["config"]["programme"]["ledger"][0].update(
@@ -322,32 +339,83 @@ async def test_combinations_agree(verification: Any) -> None:
         for n in picked:
             try:
                 MUTATORS[n](state)
-            except (KeyError, IndexError, AttributeError):
+            except (KeyError, IndexError, AttributeError, StopIteration):
                 # An earlier mutation removed what this one edits (for example an
-                # emptied list). Skip it, as a real edit would not apply either.
+                # emptied list, or a part that no longer exists, which ``next()`` reports
+                # as StopIteration). Skip it, as a real edit would not apply either.
                 continue
         await compare(state, verification, " + ".join(picked))
+
+
+# -- the form: sent only when authored, and it never moves the decision --------------
+
+
+def _revision_of(state: State) -> dict[str, Any]:
+    return build_concept_revision(
+        str(uuid4()), 1, state["config"], state["collections"], has_mesh=state["mesh"]
+    )
+
+
+async def test_an_authored_form_reaches_the_service_and_is_named_not_assessed(
+    verification: Any,
+) -> None:
+    state = ready_state()
+    authored_form(state)
+    revision = _revision_of(state)
+    assert revision["form"]["kind"] == "authored"
+    # The same revision without the form block is what an older sender would send.
+    plain = verification({k: v for k, v in revision.items() if k != "form"})
+    report = verification(revision)
+    note = [f for f in report.findings if f.check_id == "form.enclosure_checks"]
+    assert len(note) == 1 and note[0].status == "not_assessed" and note[0].severity == "advisory"
+    assert report.verdict == plain.verdict
+    assert [(g.gate, g.decision) for g in report.gates] == [
+        (g.gate, g.decision) for g in plain.gates
+    ]
+    assert [f.id for f in report.findings if not f.check_id.startswith("form.")] == [
+        f.id for f in plain.findings
+    ]
+
+
+async def test_a_form_of_only_bought_parts_is_called_out_and_still_moves_nothing(
+    verification: Any,
+) -> None:
+    state = ready_state()
+    plain = verification(_revision_of(state))
+    authored_form_of_bought_parts(state)
+    report = verification(_revision_of(state))
+    mix = [f for f in report.findings if f.check_id == "form.confidence_mix"]
+    assert len(mix) == 1 and mix[0].status == "fail" and mix[0].severity == "advisory"
+    assert report.verdict == plain.verdict == "ready_for_handover"
+
+
+async def test_a_revision_with_no_form_block_still_gets_no_form_finding(verification: Any) -> None:
+    """An older sender, or a legacy studio, sends no form: the service adds no form finding."""
+    revision = {k: v for k, v in _revision_of(ready_state()).items() if k != "form"}
+    assert "form" not in revision
+    assert not [f for f in verification(revision).findings if f.check_id.startswith("form.")]
 
 
 # -- where the two deliberately differ ----------------------------------------------
 
 
-async def test_a_blank_part_source_is_stricter_in_the_service(verification: Any) -> None:
-    """The checklist counts "   " as a source; the service does not.
+async def test_a_blank_or_dummy_part_source_is_missing_in_both(verification: Any) -> None:
+    """Whitespace is not a source, and neither is a link on the reserved ``.invalid`` name.
 
-    Deliberate: whitespace is not a source. It is the one known place the
-    service is stricter than the checklist it replaces, so a studio that is
-    ready by the old rule can read not ready by the new one, never the reverse.
+    This used to be the one place the service was stricter than the checklist it replaces. The
+    checklist now refuses both too, so the two agree: a studio is not ready on a source nobody
+    gave, whichever side asks.
     """
-    state = ready_state()
-    set_part(state, "usbc-a", datasheet="   ")
-    part(state, "usbc-a")["geometry"].pop("source")
-    items, _ = await checklist_of(state)
-    revision = build_concept_revision(
-        str(uuid4()), 1, state["config"], state["collections"], has_mesh=True
-    )
-    assert items["parts"] == "done"
-    assert service_items(verification(revision))["parts"] == "missing"
+    for dummy in ("   ", "https://example.invalid/no-datasheet-read"):
+        state = ready_state()
+        set_part(state, "usbc-a", datasheet=dummy)
+        part(state, "usbc-a")["geometry"].pop("source")
+        items, _ = await checklist_of(state)
+        revision = build_concept_revision(
+            str(uuid4()), 1, state["config"], state["collections"], has_mesh=True
+        )
+        assert items["parts"] == "missing", dummy
+        assert service_items(verification(revision))["parts"] == "missing", dummy
 
 
 async def test_a_blank_part_date_is_stricter_in_the_service(verification: Any) -> None:
@@ -359,3 +427,69 @@ async def test_a_blank_part_date_is_stricter_in_the_service(verification: Any) -
     )
     assert items["parts"] == "done"
     assert service_items(verification(revision))["parts"] == "missing"
+
+
+# -- what a look measured, judged by the real service --------------------------------------
+
+
+def _measured_record(**support: Any) -> dict[str, Any]:
+    return {
+        "revision": 1,
+        "at": "2026-11-10T13:00:00+00:00",
+        "method": "headless look run by the gateway",
+        "measured": {
+            "total_area": 600.0,
+            "overhang_area": 60.0,
+            "overhang_share": 0.1,
+            "com": [0.0, 5.0, 0.0],
+            "support": {"points": 4, "margin_mm": 22.0, "tip_angle_deg": 31.0, **support},
+            "overlaps": [],
+            "notes": [],
+        },
+    }
+
+
+def _revision_measured(state: State, record: dict[str, Any] | None) -> dict[str, Any]:
+    return build_concept_revision(
+        str(uuid4()),
+        1,
+        state["config"],
+        state["collections"],
+        has_mesh=state["mesh"],
+        measured=record,
+    )
+
+
+async def test_an_unmeasured_authored_form_says_it_was_not_measured(verification: Any) -> None:
+    state = ready_state()
+    authored_form(state)
+    report = verification(_revision_measured(state, None))
+    note = [f for f in report.findings if f.check_id == "form.measured"]
+    assert len(note) == 1 and note[0].status == "not_assessed" and note[0].severity == "advisory"
+    assert not [f for f in report.findings if f.check_id == "form.balance"]
+
+
+async def test_a_measured_form_that_tips_over_is_flagged_and_changes_no_verdict(
+    verification: Any,
+) -> None:
+    state = ready_state()
+    authored_form(state)
+    plain = verification(_revision_measured(state, None))
+    record = _measured_record(margin_mm=-4.9, tip_angle_deg=-35.0)
+    report = verification(_revision_measured(state, record))
+    balance = [f for f in report.findings if f.check_id == "form.balance"]
+    assert len(balance) == 1 and balance[0].status == "fail" and balance[0].severity == "advisory"
+    assert report.verdict == plain.verdict
+    assert [(g.gate, g.decision) for g in report.gates] == [
+        (g.gate, g.decision) for g in plain.gates
+    ]
+
+
+async def test_a_stable_measured_form_passes_balance_and_overlap(verification: Any) -> None:
+    state = ready_state()
+    authored_form(state)
+    report = verification(_revision_measured(state, _measured_record()))
+    by_check = {f.check_id: f for f in report.findings if f.check_id.startswith("form.")}
+    assert by_check["form.balance"].status == "pass"
+    assert by_check["form.component_overlap"].status == "pass"
+    assert "form.measured" not in by_check

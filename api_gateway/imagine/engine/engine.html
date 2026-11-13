@@ -21,6 +21,7 @@
   <main>
     <section class="pane" id="graphPane" aria-label="Parameter graph">
       <div id="quick" aria-label="Design controls"></div>
+      <div id="authGraph" class="agx" aria-label="Parameters, parts and the form"></div>
       <div class="gtools">
         <div class="seg gtab" role="group" aria-label="Graph"><button type="button" data-gtab="form" aria-pressed="true">Form</button><button type="button" data-gtab="elec" aria-pressed="false">Electronics</button></div>
         <span class="lbl">Add</span>
@@ -126,15 +127,15 @@
       <section class="blk" id="ctxBlk" hidden><div class="lbl">Context</div><div id="ctxBody"></div></section>
       <section class="blk" id="envBlk"><div class="lbl">Where it lives</div><p class="note" id="envSum"></p><ul id="envList" class="rlist"></ul></section>
       <section class="blk" id="verdictBlk"><div class="lbl">Manufacturing verdict</div><div id="verdict" class="verdict"></div></section>
-      <section class="blk"><div class="lbl">Product tests</div><ul id="testList"></ul></section>
+      <section class="blk" id="testBlk"><div class="lbl">Product tests</div><ul id="testList"></ul></section>
       <section class="blk" id="elecBlk"><div class="lbl">Electronics and wiring</div><div id="elecSum"></div><ul id="elecList" class="rlist"></ul>
         <p class="note simple-only">Only items that need attention are shown.</p><div class="tw eng"><table id="wireT"></table></div></section>
-      <section class="blk"><div class="lbl">Checks</div><ul id="rules"></ul><p class="note simple-only">Only checks that need attention are shown. Switch to Engineer to see every check.</p></section>
+      <section class="blk" id="rulesBlk"><div class="lbl">Checks</div><ul id="rules"></ul><p class="note simple-only">Only checks that need attention are shown. Switch to Engineer to see every check.</p></section>
       <section class="blk" id="bomBlk"><div class="lbl">Bill of materials</div><div id="bomBody"></div></section>
-      <section class="blk eng"><div class="lbl">Part</div><dl id="metrics"></dl></section>
-      <section class="blk eng"><div class="lbl">Unit cost by process</div><div class="tw"><table id="costT"></table></div>
+      <section class="blk eng" id="partBlk"><div class="lbl">Part</div><dl id="metrics"></dl></section>
+      <section class="blk eng" id="costBlk"><div class="lbl">Unit cost by process</div><div class="tw"><table id="costT"></table></div>
         <p class="note">Rough GBP estimate per unit including tooling or setup spread over the run. Use it to compare routes, not to quote.</p></section>
-      <section class="blk eng"><div class="lbl">Hand off</div>
+      <section class="blk eng" id="handBlk"><div class="lbl">Hand off</div>
         <div class="xrow">
           <button class="btn" type="button" id="cpSpec">Copy build spec</button>
           <button class="btn" type="button" id="cpReport">Copy DFM report</button>
@@ -154,6 +155,7 @@
 <script id="fg-assets" type="application/json">{"gltf":"{{asset:GLTFExporter.js}}"}</script>
 <script src="{{asset:three.min.js}}"></script>
 <script src="{{asset:OrbitControls.js}}"></script>
+<script src="{{asset:authored.js}}"></script>
 <script src="{{asset:engine.js}}"></script>
 </body>
 </html>

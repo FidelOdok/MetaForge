@@ -563,6 +563,30 @@ verdict. A result recorded without a field keeps its numbers and says
   `GET /v1/simulation/results/{id}/field`. See
   [Simulation results in 3D](simulation-results.md).
 
+## `/library`: parts, materials and machines
+
+The component library the agents design with, as one browsable page. The
+**Components** tab lists every bought part with a search across maker,
+part number, specs and notes, a filter by type, and switches for **Only
+with 3D** and **Hide discontinued** (parts the research marked as ending).
+Picking a part shows its specs with their sources, its material, its
+supplier offers, its model files with their licences, its datasheet and
+its notes, and the part in 3D: the maker's own model in the colours its
+file states when one is attached, otherwise the model drawn from its
+sourced sizes, each shape in its material's look. **Materials** lists each
+material with its sourced properties, and **Machines** the machine models
+and the machines on the bench.
+
+**Export** saves the whole library, with each entry's history, as one JSON
+file; **Import** loads such a file and adds only what this library lacks,
+leaving every entry already here as it is.
+
+- **Backed by:** `GET /v1/library/components`, `/materials` and
+  `/machines`, `GET /v1/library/components/{ref}/mesh`,
+  `GET /v1/library/export`, `POST /v1/library/import` and
+  `GET /v1/library/engine/{name}`. See
+  [Component library](component-library.md).
+
 ## `/files`: files & artifacts
 
 Every stored artifact, with download and file-link sync.

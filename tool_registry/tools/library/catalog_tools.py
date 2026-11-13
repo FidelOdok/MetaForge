@@ -66,6 +66,9 @@ COMPONENT_FAMILIES = [
     "spring",
     "actuator",
     "motor",
+    "module",
+    "battery",
+    "electronic",
     "other",
 ]
 MATERIAL_FAMILIES = [
@@ -144,7 +147,9 @@ _SPECS = (
     "socket_size_mm, socket_depth_mm, width_across_flats_mm, height_mm, inner_diameter_mm, "
     "outer_diameter_mm, thickness_mm, bore_mm, width_mm, travel_mm (mm); dynamic_load_kn, "
     "static_load_kn, fatigue_load_limit_kn (kN); reference_speed_rpm, limiting_speed_rpm "
-    "(rpm); mass_kg (kg); force_n (N); torque_nm (N m); voltage_v (V). "
+    "(rpm); mass_kg (kg); force_n (N); torque_nm (N m); voltage_v (V); capacity_mah (mAh). "
+    "A module, battery or electronic part is length_mm x width_mm x height_mm: its height "
+    "is height_mm, never thickness_mm (that is for plates and washers). "
 )
 _PROPERTIES = (
     "properties is an object keyed by name: density_kg_m3 (kg/m3), youngs_modulus_mpa, "
@@ -359,14 +364,27 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             required = ["name", "finish", "colour"]
         elif kind == "component":
             register_desc = (
-                "Add a mechanical component: name (identifier), title, family, origin "
+                "Add a component, mechanical or electronic: name (identifier), title, family "
+                "(module for a bought board or module such as a display or GNSS module, "
+                "battery, electronic for a single chip, button or connector), origin "
                 "(standard: dimensions from a standard's table, standard required; purchased: "
                 "a supplier's part), size, specs, geometry ({generator, params} for a "
                 "standard part, or {step_url, licence} / {step_work_product_id} for a "
                 "purchased one, or {usd_url, sha256, licence, package_id, attribution} "
                 "for an OpenUSD package, which simready.import builds; the licence must "
                 "be an accepted one), material (a library material name), and suppliers "
-                "[{supplier, sku, url}]. " + _SPECS + _SOURCES + " For a standard part, "
+                "[{supplier, sku, url, offer}], where offer is what you read: {read_on "
+                "(YYYY-MM-DD), via (the tool or page), currency, breaks [{qty, unit_price}], "
+                "stock, lead_time_days, confirmed (false for a search snippet or cached page)}. "
+                "For a bought part also give manufacturer, mpn (the "
+                "maker's order code), datasheet (an http(s) link) and interfaces [{id, bus, "
+                "dir}] (dir in, out or bi), and form_code: the body of a function of g "
+                "that draws the part once, in mm, centred on its body, x its length, y its "
+                "height, z its width, with the same g primitives as a studio part (for a "
+                "board: the PCB, its connectors and largest chips). A studio places it with "
+                "g.model(name). Register a real part the first time you choose it, "
+                "so later projects find it with library.list_components instead of "
+                "researching it again. " + _SPECS + _SOURCES + " For a standard part, "
                 "build the entry with library.standard_part and register what it returns. "
                 "Held for the person's approval."
             )
@@ -389,6 +407,28 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 },
                 "material": {"type": "string"},
                 "suppliers": {"type": "array", "items": {"type": "object"}},
+                "manufacturer": {"type": "string"},
+                "mpn": {"type": "string", "description": "The maker's order code."},
+                "datasheet": {"type": "string", "description": "An http(s) link."},
+                "interfaces": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "bus": {"type": "string"},
+                            "dir": {"type": "string", "enum": ["in", "out", "bi"]},
+                        },
+                        "required": ["id", "bus"],
+                    },
+                },
+                "form_code": {
+                    "type": "string",
+                    "description": (
+                        "Drawing code for g.model(name): the body of a function of g, "
+                        "mm, centred, x length, y height, z width. At most 6000 bytes."
+                    ),
+                },
                 "notes": {"type": "string"},
             }
         elif kind == "process":
@@ -446,7 +486,8 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                     "material": "title, designation, forms, processes, properties (merged by "
                     "name) or notes.",
                     "component": "title, specs (merged by name), geometry, material, "
-                    "suppliers (replaced) or notes.",
+                    "suppliers (replaced), manufacturer, mpn, datasheet, interfaces "
+                    "(replaced) or notes.",
                     "appearance": "title, finish, colour (replaced), texture, properties "
                     "(merged by name), materials, processes, suppliers (replaced) or notes.",
                     "ergonomic_limit": "title, applies_to, min, max, population, "

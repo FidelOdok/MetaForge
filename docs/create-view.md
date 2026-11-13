@@ -72,6 +72,15 @@ preference, kept in this browser (`metaforge.create.panels` in local
 storage) and the same in every creation; with storage unavailable it simply
 starts expanded.
 
+### Resizable conversation
+
+The conversation starts 400 px wide. Its right edge is a drag handle: drag it
+to make the conversation wider or narrower (280 to 760 px, and never more
+than 55% of the page body), use the arrow keys when the handle has focus
+(Home and End jump to the limits), or double-click it to reset. The width is
+kept in this browser (`metaforge.create.chatWidth` in local storage). At
+phone width the handle is hidden.
+
 ### One primary action per stage
 
 Each stage offers exactly one primary action; everything else is in a single
@@ -559,8 +568,11 @@ region.
 
 ## Develop
 
-Develop shows the twin's current model and what needs attention, with one
-primary action (see [the table above](#one-primary-action-per-stage)).
+Develop shows the twin's current model, large and first: it takes the full
+width beside the conversation and most of the window's height. Under it sit
+the one primary action (see [the table above](#one-primary-action-per-stage)),
+**More**, and a button for each kind of detail, which opens it in place and
+closes it again. Nothing is open by default, and one detail opens at a time.
 
 ### The model and its label
 
@@ -604,8 +616,9 @@ the model says so (*Preview updated · Engineering checks running*, or
 last finished model stays on screen. The activity card in the header has the
 detail.
 
-**Needs attention.** Under the model, Develop lists the creation's
-[readiness](#readiness) blockers, each with what clears it.
+**Needs attention.** A button under the model, with the number of the
+creation's [readiness](#readiness) blockers on it. Opened, it lists each
+blocker with what clears it.
 
 **Selecting a part.** Clicking a part of a 3D model selects its component
 (the `component_id` in the mesh's glTF extras, or the model's only
@@ -950,9 +963,20 @@ stage.
 
 ## Make
 
-Make shows the release checklist and the builds, with one primary action:
-**Plan the making**, or **Inspect the result** once the latest build has
-finished. Each opens in place, one at a time.
+Make shows the model the newest live build makes, large and first, as
+Develop does. Under it sit one primary action, **Plan the making**, or
+**Inspect the result** once the latest build has finished, **More**, and two
+buttons: **Release checklist**, which carries how many applicable items pass
+(or the readiness, once the checklist backs one), and **Builds**, which
+carries how many there are. Each opens in place, one at a time, as do
+planning and inspecting.
+
+**The model a build makes.** Once there is a build, Make shows the revision
+it makes in the same read-only 3D view as Develop, titled with the build
+number and its revision label (for an assembly, the whole product with every
+part in place). It is the newest build that is not cancelled, so the released
+model is what a person sees here, not whatever Develop last showed. When that
+revision is not in the twin, Make says so instead of showing an empty view.
 
 **Release checklist.** Once a process with exact checks is chosen (today 3D
 printing), Make lists the manufacturing release checklist of the current

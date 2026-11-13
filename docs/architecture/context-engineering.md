@@ -437,7 +437,7 @@ answering 503 on every deployment.
 
 Every model call re-sends the tool schemas, the brief and every earlier tool
 result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
-(about 20k per call) with 121 tools on the connection. Three limits cut that.
+(about 20k per call) with 121 tools on the connection. These limits cut that.
 
 - **Large tool results become a handle.** A result whose rendered JSON is over
   `METAFORGE_TOOL_RESULT_INLINE_CHARS` (default 8,000) is stored on the
@@ -445,10 +445,28 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   short summary (key names, list lengths, the first items, scalar fields such
   as `total`) plus a `result_handle`. The `read_tool_result` native tool reads
   more on demand, by `offset`/`limit` window or by one top-level `key`, capped
-  at the same limit so a read cannot undo the saving. The recorded trace step
+  at the same limit so a read cannot undo the saving. A read that names no
+  `limit` returns `METAFORGE_TOOL_RESULT_READ_CHARS` (default 3,000, never above
+  the inline limit), because every window stays in the context for the rest of
+  the turn: three default reads at 8,000 characters added about 15k tokens to
+  the next call. The recorded trace step
   keeps the full result. An evicted or unknown handle is an error that says
   so. This covers the native tool-calling loop; the JSON-ReAct fallback keeps
   its existing observation truncation.
+- **Old results are cleared in batches.** Every result stays in the context
+  for each later step, so a research turn that fetched 11 to 16 pages carried
+  them all: the prompt grew to about 95k tokens. Before each model call, when
+  the results older than the newest three (counting only those of at least
+  1,000 characters) pass `METAFORGE_TOOL_RESULT_CLEAR_CHARS` together (default
+  48,000, about 12k tokens; 0 turns it off), each is stored behind a handle (or
+  keeps the one it has) and replaced by a stub naming the tool, the size and
+  how to read it again with `read_tool_result`. The tool calls and the model's
+  own words about each result stay. The threshold is high on purpose: a cached
+  prompt read costs about a tenth of fresh input, and clearing breaks the cache
+  after the first cleared message, so it should happen a few times in a long
+  turn, not on every step. It runs only where `read_tool_result` is offered
+  (the chat), in `clear_stale_results` (`result_handles.py`); each clearing
+  logs `tool_results_cleared`.
 - **The project brief is capped.** `build_project_brief` stops at
   `METAFORGE_BRIEF_CHAR_LIMIT` characters (default 10,000), keeps the newest
   work products (a project with items lists one line per

@@ -144,7 +144,8 @@ MATERIAL_FORMS: tuple[str, ...] = (
     "other",
 )
 
-#: FORGE-449: mechanical COTS part families.
+#: FORGE-449: mechanical COTS part families; module, battery and electronic (2026-11-11)
+#: hold bought electronics, so a part researched once is found again by the next project.
 COMPONENT_FAMILIES: tuple[str, ...] = (
     "screw",
     "nut",
@@ -166,8 +167,17 @@ COMPONENT_FAMILIES: tuple[str, ...] = (
     "spring",
     "actuator",
     "motor",
+    "module",
+    "battery",
+    "electronic",
     "other",
 )
+#: Families whose part is a body with a length, width and height (a board, a module, a
+#: cell). Its height is always ``height_mm``; ``thickness_mm`` is for plates and washers.
+BODY_FAMILIES: tuple[str, ...] = ("module", "battery", "electronic")
+#: An interface's bus and direction, the same words the Imagine studio's parts use.
+INTERFACE_DIRS: tuple[str, ...] = ("in", "out", "bi")
+MAX_INTERFACES = 32
 #: "standard": dimensions from a standard's table, geometry generated from them;
 #: "purchased": a supplier's part with its own CAD.
 COMPONENT_ORIGINS: tuple[str, ...] = ("standard", "purchased")
@@ -198,6 +208,7 @@ COMPONENT_SPECS: dict[str, str] = {
     "force_n": "N",
     "torque_nm": "N m",
     "voltage_v": "V",
+    "capacity_mah": "mAh",
 }
 
 #: FORGE-631: how a surface is finished.
@@ -381,6 +392,32 @@ def parse_specs(raw: Any) -> dict[str, Sourced]:
     return out
 
 
+def check_body_specs(family: str, specs: dict[str, Any]) -> None:
+    """A module, battery or electronic part gives its body height as height_mm."""
+    if family in BODY_FAMILIES and "thickness_mm" in specs:
+        raise CatalogError(
+            f"a {family} gives its body as length_mm x width_mm x height_mm: "
+            "send its height as height_mm, not thickness_mm (thickness_mm is for plates "
+            "and washers)"
+        )
+
+
+def parse_form_code(raw: Any) -> str:
+    """An entry's drawing code, refused by the same rules a studio part's code is."""
+    from twin_core.library.form_code import check_model_code
+
+    try:
+        return check_model_code(raw)
+    except ValueError as exc:
+        raise CatalogError(str(exc)) from exc
+
+
+def _body_specs(family: str, raw: Any) -> dict[str, Sourced]:
+    specs = parse_specs(raw)
+    check_body_specs(family, specs)
+    return specs
+
+
 def parse_appearance_properties(raw: Any) -> dict[str, Sourced]:
     """Appearance properties: known names, fixed units, a source on each."""
     if raw in (None, {}):
@@ -523,16 +560,104 @@ def parse_stock(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
-def parse_suppliers(raw: Any) -> list[dict[str, str]]:
+def parse_interfaces(raw: Any) -> list[dict[str, str]]:
+    """A part's interfaces: [{id, bus, dir}], dir one of in, out or bi."""
     if raw in (None, []):
         return []
     if not isinstance(raw, list):
-        raise CatalogError("suppliers must be a list of {supplier, sku, url}")
+        raise CatalogError("interfaces must be a list of {id, bus, dir}")
+    if len(raw) > MAX_INTERFACES:
+        raise CatalogError(f"at most {MAX_INTERFACES} interfaces")
     out = []
-    for item in raw:
+    for i, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            raise CatalogError(f"interface {i} must be an object with id, bus and dir")
+        ident = str(item.get("id") or "").strip()
+        bus = str(item.get("bus") or "").strip().lower()
+        if not ident:
+            raise CatalogError(f"interface {i} needs an id")
+        if not bus:
+            raise CatalogError(f"interface {ident} needs a bus, such as i2c, spi, uart or gpio")
+        direction = str(item.get("dir") or "bi").strip().lower()
+        if direction not in INTERFACE_DIRS:
+            raise CatalogError(f"interface {ident}: dir must be one of {', '.join(INTERFACE_DIRS)}")
+        out.append({"id": ident, "bus": bus, "dir": direction})
+    return out
+
+
+def parse_link(where: str, raw: Any) -> str:
+    """An optional web link, such as a datasheet: http(s) or nothing."""
+    text = str(raw or "").strip()
+    if text and not re.match(r"^https?://", text, re.IGNORECASE):
+        raise CatalogError(f"{where} must be an http(s) link")
+    return text
+
+
+_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+_CURRENCY = re.compile(r"[A-Z]{3}")
+MAX_PRICE_BREAKS = 20
+
+
+def _whole(where: str, value: Any, *, low: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < low:
+        raise CatalogError(f"{where} must be a whole number of at least {low}")
+    return value
+
+
+def parse_offer(where: str, raw: Any) -> dict[str, Any]:
+    """A supplier's dated offer (2026-11-12): price breaks, stock, lead time, when and how read.
+
+    Prices go stale, so ``read_on`` (YYYY-MM-DD) and ``via`` (the tool or page it was read
+    from) are required. ``confirmed`` is false for a search snapshot or a cached page.
+    """
+    if not isinstance(raw, dict):
+        raise CatalogError(f"{where}.offer must be an object")
+    day = str(raw.get("read_on") or "")
+    if not _ISO_DAY.fullmatch(day):
+        raise CatalogError(f"{where}.offer.read_on must be the day it was read, YYYY-MM-DD")
+    via = str(raw.get("via") or "").strip()
+    if not via:
+        raise CatalogError(f"{where}.offer.via must say where it was read (a tool or a page)")
+    out: dict[str, Any] = {"read_on": day, "via": via[:200]}
+    breaks = raw.get("breaks")
+    if breaks not in (None, []):
+        currency = str(raw.get("currency") or "")
+        if not _CURRENCY.fullmatch(currency):
+            raise CatalogError(f"{where}.offer.currency must be an ISO code such as GBP")
+        if not isinstance(breaks, list) or len(breaks) > MAX_PRICE_BREAKS:
+            raise CatalogError(f"{where}.offer.breaks must be a list of up to {MAX_PRICE_BREAKS}")
+        rows: list[dict[str, Any]] = []
+        for i, b in enumerate(breaks):
+            label = f"{where}.offer.breaks[{i}]"
+            if not isinstance(b, dict):
+                raise CatalogError(f"{label} must be {{qty, unit_price}}")
+            qty = _whole(f"{label}.qty", b.get("qty"), low=1)
+            if rows and qty <= rows[-1]["qty"]:
+                raise CatalogError(f"{label}.qty must rise from one break to the next")
+            price = _number(f"{label}.unit_price", b.get("unit_price"))
+            rows.append({"qty": qty, "unit_price": price})
+        out["currency"] = currency
+        out["breaks"] = rows
+    for key in ("stock", "lead_time_days"):
+        if raw.get(key) is not None:
+            out[key] = _whole(f"{where}.offer.{key}", raw.get(key), low=0)
+    out["confirmed"] = raw.get("confirmed", True) is not False
+    return out
+
+
+def parse_suppliers(raw: Any) -> list[dict[str, Any]]:
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list):
+        raise CatalogError("suppliers must be a list of {supplier, sku, url, offer}")
+    out: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
         if not isinstance(item, dict) or not item.get("supplier") or not item.get("sku"):
             raise CatalogError("each supplier needs supplier and sku")
-        out.append({k: str(item[k]) for k in ("supplier", "sku", "url") if item.get(k)})
+        row: dict[str, Any] = {k: str(item[k]) for k in ("supplier", "sku", "url") if item.get(k)}
+        if item.get("offer") is not None:
+            row["offer"] = parse_offer(f"suppliers[{i}]", item["offer"])
+        out.append(row)
     return out
 
 
@@ -638,8 +763,15 @@ class ComponentEntry:
     specs: dict[str, Sourced]
     geometry: dict[str, Any]
     material: str
-    suppliers: list[dict[str, str]]
+    suppliers: list[dict[str, Any]]
     models: list[dict[str, Any]] = field(default_factory=list)
+    manufacturer: str = ""
+    mpn: str = ""
+    datasheet: str = ""
+    interfaces: list[dict[str, str]] = field(default_factory=list)
+    #: The body of a function of g that draws the part in mm, centred on it: x its length,
+    #: y its height, z its width. A studio places it with g.model(name). "" for none.
+    form_code: str = ""
     notes: str = ""
     version: int = 1
     updated_at: float = 0.0
@@ -731,7 +863,7 @@ class AppearanceEntry:
     properties: dict[str, Sourced]
     materials: list[str]
     processes: list[str]
-    suppliers: list[dict[str, str]]
+    suppliers: list[dict[str, Any]]
     notes: str = ""
     version: int = 1
     updated_at: float = 0.0
@@ -979,9 +1111,14 @@ class SqliteCatalog:
                 origin=origin,
                 standard=standard,
                 size=str(data.get("size") or "").strip(),
-                specs=parse_specs(data.get("specs")),
+                specs=_body_specs(family, data.get("specs")),
                 geometry=parse_geometry(data.get("geometry")),
                 models=parse_models(data.get("models")),
+                manufacturer=str(data.get("manufacturer") or "").strip(),
+                mpn=str(data.get("mpn") or "").strip(),
+                datasheet=parse_link("datasheet", data.get("datasheet")),
+                interfaces=parse_interfaces(data.get("interfaces")),
+                form_code=parse_form_code(data.get("form_code")),
                 material=str(data.get("material") or "").strip().lower(),
                 suppliers=parse_suppliers(data.get("suppliers")),
                 notes=str(data.get("notes") or ""),
@@ -1028,7 +1165,20 @@ class SqliteCatalog:
         if isinstance(entry, ProcessEntry):
             allowed = {"title", "machine_kinds", "material_families", "rules", "notes"}
         elif isinstance(entry, ComponentEntry):
-            allowed = {"title", "specs", "geometry", "material", "suppliers", "notes", "models"}
+            allowed = {
+                "title",
+                "specs",
+                "geometry",
+                "material",
+                "suppliers",
+                "notes",
+                "models",
+                "manufacturer",
+                "mpn",
+                "datasheet",
+                "interfaces",
+                "form_code",
+            }
         elif isinstance(entry, ErgonomicLimitEntry):
             allowed = {
                 "title",
@@ -1117,7 +1267,21 @@ class SqliteCatalog:
                     )
                 entry.models = proposed
             if "specs" in changes:
-                entry.specs = {**entry.specs, **parse_specs(changes["specs"])}
+                incoming = _body_specs(entry.family, changes["specs"])
+                kept = dict(entry.specs)
+                if entry.family in BODY_FAMILIES and "height_mm" in incoming:
+                    # An entry saved before the rule named its height thickness_mm.
+                    kept.pop("thickness_mm", None)
+                entry.specs = {**kept, **incoming}
+            for key in ("manufacturer", "mpn"):
+                if key in changes:
+                    setattr(entry, key, str(changes[key] or "").strip())
+            if "datasheet" in changes:
+                entry.datasheet = parse_link("datasheet", changes["datasheet"])
+            if "interfaces" in changes:
+                entry.interfaces = parse_interfaces(changes["interfaces"])
+            if "form_code" in changes:
+                entry.form_code = parse_form_code(changes["form_code"])
             if "geometry" in changes:
                 entry.geometry = parse_geometry(changes["geometry"])
             if "material" in changes:

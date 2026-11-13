@@ -33,6 +33,36 @@ Each call is recorded in the usage ledger under its role.
 | **Requirement intelligence** | `api_gateway/requirement_intelligence/intent_interpreter.py`, `requirement_author.py` | `generator` | Interprets an intent into engineering entities, and drafts requirements |
 | **Domain agents** (PydanticAI mode) | `domain_agents/{mechanical,electronics,simulation,firmware,supply_chain}/agent.py` | (agent run) | Chooses which skills and tools to call for a task. With no model configured each agent uses its fixed task dispatch instead. |
 
+### What a harness turn costs, and how it is bounded
+
+A turn is a loop of model calls, and every call carries the whole prompt: the system
+text, the conversation so far and the tool list. In a measured Imagine session a call
+averaged about 65,000 input tokens, of which the tool list was about 28,000, and a turn
+made several such calls. Caching makes most of that cheap to read, not free.
+
+- **Cost is recorded per call.** A router that bills per call (OpenRouter) reports the
+  cost it charged, and the adapter asks for it (`usage: {include: true}`). That reported
+  cost is exact, so it is stored in place of a price-table estimate, and it covers
+  models the table does not list. A call with neither a reported cost nor a table price
+  records `None`, never zero.
+  With a key brought to the router (BYOK) OpenRouter's `cost` is only its own fee, often
+  0, and the real spend is `cost_details.upstream_inference_cost`; both are added, so a
+  large call never reads as free.
+- **The spend cap uses it.** `METAFORGE_CHAT_MAX_COST_USD` used to estimate cost from the
+  built-in price table, so for a model missing from that table the cap was silently not
+  enforced. When every call of a turn reports a cost, the loop sums them, shows the
+  total on the result (`usage.cost_usd`) and stops at the cap. If some call reports no
+  cost the total is left out rather than understated, and the cap falls back to the
+  table estimate.
+- **The tool list is measured.** The loop logs `native_tool_schemas` (tool count and
+  approximate tokens) at its first step and whenever the list changes, for example when
+  `search_tools` adds a tool. In a measured Develop turn the list was 60 tools and about 31,000 tokens: 39 stage tools
+  (about 13,000) plus 21 native tools, 16 of them `skill_*` tools worth about 17,000 tokens
+  (`skill_mechanical_generate_cad_ir` alone is about 7,300). Those are registered only when
+  `METAFORGE_CHAT_SKILLS` is on, which is off by default; leave it off unless a turn needs them. A Design turn that names its Create stage gets that
+  stage's set (`mcp_core.profiles.CREATE_STAGE_TOOLS`, 35 to 40 tools, about 8,000 to
+  13,000 tokens); a turn that does not sends the person's own tool ids.
+
 ## 2. The knowledge models
 
 These are direct OpenRouter clients in `digital_twin/knowledge/`, wired at

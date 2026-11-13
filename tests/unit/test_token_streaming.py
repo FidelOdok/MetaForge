@@ -445,3 +445,80 @@ async def test_loop_usage_none_when_provider_reports_nothing() -> None:
 
     result = await run_native_tools(rt, "go", invoke=invoke, max_steps=2)
     assert result.usage is None
+
+
+# --- a reply cut off at the output cap (MetaForge, 2026-11-11) -----------------------
+# A studio write cut off mid-argument reached the tool as {} ("'config' is a
+# required property") and the model never learned it had been cut off.
+def _finish(reason: str) -> Any:
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=None, tool_calls=None), finish_reason=reason
+            )
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_openai_events_flag_a_cut_off_reply_and_drop_its_half_written_call() -> None:
+    client = _FakeOpenAI(
+        [
+            _chunk(tool_calls=[_tc(0, id="c1", name="list_projects", args="{}")]),
+            _chunk(
+                tool_calls=[_tc(1, id="c2", name="put_studio", args='{"config": {"form": {"pa')]
+            ),
+            _finish("length"),
+        ]
+    )
+    events = [
+        e
+        async for e in openai_stream_events(
+            SPEC, {"messages": [{"role": "user", "content": "go"}]}, client=client
+        )
+    ]
+    result = events[-1]["result"]
+    assert result["truncated"] is True
+    assert result["tool_calls"] == [{"id": "c1", "name": "list_projects", "arguments": {}}]
+
+
+@pytest.mark.asyncio
+async def test_openai_events_a_finished_reply_is_not_flagged() -> None:
+    client = _FakeOpenAI(
+        [
+            _chunk(tool_calls=[_tc(0, id="c1", name="list_projects", args="{}")]),
+            _finish("tool_calls"),
+        ]
+    )
+    events = [
+        e
+        async for e in openai_stream_events(
+            SPEC, {"messages": [{"role": "user", "content": "go"}]}, client=client
+        )
+    ]
+    assert "truncated" not in events[-1]["result"]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_events_flag_a_cut_off_reply_and_drop_its_last_call() -> None:
+    from orchestrator.harness.providers.adapters import anthropic_stream_events
+
+    final = SimpleNamespace(
+        model="claude-x",
+        stop_reason="max_tokens",
+        content=[
+            SimpleNamespace(type="tool_use", id="t1", name="list_projects", input={}),
+            SimpleNamespace(type="tool_use", id="t2", name="put_studio", input={}),
+        ],
+    )
+    client = SimpleNamespace(messages=SimpleNamespace(stream=_FakeAnthropicStream([], final)))
+    spec = ProviderSpec(name="anthropic", model="claude-x", api_key="k")
+    events = [
+        e
+        async for e in anthropic_stream_events(
+            spec, {"messages": [{"role": "user", "content": "go"}]}, client=client
+        )
+    ]
+    result = events[-1]["result"]
+    assert result["truncated"] is True
+    assert [c["name"] for c in result["tool_calls"]] == ["list_projects"]

@@ -1,0 +1,191 @@
+/* The library page (2026-11-12): a list on the left, the chosen part on the right. Colours
+   come from the theme variables in console.css, so light and dark both work. */
+
+.mf-library-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--mf-r-65-72-90-0p2);
+}
+.mf-library-tabs button {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--mf-c-9a9aaa);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.mf-library-tabs button[aria-selected='true'] {
+  color: var(--mf-c-e2e2eb);
+  border-bottom-color: var(--color-primary-container);
+}
+.mf-library-split {
+  display: grid;
+  grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .mf-library-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.mf-library-browser,
+.mf-library-detail,
+.mf-library-cards > li {
+  background: var(--mf-r-30-31-38-0p85);
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 8px;
+}
+.mf-library-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--mf-r-65-72-90-0p2);
+  font-size: 12px;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-library-filters input[type='search'] {
+  flex: 1 1 100%;
+}
+.mf-library-filters input[type='search'],
+.mf-library-filters select {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--mf-c-e2e2eb);
+  background: var(--mf-c-111319);
+  border: 1px solid var(--mf-r-65-72-90-0p3);
+  border-radius: 4px;
+}
+.mf-library-rows {
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+}
+.mf-library-rows button,
+.mf-library-cards button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 7px 8px;
+  text-align: left;
+  border-radius: 4px;
+}
+.mf-library-rows button:hover,
+.mf-library-cards button:hover {
+  background: var(--mf-c-282a30);
+}
+.mf-library-rows button.is-selected {
+  background: var(--mf-c-282a30);
+  box-shadow: inset 2px 0 0 var(--color-primary-container);
+}
+.mf-library-row-title {
+  font-size: 13px;
+  color: var(--mf-c-e2e2eb);
+}
+.mf-library-row-meta,
+.mf-library-muted {
+  font-size: 11px;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-library-detail {
+  padding: 16px;
+  min-width: 0;
+}
+.mf-library-detail h2 {
+  margin: 0 0 2px;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--mf-c-e8e8ed);
+}
+.mf-library-detail h3 {
+  margin: 16px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-library-detail p,
+.mf-library-detail li {
+  font-size: 13px;
+  color: var(--mf-c-e2e2eb);
+}
+.mf-library-detail a {
+  color: var(--mf-c-86cfff);
+}
+.mf-library-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.mf-library-preview {
+  margin-top: 12px;
+}
+.mf-library-preview-stage {
+  position: relative;
+  height: 320px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--mf-c-f3f4f6, #f3f4f6), var(--mf-c-e9eaee, #e9eaee));
+  overflow: hidden;
+}
+.mf-library-preview-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  font-size: 12px;
+  color: #55585f;
+}
+.mf-library-preview-error {
+  color: #b3261e;
+}
+.mf-library-preview-note {
+  margin-top: 6px;
+  font-size: 11px !important;
+  color: var(--mf-c-9a9aaa) !important;
+}
+.mf-library-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.mf-library-table th,
+.mf-library-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--mf-r-65-72-90-0p2);
+  color: var(--mf-c-e2e2eb);
+}
+.mf-library-table th {
+  font-weight: 500;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-library-list-plain {
+  margin: 0;
+  padding-left: 16px;
+}
+.mf-library-notes {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  color: var(--mf-c-a8a8b7);
+}
+.mf-library-cards {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mf-library-card-body {
+  padding: 0 10px 10px;
+}

@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PANELS_KEY, readCollapsed, useCreateLayoutStore } from '../create-layout-store';
+import {
+  CHAT_WIDTH_DEFAULT,
+  CHAT_WIDTH_KEY,
+  CHAT_WIDTH_MAX,
+  CHAT_WIDTH_MIN,
+  PANELS_KEY,
+  readChatWidth,
+  readCollapsed,
+  useCreateLayoutStore,
+} from '../create-layout-store';
 
 const P = 'proj-layout';
 
@@ -46,5 +55,26 @@ describe('create layout store', () => {
     expect(useCreateLayoutStore.getState().stage(P).drawerCollapsed).toBe(true);
     s.closeDrawer(P);
     expect(useCreateLayoutStore.getState().stage(P)).toEqual({ drawer: null, drawerCollapsed: false });
+  });
+
+  it('starts the conversation wider than the old fixed 320 px column', () => {
+    expect(CHAT_WIDTH_DEFAULT).toBeGreaterThan(320);
+    expect(useCreateLayoutStore.getState().chatWidth).toBe(CHAT_WIDTH_DEFAULT);
+  });
+
+  it('keeps a dragged conversation width across loads, held between its limits', () => {
+    useCreateLayoutStore.getState().setChatWidth(512);
+    expect(window.localStorage.getItem(CHAT_WIDTH_KEY)).toBe('512');
+    useCreateLayoutStore.getState().reset();
+    expect(useCreateLayoutStore.getState().chatWidth).toBe(512);
+    useCreateLayoutStore.getState().setChatWidth(10);
+    expect(useCreateLayoutStore.getState().chatWidth).toBe(CHAT_WIDTH_MIN);
+    useCreateLayoutStore.getState().setChatWidth(99999);
+    expect(useCreateLayoutStore.getState().chatWidth).toBe(CHAT_WIDTH_MAX);
+  });
+
+  it('falls back to the default width for a stored value that is not a number', () => {
+    window.localStorage.setItem(CHAT_WIDTH_KEY, 'wide');
+    expect(readChatWidth()).toBe(CHAT_WIDTH_DEFAULT);
   });
 });

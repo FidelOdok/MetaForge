@@ -32,7 +32,17 @@ from uuid import UUID, uuid4
 import structlog
 from pydantic import ValidationError
 
-from api_gateway.imagine import engine_page, verification_client
+from api_gateway.imagine import (
+    component_link,
+    engine_page,
+    library_cost,
+    library_link,
+    library_models,
+    part_model,
+    resolve_part,
+    studio_patch,
+    verification_client,
+)
 from api_gateway.imagine.schemas import (
     COLLECTION_KINDS,
     KIND_COLLECTIONS,
@@ -121,6 +131,119 @@ def engine_url(project_id: str) -> str:
     if engine_token.auth_required():
         return f"{path}?t={engine_token.sign(project_id)}"
     return path
+
+
+_MEASURED_KEYS = (
+    "total_area",
+    "overhang_area",
+    "overhang_share",
+    "com",
+    "support",
+    "overlaps",
+    "notes",
+)
+_MAX_MEASURED_BYTES = 16_000
+_MAX_FIT_PAIRS = 24
+
+
+def _vec3(value: Any) -> list[float]:
+    if not (isinstance(value, list) and len(value) == 3):
+        raise ValueError("a point must be three numbers")
+    return [_number(x) for x in value]
+
+
+def _clean_fit(value: Any) -> dict[str, Any] | None:
+    """The page's fit test (which parts clash on their drawn shapes), in its own shape only."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("fit must be an object")
+    pairs = value.get("pairs")
+    if not isinstance(pairs, list) or not all(isinstance(p, dict) for p in pairs):
+        raise ValueError("fit.pairs must be a list of objects")
+    not_closed = value.get("not_closed") or []
+    if not isinstance(not_closed, list):
+        raise ValueError("fit.not_closed must be a list")
+    clean_pairs = []
+    for p in pairs[:_MAX_FIT_PAIRS]:
+        region = p.get("region")
+        if not isinstance(region, dict):
+            raise ValueError("a fit pair needs its region")
+        clean_pairs.append(
+            {
+                "a": str(p["a"])[:64],
+                "b": str(p["b"])[:64],
+                "a_name": str(p.get("a_name") or p["a"])[:120],
+                "b_name": str(p.get("b_name") or p["b"])[:120],
+                "depth_mm": _number(p["depth_mm"]),
+                "points": int(_number(p.get("points") or 0)),
+                "region": {"min": _vec3(region.get("min")), "max": _vec3(region.get("max"))},
+            }
+        )
+    return {
+        "pairs": clean_pairs,
+        "checked_pairs": int(_number(value.get("checked_pairs") or 0)),
+        "not_closed": [str(x)[:64] for x in not_closed[:_MAX_FIT_PAIRS]],
+        "partial": bool(value.get("partial")),
+        "tolerance_mm": _number(value["tolerance_mm"]),
+        "step_mm": _number(value["step_mm"]),
+    }
+
+
+def _number(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        raise ValueError("a measurement must be a number")
+    if value in (float("inf"), float("-inf")):
+        raise ValueError("a measurement must be finite")
+    return float(value)
+
+
+def _clean_measured(value: Any) -> dict[str, Any]:
+    """The look's measurements, reduced to the fields the page reports and checked for shape.
+
+    Raises ``ValueError`` when the value is not that shape. Anything else a caller adds (a
+    ``verified`` flag, an ``authority``) is dropped, never stored.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("the measurement must be an object")
+    out: dict[str, Any] = {}
+    for key in ("total_area", "overhang_area", "overhang_share"):
+        out[key] = _number(value[key]) if value.get(key) is not None else None
+    com = value.get("com")
+    if com is None:
+        out["com"] = None
+    elif isinstance(com, list) and len(com) == 3:
+        out["com"] = [_number(x) for x in com]
+    else:
+        raise ValueError("com must be three numbers")
+    support = value.get("support")
+    if support is None:
+        out["support"] = None
+    elif isinstance(support, dict):
+        out["support"] = {k: _number(support[k]) for k in ("points", "margin_mm", "tip_angle_deg")}
+    else:
+        raise ValueError("support must be an object")
+    overlaps = value.get("overlaps")
+    if not isinstance(overlaps, list):
+        raise ValueError("overlaps must be a list")
+    out["overlaps"] = [
+        {"a": str(o["a"])[:64], "b": str(o["b"])[:64], "volume_mm3": _number(o["volume_mm3"])}
+        for o in overlaps
+        if isinstance(o, dict)
+    ]
+    if len(out["overlaps"]) != len(overlaps):
+        raise ValueError("each overlap must be an object")
+    notes = value.get("notes")
+    if not isinstance(notes, list) or not all(isinstance(n, str) for n in notes):
+        raise ValueError("notes must be a list of text")
+    out["notes"] = [n[:300] for n in notes[:12]]
+    try:
+        fit = _clean_fit(value.get("fit"))
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"fit is not the shape the page makes: {exc}") from exc
+    if fit is not None:
+        out["fit"] = fit
+    return out
 
 
 class ImagineError(Exception):
@@ -257,11 +380,18 @@ def _chosen_parts(
 
 def _part_gaps(part: dict[str, Any]) -> list[str]:
     geometry = part.get("geometry") or {}
-    source = (
-        part.get("datasheet")
-        or part.get("url")
-        or (part.get("cost") or {}).get("source")
-        or geometry.get("source")
+    source = next(
+        (
+            c
+            for c in (
+                part.get("datasheet"),
+                part.get("url"),
+                (part.get("cost") or {}).get("source"),
+                geometry.get("source"),
+            )
+            if part_model.is_real_source(c)
+        ),
+        None,
     )
     gaps = []
     if not source:
@@ -270,7 +400,7 @@ def _part_gaps(part: dict[str, Any]) -> list[str]:
         gaps.append("date")
     if not part.get("interfaces"):
         gaps.append("interfaces")
-    if not geometry.get("envelope"):
+    if not part_model.size_is_read(geometry):
         gaps.append("3D envelope")
     return gaps
 
@@ -519,54 +649,205 @@ class ImagineService:
     ) -> StudioResponse:
         with tracer.start_as_current_span("imagine.put_studio") as span:
             span.set_attribute("project_id", project_id)
-            try:
-                checked = engine_page.validate_config(config)
-            except engine_page.ConfigError as exc:
-                _count("put", "refused")
-                # ``errors`` and ``warnings`` stay for the dashboard; ``findings``
-                # is the same shape POST /validate returns, so an agent reads one
-                # format. There is no verdict here: the write is refused before
-                # anything is judged, and verdicts are the service's to give.
-                findings = config_findings(exc.errors, exc.warnings, None)
+            return await self._put(project_id, config, actor=actor, span=span)
+
+    async def patch_studio(
+        self, project_id: str, base_revision: int, changes: Any, *, actor: str
+    ) -> StudioResponse:
+        """The next revision: the head's config with ``changes`` applied (studio_patch).
+
+        Refused (409) when the head is no longer ``base_revision``, so a change is never
+        applied to a config its author did not read; (400) when a change cannot be applied;
+        and (422) when the changed config fails the formgraph checks, exactly as a full
+        write is. Nothing is written when it is refused.
+        """
+        with tracer.start_as_current_span("imagine.patch_studio") as span:
+            span.set_attribute("project_id", project_id)
+            span.set_attribute("studio.base_revision", base_revision)
+            head = await self._head(project_id)
+            if head is None or not isinstance(head.state.get("config"), dict):
+                _count("patch", "refused")
                 raise ImagineError(
-                    "The config does not pass the formgraph checks.",
-                    422,
-                    {
-                        "errors": exc.errors,
-                        "warnings": exc.warnings,
-                        "findings": [f.model_dump(mode="json") for f in findings],
-                    },
-                ) from exc
-            async with self._lock(project_id):
-                head = await self._head(project_id)
-                if head is not None and head.state.get("status") == "handed_over":
-                    _count("put", "refused")
-                    raise ImagineError(
-                        f"{head.ref} is handed over and read-only; rework it to change the config.",
-                        409,
-                    )
-                state = {
-                    "config": checked.config,
-                    "status": "draft",
-                    "collections": (head.state["collections"] if head else _empty_collections()),
-                    "events": (head.state["events"] if head else {}),
-                    "handover": None,
-                    "rework": head.state.get("rework") if head else None,
-                    "warnings": checked.warnings,
-                }
-                new = await self._write_revision(
-                    project_id, state, actor=actor, reason="studio config from the agent"
+                    "There is no studio to change yet; write the first config with "
+                    "twin.imagine_put_studio.",
+                    404,
                 )
-            span.set_attribute("studio.revision", new.revision)
-            _count("put", "ok")
-            self._publish(project_id, f"put-{new.revision}", f"Studio config {new.ref} recorded")
-            logger.info(
-                "imagine_studio_put",
-                project_id=project_id,
-                ref=new.ref,
-                warnings=len(checked.warnings),
+            if head.revision != base_revision:
+                _count("patch", "refused")
+                raise ImagineError(
+                    f"The studio is at revision {head.revision}, not {base_revision}; read it "
+                    f"again (twin.imagine_get_studio) and make the change against "
+                    f"revision {head.revision}.",
+                    409,
+                )
+            try:
+                config, applied = studio_patch.apply_changes(head.state["config"], changes)
+            except studio_patch.PatchError as exc:
+                _count("patch", "refused")
+                raise ImagineError(str(exc), 400) from exc
+            span.set_attribute("studio.changes", len(applied))
+            out = await self._put(
+                project_id,
+                config,
+                actor=actor,
+                span=span,
+                expect_revision=base_revision,
+                reason="studio change from the agent",
+                metric="patch",
             )
-            return self._response(project_id, new)
+            logger.info(
+                "imagine_studio_patched",
+                project_id=project_id,
+                base_revision=base_revision,
+                revision=out.revision,
+                changes=applied,
+            )
+            return out
+
+    async def _put(
+        self,
+        project_id: str,
+        config: dict[str, Any],
+        *,
+        actor: str,
+        span: Any,
+        expect_revision: int | None = None,
+        reason: str = "studio config from the agent",
+        metric: str = "put",
+    ) -> StudioResponse:
+        # A part with no size gets a labelled 3D body, so every part exists in 3D.
+        # Reading a library and a model is file work: off the event loop.
+        config, drawn = await asyncio.to_thread(
+            resolve_part.fill_part_bodies,
+            config,
+            kicad_config=resolve_part.kicad_config_from_env(),
+        )
+        # A component in the form that names its real part is drawn from that part: with
+        # the part's library model when its entry has one, else as its bounding box.
+        model = library_models.cached(library_models.catalog_model)
+        modelled_entries = await asyncio.to_thread(library_models.linked_models, config, model)
+        config, linked = component_link.expand_component_parts(
+            config, has_model=modelled_entries.__contains__
+        )
+        # Library models the parts name travel with the revision (the page has no network).
+        config, modelled = await asyncio.to_thread(library_models.embed, config, model)
+        # A linked part with no cost of its own is priced from the library's confirmed offers.
+        config, priced = await asyncio.to_thread(
+            library_cost.price_parts, config, library_cost.cached(library_cost.catalog_entry)
+        )
+        # Real parts the component library does not hold yet: register once, reuse later.
+        library = await asyncio.to_thread(
+            library_link.library_notes, config, library_link.catalog_exists
+        )
+        drawn = [*drawn, *linked, *modelled, *priced, *library]
+        try:
+            checked = engine_page.validate_config(config)
+        except engine_page.ConfigError as exc:
+            _count(metric, "refused")
+            # ``errors`` and ``warnings`` stay for the dashboard; ``findings``
+            # is the same shape POST /validate returns, so an agent reads one
+            # format. There is no verdict here: the write is refused before
+            # anything is judged, and verdicts are the service's to give.
+            findings = config_findings(exc.errors, exc.warnings, None)
+            raise ImagineError(
+                "The config does not pass the formgraph checks.",
+                422,
+                {
+                    "errors": exc.errors,
+                    "warnings": exc.warnings,
+                    "findings": [f.model_dump(mode="json") for f in findings],
+                },
+            ) from exc
+        async with self._lock(project_id):
+            head = await self._head(project_id)
+            if head is not None and head.state.get("status") == "handed_over":
+                _count(metric, "refused")
+                raise ImagineError(
+                    f"{head.ref} is handed over and read-only; rework it to change the config.",
+                    409,
+                )
+            now = head.revision if head is not None else 0
+            if expect_revision is not None and now != expect_revision:
+                _count(metric, "refused")
+                raise ImagineError(
+                    f"The studio moved to revision {now} while this change was checked; "
+                    f"read it again and make the change against revision {now}.",
+                    409,
+                )
+            state = {
+                "config": checked.config,
+                "status": "draft",
+                "collections": (head.state["collections"] if head else _empty_collections()),
+                "events": (head.state["events"] if head else {}),
+                "handover": None,
+                "rework": head.state.get("rework") if head else None,
+                "warnings": [*checked.warnings, *drawn],
+            }
+            new = await self._write_revision(project_id, state, actor=actor, reason=reason)
+        span.set_attribute("studio.revision", new.revision)
+        _count(metric, "ok")
+        self._publish(project_id, f"put-{new.revision}", f"Studio config {new.ref} recorded")
+        logger.info(
+            "imagine_studio_put",
+            project_id=project_id,
+            ref=new.ref,
+            warnings=len(checked.warnings),
+        )
+        return self._response(project_id, new)
+
+    # -- measurements -----------------------------------------------------
+
+    async def record_measurement(self, project_id: str, revision: int, measured: Any) -> None:
+        """Keep what a look measured against the revision it measured.
+
+        Only the gateway's own headless browser calls this (``twin.imagine_look``); no route
+        accepts a measurement, so a person's browser cannot claim one. The record belongs to
+        one revision: a newer write starts a state without it, so a stale figure is never
+        carried forward. Writing it makes no new revision.
+        """
+        try:
+            cleaned = _clean_measured(measured)
+        except (ValueError, KeyError, TypeError) as exc:
+            _count("measure", "refused")
+            raise ImagineError(
+                f"The measurement is not in the shape the page reports: {exc}", 422
+            ) from exc
+        if len(json.dumps(cleaned)) > _MAX_MEASURED_BYTES:
+            _count("measure", "refused")
+            raise ImagineError("The measurement is too large (16 KB at most).", 413)
+        async with self._lock(project_id):
+            head = await self._head(project_id)
+            if head is None:
+                _count("measure", "refused")
+                raise ImagineError("No studio yet: an agent puts a config first.", 404)
+            if head.state.get("status") == "handed_over":
+                _count("measure", "refused")
+                raise ImagineError(f"{head.ref} is handed over and read-only.", 409)
+            if head.revision != revision:
+                _count("measure", "refused")
+                raise ImagineError(
+                    f"The studio is at revision {head.revision}, not {revision}: a measurement "
+                    "belongs to the revision it measured.",
+                    409,
+                )
+            head.state["measured"] = {
+                "revision": head.revision,
+                "at": _now(),
+                "method": "headless look run by the gateway",
+                "measured": cleaned,
+            }
+            await self._save(head)
+        _count("measure", "ok")
+
+    async def get_measurement(self, project_id: str) -> dict[str, Any] | None:
+        """The measurement recorded for the head revision, or ``None``."""
+        head = await self._head(project_id)
+        if head is None:
+            return None
+        record = head.state.get("measured")
+        if not isinstance(record, dict) or record.get("revision") != head.revision:
+            return None
+        return dict(record)
 
     async def engine_html(self, project_id: str) -> str:
         with tracer.start_as_current_span("imagine.engine_page") as span:
@@ -575,7 +856,15 @@ class ImagineService:
             if head is None:
                 _count("engine", "refused")
                 raise ImagineError("No studio yet: an agent puts a config first.", 404)
-            checked = engine_page.validate_config(head.state.get("config") or {})
+            config = head.state.get("config") or {}
+            if ((config.get("form") or {}).get("template")) != "authored":
+                _count("engine", "refused")
+                raise ImagineError(
+                    "This studio uses the enclosure template, which was removed: every form "
+                    "is authored now. Write a new studio with form.template authored.",
+                    410,
+                )
+            checked = engine_page.validate_config(config)
             _count("engine", "ok")
             return engine_page.render_engine(checked.compiled)
 
@@ -631,6 +920,21 @@ class ImagineService:
                 collection = KIND_COLLECTIONS[event.kind]
                 previous = head.state["collections"][collection].get(doc_id)
                 data = {k: v for k, v in data.items() if k not in _DELEGATION_KEYS}
+                if event.kind == "form_seen":
+                    # A person looking at the form is not something an agent can say for them,
+                    # and the revision is the server's, never the page's.
+                    if from_agent or delegated:
+                        _count("event", "refused")
+                        raise ImagineError(
+                            "Seeing the form is the person's own act; an agent cannot record it.",
+                            403,
+                        )
+                    doc_id = "latest"
+                    data = {
+                        "seen": data.get("seen") is True,
+                        "revision": head.revision,
+                        "at": datetime.now(UTC).isoformat(),
+                    }
                 if delegated:
                     data = _delegated_write(event.kind, data, previous, delegated)
                 elif from_agent and event.kind == "scenario":
@@ -970,6 +1274,7 @@ class ImagineService:
                     config,
                     head.state["collections"],
                     has_mesh=has_mesh,
+                    measured=head.state.get("measured"),
                 ),
                 "supplied": [f.model_dump(mode="json") for f in supplied],
             }
@@ -1183,22 +1488,36 @@ class ImagineService:
                 f"{mfc['selected_process']}, {mfc['selected_material']}, {mfc['quantity']} units.",
             )
 
-        # 7. concept assembly and an illustrative concept mesh
+        # 7. concept assembly, and the form seen. A person having seen this revision of the form
+        # satisfies it, or an illustrative concept mesh does (spec 5.1, concept.form_seen). The mesh
+        # is optional: nothing downstream reads it and it can never be evidence.
         mesh = await self.bridge.has_concept_mesh(project_id)
+        seen_doc = (cols.get("formSeen") or {}).get("latest") or {}
+        seen = bool(seen_doc.get("seen")) and seen_doc.get("revision") == head.revision
         parts_ok = bool(chosen) and not no_part
-        if parts_ok and mesh:
+        if parts_ok and (mesh or seen):
+            how = (
+                f"a person has seen this form (revision {head.revision})"
+                if seen
+                else "an illustrative concept mesh exists"
+            )
+            if seen and mesh:
+                how += "; an illustrative concept mesh also exists"
             add(
                 "concept_assembly",
                 "Concept assembly and concept mesh",
                 "done",
-                "Component ids are assigned at handover; an illustrative concept mesh exists.",
+                f"Component ids are assigned at handover; {how}.",
             )
         else:
             missing = []
             if not parts_ok:
                 missing.append("a chosen part for every function")
-            if not mesh:
-                missing.append("an illustrative concept mesh (generate one in Imagine)")
+            if not (mesh or seen):
+                missing.append(
+                    "a person to have seen the form (use 'I have seen this form' in the studio), "
+                    "or an illustrative concept mesh"
+                )
             add(
                 "concept_assembly",
                 "Concept assembly and concept mesh",
@@ -1490,6 +1809,8 @@ class ImagineService:
                 "source": p.get("datasheet") or p.get("url") or (p.get("cost") or {}).get("source"),
                 "retrieved": p.get("retrieved") or p.get("date"),
                 "envelope_mm": (p.get("geometry") or {}).get("envelope"),
+                "fidelity": (p.get("geometry") or {}).get("fidelity"),
+                "size_basis": (p.get("geometry") or {}).get("size_basis"),
             }
         lines = [
             f"The concept assembly chosen in the Imagine studio ({head.ref}). Parts and "
