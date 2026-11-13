@@ -261,6 +261,9 @@ REVIEWED_GAPS = {
     ("POST", "/v1/harness/credentials"),
     ("DELETE", "/v1/harness/credentials/{provider}"),
     ("PUT", "/v1/harness/selection"),
+    # Loads a library file into the library every account shares: one account
+    # must not overwrite what all of them see.
+    ("POST", "/v1/library/import"),
     # Stores that do not record a project yet.
     ("POST", "/v1/assistant/proposals/{change_id}/decide"),
     ("POST", "/v1/cad-export/ros2-launch"),
