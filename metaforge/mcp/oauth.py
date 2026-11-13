@@ -485,7 +485,11 @@ class OAuthProvider:
         Always false under identity login: a shared secret would let anyone
         holding it act outside any account.
         """
-        if not secret or self.config.identity_login or not self.config.login_secret:
+        if (
+            not secret
+            or getattr(self.config, "identity_login", False)
+            or not self.config.login_secret
+        ):
             return False
         return hmac.compare_digest(secret, self.config.login_secret)
 

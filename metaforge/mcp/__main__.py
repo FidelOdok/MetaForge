@@ -1362,7 +1362,7 @@ def _mount_oauth_routes(
         logger.info("oauth_client_registered", client_id=registration["client_id"])
         return JSONResponse(registration, status_code=201)
 
-    identity = oauth.config.identity_login
+    identity = bool(getattr(oauth.config, "identity_login", False))
     if identity and login is None:
         raise RuntimeError("identity login is configured but no provider can check passwords")
 
