@@ -172,7 +172,7 @@ the route runs, and the route's shape decides how the project is found:
 | stateless or content-addressed | `POST /v1/design-flows/validate`, `POST /v1/robot/joint-loads`, `/v1/convert` (the id is the file's SHA-256) | answered |
 | anything else | | **refused with 403** |
 
-**Entities** (FORGE-872). Most routes the dashboard uses inside a project
+**Entities.** Most routes the dashboard uses inside a project
 name an entity, not a project. `api_gateway/auth/ownership.py` looks up which
 project owns it:
 
