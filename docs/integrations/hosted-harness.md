@@ -126,6 +126,13 @@ Then **Settings → Connectors → Add custom connector**, and enter
 `WWW-Authenticate` header, follows it to the metadata, registers itself, and
 sends you to the sign-in page. Enter the secret and it completes the exchange.
 
+**Signing in with your own account.** When the gateway runs an authentication
+provider that can check passwords (`METAFORGE_AUTH_MODE`; see
+[Authentication](../deployment/authentication.md#signing-in-to-mcp)), the
+sign-in page asks for your email and password instead, the same account as the
+dashboard, and the connection is bound to you. `METAFORGE_OAUTH_LOGIN_SECRET` is
+not needed and is ignored if set.
+
 With `DATABASE_URL` set (the standard compose file sets it), registered
 clients and issued tokens are kept in Postgres (`mcp_oauth_clients`,
 `mcp_oauth_tokens`, tokens by their SHA-256 only), so redeploying or

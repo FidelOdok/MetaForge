@@ -58,8 +58,21 @@ __all__ = [
     "OAuthConfig",
     "OAuthError",
     "OAuthProvider",
+    "subject_of",
     "verify_pkce_s256",
 ]
+
+#: Actor prefix for a token bound to a person the auth provider verified
+#: (FORGE-859). ``_actor_for`` strips ``:`` from a typed name, so a
+#: shared-secret login can never produce it.
+SUBJECT_PREFIX = "sub:"
+
+
+def subject_of(actor_id: str | None) -> str | None:
+    """The verified subject a token is bound to, or ``None`` for a label."""
+    if actor_id and actor_id.startswith(SUBJECT_PREFIX):
+        return actor_id[len(SUBJECT_PREFIX) :] or None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +180,10 @@ class OAuthConfig:
     #: is a label, not a claim the server stands behind. An upstream
     #: identity provider (the Phase-2 broker) is what flips this.
     verified_identity: bool = False
+    #: Sign people in with the auth provider's own email and password check
+    #: (FORGE-859) instead of the shared secret. Tokens are then bound to a
+    #: verified subject, and the shared secret is refused.
+    identity_login: bool = False
     scope: str = "mcp"
     code_ttl: int = 600
     access_ttl: int = 3600
@@ -174,14 +191,23 @@ class OAuthConfig:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.login_secret)
+        return self.identity_login or bool(self.login_secret)
 
     @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> OAuthConfig | None:
-        """Build from env, or ``None`` when OAuth isn't configured."""
+    def from_env(
+        cls, env: dict[str, str] | None = None, *, identity_login: bool = False
+    ) -> OAuthConfig | None:
+        """Build from env, or ``None`` when OAuth isn't configured.
+
+        ``identity_login`` is set by the sidecar when the gateway's auth
+        provider can check passwords; OAuth is then on without a shared
+        secret, and any secret that is set is ignored.
+        """
         src = env if env is not None else dict(os.environ)
         secret = (src.get("METAFORGE_OAUTH_LOGIN_SECRET") or "").strip()
-        if not secret:
+        if identity_login:
+            secret = ""
+        elif not secret:
             return None
 
         def _int(name: str, default: int) -> int:
@@ -195,6 +221,8 @@ class OAuthConfig:
 
         return cls(
             login_secret=secret,
+            identity_login=identity_login,
+            verified_identity=identity_login,
             issuer=(src.get("METAFORGE_OAUTH_ISSUER") or "").strip() or None,
             actor_id=(src.get("METAFORGE_OAUTH_ACTOR_ID") or "oauth:web").strip(),
             scope=(src.get("METAFORGE_OAUTH_SCOPE") or "mcp").strip(),
@@ -452,8 +480,12 @@ class OAuthProvider:
         return client
 
     def verify_login(self, secret: str | None) -> bool:
-        """Constant-time check of the shared login secret."""
-        if not secret:
+        """Constant-time check of the shared login secret.
+
+        Always false under identity login: a shared secret would let anyone
+        holding it act outside any account.
+        """
+        if not secret or self.config.identity_login or not self.config.login_secret:
             return False
         return hmac.compare_digest(secret, self.config.login_secret)
 
@@ -464,6 +496,8 @@ class OAuthProvider:
         code_challenge: str,
         scope: str | None,
         operator: str | None = None,
+        *,
+        subject: str | None = None,
     ) -> str:
         """Mint an authorization code, optionally labelled with who logged in.
 
@@ -481,7 +515,11 @@ class OAuthProvider:
             code_challenge=code_challenge,
             scope=scope or self.config.scope,
             expires_at=self._now() + self.config.code_ttl,
-            actor_id=_actor_for(operator, self.config.actor_id),
+            actor_id=(
+                f"{SUBJECT_PREFIX}{subject}"
+                if subject
+                else _actor_for(operator, self.config.actor_id)
+            ),
         )
         return code
 
