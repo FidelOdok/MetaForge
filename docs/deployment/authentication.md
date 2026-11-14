@@ -161,11 +161,43 @@ the route runs, and the route's shape decides how the project is found:
 |---|---|---|
 | `{project_id}` in the path | `GET /v1/twin/projects/{project_id}/…` | answered only for the caller's projects |
 | `project_id` / `projectId` query parameter | `GET /v1/knowledge/search?project_id=…` | parameter required, then checked |
-| `project_id` / `projectId` in the JSON body | `POST /v1/runs` | field required, then checked |
+| `project_id` / `projectId` in the JSON body | `POST /v1/design-loop/start` | field required, then checked |
+| a run request | `POST /v1/runs` | the project the request carries (`request.project_id`, `project`, or `arguments.project_id`) is required, then checked |
+| an entity id (path, query or body) | `GET /v1/twin/nodes/{node_id}`, `GET /v1/runs/{run_id}`, `POST /v1/cad-export/urdf` | answered only when the entity's **owning project** is the caller's (see below) |
+| a chat scope | `GET /v1/chat/threads?scope_kind=project&entity_id=…` | `scope_kind` + id required; `project` and `digital-twin-node` scopes resolve to a project, others are refused |
 | `GET /v1/projects` | | filtered to the caller's projects |
 | `POST /v1/projects` | | the new project is registered to its creator via `project_created`; if that fails the project is deleted again and the call returns 503 |
-| `GET` under `/v1/library/`, `/v1/examples`, `/v1/features` | shared reference data | readable; writes refused |
+| `GET` under `/v1/library/`, `/v1/examples`, `/v1/features` | shared reference data | readable; writes refused, even ones that name the caller's work |
+| catalogues with no account data | flow templates, `/v1/harness/{providers,models,tools}`, chat channel kinds | readable |
+| stateless or content-addressed | `POST /v1/design-flows/validate`, `POST /v1/robot/joint-loads`, `/v1/convert` (the id is the file's SHA-256) | answered |
 | anything else | | **refused with 403** |
+
+**Entities.** Most routes the dashboard uses inside a project
+name an entity, not a project. `api_gateway/auth/ownership.py` looks up which
+project owns it:
+
+| Id | Owner looked up from |
+|---|---|
+| `node_id`, `work_product_id` (and `related_to`, `work_product_id_a/_b`, `target_node_id`, `cutter_node_id`) | the twin node's `project_id` |
+| `run_id` (runs, held tool calls, gates) | the run request's project |
+| `approval_id` | the approval's project |
+| `thread_id` | the chat thread's scope |
+| `session_id` under `/v1/sessions/` | the agent session's `project_id` |
+| `upload_id` | the upload's `project_id` |
+
+An entity that does not exist, or that belongs to **no** project, is a 404 on
+a shared gateway: it cannot be shown to be the caller's. Every entity a
+request names is checked, including ones nested under a project path, so
+`/v1/twin/projects/{mine}/nodes/{theirs}` is refused. A lookup that fails is
+a 503, never a pass.
+
+A few routes the dashboard calls are still refused because their stores do
+not record a project yet (baselines, design-loop, design-flow versions,
+simulation result fields, knowledge entries, evals and a few others), and
+per-account model credentials are not stored per account. Those screens show
+an error on a shared gateway. They are listed, with reasons, in
+`REVIEWED_GAPS` in `tests/unit/test_gateway_entity_scope.py`; that test fails
+when the dashboard starts calling a refused route that is not on the list.
 
 A project outside the caller's scope gets **404**, the same as one that does
 not exist, so ids cannot be probed. A provider that cannot reach its answer
