@@ -566,14 +566,19 @@ verdict. A result recorded without a field keeps its numbers and says
 ## `/library`: parts, materials and machines
 
 The component library the agents design with, as one browsable page. The
-**Components** tab lists every bought part with a search across maker,
-part number, specs and notes, a filter by type, and switches for **Only
-with 3D** and **Hide discontinued** (parts the research marked as ending).
-Picking a part shows its specs with their sources, its material, its
-supplier offers, its model files with their licences, its datasheet and
-its notes, and the part in 3D: the maker's own model in the colours its
-file states when one is attached, otherwise the model drawn from its
-sourced sizes, each shape in its material's look. **Materials** lists each
+**Components** tab has one toolbar: a search across maker, part number,
+specs and notes; chips for what a part is for (Lighting, Power, Control &
+radio, Sensors, Controls & display, Wires & connectors, Mechanical,
+Materials), each with its count; and toggles for **3D only** and **Hide
+discontinued** (parts the research marked as ending). Each row shows the
+part number with the maker and a one-line description, and small icons for
+a 3D model or a part being discontinued. Picking a part opens it on its 3D
+view (the maker's own model in the colours its file states when one is
+attached, otherwise the model drawn from its sourced sizes, each shape in
+its material's look), labelled with where the model came from and its
+size; then its maker, part number, category, type, material and datasheet,
+and folded sections for specs with their sources, supplier offers, model
+files with their licences, and notes. An empty section is not shown. **Materials** lists each
 material with its sourced properties, and **Machines** the machine models
 and the machines on the bench.
 
