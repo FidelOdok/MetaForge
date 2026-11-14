@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ChevronRight, FlaskConical, Menu, PanelLeft, PlugZap, UserRound } from 'lucide-react';
+import { ChevronRight, FlaskConical, Menu, PanelLeft, PlugZap } from 'lucide-react';
 import { ProjectSwitcher } from '../shared/ProjectSwitcher';
 import { useHealth } from '../../hooks/use-health';
 import { useLayoutStore } from '../../store/layout-store';
 import type { DependencyStatus } from '../../types/health';
+import { AccountMenu } from './AccountMenu';
 import { ThemeToggle } from './ThemeToggle';
 import { ViewSwitch } from './ViewSwitch';
 import { SAMPLE_WORKSPACE_HREF, SECTION_LABELS, isSampleWorkspace } from './nav';
@@ -92,14 +93,7 @@ export function Topbar({ onMenu, navOpen = false }: TopbarProps) {
             <span>Sample</span>
           </a>
         )}
-        <Link
-          className="icon-control nav-account"
-          to="/settings"
-          aria-label="Account and API keys"
-          title="Account and API keys"
-        >
-          <UserRound size={17} />
-        </Link>
+        <AccountMenu />
         <Link
           to="/settings"
           aria-label={gatewayTitle}

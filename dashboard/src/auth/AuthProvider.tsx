@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { authClient } from 'metaforge:auth';
 import { logger } from '../lib/logger';
-import { setAccessToken } from './accessToken';
-import type { AuthSession, AuthStatus, AuthUser } from './types';
+import { getAccessToken, setAccessToken, setUnauthorizedHandler } from './accessToken';
+import type { AuthSession, AuthStatus, AuthUser, SignedOutReason } from './types';
 
 /**
  * Session state for the dashboard, from whichever auth client this build has.
@@ -20,6 +20,8 @@ export interface AuthContextValue {
   status: AuthStatus;
   session: AuthSession | null;
   user: AuthUser | null;
+  /** Set when the session ended without the user signing out. */
+  signedOutReason: SignedOutReason | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
@@ -31,6 +33,7 @@ const NO_CLIENT = 'This dashboard build has no authentication provider.';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [signedOutReason, setSignedOutReason] = useState<SignedOutReason | null>(null);
   const [status, setStatus] = useState<AuthStatus>(
     authClient?.isConfigured ? 'loading' : 'unconfigured',
   );
@@ -49,7 +52,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // session it came from.
       setAccessToken(next?.accessToken ?? null);
       setStatus(next ? 'signed-in' : 'signed-out');
+      if (next) setSignedOutReason(null);
     };
+
+    // The gateway rejected a token we sent: end the session here, once, and
+    // say why on the sign-in screen. Without this every panel fails with its
+    // own 401 and the user is left signed in to nothing.
+    setUnauthorizedHandler(() => {
+      if (!active || !getAccessToken()) return;
+      logger.warn('auth_session_rejected_by_gateway');
+      setSignedOutReason('expired');
+      apply(null);
+      client.signOut().catch((err) => {
+        logger.error('auth_sign_out_failed', { error: String(err) });
+      });
+    });
 
     client
       .restore()
@@ -65,6 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       active = false;
+      setUnauthorizedHandler(null);
       unsubscribe();
     };
   }, []);
@@ -81,15 +99,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (!authClient) return;
+    setSignedOutReason(null);
     await authClient.signOut();
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, session, user: session?.user ?? null, signIn, signUp, signOut }),
-    [status, session, signIn, signUp, signOut],
+    () => ({
+      status,
+      session,
+      user: session?.user ?? null,
+      signedOutReason,
+      signIn,
+      signUp,
+      signOut,
+    }),
+    [status, session, signedOutReason, signIn, signUp, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+/** The auth context, or `null` outside an `AuthProvider` (isolated renders). */
+export function useOptionalAuth(): AuthContextValue | null {
+  return useContext(AuthContext);
 }
 
 export function useAuth(): AuthContextValue {

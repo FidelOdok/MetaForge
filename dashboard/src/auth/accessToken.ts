@@ -23,3 +23,22 @@ export function setAccessToken(token: string | null): void {
 export function getAccessToken(): string | null {
   return current;
 }
+
+/**
+ * Who to tell when the gateway rejects a token we sent (HTTP 401).
+ *
+ * A provider refreshes its own tokens, so a 401 on a request that carried one
+ * means the session is over: revoked, expired past refresh, or the account was
+ * removed. `AuthProvider` registers here and signs the user out with the
+ * reason, rather than leaving every panel to fail on its own.
+ */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+/** Called by the API client on a 401 to a request that carried a token. */
+export function notifyUnauthorized(): void {
+  onUnauthorized?.();
+}
