@@ -75,6 +75,9 @@ describe('LibraryPage', () => {
     fireEvent.click(within(groups).getByRole('button', { name: /Power/ }));
     expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
     fireEvent.click(within(groups).getByRole('button', { name: 'All' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Integration level' }), { target: { value: 'L5 Module' } });
+    expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Integration level' }), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: /3D only/ }));
     expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
     fireEvent.click(screen.getByRole('button', { name: /3D only/ }));
