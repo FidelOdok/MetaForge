@@ -1282,22 +1282,28 @@ async def bootstrap_tool_registry(
         # matched" from "nobody configured a key" (the silent-fallback rot
         # this codebase keeps re-learning), so the tool simply isn't offered.
         if _is_adapter_enabled("web") and (not adapter_ids or "web" in adapter_ids):
-            if os.environ.get("BRAVE_API_KEY"):
-                try:
-                    from tool_registry.tools.web.brave import BraveSearchProvider
-                    from tool_registry.tools.web.mcp_adapter import WebMcpServer
+            # web.fetch needs no key, so the adapter always registers; only
+            # web.search waits for BRAVE_API_KEY (see WebMcpServer).
+            try:
+                from tool_registry.tools.web.mcp_adapter import WebMcpServer
 
-                    server = WebMcpServer(provider=BraveSearchProvider())
-                    await registry.register_adapter(server)
-                    registered.append("web")
-                    logger.info("web_mcp_adapter_registered", provider="Brave")
-                except Exception as exc:
-                    logger.error("web_mcp_adapter_failed", error=str(exc))
-                    span.record_exception(exc)
-                    failed.append("web")
-            else:
-                skipped.append("web")
-                logger.info("web_mcp_adapter_skipped", reason="missing env vars: BRAVE_API_KEY")
+                provider = None
+                if os.environ.get("BRAVE_API_KEY"):
+                    from tool_registry.tools.web.brave import BraveSearchProvider
+
+                    provider = BraveSearchProvider()
+                server = WebMcpServer(provider=provider)
+                await registry.register_adapter(server)
+                registered.append("web")
+                logger.info(
+                    "web_mcp_adapter_registered",
+                    provider="Brave" if provider is not None else None,
+                    search=provider is not None,
+                )
+            except Exception as exc:
+                logger.error("web_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("web")
         else:
             skipped.append("web")
             logger.info(
