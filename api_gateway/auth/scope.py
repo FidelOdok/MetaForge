@@ -148,6 +148,10 @@ class RouteTenancy(enum.Enum):
 EXPLICIT: dict[tuple[str, str], RouteTenancy] = {
     ("GET", "/v1/projects"): RouteTenancy.ACCOUNT_LIST,
     ("POST", "/v1/projects"): RouteTenancy.ACCOUNT_CREATE,
+    # The approval inbox and the dashboard's pending badge ask with no project:
+    # answered, then filtered to the caller's projects by the route (an
+    # explicit project_id that is not theirs is a 404 there).
+    ("GET", "/v1/approvals"): RouteTenancy.ACCOUNT_LIST,
     # The run request carries its project (``request.project_id``, or the
     # held tool call's ``project`` / ``arguments.project_id``).
     ("POST", "/v1/runs"): RouteTenancy.PROJECT_BODY,
