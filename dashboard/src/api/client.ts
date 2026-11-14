@@ -1,6 +1,18 @@
 import { context as otelContext, propagation } from '@opentelemetry/api';
 import axios from 'axios';
-import { getAccessToken, notifyUnauthorized } from '../auth/accessToken';
+import {
+  getAccessToken,
+  notifyUnauthorized,
+  refreshAccessToken,
+  setAccessToken,
+} from '../auth/accessToken';
+
+declare module 'axios' {
+  interface InternalAxiosRequestConfig {
+    /** Set on the one retry after a token refresh, so a second 401 ends the session. */
+    _mfRetried?: boolean;
+  }
+}
 import { logger } from '../lib/logger';
 import { apiBase, getGatewayBase } from '../lib/gatewayConfig';
 import { installSampleAdapter } from '../lib/sample-workspace';
@@ -106,11 +118,27 @@ apiClient.interceptors.response.use(
     rejectIfHtml(response);
     return response;
   },
-  (error) => {
-    // A 401 to a request that carried a token: the session is over. One that
-    // carried none is a gateway wanting sign-in, which AuthGate already shows.
-    const sentToken = Boolean(error.config?.headers?.Authorization);
+  async (error) => {
+    // A 401 to a request that carried a token. The token may simply have
+    // expired before the provider's refresh ran (a throttled background tab):
+    // renew it and retry once. Only when that fails is the session over. A
+    // 401 to a request that carried none is a gateway wanting sign-in, which
+    // AuthGate already shows.
+    const config = error.config;
+    const sentToken = Boolean(config?.headers?.Authorization);
     if (error.response?.status === 401 && sentToken) {
+      if (config && !config._mfRetried) {
+        const fresh = await refreshAccessToken();
+        if (fresh && `Bearer ${fresh}` !== config.headers.Authorization) {
+          config._mfRetried = true;
+          // The retry passes through the request interceptor, which reads the
+          // holder: put the fresh token there, not only on this request.
+          setAccessToken(fresh);
+          config.headers.Authorization = `Bearer ${fresh}`;
+          logger.info('auth_token_refreshed_after_401', { url: config.url });
+          return apiClient.request(config);
+        }
+      }
       notifyUnauthorized();
     }
     logger.error('api_error', {

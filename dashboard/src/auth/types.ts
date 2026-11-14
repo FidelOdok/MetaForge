@@ -71,6 +71,16 @@ export interface AuthClient {
 
   signOut(): Promise<void>;
 
+  /**
+   * Get a fresh session now, or `null` when the session cannot be renewed.
+   *
+   * Optional. A provider refreshes its tokens on a timer, but a browser
+   * throttles timers in a background tab, so an access token can expire
+   * before the refresh runs. The API client calls this once on a 401 and
+   * retries the request with the new token before it ends the session.
+   */
+  refresh?(): Promise<AuthSession | null>;
+
   /** The sign-in screen. Owned by the client because its copy and its fields
    *  are provider-specific. */
   SignInView: ComponentType<{ gatewayLabel?: string; reason?: SignedOutReason }>;

@@ -1,7 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { authClient } from 'metaforge:auth';
 import { logger } from '../lib/logger';
-import { getAccessToken, setAccessToken, setUnauthorizedHandler } from './accessToken';
+import {
+  getAccessToken,
+  setAccessToken,
+  setTokenRefresher,
+  setUnauthorizedHandler,
+} from './accessToken';
 import type { AuthSession, AuthStatus, AuthUser, SignedOutReason } from './types';
 
 /**
@@ -68,6 +73,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     });
 
+    // An expired token is renewed and the request retried before anything
+    // signs out (see refreshAccessToken). A renewed session updates the
+    // holder here, exactly as a provider's own silent refresh does.
+    if (client.refresh) {
+      const refresh = client.refresh.bind(client);
+      setTokenRefresher(async () => {
+        const next = await refresh();
+        if (next) apply(next);
+        return next?.accessToken ?? null;
+      });
+    }
+
     client
       .restore()
       .then(apply)
@@ -83,6 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
       setUnauthorizedHandler(null);
+      setTokenRefresher(null);
       unsubscribe();
     };
   }, []);
