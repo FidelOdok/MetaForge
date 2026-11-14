@@ -310,7 +310,12 @@ def compact_native_messages(
     segment (conversation history + the goal) and the most recent exchanges
     stay verbatim.
     """
-    est = sum(count_tokens(json.dumps(m, default=str)) for m in messages)
+    # Attached tool-result images (``providers/images.py``) are billed as
+    # images, not as their base64 text, and leave after one call: not counted.
+    est = sum(
+        count_tokens(json.dumps({k: v for k, v in m.items() if k != "images"}, default=str))
+        for m in messages
+    )
     if est <= max_tokens:
         return messages
 

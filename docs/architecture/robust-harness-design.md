@@ -408,6 +408,12 @@ The live loop manages its context window deterministically, in four layers:
 - **Loud truncation** — oversized tool observations are capped with an
   explicit `…[truncated N chars]` marker (`truncate_observation`), never a
   silent slice, on both paths.
+- **Tool-result images** — base64 images inside a native-loop tool result
+  (`twin.imagine_look`'s screenshots) are taken out of the text, replaced by a
+  placeholder, and sent to the next model call only as real image input
+  (`image_url` parts on OpenAI-compatible providers, `image` blocks in the
+  `tool_result` on Anthropic); see
+  [context engineering, Context budget](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/context-engineering.md#context-budget).
 - **Post-turn telemetry** — `context.stats` is re-emitted after the loop with
   `phase: "final"` and a `trace_tokens` estimate, so the meter reflects what
   the turn actually consumed, not just the pre-loop snapshot.

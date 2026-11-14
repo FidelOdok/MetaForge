@@ -31,6 +31,10 @@ from typing import Any, cast
 import structlog
 
 from orchestrator.harness.providers import caching
+from orchestrator.harness.providers.images import (
+    anthropic_tool_result_content,
+    openai_with_tool_images,
+)
 from orchestrator.harness.providers.pipeline import ProviderError, ProviderSpec
 
 logger = structlog.get_logger(__name__)
@@ -357,7 +361,8 @@ def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any
                 {
                     "type": "tool_result",
                     "tool_use_id": m.get("tool_call_id"),
-                    "content": str(m.get("content", "")),
+                    # Text, or text plus the result's image blocks.
+                    "content": anthropic_tool_result_content(m),
                 }
             )
             continue
@@ -459,6 +464,8 @@ async def openai_invoke(
     # history (from an earlier round-trip in this same turn) — see
     # _sanitize_openai_messages.
     messages = _sanitize_openai_messages(messages)
+    # Images a tool returned ride in a user message after the tool results.
+    messages = openai_with_tool_images(messages)
     if client is None:
         from openai import AsyncOpenAI
 
@@ -1010,6 +1017,7 @@ async def openai_stream_events(
 
     # MET-747 follow-up: same message-history sanitization as openai_invoke.
     messages = _sanitize_openai_messages(messages)
+    messages = openai_with_tool_images(messages)
     if client is None:
         from openai import AsyncOpenAI
 
