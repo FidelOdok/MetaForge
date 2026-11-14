@@ -92,6 +92,14 @@ it:
 - **Recording never breaks a call.** A policy that fails to record is logged
   (`llm_budget_record_failed`) and the call's result is returned as usual.
 
+**Seeing where a budget stands.** `GET /v1/runs/usage/budget?project_id=…`
+answers `{"enabled": false}` without a policy. With one it answers
+`{"enabled": true, "available": …}` plus what the policy reports through its
+optional `status()` (a hosted policy: the monthly amount, the spend this month
+and what is left). `available: false` means the policy could not say, not
+that nothing was spent. On a shared gateway the project must be the caller's,
+like any project-scoped route.
+
 Open core ships no policy. A hosted deployment supplies one that keeps a budget per
 account and totals in its own database, shared by every gateway and worker process; the
 local `llm_usage.db` file is per host and is not that total.

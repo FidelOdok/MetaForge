@@ -47,7 +47,9 @@ __all__ = [
     "BudgetConfigurationError",
     "BudgetExceeded",
     "BudgetPolicy",
+    "BudgetReporter",
     "BudgetUnavailable",
+    "budget_status",
     "active_policy",
     "check_budget",
     "configure_budget_policy",
@@ -94,6 +96,14 @@ class BudgetPolicy(Protocol):
 
     async def record(self, event: UsageEvent) -> None:
         """Account a finished call. Must not raise; it is best-effort."""
+        ...
+
+
+class BudgetReporter(Protocol):
+    """Optional: a policy that can say where a budget stands, for a person to see."""
+
+    async def status(self, ctx: UsageContext) -> dict[str, object] | None:
+        """The budget that applies to ``ctx`` (amounts, spend, period), or ``None``."""
         ...
 
 
@@ -200,3 +210,26 @@ async def record_spend(event: UsageEvent | None) -> None:
         await policy.record(event)
     except Exception as exc:  # noqa: BLE001 - accounting must never break a model call
         logger.warning("llm_budget_record_failed", policy=policy.name, error=str(exc))
+
+
+async def budget_status(ctx: UsageContext) -> dict[str, object]:
+    """Where the budget for ``ctx`` stands, for the dashboard (FORGE-873).
+
+    ``{"enabled": false}`` without a policy; ``{"enabled": true}`` plus
+    whatever the policy reports otherwise. ``available: false`` when the
+    policy could not answer, so a view can say so rather than show zero.
+    """
+    policy = active_policy()
+    if policy is None:
+        return {"enabled": False}
+    report = getattr(policy, "status", None)
+    if report is None:
+        return {"enabled": True, "available": False}
+    try:
+        detail = await report(ctx)
+    except Exception as exc:  # noqa: BLE001 - a view, not a gate
+        logger.warning("llm_budget_status_failed", policy=policy.name, error=str(exc))
+        return {"enabled": True, "available": False}
+    if detail is None:
+        return {"enabled": True, "available": False}
+    return {"enabled": True, "available": True, **detail}

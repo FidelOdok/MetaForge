@@ -269,3 +269,60 @@ def test_requests_attribute_model_calls_to_the_verified_caller() -> None:
     body = TestClient(app).get("/v1/probe", headers={"Authorization": "Bearer t"}).json()
     # A provider without project scope resolves no project; the caller is known.
     assert body == {"subject": "user-42", "project_id": None}
+
+
+# -- where a budget stands, for a person to see ------------------------------
+
+
+async def test_budget_status_without_a_policy() -> None:
+    from orchestrator.harness.providers.budget import budget_status
+
+    assert await budget_status(UsageContext(project_id="p-1")) == {"enabled": False}
+
+
+async def test_budget_status_from_a_policy_that_cannot_report() -> None:
+    from orchestrator.harness.providers.budget import budget_status
+
+    configure_budget_policy(RecordingPolicy())
+    assert await budget_status(UsageContext(project_id="p-1")) == {
+        "enabled": True,
+        "available": False,
+    }
+
+
+async def test_budget_status_reports_what_the_policy_says() -> None:
+    from orchestrator.harness.providers.budget import budget_status
+
+    class Reporting(RecordingPolicy):
+        async def status(self, ctx: UsageContext) -> dict[str, object] | None:
+            return {"monthly_usd": 5.0, "spent_usd": 1.25, "project": ctx.project_id}
+
+    class Broken(RecordingPolicy):
+        async def status(self, ctx: UsageContext) -> dict[str, object] | None:
+            raise ConnectionError("down")
+
+    configure_budget_policy(Reporting())
+    out = await budget_status(UsageContext(project_id="p-1"))
+    assert out == {
+        "enabled": True,
+        "available": True,
+        "monthly_usd": 5.0,
+        "spent_usd": 1.25,
+        "project": "p-1",
+    }
+    configure_budget_policy(Broken())
+    assert (await budget_status(UsageContext(project_id="p-1")))["available"] is False
+
+
+def test_the_budget_route_asks_for_the_projects_budget() -> None:
+    from api_gateway.runs import routes as run_routes
+
+    class Reporting(RecordingPolicy):
+        async def status(self, ctx: UsageContext) -> dict[str, object] | None:
+            return {"for_project": ctx.project_id}
+
+    configure_budget_policy(Reporting())
+    app = FastAPI()
+    app.include_router(run_routes.router)
+    body = TestClient(app).get("/v1/runs/usage/budget", params={"project_id": "p-9"}).json()
+    assert body == {"enabled": True, "available": True, "for_project": "p-9"}
