@@ -453,6 +453,35 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   keeps the full result. An evicted or unknown handle is an error that says
   so. This covers the native tool-calling loop; the JSON-ReAct fallback keeps
   its existing observation truncation.
+- **Images in a tool result go to the model as images, once.** A tool such as
+  `twin.imagine_look` returns screenshots as base64 inside its JSON
+  (`images: [{view, png_base64}]`). Rendered as text, two screenshots were
+  about 130k characters: the result became a handle and the model never saw a
+  picture. Before a result is rendered, `extract_images`
+  (`orchestrator/harness/tool_images.py`) replaces each image with a short
+  placeholder (`[image: first look, attached ...]`), so the rest of the result
+  (status, size, parts, errors, measurements) stays inline under the limit
+  above, and attaches the image to the `tool` message. It recognises a
+  `png_base64` / `jpeg_base64` / `jpg_base64` / `webp_base64` / `gif_base64` /
+  `image_base64` key (labelled by a sibling `view`, `label`, `name`, `title` or
+  `caption`), an MCP image block (`{"type": "image", "data", "mimeType"}`), and
+  `data:image/...;base64,` URLs in either, in a dict, a list or a JSON string.
+  The type is read from the bytes; only PNG, JPEG, GIF and WebP are attached.
+  At most 4 images are attached per batch of tool calls and an image over
+  5 MB is not; the placeholder says why. Each provider adapter renders the
+  attachment in its own format (`orchestrator/harness/providers/images.py`):
+  an OpenAI-compatible request (OpenAI, OpenRouter, vLLM, Ollama) gets one
+  `user` message of `image_url` data-URL parts right after the batch's tool
+  messages, since a `tool` message carries only text; an Anthropic request
+  gets `image` blocks inside the `tool_result`. Other families see only the
+  placeholders. Images are shown to the one model call after the call that
+  returned them: `expire_tool_images` drops them from every tool result older
+  than the latest assistant turn, so they are not re-sent on every later step.
+  The recorded trace step keeps the full result, base64 included.
+  `METAFORGE_TOOL_RESULT_IMAGES=off` stops attaching (for a text-only model)
+  but still takes the base64 out. Extraction and expiry log
+  `tool_result_images_extracted`, `tool_result_images_attached` and
+  `tool_result_images_expired`.
 - **Old results are cleared in batches.** Every result stays in the context
   for each later step, so a research turn that fetched 11 to 16 pages carried
   them all: the prompt grew to about 95k tokens. Before each model call, when

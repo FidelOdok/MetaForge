@@ -31,6 +31,7 @@ import structlog
 from observability.tracing import get_tracer
 from orchestrator.harness.compression import compact_native_messages, truncate_observation_value
 from orchestrator.harness.providers import default_invoke
+from orchestrator.harness.providers.images import TOOL_IMAGES_KEY
 from orchestrator.harness.providers.pipeline import Invoke, StreamEvents
 from orchestrator.harness.providers.pricing import DEFAULT_PRICING, TokenPricing, estimate_cost_usd
 from orchestrator.harness.providers.usage import reported_cost_usd
@@ -44,6 +45,12 @@ from orchestrator.harness.tool_exec import (
     error_content,
     note_service_refusal,
     observation_failure_reason,
+)
+from orchestrator.harness.tool_images import (
+    ImageBudget,
+    ToolImage,
+    expire_tool_images,
+    extract_images,
 )
 from orchestrator.harness.tools import NATIVE
 
@@ -403,15 +410,24 @@ def _declares_project_id(runtime: HarnessRuntime, name: str) -> bool:
     return "project_id" in spec.input_schema.get("properties", {})
 
 
-def _model_content(runtime: HarnessRuntime, tool: str, observation: Any) -> str:
-    """The text the model receives for one tool result (FORGE-479).
+def _model_content(
+    runtime: HarnessRuntime, tool: str, observation: Any, images: ImageBudget
+) -> tuple[str, list[ToolImage]]:
+    """The text the model receives for one tool result, and its images (FORGE-479).
 
-    Over the configured inline limit the result becomes a summary plus a
-    handle readable through ``read_tool_result``; otherwise it renders exactly
-    as before. The recorded trace step keeps the full observation either way.
+    Images are taken out first (``tool_images.extract_images``): each base64
+    value becomes a short placeholder and the image itself is returned to go
+    to the model as image input, so a screenshot no longer turns the whole
+    result into a handle. Over the configured inline limit the rest becomes a
+    summary plus a handle readable through ``read_tool_result``; otherwise it
+    renders exactly as before. The recorded trace step keeps the full
+    observation either way.
     """
+    observation, attached = extract_images(observation, images)
+    if attached:
+        logger.info("tool_result_images_attached", tool=tool, images=len(attached))
     handled = runtime.results.offer(tool, observation)
-    return handled if handled is not None else _json_safe(observation)
+    return (handled if handled is not None else _json_safe(observation)), attached
 
 
 async def _execute_calls(
@@ -420,12 +436,14 @@ async def _execute_calls(
     thought: str,
     cache: TurnToolCache,
     project_id: str | None = None,
-) -> list[tuple[ReActStep, str, str]]:
+) -> list[tuple[ReActStep, str, str, list[ToolImage]]]:
     """Execute one batch of model-emitted calls.
 
-    Returns ``(step, tool_message_content, tool_call_id)`` in the model's
-    original call order — providers match results to calls by id, and the trace
-    should read in the order the model asked for.
+    Returns ``(step, tool_message_content, tool_call_id, images)`` in the
+    model's original call order (``images`` are those taken out of the result,
+    at most ``tool_images.MAX_IMAGES_PER_STEP`` across the batch) — providers
+    match results to calls by id, and the trace should read in the order the
+    model asked for.
 
     The batch runs concurrently, which is the whole point of a provider emitting
     parallel calls; before MET-569 they were awaited one at a time, so four
@@ -484,8 +502,9 @@ async def _execute_calls(
             gathered = await asyncio.gather(*(_call(k) for k in keys))
             outcomes = dict(zip(keys, gathered, strict=True))
 
-    results: list[tuple[ReActStep, str, str]] = []
+    results: list[tuple[ReActStep, str, str, list[ToolImage]]] = []
     served: set[str] = set()
+    image_budget = ImageBudget()
     for cid, name, args, key in entries:
         outcome = outcomes.get(key)
         if outcome is not None and key not in served:
@@ -496,7 +515,7 @@ async def _execute_calls(
                 # restarting, a lock clearing) may have changed by the time the
                 # model tries again.
                 step = ReActStep(thought=thought, tool_call=ToolCall(name, args), error=str(exc))
-                results.append((step, error_content(exc), cid))
+                results.append((step, error_content(exc), cid, []))
                 continue
             cache.put(key, observation)
             step = ReActStep(
@@ -505,7 +524,8 @@ async def _execute_calls(
                 observation=observation,
                 error=observation_failure_reason(observation),
             )
-            results.append((step, _model_content(runtime, name, observation), cid))
+            text, images = _model_content(runtime, name, observation, image_budget)
+            results.append((step, text, cid, images))
             continue
 
         if not cache.has(key):
@@ -518,7 +538,7 @@ async def _execute_calls(
                 error=str(exc) if exc else "tool call not executed",
             )
             content = error_content(exc) if exc else _render_json({"status": "error"})
-            results.append((step, content, cid))
+            results.append((step, content, cid, []))
             continue
 
         # The step's observation is the SAME envelope the model receives, so
@@ -534,7 +554,8 @@ async def _execute_calls(
             observation=view,
             error=observation_failure_reason(cache.get(key)),
         )
-        results.append((step, _model_content(runtime, name, view), cid))
+        text, images = _model_content(runtime, name, view, image_budget)
+        results.append((step, text, cid, images))
     return results
 
 
@@ -698,6 +719,7 @@ async def run_native_tools(
         hit_deadline = False
         hit_budget = False
         last_logged_tools = -1
+        images_attached = 0
         for step_no in range(1, max_steps + 1):
             if deadline is not None and time.monotonic() >= deadline:
                 hit_deadline = True
@@ -705,6 +727,9 @@ async def run_native_tools(
             if _budget_exceeded():
                 hit_budget = True
                 break
+            # Images from tool results go to the one model call after the call
+            # that returned them, then only their placeholders stay.
+            messages = expire_tool_images(messages)
             if max_context_tokens is not None:
                 messages = compact_native_messages(messages, max_tokens=max_context_tokens)
             # MetaForge (2026-11-11): old results are cleared in batches once they are
@@ -829,12 +854,21 @@ async def run_native_tools(
                     ],
                 }
             )
-            for step, content, call_id in await _execute_calls(
+            for step, content, call_id, images in await _execute_calls(
                 runtime, list(calls), text, tool_cache, project_id=project_id
             ):
                 steps.append(step)
                 await _emit(step)
-                messages.append({"role": "tool", "tool_call_id": call_id, "content": content})
+                tool_msg: dict[str, Any] = {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": content,
+                }
+                if images:
+                    tool_msg[TOOL_IMAGES_KEY] = [i.as_entry() for i in images]
+                    images_attached += len(images)
+                    span.set_attribute("tool_result_images", images_attached)
+                messages.append(tool_msg)
             if truncated:
                 # Cut off after at least one complete call: the adapter dropped
                 # the half-written one, so say so, or the model never learns
