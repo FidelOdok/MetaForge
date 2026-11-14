@@ -55,22 +55,40 @@ function hasModel(c: LibraryComponent): boolean {
   return Boolean(activeMakerModel(c) || c.form_code);
 }
 
+const ACRONYMS = /\b(fdm|sla|sls|cnc|pcb|led|cob|ic|mcu|usb)\b/gi;
+
 function label(family: string): string {
-  const text = family.replace(/_/g, ' ');
+  const text = family.replace(/_/g, ' ').replace(ACRONYMS, (a) => a.toUpperCase());
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 
 function formatValue(v: SourcedValue): string {
-  const value = Array.isArray(v.value) ? v.value.join(' x ') : String(v.value);
-  return `${value} ${v.unit}`;
+  if (Array.isArray(v.value)) {
+    const numbers = v.value.every((x) => typeof x === 'number');
+    return numbers ? `${v.value.join(' x ')} ${v.unit}`.trim() : v.value.join(', ');
+  }
+  return `${v.value} ${v.unit}`.trim();
 }
 
-function SourcedTable({ values }: { values: Record<string, SourcedValue> }) {
+function SourcedTable({
+  values,
+  inherited = {},
+}: {
+  values: Record<string, SourcedValue>;
+  /** Values that come from somewhere else (a machine's model), marked as such. */
+  inherited?: Record<string, SourcedValue>;
+}) {
+  const rows: Array<[string, SourcedValue, boolean]> = [
+    ...Object.entries(values).map(([k, v]) => [k, v, false] as [string, SourcedValue, boolean]),
+    ...Object.entries(inherited)
+      .filter(([k]) => !(k in values))
+      .map(([k, v]) => [k, v, true] as [string, SourcedValue, boolean]),
+  ];
   return (
     <table className="mf-library-table">
       <tbody>
-        {Object.entries(values).map(([key, v]) => (
+        {rows.map(([key, v, fromModel]) => (
           <tr key={key}>
             <td>{key.replace(/_(mm|kg|kn|n|v|mah|rpm|mpa|c|pct|w_mk|um_mk|kg_m3)$/, '').replace(/_/g, ' ')}</td>
             <td className="font-mono">{formatValue(v)}</td>
@@ -83,6 +101,7 @@ function SourcedTable({ values }: { values: Record<string, SourcedValue> }) {
                 v.source_kind.replace(/_/g, ' ')
               )}
               {v.needs_review ? ' · review' : ''}
+              {fromModel ? ' · from the model' : ''}
             </td>
           </tr>
         ))}
@@ -323,29 +342,85 @@ function MaterialsTab({ materials }: { materials: LibraryMaterial[] }) {
   );
 }
 
-function MachinesTab({ machines }: { machines: LibraryMachine[] }) {
+const KIND_NAMES: Record<string, string> = {
+  fdm_printer: '3D printers',
+  cnc_router: 'CNC routers',
+  laser_cutter: 'Laser cutters',
+};
+
+function machineName(m: LibraryMachine): string {
+  return m.layer === 'instance' ? m.name || m.id : `${m.make ?? ''} ${m.model ?? ''}`.trim();
+}
+
+function MachineCard({ machine, model }: { machine: LibraryMachine; model?: LibraryMachine }) {
+  const own = machine.capabilities || {};
+  const inherited = model?.capabilities || {};
+  const total = new Set([...Object.keys(own), ...Object.keys(inherited)]).size;
+  const facts: Array<[string, ReactNode]> = [['Kind', label(machine.kind)]];
+  if (machine.processes?.length) facts.push(['Processes', machine.processes.map(label).join(', ')]);
+  if (machine.layer === 'instance') {
+    if (model) facts.push(['Model', machineName(model)]);
+    if (machine.location) facts.push(['Location', machine.location]);
+    if (machine.status) facts.push(['Status', label(machine.status)]);
+    if (machine.route) facts.push(['Route', machine.route === 'in_house' ? 'In house' : 'Vendor']);
+    if (machine.connection?.protocol && machine.connection.protocol !== 'none')
+      facts.push(['Connection', label(machine.connection.protocol)]);
+  }
   return (
-    <table className="mf-library-table mf-library-panel" data-testid="library-machines">
-      <thead>
-        <tr>
-          <th>Machine</th>
-          <th>Kind</th>
-          <th>Processes</th>
-        </tr>
-      </thead>
-      <tbody>
-        {machines.map((m) => (
-          <tr key={m.id}>
-            <td>
-              {m.layer === 'instance' ? m.name : `${m.make ?? ''} ${m.model ?? ''}`}
-              {m.layer === 'instance' && <span className="mf-library-muted"> · on the bench</span>}
-            </td>
-            <td>{label(m.kind)}</td>
-            <td>{(m.processes || []).map(label).join(', ')}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <details className="mf-library-section" data-testid="library-machine">
+      <summary>
+        {machineName(machine)}
+        <span className="mf-library-count">{total}</span>
+      </summary>
+      <div className="mf-library-section-body">
+        <dl className="mf-library-facts mf-library-facts-tight">
+          {facts.map(([k, v]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </div>
+          ))}
+        </dl>
+        {total > 0 ? (
+          <SourcedTable values={own} inherited={inherited} />
+        ) : (
+          <p className="mf-library-muted">No capabilities recorded yet.</p>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function MachinesTab({ machines }: { machines: LibraryMachine[] }) {
+  const byId = new Map(machines.map((m) => [m.id, m]));
+  const bench = machines.filter((m) => m.layer === 'instance');
+  const models = machines.filter((m) => m.layer === 'model');
+  const kinds = [...new Set(models.map((m) => m.kind))].sort();
+  return (
+    <div className="mf-library-machines" data-testid="library-machines">
+      {bench.length > 0 && (
+        <section>
+          <h3 className="mf-library-group-title">On the bench</h3>
+          <div className="mf-library-cards">
+            {bench.map((m) => (
+              <MachineCard key={m.id} machine={m} model={m.model_id ? byId.get(m.model_id) : undefined} />
+            ))}
+          </div>
+        </section>
+      )}
+      {kinds.map((k) => (
+        <section key={k}>
+          <h3 className="mf-library-group-title">{KIND_NAMES[k] ?? label(k)}</h3>
+          <div className="mf-library-cards">
+            {models
+              .filter((m) => m.kind === k)
+              .map((m) => (
+                <MachineCard key={m.id} machine={m} />
+              ))}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 

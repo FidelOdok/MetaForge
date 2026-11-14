@@ -578,9 +578,13 @@ attached, otherwise the model drawn from its sourced sizes, each shape in
 its material's look), labelled with where the model came from and its
 size; then its maker, part number, category, type, material and datasheet,
 and folded sections for specs with their sources, supplier offers, model
-files with their licences, and notes. An empty section is not shown. **Materials** lists each
-material with its sourced properties, and **Machines** the machine models
-and the machines on the bench.
+files with their licences, and notes. An empty section is not shown.
+**Materials** lists each material with its sourced properties. **Machines**
+shows the machines on the bench first (location, status, route and the
+model each is an instance of), then the machine models grouped by kind;
+each opens to its capabilities (travel, build volume, nozzle, laser power,
+materials) with their sources, and a bench machine also shows the
+capabilities it takes from its model, marked "from the model".
 
 **Export** saves the whole library, with each entry's history, as one JSON
 file; **Import** loads such a file and adds only what this library lacks,
