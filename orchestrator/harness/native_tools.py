@@ -126,6 +126,32 @@ _COMPANION_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     ),
 )
 
+# The control plane: the tools a chat needs to start and drive a design at all
+# (create or open the project, compile the intent, propose the flow, start the
+# run, follow it, see what waits for a person). A round-robin share of three
+# or four tools per adapter dropped the flow adapter's alphabetical tail, so
+# the agent could compile an intent but not propose a flow, and then said it
+# had (2026-11-14). Kept whatever the cap; a short fixed list.
+_CONTROL_PLANE_TOOLS = frozenset(
+    {
+        "mcp_project_create",
+        "mcp_project_get",
+        "mcp_project_list",
+        "mcp_project_open",
+        "mcp_flow_compile_intent",
+        "mcp_flow_capabilities",
+        "mcp_flow_propose",
+        "mcp_flow_patch",
+        "mcp_flow_list",
+        "mcp_flow_start_run",
+        "mcp_flow_status",
+        "mcp_flow_lifecycle",
+        "mcp_flow_await_gate",
+        "mcp_flow_verify_completion",
+        "mcp_approvals_list",
+    }
+)
+
 # Families that lose to the FreeCAD authoring set when the cap bites.
 _NICHE_ORIGINS = ("gazebo", "isaac_sim", "omniverse_usd")
 
@@ -140,11 +166,14 @@ def _select_tools(
     — ``twin.*`` and ``web.*`` go first, which is precisely backwards.
 
     Policy: keep every native tool (few, curated, session-critical —
-    ``chat.set_project_scope`` and the skill layer) plus three more protected
+    ``chat.set_project_scope`` and the skill layer) plus four more protected
     classes (FORGE-94), then fill the remaining budget round-robin across MCP
     origins so each adapter keeps a share and no capability disappears
     wholesale:
 
+    - ``_CONTROL_PLANE_TOOLS`` — the project, flow and approvals tools a chat
+      needs to start and drive a design; without them it cannot propose a
+      flow at all, whatever else it keeps.
     - ``pinned`` — names ``search_tools``'s handler has already promised the
       model are available (``ToolRegistry.pin``). A round-robin cap that
       drops one of these on a *later* turn would make that promise a lie the
@@ -181,7 +210,7 @@ def _select_tools(
 
     def _protected(spec: Any) -> bool:
         name = spec.name
-        if name in pinned or name.endswith("_open_session"):
+        if name in pinned or name in _CONTROL_PLANE_TOOLS or name.endswith("_open_session"):
             return True
         if any(name.endswith(f"_{verb}") for verb in _SESSION_CRITICAL_VERBS):
             return True
