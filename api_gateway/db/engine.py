@@ -56,8 +56,11 @@ def _create_engine(url: str) -> AsyncEngine | None:
         try:
             from sqlalchemy.ext.asyncio import create_async_engine
 
+            from shared.pg import sqlalchemy_connect_args
+
             engine: AsyncEngine = create_async_engine(
                 url,
+                connect_args=sqlalchemy_connect_args(),
                 pool_size=pool_size,
                 max_overflow=max_overflow,
                 pool_pre_ping=True,

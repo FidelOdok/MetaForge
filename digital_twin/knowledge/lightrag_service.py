@@ -50,6 +50,7 @@ from digital_twin.knowledge.service import (
 from digital_twin.knowledge.types import KnowledgeType
 from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
+from shared.pg import asyncpg_connect_kwargs
 
 if TYPE_CHECKING:
     from digital_twin.knowledge.llm_property_extractor import PropertyLLM
@@ -1071,7 +1072,7 @@ class LightRAGKnowledgeService:
         import asyncpg  # type: ignore[import-untyped]
 
         assert self._cfg.postgres_dsn is not None
-        conn = await asyncpg.connect(self._cfg.postgres_dsn)
+        conn = await asyncpg.connect(self._cfg.postgres_dsn, **asyncpg_connect_kwargs())
         try:
             rows = await conn.fetch(sql, *params)
         finally:
@@ -1273,7 +1274,7 @@ class LightRAGKnowledgeService:
         import asyncpg  # type: ignore[import-untyped]
 
         assert self._cfg.postgres_dsn is not None
-        conn = await asyncpg.connect(self._cfg.postgres_dsn)
+        conn = await asyncpg.connect(self._cfg.postgres_dsn, **asyncpg_connect_kwargs())
         try:
             rows = await conn.fetch(sql, *params)
         finally:
@@ -1470,7 +1471,7 @@ class LightRAGKnowledgeService:
             import asyncpg  # type: ignore[import-untyped]
 
             assert self._cfg.postgres_dsn is not None
-            conn = await asyncpg.connect(self._cfg.postgres_dsn)
+            conn = await asyncpg.connect(self._cfg.postgres_dsn, **asyncpg_connect_kwargs())
             try:
                 row = await conn.fetchrow(sql, workspace, source_path, scope_project_id)
             finally:
@@ -1582,7 +1583,7 @@ class LightRAGKnowledgeService:
             import asyncpg  # type: ignore[import-untyped]
 
             assert self._cfg.postgres_dsn is not None
-            conn = await asyncpg.connect(self._cfg.postgres_dsn)
+            conn = await asyncpg.connect(self._cfg.postgres_dsn, **asyncpg_connect_kwargs())
             try:
                 row = await conn.fetchrow(id_sql, workspace, list(ids))
                 n = int(row["n"]) if row and row["n"] is not None else 0
@@ -1681,7 +1682,7 @@ class LightRAGKnowledgeService:
             try:
                 import asyncpg  # type: ignore[import-untyped]
 
-                conn = await asyncpg.connect(self._cfg.postgres_dsn)
+                conn = await asyncpg.connect(self._cfg.postgres_dsn, **asyncpg_connect_kwargs())
                 try:
                     row = await conn.fetchval("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
                     pgvector_ok = row == 1
@@ -1800,6 +1801,11 @@ class LightRAGKnowledgeService:
             "POSTGRES_PASSWORD": parsed.password or "",
             "POSTGRES_DATABASE": (parsed.path or "/").lstrip("/") or "postgres",
         }
+        # The shared pool cap (shared.pg) applies to LightRAG's own pool too,
+        # which it reads from POSTGRES_MAX_CONNECTIONS.
+        store_max = os.environ.get("METAFORGE_PG_STORE_POOL_MAX", "").strip()
+        if store_max.isdigit():
+            env_map["POSTGRES_MAX_CONNECTIONS"] = store_max
         for key, value in env_map.items():
             os.environ.setdefault(key, value)
 

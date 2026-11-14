@@ -64,7 +64,9 @@ class PgVectorInsightStore(InsightStore):
         try:
             import asyncpg
 
-            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=self._pool_size)
+            from shared.pg import store_pool_kwargs
+
+            self._pool = await asyncpg.create_pool(self._dsn, **store_pool_kwargs(self._pool_size))
             async with self._pool.acquire() as conn:
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
                 await conn.execute(
