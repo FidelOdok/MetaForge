@@ -400,3 +400,65 @@ def test_niche_families_are_dropped_before_others() -> None:
     kept, dropped = _select_tools(reg.all_tools(), 128)
     niche_dropped = [d for d in dropped if d.startswith(("mcp_gazebo", "mcp_isaac", "mcp_omni"))]
     assert len(niche_dropped) == 30
+
+
+# ---------------------------------------------------------------------------
+# The control plane survives the cap: a chat that cannot propose a flow or see
+# what is held for a person cannot drive a design, whatever else it keeps
+# ---------------------------------------------------------------------------
+
+_FLOW_TOOLS = (
+    "await_gate",
+    "capabilities",
+    "compile_intent",
+    "lifecycle",
+    "list",
+    "patch",
+    "propose",
+    "start_run",
+    "status",
+    "supervise",
+    "verify_completion",
+)
+
+
+def _control_plane_registry() -> ToolRegistry:
+    # The 2026-11-14 night light turn: 304 tools against a 128 cap, and the
+    # flow adapter's alphabetical tail (propose, start_run, status) dropped,
+    # because about forty adapters left the round-robin some three tools each.
+    reg = _registry(natives=8, mcp_per_server=7, servers=40)
+    loose = {"type": "object", "properties": {}}
+    for tool in _FLOW_TOOLS:
+        reg.register_mcp("flow", tool, description="d", input_schema=loose, handler=_echo)
+    for tool in ("decide", "list"):
+        reg.register_mcp("approvals", tool, description="d", input_schema=loose, handler=_echo)
+    for tool in ("create", "get", "list", "open"):
+        reg.register_mcp("project", tool, description="d", input_schema=loose, handler=_echo)
+    return reg
+
+
+def test_flow_and_approval_tools_survive_a_large_cap() -> None:
+    kept, dropped = _select_tools(_control_plane_registry().all_tools(), 128)
+    names = {s.name for s in kept}
+    for tool in (
+        "mcp_flow_compile_intent",
+        "mcp_flow_capabilities",
+        "mcp_flow_propose",
+        "mcp_flow_patch",
+        "mcp_flow_start_run",
+        "mcp_flow_status",
+        "mcp_flow_lifecycle",
+        "mcp_flow_verify_completion",
+        "mcp_approvals_list",
+        "mcp_project_create",
+        "mcp_project_get",
+    ):
+        assert tool in names, f"{tool} dropped: {dropped}"
+    assert len(kept) == 128
+
+
+def test_control_plane_protection_does_not_cover_other_adapters() -> None:
+    # negative control: only the named control-plane tools are protected, so
+    # an ordinary adapter's tail still gives way to the cap
+    kept, dropped = _select_tools(_control_plane_registry().all_tools(), 128)
+    assert any(d.startswith("mcp_server0") for d in dropped)

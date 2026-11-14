@@ -460,6 +460,15 @@ is exactly backwards. Instead:
   added, still sorted into the same dropped tail (a large adapter's own
   alphabetical tail is exactly where the round-robin's global budget ran
   out);
+- the **control plane** is always kept (`_CONTROL_PLANE_TOOLS`):
+  `project.create`/`get`/`list`/`open`, `flow.compile_intent`,
+  `flow.capabilities`, `flow.propose`, `flow.patch`, `flow.list`,
+  `flow.start_run`, `flow.status`, `flow.lifecycle`, `flow.await_gate`,
+  `flow.verify_completion` and `approvals.list`. With about 300 tools and
+  some forty adapters the round-robin left each adapter three or four, and
+  the flow adapter's alphabetical tail went (2026-11-14): a chat could
+  compile an intent but never propose a flow, so nothing reached the
+  Approvals page;
 - **companion groups** are kept together: if any of
   `twin.stage_work_product_file`, `freecad.import_step`,
   `freecad.export_model`, `twin.commit_geometry`, `freecad.open_session` or
