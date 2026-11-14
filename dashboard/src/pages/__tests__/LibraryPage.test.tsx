@@ -56,7 +56,7 @@ describe('LibraryPage', () => {
 
   it('lists every component and shows the first in detail', async () => {
     render(<LibraryPage />);
-    expect(await screen.findByTestId('library-count')).toHaveTextContent('3 of 3');
+    expect(await screen.findByTestId('library-count')).toHaveTextContent('3 parts');
     expect(screen.getByTestId('library-detail')).toBeInTheDocument();
   });
 
@@ -66,13 +66,14 @@ describe('LibraryPage', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search components' }), { target: { value: 'nordic' } });
     expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search components' }), { target: { value: '' } });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: 'module' } });
+    const types = screen.getByRole('group', { name: 'Type' });
+    fireEvent.click(within(types).getByRole('button', { name: /module/i }));
     expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: '' } });
-    fireEvent.click(screen.getByLabelText(/Only with 3D/));
+    fireEvent.click(within(types).getByRole('button', { name: 'All' }));
+    fireEvent.click(screen.getByRole('button', { name: /3D only/ }));
     expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
-    fireEvent.click(screen.getByLabelText(/Only with 3D/));
-    fireEvent.click(screen.getByLabelText(/Hide/));
+    fireEvent.click(screen.getByRole('button', { name: /3D only/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Hide discontinued/ }));
     expect(screen.getByTestId('library-count')).toHaveTextContent('2 of 3');
   });
 

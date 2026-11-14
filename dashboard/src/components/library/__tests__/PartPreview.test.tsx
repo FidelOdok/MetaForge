@@ -40,7 +40,7 @@ describe('PartPreview', () => {
       triangles: 2, source: {},
     });
     render(<PartPreview part={{ ...BASE, models: [MAKER], form_code: 'return [];' }} />);
-    expect(await screen.findByText(/7.00 x 7.00 x 0.85 mm/)).toBeInTheDocument();
+    expect(await screen.findByText(/7.0 x 7.0 x 0.8 mm/)).toBeInTheDocument();
     expect(screen.getByTestId('library-preview')).toHaveAttribute('data-source', 'maker');
   });
 
@@ -54,7 +54,7 @@ describe('PartPreview', () => {
     const run = vi.fn().mockResolvedValue({ parts: [{ shapes: [{ name: 'body [epoxy_black]', positions: BOX, indices: [0, 1, 2] }] }] });
     window.FGAuthored = { run };
     render(<PartPreview part={{ ...BASE, form_code: "return [g.box(7, 0.85, 7).name('body [epoxy_black]')];" }} />);
-    expect(await screen.findByText(/7.00 x 7.00 x 0.85 mm/)).toBeInTheDocument();
+    expect(await screen.findByText(/7.0 x 7.0 x 0.8 mm/)).toBeInTheDocument();
     expect(run).toHaveBeenCalledWith([expect.objectContaining({ code: expect.stringContaining('g.box') })], {});
     expect(api.getComponentMesh).not.toHaveBeenCalled();
   });

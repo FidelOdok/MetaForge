@@ -53,6 +53,8 @@ export const MATERIAL_LOOKS: Record<string, Look> = {
   silicone_white: L(0xf2f2f2, 0.5, 0),
   pmma_clear: L(0xdcecf4, 0.05, 0, 0.4),
   pc_opal: L(0xf4f4f4, 0.6, 0, 0.85),
+  pc_clear: L(0xe4eef3, 0.05, 0, 0.35),
+  wood_beech: L(0xd9b382, 0.75, 0),
   die_red: L(0xd23a2a, 0.3, 0.1),
   die_green: L(0x2ea84a, 0.3, 0.1),
   die_blue: L(0x2f5fd0, 0.3, 0.1),
