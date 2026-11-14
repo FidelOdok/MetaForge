@@ -36,6 +36,8 @@ from typing import Any
 
 import structlog
 
+from twin_core.library.viewer import FROM_CONTEXT, resolve
+
 logger = structlog.get_logger(__name__)
 
 __all__ = [
@@ -171,6 +173,10 @@ CAPABILITIES: dict[str, _Spec] = {
 
 class MachineLibraryError(ValueError):
     """A machine or capability that does not pass the library's rules."""
+
+
+class MachinePermissionError(MachineLibraryError):
+    """The machine is shared library data; an account may read it, not change it."""
 
 
 class MachineNotFoundError(KeyError):
@@ -466,31 +472,55 @@ class SqliteMachineLibrary:
             );
             """
         )
+        # FORGE-876: who owns a machine ('' = shared). Added in place to files
+        # that predate it; existing machines are shared.
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(machines)")}
+        if "owner" not in cols:
+            self._conn.execute("ALTER TABLE machines ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
         self._conn.commit()
         logger.info("machine_library_opened", path=path)
 
     # ── reads ────────────────────────────────────────────────────────────
 
-    def _row(self, machine_id: str) -> tuple[str, dict[str, Any]]:
+    def _row(self, machine_id: str, viewer: Any = FROM_CONTEXT) -> tuple[str, dict[str, Any]]:
+        viewer = resolve(viewer)
+        where, args = ("", ()) if viewer is None else (" AND owner IN ('', ?)", (viewer,))
         with self._lock:
             row = self._conn.execute(
-                "SELECT layer, body FROM machines WHERE id = ?", (machine_id,)
+                f"SELECT layer, body FROM machines WHERE id = ?{where}", (machine_id, *args)
             ).fetchone()
         if row is None:
             raise MachineNotFoundError(machine_id)
         return row[0], json.loads(row[1])
 
-    def get(self, machine_id: str) -> MachineModel | MachineInstance:
-        layer, body = self._row(machine_id)
+    def owner_of(self, machine_id: str) -> str | None:
+        """The account that owns a machine, ``None`` when it is shared."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT owner FROM machines WHERE id = ?", (machine_id,)
+            ).fetchone()
+        if row is None:
+            raise MachineNotFoundError(machine_id)
+        return row[0] or None
+
+    def get(self, machine_id: str, *, viewer: Any = FROM_CONTEXT) -> MachineModel | MachineInstance:
+        """A machine ``viewer`` may see: shared, or their own (``None``: any)."""
+        layer, body = self._row(machine_id, viewer)
         body.pop("layer", None)
         caps = _caps_from_json(body.pop("capabilities", {}))
         if layer == "model":
             return MachineModel(capabilities=caps, **body)
         return MachineInstance(capabilities=caps, **body)
 
-    def list(self, *, layer: str | None = None, kind: str | None = None) -> list[Any]:
+    def list(
+        self, *, layer: str | None = None, kind: str | None = None, viewer: Any = FROM_CONTEXT
+    ) -> list[Any]:
+        viewer = resolve(viewer)
+        where, args = ("", ()) if viewer is None else (" WHERE owner IN ('', ?)", (viewer,))
         with self._lock:
-            rows = self._conn.execute("SELECT id FROM machines ORDER BY updated_at").fetchall()
+            rows = self._conn.execute(
+                f"SELECT id FROM machines{where} ORDER BY updated_at", args
+            ).fetchall()
         out = [self.get(r[0]) for r in rows]
         if layer:
             out = [m for m in out if (layer == "model") == isinstance(m, MachineModel)]
@@ -507,15 +537,16 @@ class SqliteMachineLibrary:
             ).fetchall()
         return [{"version": r[0], "changed_at": r[1], "changed_by": r[2]} for r in rows]
 
-    def limits(self, instance_id: str) -> dict[str, Any]:
-        machine = self.get(instance_id)
+    def limits(self, instance_id: str, *, viewer: Any = FROM_CONTEXT) -> dict[str, Any]:
+        viewer = resolve(viewer)
+        machine = self.get(instance_id, viewer=viewer)
         if not isinstance(machine, MachineInstance):
             raise MachineLibraryError(
                 f"{instance_id} is a model; limits come from a machine instance"
             )
         model = None
         if machine.model_id:
-            found = self.get(machine.model_id)
+            found = self.get(machine.model_id, viewer=viewer)
             model = found if isinstance(found, MachineModel) else None
         return machine_limits(machine, model)
 
@@ -569,13 +600,26 @@ class SqliteMachineLibrary:
 
     # ── writes ───────────────────────────────────────────────────────────
 
-    def _save(self, machine: MachineModel | MachineInstance, by: str) -> None:
+    def _save(
+        self, machine: MachineModel | MachineInstance, by: str, owner: Any = FROM_CONTEXT
+    ) -> None:
+        owner = resolve(owner)
         body = machine.as_dict()
         with self._lock:
+            # An update keeps the owner the machine was registered with.
             self._conn.execute(
-                "INSERT OR REPLACE INTO machines (id, layer, body, version, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (machine.id, body["layer"], json.dumps(body), machine.version, machine.updated_at),
+                "INSERT INTO machines (id, layer, body, version, updated_at, owner) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET layer = excluded.layer, body = excluded.body, "
+                "version = excluded.version, updated_at = excluded.updated_at",
+                (
+                    machine.id,
+                    body["layer"],
+                    json.dumps(body),
+                    machine.version,
+                    machine.updated_at,
+                    owner or "",
+                ),
             )
             self._conn.execute(
                 "INSERT INTO machine_history (id, version, body, changed_at, changed_by) "
@@ -597,8 +641,14 @@ class SqliteMachineLibrary:
             by=by,
         )
 
-    def register(self, data: dict[str, Any], *, by: str = "") -> MachineModel | MachineInstance:
-        """Add a model (``layer: model``) or an instance (``layer: instance``)."""
+    def register(
+        self, data: dict[str, Any], *, by: str = "", owner: Any = FROM_CONTEXT
+    ) -> MachineModel | MachineInstance:
+        """Add a model (``layer: model``) or an instance (``layer: instance``).
+
+        ``owner`` makes it an account's own; without one it is shared.
+        """
+        owner = resolve(owner)
         layer = _text(data.get("layer"), "layer")
         kind = _text(data.get("kind"), "kind")
         if kind not in MACHINE_KINDS:
@@ -619,7 +669,9 @@ class SqliteMachineLibrary:
             )
         elif layer == "instance":
             model_id = _text(data.get("model_id"), "model_id", required=False) or None
-            if model_id is not None and not isinstance(self.get(model_id), MachineModel):
+            if model_id is not None and not isinstance(
+                self.get(model_id, viewer=owner), MachineModel
+            ):
                 raise MachineLibraryError(f"model_id {model_id} is not a machine model")
             route = _text(data.get("route") or "in_house", "route")
             if route not in ("in_house", "vendor"):
@@ -643,14 +695,28 @@ class SqliteMachineLibrary:
             )
         else:
             raise MachineLibraryError("layer must be 'model' or 'instance'")
-        self._save(machine, by)
+        self._save(machine, by, owner)
         return machine
 
     def update(
-        self, machine_id: str, changes: dict[str, Any], *, by: str = ""
+        self,
+        machine_id: str,
+        changes: dict[str, Any],
+        *,
+        by: str = "",
+        editor: Any = FROM_CONTEXT,
     ) -> MachineModel | MachineInstance:
-        """Change fields or capabilities; a new version is kept, the old one stays."""
-        machine = self.get(machine_id)
+        """Change fields or capabilities; a new version is kept, the old one stays.
+
+        ``editor`` is the account asking (``None``: unscoped). An account may
+        change only its own machines.
+        """
+        editor = resolve(editor)
+        machine = self.get(machine_id, viewer=editor)
+        if editor is not None and self.owner_of(machine_id) != editor:
+            raise MachinePermissionError(
+                f"{machine_id} is shared library data; register your own machine instead"
+            )
         allowed = {"processes", "capabilities", "status", "location", "name", "connection", "route"}
         unknown = set(changes) - allowed
         if unknown:

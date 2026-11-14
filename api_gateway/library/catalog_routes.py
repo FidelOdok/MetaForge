@@ -14,8 +14,14 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from api_gateway.library.routes import history_with_authority
+from api_gateway.library.tenancy import library_tenant, with_ownership
 from observability.tracing import get_tracer
-from twin_core.library.catalog import CatalogError, CatalogNotFoundError, SqliteCatalog
+from twin_core.library.catalog import (
+    CatalogError,
+    CatalogNotFoundError,
+    CatalogPermissionError,
+    SqliteCatalog,
+)
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.library.catalog_routes")
@@ -50,61 +56,78 @@ def _by(request: Request, named: str) -> str:
     return (named or request.headers.get(AGENT_HEADER) or "").strip()[:100] or "unknown"
 
 
-def _list(kind: str, family: str | None) -> dict[str, Any]:
-    entries = get_catalog().list(kind, family=family or None)
-    return {"entries": [e.as_dict() for e in entries]}
+def _shown(entry: Any) -> dict[str, Any]:
+    return with_ownership(entry.as_dict(), get_catalog().owner_of(entry.id))
 
 
-def _get(kind: str, ref: str) -> dict[str, Any]:
+def _list(kind: str, family: str | None, request: Request) -> dict[str, Any]:
+    entries = get_catalog().list(kind, family=family or None, viewer=library_tenant(request))
+    return {"entries": [_shown(e) for e in entries]}
+
+
+def _get(kind: str, ref: str, request: Request) -> dict[str, Any]:
     catalog = get_catalog()
     try:
-        entry = catalog.get(ref, kind)
+        entry = catalog.get(ref, kind, viewer=library_tenant(request))
     except CatalogNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"no {kind} '{ref}'") from exc
-    return {"entry": entry.as_dict(), "history": history_with_authority(catalog.history(entry.id))}
+    return {"entry": _shown(entry), "history": history_with_authority(catalog.history(entry.id))}
 
 
 def _register(kind: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
     by = _by(request, str(body.pop("by", "") or ""))
+    # FORGE-876: on a shared gateway the entry is the caller's account's own.
+    owner = library_tenant(request)
     with tracer.start_as_current_span(f"library.register_{kind}") as span:
+        span.set_attribute("entry.shared", owner is None)
         try:
-            entry = get_catalog().register(kind, body, by=by)
+            entry = get_catalog().register(kind, body, by=by, owner=owner)
         except CatalogError as exc:
             span.record_exception(exc)
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         span.set_attribute("entry.id", entry.id)
-    logger.info("catalog_entry_registered", kind=kind, entry_id=entry.id, name=entry.name, by=by)
-    return {"entry": entry.as_dict()}
+    logger.info(
+        "catalog_entry_registered",
+        kind=kind,
+        entry_id=entry.id,
+        name=entry.name,
+        by=by,
+        shared=owner is None,
+    )
+    return {"entry": _shown(entry)}
 
 
 def _update(kind: str, ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
     by = _by(request, body.by)
     catalog = get_catalog()
+    editor = library_tenant(request)
     try:
-        current = catalog.get(ref, kind)
-        entry = catalog.update(current.id, body.changes, by=by)
+        current = catalog.get(ref, kind, viewer=editor)
+        entry = catalog.update(current.id, body.changes, by=by, editor=editor)
     except CatalogNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"no {kind} '{ref}'") from exc
+    except CatalogPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except CatalogError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"entry": entry.as_dict()}
+    return {"entry": _shown(entry)}
 
 
 @router.get("/processes")
-async def list_processes(family: str | None = None) -> dict[str, Any]:
-    return _list("process", family)
+async def list_processes(family: str | None = None, *, request: Request) -> dict[str, Any]:
+    return _list("process", family, request)
 
 
 @router.get("/processes/{ref}")
-async def get_process(ref: str) -> dict[str, Any]:
-    return _get("process", ref)
+async def get_process(ref: str, request: Request) -> dict[str, Any]:
+    return _get("process", ref, request)
 
 
 @router.get("/processes/{ref}/limits")
-async def process_limits(ref: str, material: str | None = None) -> dict[str, Any]:
+async def process_limits(ref: str, request: Request, material: str | None = None) -> dict[str, Any]:
     """The process's rules as DFM limits and a ranking candidate, optionally for a material."""
     try:
-        return get_catalog().process_limits(ref, material or None)
+        return get_catalog().process_limits(ref, material or None, viewer=library_tenant(request))
     except CatalogNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"no entry '{exc.args[0]}'") from exc
     except CatalogError as exc:
@@ -122,17 +145,18 @@ async def update_process(ref: str, body: UpdateEntryRequest, request: Request) -
 
 
 @router.get("/materials")
-async def list_materials(family: str | None = None) -> dict[str, Any]:
-    return _list("material", family)
+async def list_materials(family: str | None = None, *, request: Request) -> dict[str, Any]:
+    return _list("material", family, request)
 
 
 @router.get("/materials/resolve")
-async def resolve_material(name: str) -> dict[str, Any]:
+async def resolve_material(name: str, request: Request) -> dict[str, Any]:
     """The figures a tool call carries for ``name`` (FORGE-446); 422 with candidates."""
     from twin_core.library.material_resolver import MaterialResolutionError, block, match
 
     try:
-        return block(match(get_catalog().list("material"), name))
+        materials = get_catalog().list("material", viewer=library_tenant(request))
+        return block(match(materials, name))
     except MaterialResolutionError as exc:
         raise HTTPException(
             status_code=422, detail={"message": str(exc), "candidates": exc.candidates}
@@ -140,8 +164,8 @@ async def resolve_material(name: str) -> dict[str, Any]:
 
 
 @router.get("/materials/{ref}")
-async def get_material(ref: str) -> dict[str, Any]:
-    return _get("material", ref)
+async def get_material(ref: str, request: Request) -> dict[str, Any]:
+    return _get("material", ref, request)
 
 
 @router.post("/materials", status_code=201)
@@ -155,9 +179,9 @@ async def update_material(ref: str, body: UpdateEntryRequest, request: Request) 
 
 
 @router.get("/components")
-async def list_components(family: str | None = None) -> dict[str, Any]:
+async def list_components(family: str | None = None, *, request: Request) -> dict[str, Any]:
     """Mechanical components (FORGE-449): standard and purchased parts."""
-    return _list("component", family)
+    return _list("component", family, request)
 
 
 @router.get("/components/standard")
@@ -172,12 +196,12 @@ async def standard_part(family: str, size: str, length_mm: float | None = None) 
 
 
 @router.get("/components/{ref}")
-async def get_component(ref: str) -> dict[str, Any]:
-    return _get("component", ref)
+async def get_component(ref: str, request: Request) -> dict[str, Any]:
+    return _get("component", ref, request)
 
 
 @router.get("/components/{ref}/mesh")
-async def component_mesh(ref: str) -> dict[str, Any]:
+async def component_mesh(ref: str, request: Request) -> dict[str, Any]:
     """The entry's attached maker model as a coloured, Y-up, centred mesh (2026-11-12).
 
     For drawing in the studio and the library viewer only. A model whose licence MetaForge
@@ -188,7 +212,7 @@ async def component_mesh(ref: str) -> dict[str, Any]:
     from api_gateway.library import model_mesh
 
     try:
-        entry = get_catalog().get(ref, "component").as_dict()
+        entry = get_catalog().get(ref, "component", viewer=library_tenant(request)).as_dict()
     except CatalogNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     try:
@@ -215,14 +239,14 @@ async def update_component(ref: str, body: UpdateEntryRequest, request: Request)
 
 
 @router.get("/appearances")
-async def list_appearances(family: str | None = None) -> dict[str, Any]:
+async def list_appearances(family: str | None = None, *, request: Request) -> dict[str, Any]:
     """Appearances (FORGE-631): colour, material and finish; family is the finish."""
-    return _list("appearance", family)
+    return _list("appearance", family, request)
 
 
 @router.get("/appearances/{ref}")
-async def get_appearance(ref: str) -> dict[str, Any]:
-    return _get("appearance", ref)
+async def get_appearance(ref: str, request: Request) -> dict[str, Any]:
+    return _get("appearance", ref, request)
 
 
 @router.post("/appearances", status_code=201)
@@ -236,14 +260,14 @@ async def update_appearance(ref: str, body: UpdateEntryRequest, request: Request
 
 
 @router.get("/ergonomic-limits")
-async def list_ergonomic_limits(family: str | None = None) -> dict[str, Any]:
+async def list_ergonomic_limits(family: str | None = None, *, request: Request) -> dict[str, Any]:
     """Ergonomic design limits (FORGE-635); family is the feature kind they bound."""
-    return _list("ergonomic_limit", family)
+    return _list("ergonomic_limit", family, request)
 
 
 @router.get("/ergonomic-limits/{ref}")
-async def get_ergonomic_limit(ref: str) -> dict[str, Any]:
-    return _get("ergonomic_limit", ref)
+async def get_ergonomic_limit(ref: str, request: Request) -> dict[str, Any]:
+    return _get("ergonomic_limit", ref, request)
 
 
 @router.post("/ergonomic-limits", status_code=201)

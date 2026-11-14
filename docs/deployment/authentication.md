@@ -167,7 +167,8 @@ the route runs, and the route's shape decides how the project is found:
 | a chat scope | `GET /v1/chat/threads?scope_kind=project&entity_id=…` | `scope_kind` + id required; `project` and `digital-twin-node` scopes resolve to a project, others are refused |
 | `GET /v1/projects` | | filtered to the caller's projects |
 | `POST /v1/projects` | | the new project is registered to its creator via `project_created`; if that fails the project is deleted again and the call returns 503 |
-| `GET` under `/v1/library/`, `/v1/examples`, `/v1/features` | shared reference data | readable; writes refused, even ones that name the caller's work |
+| `GET` under `/v1/library/`, `/v1/examples`, `/v1/features` | shared reference data | readable; the library shows shared entries and the caller's account's own (see below) |
+| adding or changing a library entry | `POST /v1/library/materials`, `PATCH /v1/library/machines/{machine_id}` | allowed when the scope names a `tenant`; the entry is that account's own. Shared entries are refused (403). Import, machine discovery and machine jobs stay refused |
 | catalogues with no account data | flow templates, `/v1/harness/{providers,models,tools}`, chat channel kinds | readable |
 | stateless or content-addressed | `POST /v1/design-flows/validate`, `POST /v1/robot/joint-loads`, `/v1/convert` (the id is the file's SHA-256) | answered |
 | anything else | | **refused with 403** |
@@ -190,6 +191,30 @@ a shared gateway: it cannot be shown to be the caller's. Every entity a
 request names is checked, including ones nested under a project path, so
 `/v1/twin/projects/{mine}/nodes/{theirs}` is refused. A lookup that fails is
 a 503, never a pass.
+
+**The library.** Processes, materials, components, appearances, ergonomic
+limits and machines come in two layers on a shared gateway:
+
+- **shared** entries, curated for every account: readable by all, changed by
+  none of them;
+- an account's **own** entries, added through the library routes (or the
+  `library.register_*` tools): seen and changed only by that account.
+
+The account is `ProjectScope.tenant`, an opaque key the provider sets (a
+scope without one may read the shared library and add nothing). Every
+library read made while answering a request, including those made from
+design-flow planning, the Imagine studio and the manufacturing context, sees
+the shared entries and the caller's own: the middleware sets the request's
+library view (`twin_core/library/viewer.py`), and the stores read it. Names are
+unique per account, so two accounts can each have a `my-petg`; an account
+cannot take a shared entry's name. A local gateway and the deployment's own
+services see every entry, and what they add is shared. Each entry the API
+returns carries `shared: true|false`.
+
+Not yet confined: a design-flow **run** executing in the Temporal worker has
+no request, so it reads the library unscoped and can see other accounts'
+entries; so does the MCP sidecar's remote library, which calls the gateway
+as the deployment's service. Both are open in the hosted-pilot plan.
 
 A few routes the dashboard calls are still refused because their stores do
 not record a project yet (baselines, design-loop, design-flow versions,

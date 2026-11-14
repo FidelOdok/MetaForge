@@ -19,10 +19,12 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from api_gateway.library.tenancy import library_tenant, with_ownership
 from observability.tracing import get_tracer
 from twin_core.library.machines import (
     MachineLibraryError,
     MachineNotFoundError,
+    MachinePermissionError,
     SqliteMachineLibrary,
 )
 
@@ -78,35 +80,43 @@ def _by(request: Request, named: str) -> str:
     return (named or request.headers.get(AGENT_HEADER) or "").strip()[:100] or "unknown"
 
 
+def _shown(machine: Any) -> dict[str, Any]:
+    return with_ownership(machine.as_dict(), get_machine_library().owner_of(machine.id))
+
+
 def _not_found(machine_id: str) -> HTTPException:
     return HTTPException(status_code=404, detail=f"machine '{machine_id}' not found")
 
 
 @router.get("/machines")
-async def list_machines(layer: str | None = None, kind: str | None = None) -> dict[str, Any]:
+async def list_machines(
+    request: Request, layer: str | None = None, kind: str | None = None
+) -> dict[str, Any]:
     """Models and instances; ``layer=model|instance`` and ``kind`` narrow it."""
-    machines = get_machine_library().list(layer=layer or None, kind=kind or None)
-    return {"machines": [m.as_dict() for m in machines]}
+    machines = get_machine_library().list(
+        layer=layer or None, kind=kind or None, viewer=library_tenant(request)
+    )
+    return {"machines": [_shown(m) for m in machines]}
 
 
 @router.get("/machines/{machine_id}")
-async def get_machine(machine_id: str) -> dict[str, Any]:
+async def get_machine(machine_id: str, request: Request) -> dict[str, Any]:
     library = get_machine_library()
     try:
-        machine = library.get(machine_id)
+        machine = library.get(machine_id, viewer=library_tenant(request))
     except MachineNotFoundError as exc:
         raise _not_found(machine_id) from exc
     return {
-        "machine": machine.as_dict(),
+        "machine": _shown(machine),
         "history": history_with_authority(library.history(machine_id)),
     }
 
 
 @router.get("/machines/{machine_id}/limits")
-async def machine_limits(machine_id: str) -> dict[str, Any]:
+async def machine_limits(machine_id: str, request: Request) -> dict[str, Any]:
     """An instance's limits, shaped for the ranking and DFM skills."""
     try:
-        return get_machine_library().limits(machine_id)
+        return get_machine_library().limits(machine_id, viewer=library_tenant(request))
     except MachineNotFoundError as exc:
         raise _not_found(machine_id) from exc
     except MachineLibraryError as exc:
@@ -117,16 +127,21 @@ async def machine_limits(machine_id: str) -> dict[str, Any]:
 async def register_machine(body: dict[str, Any], request: Request) -> dict[str, Any]:
     """Add a model (``layer: model``) or an instance (``layer: instance``)."""
     by = _by(request, str(body.pop("by", "") or ""))
+    # FORGE-876: on a shared gateway the machine is the caller's account's own.
+    owner = library_tenant(request)
     with tracer.start_as_current_span("library.register_machine") as span:
+        span.set_attribute("machine.shared", owner is None)
         try:
-            machine = get_machine_library().register(body, by=by)
+            machine = get_machine_library().register(body, by=by, owner=owner)
         except MachineLibraryError as exc:
             span.record_exception(exc)
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         span.set_attribute("machine.id", machine.id)
         span.set_attribute("machine.kind", machine.kind)
-    logger.info("machine_registered", machine_id=machine.id, kind=machine.kind, by=by)
-    return {"machine": machine.as_dict()}
+    logger.info(
+        "machine_registered", machine_id=machine.id, kind=machine.kind, by=by, shared=owner is None
+    )
+    return {"machine": _shown(machine)}
 
 
 @router.patch("/machines/{machine_id}")
@@ -138,14 +153,18 @@ async def update_machine(
     with tracer.start_as_current_span("library.update_machine") as span:
         span.set_attribute("machine.id", machine_id)
         try:
-            machine = get_machine_library().update(machine_id, body.changes, by=by)
+            machine = get_machine_library().update(
+                machine_id, body.changes, by=by, editor=library_tenant(request)
+            )
         except MachineNotFoundError as exc:
             raise _not_found(machine_id) from exc
+        except MachinePermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except MachineLibraryError as exc:
             span.record_exception(exc)
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     logger.info("machine_updated", machine_id=machine_id, version=machine.version, by=by)
-    return {"machine": machine.as_dict()}
+    return {"machine": _shown(machine)}
 
 
 @router.post("/discover")

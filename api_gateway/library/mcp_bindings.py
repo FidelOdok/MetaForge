@@ -13,12 +13,26 @@ from api_gateway.library.routes import get_machine_library, history_with_authori
 from twin_core.library.machines import MachineLibraryError, MachineNotFoundError
 
 
+def _machine(machine: Any) -> dict[str, Any]:
+    from api_gateway.library.routes import get_machine_library
+    from api_gateway.library.tenancy import with_ownership
+
+    return with_ownership(machine.as_dict(), get_machine_library().owner_of(machine.id))
+
+
+def _entry(entry: Any) -> dict[str, Any]:
+    from api_gateway.library.catalog_routes import get_catalog
+    from api_gateway.library.tenancy import with_ownership
+
+    return with_ownership(entry.as_dict(), get_catalog().owner_of(entry.id))
+
+
 class LocalMachineLibrary:
     """``library.*`` against this process's store."""
 
     async def list_machines(self, layer: str | None, kind: str | None) -> dict[str, Any]:
         machines = get_machine_library().list(layer=layer, kind=kind)
-        return {"machines": [m.as_dict() for m in machines]}
+        return {"machines": [_machine(m) for m in machines]}
 
     async def get_machine(self, machine_id: str) -> dict[str, Any]:
         library = get_machine_library()
@@ -27,12 +41,12 @@ class LocalMachineLibrary:
         except MachineNotFoundError as exc:
             raise ValueError(f"machine '{machine_id}' not found") from exc
         return {
-            "machine": machine.as_dict(),
+            "machine": _machine(machine),
             "history": history_with_authority(library.history(machine_id)),
         }
 
     async def register_machine(self, data: dict[str, Any], by: str) -> dict[str, Any]:
-        return {"machine": get_machine_library().register(data, by=by).as_dict()}
+        return {"machine": _machine(get_machine_library().register(data, by=by))}
 
     async def update_machine(
         self, machine_id: str, changes: dict[str, Any], by: str
@@ -41,7 +55,7 @@ class LocalMachineLibrary:
             machine = get_machine_library().update(machine_id, changes, by=by)
         except MachineNotFoundError as exc:
             raise ValueError(f"machine '{machine_id}' not found") from exc
-        return {"machine": machine.as_dict()}
+        return {"machine": _machine(machine)}
 
     async def machine_limits(self, machine_id: str) -> dict[str, Any]:
         try:
@@ -86,7 +100,7 @@ class LocalMachineLibrary:
     async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]:
         from api_gateway.library.catalog_routes import get_catalog
 
-        return {"entries": [e.as_dict() for e in get_catalog().list(kind, family=family)]}
+        return {"entries": [_entry(e) for e in get_catalog().list(kind, family=family)]}
 
     async def get_entry(self, kind: str, ref: str) -> dict[str, Any]:
         from api_gateway.library.catalog_routes import get_catalog
@@ -98,14 +112,14 @@ class LocalMachineLibrary:
         except CatalogNotFoundError as exc:
             raise ValueError(f"no {kind} '{ref}'") from exc
         return {
-            "entry": entry.as_dict(),
+            "entry": _entry(entry),
             "history": history_with_authority(catalog.history(entry.id)),
         }
 
     async def register_entry(self, kind: str, data: dict[str, Any], by: str) -> dict[str, Any]:
         from api_gateway.library.catalog_routes import get_catalog
 
-        return {"entry": get_catalog().register(kind, data, by=by).as_dict()}
+        return {"entry": _entry(get_catalog().register(kind, data, by=by))}
 
     async def update_entry(
         self, kind: str, ref: str, changes: dict[str, Any], by: str
@@ -118,7 +132,7 @@ class LocalMachineLibrary:
             current = catalog.get(ref, kind)
         except CatalogNotFoundError as exc:
             raise ValueError(f"no {kind} '{ref}'") from exc
-        return {"entry": catalog.update(current.id, changes, by=by).as_dict()}
+        return {"entry": _entry(catalog.update(current.id, changes, by=by))}
 
     async def process_limits(self, ref: str, material: str | None) -> dict[str, Any]:
         from api_gateway.library.catalog_routes import get_catalog
