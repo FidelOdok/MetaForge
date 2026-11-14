@@ -70,7 +70,8 @@ class TestRegistryMcpBridge:
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 128
+        # +1: web.fetch is registered without a search key (it needs none).
+        assert len(tools) == 129
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""
