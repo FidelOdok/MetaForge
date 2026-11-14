@@ -1047,20 +1047,26 @@ async def send_message(
     if body.actor_kind == "user":
         if project_id and operation_id:
             chat_ops.turn_started(project_id, operation_id)
-        # Section 5: what the request would change, decided before the agent acts.
-        classified = (
-            await classify_turn(
-                project_id,
-                operation_id,
-                body.content,
-                twin=_twin,
-                component_id=body.graph_ref_node,
-                component_label=body.graph_ref_label,
-            )
-            if project_id
-            else None
-        )
+        classified = None
+        # Everything after ``turn_started`` sits inside this ``try``, the
+        # classification included: a turn cancelled there (the client went
+        # away and the server cancelled the request) must still end its
+        # operation, or the project shows it running for ever and the
+        # dashboard holds every later message in its queue behind it.
         try:
+            # Section 5: what the request would change, decided before the agent acts.
+            classified = (
+                await classify_turn(
+                    project_id,
+                    operation_id,
+                    body.content,
+                    twin=_twin,
+                    component_id=body.graph_ref_node,
+                    component_label=body.graph_ref_label,
+                )
+                if project_id
+                else None
+            )
             if classified is not None and classified.needs_clarification:
                 # "Make it metallic": ask the look or the material before any
                 # agent work, so nothing is changed on a guess.

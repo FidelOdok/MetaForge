@@ -488,3 +488,57 @@ class TestRunCancellableOnDisconnect:
         checks_after_settle = checks
         await asyncio.sleep(0.05)
         assert checks == checks_after_settle  # no further polling once done
+
+
+# ---------------------------------------------------------------------------
+# A turn cancelled while it is being classified still ends its operation.
+# Seen on hosted staging: the browser tab died just after the gateway had
+# classified the turn; the cancellation landed outside the try that records
+# it, so the operation stayed "running" for good and the dashboard queued
+# every later message behind it.
+# ---------------------------------------------------------------------------
+
+
+class TestTurnCancelledDuringClassification:
+    def test_operation_is_cancelled_not_left_running(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from api_gateway.chat import routes
+
+        events: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            routes.chat_ops, "turn_accepted", lambda p, o: events.append(("accepted", o))
+        )
+        monkeypatch.setattr(
+            routes.chat_ops, "turn_started", lambda p, o: events.append(("started", o))
+        )
+        monkeypatch.setattr(
+            routes.chat_ops, "turn_cancelled", lambda p, o: events.append(("cancelled", o))
+        )
+
+        def _finished(p: str, o: str, *, failed: bool, replied: bool = True) -> None:
+            events.append(("finished", o))
+
+        monkeypatch.setattr(routes.chat_ops, "turn_finished", _finished)
+
+        async def _cancelled(*args: object, **kwargs: object) -> None:
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(routes, "classify_turn", _cancelled)
+
+        thread = _create_thread(client, scope_kind="project", scope_entity_id="proj-1")
+        resp = client.post(
+            f"/v1/chat/threads/{thread['id']}/messages",
+            json={
+                "actor_id": "u1",
+                "actor_kind": "user",
+                "content": "fix it",
+                "client_turn_id": "t1",
+            },
+        )
+
+        assert resp.status_code == 201
+        kinds = [k for k, _ in events]
+        assert kinds[:2] == ["accepted", "started"]
+        assert kinds[-1] == "cancelled"
+        assert "finished" not in kinds
