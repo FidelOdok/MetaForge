@@ -296,10 +296,16 @@ Once signed in:
 - **Signing out.** The account control in the top bar shows the signed-in
   email and a **Sign out** item. With no provider (a local gateway) it stays
   the plain link to Settings.
-- **A session that ends mid-use.** A provider refreshes its own tokens, so a
-  401 to a request that *carried* a token means the gateway no longer accepts
-  it: revoked, expired past refresh, or the account was removed. The API
-  client reports it once, the dashboard signs the user out, and the sign-in
+- **A token that expired before its refresh.** A provider refreshes its
+  tokens on a timer, but a browser throttles timers in a background tab, so a
+  request can go out with a token that has just expired. On a 401 to a
+  request that carried a token, the API client asks the client's optional
+  `refresh()` for a new session, once (requests that fail together share it),
+  and retries with the new token.
+- **A session that ends mid-use.** When there is no `refresh()`, it returns
+  nothing, or the retried request is refused too, the gateway no longer
+  accepts the session: revoked, expired past refresh, or the account was
+  removed. The API client reports it once, the dashboard signs the user out, and the sign-in
   screen is told why (`SignInView` receives `reason="expired"`, an optional
   prop a provider's screen can show). A 401 to a request with no token is a
   gateway asking for sign-in, which `AuthGate` already handles.

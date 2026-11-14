@@ -28,8 +28,8 @@ export function getAccessToken(): string | null {
  * Who to tell when the gateway rejects a token we sent (HTTP 401).
  *
  * A provider refreshes its own tokens, so a 401 on a request that carried one
- * means the session is over: revoked, expired past refresh, or the account was
- * removed. `AuthProvider` registers here and signs the user out with the
+ * means the session is over once a refresh (below) has also failed: revoked,
+ * expired past refresh, or the account was removed. `AuthProvider` registers here and signs the user out with the
  * reason, rather than leaving every panel to fail on its own.
  */
 let onUnauthorized: (() => void) | null = null;
@@ -41,4 +41,34 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 /** Called by the API client on a 401 to a request that carried a token. */
 export function notifyUnauthorized(): void {
   onUnauthorized?.();
+}
+
+/**
+ * How to renew the session when the gateway says a token has expired.
+ *
+ * A browser throttles timers in a background tab, so a provider's scheduled
+ * refresh can run late and a request goes out with a token that just expired.
+ * The API client asks for a fresh one here before it ends the session.
+ * Concurrent callers share one refresh.
+ */
+let refresher: (() => Promise<string | null>) | null = null;
+let inFlight: Promise<string | null> | null = null;
+
+export function setTokenRefresher(fn: (() => Promise<string | null>) | null): void {
+  refresher = fn;
+  inFlight = null;
+}
+
+/** A fresh token, or `null` when there is no refresher or it could not renew. */
+export function refreshAccessToken(): Promise<string | null> {
+  if (!refresher) return Promise.resolve(null);
+  if (!inFlight) {
+    const run = refresher;
+    inFlight = run()
+      .catch(() => null)
+      .finally(() => {
+        inFlight = null;
+      });
+  }
+  return inFlight;
 }
