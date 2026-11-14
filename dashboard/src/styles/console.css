@@ -543,6 +543,13 @@ button:disabled {
 .gateway-chip.disconnected {
   color:var(--mf-c-ffc696)
 }
+.budget-chip.budget-warning {
+  color:var(--mf-c-ffc696)
+}
+.budget-chip.budget-exhausted {
+  color:#ff8f8f;
+  border-color:currentColor
+}
 .workspace-main {
   outline:none;
   max-width:1840px;

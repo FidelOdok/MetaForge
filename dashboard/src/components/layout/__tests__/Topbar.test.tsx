@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 const mockUseHealth = vi.fn();
 vi.mock('../../../hooks/use-health', () => ({ useHealth: () => mockUseHealth() }));
+vi.mock('../BudgetChip', () => ({ BudgetChip: () => null }));
 vi.mock('../../shared/ProjectSwitcher', () => ({
   ProjectSwitcher: () => <div data-testid="project-switcher" />,
 }));

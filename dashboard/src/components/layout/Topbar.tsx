@@ -6,6 +6,7 @@ import { useHealth } from '../../hooks/use-health';
 import { useLayoutStore } from '../../store/layout-store';
 import type { DependencyStatus } from '../../types/health';
 import { AccountMenu } from './AccountMenu';
+import { BudgetChip } from './BudgetChip';
 import { ThemeToggle } from './ThemeToggle';
 import { ViewSwitch } from './ViewSwitch';
 import { SAMPLE_WORKSPACE_HREF, SECTION_LABELS, isSampleWorkspace } from './nav';
@@ -93,6 +94,7 @@ export function Topbar({ onMenu, navOpen = false }: TopbarProps) {
             <span>Sample</span>
           </a>
         )}
+        {!sample && <BudgetChip />}
         <AccountMenu />
         <Link
           to="/settings"

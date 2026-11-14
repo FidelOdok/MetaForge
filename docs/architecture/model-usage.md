@@ -99,6 +99,9 @@ optional `status()` (a hosted policy: the monthly amount, the spend this month
 and what is left). `available: false` means the policy could not say, not
 that nothing was spent. On a shared gateway the project must be the caller's,
 like any project-scoped route.
+The dashboard shows it in the top bar for the active project, as
+"AI $1.25 / $5.00", amber from 80% and red once used up, and shows nothing
+when the gateway has no budget or could not report one.
 
 Open core ships no policy. A hosted deployment supplies one that keeps a budget per
 account and totals in its own database, shared by every gateway and worker process; the
