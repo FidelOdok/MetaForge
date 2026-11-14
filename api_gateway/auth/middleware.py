@@ -30,6 +30,7 @@ from starlette.responses import JSONResponse, Response
 
 from api_gateway.auth.provider import AuthProvider, AuthUnavailable, InvalidToken
 from api_gateway.auth.scope import decide, supports_project_scope
+from twin_core.library.viewer import NO_TENANT, library_viewer
 
 logger = structlog.get_logger(__name__)
 
@@ -125,6 +126,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
                 return JSONResponse({"detail": decision.detail}, status_code=decision.status)
             request.state.project_scope = scope
+            # FORGE-876: every library read and write in this request sees the
+            # shared entries and this caller's own, wherever it is made from.
+            view = None if scope.unrestricted else (scope.tenant or NO_TENANT)
+            with library_viewer(view):
+                return await call_next(request)
 
         return await call_next(request)
 

@@ -76,6 +76,10 @@ class ProjectScope:
     #: The deployment's own services (a worker calling back into the gateway),
     #: never a person: every project and every route, as without scoping.
     unrestricted: bool = False
+    #: Who owns the library entries this principal adds (FORGE-876): an
+    #: opaque key the provider chooses, such as the caller's account. ``None``
+    #: means the caller may read the shared library but add nothing to it.
+    tenant: str | None = None
 
     def allows(self, project_id: str | None) -> bool:
         if self.unrestricted:
@@ -127,6 +131,9 @@ class RouteTenancy(enum.Enum):
     ACCOUNT_CREATE = "account_create"
     #: Reference data shared by every account; reads only.
     SHARED_READ = "shared_read"
+    #: Adds to or changes the caller's own library entries (FORGE-876):
+    #: allowed when the scope names a tenant; shared entries stay read-only.
+    TENANT_LIBRARY = "tenant_library"
     #: Names an entity, not a project; checked against the entity's owner.
     PROJECT_ENTITY = "project_entity"
     #: Pure computation over the request body: reads and stores nothing.
@@ -154,6 +161,22 @@ EXPLICIT: dict[tuple[str, str], RouteTenancy] = {
     ("GET", "/v1/harness/models"): RouteTenancy.SHARED_READ,
     ("GET", "/v1/harness/tools"): RouteTenancy.SHARED_READ,
     ("GET", "/v1/chat/channels"): RouteTenancy.SHARED_READ,
+    # FORGE-876: an account adds and changes its own library entries; the
+    # stores refuse changes to shared ones. Import, discovery and machine jobs
+    # stay blocked. Reads, the export included, see shared entries and the
+    # caller's own: the middleware sets the request's library view.
+    **{
+        (method, f"/v1/library/{kind}{suffix}"): RouteTenancy.TENANT_LIBRARY
+        for kind, ref in (
+            ("processes", "ref"),
+            ("materials", "ref"),
+            ("components", "ref"),
+            ("appearances", "ref"),
+            ("ergonomic-limits", "ref"),
+            ("machines", "machine_id"),
+        )
+        for method, suffix in (("POST", ""), ("PATCH", f"/{{{ref}}}"))
+    },
     # Computed from the request alone; nothing read, nothing stored.
     ("POST", "/v1/design-flows/validate"): RouteTenancy.STATELESS,
     ("POST", "/v1/robot/joint-loads"): RouteTenancy.STATELESS,
@@ -384,6 +407,15 @@ async def decide(app: ASGIApp, request: Request, scope: ProjectScope) -> ScopeDe
             RouteTenancy.STATELESS,
         ):
             return ScopeDecision(allowed=True, tenancy=tenancy)
+        if tenancy is RouteTenancy.TENANT_LIBRARY:
+            if scope.tenant:
+                return ScopeDecision(allowed=True, tenancy=tenancy)
+            return ScopeDecision(
+                allowed=False,
+                status=403,
+                tenancy=tenancy,
+                detail="Your account cannot add to the library on this gateway.",
+            )
         if tenancy is RouteTenancy.BLOCKED:
             return ScopeDecision(
                 allowed=False,

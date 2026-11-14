@@ -61,6 +61,7 @@ import structlog
 
 from twin_core.library.licences import ACCEPTED_LICENCES, is_accepted, normalise_licence
 from twin_core.library.machines import MACHINE_KINDS
+from twin_core.library.viewer import FROM_CONTEXT, resolve
 
 logger = structlog.get_logger(__name__)
 
@@ -308,6 +309,10 @@ _NAME = re.compile(r"^[a-z0-9][a-z0-9_\-]{1,63}$")
 
 class CatalogError(ValueError):
     """An entry or value that does not pass the library's rules."""
+
+
+class CatalogPermissionError(CatalogError):
+    """The entry is shared library data; an account may read it, not change it."""
 
 
 class CatalogNotFoundError(KeyError):
@@ -907,7 +912,8 @@ class SqliteCatalog:
             CREATE TABLE IF NOT EXISTS catalog_entries (
                 id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
                 body TEXT NOT NULL, version INTEGER NOT NULL, updated_at REAL NOT NULL,
-                UNIQUE (kind, name)
+                owner TEXT NOT NULL DEFAULT '',
+                UNIQUE (kind, name, owner)
             );
             CREATE TABLE IF NOT EXISTS catalog_history (
                 id TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL,
@@ -917,7 +923,57 @@ class SqliteCatalog:
             """
         )
         self._conn.commit()
+        self._migrate_owner()
         logger.info("catalog_opened", path=path)
+
+    def _migrate_owner(self) -> None:
+        """FORGE-876: give a pre-owner file the ``owner`` column.
+
+        Names were unique per kind; now per kind and owner, so two accounts can
+        each have a ``my-petg``. SQLite cannot change a constraint in place, so
+        the table is rebuilt in one transaction. Existing entries are shared.
+        """
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(catalog_entries)")}
+        if "owner" in cols:
+            return
+        with self._lock:
+            self._conn.executescript(
+                """
+                BEGIN;
+                CREATE TABLE catalog_entries_owned (
+                    id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+                    body TEXT NOT NULL, version INTEGER NOT NULL, updated_at REAL NOT NULL,
+                    owner TEXT NOT NULL DEFAULT '',
+                    UNIQUE (kind, name, owner)
+                );
+                INSERT INTO catalog_entries_owned (id, kind, name, body, version, updated_at)
+                    SELECT id, kind, name, body, version, updated_at FROM catalog_entries;
+                DROP TABLE catalog_entries;
+                ALTER TABLE catalog_entries_owned RENAME TO catalog_entries;
+                COMMIT;
+                """
+            )
+        logger.info("catalog_owner_column_added")
+
+    @staticmethod
+    def _visible(viewer: str | None) -> tuple[str, tuple[str, ...]]:
+        """SQL filter for what ``viewer`` sees: shared entries and their own.
+
+        ``None`` is an unscoped caller (a local gateway, a service): everything.
+        """
+        if viewer is None:
+            return "", ()
+        return " AND owner IN ('', ?)", (viewer,)
+
+    def owner_of(self, entry_id: str) -> str | None:
+        """The account that owns an entry, ``None`` when it is shared."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT owner FROM catalog_entries WHERE id = ?", (entry_id,)
+            ).fetchone()
+        if row is None:
+            raise CatalogNotFoundError(entry_id)
+        return row[0] or None
 
     # ── reads ────────────────────────────────────────────────────────────
 
@@ -935,16 +991,25 @@ class SqliteCatalog:
         props = {k: Sourced(**v) for k, v in (body.pop("properties", None) or {}).items()}
         return MaterialEntry(properties=props, **body)
 
-    def get(self, ref: str, kind: str | None = None) -> Any:
-        """By id, or by name when ``kind`` is given."""
+    def get(self, ref: str, kind: str | None = None, *, viewer: Any = FROM_CONTEXT) -> Any:
+        """By id, or by name when ``kind`` is given; only what ``viewer`` may see.
+
+        By name, the viewer's own entry wins over a shared one of the same name.
+        """
+        viewer = resolve(viewer)
+        where, args = self._visible(viewer)
         with self._lock:
             row = self._conn.execute(
-                "SELECT body FROM catalog_entries WHERE id = ?", (ref,)
+                f"SELECT body FROM catalog_entries WHERE id = ?{where}", (ref, *args)
             ).fetchone()
             if row is None and kind:
+                # A viewer's own entry wins over a shared one of the same name;
+                # an unscoped caller gets the shared one, never some account's.
+                order = "DESC" if viewer is not None else "ASC"
                 row = self._conn.execute(
-                    "SELECT body FROM catalog_entries WHERE kind = ? AND name = ?",
-                    (kind, ref.strip().lower()),
+                    f"SELECT body FROM catalog_entries WHERE kind = ? AND name = ?{where}"
+                    f" ORDER BY owner {order} LIMIT 1",
+                    (kind, ref.strip().lower(), *args),
                 ).fetchone()
         if row is None:
             raise CatalogNotFoundError(ref)
@@ -953,10 +1018,15 @@ class SqliteCatalog:
             raise CatalogNotFoundError(ref)
         return entry
 
-    def list(self, kind: str, *, family: str | None = None) -> list[Any]:
+    def list(
+        self, kind: str, *, family: str | None = None, viewer: Any = FROM_CONTEXT
+    ) -> list[Any]:
+        viewer = resolve(viewer)
+        where, args = self._visible(viewer)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT body FROM catalog_entries WHERE kind = ? ORDER BY name", (kind,)
+                f"SELECT body FROM catalog_entries WHERE kind = ?{where} ORDER BY name",
+                (kind, *args),
             ).fetchall()
         entries = [self._load(json.loads(r[0])) for r in rows]
         return [e for e in entries if family is None or e.family == family]
@@ -970,18 +1040,21 @@ class SqliteCatalog:
             ).fetchall()
         return [{"version": r[0], "changed_at": r[1], "changed_by": r[2]} for r in rows]
 
-    def process_limits(self, ref: str, material: str | None = None) -> dict[str, Any]:
+    def process_limits(
+        self, ref: str, material: str | None = None, *, viewer: Any = FROM_CONTEXT
+    ) -> dict[str, Any]:
         """A process's rules as ``check_manufacturability`` limits and a ranking candidate.
 
         With a material, only rules for every family or that material's family
         apply. Rules for another family are left out, not merged.
         """
-        process = self.get(ref, "process")
+        viewer = resolve(viewer)
+        process = self.get(ref, "process", viewer=viewer)
         assert isinstance(process, ProcessEntry)
         family = None
         material_name = None
         if material:
-            mat = self.get(material, "material")
+            mat = self.get(material, "material", viewer=viewer)
             assert isinstance(mat, MaterialEntry)
             family, material_name = mat.family, mat.name
             if process.material_families and family not in process.material_families:
@@ -1028,15 +1101,34 @@ class SqliteCatalog:
 
     # ── writes ───────────────────────────────────────────────────────────
 
-    def _save(self, entry: Any, by: str, *, new: bool) -> None:
+    def _save(self, entry: Any, by: str, *, new: bool, owner: str | None = None) -> None:
         body = json.dumps(entry.as_dict())
         with self._lock:
             try:
                 if new:
+                    if owner:
+                        # An account's entry may not take a shared entry's name:
+                        # it would silently replace the shared one for them.
+                        clash = self._conn.execute(
+                            "SELECT 1 FROM catalog_entries WHERE kind = ? AND name = ?"
+                            " AND owner = ''",
+                            (entry.kind, entry.name),
+                        ).fetchone()
+                        if clash:
+                            raise sqlite3.IntegrityError("shared name")
                     self._conn.execute(
-                        "INSERT INTO catalog_entries (id, kind, name, body, version, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
-                        (entry.id, entry.kind, entry.name, body, entry.version, entry.updated_at),
+                        "INSERT INTO catalog_entries"
+                        " (id, kind, name, body, version, updated_at, owner)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            entry.id,
+                            entry.kind,
+                            entry.name,
+                            body,
+                            entry.version,
+                            entry.updated_at,
+                            owner or "",
+                        ),
                     )
                 else:
                     self._conn.execute(
@@ -1056,7 +1148,11 @@ class SqliteCatalog:
             "catalog_entry_saved", kind=entry.kind, entry_id=entry.id, version=entry.version, by=by
         )
 
-    def register(self, kind: str, data: dict[str, Any], *, by: str = "") -> Any:
+    def register(
+        self, kind: str, data: dict[str, Any], *, by: str = "", owner: Any = FROM_CONTEXT
+    ) -> Any:
+        """Add an entry; ``owner`` makes it an account's own, else it is shared."""
+        owner = resolve(owner)
         now = self._clock()
         entry: ProcessEntry | MaterialEntry | ComponentEntry | AppearanceEntry | ErgonomicLimitEntry
         if kind == "process":
@@ -1156,12 +1252,23 @@ class SqliteCatalog:
             raise CatalogError(
                 "kind must be process, material, component, appearance or ergonomic_limit"
             )
-        self._save(entry, by, new=True)
+        self._save(entry, by, new=True, owner=owner)
         return entry
 
-    def update(self, entry_id: str, changes: dict[str, Any], *, by: str = "") -> Any:
-        """Change an entry; rules are replaced, properties merged by name."""
-        entry = self.get(entry_id)
+    def update(
+        self, entry_id: str, changes: dict[str, Any], *, by: str = "", editor: Any = FROM_CONTEXT
+    ) -> Any:
+        """Change an entry; rules are replaced, properties merged by name.
+
+        ``editor`` is the account asking (``None``: unscoped, may change any).
+        An account may change only its own entries; shared ones are refused.
+        """
+        editor = resolve(editor)
+        entry = self.get(entry_id, viewer=editor)
+        if editor is not None and self.owner_of(entry.id) != editor:
+            raise CatalogPermissionError(
+                f"{entry.name} is shared library data; register your own {entry.kind} instead"
+            )
         if isinstance(entry, ProcessEntry):
             allowed = {"title", "machine_kinds", "material_families", "rules", "notes"}
         elif isinstance(entry, ComponentEntry):
