@@ -66,7 +66,8 @@ class MinIOSettings:
     from environment variables so credentials never live in code:
     ``MINIO_ENDPOINT``, ``MINIO_ACCESS_KEY``, ``MINIO_SECRET_KEY``,
     ``MINIO_BUCKET`` (default ``metaforge-kb``), ``MINIO_SECURE``
-    (default ``true``).
+    (default ``true``), ``METAFORGE_KB_VERSIONING`` (``required``, the
+    default, or ``off``).
     """
 
     endpoint: str
@@ -75,6 +76,11 @@ class MinIOSettings:
     bucket: str = DEFAULT_BUCKET_NAME
     secure: bool = True
     region: str | None = None
+    #: ``required`` (default): bucket versioning must be on, or initialize
+    #: fails (FORGE-594). ``off``: for an S3-compatible store with no
+    #: versioning at all, such as Cloudflare R2; the history guarantee is
+    #: then the store's, not the bucket's, and a warning says so.
+    versioning: str = "required"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> MinIOSettings:
@@ -86,6 +92,11 @@ class MinIOSettings:
         except KeyError as exc:  # pragma: no cover — exercised in tests
             raise KBStorageError(f"MinIO settings missing required env var: {exc.args[0]}") from exc
         secure_raw = src.get("MINIO_SECURE", "true").strip().lower()
+        versioning = (src.get("METAFORGE_KB_VERSIONING") or "required").strip().lower()
+        if versioning not in {"required", "off"}:
+            raise KBStorageError(
+                f"METAFORGE_KB_VERSIONING={versioning!r}: expected 'required' or 'off'"
+            )
         return cls(
             endpoint=endpoint,
             access_key=access_key,
@@ -93,6 +104,7 @@ class MinIOSettings:
             bucket=src.get("MINIO_BUCKET", DEFAULT_BUCKET_NAME),
             secure=secure_raw not in {"0", "false", "no", "off"},
             region=src.get("MINIO_REGION") or None,
+            versioning=versioning,
         )
 
 
@@ -187,7 +199,18 @@ class MinIOKBStorage:
         with tracer.start_as_current_span("kb_storage.minio.initialize") as span:
             span.set_attribute("storage.bucket", self._settings.bucket)
             await asyncio.to_thread(self._ensure_bucket)
-            versioning = await asyncio.to_thread(self._enable_versioning)
+            if self._settings.versioning == "off":
+                # Chosen explicitly (METAFORGE_KB_VERSIONING=off): never a
+                # silent fallback from a refused call.
+                versioning = "off"
+                logger.warning(
+                    "kb_storage_versioning_off",
+                    bucket=self._settings.bucket,
+                    hint="objects can be overwritten in place; set only for a store "
+                    "without versioning, such as Cloudflare R2",
+                )
+            else:
+                versioning = await asyncio.to_thread(self._enable_versioning)
             span.set_attribute("storage.versioning", versioning)
             for prefix in KBPrefix:
                 key = object_key(prefix, _PREFIX_MARKER)

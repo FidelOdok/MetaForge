@@ -171,6 +171,15 @@ not pass through the gateway. Set `MINIO_REGION` too, or presigning first
 asks the store for its region. Without the setting, or if presigning fails,
 the link goes through the gateway.
 
+**Bucket versioning.** The knowledge store turns versioning on for its bucket
+at start and refuses to start if that does not take, so a datasheet's history
+cannot be overwritten in place. A store with no S3 versioning at all, such as
+Cloudflare R2, can never pass that check: set `METAFORGE_KB_VERSIONING=off`
+for it. The store then starts without the call, logs
+`kb_storage_versioning_off` at every start, and old versions of an object are
+kept only if the store keeps them itself. Any value other than `required`
+(the default) or `off` stops the gateway.
+
 ## The local plugin
 
 `metaforge-local` runs on the person's own machine over stdio, with no

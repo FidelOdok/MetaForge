@@ -153,3 +153,27 @@ def test_a_refused_versioning_call_fails_initialize() -> None:
 def test_versioning_that_does_not_read_back_enabled_fails_initialize() -> None:
     with pytest.raises(KBStorageError, match="versioning reads 'Suspended'"):
         asyncio.run(_storage(_Client(reads="Suspended")).initialize())
+
+
+# A store with no versioning at all (Cloudflare R2): opted out explicitly.
+
+
+@pytest.mark.usefixtures("_fake_minio")
+def test_versioning_off_skips_the_call_and_initializes() -> None:
+    client = _Client(refuse=True)
+    settings = MinIOSettings.from_env({**_ENV, "METAFORGE_KB_VERSIONING": "off"})
+    asyncio.run(MinIOKBStorage(settings, client=client).initialize())
+    assert client.set_calls == 0
+    assert "metaforge-kb" in client.buckets
+
+
+@pytest.mark.usefixtures("_fake_minio")
+def test_versioning_is_required_unless_turned_off() -> None:
+    assert MinIOSettings.from_env(_ENV).versioning == "required"
+    with pytest.raises(KBStorageError, match="could not enable versioning"):
+        asyncio.run(_storage(_Client(refuse=True)).initialize())
+
+
+def test_an_unknown_versioning_mode_is_refused() -> None:
+    with pytest.raises(KBStorageError, match="METAFORGE_KB_VERSIONING"):
+        MinIOSettings.from_env({**_ENV, "METAFORGE_KB_VERSIONING": "maybe"})
