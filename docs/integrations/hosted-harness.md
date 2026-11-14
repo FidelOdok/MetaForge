@@ -258,7 +258,8 @@ Supabase's on port 5432 (15 clients on the smallest instance), the idle
 connections alone exhaust it, and requests fail with `EMAXCONNSESSION`. Use the
 transaction-mode pooler instead (Supabase port 6543) and set
 `METAFORGE_PG_STATEMENT_CACHE=off`, which turns off the prepared-statement
-caches a transaction pooler cannot keep. `METAFORGE_PG_STORE_POOL_MAX` caps
+caches a transaction pooler cannot keep, LightRAG's included
+(`POSTGRES_STATEMENT_CACHE_SIZE=0`). `METAFORGE_PG_STORE_POOL_MAX` caps
 every store's asyncpg pool at once.
 
 ## See also

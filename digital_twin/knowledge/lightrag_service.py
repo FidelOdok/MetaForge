@@ -50,7 +50,7 @@ from digital_twin.knowledge.service import (
 from digital_twin.knowledge.types import KnowledgeType
 from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
-from shared.pg import asyncpg_connect_kwargs
+from shared.pg import asyncpg_connect_kwargs, statement_cache_enabled
 
 if TYPE_CHECKING:
     from digital_twin.knowledge.llm_property_extractor import PropertyLLM
@@ -1806,6 +1806,11 @@ class LightRAGKnowledgeService:
         store_max = os.environ.get("METAFORGE_PG_STORE_POOL_MAX", "").strip()
         if store_max.isdigit():
             env_map["POSTGRES_MAX_CONNECTIONS"] = store_max
+        # Behind a transaction pooler LightRAG's pool must not cache prepared
+        # statements either ("prepared statement __asyncpg_stmt_1__ already
+        # exists"); it reads POSTGRES_STATEMENT_CACHE_SIZE.
+        if not statement_cache_enabled():
+            env_map["POSTGRES_STATEMENT_CACHE_SIZE"] = "0"
         for key, value in env_map.items():
             os.environ.setdefault(key, value)
 
