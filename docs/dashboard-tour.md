@@ -568,9 +568,13 @@ verdict. A result recorded without a field keeps its numbers and says
 The component library the agents design with, as one browsable page. The
 **Components** tab has one toolbar: a search across maker, part number,
 specs and notes; chips for what a part is for (Lighting, Power, Control &
-radio, Sensors, Controls & display, Wires & connectors, Mechanical,
-Materials), each with its count; and toggles for **3D only** and **Hide
-discontinued** (parts the research marked as ending). Each row shows the
+radio, Sensors, Controls & display, Audio, Wires & connectors, Mechanical,
+Materials), each with its count; a **demo** menu (Watch, Lamp, Speaker)
+for the parts gathered for each demo product; an **integration level** menu (L6 board,
+L5 module, L4 system in package, L3 chip, discrete part, or off the ladder
+for mechanical parts, wires and materials); and toggles for **3D only** and
+**Hide discontinued** (parts the research marked as ending). The level is
+worked out from each part's family, name and package for browsing only. Each row shows the
 part number with the maker and a one-line description, and small icons for
 a 3D model or a part being discontinued. Picking a part opens it on its 3D
 view (the maker's own model in the colours its file states when one is

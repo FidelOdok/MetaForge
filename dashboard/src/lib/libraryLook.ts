@@ -72,6 +72,12 @@ export const MATERIAL_LOOKS: Record<string, Look> = {
   glass_black: L(0x0c0f14, 0.08, 0.2),
   hdpe_white: L(0xf1f0ea, 0.7, 0),
   tim_grey: L(0x8a8d90, 0.8, 0),
+  paper_black: L(0x1e1e20, 0.85, 0),
+  foam_grey: L(0x4a4c50, 0.95, 0),
+  fabric_black: L(0x26272a, 0.95, 0),
+  perforated_metal: L(0x9da1a6, 0.45, 0.7),
+  rubber_black: L(0x202022, 0.8, 0),
+  glass_clear: L(0xeaf3f7, 0.05, 0, 0.3),
 };
 
 /** Plain grey: a maker's face with no stated colour, or an untagged drawn shape. */

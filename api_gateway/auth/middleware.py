@@ -30,6 +30,7 @@ from starlette.responses import JSONResponse, Response
 
 from api_gateway.auth.provider import AuthProvider, AuthUnavailable, InvalidToken
 from api_gateway.auth.scope import decide, supports_project_scope
+from orchestrator.harness.providers.usage import usage_scope
 from twin_core.library.viewer import NO_TENANT, library_viewer
 
 logger = structlog.get_logger(__name__)
@@ -126,13 +127,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
                 return JSONResponse({"detail": decision.detail}, status_code=decision.status)
             request.state.project_scope = scope
+            project_id = decision.project_id
             # FORGE-876: every library read and write in this request sees the
             # shared entries and this caller's own, wherever it is made from.
             view = None if scope.unrestricted else (scope.tenant or NO_TENANT)
-            with library_viewer(view):
-                return await call_next(request)
+        else:
+            project_id = None
+            view = None
 
-        return await call_next(request)
+        # FORGE-873: attribute every model call this request makes, including
+        # in tasks it starts, to the verified caller and the project the scope
+        # decision resolved. Budgets and per-account metering key off these.
+        with (
+            usage_scope(subject=principal.subject, project_id=project_id),
+            library_viewer(view),
+        ):
+            return await call_next(request)
 
     # -- internals ---------------------------------------------------------
 

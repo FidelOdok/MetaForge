@@ -490,6 +490,11 @@ async def run_worker() -> None:
 
 
 def main() -> None:
+    # FORGE-873: the worker makes model calls too; refuse to start without
+    # the budget a deployment asked for.
+    from orchestrator.harness.providers.budget import active_policy
+
+    active_policy()
     asyncio.run(run_worker())
 
 

@@ -26,6 +26,7 @@ import structlog
 
 from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
+from orchestrator.harness.providers.budget import check_budget, record_spend
 from orchestrator.harness.providers.provenance import ServedBy, note_served, record_fallback
 from orchestrator.harness.providers.usage import record_call
 
@@ -182,6 +183,9 @@ class ProviderPipeline:
         moves straight to the next provider. Raises
         :class:`AllProvidersFailedError` only when the whole chain is spent.
         """
+        # FORGE-873: refuse before any provider is tried. Raised outside the
+        # per-provider loop, so a budget is never retried on another model.
+        await check_budget(role)
         candidates = self.resolve(role)
         attempts: list[tuple[ProviderSpec, Exception]] = []
         known_insufficient_window: int | None = None
@@ -255,7 +259,7 @@ class ProviderPipeline:
                         )
                         span.set_attribute("provider.chosen", spec.name)
                         self._on_served(role, candidates, spec, attempts)
-                        self._record_usage(role, spec, result)
+                        await self._record_usage(role, spec, result)
                         return result
 
                 assert last_exc is not None  # loop only exits the try via break/exhaust
@@ -319,12 +323,12 @@ class ProviderPipeline:
             f"({known_insufficient_window} tokens)"
         )
 
-    def _record_usage(
+    async def _record_usage(
         self, role: Role, spec: ProviderSpec, result: Any, *, reported: bool = True
     ) -> None:
         """FORGE-476: account this call's tokens and cost (best-effort)."""
         usage = result.get("usage") if isinstance(result, dict) else None
-        record_call(
+        event = record_call(
             provider=spec.name,
             model=spec.model,
             pipeline_role=role,
@@ -332,6 +336,8 @@ class ProviderPipeline:
             metrics=self._metrics,
             reported=reported and isinstance(usage, dict),
         )
+        # FORGE-873: the budget policy keeps its own totals. Never raises.
+        await record_spend(event)
 
     def _record_call_duration(self, spec: ProviderSpec, role: Role, duration: float) -> None:
         """Best-effort per-attempt latency metric (production-harness audit
@@ -356,6 +362,9 @@ class ProviderPipeline:
         un-send tokens). Raises :class:`AllProvidersFailedError` if no provider
         produces a first token.
         """
+        # FORGE-873: refuse before any provider is tried. Raised outside the
+        # per-provider loop, so a budget is never retried on another model.
+        await check_budget(role)
         candidates = self.resolve(role)
         attempts: list[tuple[ProviderSpec, Exception]] = []
         known_insufficient_window: int | None = None
@@ -396,7 +405,7 @@ class ProviderPipeline:
                 logger.info("provider_stream_ok", role=role, provider=spec.name, model=spec.model)
                 self._on_served(role, candidates, spec, attempts)
                 # A text-delta stream carries no usage: counted, tokens unknown.
-                self._record_usage(role, spec, None, reported=False)
+                await self._record_usage(role, spec, None, reported=False)
                 yield first
                 async for delta in agen:
                     yield delta
@@ -420,6 +429,9 @@ class ProviderPipeline:
         callers fall back to the non-streaming invoke when every candidate
         declines (:class:`AllProvidersFailedError`).
         """
+        # FORGE-873: refuse before any provider is tried. Raised outside the
+        # per-provider loop, so a budget is never retried on another model.
+        await check_budget(role)
         candidates = self.resolve(role)
         attempts: list[tuple[ProviderSpec, Exception]] = []
         known_insufficient_window: int | None = None
@@ -465,13 +477,13 @@ class ProviderPipeline:
                     async for event in _chain_first(first, agen):
                         if not recorded and event.get("type") == "response":
                             recorded = True
-                            self._record_usage(role, spec, event.get("result"))
+                            await self._record_usage(role, spec, event.get("result"))
                         yield event
                 finally:
                     if not recorded:
                         # Ended (or was abandoned) before a final response:
                         # the call happened, its tokens are unknown.
-                        self._record_usage(role, spec, None, reported=False)
+                        await self._record_usage(role, spec, None, reported=False)
                 return
 
             assert last_exc is not None

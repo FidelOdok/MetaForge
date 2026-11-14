@@ -449,7 +449,13 @@ class HybridBrain:
         # ReAct brain, is attributed to this run and phase. Both engines
         # (in-process and the Temporal worker) build their brain through here.
         with (
-            usage_scope(run_id=self._run_id, phase=phase.id, role="phase_brain"),
+            usage_scope(
+                run_id=self._run_id,
+                phase=phase.id,
+                role="phase_brain",
+                # FORGE-873: in the Temporal worker no request set the project.
+                project_id=context.project_id or None,
+            ),
             routing_scope(
                 project_id=context.project_id,
                 phase_model=phase.model or "",
