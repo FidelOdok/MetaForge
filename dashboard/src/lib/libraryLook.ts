@@ -65,6 +65,8 @@ export const MATERIAL_LOOKS: Record<string, Look> = {
   abs_grey: L(0x8d9096, 0.6, 0),
   pa_white: L(0xf0eee6, 0.6, 0),
   pa_black: L(0x202124, 0.6, 0),
+  pa_green: L(0x2e8b57, 0.55, 0),
+  pvc_red: L(0xb3261e, 0.5, 0),
   lcp_black: L(0x151517, 0.5, 0),
   pp_black: L(0x1d1d1f, 0.6, 0),
   pvc_sleeve: L(0x2d4f9e, 0.35, 0),
