@@ -3639,7 +3639,15 @@ class UnifiedMcpServer:
 
         if "error" in payload:
             entry["reachable"] = False
-            entry["error"] = payload["error"].get("message", "health/check returned an error")
+            error = payload["error"]
+            # A JSON-RPC error object, or a plain message from something in
+            # front of the adapter (a proxy, an on-demand worker's stand-in):
+            # health reports it either way, never crashes on its shape.
+            entry["error"] = (
+                str(error.get("message") or "health/check returned an error")
+                if isinstance(error, dict)
+                else str(error)
+            )
             return entry
         entry["reachable"] = True
         return entry
