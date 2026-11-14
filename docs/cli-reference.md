@@ -947,6 +947,9 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 | `METAFORGE_APPROVAL_AGENT` + `METAFORGE_APPROVAL_ON_BEHALF_OF` | `approvals` | When both are set, requests use surface `agent` and name the agent and the user it acts for (sent as `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of`) |
 | `METAFORGE_INGEST_TIMEOUT` | `ingest` | Override the default 300 s timeout |
 | `METAFORGE_MAX_OUTPUT_TOKENS` | chat (gateway-side) | Output-token cap per model completion (default 8192) |
+| `METAFORGE_LLM_REQUEST_TIMEOUT_SECONDS` | chat (gateway-side) | Longest wait for one model call, or between chunks of a streamed one (default: the SDK's 600 s) |
+| `METAFORGE_LLM_SDK_RETRIES` | chat (gateway-side) | The provider SDK's own retries per call (default: the SDK's 2; the pipeline retries as well) |
+| `METAFORGE_CHAT_WALL_CLOCK_SECONDS` | chat (gateway-side) | Hard time limit for a whole chat turn, checked between steps (default: none) |
 | `FORGE_LOG` | `forge` (TUI) | `1`/`true` enables verbose logging (raw SSE frames); same as `--debug` |
 | `FORGE_LOG_FILE` | `forge` (TUI) | Override the log path (default `~/.forge/logs/session.log`) |
 
