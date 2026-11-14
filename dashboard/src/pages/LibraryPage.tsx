@@ -1,12 +1,12 @@
-import { useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Upload } from 'lucide-react';
+import { AlertTriangle, Box, Download, ExternalLink, Search, Upload } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
-import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { PartPreview, activeMakerModel } from '../components/library/PartPreview';
+import { CATEGORIES, categoryOf, type Category } from '../lib/libraryCategory';
 import './LibraryPage.css';
 import {
   exportLibrary,
@@ -30,38 +30,59 @@ const TABS: Array<[Tab, string]> = [
 /** A title the research import marked as a part being discontinued. */
 const ENDING = /^\[ENDING[^\]]*\]\s*/;
 
+function isEnding(c: LibraryComponent): boolean {
+  return ENDING.test(c.title);
+}
+
 function cleanTitle(title: string): string {
   return title.replace(ENDING, '');
+}
+
+/** "Nordic nRF52840-QIAA-R: BLE SoC" -> "BLE SoC": the title without its maker and part. */
+function describe(c: LibraryComponent): string {
+  const title = cleanTitle(c.title || c.name);
+  const cut = title.indexOf(': ');
+  return cut > 0 ? title.slice(cut + 2) : title;
+}
+
+/** A short handle for the part: its part number, else its title. */
+function handle(c: LibraryComponent): string {
+  const mpn = (c.mpn || '').split(/[,(;]/)[0]?.trim();
+  return mpn || cleanTitle(c.title || c.name);
 }
 
 function hasModel(c: LibraryComponent): boolean {
   return Boolean(activeMakerModel(c) || c.form_code);
 }
 
+function label(family: string): string {
+  const text = family.replace(/_/g, ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+
 function formatValue(v: SourcedValue): string {
   const value = Array.isArray(v.value) ? v.value.join(' x ') : String(v.value);
   return `${value} ${v.unit}`;
 }
 
-function SourcedTable({ values, label }: { values: Record<string, SourcedValue>; label: string }) {
-  const rows = Object.entries(values || {});
-  if (rows.length === 0) return <p className="mf-library-muted">No typed {label} yet.</p>;
+function SourcedTable({ values }: { values: Record<string, SourcedValue> }) {
   return (
     <table className="mf-library-table">
       <tbody>
-        {rows.map(([key, v]) => (
+        {Object.entries(values).map(([key, v]) => (
           <tr key={key}>
-            <td>{key.replace(/_/g, ' ')}</td>
+            <td>{key.replace(/_(mm|kg|kn|n|v|mah|rpm|mpa|c|pct|w_mk|um_mk|kg_m3)$/, '').replace(/_/g, ' ')}</td>
             <td className="font-mono">{formatValue(v)}</td>
             <td className="mf-library-muted">
               {v.source_ref?.startsWith('http') ? (
                 <a href={v.source_ref.split(' ')[0]} target="_blank" rel="noopener noreferrer">
-                  {v.source_kind}
+                  {v.source_kind.replace(/_/g, ' ')}
                 </a>
               ) : (
-                v.source_kind
+                v.source_kind.replace(/_/g, ' ')
               )}
-              {v.needs_review ? ' (needs review)' : ''}
+              {v.needs_review ? ' · review' : ''}
             </td>
           </tr>
         ))}
@@ -70,206 +91,257 @@ function SourcedTable({ values, label }: { values: Record<string, SourcedValue>;
   );
 }
 
+/** A collapsible section that says how much it holds; nothing at all when it holds nothing. */
+function Section({ title, count, open, children }: { title: string; count?: number; open?: boolean; children: ReactNode }) {
+  if (count === 0) return null;
+  return (
+    <details className="mf-library-section" open={open}>
+      <summary>
+        {title}
+        {count !== undefined && <span className="mf-library-count">{count}</span>}
+      </summary>
+      <div className="mf-library-section-body">{children}</div>
+    </details>
+  );
+}
+
 function ComponentDetail({ part }: { part: LibraryComponent }) {
   const models = (part.models || []).filter((m) => (m.status ?? 'active') === 'active');
+  const specs = Object.keys(part.specs || {}).length;
+  const suppliers = part.suppliers || [];
+  const facts: Array<[string, ReactNode]> = [
+    ...(part.manufacturer ? ([['Maker', part.manufacturer]] as Array<[string, ReactNode]>) : []),
+    ['Part', <span className="font-mono mf-library-break">{part.mpn || part.name}</span>],
+    ['Category', categoryOf(part)],
+    ['Type', label(part.family)],
+  ];
+  if (part.material) facts.push(['Material', part.material.split('; library materials')[0]]);
+  if (part.datasheet)
+    facts.push([
+      'Datasheet',
+      <a href={part.datasheet} target="_blank" rel="noopener noreferrer">
+        Open <ExternalLink size={11} aria-hidden="true" />
+      </a>,
+    ]);
+
   return (
     <article className="mf-library-detail" data-testid="library-detail">
-      <header>
-        <h2>{cleanTitle(part.title || part.name)}</h2>
-        <p className="mf-library-muted">
-          {[part.manufacturer, part.mpn].filter(Boolean).join(' · ')} · v{part.version} ·{' '}
-          <code>{part.name}</code>
-        </p>
-        <div className="mf-library-badges">
-          <Badge>{part.family}</Badge>
-          {ENDING.test(part.title) && <Badge variant="warning">being discontinued: check status</Badge>}
-          {activeMakerModel(part) && <Badge variant="info">maker model</Badge>}
-        </div>
-      </header>
       <PartPreview part={part} />
-      {part.material && (
-        <section>
-          <h3>Material</h3>
-          <p>{part.material}</p>
-        </section>
-      )}
-      <section>
-        <h3>Specs</h3>
-        <SourcedTable values={part.specs} label="specs" />
-      </section>
-      {(part.suppliers || []).length > 0 && (
-        <section>
-          <h3>Suppliers</h3>
-          <ul className="mf-library-list-plain">
-            {(part.suppliers || []).map((s) => (
-              <li key={`${s.supplier}-${s.sku}`}>
-                {s.url ? (
-                  <a href={s.url} target="_blank" rel="noopener noreferrer">
-                    {s.supplier} {s.sku}
-                  </a>
-                ) : (
-                  `${s.supplier} ${s.sku}`
-                )}
-                {s.offer?.breaks?.length ? (
-                  <span className="font-mono">
-                    {' '}
-                    {s.offer.breaks.map((b) => `${b.qty}+: ${s.offer?.currency ?? ''} ${b.unit_price}`).join(', ')}
-                  </span>
-                ) : null}
-                {s.offer?.read_on && <span className="mf-library-muted"> (read {s.offer.read_on})</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {models.length > 0 && (
-        <section>
-          <h3>Model files</h3>
-          <ul className="mf-library-list-plain">
-            {models.map((m) => (
-              <li key={`${m.model_id}-${m.version}`}>
-                {m.model_id} v{m.version} ({m.engine}): {m.usage}
-                <span className="mf-library-muted"> Licence: {m.artifacts[0]?.licence}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {part.datasheet && (
-        <p>
-          <a href={part.datasheet} target="_blank" rel="noopener noreferrer">
-            Datasheet
-          </a>
-        </p>
-      )}
-      <details>
-        <summary>Notes and what is assumed</summary>
+      <header className="mf-library-detail-head">
+        <h2>{describe(part)}</h2>
+        {isEnding(part) && (
+          <p className="mf-library-warning">
+            <AlertTriangle size={13} aria-hidden="true" /> The research found this part being discontinued: check its
+            status before designing it in.
+          </p>
+        )}
+      </header>
+      <dl className="mf-library-facts">
+        {facts.map(([k, v]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <Section title="Specs" count={specs} open>
+        <SourcedTable values={part.specs} />
+      </Section>
+      <Section title="Suppliers" count={suppliers.length}>
+        <ul className="mf-library-list-plain">
+          {suppliers.map((s) => (
+            <li key={`${s.supplier}-${s.sku}`}>
+              {s.url ? (
+                <a href={s.url} target="_blank" rel="noopener noreferrer">
+                  {s.supplier} {s.sku}
+                </a>
+              ) : (
+                `${s.supplier} ${s.sku}`
+              )}
+              {s.offer?.breaks?.length ? (
+                <span className="font-mono mf-library-muted">
+                  {' '}
+                  {s.offer.breaks.map((b) => `${b.qty}+ ${s.offer?.currency ?? ''} ${b.unit_price}`).join(' · ')}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </Section>
+      <Section title="Model files" count={models.length}>
+        <ul className="mf-library-list-plain">
+          {models.map((m) => (
+            <li key={`${m.model_id}-${m.version}`}>
+              <p>{m.usage}</p>
+              <p className="mf-library-muted">Licence: {m.artifacts[0]?.licence}</p>
+            </li>
+          ))}
+        </ul>
+      </Section>
+      <Section title="Notes and what is assumed">
         <pre className="mf-library-notes">{part.notes}</pre>
-      </details>
+      </Section>
     </article>
+  );
+}
+
+function Chip({
+  on,
+  onClick,
+  children,
+  title,
+}: {
+  on: boolean;
+  onClick: () => void;
+  children: ReactNode;
+  title?: string;
+}) {
+  return (
+    <button type="button" className="mf-library-chip" aria-pressed={on} onClick={onClick} title={title}>
+      {children}
+    </button>
   );
 }
 
 function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
   const [query, setQuery] = useState('');
-  const [family, setFamily] = useState('');
+  const [group, setGroup] = useState<Category | ''>('');
   const [only3d, setOnly3d] = useState(false);
   const [hideEnding, setHideEnding] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const families = useMemo(() => [...new Set(parts.map((p) => p.family))].sort(), [parts]);
+  const groups = useMemo(() => {
+    const counts = new Map<Category, number>();
+    parts.forEach((p) => counts.set(categoryOf(p), (counts.get(categoryOf(p)) ?? 0) + 1));
+    return CATEGORIES.filter((c) => counts.has(c)).map((c) => [c, counts.get(c) ?? 0] as const);
+  }, [parts]);
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return parts
-      .filter((p) => !family || p.family === family)
+      .filter((p) => !group || categoryOf(p) === group)
       .filter((p) => !only3d || hasModel(p))
-      .filter((p) => !hideEnding || !ENDING.test(p.title))
+      .filter((p) => !hideEnding || !isEnding(p))
       .filter((p) => {
         if (words.length === 0) return true;
         const hay = `${p.name} ${p.title} ${p.manufacturer ?? ''} ${p.mpn ?? ''} ${p.notes}`.toLowerCase();
         return words.every((w) => hay.includes(w));
       })
-      .sort((a, b) => cleanTitle(a.title).localeCompare(cleanTitle(b.title)));
-  }, [parts, query, family, only3d, hideEnding]);
-  const current = parts.find((p) => p.name === selected) ?? shown[0] ?? null;
+      .sort((a, b) => `${a.manufacturer} ${handle(a)}`.localeCompare(`${b.manufacturer} ${handle(b)}`));
+  }, [parts, query, group, only3d, hideEnding]);
+  const current = parts.find((p) => p.name === selected && shown.includes(p)) ?? shown[0] ?? null;
 
   return (
-    <div className="mf-library-split">
-      <div className="mf-library-browser">
-        <div className="mf-library-filters">
+    <>
+      <div className="mf-library-toolbar">
+        <label className="mf-library-search">
+          <Search size={14} aria-hidden="true" />
           <input
             type="search"
             aria-label="Search components"
-            placeholder="Search maker, part, specs, notes"
+            placeholder="Search parts, makers, specs"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <select aria-label="Type" value={family} onChange={(e) => setFamily(e.target.value)}>
-            <option value="">All types</option>
-            {families.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-          <label>
-            <input type="checkbox" checked={only3d} onChange={(e) => setOnly3d(e.target.checked)} /> Only with 3D
-          </label>
-          <label>
-            <input type="checkbox" checked={hideEnding} onChange={(e) => setHideEnding(e.target.checked)} /> Hide
-            discontinued
-          </label>
-          <span className="mf-library-muted font-mono" data-testid="library-count">
-            {shown.length} of {parts.length}
-          </span>
-        </div>
-        <ul className="mf-library-rows" role="listbox" aria-label="Components">
-          {shown.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={current?.name === p.name}
-                className={current?.name === p.name ? 'is-selected' : undefined}
-                onClick={() => setSelected(p.name)}
-              >
-                <span className="mf-library-row-title">{cleanTitle(p.title || p.name)}</span>
-                <span className="mf-library-row-meta">
-                  {[p.manufacturer, p.family].filter(Boolean).join(' · ')}
-                  {hasModel(p) ? ' · 3D' : ''}
-                  {ENDING.test(p.title) ? ' · discontinued?' : ''}
-                </span>
-              </button>
-            </li>
+        </label>
+        <div className="mf-library-chips" role="group" aria-label="Category">
+          <Chip on={group === ''} onClick={() => setGroup('')}>
+            All
+          </Chip>
+          {groups.map(([c, n]) => (
+            <Chip key={c} on={group === c} onClick={() => setGroup(group === c ? '' : c)}>
+              {c} <span className="mf-library-count">{n}</span>
+            </Chip>
           ))}
-        </ul>
+        </div>
+        <div className="mf-library-chips" role="group" aria-label="Show">
+          <Chip on={only3d} onClick={() => setOnly3d(!only3d)} title="Only parts with a 3D model">
+            <Box size={12} aria-hidden="true" /> 3D only
+          </Chip>
+          <Chip on={hideEnding} onClick={() => setHideEnding(!hideEnding)} title="Hide parts being discontinued">
+            Hide discontinued
+          </Chip>
+        </div>
       </div>
-      {current ? <ComponentDetail part={current} /> : <EmptyState title="No component matches" description="Clear the search or the filters." />}
-    </div>
+      <div className="mf-library-split">
+        <div className="mf-library-browser">
+          <div className="mf-library-browser-head" data-testid="library-count">
+            {shown.length === parts.length ? `${parts.length} parts` : `${shown.length} of ${parts.length}`}
+          </div>
+          <ul className="mf-library-rows" role="listbox" aria-label="Components">
+            {shown.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={current?.name === p.name}
+                  className={current?.name === p.name ? 'is-selected' : undefined}
+                  onClick={() => setSelected(p.name)}
+                >
+                  <span className="mf-library-row-line">
+                    <span className="mf-library-row-title">{handle(p)}</span>
+                    <span className="mf-library-row-icons">
+                      {isEnding(p) && <AlertTriangle size={12} aria-label="being discontinued" className="is-warning" />}
+                      {hasModel(p) && <Box size={12} aria-label="has a 3D model" />}
+                    </span>
+                  </span>
+                  <span className="mf-library-row-meta">
+                    {[p.manufacturer, describe(p) !== handle(p) ? describe(p) : label(p.family)]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        {current ? (
+          <ComponentDetail part={current} />
+        ) : (
+          <EmptyState title="No part matches" description="Clear the search or a filter." />
+        )}
+      </div>
+    </>
   );
 }
 
 function MaterialsTab({ materials }: { materials: LibraryMaterial[] }) {
-  const [open, setOpen] = useState<string | null>(null);
   return (
-    <ul className="mf-library-cards" data-testid="library-materials">
+    <div className="mf-library-cards" data-testid="library-materials">
       {materials.map((m) => (
-        <li key={m.id}>
-          <button type="button" onClick={() => setOpen(open === m.name ? null : m.name)} aria-expanded={open === m.name}>
-            <span className="mf-library-row-title">{m.title || m.name}</span>
-            <span className="mf-library-row-meta">
-              {m.family} · {Object.keys(m.properties || {}).length} sourced properties
-            </span>
-          </button>
-          {open === m.name && (
-            <div className="mf-library-card-body">
-              <SourcedTable values={m.properties} label="properties" />
-              <pre className="mf-library-notes">{m.notes}</pre>
-            </div>
-          )}
-        </li>
+        <details key={m.id} className="mf-library-section">
+          <summary>
+            {m.title || m.name}
+            <span className="mf-library-count">{Object.keys(m.properties || {}).length}</span>
+          </summary>
+          <div className="mf-library-section-body">
+            <p className="mf-library-muted">{label(m.family)}</p>
+            {Object.keys(m.properties || {}).length > 0 && <SourcedTable values={m.properties} />}
+            <pre className="mf-library-notes">{m.notes}</pre>
+          </div>
+        </details>
       ))}
-    </ul>
+    </div>
   );
 }
 
 function MachinesTab({ machines }: { machines: LibraryMachine[] }) {
   return (
-    <table className="mf-library-table" data-testid="library-machines">
+    <table className="mf-library-table mf-library-panel" data-testid="library-machines">
       <thead>
         <tr>
           <th>Machine</th>
           <th>Kind</th>
-          <th>Layer</th>
           <th>Processes</th>
         </tr>
       </thead>
       <tbody>
         {machines.map((m) => (
           <tr key={m.id}>
-            <td>{m.layer === 'instance' ? m.name : `${m.make ?? ''} ${m.model ?? ''}`}</td>
-            <td>{m.kind}</td>
-            <td>{m.layer}</td>
-            <td>{(m.processes || []).join(', ')}</td>
+            <td>
+              {m.layer === 'instance' ? m.name : `${m.make ?? ''} ${m.model ?? ''}`}
+              {m.layer === 'instance' && <span className="mf-library-muted"> · on the bench</span>}
+            </td>
+            <td>{label(m.kind)}</td>
+            <td>{(m.processes || []).map(label).join(', ')}</td>
           </tr>
         ))}
       </tbody>
@@ -326,22 +398,29 @@ export function LibraryPage() {
     }
   }
 
-  const loading = components.isLoading;
   const parts = components.data ?? [];
-  const counts = `${parts.length} components · ${materials.data?.length ?? 0} materials · ${machines.data?.length ?? 0} machines`;
+  const counts: Record<Tab, number | undefined> = {
+    components: components.data?.length,
+    materials: materials.data?.length,
+    machines: machines.data?.length,
+  };
 
   return (
     <div className="mf-library">
       <PageHeader
         title="Library"
-        meta={counts}
-        description="Bought parts, materials and machines the agents design with. Every value carries its source."
         actions={
           <>
-            <Button variant="secondary" size="sm" onClick={onExport} disabled={busy}>
+            <Button variant="ghost" size="sm" onClick={onExport} disabled={busy} title="Save the whole library as a file">
               <Download size={14} aria-hidden="true" /> Export
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => fileInput.current?.click()} disabled={busy}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fileInput.current?.click()}
+              disabled={busy}
+              title="Add the entries of a library file"
+            >
               <Upload size={14} aria-hidden="true" /> Import
             </Button>
             <input
@@ -356,17 +435,18 @@ export function LibraryPage() {
         }
       />
       <div className="mf-library-tabs" role="tablist">
-        {TABS.map(([t, label]) => (
+        {TABS.map(([t, name]) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
-            {label}
+            {name}
+            {counts[t] !== undefined && <span className="mf-library-count">{counts[t]}</span>}
           </button>
         ))}
       </div>
       {components.isError && (
         <EmptyState title="The library could not be read" description="Check that the gateway is running." />
       )}
-      {!loading && !components.isError && tab === 'components' && parts.length === 0 && (
-        <EmptyState title="The library is empty" description="Import a library export, or let an agent research parts." />
+      {!components.isLoading && !components.isError && tab === 'components' && parts.length === 0 && (
+        <EmptyState title="The library is empty" description="Import a library file, or let an agent research parts." />
       )}
       {tab === 'components' && parts.length > 0 && <ComponentsTab parts={parts} />}
       {tab === 'materials' && <MaterialsTab materials={materials.data ?? []} />}

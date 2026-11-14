@@ -136,10 +136,7 @@ export function PartPreview({ part }: { part: LibraryComponent }) {
   const placed = useMemo(() => (shapes ? centred(shapes) : null), [shapes]);
   const span = placed ? Math.max(...placed.size, 1) : 10;
 
-  let note: string;
-  if (source === 'maker') note = "The maker's own model, in the colours its file states.";
-  else if (source === 'drawn') note = 'Drawn from sourced sizes; the notes say what is assumed.';
-  else note = 'Neither a maker model nor sourced sizes to draw one from.';
+  const sourceLabel = source === 'maker' ? "Maker's model" : source === 'drawn' ? 'Drawn from sourced sizes' : '';
 
   return (
     <div className="mf-library-preview" data-testid="library-preview" data-source={source}>
@@ -167,15 +164,14 @@ export function PartPreview({ part }: { part: LibraryComponent }) {
         {error && <p className="mf-library-preview-status mf-library-preview-error">Model not shown: {error}</p>}
         {source === 'none' && <p className="mf-library-preview-status">No model yet.</p>}
       </div>
-      <p className="mf-library-preview-note">
-        {note}
-        {placed && placed.shapes.length > 0 && (
+      {placed && placed.shapes.length > 0 && (
+        <p className="mf-library-preview-tag">
+          {sourceLabel} ·{' '}
           <span className="font-mono">
-            {' '}
-            {placed.size[0].toFixed(2)} x {placed.size[2].toFixed(2)} x {placed.size[1].toFixed(2)} mm (L x W x H)
+            {placed.size[0].toFixed(1)} x {placed.size[2].toFixed(1)} x {placed.size[1].toFixed(1)} mm
           </span>
-        )}
-      </p>
+        </p>
+      )}
     </div>
   );
 }

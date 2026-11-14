@@ -42,7 +42,12 @@ const PARTS = [
     manufacturer: 'Nordic',
     form_code: "return [g.box(7, 0.85, 7).name('body [epoxy_black]')];",
   }),
-  part('hi_link_hlk_pm01', { title: 'Hi-Link HLK-PM01: AC-DC module', family: 'module', manufacturer: 'Hi-Link' }),
+  part('hi_link_hlk_pm01', {
+    title: 'Hi-Link HLK-PM01: AC-DC module',
+    family: 'module',
+    manufacturer: 'Hi-Link',
+    notes: 'Smart-lamp market research, 01-power-and-drivers.md section 1 (Mains AC-DC modules), read 2026-11-12.',
+  }),
   part('samsung_lm301b', { title: '[ENDING: check status] Samsung LM301B: LED', manufacturer: 'Samsung' }),
 ];
 
@@ -56,7 +61,7 @@ describe('LibraryPage', () => {
 
   it('lists every component and shows the first in detail', async () => {
     render(<LibraryPage />);
-    expect(await screen.findByTestId('library-count')).toHaveTextContent('3 of 3');
+    expect(await screen.findByTestId('library-count')).toHaveTextContent('3 parts');
     expect(screen.getByTestId('library-detail')).toBeInTheDocument();
   });
 
@@ -66,13 +71,14 @@ describe('LibraryPage', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search components' }), { target: { value: 'nordic' } });
     expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search components' }), { target: { value: '' } });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: 'module' } });
+    const groups = screen.getByRole('group', { name: 'Category' });
+    fireEvent.click(within(groups).getByRole('button', { name: /Power/ }));
     expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: '' } });
-    fireEvent.click(screen.getByLabelText(/Only with 3D/));
+    fireEvent.click(within(groups).getByRole('button', { name: 'All' }));
+    fireEvent.click(screen.getByRole('button', { name: /3D only/ }));
     expect(screen.getByTestId('library-count')).toHaveTextContent('1 of 3');
-    fireEvent.click(screen.getByLabelText(/Only with 3D/));
-    fireEvent.click(screen.getByLabelText(/Hide/));
+    fireEvent.click(screen.getByRole('button', { name: /3D only/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Hide discontinued/ }));
     expect(screen.getByTestId('library-count')).toHaveTextContent('2 of 3');
   });
 
