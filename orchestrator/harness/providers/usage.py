@@ -209,6 +209,11 @@ class UsageContext:
     role: str | None = None
     #: The client or surface that asked (cli, dashboard, mcp client name...).
     caller: str | None = None
+    #: The project the call works for (FORGE-873). Budgets and per-account
+    #: metering key off it; set by the gateway per request and by runs.
+    project_id: str | None = None
+    #: The verified caller (``Principal.subject``), when one is known.
+    subject: str | None = None
 
 
 _ctx: ContextVar[UsageContext] = ContextVar("llm_usage_context", default=UsageContext())
@@ -226,6 +231,8 @@ def usage_scope(
     role: str | None = None,
     caller: str | None = None,
     default_role: str | None = None,
+    project_id: str | None = None,
+    subject: str | None = None,
 ) -> Iterator[UsageContext]:
     """Attribute every model call inside the block.
 
@@ -240,6 +247,8 @@ def usage_scope(
         phase=phase if phase is not None else parent.phase,
         role=role if role is not None else (parent.role or default_role),
         caller=caller if caller is not None else parent.caller,
+        project_id=project_id if project_id is not None else parent.project_id,
+        subject=subject if subject is not None else parent.subject,
     )
     token = _ctx.set(merged)
     try:
@@ -266,6 +275,9 @@ class UsageEvent:
     cached_input_tokens: int | None
     #: ``None`` means unknown (no usage, or the model has no price).
     cost_usd: float | None
+    #: Attribution for budgets (FORGE-873); ``None`` on a local, unscoped call.
+    project_id: str | None = None
+    subject: str | None = None
 
 
 @dataclass
@@ -383,6 +395,15 @@ class UsageStore:
                 CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage(ts);
                 """
             )
+            # FORGE-873: attribution columns, added in place to files that
+            # predate them (SQLite has no ADD COLUMN IF NOT EXISTS).
+            have = {row[1] for row in self._conn.execute("PRAGMA table_info(llm_usage)")}
+            for column in ("project_id", "subject"):
+                if column not in have:
+                    self._conn.execute(f"ALTER TABLE llm_usage ADD COLUMN {column} TEXT")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_llm_usage_project ON llm_usage(project_id, ts)"
+            )
             self._conn.commit()
         self._alerted: set[str] = set()
 
@@ -395,8 +416,9 @@ class UsageStore:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO llm_usage (ts, run_id, phase, role, caller, provider, model,"
-                " prompt_tokens, completion_tokens, cached_input_tokens, cost_usd)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " prompt_tokens, completion_tokens, cached_input_tokens, cost_usd,"
+                " project_id, subject)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     e.ts,
                     e.run_id,
@@ -409,6 +431,8 @@ class UsageStore:
                     e.completion_tokens,
                     e.cached_input_tokens,
                     e.cost_usd,
+                    e.project_id,
+                    e.subject,
                 ),
             )
             self._conn.commit()
@@ -423,7 +447,8 @@ class UsageStore:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT ts, run_id, phase, role, caller, provider, model, prompt_tokens,"
-                f" completion_tokens, cached_input_tokens, cost_usd FROM llm_usage {where}"
+                " completion_tokens, cached_input_tokens, cost_usd, project_id, subject"
+                f" FROM llm_usage {where}"
                 " ORDER BY id",
                 args,
             ).fetchall()
@@ -554,10 +579,13 @@ def record_call(
                 if (billed := reported_cost_usd(usage) if tokens else None) is not None
                 else price_cost_usd(provider, model, tokens)
             ),
+            project_id=ctx.project_id,
+            subject=ctx.subject,
         )
         logger.info(
             "llm_usage",
             run_id=event.run_id,
+            project_id=event.project_id,
             phase=event.phase,
             role=event.role,
             caller=event.caller,

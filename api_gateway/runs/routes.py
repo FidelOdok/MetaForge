@@ -1196,6 +1196,21 @@ def get_usage_summary(window_hours: float = 24.0) -> dict[str, Any]:
     return usage_report(window_hours * 3600.0)
 
 
+@router.get("/usage/budget")
+async def get_budget(project_id: str | None = None) -> dict[str, Any]:
+    """Where the AI budget that pays for ``project_id``'s model calls stands (FORGE-873).
+
+    On a hosted gateway this is the budget of the account owning the project:
+    the monthly amount, what has been spent this month and what is left. A
+    gateway with no budget answers ``{"enabled": false}``.
+    """
+    from orchestrator.harness.providers.budget import budget_status
+    from orchestrator.harness.providers.usage import current_usage_context, usage_scope
+
+    with usage_scope(project_id=project_id or None):
+        return await budget_status(current_usage_context())
+
+
 @router.get("/{run_id}", response_model=RunResponse)
 async def get_run(run_id: str) -> RunResponse:
     try:

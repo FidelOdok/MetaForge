@@ -38349,6 +38349,58 @@
         ]
       }
     },
+    "/v1/runs/usage/budget": {
+      "get": {
+        "description": "Where the AI budget that pays for ``project_id``'s model calls stands.\n\nOn a hosted gateway this is the budget of the account owning the project:\nthe monthly amount, what has been spent this month and what is left. A\ngateway with no budget answers ``{\"enabled\": false}``.",
+        "operationId": "get_budget_v1_runs_usage_budget_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Budget V1 Runs Usage Budget Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Budget",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
     "/v1/runs/usage/summary": {
       "get": {
         "description": "LLM tokens and cost across all runs for the trailing window.",
