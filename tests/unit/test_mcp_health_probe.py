@@ -67,6 +67,16 @@ class _Hangs(McpToolServer):
         return "{}"
 
 
+class _PlainError(McpToolServer):
+    """Something in front of the adapter answers with a bare message, not a JSON-RPC error."""
+
+    def __init__(self) -> None:
+        super().__init__(adapter_id="kicad", version="0.1.0")
+
+    async def handle_request(self, raw: str) -> str:
+        return json.dumps({"error": "worker unavailable: no snapshot"})
+
+
 async def _health(server: UnifiedMcpServer) -> dict[str, Any]:
     raw = await server.handle_request(
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "health/check", "params": {}})
@@ -88,6 +98,15 @@ class TestItCanSayUnhealthy:
         entry = next(a for a in report["adapters"] if a["adapter_id"] == "calculix")
         assert entry["reachable"] is False
         assert "-32001" in entry["error"]
+
+    async def test_an_error_that_is_not_a_json_rpc_object_is_reported_not_raised(self) -> None:
+        # A proxy in front of an adapter answered {"error": "<message>"}; the
+        # probe read error.message off a string and the whole health route 500'd.
+        report = await _health(UnifiedMcpServer(adapters=[_Healthy(), _PlainError()]))
+        entry = next(a for a in report["adapters"] if a["adapter_id"] == "kicad")
+        assert entry["reachable"] is False
+        assert entry["error"] == "worker unavailable: no snapshot"
+        assert report["status"] == "degraded"
 
     async def test_a_hang_is_bounded_and_reported(self) -> None:
         server = UnifiedMcpServer(adapters=[_Healthy(), _Hangs()])
