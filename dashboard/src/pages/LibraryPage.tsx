@@ -7,6 +7,8 @@ import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { PartPreview, activeMakerModel } from '../components/library/PartPreview';
 import { CATEGORIES, categoryOf, type Category } from '../lib/libraryCategory';
+import { LEVELS, LEVEL_HELP, levelOf, type Level } from '../lib/libraryLevel';
+import { DEMOS, demosOf, type Demo } from '../lib/libraryDemo';
 import './LibraryPage.css';
 import {
   exportLibrary,
@@ -132,6 +134,7 @@ function ComponentDetail({ part }: { part: LibraryComponent }) {
     ...(part.manufacturer ? ([['Maker', part.manufacturer]] as Array<[string, ReactNode]>) : []),
     ['Part', <span className="font-mono mf-library-break">{part.mpn || part.name}</span>],
     ['Category', categoryOf(part)],
+    ['Level', <span title={LEVEL_HELP[levelOf(part)]}>{levelOf(part)}</span>],
     ['Type', label(part.family)],
   ];
   if (part.material) facts.push(['Material', part.material.split('; library materials')[0]]);
@@ -225,6 +228,8 @@ function Chip({
 function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState<Category | ''>('');
+  const [level, setLevel] = useState<Level | ''>('');
+  const [demo, setDemo] = useState<Demo | ''>('');
   const [only3d, setOnly3d] = useState(false);
   const [hideEnding, setHideEnding] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -237,6 +242,8 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return parts
       .filter((p) => !group || categoryOf(p) === group)
+      .filter((p) => !level || levelOf(p) === level)
+      .filter((p) => !demo || demosOf(p).includes(demo))
       .filter((p) => !only3d || hasModel(p))
       .filter((p) => !hideEnding || !isEnding(p))
       .filter((p) => {
@@ -245,7 +252,7 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
         return words.every((w) => hay.includes(w));
       })
       .sort((a, b) => `${a.manufacturer} ${handle(a)}`.localeCompare(`${b.manufacturer} ${handle(b)}`));
-  }, [parts, query, group, only3d, hideEnding]);
+  }, [parts, query, group, level, demo, only3d, hideEnding]);
   const current = parts.find((p) => p.name === selected && shown.includes(p)) ?? shown[0] ?? null;
 
   return (
@@ -271,6 +278,36 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
             </Chip>
           ))}
         </div>
+        <select
+          aria-label="Demo"
+          className="mf-library-chip mf-library-more"
+          data-on={demo || undefined}
+          value={demo}
+          onChange={(e) => setDemo(e.target.value as Demo | '')}
+          title="Parts gathered for one of the demo products"
+        >
+          <option value="">Any demo</option>
+          {DEMOS.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Integration level"
+          className="mf-library-chip mf-library-more"
+          data-on={level || undefined}
+          value={level}
+          onChange={(e) => setLevel(e.target.value as Level | '')}
+          title="Where a part sits on the hardware integration ladder"
+        >
+          <option value="">Any level</option>
+          {LEVELS.map((l) => (
+            <option key={l} value={l} title={LEVEL_HELP[l]}>
+              {l}
+            </option>
+          ))}
+        </select>
         <div className="mf-library-chips" role="group" aria-label="Show">
           <Chip on={only3d} onClick={() => setOnly3d(!only3d)} title="Only parts with a 3D model">
             <Box size={12} aria-hidden="true" /> 3D only
@@ -298,6 +335,9 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
                   <span className="mf-library-row-line">
                     <span className="mf-library-row-title">{handle(p)}</span>
                     <span className="mf-library-row-icons">
+                      <span className="mf-library-level" title={LEVEL_HELP[levelOf(p)]}>
+                        {levelOf(p).split(' ')[0]?.startsWith('L') ? levelOf(p).split(' ')[0] : ''}
+                      </span>
                       {isEnding(p) && <AlertTriangle size={12} aria-label="being discontinued" className="is-warning" />}
                       {hasModel(p) && <Box size={12} aria-label="has a 3D model" />}
                     </span>

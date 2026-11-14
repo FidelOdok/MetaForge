@@ -106,7 +106,7 @@
   border-color: var(--mf-r-65-72-90-0p3);
 }
 .mf-library-break {
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .mf-library-chip:hover {
   color: var(--mf-c-e2e2eb);
@@ -358,4 +358,11 @@
 }
 .mf-library-facts-tight {
   padding: 0 0 10px;
+}
+
+/* integration level tag on a row: L3 to L6 only */
+.mf-library-level {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  color: var(--mf-c-9a9aaa);
 }
