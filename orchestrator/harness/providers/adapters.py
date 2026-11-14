@@ -80,6 +80,34 @@ def _classify_error(exc: Exception) -> ProviderError:
 
 DEFAULT_MAX_OUTPUT_TOKENS = 8192
 
+REQUEST_TIMEOUT_ENV = "METAFORGE_LLM_REQUEST_TIMEOUT_SECONDS"
+SDK_RETRIES_ENV = "METAFORGE_LLM_SDK_RETRIES"
+
+
+def client_options() -> dict[str, Any]:
+    """Timeout and retry options for every provider SDK client.
+
+    The OpenAI and Anthropic SDKs wait ten minutes for a call by default and
+    retry it twice, so one stalled call could hold a chat turn for half an
+    hour; a turn's own deadline is only checked between steps and cannot cut
+    it short. ``METAFORGE_LLM_REQUEST_TIMEOUT_SECONDS`` bounds each call (for a
+    streamed call, each wait between chunks) and ``METAFORGE_LLM_SDK_RETRIES``
+    sets the SDK's own retries (the pipeline retries too). Unset keeps the
+    SDK defaults.
+    """
+    out: dict[str, Any] = {}
+    raw = (os.environ.get(REQUEST_TIMEOUT_ENV) or "").strip()
+    try:
+        timeout = float(raw) if raw else 0.0
+    except ValueError:
+        timeout = 0.0
+    if timeout > 0:
+        out["timeout"] = timeout
+    retries = (os.environ.get(SDK_RETRIES_ENV) or "").strip()
+    if retries.isdigit():
+        out["max_retries"] = int(retries)
+    return out
+
 
 def default_max_output_tokens() -> int:
     """Output-token cap applied when a request doesn't set ``max_tokens``.
@@ -403,7 +431,9 @@ async def anthropic_invoke(
         from anthropic import AsyncAnthropic
 
         client = AsyncAnthropic(
-            api_key=_require_key(spec, "ANTHROPIC_API_KEY"), base_url=spec.base_url or None
+            api_key=_require_key(spec, "ANTHROPIC_API_KEY"),
+            base_url=spec.base_url or None,
+            **client_options(),
         )
     kwargs: dict[str, Any] = {
         "model": spec.model,
@@ -470,7 +500,9 @@ async def openai_invoke(
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(
-            api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+            api_key=_require_key(spec, "OPENAI_API_KEY"),
+            base_url=spec.base_url or None,
+            **client_options(),
         )
     kwargs: dict[str, Any] = {
         "model": spec.model,
@@ -596,6 +628,7 @@ def _codex_client(credentials: Any) -> Any:
     return AsyncOpenAI(
         api_key=credentials.access_token,
         base_url=codex_auth.CODEX_BACKEND_BASE,
+        **client_options(),
         default_headers={
             "chatgpt-account-id": credentials.account_id or "",
             "originator": "codex_cli_rs",
@@ -852,7 +885,9 @@ async def anthropic_stream(
         from anthropic import AsyncAnthropic
 
         client = AsyncAnthropic(
-            api_key=_require_key(spec, "ANTHROPIC_API_KEY"), base_url=spec.base_url or None
+            api_key=_require_key(spec, "ANTHROPIC_API_KEY"),
+            base_url=spec.base_url or None,
+            **client_options(),
         )
     kwargs: dict[str, Any] = {
         "model": spec.model,
@@ -889,7 +924,9 @@ async def openai_stream(
         client = cast(
             Any,
             AsyncOpenAI(
-                api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+                api_key=_require_key(spec, "OPENAI_API_KEY"),
+                base_url=spec.base_url or None,
+                **client_options(),
             ),
         )
     try:
@@ -1024,7 +1061,9 @@ async def openai_stream_events(
         client = cast(
             Any,
             AsyncOpenAI(
-                api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+                api_key=_require_key(spec, "OPENAI_API_KEY"),
+                base_url=spec.base_url or None,
+                **client_options(),
             ),
         )
     kwargs: dict[str, Any] = {
@@ -1130,7 +1169,9 @@ async def anthropic_stream_events(
         from anthropic import AsyncAnthropic
 
         client = AsyncAnthropic(
-            api_key=_require_key(spec, "ANTHROPIC_API_KEY"), base_url=spec.base_url or None
+            api_key=_require_key(spec, "ANTHROPIC_API_KEY"),
+            base_url=spec.base_url or None,
+            **client_options(),
         )
     kwargs: dict[str, Any] = {
         "model": spec.model,
