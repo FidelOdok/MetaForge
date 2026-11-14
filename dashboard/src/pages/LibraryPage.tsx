@@ -6,6 +6,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { PartPreview, activeMakerModel } from '../components/library/PartPreview';
+import { CATEGORIES, categoryOf, type Category } from '../lib/libraryCategory';
 import './LibraryPage.css';
 import {
   exportLibrary,
@@ -59,8 +60,6 @@ function label(family: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** Types shown as chips; the rest are in a "More types" menu so the toolbar stays short. */
-const CHIP_TYPES = 4;
 
 function formatValue(v: SourcedValue): string {
   const value = Array.isArray(v.value) ? v.value.join(' x ') : String(v.value);
@@ -113,6 +112,7 @@ function ComponentDetail({ part }: { part: LibraryComponent }) {
   const facts: Array<[string, ReactNode]> = [
     ...(part.manufacturer ? ([['Maker', part.manufacturer]] as Array<[string, ReactNode]>) : []),
     ['Part', <span className="font-mono mf-library-break">{part.mpn || part.name}</span>],
+    ['Category', categoryOf(part)],
     ['Type', label(part.family)],
   ];
   if (part.material) facts.push(['Material', part.material.split('; library materials')[0]]);
@@ -205,19 +205,19 @@ function Chip({
 
 function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
   const [query, setQuery] = useState('');
-  const [family, setFamily] = useState('');
+  const [group, setGroup] = useState<Category | ''>('');
   const [only3d, setOnly3d] = useState(false);
   const [hideEnding, setHideEnding] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const families = useMemo(() => {
-    const counts = new Map<string, number>();
-    parts.forEach((p) => counts.set(p.family, (counts.get(p.family) ?? 0) + 1));
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const groups = useMemo(() => {
+    const counts = new Map<Category, number>();
+    parts.forEach((p) => counts.set(categoryOf(p), (counts.get(categoryOf(p)) ?? 0) + 1));
+    return CATEGORIES.filter((c) => counts.has(c)).map((c) => [c, counts.get(c) ?? 0] as const);
   }, [parts]);
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return parts
-      .filter((p) => !family || p.family === family)
+      .filter((p) => !group || categoryOf(p) === group)
       .filter((p) => !only3d || hasModel(p))
       .filter((p) => !hideEnding || !isEnding(p))
       .filter((p) => {
@@ -226,7 +226,7 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
         return words.every((w) => hay.includes(w));
       })
       .sort((a, b) => `${a.manufacturer} ${handle(a)}`.localeCompare(`${b.manufacturer} ${handle(b)}`));
-  }, [parts, query, family, only3d, hideEnding]);
+  }, [parts, query, group, only3d, hideEnding]);
   const current = parts.find((p) => p.name === selected && shown.includes(p)) ?? shown[0] ?? null;
 
   return (
@@ -242,31 +242,15 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
-        <div className="mf-library-chips" role="group" aria-label="Type">
-          <Chip on={family === ''} onClick={() => setFamily('')}>
+        <div className="mf-library-chips" role="group" aria-label="Category">
+          <Chip on={group === ''} onClick={() => setGroup('')}>
             All
           </Chip>
-          {families.slice(0, CHIP_TYPES).map(([f, n]) => (
-            <Chip key={f} on={family === f} onClick={() => setFamily(family === f ? '' : f)}>
-              {label(f)} <span className="mf-library-count">{n}</span>
+          {groups.map(([c, n]) => (
+            <Chip key={c} on={group === c} onClick={() => setGroup(group === c ? '' : c)}>
+              {c} <span className="mf-library-count">{n}</span>
             </Chip>
           ))}
-          {families.length > CHIP_TYPES && (
-            <select
-              aria-label="More types"
-              className="mf-library-chip mf-library-more"
-              data-on={families.slice(CHIP_TYPES).some(([f]) => f === family) || undefined}
-              value={families.slice(CHIP_TYPES).some(([f]) => f === family) ? family : ''}
-              onChange={(e) => setFamily(e.target.value)}
-            >
-              <option value="">More types</option>
-              {families.slice(CHIP_TYPES).map(([f, n]) => (
-                <option key={f} value={f}>
-                  {label(f)} ({n})
-                </option>
-              ))}
-            </select>
-          )}
         </div>
         <div className="mf-library-chips" role="group" aria-label="Show">
           <Chip on={only3d} onClick={() => setOnly3d(!only3d)} title="Only parts with a 3D model">
