@@ -452,12 +452,20 @@ def validate_programme(cfg, E, W):
         for k in ('S', 'O', 'D'):
             if k in r and not (isinstance(r[k], int) and 1 <= r[k] <= 10):
                 E.append(f'programme.risks[{i}].{k} must be a whole number from 1 to 10.')
+    # A passive product (no board, no battery: a case, a bracket, a box) has
+    # no board or battery trade-off to explain, and cannot connect to
+    # anything, so UK PSTI (connectable products only) does not apply to it.
+    power = cfg.get('power') or {}
+    has_board = str(power.get('board', '')).lower() not in ('', 'none')
+    has_battery = str(power.get('battery', '')).lower() not in ('', 'none')
     rat = pg.get('rationale') or {}
     for k in ('process', 'material', 'board', 'battery', 'size'):
+        if (k == 'board' and not has_board) or (k == 'battery' and not has_battery):
+            continue
         if k not in rat:
             W.append(f'programme.rationale.{k} is missing; that trade-off will show as open.')
     fw = pg.get('firmware') or {}
-    if pg.get('segment') == 'consumer' and 'UK' in [str(m).upper() for m in pg.get('markets', [])]:
+    if has_board and pg.get('segment') == 'consumer' and 'UK' in [str(m).upper() for m in pg.get('markets', [])]:
         for k in ('uniqueCredentials', 'vulnPolicy', 'supportYears'):
             if not fw.get(k):
                 W.append(f'UK PSTI applies to connected consumer products: set programme.firmware.{k}.')
