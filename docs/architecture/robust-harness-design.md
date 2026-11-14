@@ -413,7 +413,7 @@ The live loop manages its context window deterministically, in four layers:
   placeholder, and sent to the next model call only as real image input
   (`image_url` parts on OpenAI-compatible providers, `image` blocks in the
   `tool_result` on Anthropic); see
-  [Context budget](context-engineering.md#context-budget).
+  [context engineering, Context budget](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/context-engineering.md#context-budget).
 - **Post-turn telemetry** — `context.stats` is re-emitted after the loop with
   `phase: "final"` and a `trace_tokens` estimate, so the meter reflects what
   the turn actually consumed, not just the pre-loop snapshot.
