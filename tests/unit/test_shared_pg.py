@@ -62,3 +62,26 @@ def test_engine_passes_the_connect_args(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv(pg.STATEMENT_CACHE_ENV, "off")
     assert engine_mod._create_engine("postgresql+asyncpg://u:p@h:6543/db") is not None
     assert seen["connect_args"] == {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+
+
+def test_lightrag_pool_follows_the_switches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from digital_twin.knowledge.lightrag_service import LightRAGKnowledgeService
+
+    for key in (
+        "POSTGRES_STATEMENT_CACHE_SIZE",
+        "POSTGRES_MAX_CONNECTIONS",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_DATABASE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(pg.STATEMENT_CACHE_ENV, "off")
+    monkeypatch.setenv(pg.STORE_POOL_MAX_ENV, "3")
+    LightRAGKnowledgeService._apply_postgres_env("postgresql://u:p@pooler.example:6543/postgres")
+    import os
+
+    assert os.environ["POSTGRES_STATEMENT_CACHE_SIZE"] == "0"
+    assert os.environ["POSTGRES_MAX_CONNECTIONS"] == "3"
+    assert os.environ["POSTGRES_PORT"] == "6543"
