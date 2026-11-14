@@ -2360,6 +2360,12 @@ def create_app(
         app.state.auth_provider = load_provider(auth_settings.mode)
         app.add_middleware(AuthMiddleware, provider=app.state.auth_provider)
 
+    # FORGE-873: a named budget mode that cannot load stops the gateway here,
+    # like a missing auth provider, rather than running unmetered.
+    from orchestrator.harness.providers.budget import active_policy
+
+    active_policy()
+
     # -- CORS --------------------------------------------------------------
     app.add_middleware(
         CORSMiddleware,

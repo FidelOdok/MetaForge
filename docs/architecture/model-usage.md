@@ -63,6 +63,39 @@ made several such calls. Caching makes most of that cheap to read, not free.
   stage's set (`mcp_core.profiles.CREATE_STAGE_TOOLS`, 35 to 40 tools, about 8,000 to
   13,000 tokens); a turn that does not sends the person's own tool ids.
 
+### Budgets: who a call is for, and whether it may be made
+
+Every recorded call carries who it is for as well as what it cost: the run, phase,
+role and caller, and also the **project** and the **verified caller** (the
+`Principal.subject` from sign-in). On a gateway with sign-in, the authentication
+middleware sets both for every request, so every model call the request makes, in
+tasks it starts too, is attributed. A design-flow phase sets the project from its run,
+because in the Temporal worker no request is in flight. A local gateway without
+sign-in records neither, and that is fine: nobody meters a laptop.
+
+Whether a call may be made at all is a seam, like authentication. An implementation
+registers on the `metaforge.budget` entry-point group and `METAFORGE_BUDGET_MODE` names
+it:
+
+| `METAFORGE_BUDGET_MODE` | Behaviour |
+|---|---|
+| unset, `off` or `none` | No budget. Calls are recorded as above and never refused. |
+| a registered name | Checked before **every** model call, and told what each call cost after it |
+| a name nothing registered | The gateway and the design-flow worker **refuse to start** |
+
+- **Refused before it is sent.** The check runs before the first provider is tried, on
+  the plain, streaming and event-streaming paths alike. A refusal is not a provider
+  failure, so it is never retried and never handed to the fallback model; the person
+  sees the policy's own message, such as "Monthly AI budget reached for this account."
+- **Fails closed.** If the policy cannot reach its own totals, the call is refused with
+  "The AI budget could not be checked", not let through unmetered.
+- **Recording never breaks a call.** A policy that fails to record is logged
+  (`llm_budget_record_failed`) and the call's result is returned as usual.
+
+Open core ships no policy. A hosted deployment supplies one that keeps a budget per
+account and totals in its own database, shared by every gateway and worker process; the
+local `llm_usage.db` file is per host and is not that total.
+
 ## 2. The knowledge models
 
 These are direct OpenRouter clients in `digital_twin/knowledge/`, wired at
