@@ -249,6 +249,18 @@ login secret, every call is attributable to the credential, not to a person.
 That is honest for a gateway with one owner and is *not* an access model for a
 team — `/health` on the gateway reports the posture it is actually running.
 
+**A connection pooler with a small client limit runs out.** Each service
+(gateway, MCP sidecar, workers) opens several Postgres pools: the SQLAlchemy
+engine (`METAFORGE_PG_POOL_SIZE`, default 5, plus `METAFORGE_PG_MAX_OVERFLOW`,
+default 10) and one asyncpg pool per store (catalog, knowledge, experience
+memory, insights, and LightRAG's own). Behind a session-mode pooler, such as
+Supabase's on port 5432 (15 clients on the smallest instance), the idle
+connections alone exhaust it, and requests fail with `EMAXCONNSESSION`. Use the
+transaction-mode pooler instead (Supabase port 6543) and set
+`METAFORGE_PG_STATEMENT_CACHE=off`, which turns off the prepared-statement
+caches a transaction pooler cannot keep. `METAFORGE_PG_STORE_POOL_MAX` caps
+every store's asyncpg pool at once.
+
 ## See also
 
 - [`docs/runbooks/cloudflare-mcp-tunnel.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/runbooks/cloudflare-mcp-tunnel.md)

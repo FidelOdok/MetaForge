@@ -159,8 +159,10 @@ class ComponentCatalogStore:
             try:
                 import asyncpg
 
+                from shared.pg import store_pool_kwargs
+
                 self._pool = await asyncpg.create_pool(
-                    self._dsn, min_size=1, max_size=self._pool_size
+                    self._dsn, **store_pool_kwargs(self._pool_size)
                 )
                 async with self._pool.acquire() as conn:
                     for statement in schema_statements():
