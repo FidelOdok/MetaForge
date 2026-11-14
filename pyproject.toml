@@ -5,8 +5,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 # "cli" is load-bearing: [project.scripts] exposes `forge` as
 # cli.forge_cli.main:main, so a wheel without it installs a console script
-# that dies on import (FORGE-648).
-packages = ["cli", "twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway", "observability", "digital_twin", "metaforge"]
+# that dies on import (FORGE-648). "shared" is load-bearing for the same reason:
+# api_gateway/twin/import_commit.py imports shared.storage, so a wheel without it
+# installs a metaforge-mcp that dies at startup with ModuleNotFoundError. Editable
+# installs hid this because they import from the source tree; the CI job
+# "Plain install starts the MCP server" installs a real wheel to catch it.
+packages = ["cli", "twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway", "observability", "digital_twin", "metaforge", "shared"]
 
 [project]
 # Not "metaforge": that name on PyPI belongs to an unrelated job-shop
@@ -111,6 +115,14 @@ dependencies = [
     # informal unit-suffix-in-key-name convention. Pure Python, no C
     # extension -- safe to add unconditionally.
     "pint>=0.24",
+    # The local MCP server's bootstrap imports the gateway package, whose
+    # __init__ loads the whole server, whose design-flow routes import
+    # ``temporalio`` at module level. Without it a plain install (what the
+    # claude-code-local plugin's README tells people to run) dies at startup
+    # with ``ModuleNotFoundError: temporalio`` and the plugin shows
+    # CONNECTION_CLOSED. The gateway image also gets it from the ``temporal``
+    # extra; the spec is identical on purpose, so the resolver sees one range.
+    "temporalio>=1.5",
 ]
 
 [project.urls]
