@@ -36,7 +36,12 @@ const IC_PACKAGE =
   /\b(V?QFN|W?QFN|[WUVX]?DFN|WSON|SON|SOIC|SOP|ESOP|MSOP|VSSOP|PSOP|TSSOP|QSOP|SSOP|LQFP|TQFP|QFP|BGA|WLCSP|WLBGA|DSBGA|CSP|LGA|aQFN|SOT-?23-?[5-8]|SOT-?563|TSOT|DIP-?8|SO-?8|SOT25|SOT26)\b/i;
 const IC_WORDS = /\b(IC|SoC|MCU|microcontroller|driver IC|driver|controller|transceiver|charger|fuel gauge|regulator|converter|amplifier|codec|RTC|real-time clock|sensor IC|ADC|DAC)\b/i;
 
+const RECORDED = /Integration level \(research\): (L6 Board|L5 Module|L4 SiP|L3 Chip|Discrete|Off the ladder)/;
+
 export function levelOf(part: LibraryComponent): Level {
+  // a level the research recorded for the part wins over working it out
+  const recorded = RECORDED.exec(part.notes || '');
+  if (recorded?.[1]) return recorded[1] as Level;
   const category = categoryOf(part);
   if (category === 'Mechanical' || category === 'Materials') return 'Off the ladder';
   const text = `${part.name} ${part.title} ${part.mpn ?? ''}`;

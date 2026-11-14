@@ -8,6 +8,7 @@ import { useToast } from '../components/ui/Toast';
 import { PartPreview, activeMakerModel } from '../components/library/PartPreview';
 import { CATEGORIES, categoryOf, type Category } from '../lib/libraryCategory';
 import { LEVELS, LEVEL_HELP, levelOf, type Level } from '../lib/libraryLevel';
+import { DEMOS, demosOf, type Demo } from '../lib/libraryDemo';
 import './LibraryPage.css';
 import {
   exportLibrary,
@@ -228,6 +229,7 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState<Category | ''>('');
   const [level, setLevel] = useState<Level | ''>('');
+  const [demo, setDemo] = useState<Demo | ''>('');
   const [only3d, setOnly3d] = useState(false);
   const [hideEnding, setHideEnding] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -241,6 +243,7 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
     return parts
       .filter((p) => !group || categoryOf(p) === group)
       .filter((p) => !level || levelOf(p) === level)
+      .filter((p) => !demo || demosOf(p).includes(demo))
       .filter((p) => !only3d || hasModel(p))
       .filter((p) => !hideEnding || !isEnding(p))
       .filter((p) => {
@@ -249,7 +252,7 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
         return words.every((w) => hay.includes(w));
       })
       .sort((a, b) => `${a.manufacturer} ${handle(a)}`.localeCompare(`${b.manufacturer} ${handle(b)}`));
-  }, [parts, query, group, level, only3d, hideEnding]);
+  }, [parts, query, group, level, demo, only3d, hideEnding]);
   const current = parts.find((p) => p.name === selected && shown.includes(p)) ?? shown[0] ?? null;
 
   return (
@@ -275,6 +278,21 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
             </Chip>
           ))}
         </div>
+        <select
+          aria-label="Demo"
+          className="mf-library-chip mf-library-more"
+          data-on={demo || undefined}
+          value={demo}
+          onChange={(e) => setDemo(e.target.value as Demo | '')}
+          title="Parts gathered for one of the demo products"
+        >
+          <option value="">Any demo</option>
+          {DEMOS.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
         <select
           aria-label="Integration level"
           className="mf-library-chip mf-library-more"
