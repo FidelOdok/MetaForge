@@ -214,6 +214,35 @@ calling back into the gateway), never a person: it skips all of the above.
 A provider without `ProjectAuthorizer` changes nothing, and a local gateway
 (`auth_mode: off`) never loads any of this.
 
+## Signing in to MCP
+
+The MCP endpoint (`metaforge.mcp` over HTTP) runs its own OAuth 2.1 server,
+because claude.ai and Claude Code sign in to it directly. Its sign-in page has
+to establish who is signing in:
+
+| Gateway | MCP sign-in | Token bound to |
+|---|---|---|
+| `auth_mode: off`, `METAFORGE_OAUTH_LOGIN_SECRET` set | one shared secret, plus a name typed as a label | a label (`user:<name>`), not a verified person |
+| a provider that implements `PasswordLogin` | the person's own email and password, checked by the provider | the verified subject (`sub:<subject>`) |
+
+`PasswordLogin` (`api_gateway/auth/login.py`) is a second optional provider
+capability, next to `ProjectAuthorizer`:
+
+```python
+async def verify_password(self, email: str, password: str) -> Principal: ...
+```
+
+Wrong credentials raise `InvalidToken` (the page says so, 401); an
+unreachable identity provider raises `AuthUnavailable` (503, never "wrong
+password"). With it installed the shared secret is refused even if set:
+anyone holding it would act outside every account. A typed name can never
+pass for a verified subject, because the label is stripped of `:`.
+
+Binding a token to a person is what a project scope needs; applying that
+scope to MCP tool calls is a separate step. Until it is in place, an MCP
+endpoint on a gateway shared by several accounts must not be offered to more
+than one of them.
+
 ## Responses
 
 | Status | Meaning |

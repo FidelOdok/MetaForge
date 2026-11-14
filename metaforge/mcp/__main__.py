@@ -602,6 +602,7 @@ def build_http_app(
     oauth: OAuthProvider | None = None,
     service_key: str | None = None,
     service_verifier: ServiceRunVerifier | None = None,
+    login: Any = None,
 ) -> Any:
     """Construct a FastAPI app exposing the unified server.
 
@@ -1240,7 +1241,7 @@ def build_http_app(
     # unauthenticated — they ARE the auth handshake the claude.ai connector
     # runs before it can present a bearer token to /mcp.
     if oauth and oauth.config.enabled:
-        _mount_oauth_routes(app, oauth, _issuer_for)
+        _mount_oauth_routes(app, oauth, _issuer_for, login=login)
 
     return app
 
@@ -1256,8 +1257,14 @@ def _form_params(raw: bytes) -> dict[str, str]:
     return dict(parse_qsl(raw.decode("utf-8")))
 
 
-def _login_page(action: str, fields: dict[str, str], *, error: str = "") -> str:
-    """Minimal shared-secret login form for ``/authorize``.
+def _login_page(
+    action: str, fields: dict[str, str], *, error: str = "", identity: bool = False
+) -> str:
+    """Minimal login form for ``/authorize``.
+
+    ``identity`` (FORGE-859): the deployment's auth provider checks the
+    person's own email and password, and the token is bound to them.
+    Otherwise it is the shared-secret form, with a name recorded as a label.
 
     Carries the original OAuth request parameters as hidden inputs so the
     POST can re-validate and mint the code without server-side session
@@ -1281,7 +1288,8 @@ def _login_page(action: str, fields: dict[str, str], *, error: str = "") -> str:
   form {{ background:#161b22; padding:2rem; border-radius:12px; width:min(360px,90vw);
           box-shadow:0 8px 32px rgba(0,0,0,.4); }}
   h1 {{ font-size:1.1rem; margin:0 0 1rem; }}
-  input[type=password] {{ width:100%; padding:.6rem; border-radius:8px;
+  input[type=password], input[type=email], input[type=text] {{
+          width:100%; padding:.6rem; border-radius:8px;
           border:1px solid #30363d; background:#0d1117; color:#e6edf3; box-sizing:border-box; }}
   button {{ margin-top:1rem; width:100%; padding:.6rem; border:0; border-radius:8px;
           background:#2f81f7; color:#fff; font-weight:600; cursor:pointer; }}
@@ -1289,9 +1297,30 @@ def _login_page(action: str, fields: dict[str, str], *, error: str = "") -> str:
 </style></head>
 <body>
 <form method="post" action="{action}">
-  <h1>Authorize MetaForge MCP</h1>
+  <h1>{"Sign in to MetaForge" if identity else "Authorize MetaForge MCP"}</h1>
   {banner}
-  <label>Your name<br>
+  {_identity_fields() if identity else _secret_fields()}
+  {hidden}
+  <button type="submit">{"Sign in" if identity else "Authorize"}</button>
+</form>
+</body></html>"""
+
+
+def _identity_fields() -> str:
+    return """<label>Email<br>
+    <input type="email" name="email" required autofocus autocomplete="username">
+  </label>
+  <label>Password<br>
+    <input type="password" name="password" required autocomplete="current-password">
+  </label>
+  <p style="font-size:.8rem;opacity:.7;margin:.6rem 0 0">
+    The same account you use in the MetaForge dashboard. This connection
+    can reach only your account's projects.
+  </p>"""
+
+
+def _secret_fields() -> str:
+    return """<label>Your name<br>
     <input type="text" name="operator" autofocus placeholder="e.g. ana"
            autocomplete="username">
   </label>
@@ -1301,17 +1330,14 @@ def _login_page(action: str, fields: dict[str, str], *, error: str = "") -> str:
   </p>
   <label>Access secret<br>
     <input type="password" name="login_secret" required>
-  </label>
-  {hidden}
-  <button type="submit">Authorize</button>
-</form>
-</body></html>"""
+  </label>"""
 
 
 def _mount_oauth_routes(
     app: Any,
     oauth: OAuthProvider,
     issuer_for: Callable[[Request], str],
+    login: Any = None,
 ) -> None:
     from urllib.parse import urlencode
 
@@ -1335,6 +1361,10 @@ def _mount_oauth_routes(
             return JSONResponse(exc.as_dict(), status_code=exc.status)
         logger.info("oauth_client_registered", client_id=registration["client_id"])
         return JSONResponse(registration, status_code=201)
+
+    identity = bool(getattr(oauth.config, "identity_login", False))
+    if identity and login is None:
+        raise RuntimeError("identity login is configured but no provider can check passwords")
 
     def _authorize_fields(params: dict[str, str]) -> dict[str, str]:
         keys = (
@@ -1362,7 +1392,7 @@ def _mount_oauth_routes(
             )
         except OAuthError as exc:
             return _authorize_error(exc, params)
-        return HTMLResponse(_login_page("/authorize", _authorize_fields(params)))
+        return HTMLResponse(_login_page("/authorize", _authorize_fields(params), identity=identity))
 
     @app.post("/authorize")
     async def oauth_authorize_post(request: Request) -> Any:
@@ -1378,7 +1408,38 @@ def _mount_oauth_routes(
             )
         except OAuthError as exc:
             return _authorize_error(exc, params)
-        if not oauth.verify_login(params.get("login_secret")):
+        subject: str | None = None
+        if identity:
+            from api_gateway.auth.provider import AuthUnavailable, InvalidToken
+
+            try:
+                principal = await login.verify_password(
+                    (params.get("email") or "").strip(), params.get("password") or ""
+                )
+            except InvalidToken:
+                logger.warning("oauth_login_denied", client_id=params.get("client_id"))
+                return HTMLResponse(
+                    _login_page(
+                        "/authorize",
+                        _authorize_fields(params),
+                        error="Wrong email or password",
+                        identity=True,
+                    ),
+                    status_code=401,
+                )
+            except AuthUnavailable:
+                logger.error("oauth_login_unavailable", client_id=params.get("client_id"))
+                return HTMLResponse(
+                    _login_page(
+                        "/authorize",
+                        _authorize_fields(params),
+                        error="Sign-in is unavailable right now; try again shortly",
+                        identity=True,
+                    ),
+                    status_code=503,
+                )
+            subject = principal.subject
+        elif not oauth.verify_login(params.get("login_secret")):
             logger.warning("oauth_login_denied", client_id=params.get("client_id"))
             return HTMLResponse(
                 _login_page("/authorize", _authorize_fields(params), error="Invalid secret"),
@@ -1391,6 +1452,7 @@ def _mount_oauth_routes(
             params["code_challenge"],
             params.get("scope"),
             operator=params.get("operator"),
+            subject=subject,
         )
         query = {"code": code}
         if params.get("state"):
@@ -1466,7 +1528,8 @@ async def serve_http_async(
     from metaforge.mcp.oauth_store import create_oauth_persistence
 
     api_key = os.environ.get("METAFORGE_MCP_API_KEY") or None
-    oauth_config = OAuthConfig.from_env()
+    login = _password_login_from_env()
+    oauth_config = OAuthConfig.from_env(identity_login=login is not None)
     oauth = None
     if oauth_config:
         # FORGE-697: clients and tokens outlive a restart when DATABASE_URL is set.
@@ -1480,6 +1543,7 @@ async def serve_http_async(
         oauth=oauth,
         service_key=service_key,
         service_verifier=service_verifier,
+        login=login,
     )
     config = uvicorn.Config(
         app,
@@ -2511,6 +2575,29 @@ def _client_task_verifier_from_env() -> Any:
         )
         return None
     return GatewayClientTaskVerifier(gateway_url)
+
+
+def _password_login_from_env() -> Any:
+    """The gateway's auth provider, when it can sign people in (FORGE-859).
+
+    With ``METAFORGE_AUTH_MODE`` naming a provider that implements
+    :class:`~api_gateway.auth.login.PasswordLogin`, MCP sign-in uses the
+    person's own account and binds each token to them; the shared secret is
+    then refused. A provider without it leaves the shared-secret login as it
+    was. ``off`` (every local install) loads nothing.
+    """
+    mode = (os.environ.get("METAFORGE_AUTH_MODE") or "off").strip().lower()
+    if mode in ("", "off"):
+        return None
+    from api_gateway.auth.login import supports_password_login
+    from api_gateway.auth.provider import load_provider
+
+    provider = load_provider(mode)
+    if not supports_password_login(provider):
+        logger.info("mcp_login_shared_secret", auth_mode=mode)
+        return None
+    logger.info("mcp_login_identity", auth_mode=mode)
+    return provider
 
 
 def _service_auth_from_env() -> tuple[str | None, ServiceRunVerifier | None]:
