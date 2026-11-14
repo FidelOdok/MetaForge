@@ -113,4 +113,28 @@ describe('LibraryPage', () => {
     render(<LibraryPage />);
     expect(await screen.findByText('The library could not be read')).toBeInTheDocument();
   });
+
+  it("shows each machine's capabilities, a bench machine's own and those it takes from its model", async () => {
+    const src = { source_kind: 'manufacturer_spec', source_ref: 'https://maker.example', needs_review: false };
+    api.listMachines.mockResolvedValue([
+      {
+        id: 'mm_1', layer: 'model', kind: 'fdm_printer', make: 'Prusa', model: 'MK4S', version: 1,
+        capabilities: {
+          build_volume_mm: { value: [250, 210, 220], unit: 'mm', ...src },
+          materials: { value: ['PLA', 'PETG'], unit: '', ...src },
+        },
+      },
+      { id: 'mi_1', layer: 'instance', kind: 'fdm_printer', name: 'Bench MK4S', model_id: 'mm_1', location: 'home', version: 1, capabilities: {} },
+    ]);
+    render(<LibraryPage />);
+    await screen.findByTestId('library-count');
+    fireEvent.click(screen.getByRole('tab', { name: /Machines/ }));
+    const cards = await screen.findAllByTestId('library-machine');
+    const bench = cards[0]!;
+    expect(within(bench).getByText('Bench MK4S')).toBeInTheDocument();
+    expect(within(bench).getByText('250 x 210 x 220 mm')).toBeInTheDocument();
+    expect(within(bench).getAllByText(/from the model/).length).toBe(2);
+    expect(within(cards[1]!).getByText('PLA, PETG')).toBeInTheDocument();
+    expect(within(cards[1]!).queryByText(/from the model/)).toBeNull();
+  });
 });

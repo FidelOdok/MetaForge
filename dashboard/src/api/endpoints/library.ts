@@ -2,7 +2,8 @@ import apiClient from '../client';
 
 /** A sourced value: a spec or a property, with where it came from. */
 export interface SourcedValue {
-  value: number | number[];
+  /** A number, a size as [x, y, z], or a list of names (a machine's materials). */
+  value: number | string | Array<number | string>;
   unit: string;
   source_kind: string;
   source_ref: string;
@@ -84,6 +85,7 @@ export interface LibraryMachine {
   route?: string;
   status?: string;
   location?: string;
+  connection?: { protocol?: string; url?: string };
   version: number;
 }
 
