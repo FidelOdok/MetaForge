@@ -129,6 +129,13 @@ async def list_approvals(
         items = [i for i in items if i.status != "pending"]
     if kind is not None:
         items = [i for i in items if i.kind == kind]
+    # On a gateway shared by several accounts (set by the auth middleware):
+    # only the caller's projects, and nothing that names no project.
+    scope = getattr(request.state, "project_scope", None)
+    if scope is not None and not getattr(scope, "unrestricted", False):
+        if project_id and not scope.allows(project_id):
+            raise HTTPException(status_code=404, detail="Not found")
+        items = [i for i in items if i.project_id is not None and scope.allows(i.project_id)]
     unscoped = 0
     if project_id:
         unscoped = sum(1 for i in items if i.project_id is None)

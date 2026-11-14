@@ -166,6 +166,7 @@ the route runs, and the route's shape decides how the project is found:
 | an entity id (path, query or body) | `GET /v1/twin/nodes/{node_id}`, `GET /v1/runs/{run_id}`, `POST /v1/cad-export/urdf` | answered only when the entity's **owning project** is the caller's (see below) |
 | a chat scope | `GET /v1/chat/threads?scope_kind=project&entity_id=…` | `scope_kind` + id required; `project` and `digital-twin-node` scopes resolve to a project, others are refused |
 | `GET /v1/projects` | | filtered to the caller's projects |
+| `GET /v1/approvals` | the inbox and the pending badge | without `project_id`, filtered to approvals of the caller's projects (none that name no project); a `project_id` that is not theirs is a 404 |
 | `POST /v1/projects` | | the new project is registered to its creator via `project_created`; if that fails the project is deleted again and the call returns 503 |
 | `GET` under `/v1/library/`, `/v1/examples`, `/v1/features` | shared reference data | readable; the library shows shared entries and the caller's account's own (see below) |
 | adding or changing a library entry | `POST /v1/library/materials`, `PATCH /v1/library/machines/{machine_id}` | allowed when the scope names a `tenant`; the entry is that account's own. Shared entries are refused (403). Import, machine discovery and machine jobs stay refused |
