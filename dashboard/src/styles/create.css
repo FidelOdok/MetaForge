@@ -995,3 +995,50 @@ p.cv-muted {
     padding: 8px 0 32px;
   }
 }
+
+/* Where the studio's values come from: library, typed in, or an estimate. */
+.cv-sources summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.cv-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cv-sources-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.cv-sources-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cv-sources-ref {
+  display: block;
+  font-size: 12px;
+}
+.cv-source-origin {
+  flex: none;
+  min-width: 64px;
+  padding: 1px 6px;
+  border: 1px solid var(--cv-line);
+  border-radius: 999px;
+  font-size: 11px;
+  text-align: center;
+}
+.cv-source-origin.is-library {
+  border-color: var(--cv-accent);
+  color: var(--cv-accent);
+}
+.cv-source-origin.is-estimate {
+  border-color: var(--cv-warn);
+  color: var(--cv-warn);
+}

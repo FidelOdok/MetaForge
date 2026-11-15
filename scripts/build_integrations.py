@@ -55,7 +55,10 @@ LOCAL_PLUGIN_NAME = "metaforge-local"
 CLOUD_PLUGIN_NAME = "metaforge-cloud"
 #: The bare URL, no query string: the connector claude.ai signed in to had none,
 #: and an earlier plugin build with `?profile=all` stayed at "Not added".
-HOSTED_GATEWAY_URL = "https://mcp.metaforge.uk/mcp"
+#: The hosted staging stack. Production is not serving yet, and the bare
+#: ``mcp.metaforge.uk`` name is a tunnel to a self-hosted server, so the cloud
+#: plugin connects to staging until a production MCP endpoint is live.
+HOSTED_GATEWAY_URL = "https://mcp.staging.metaforge.uk/mcp"
 
 # FORGE-648. Both of these READMEs used to say `pip install metaforge`, and
 # `metaforge` on PyPI is an unrelated job-shop scheduling library by someone
@@ -733,10 +736,10 @@ def build_claude_code_cloud() -> Path:
         f"/plugin install {CLOUD_PLUGIN_NAME}\n```\n\n"
         "It is listed in the open-core marketplace until the hosted service "
         "publishes a marketplace of its own (FORGE-707).\n\n"
-        "Run `/mcp`, choose `metaforge`, and sign in with the access secret "
-        "your administrator gave you. There is no token field: the gateway answers "
-        "401 and Claude Code runs OAuth. The gateway needs "
-        "`METAFORGE_OAUTH_LOGIN_SECRET` set.\n\n"
+        "Run `/mcp`, choose `metaforge`, and sign in with your MetaForge account "
+        "(the email and password you use on the dashboard). There is no token "
+        "field: the gateway answers 401 and Claude Code runs OAuth. You reach only "
+        "your own account's projects.\n\n"
         "### On claude.ai\n\n"
         "Open the plugin's **Connectors** tab. Adding a plugin does not add or sign "
         "in its connector: **Add** it, then **Connect**. If it cannot be added, add "
