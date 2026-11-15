@@ -19,6 +19,7 @@ itself is never touched.
 from __future__ import annotations
 
 import copy
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -51,18 +52,54 @@ def _price_at(offer: dict[str, Any], qty: int) -> tuple[float, int] | None:
     return best
 
 
-def best_offer(entry: dict[str, Any], qty: int) -> dict[str, Any] | None:
-    """The cost to record for ``entry`` at ``qty``, or None when no confirmed offer prices it."""
+def _amount(raw: Any) -> tuple[str, float] | None:
+    """``{amount, unit}`` as (what it measures, amount in that measure's base unit)."""
+    from twin_core.library.catalog import PACK_UNITS
+
+    if not isinstance(raw, dict):
+        return None
+    unit = PACK_UNITS.get(str(raw.get("unit") or ""))
+    amount = raw.get("amount")
+    if unit is None or isinstance(amount, bool) or not isinstance(amount, (int, float)):
+        return None
+    if amount <= 0:
+        return None
+    return unit[0], float(amount) * unit[1]
+
+
+def _fmt_amount(raw: dict[str, Any]) -> str:
+    return f"{float(raw['amount']):g} {raw['unit']}"
+
+
+def best_offer(entry: dict[str, Any], qty: int, use: Any = None) -> dict[str, Any] | None:
+    """The cost to record for ``entry`` at ``qty``, or None when no confirmed offer prices it.
+
+    An offer for a pack (a roll, reel, sheet; FORGE-882) prices one unit of the product by
+    what that unit ``use``s of the pack: pack price x use / pack size. A pack offer with no
+    use, or a use in another kind of unit, prices nothing: a whole pack is never counted
+    per unit.
+    """
     found: list[tuple[bool, float, dict[str, Any]]] = []
     for sup in entry.get("suppliers") or []:
         offer = sup.get("offer") if isinstance(sup, dict) else None
         if not isinstance(offer, dict) or offer.get("confirmed") is False:
             continue
-        price = _price_at(offer, qty)
+        pack = offer.get("pack")
+        packs = 1
+        share = 1.0
+        if isinstance(pack, dict):
+            have, need = _amount(pack), _amount(use)
+            if have is None or need is None or have[0] != need[0]:
+                continue  # sold by the pack, and how much one unit uses is not known
+            share = need[1] / have[1]
+            packs = max(1, math.ceil(share * qty))  # the break is for whole packs
+        price = _price_at(offer, packs if isinstance(pack, dict) else qty)
         currency = str(offer.get("currency") or "")
         if price is None or not currency:
             continue
         unit, at = price
+        if isinstance(pack, dict):
+            unit = unit * share
         found.append(
             (
                 currency != HOME_CURRENCY,
@@ -74,6 +111,11 @@ def best_offer(entry: dict[str, Any], qty: int) -> dict[str, Any] | None:
                     "source": (
                         f"{sup.get('supplier')} {sup.get('sku')}, read {offer.get('read_on')} "
                         f"via {offer.get('via')}"
+                        + (
+                            f"; {_fmt_amount(use)} per unit of a {_fmt_amount(pack)} pack"
+                            if isinstance(pack, dict)
+                            else ""
+                        )
                     ),
                 },
             )
@@ -82,6 +124,15 @@ def best_offer(entry: dict[str, Any], qty: int) -> dict[str, Any] | None:
         return None
     found.sort(key=lambda row: (row[0], row[1]))
     return found[0][2]
+
+
+def _sold_by_pack(entry: dict[str, Any]) -> bool:
+    return any(
+        isinstance(sup, dict)
+        and isinstance(sup.get("offer"), dict)
+        and isinstance(sup["offer"].get("pack"), dict)
+        for sup in entry.get("suppliers") or []
+    )
 
 
 def price_parts(config: dict[str, Any], lookup: Lookup) -> tuple[dict[str, Any], list[str]]:
@@ -93,6 +144,7 @@ def price_parts(config: dict[str, Any], lookup: Lookup) -> tuple[dict[str, Any],
         return out, []
     qty = _build_qty(out)
     unpriced: list[str] = []
+    needs_use: list[str] = []
     for part in parts:
         if not isinstance(part, dict) or part.get("standIn"):
             continue
@@ -107,21 +159,32 @@ def price_parts(config: dict[str, Any], lookup: Lookup) -> tuple[dict[str, Any],
             continue
         if entry is None:
             continue  # the library link check says so
-        cost = best_offer(entry, qty)
+        cost = best_offer(entry, qty, part.get("use"))
         if cost is None:
             part.pop("cost", None)
-            unpriced.append(str(part.get("id") or name))
+            if _sold_by_pack(entry) and _amount(part.get("use")) is None:
+                needs_use.append(str(part.get("id") or name))
+            else:
+                unpriced.append(str(part.get("id") or name))
             continue
         cost["source"] = f"library {name} v{entry.get('version')}: {cost['source']}"
         cost["derived_from"] = MARK
         part["cost"] = cost
-    if not unpriced:
-        return out, []
-    return out, [
-        f"{len(unpriced)} linked part(s) have no price confirmed on a live page at {qty} "
-        f"unit(s), so the estimate leaves them out: {', '.join(unpriced)}. Record a supplier "
-        "offer read from a live page (an unconfirmed offer is never used)."
-    ]
+    notes: list[str] = []
+    if needs_use:
+        notes.append(
+            f"{len(needs_use)} linked part(s) are sold by the pack (a roll, reel or sheet), so "
+            f"the estimate leaves them out until each says how much one unit uses: "
+            f'{", ".join(needs_use)}. Set the part\'s "use" to {{amount, unit}} (for example '
+            '{"amount": 25, "unit": "mm"}) in a unit of the same kind as the pack.'
+        )
+    if unpriced:
+        notes.append(
+            f"{len(unpriced)} linked part(s) have no price confirmed on a live page at {qty} "
+            f"unit(s), so the estimate leaves them out: {', '.join(unpriced)}. Record a supplier "
+            "offer read from a live page (an unconfirmed offer is never used)."
+        )
+    return out, notes
 
 
 def cached(lookup: Lookup) -> Lookup:

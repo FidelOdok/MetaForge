@@ -167,6 +167,13 @@ write:
   the part's `"library"` to the entry's `name`. A write lists the real parts
   that are not linked, and a link to an entry that is not there yet (a
   registration can wait for the person's approval).
+- **A part sold by the pack says how much one unit uses.** When the linked
+  entry's offer is for a roll, reel, sheet or bag (its offer has a `pack`,
+  such as `{"amount": 16.46, "unit": "m"}`), set the part's `"use"` to how much
+  one product uses, in a unit of the same kind (`{"amount": 25, "unit": "mm"}`
+  of tape). The price is then the pack price times use over pack size; without
+  a `use` the part is left out of the estimate and the write says so, rather
+  than counting a whole roll per unit.
 - **A linked part's size is the library's.** On every write a part with a
   `"library"` link takes `geometry.envelope` from its entry's `length_mm`,
   `width_mm` and `height_mm` (`derived_from: "library"`, `size_basis: read`),

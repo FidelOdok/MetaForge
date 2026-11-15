@@ -13,6 +13,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+import pytest
+
 from api_gateway.imagine import library_cost
 
 
@@ -166,3 +168,51 @@ async def test_a_studio_write_prices_a_linked_part_from_the_real_catalog() -> No
     finally:
         catalog_routes.init_catalog(None)
         ops.init_operations(None)
+
+
+# --- FORGE-882: a part sold by the pack -------------------------------------------------
+
+TAPE = {
+    "name": "copper_tape",
+    "version": 1,
+    "suppliers": [
+        {
+            "supplier": "Mouser",
+            "sku": "517-1181-1/2",
+            "offer": {
+                **offer("GBP", [(1, 49.14), (10, 40.75)]),
+                "pack": {"amount": 16.4592, "unit": "m", "note": "18 yd roll"},
+            },
+        }
+    ],
+}
+
+
+def _tape_lookup(name: str) -> dict[str, Any] | None:
+    return TAPE if name == "copper_tape" else None
+
+
+def test_a_pack_sold_part_is_priced_by_what_one_unit_uses() -> None:
+    part = {"id": "touch-a", "library": "copper_tape", "use": {"amount": 25, "unit": "mm"}}
+    cfg, notes = library_cost.price_parts(studio(part), _tape_lookup)
+    cost = cost_of(cfg)
+    # one 18 yd roll (16.4592 m) at 49.14 GBP, 25 mm per unit
+    assert cost is not None and cost["unit"] == pytest.approx(49.14 * 0.025 / 16.4592, rel=1e-6)
+    assert "25 mm" in cost["source"] and "16.4592 m" in cost["source"]
+    assert notes == []
+
+
+def test_a_pack_sold_part_with_no_stated_use_is_left_out_and_named() -> None:
+    # negative control: a whole roll per unit is never counted
+    cfg, notes = library_cost.price_parts(
+        studio({"id": "touch-a", "library": "copper_tape"}), _tape_lookup
+    )
+    assert cost_of(cfg) is None
+    assert any("touch-a" in n and "use" in n for n in notes)
+
+
+def test_a_use_in_another_kind_of_unit_is_not_priced() -> None:
+    part = {"id": "touch-a", "library": "copper_tape", "use": {"amount": 2, "unit": "g"}}
+    cfg, notes = library_cost.price_parts(studio(part), _tape_lookup)
+    assert cost_of(cfg) is None
+    assert any("touch-a" in n for n in notes)

@@ -29,8 +29,11 @@ engineering verification. Missing specifications remain unknown.
   `offer` read from it: `read_on` (`YYYY-MM-DD`) and `via` (the tool or page it
   came from), both required because prices go stale; `currency` (an ISO code)
   with `breaks` (`[{qty, unit_price}]`, quantities rising); `stock`;
-  `lead_time_days`; and `confirmed`, false for a search snippet or a cached
-  page. An offer is a dated reading, not a live price.
+  `lead_time_days`; `confirmed`, false for a search snippet or a cached
+  page; and `pack` (`{amount, unit, note?}`) when the price is for a roll,
+  reel, sheet or bag rather than one piece (units `m`, `cm`, `mm`, `m2`,
+  `mm2`, `kg`, `g`, `l`, `ml`, `pcs`). An offer is a dated reading, not a live
+  price.
 - The Imagine studio links a real part to its entry with the part's `library`
   field, and the Imagine stage can list, read and register components, so a
   part researched in one project is found by the next. See
