@@ -687,6 +687,20 @@ approximation) draws the part. A size the library gave earlier is dropped when t
 longer holds it, so the studio and the library cannot drift. Code:
 `api_gateway/imagine/library_geometry.py`.
 
+#### Materials from the library
+
+When `process.material` names a material in the MetaForge material library (the catalogue's own id,
+such as `pla`, or a maker's grade named for its family, such as `prusament_petg`), each write puts
+its figures into `context.machines.materials` under the catalogue material it screens as. The engine
+merges that entry over its built-in material by id, so the library's figures replace the
+catalogue's and every other field stays the catalogue's: `density` from `density_kg_m3`, and `E`
+and `str` from the across-layer figures when the library has them (an FDM part is weakest across
+its layers), else `youngs_modulus_mpa` and `ultimate_strength_mpa`. Fields the library does not hold
+(`costKg`, `k`, `ul94` today) are listed in the entry's `defaulted` and named in the write's
+warnings. The entry carries `derived_from: "library"`, `libraryMaterial` and a `source` naming the
+library entry, its version and the datasheet. A material the library does not hold is left as the
+catalogue has it. Code: `api_gateway/imagine/library_materials.py`.
+
 #### Machines from the library
 
 `process.machine` may name a machine in the MetaForge machine library: an in-house instance (the
