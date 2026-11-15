@@ -149,6 +149,17 @@ write:
   the part's `"library"` to the entry's `name`. A write lists the real parts
   that are not linked, and a link to an entry that is not there yet (a
   registration can wait for the person's approval).
+- **A linked part's size is the library's.** On every write a part with a
+  `"library"` link takes `geometry.envelope` from its entry's `length_mm`,
+  `width_mm` and `height_mm` (`derived_from: "library"`, `size_basis: read`),
+  as its price comes from the entry's offers. Leave `geometry` out of a linked
+  part, and do not research a size the entry already holds. A size you type on
+  a linked part is replaced by the library's, and the write says so. An entry
+  that lacks part of its size (a footprint with no height) is named in the
+  write's warnings: add the missing field to the entry, sourced, with
+  `library.update_component`, not to the studio. Only an exact or generated
+  model on the part (a measured STEP, a KiCad body) is kept over the entry's
+  outline.
 - **Draw a library part once, in the library.** Give the entry a `form_code`
   (on `library.register_component`, or later with `library.update_component`):
   the body of a function of `g` that draws the part in mm, centred on its body,
