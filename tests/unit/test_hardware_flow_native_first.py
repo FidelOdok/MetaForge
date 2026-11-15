@@ -179,11 +179,49 @@ async def test_hardware_v1_routes_design_electronics_firmware_native_first(
     hw = await routes.build_phase_brain("r1", "hardware_v1")
     assert isinstance(hw._handlers["design"], NativeMechanicalDesignHandler)
     elec, fw = hw._handlers["electronics"], hw._handlers["firmware"]
-    assert isinstance(elec, NativeFirstPhaseHandler) and elec.required_types == (
-        "schematic",
-        "pcb_layout",
-    )
+    assert isinstance(elec, NativeFirstPhaseHandler) and elec.required_types == ("schematic",)
     assert isinstance(fw, NativeFirstPhaseHandler) and fw.required_types == ("firmware_source",)
     # the deterministic handlers stay as the backstops
     assert type(elec.fallback).__name__ == "GoalDrivenElectronicsHandler"
     assert type(fw.fallback).__name__ == "GoalDrivenFirmwareHandler"
+
+
+# --- a module build ----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_module_build_with_an_interconnect_schematic_is_kept() -> None:
+    # The owner's direction (2026-11-15): existing boards, no custom PCB. A
+    # schematic of the interconnect is the electronics deliverable; no board.
+    native, fallback = _Brain(), _Brain()
+    handler = NativeFirstPhaseHandler(
+        native,
+        fallback,
+        _probe({"schematic", "bom", "design_decision"}),
+        required_types=("schematic",),
+        note=ELECTRONICS_NOTE,
+        label="electronics",
+    )
+    out = await handler.run_phase(goal="a night light", phase=_phase("electronics"), context=_CTX)
+    assert out.summary == "electronics by the brain"
+    assert fallback.goals == []
+
+
+@pytest.mark.asyncio
+async def test_a_module_build_without_any_schematic_still_falls_back() -> None:
+    # negative control: a BOM alone is not an electronics design
+    native, fallback = _Brain(), _Brain()
+    handler = NativeFirstPhaseHandler(
+        native,
+        fallback,
+        _probe({"bom", "design_decision"}),
+        required_types=("schematic",),
+        note=ELECTRONICS_NOTE,
+        label="electronics",
+    )
+    out = await handler.run_phase(goal="a night light", phase=_phase("electronics"), context=_CTX)
+    assert out.summary.startswith("FALLBACK:") and "schematic" in out.summary
+
+
+def test_electronics_note_puts_modules_before_a_custom_board() -> None:
+    assert ELECTRONICS_NOTE.index("modules") < ELECTRONICS_NOTE.index("kicad.generate_pcb")

@@ -583,7 +583,8 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
                 react,
                 GoalDrivenElectronicsHandler(bridge, bom_recorder),
                 present_types,
-                required_types=("schematic", "pcb_layout"),
+                # A module build has an interconnect schematic and no custom board.
+                required_types=("schematic",),
                 note=ELECTRONICS_NOTE,
                 label="electronics",
             ),
