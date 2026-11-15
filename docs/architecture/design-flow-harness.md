@@ -145,6 +145,13 @@ pattern:
 | Simulation & V&V | `GoalDrivenVVHandler` | `test_plan` + an honest verdict (deep analyses deferred, never falsely "compliant") |
 | Manufacturing Prep | `GoalDrivenManufacturingHandler` | `manufacturing_file` + honest readiness (Gerbers deferred to Phase 2) |
 
+**Gate feedback reaches scripted handlers.** A retry or rework reason arrives as
+`FlowContext.retry_feedback`, which only the `ReActPhaseBrain` reads. A scripted
+handler sees only the goal, so `HybridBrain` puts the feedback before the goal
+for any handler that does not set `reads_retry_feedback` (the native-first
+handlers set it, and pass the feedback on to their own backstop). Before this,
+every scripted phase ignored every retry and rework reason (2026-11-15).
+
 Handlers share the pattern in `api_gateway/runs/*_handlers.py` and persist via
 the recorders in `api_gateway/twin/` (`geometry_recorder`, `bom_recorder`,
 `document_recorder`). A `HybridBrain` routes each phase to its handler and falls

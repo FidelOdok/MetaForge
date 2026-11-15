@@ -61,6 +61,9 @@ FIRMWARE_NOTE = (
 class NativeFirstPhaseHandler:
     """Run the native brain; keep its outcome only if the phase's work products exist."""
 
+    #: The native brain reads context.retry_feedback itself (see HybridBrain).
+    reads_retry_feedback = True
+
     def __init__(
         self,
         native: Any,
@@ -104,7 +107,12 @@ class NativeFirstPhaseHandler:
                 reason = f"the native {self.label} phase failed: {exc}"
             span.set_attribute("phase.engine", "fallback")
             logger.warning("native_first_phase_fallback", phase=phase.id, reason=reason)
-            fallback = await self.fallback.run_phase(goal=goal, phase=phase, context=context)
+            fallback_goal = (
+                f"{context.retry_feedback}\n\n{goal}" if context.retry_feedback else goal
+            )
+            fallback = await self.fallback.run_phase(
+                goal=fallback_goal, phase=phase, context=context
+            )
             return PhaseOutcome(
                 summary=(
                     f"FALLBACK: {reason}; the scripted {self.label} handler ran instead. "

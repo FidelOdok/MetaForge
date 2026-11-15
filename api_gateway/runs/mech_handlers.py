@@ -465,8 +465,16 @@ class HybridBrain:
             handler = self._handlers.get(phase.id)
             if handler is not None:
                 logger.info("design_flow_deterministic_phase", phase=phase.id)
+                # A retry or rework reason reaches the ReAct brain through the
+                # context; a scripted handler only reads the goal, so it gets
+                # the reason first (2026-11-15). A handler that drives the
+                # brain itself says so and is passed the goal unchanged.
+                handler_goal = goal
+                if context.retry_feedback and not getattr(handler, "reads_retry_feedback", False):
+                    handler_goal = f"{context.retry_feedback}\n\n{goal}"
+                    logger.info("design_flow_handler_feedback", phase=phase.id)
                 try:
-                    return await handler.run_phase(goal=goal, phase=phase, context=context)
+                    return await handler.run_phase(goal=handler_goal, phase=phase, context=context)
                 except McpToolError as exc:
                     if not is_service_refusal(exc):
                         raise
@@ -501,6 +509,11 @@ _NATIVE_DESIGN_NOTE = (
 )
 
 
+def _with_feedback(goal: str, context: FlowContext) -> str:
+    """The goal with the gate's retry or rework reason first, for a scripted handler."""
+    return f"{context.retry_feedback}\n\n{goal}" if context.retry_feedback else goal
+
+
 class NativeMechanicalDesignHandler:
     """mech_v1 design phase: the native ReAct brain designs, a scripted spec backstops it.
 
@@ -509,6 +522,9 @@ class NativeMechanicalDesignHandler:
     cad_model, the goal-driven single-primitive handler runs instead, given the
     same flow context and constraint set, and the phase summary says so.
     """
+
+    #: The native brain reads context.retry_feedback itself (see HybridBrain).
+    reads_retry_feedback = True
 
     def __init__(
         self,
@@ -537,7 +553,9 @@ class NativeMechanicalDesignHandler:
         except Exception as exc:  # noqa: BLE001 - the backstop exists for exactly this
             reason = f"the native design phase failed: {exc}"
         logger.warning("mech_native_design_fallback", reason=reason)
-        fallback = await self._fallback.run_phase(goal=goal, phase=phase, context=context)
+        fallback = await self._fallback.run_phase(
+            goal=_with_feedback(goal, context), phase=phase, context=context
+        )
         return PhaseOutcome(
             summary=(
                 f"FALLBACK: {reason}; a single-primitive design was authored from the "
