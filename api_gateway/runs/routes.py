@@ -453,6 +453,18 @@ def _make_cad_model_probe(project_backend: Any, twin: Any) -> Any:
     return probe
 
 
+def _make_present_types(project_backend: Any, twin: Any) -> Any:
+    """The work-product types the project recorded since ``since_ts``."""
+    from api_gateway.runs.gate_eval import ProjectGateEvaluator
+
+    evaluator = ProjectGateEvaluator(project_backend, twin=twin)
+
+    async def present(project_id: str | None, since_ts: float) -> set[str]:
+        return set(await evaluator.present_types(project_id, since_ts))
+
+    return present
+
+
 async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) -> Any:
     """The brain a phase runs on, for whichever engine is driving it.
 
@@ -482,6 +494,11 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
         SimulationHandler,
     )
     from api_gateway.runs.mfg_handlers import GoalDrivenManufacturingHandler
+    from api_gateway.runs.native_first import (
+        ELECTRONICS_NOTE,
+        FIRMWARE_NOTE,
+        NativeFirstPhaseHandler,
+    )
     from api_gateway.runs.req_handlers import GoalDrivenRequirementsHandler
     from api_gateway.runs.vv_handlers import GoalDrivenVVHandler
     from api_gateway.twin.bom_recorder import make_bom_recorder
@@ -539,6 +556,8 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
             )
         }
     elif flow_id == "hardware_v1":
+        twin = get_twin()
+        present_types = _make_present_types(project_backend, twin)
         # Deterministic handlers where the native brain is flaky or dishonest:
         # mechanical design (loadable cad_model), electronics (BOM + closed power
         # budget), firmware (pinmap + firmware_source scaffold), and V&V (honest
@@ -550,9 +569,32 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
             "requirements": GoalDrivenRequirementsHandler(bridge, doc_recorder),
             "architecture": GoalDrivenArchitectureHandler(bridge, doc_recorder),
             "concept_selection": GoalDrivenConceptSelectionHandler(bridge),
-            "design": GoalDrivenMechanicalHandler(bridge, recorder),
-            "electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder),
-            "firmware": GoalDrivenFirmwareHandler(bridge, doc_recorder),
+            # The tool-using brain designs the part, draws the board and builds
+            # the firmware; the scripted handlers are backstops and the phase
+            # summary says FALLBACK when one ran (FORGE-496 pattern, 2026-11-15).
+            "design": NativeMechanicalDesignHandler(
+                react,
+                GoalDrivenMechanicalHandler(
+                    bridge, recorder, constraints_loader=_make_constraints_loader(twin)
+                ),
+                _make_cad_model_probe(project_backend, twin),
+            ),
+            "electronics": NativeFirstPhaseHandler(
+                react,
+                GoalDrivenElectronicsHandler(bridge, bom_recorder),
+                present_types,
+                required_types=("schematic", "pcb_layout"),
+                note=ELECTRONICS_NOTE,
+                label="electronics",
+            ),
+            "firmware": NativeFirstPhaseHandler(
+                react,
+                GoalDrivenFirmwareHandler(bridge, doc_recorder),
+                present_types,
+                required_types=("firmware_source",),
+                note=FIRMWARE_NOTE,
+                label="firmware",
+            ),
             "simulation": GoalDrivenVVHandler(bridge, doc_recorder),
             "manufacturing": GoalDrivenManufacturingHandler(bridge, doc_recorder),
         }

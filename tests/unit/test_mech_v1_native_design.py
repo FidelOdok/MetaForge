@@ -266,6 +266,6 @@ async def test_build_phase_brain_routes_only_mech_v1_design_to_the_native_handle
     assert set(mech._handlers) == {"design"}
 
     hw = await routes.build_phase_brain("r1", "hardware_v1")
-    assert type(hw._handlers["design"]) is GoalDrivenMechanicalHandler
+    assert isinstance(hw._handlers["design"], NativeMechanicalDesignHandler)
     d1 = await routes.build_phase_brain("r1", "design_v1")
     assert type(d1._handlers["design"]).__name__ == "MechanicalDesignHandler"

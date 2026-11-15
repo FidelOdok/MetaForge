@@ -139,9 +139,9 @@ pattern:
 | Requirements | `GoalDrivenRequirementsHandler` | the `constraint_set` (verifiable constraints, each with an acceptance method, the one home of the values), then the `prd` prose, then a decision linking `CS-...@n` by `depends_on` |
 | Architecture | `GoalDrivenArchitectureHandler` | `documentation` (per-subsystem numeric mass/power/cost budgets) |
 | Concept Selection | `GoalDrivenConceptSelectionHandler` | `design_decision` (trade study: alternatives + rationale + link to the architecture decision) |
-| Mechanical Design | `GoalDrivenMechanicalHandler` | loadable `cad_model` (FreeCAD → STEP → MinIO) |
-| Electronics | `GoalDrivenElectronicsHandler` | `bom` + closed numeric power budget |
-| Firmware & Control | `GoalDrivenFirmwareHandler` | `pinmap` + `firmware_source` scaffold |
+| Mechanical Design | `NativeMechanicalDesignHandler` (backstop `GoalDrivenMechanicalHandler`) | the brain's named multi-part `cad_model`; the backstop is one primitive |
+| Electronics | `NativeFirstPhaseHandler` (backstop `GoalDrivenElectronicsHandler`) | KiCad `schematic` + `pcb_layout` (ERC, DRC, Gerbers) and the power budget; the backstop records `bom` + power budget only |
+| Firmware & Control | `NativeFirstPhaseHandler` (backstop `GoalDrivenFirmwareHandler`) | `firmware_source` that was built, statically checked and run on the emulator; the backstop is a pin map + scaffold |
 | Simulation & V&V | `GoalDrivenVVHandler` | `test_plan` + an honest verdict (deep analyses deferred, never falsely "compliant") |
 | Manufacturing Prep | `GoalDrivenManufacturingHandler` | `manufacturing_file` + honest readiness (Gerbers deferred to Phase 2) |
 
@@ -159,7 +159,27 @@ dimensions in `extra_metadata` on the commit. If the phase ends with no loadable
 `cad_model` (or the native turn fails), `GoalDrivenMechanicalHandler` runs as a
 backstop. It is given the flow context and the project's constraint set,
 re-asks once if its spec breaks a stated limit, and the phase summary starts
-with `FALLBACK:`. `design_v1` and `hardware_v1` routing is unchanged.
+with `FALLBACK:`. `design_v1` routing is unchanged.
+
+**`hardware_v1` design, electronics and firmware (native first).** These three
+phases used to run only their scripted handlers, which never call FreeCAD
+authoring, KiCad or the firmware build: a run could commit a solid cylinder as
+its enclosure and finish with no schematic, board or built firmware
+(2026-11-15). The design phase now runs `NativeMechanicalDesignHandler` as in
+`mech_v1`. Electronics and firmware run `NativeFirstPhaseHandler`
+(`api_gateway/runs/native_first.py`): the `ReActPhaseBrain` does the phase with
+a rules note naming the tools (`kicad.generate_schematic`,
+`kicad.generate_pcb`, `kicad.autoroute_pcb`, `kicad.run_erc`/`run_drc`,
+`twin.record_design_files`; `firmware.build`, `firmware.static_check`,
+`firmware.run_emulated`), then a probe checks the twin for the phase's work
+products since the phase started (`schematic` and `pcb_layout`;
+`firmware_source`). If one is missing or the brain fails, the scripted handler
+runs and the summary starts with `FALLBACK:`. The `pcb_layout` and
+`firmware_source` deliverables now carry the tools that make them in
+`DELIVERABLE_TOOLS` (`mcp_core/profiles.py`; the board's set includes the
+schematic tools), so a phase expected to deliver a board can draw one whatever
+discipline it names. `schematic` alone keeps only the recorder, because
+`design_v1`'s CAD phase also expects it and has no room in its tool budget.
 
 **Multi-part designs commit an assembly.** When a design has more
 than one part, the `cad_model` hint tells the agent to commit each part as its
