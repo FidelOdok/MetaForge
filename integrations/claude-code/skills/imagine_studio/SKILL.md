@@ -132,6 +132,14 @@ write:
 - **The manufacturing context** is `process`: `id`, `material` and `qty` (a
   whole number of units) are what the handover needs. The quantity comes from
   the person; if they have not said, record it as an assumption.
+- **The material's figures are the library's.** Set `process.material` to the
+  library material's name (`pla`, or a maker's grade such as
+  `prusament_petg`, which screens as its family). Each write takes its density,
+  stiffness and strength from the library (the across-layer figures for FDM)
+  into `context.machines.materials`, `derived_from: "library"`; the price per
+  kg, thermal conductivity and flammability stay the catalogue's until the
+  library holds them, and the write says so. Do not type material figures the
+  library holds.
 - **Parts** in `context.components` need `schemaVersion: 1`, and each part
   `id`, `role` (`fn:<function>`, `board` or `battery`), `mpn`, `manufacturer`,
   `datasheet`, `retrieved`, `interfaces` and `geometry.envelope` with a

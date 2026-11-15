@@ -38,6 +38,7 @@ from api_gateway.imagine import (
     library_cost,
     library_geometry,
     library_link,
+    library_materials,
     library_models,
     part_model,
     resolve_part,
@@ -722,6 +723,12 @@ class ImagineService:
         config, sized = await asyncio.to_thread(
             library_geometry.derive_part_geometry, config, lookup
         )
+        # The material's figures come from the material library (FORGE-880).
+        config, material_notes = await asyncio.to_thread(
+            library_materials.derive_material,
+            config,
+            library_cost.cached(library_materials.catalog_material),
+        )
         # A part with no size gets a labelled 3D body, so every part exists in 3D.
         # Reading a library and a model is file work: off the event loop.
         config, drawn = await asyncio.to_thread(
@@ -744,7 +751,7 @@ class ImagineService:
         library = await asyncio.to_thread(
             library_link.library_notes, config, library_link.catalog_exists
         )
-        drawn = [*sized, *drawn, *linked, *modelled, *priced, *library]
+        drawn = [*material_notes, *sized, *drawn, *linked, *modelled, *priced, *library]
         try:
             checked = engine_page.validate_config(config)
         except engine_page.ConfigError as exc:
