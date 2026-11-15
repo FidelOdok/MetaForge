@@ -140,7 +140,7 @@ pattern:
 | Architecture | `GoalDrivenArchitectureHandler` | `documentation` (per-subsystem numeric mass/power/cost budgets) |
 | Concept Selection | `GoalDrivenConceptSelectionHandler` | `design_decision` (trade study: alternatives + rationale + link to the architecture decision) |
 | Mechanical Design | `NativeMechanicalDesignHandler` (backstop `GoalDrivenMechanicalHandler`) | the brain's named multi-part `cad_model`; the backstop is one primitive |
-| Electronics | `NativeFirstPhaseHandler` (backstop `GoalDrivenElectronicsHandler`) | KiCad `schematic` + `pcb_layout` (ERC, DRC, Gerbers) and the power budget; the backstop records `bom` + power budget only |
+| Electronics | `NativeFirstPhaseHandler` (backstop `GoalDrivenElectronicsHandler`) | KiCad `schematic` (the module interconnect, or a custom board's circuit with `pcb_layout`, DRC and Gerbers) and the power budget; the backstop records `bom` + power budget only |
 | Firmware & Control | `NativeFirstPhaseHandler` (backstop `GoalDrivenFirmwareHandler`) | `firmware_source` that was built, statically checked and run on the emulator; the backstop is a pin map + scaffold |
 | Simulation & V&V | `GoalDrivenVVHandler` | `test_plan` + an honest verdict (deep analyses deferred, never falsely "compliant") |
 | Manufacturing Prep | `GoalDrivenManufacturingHandler` | `manufacturing_file` + honest readiness (Gerbers deferred to Phase 2) |
@@ -172,8 +172,10 @@ a rules note naming the tools (`kicad.generate_schematic`,
 `kicad.generate_pcb`, `kicad.autoroute_pcb`, `kicad.run_erc`/`run_drc`,
 `twin.record_design_files`; `firmware.build`, `firmware.static_check`,
 `firmware.run_emulated`), then a probe checks the twin for the phase's work
-products since the phase started (`schematic` and `pcb_layout`;
-`firmware_source`). If one is missing or the brain fails, the scripted handler
+products since the phase started (`schematic` for electronics, `firmware_source`
+for firmware). Electronics is told to prefer complete commercial modules and
+boards over a custom board; a module build delivers the interconnect schematic,
+and only a custom board adds `pcb_layout` and `gerber`. If one is missing or the brain fails, the scripted handler
 runs and the summary starts with `FALLBACK:`. The `pcb_layout` and
 `firmware_source` deliverables now carry the tools that make them in
 `DELIVERABLE_TOOLS` (`mcp_core/profiles.py`; the board's set includes the

@@ -33,16 +33,20 @@ tracer = get_tracer("api_gateway.runs.native_first")
 PresentTypes = Callable[[str | None, float], Awaitable[set[str]]]
 
 ELECTRONICS_NOTE = (
-    "ELECTRONICS RULES: produce the real board, not a description of one. Use the parts the "
-    "architecture and concept phases chose. Draw the circuit with kicad.generate_schematic "
-    "(every part as a KiCad symbol and footprint, nets as REF.PIN) and keep ERC clean "
-    "(kicad.run_erc). Lay out the board with kicad.generate_pcb inside the approved outline, "
-    "route it with kicad.autoroute_pcb and run kicad.run_drc. Record the files with "
-    "twin.record_design_files (work_product_type schematic, then pcb_layout; Gerbers as "
-    "gerber after kicad.export_gerber). Close the power budget per rail with "
-    "power.check_budget, record each chosen part with twin.record_component_selection, and "
-    "finish with one twin.record_decision that states the ERC and DRC results as numbers. "
-    "A check that did not run is reported as not run, never as passed."
+    "ELECTRONICS RULES: produce the real design, not a description of one. Prefer complete "
+    "commercial modules and boards (a dev board with USB-C, an LED ring board, a sensor "
+    "breakout) over a custom board whenever they meet the requirements and fit; record why "
+    "any module was rejected. Use the parts the architecture and concept phases chose. Draw "
+    "the circuit with kicad.generate_schematic (for a module build, the interconnect: each "
+    "board as its connector or header symbol, nets as REF.PIN) and keep ERC clean "
+    "(kicad.run_erc). Only when the concept calls for a custom board: lay it out with "
+    "kicad.generate_pcb inside the approved outline, route it with kicad.autoroute_pcb, run "
+    "kicad.run_drc until it is clean, and export Gerbers. Record the files with "
+    "twin.record_design_files (work_product_type schematic; pcb_layout and gerber for a "
+    "board). Close the power budget per rail with power.check_budget, record each chosen part "
+    "with twin.record_component_selection, and finish with one twin.record_decision that "
+    "states the ERC (and DRC) results as numbers. A check that did not run is reported as "
+    "not run, never as passed."
 )
 
 FIRMWARE_NOTE = (
