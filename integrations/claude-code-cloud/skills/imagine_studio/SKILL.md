@@ -132,6 +132,16 @@ write:
 - **The manufacturing context** is `process`: `id`, `material` and `qty` (a
   whole number of units) are what the handover needs. The quantity comes from
   the person; if they have not said, record it as an assumption.
+- **The machine is the library's.** When the person names the machine the
+  parts are made on, find it with `library.list_machines` and set
+  `process.machine` to its library id (an in-house instance such as their own
+  printer, or a vendor service's instance). Each write builds it into
+  `context.machines` from the library (build volume and the limits the library
+  holds, `derived_from: "library"`) and adds the person's other in-house
+  machines for the process. A figure the library lacks comes from the process
+  default and the write names it: add the machine's own figure to the library,
+  not to the studio. Do not write a `context.machines` entry for a machine the
+  library holds.
 - **The material's figures are the library's.** Set `process.material` to the
   library material's name (`pla`, or a maker's grade such as
   `prusament_petg`, which screens as its family). Each write takes its density,

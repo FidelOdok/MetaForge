@@ -38,6 +38,7 @@ from api_gateway.imagine import (
     library_cost,
     library_geometry,
     library_link,
+    library_machines,
     library_materials,
     library_models,
     part_model,
@@ -378,6 +379,13 @@ def _chosen_parts(
             if len(cands) == 1:
                 chosen[role] = cands[0]
     return chosen
+
+
+def _machine_library() -> Any:
+    """The gateway's machine library (the studio's machines come from it, FORGE-879)."""
+    from api_gateway.library.routes import get_machine_library
+
+    return get_machine_library()
 
 
 def _part_gaps(part: dict[str, Any]) -> list[str]:
@@ -729,6 +737,11 @@ class ImagineService:
             config,
             library_cost.cached(library_materials.catalog_material),
         )
+        # The machine and the in-house machines for the process come from the machine
+        # library (FORGE-879), so process.machine can name the owner's own printer.
+        config, machined = await asyncio.to_thread(
+            library_machines.derive_machines, config, _machine_library()
+        )
         # A part with no size gets a labelled 3D body, so every part exists in 3D.
         # Reading a library and a model is file work: off the event loop.
         config, drawn = await asyncio.to_thread(
@@ -751,7 +764,7 @@ class ImagineService:
         library = await asyncio.to_thread(
             library_link.library_notes, config, library_link.catalog_exists
         )
-        drawn = [*material_notes, *sized, *drawn, *linked, *modelled, *priced, *library]
+        drawn = [*material_notes, *sized, *machined, *drawn, *linked, *modelled, *priced, *library]
         try:
             checked = engine_page.validate_config(config)
         except engine_page.ConfigError as exc:
