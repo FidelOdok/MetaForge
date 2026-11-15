@@ -126,7 +126,8 @@ class TestTelemetryMetricsGroupAccess:
         # + 3 reconstruction proposals, accepted features and model passes (4B).
         # + 6 CAD design loop runs, iterations, renders, verdicts, calls and spend.
         # + 3 CadQuery isolated script runner runs, durations and limit stops.
-        assert len(MetricsRegistry.all_metrics()) == 170
+        # + 1 MCP project-scope decisions (account-confined MCP calls).
+        assert len(MetricsRegistry.all_metrics()) == 171
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

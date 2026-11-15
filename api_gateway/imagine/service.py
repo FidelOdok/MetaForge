@@ -39,6 +39,7 @@ from api_gateway.imagine import (
     library_geometry,
     library_link,
     library_machines,
+    library_materials,
     library_models,
     part_model,
     resolve_part,
@@ -742,6 +743,12 @@ class ImagineService:
         config, sized = await asyncio.to_thread(
             library_geometry.derive_part_geometry, config, lookup
         )
+        # The material's figures come from the material library (FORGE-880).
+        config, material_notes = await asyncio.to_thread(
+            library_materials.derive_material,
+            config,
+            library_cost.cached(library_materials.catalog_material),
+        )
         # The machine and the in-house machines for the process come from the machine
         # library (FORGE-879), so process.machine can name the owner's own printer.
         config, machined = await asyncio.to_thread(
@@ -769,7 +776,7 @@ class ImagineService:
         library = await asyncio.to_thread(
             library_link.library_notes, config, library_link.catalog_exists
         )
-        drawn = [*sized, *machined, *drawn, *linked, *modelled, *priced, *library]
+        drawn = [*material_notes, *sized, *machined, *drawn, *linked, *modelled, *priced, *library]
         try:
             checked = engine_page.validate_config(config)
         except engine_page.ConfigError as exc:
