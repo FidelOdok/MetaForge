@@ -31,6 +31,7 @@ import httpx
 import structlog
 
 from mcp_core.context import TaskBinding
+from metaforge.mcp.gateway_auth import gateway_auth_headers
 
 logger = structlog.get_logger(__name__)
 
@@ -84,7 +85,9 @@ class GatewayClientTaskVerifier:
 
     def _http(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_SECONDS)
+            self._client = httpx.AsyncClient(
+                timeout=_REQUEST_TIMEOUT_SECONDS, headers=gateway_auth_headers()
+            )
         return self._client
 
     async def confirm(self, binding: TaskBinding) -> None:
