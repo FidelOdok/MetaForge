@@ -442,7 +442,10 @@ class ProjectServer(McpToolServer):
             if not query or not isinstance(query, str):
                 raise ValueError("project.open: 'query' is required and must be a string")
 
-            projects = await self.backend.list_projects()
+            # FORGE-859: on a server shared by several accounts, only the
+            # caller's own projects are candidates, so another account's
+            # names never appear in an ambiguity error or get opened.
+            projects = _visible(await self.backend.list_projects())
             candidates = [ProjectRef(id=str(p.id), name=str(p.name)) for p in projects]
             try:
                 match = resolve_project_ref(query, candidates)
@@ -553,7 +556,9 @@ class ProjectServer(McpToolServer):
             limit = min(limit, 100)
 
             ctx_project_id = current_context().project_id
-            projects = await self.backend.list_projects()
+            # FORGE-859: the caller's projects only, before counting, so the
+            # total and the pages never reveal another account's projects.
+            projects = _visible(await self.backend.list_projects())
 
             # MET-441: when the call context names a project, scope the
             # list to that project only. Defaults to "no filter" so
@@ -617,6 +622,9 @@ class ProjectServer(McpToolServer):
                     raise ValueError("project.get: 'id' must be a string")
                 span.set_attribute("project.lookup_kind", "id")
                 project = await self.backend.get_project(project_id)
+                # FORGE-859: another account's project is "not found".
+                if project is not None and not _visible([project]):
+                    project = None
             elif project_name is not None:
                 if not isinstance(project_name, str):
                     raise ValueError("project.get: 'name' must be a string")
@@ -709,11 +717,19 @@ async def _find_by_name(backend: ProjectBackendLike, name: str) -> ProjectLike |
     Acceptable for Phase 1 (project counts are O(10s), not O(10ks)).
     When projects grow past that we'll add a name index to the backend.
     """
-    projects = await backend.list_projects()
+    projects = _visible(await backend.list_projects())
     for project in projects:
         if project.name == name:
             return project
     return None
+
+
+def _visible(projects: list[ProjectLike]) -> list[ProjectLike]:
+    """The projects this call may see (FORGE-859): all, unless it is confined."""
+    ctx = current_context()
+    if ctx.allowed_projects is None:
+        return list(projects)
+    return [p for p in projects if ctx.allows_project(p.id)]
 
 
 def _project_to_dict(project: ProjectLike) -> dict[str, Any]:

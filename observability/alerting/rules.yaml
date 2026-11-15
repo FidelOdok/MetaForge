@@ -687,6 +687,25 @@ groups:
             the check exists for. A front end of your own needs adding to
             METAFORGE_MCP_ALLOWED_ORIGINS.
 
+      # FORGE-859: the auth provider could not say which projects a signed-in
+      # account may touch, so its MCP calls are being refused. Every signed-in
+      # MCP user is affected while this fires; a "not found" is a person's
+      # own mistake and is not alerted on.
+      - alert: McpProjectScopeUnavailable
+        expr: increase(metaforge_mcp_project_scope_total{outcome="scope_unavailable"}[10m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP cannot check signed-in accounts' projects; their calls are refused"
+          description: >-
+            Look for mcp_project_scope_unavailable and
+            mcp_project_scope_lookup_failed in the mcp-http logs. The first is
+            the auth provider's project_scope() raising AuthUnavailable (its
+            control plane is unreachable); the second is an owner lookup (the
+            twin, the session store, or the gateway for runs and uploads)
+            failing. Calls fail closed until it recovers.
+
       # ── Design-flow engine (FORGE-401) ───────────────────────────────
       - alert: DesignFlowEngineUnavailable
         expr: rate(metaforge_design_flow_engine_unavailable_total[5m]) > 0

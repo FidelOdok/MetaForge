@@ -147,8 +147,27 @@ class McpCallContext(BaseModel):
         default=False,
         description="True only when the server confirmed this session's claimed task.",
     )
+    # FORGE-859: the projects a signed-in account may touch, on an MCP server
+    # shared by several accounts. Server-set only, after the auth provider
+    # answered for the verified subject; never read from a header. ``None``
+    # is unrestricted: a local install, an API-key or a service caller.
+    allowed_projects: frozenset[str] | None = Field(
+        default=None,
+        description="Projects this call may touch (None = unrestricted). Server-set only.",
+    )
 
     model_config = ConfigDict(frozen=True)
+
+    def allows_project(self, project_id: object) -> bool:
+        """Whether this call may see ``project_id`` (FORGE-859).
+
+        Always true for an unrestricted call. For a confined one, a project
+        outside the account's scope and no project at all are both refused:
+        something that belongs to no project cannot be shown to be theirs.
+        """
+        if self.allowed_projects is None:
+            return True
+        return bool(project_id) and str(project_id) in self.allowed_projects
 
     #: The all-zero session of the unattributed sentinel. Binding anything to
     #: it would be process-global by another name, which is the leak the

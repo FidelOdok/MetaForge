@@ -152,6 +152,7 @@ from mcp_core.service_auth import (
 )
 from mcp_core.workflows import WORKFLOWS, prompt_body, prompt_manifest
 from metaforge.mcp.capture import SessionCapture
+from metaforge.mcp.project_scope import McpProjectScoper, ProjectScopeError
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
 from tool_registry.bootstrap import bootstrap_tool_registry
@@ -434,6 +435,11 @@ class UnifiedMcpServer:
         # all -- "which plugin tool is failing, for whom" was a question
         # you answered by reading Loki by hand.
         self._metrics = metrics
+        # FORGE-859: a signed-in account's calls confined to its projects.
+        # None (the default, and every deployment without an identity login
+        # whose provider can answer for projects) leaves every call as it was.
+        self._project_scoper: McpProjectScoper | None = None
+        self._ownership_sources: dict[str, Any] = {}
         # Whoever last completed the `initialize` handshake. Reported by
         # health/check so a version-skew question has an answer other than
         # "ask the user what they are running".
@@ -612,6 +618,53 @@ class UnifiedMcpServer:
             }
         )
 
+    def attach_ownership_sources(self, **sources: Any) -> None:
+        """What owner lookups may read: the twin, the agent-session store, the
+        project backend (FORGE-859). Supplied by the bootstrap, which built them."""
+        self._ownership_sources.update({k: v for k, v in sources.items() if v is not None})
+
+    def attach_project_scope(
+        self,
+        authorizer: Any,
+        *,
+        gateway_url: str | None = None,
+        library_in_process: bool = True,
+    ) -> McpProjectScoper:
+        """Confine signed-in accounts to their projects (FORGE-859, part B).
+
+        ``authorizer`` is the deployment's auth provider, which implements
+        :class:`~api_gateway.auth.scope.ProjectAuthorizer`. Called by the HTTP
+        transport only when the OAuth login binds tokens to a verified
+        subject; any other caller is unaffected.
+        """
+        from metaforge.mcp.project_scope import sidecar_owner_lookups
+
+        sources = self._ownership_sources
+        backend = sources.get("project_backend")
+        lookups = sidecar_owner_lookups(
+            twin=sources.get("twin"),
+            agent_session_store=sources.get("agent_session_store"),
+            approvals_lister=getattr(self, "_approvals_lister", None),
+            gateway_url=gateway_url,
+        )
+        self._project_scoper = McpProjectScoper(
+            authorizer,
+            lookups,
+            library_in_process=library_in_process,
+            project_deleter=getattr(backend, "delete_project", None),
+            metrics=self._metrics,
+        )
+        logger.info(
+            "mcp_project_scope_enabled",
+            lookups=sorted(lookups),
+            library_in_process=library_in_process,
+        )
+        return self._project_scoper
+
+    @property
+    def project_scoper(self) -> McpProjectScoper | None:
+        return self._project_scoper
+
     def _effective_caller(self) -> Caller:
         """Who is calling *this* request: the transport's answer, or the service."""
         try:
@@ -662,6 +715,11 @@ class UnifiedMcpServer:
         except Exception as exc:  # noqa: BLE001 - a notice must never fail a tool call
             logger.debug("approval_notice_unavailable", error=str(exc))
             return None
+        # FORGE-859: a signed-in account hears only of its own projects' items.
+        if self._project_scoper is not None and ctx is not None:
+            visible = await self._project_scoper.visible_projects(ctx)
+            if visible is not None:
+                items = [i for i in items if str(i.get("project_id") or "") in visible]
         told = self._approvals_told.setdefault(session, set())
         if len(self._approvals_told) > _APPROVAL_NOTICE_SESSIONS:
             self._approvals_told.pop(next(iter(self._approvals_told)))
@@ -1045,6 +1103,24 @@ class UnifiedMcpServer:
                             "code": exc.code,
                             "reason": exc.reason,
                             "retryable": False,
+                        },
+                    )
+                )
+            except ProjectScopeError as exc:
+                self._mark_failed(span, exc)
+                # FORGE-859. Refused, not held: the call left the signed-in
+                # account's projects. "Not found" reads the same whether the
+                # project is someone else's or does not exist.
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": exc.code,
+                            "reason": exc.reason,
+                            "retryable": exc.retryable,
                         },
                     )
                 )
@@ -2319,6 +2395,13 @@ class UnifiedMcpServer:
         except ResourceUriError as exc:
             raise ResourceReadError(uri, str(exc)) from exc
 
+        confined = None
+        if self._project_scoper is not None:
+            from mcp_core.context import current_context
+
+            # FORGE-859: a signed-in account reads only its projects' resources.
+            confined = await self._project_scoper.admit_resource(uri, current_context())
+
         adapter = next(
             (a for a in self._adapters if getattr(a, "adapter_id", None) == parsed.adapter),
             None,
@@ -2329,16 +2412,21 @@ class UnifiedMcpServer:
                 f"{uri} (no adapter {parsed.adapter!r}; loaded: {', '.join(known)})"
             )
 
-        raw = await adapter.handle_request(
-            json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": "unified-resources-read",
-                    "method": "resources/read",
-                    "params": params,
-                }
-            )
+        request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "unified-resources-read",
+                "method": "resources/read",
+                "params": params,
+            }
         )
+        if confined is not None:
+            from mcp_core.context import with_context
+
+            with with_context(confined):
+                raw = await adapter.handle_request(request)
+        else:
+            raw = await adapter.handle_request(request)
         payload = json.loads(raw)
         if "error" in payload:
             err = payload["error"]
@@ -3366,6 +3454,21 @@ class UnifiedMcpServer:
             base = scoped if scoped is not None else current_context()
             if not base.client:
                 scoped = base.model_copy(update={"client": label})
+        if self._project_scoper is not None:
+            # FORGE-859: a signed-in account's call is checked against its
+            # projects before anything else looks at it, the approval hold
+            # included: a write to someone else's project is not even held.
+            base = scoped if scoped is not None else current_context()
+            tool_id = self._resolve_tool_id(params.get("tool_id", ""))
+            arguments = params.get("arguments") or {}
+            admission = await self._project_scoper.admit(
+                tool_id, arguments if isinstance(arguments, dict) else {}, base
+            )
+            if admission is not None:
+                params = {**params, "tool_id": tool_id, "arguments": admission.arguments}
+                with self._project_scoper.running(admission):
+                    result = await self._dispatch_tool_call_unscoped(params)
+                return dict(await self._project_scoper.after(tool_id, admission, result))
         if scoped is None:
             return await self._dispatch_tool_call_unscoped(params)
 
@@ -3896,6 +3999,8 @@ _ERROR_CLASSES: tuple[tuple[str, str], ...] = (
     # the tools a service may use. Its own label: a rise means a phase is
     # reaching for something it was never given, not that approvals are slow.
     ("ServiceScopeError", "service_scope_refused"),
+    # FORGE-859: a signed-in account's call outside its projects.
+    ("ProjectScopeError", "project_scope_refused"),
     # FORGE-393. Separate labels on purpose: a rise in the first means a
     # client is still passing the old argument, a rise in the second means
     # approvals are landing without an identified human -- different faults
