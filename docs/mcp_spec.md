@@ -194,7 +194,7 @@ When the OAuth sign-in binds each token to a person (an auth provider that
 implements `PasswordLogin`) and that provider also implements
 `ProjectAuthorizer`, every `tools/call` and `resources/read` from that person
 is checked against their projects before it runs, the approval hold included
-(`metaforge/mcp/project_scope.py`, FORGE-859). Each tool has a tenancy:
+(`metaforge/mcp/project_scope.py`). Each tool has a tenancy:
 `project`, `entity`, `account_list`, `account_create`, `shared_read`,
 `tenant_library`, `stateless`, `adapter_workspace` or `blocked`, and a tool
 with none is refused. A refusal is a JSON-RPC error (`-32001`) whose `data`

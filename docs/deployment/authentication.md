@@ -321,7 +321,7 @@ given a `version_id` rather than a run or a template.
 Callers that are not a signed-in person are unchanged: a local install, the
 shared-secret login, `METAFORGE_MCP_API_KEY` callers and the design-flow
 service caller (`METAFORGE_MCP_SERVICE_KEY`), which is confined to its run's
-project by FORGE-487 instead. A token issued before the identity login was
+project by its run's own check instead. A token issued before the identity login was
 switched on carries no subject and is refused until the person signs in
 again. A provider whose `project_scope()` raises `AuthUnavailable` gets
 `code: scope_unavailable` (retryable), never an empty scope;
@@ -342,7 +342,7 @@ Limits, stated plainly:
 - **A library served by the gateway is refused.** When the sidecar reaches the
   library through `METAFORGE_GATEWAY_URL`, the gateway cannot be told whose
   view to apply, so `library.*` is refused to a signed-in account. Material
-  names resolved for other tools (FORGE-446) still use the gateway's view.
+  names resolved for other tools still use the gateway's view.
 - **Runs and uploads are looked up through the gateway.** The sidecar asks
   `GET /v1/runs/{id}` and `GET /v1/uploads/{id}`; if it cannot (no
   `METAFORGE_GATEWAY_URL`, or the gateway refuses it), calls naming them are
