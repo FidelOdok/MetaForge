@@ -62,14 +62,15 @@ async def _visible_items(lister: ApprovalsLister, project_id: str | None) -> lis
     """The items this call may see (FORGE-859).
 
     On an MCP server shared by several accounts, only items in the caller's
-    projects, and nothing that names no project, the same rule the gateway's
-    ``GET /v1/approvals`` applies to a signed-in account.
+    projects, plus the caller's own requests that name no project yet (a held
+    ``project.create``), the same rule the gateway's ``GET /v1/approvals``
+    applies to a signed-in account.
     """
     ctx = current_context()
     items = await lister(project_id)
     if ctx.allowed_projects is None:
         return items
-    return [i for i in items if ctx.allows_project(i.get("project_id"))]
+    return [i for i in items if ctx.allows_approval(i)]
 
 
 def _summary(item: dict[str, Any]) -> dict[str, Any]:

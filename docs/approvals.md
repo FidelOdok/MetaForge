@@ -28,6 +28,11 @@ The list response is `{"items": [...], "unscoped_count": n}`. When scoped to a
 project, `unscoped_count` is how many items were left out because they carry no
 project, so a hidden item is reported rather than silently dropped.
 
+On a gateway shared by several accounts, a person sees the approvals in their
+projects plus their own requests that have no project yet (a held
+`project.create`), and can open and decide those. See
+[Your own requests](deployment/authentication.md#your-own-requests).
+
 ## What is covered
 
 The id is `<prefix>:<native id>`. The prefix says which store holds the item;
@@ -50,9 +55,15 @@ The id is `<prefix>:<native id>`. The prefix says which store holds the item;
 `id`, `kind`, `status` (`pending`, `approved`, `rejected`, `expired`,
 `canceled`, `retried`, `reworked`), `title`, `summary`, `project_id`,
 `created_at`, `deadline` (ISO-8601), `route` (`dashboard`, `elicitation` or
-null), `requested_by`, `reason_held`, `findings`, `allowed_decisions`,
-`rework_targets`, `reason_required_for`, `decidable`, `not_decidable_reason`,
-`detail`, `decision` and `base_revision`.
+null), `requested_by`, `requester`, `reason_held`, `findings`,
+`allowed_decisions`, `rework_targets`, `reason_required_for`, `decidable`,
+`not_decidable_reason`, `detail`, `decision` and `base_revision`.
+
+`requested_by` is a display label: for a held tool call, who asked when that
+was recorded, otherwise the caller's trust level (`remote`, `untrusted` ...).
+`requester` is set only on a held tool call whose asker was established (a
+signed-in person, `sub:<subject>`, relayed by the MCP server or recorded by the
+gateway from the caller's own sign-in), and is null otherwise.
 
 `base_revision` is the revision of what the item asks about, where one is
 known: a sketch's or drawing's content hash, a pending gate's `gate:<digest>`

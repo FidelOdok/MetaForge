@@ -715,11 +715,23 @@ class UnifiedMcpServer:
         except Exception as exc:  # noqa: BLE001 - a notice must never fail a tool call
             logger.debug("approval_notice_unavailable", error=str(exc))
             return None
-        # FORGE-859: a signed-in account hears only of its own projects' items.
+        # FORGE-859: a signed-in account hears only of its own projects' items,
+        # and of its own requests that name no project yet.
         if self._project_scoper is not None and ctx is not None:
             visible = await self._project_scoper.visible_projects(ctx)
             if visible is not None:
-                items = [i for i in items if str(i.get("project_id") or "") in visible]
+                from mcp_core.context import is_requester
+
+                items = [
+                    i
+                    for i in items
+                    if str(i.get("project_id") or "") in visible
+                    or (
+                        not i.get("project_id")
+                        and ctx.actor_verified
+                        and is_requester(i.get("requester"), ctx.actor_id)
+                    )
+                ]
         told = self._approvals_told.setdefault(session, set())
         if len(self._approvals_told) > _APPROVAL_NOTICE_SESSIONS:
             self._approvals_told.pop(next(iter(self._approvals_told)))
@@ -2627,6 +2639,7 @@ class UnifiedMcpServer:
                     session_id=_stable_session() or None,
                     project=_effective_project(arguments),
                     client=self._client_label(),
+                    requested_by=_requester(),
                 )
             )
             if by_policy is not None and by_policy.outcome is ApprovalOutcome.APPROVED:
@@ -2735,6 +2748,7 @@ class UnifiedMcpServer:
                         timeout_seconds=window,
                         on_held=on_held if route == "dashboard" else None,
                         client=self._client_label(),
+                        requested_by=_requester(),
                     )
                 )
             )
@@ -2873,6 +2887,7 @@ class UnifiedMcpServer:
                 session_id=session or None,
                 project=project,
                 client=self._client_label(),
+                requested_by=_requester(),
                 approval_key=key,
                 arguments_hash=args_hash,
             ),
@@ -3006,6 +3021,7 @@ class UnifiedMcpServer:
                     session_id=session or None,
                     project=project,
                     client=self._client_label(),
+                    requested_by=_requester(),
                     approval_key=key,
                     arguments_hash=args_hash,
                 )
@@ -3033,6 +3049,7 @@ class UnifiedMcpServer:
             project=project,
             timeout_seconds=ttl,
             client=self._client_label(),
+            requested_by=_requester(),
             approval_key=key,
             arguments_hash=args_hash,
         )
@@ -4085,6 +4102,21 @@ def _effective_project(arguments: dict[str, Any]) -> str | None:
     except Exception:  # noqa: BLE001 — a missing project must not block approval
         return None
     return str(scoped) if scoped else None
+
+
+def _requester() -> str | None:
+    """Who asked for this call, recorded on its approval.
+
+    Only an identity this server established (a signed-in person,
+    ``sub:<subject>``); a typed-in actor header records nothing. With it, the
+    person can see and decide their own held call before it has a project.
+    """
+    try:
+        from mcp_core.context import current_context
+
+        return current_context().requester
+    except Exception:  # noqa: BLE001 — a missing requester must not block approval
+        return None
 
 
 # ---------------------------------------------------------------------------

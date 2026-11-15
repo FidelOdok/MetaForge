@@ -305,7 +305,10 @@ def tool_item(run: Run) -> ApprovalItem:
         created_at=_iso(run.created_at),
         deadline=_iso(run.approval_deadline),
         route=route if route in ("dashboard", "elicitation") else None,
-        requested_by=str(req.get("caller") or "") or None,
+        # Who asked, when recorded (an MCP hold from a signed-in person), else
+        # the caller's trust level as before.
+        requested_by=str(req.get("requested_by") or req.get("caller") or "") or None,
+        requester=tool_approvals.verified_requester(req),
         reason_held=run.approval_reason or run.error,
         allowed_decisions=allowed,  # type: ignore[arg-type]
         decidable=decidable,

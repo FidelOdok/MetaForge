@@ -24,7 +24,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api_gateway.auth.approver import approver_from_request
+from api_gateway.auth.approver import approver_from_request, requester_from_request
 from api_gateway.runs.schemas import (
     ApprovalRequest,
     RunListResponse,
@@ -365,10 +365,14 @@ class HoldToolCallRequest(BaseModel):
     approval_key: str | None = Field(default=None, max_length=128)
     #: The canonical hash of the arguments, for the audit trail.
     arguments_hash: str | None = Field(default=None, max_length=128)
+    #: Who asked for the call (a signed-in person, ``sub:<subject>``), as the
+    #: MCP server established it. Taken only from the deployment's service;
+    #: a person calling directly is recorded as themselves.
+    requested_by: str | None = Field(default=None, max_length=200)
 
 
 @router.post("", response_model=RunResponse, status_code=201)
-def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
+def hold_tool_call(body: HoldToolCallRequest, request: Request) -> RunResponse:
     """Create a held approval and return it.
 
     This exists because the approval store is process-level (an
@@ -384,7 +388,10 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
 
     With an ``approval_key`` (FORGE-780) the hold is a durable approval: a
     live one with the same key is returned rather than a second opened.
+
+    ``requested_by`` follows :func:`~api_gateway.auth.approver.requester_from_request`.
     """
+    requested_by, verified = requester_from_request(request, body.requested_by)
     return RunResponse.from_run(
         create_hold(
             tool=body.tool,
@@ -399,6 +406,8 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
             timeout_seconds=body.timeout_seconds,
             approval_key=body.approval_key,
             arguments_hash=body.arguments_hash,
+            requested_by=requested_by,
+            requested_by_verified=verified,
         )
     )
 
@@ -413,6 +422,10 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
 
 #: Request fields a durable hold carries.
 APPROVAL_KEY = "approval_key"
+#: Who asked for a held call, and whether that identity was established
+#: (a person the MCP server or this gateway verified) or is only a label.
+REQUESTED_BY = "requested_by"
+REQUESTED_BY_VERIFIED = "requested_by_verified"
 _EXPIRES_AT = "expires_at"
 _CONSUMED_AT = "consumed_at"
 
@@ -434,6 +447,25 @@ def _iso_now() -> str:
     return datetime.fromtimestamp(time.time(), UTC).isoformat()
 
 
+def stamp_requester(request: dict[str, Any], requested_by: str | None, verified: bool) -> None:
+    """Record who asked on a ledger entry's request, when anyone is known."""
+    if requested_by:
+        request[REQUESTED_BY] = requested_by
+        request[REQUESTED_BY_VERIFIED] = bool(verified)
+
+
+def verified_requester(request: dict[str, Any]) -> str | None:
+    """The established requester of a held call, or ``None``.
+
+    Only a value recorded as verified: an unauthenticated label must never
+    let anyone see an approval outside their projects.
+    """
+    value = request.get(REQUESTED_BY)
+    if request.get(REQUESTED_BY_VERIFIED) is True and isinstance(value, str) and value:
+        return value
+    return None
+
+
 def create_hold(
     *,
     tool: str,
@@ -448,6 +480,8 @@ def create_hold(
     timeout_seconds: float | None = None,
     approval_key: str | None = None,
     arguments_hash: str | None = None,
+    requested_by: str | None = None,
+    requested_by_verified: bool = False,
 ) -> Run:
     """Open a held approval, or return the live durable one with the same key."""
     if approval_key:
@@ -471,6 +505,7 @@ def create_hold(
         "route": route,
         "client": client,
     }
+    stamp_requester(request, requested_by, requested_by_verified)
     if approval_key:
         request[APPROVAL_KEY] = approval_key
         request["arguments_hash"] = arguments_hash
@@ -492,6 +527,8 @@ def create_hold(
         deadline=run.approval_deadline,
         durable=bool(approval_key),
         arguments_hash=arguments_hash,
+        requested_by=requested_by,
+        requested_by_verified=bool(requested_by) and requested_by_verified,
     )
     if approval_key:
         _record_outcome("held")
@@ -639,6 +676,10 @@ class PolicyApprovalRequest(BaseModel):
     #: FORGE-780: recorded on the approval so the audit names what ran.
     approval_key: str | None = Field(default=None, max_length=128)
     arguments_hash: str | None = Field(default=None, max_length=128)
+    #: Who asked for the call (a signed-in person, ``sub:<subject>``), as the
+    #: MCP server established it. Taken only from the deployment's service;
+    #: a person calling directly is recorded as themselves.
+    requested_by: str | None = Field(default=None, max_length=200)
 
 
 class PolicyApprovalResponse(BaseModel):
@@ -656,7 +697,9 @@ class PolicyApprovalResponse(BaseModel):
 
 
 @router.post("/policy", response_model=PolicyApprovalResponse)
-async def approve_by_policy(body: PolicyApprovalRequest) -> PolicyApprovalResponse:
+async def approve_by_policy(
+    body: PolicyApprovalRequest, request: Request
+) -> PolicyApprovalResponse:
     """Approve a held call the project's policy covers, or say it does not.
 
     A ``phase.claim`` on an open task of the project's own client-mode run
@@ -667,7 +710,22 @@ async def approve_by_policy(body: PolicyApprovalRequest) -> PolicyApprovalRespon
     ``policy:<mode>:<project>``. A covered call is written to the ledger like
     any other, on route ``policy``; anything else records nothing and the
     caller holds it for a person as before.
+
+    ``requested_by`` follows :func:`~api_gateway.auth.approver.requester_from_request`.
     """
+    requested_by, verified = requester_from_request(request, body.requested_by)
+    return await record_policy_approval(
+        body, requested_by=requested_by, requested_by_verified=verified
+    )
+
+
+async def record_policy_approval(
+    body: PolicyApprovalRequest,
+    *,
+    requested_by: str | None = None,
+    requested_by_verified: bool = False,
+) -> PolicyApprovalResponse:
+    """:func:`approve_by_policy` without the HTTP request (the in-process ledger)."""
     from api_gateway.approvals.claim_policy import (
         POLICY_APPROVABLE_TOOLS,
         claim_covered_by_policy,
@@ -704,6 +762,7 @@ async def approve_by_policy(body: PolicyApprovalRequest) -> PolicyApprovalRespon
         "route": "policy",
         "client": body.client,
     }
+    stamp_requester(request, requested_by, requested_by_verified)
     if body.approval_key:
         request[APPROVAL_KEY] = body.approval_key
         # The call runs now, on this approval; it is never a pass for a retry.
@@ -769,6 +828,10 @@ class DelegatedApprovalRequest(BaseModel):
     approver_verified: bool = False
     approval_key: str | None = Field(default=None, max_length=128)
     arguments_hash: str | None = Field(default=None, max_length=128)
+    #: Who asked for the call (a signed-in person, ``sub:<subject>``), as the
+    #: MCP server established it. Taken only from the deployment's service;
+    #: a person calling directly is recorded as themselves.
+    requested_by: str | None = Field(default=None, max_length=200)
 
 
 #: What the decision record says a delegated approval was.
@@ -783,7 +846,13 @@ DELEGATED_RELEASE_REASON = (
 )
 
 
-def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
+def approve_delegated(
+    body: DelegatedApprovalRequest,
+    *,
+    verified: bool,
+    requested_by: str | None = None,
+    requested_by_verified: bool = False,
+) -> Run:
     """Record a delegated approval and return it, closed and used (FORGE-827).
 
     FORGE-834: a release step (``twin.create_baseline``,
@@ -858,6 +927,11 @@ def approve_delegated(body: DelegatedApprovalRequest, *, verified: bool) -> Run:
         "client": body.client,
         "agent": body.agent,
         "on_behalf_of": body.on_behalf_of,
+        **(
+            {REQUESTED_BY: requested_by, REQUESTED_BY_VERIFIED: bool(requested_by_verified)}
+            if requested_by
+            else {}
+        ),
     }
     if body.approval_key:
         request[APPROVAL_KEY] = body.approval_key
@@ -919,7 +993,15 @@ def record_delegated_approval(body: DelegatedApprovalRequest, request: Request) 
     from api_gateway.auth.dependencies import current_principal
 
     verified = body.approver_verified and current_principal(request) is not None
-    return RunResponse.from_run(approve_delegated(body, verified=verified))
+    requested_by, requester_verified = requester_from_request(request, body.requested_by)
+    return RunResponse.from_run(
+        approve_delegated(
+            body,
+            verified=verified,
+            requested_by=requested_by,
+            requested_by_verified=requester_verified,
+        )
+    )
 
 
 class ResolveHoldRequest(BaseModel):

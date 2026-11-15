@@ -811,6 +811,13 @@ class McpProjectScoper:
                 if not _UUIDISH.match(entity_id):
                     raise self._not_found(tool_id, name, entity_id, tenancy)
                 owner = await self._owner(tool_id, lookup_kind, entity_id, tenancy)
+                if owner is None and await self._own_request(
+                    tool_id, lookup_kind, entity_id, ctx, tenancy
+                ):
+                    # The caller's own request with no project yet (a held
+                    # project.create): theirs to decide, nobody else's.
+                    checked += 1
+                    continue
                 if owner is None or not scope.allows(owner):
                     raise self._not_found(tool_id, name, entity_id, tenancy)
                 checked += 1
@@ -851,6 +858,16 @@ class McpProjectScoper:
                 code="scope_unavailable",
                 tenancy=tenancy,
             )
+        return await self._lookup(tool_id, kind, lookup, entity_id, tenancy)
+
+    async def _lookup(
+        self,
+        tool_id: str,
+        kind: str,
+        lookup: OwnerLookup,
+        entity_id: str,
+        tenancy: ToolTenancy,
+    ) -> str | None:
         with tracer.start_as_current_span("mcp.entity_owner") as span:
             span.set_attribute("entity.kind", kind)
             try:
@@ -869,6 +886,26 @@ class McpProjectScoper:
                 ) from exc
             span.set_attribute("entity.resolved", owner is not None)
         return owner
+
+    async def _own_request(
+        self,
+        tool_id: str,
+        kind: str,
+        entity_id: str,
+        ctx: McpCallContext,
+        tenancy: ToolTenancy,
+    ) -> bool:
+        """Whether an entity with no project is an approval this caller asked for."""
+        from mcp_core.context import is_requester
+
+        lookup = self._lookups.get(f"{kind}_requester")
+        if lookup is None:
+            return False
+        requester = await self._lookup(tool_id, f"{kind}_requester", lookup, entity_id, tenancy)
+        if not is_requester(requester, ctx.actor_id):
+            return False
+        logger.info("mcp_project_scope_own_request", tool_id=tool_id, kind=kind)
+        return True
 
     async def after(self, tool_id: str, admission: Admission, result: Any) -> Any:
         """``project.create``: register the new project to its creator.
@@ -1077,13 +1114,27 @@ def sidecar_owner_lookups(
 
     if approvals_lister is not None:
 
-        async def approval(approval_id: str) -> str | None:
+        async def _approval_item(approval_id: str) -> dict[str, Any] | None:
             for item in await approvals_lister(None):
                 if item.get("id") == approval_id:
-                    return _str(item.get("project_id"))
+                    return item if isinstance(item, dict) else None
             return None
 
+        async def approval(approval_id: str) -> str | None:
+            item = await _approval_item(approval_id)
+            return _str(item.get("project_id")) if item is not None else None
+
+        async def approval_requester(approval_id: str) -> str | None:
+            # Who asked, for an approval with no project yet; only the
+            # gateway's established requester (``requester``), never the
+            # display label ``requested_by``.
+            item = await _approval_item(approval_id)
+            if item is None or item.get("project_id"):
+                return None
+            return _str(item.get("requester"))
+
         lookups["approval"] = approval
+        lookups["approval_requester"] = approval_requester
 
     async def job(job_id: str) -> str | None:
         from tool_registry.jobs import active_job_runner

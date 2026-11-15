@@ -668,6 +668,17 @@
             ],
             "title": "Requested By"
           },
+          "requester": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requester"
+          },
           "review": {
             "anyOf": [
               {
@@ -6699,6 +6710,18 @@
             ],
             "title": "Project"
           },
+          "requested_by": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
           "session_id": {
             "anyOf": [
               {
@@ -11448,6 +11471,18 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
           },
           "route": {
             "default": "dashboard",
@@ -17525,6 +17560,18 @@
               }
             ],
             "title": "Project"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
           },
           "session_id": {
             "anyOf": [
@@ -30555,7 +30602,7 @@
         ]
       },
       "post": {
-        "description": "Create a held approval and return it.\n\nThis exists because the approval store is process-level (an\n``InMemoryRunStore`` in *this* process), and the MCP sidecar is a\ndifferent process. A sidecar used to hold calls only in\nits own memory, where the dashboard \u2014 served from here \u2014 would never see\nthem. So the sidecar parks them here instead, and there is exactly one\nledger rather than one per process.\n\nA second store would have been the more obvious fix and the wrong one:\ntwo queues means a reviewer clearing one while the other fills, and no\npage that shows both.\n\nWith an ``approval_key`` the hold is a durable approval: a\nlive one with the same key is returned rather than a second opened.",
+        "description": "Create a held approval and return it.\n\nThis exists because the approval store is process-level (an\n``InMemoryRunStore`` in *this* process), and the MCP sidecar is a\ndifferent process. A sidecar used to hold calls only in\nits own memory, where the dashboard \u2014 served from here \u2014 would never see\nthem. So the sidecar parks them here instead, and there is exactly one\nledger rather than one per process.\n\nA second store would have been the more obvious fix and the wrong one:\ntwo queues means a reviewer clearing one while the other fills, and no\npage that shows both.\n\nWith an ``approval_key`` the hold is a durable approval: a\nlive one with the same key is returned rather than a second opened.\n\n``requested_by`` follows :func:`~api_gateway.auth.approver.requester_from_request`.",
         "operationId": "hold_tool_call_v1_chat_tool_approvals_post",
         "requestBody": {
           "content": {
@@ -30682,7 +30729,7 @@
     },
     "/v1/chat/tool_approvals/policy": {
       "post": {
-        "description": "Approve a held call the project's policy covers, or say it does not.\n\nA ``phase.claim`` on an open task of the project's own client-mode run\nunder an ``auto`` policy is covered (see\n:mod:`api_gateway.approvals.claim_policy`), approved by\n``policy:auto:<who set it>``. Any other held write is decided by\n:mod:`api_gateway.approvals.tool_write_policy`, approved by\n``policy:<mode>:<project>``. A covered call is written to the ledger like\nany other, on route ``policy``; anything else records nothing and the\ncaller holds it for a person as before.",
+        "description": "Approve a held call the project's policy covers, or say it does not.\n\nA ``phase.claim`` on an open task of the project's own client-mode run\nunder an ``auto`` policy is covered (see\n:mod:`api_gateway.approvals.claim_policy`), approved by\n``policy:auto:<who set it>``. Any other held write is decided by\n:mod:`api_gateway.approvals.tool_write_policy`, approved by\n``policy:<mode>:<project>``. A covered call is written to the ledger like\nany other, on route ``policy``; anything else records nothing and the\ncaller holds it for a person as before.\n\n``requested_by`` follows :func:`~api_gateway.auth.approver.requester_from_request`.",
         "operationId": "approve_by_policy_v1_chat_tool_approvals_policy_post",
         "requestBody": {
           "content": {

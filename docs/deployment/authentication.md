@@ -166,7 +166,7 @@ the route runs, and the route's shape decides how the project is found:
 | an entity id (path, query or body) | `GET /v1/twin/nodes/{node_id}`, `GET /v1/runs/{run_id}`, `POST /v1/cad-export/urdf` | answered only when the entity's **owning project** is the caller's (see below) |
 | a chat scope | `GET /v1/chat/threads?scope_kind=project&entity_id=…` | `scope_kind` + id required; `project` and `digital-twin-node` scopes resolve to a project, others are refused |
 | `GET /v1/projects` | | filtered to the caller's projects |
-| `GET /v1/approvals` | the inbox and the pending badge | without `project_id`, filtered to approvals of the caller's projects (none that name no project); a `project_id` that is not theirs is a 404 |
+| `GET /v1/approvals` | the inbox and the pending badge | without `project_id`, filtered to approvals of the caller's projects, plus the caller's own requests that have no project yet (see [Your own requests](#your-own-requests)); a `project_id` that is not theirs is a 404 |
 | `POST /v1/projects` | | the new project is registered to its creator via `project_created`; if that fails the project is deleted again and the call returns 503 |
 | `GET` under `/v1/library/`, `/v1/examples`, `/v1/features` | shared reference data | readable; the library shows shared entries and the caller's account's own (see below) |
 | adding or changing a library entry | `POST /v1/library/materials`, `PATCH /v1/library/machines/{machine_id}` | allowed when the scope names a `tenant`; the entry is that account's own. Shared entries are refused (403). Import, machine discovery and machine jobs stay refused |
@@ -188,8 +188,9 @@ project owns it:
 | `upload_id` | the upload's `project_id` |
 
 An entity that does not exist, or that belongs to **no** project, is a 404 on
-a shared gateway: it cannot be shown to be the caller's. Every entity a
-request names is checked, including ones nested under a project path, so
+a shared gateway: it cannot be shown to be the caller's. The one exception is
+[your own requests](#your-own-requests). Every entity a request names is
+checked, including ones nested under a project path, so
 `/v1/twin/projects/{mine}/nodes/{theirs}` is refused. A lookup that fails is
 a 503, never a pass.
 
@@ -242,6 +243,39 @@ calling back into the gateway), never a person: it skips all of the above.
 
 A provider without `ProjectAuthorizer` changes nothing, and a local gateway
 (`auth_mode: off`) never loads any of this.
+
+### Your own requests
+
+Some held calls have no project yet: `project.create` is held for approval
+before the project it creates exists. Scoping alone would hide such an
+approval from everyone, including the only person who can decide it, and it
+would expire unanswered. So a person sees and decides the approvals in their
+projects **plus their own requests that have no project yet**, and nobody else
+gains anything:
+
+- **Who asked is recorded on the hold.** When the MCP sidecar holds a call
+  from a signed-in person, it sends `requested_by: "sub:<subject>"`, taken
+  from the sign-in it verified (never from a typed-in actor header, an API key
+  or the shared-secret login, which identify nobody). The approval item shows
+  it as `requester`.
+- **The gateway decides whom to believe.** It takes a supplied
+  `requested_by` only from the deployment's own service: a principal with
+  `role == "service"` whose scope is unrestricted (on a project-scoped
+  gateway), which is how the sidecar calls with `METAFORGE_GATEWAY_API_KEY`.
+  A person calling the hold routes directly is recorded as themselves
+  (`sub:<subject>`) whatever the body says, so nobody can file an approval in
+  someone else's name. With authentication off the value is kept as an
+  unverified label, and a label never grants access.
+- **Where it applies.** `GET /v1/approvals` lists the item; `GET`, `decision`
+  and `inline-decision` under `/v1/approvals/tool:<id>`, and the
+  `/v1/chat/tool_approvals/{run_id}` routes, answer it, for the requester
+  only. The match is the recorded `sub:<subject>` (or the bare subject)
+  against the caller's verified subject. An approval that has a project is
+  decided by its project, whoever asked; anyone else asking for a requester's
+  item gets the same 404 as for one that does not exist. Only held tool calls
+  carry a requester; every other entity with no project is still refused.
+- **Counting.** With `project_id`, `unscoped_count` counts the caller's own
+  requests with no project, as it counts every item it leaves out.
 
 ## Signing in to MCP
 
@@ -303,7 +337,9 @@ whatever the tool: a session bound to someone else's project reaches nothing.
 `metaforge://flow/run/{run_id}`, `metaforge://files/{work_product_id}`); the
 knowledge-source resources are refused. The approval notices added to tool
 results, and cancelling or retrying a tool job over `/v1/jobs/{id}`, see only
-the caller's projects.
+the caller's projects. `approvals.list`, `approvals.decide` and the approval
+notices also include the caller's own requests that have no project yet, by
+the same rule as the gateway (see [Your own requests](#your-own-requests)).
 
 Refused to a signed-in account, because nothing yet traces them to a project:
 `twin.query_cypher` and `twin.find_by_property` (whole twin);
