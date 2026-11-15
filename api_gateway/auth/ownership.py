@@ -22,6 +22,7 @@ from uuid import UUID
 
 import structlog
 
+from api_gateway.runs.schemas import project_of
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -122,6 +123,43 @@ OWNER_LOOKUPS: dict[str, OwnerLookup] = {
     "agent_session": agent_session_project,
     "upload": upload_project,
 }
+
+
+# ── who asked, for an approval that has no project yet ──────────────────
+
+#: Path prefixes whose ``run`` ids are held tool calls in the approval ledger
+#: (not runs in the run store).
+TOOL_APPROVAL_PREFIX = "/v1/chat/tool_approvals/"
+
+
+def _held_call_requester(raw_id: str) -> str | None:
+    from api_gateway.chat import tool_approvals
+    from orchestrator.harness.runs import RunNotFoundError
+
+    try:
+        run = tool_approvals.get_approval_store().get(raw_id)
+    except RunNotFoundError:
+        return None
+    if project_of(run.request) or run.request.get("project"):
+        # It has a project: the project decides, never the requester.
+        return None
+    return tool_approvals.verified_requester(run.request)
+
+
+async def requester_of(app: Any, kind: str, entity_id: str, path: str) -> str | None:
+    """Who asked for an approval that names no project, or ``None``.
+
+    Only held tool calls carry an established requester: an approval id
+    ``tool:<id>`` on ``/v1/approvals/...``, or a ``run_id`` on
+    ``/v1/chat/tool_approvals/...``. Every other entity answers ``None``,
+    and is refused as before when it has no project.
+    """
+    if kind == "approval":
+        prefix, _, raw = entity_id.partition(":")
+        return _held_call_requester(raw) if prefix == "tool" and raw else None
+    if kind == "run" and path.startswith(TOOL_APPROVAL_PREFIX):
+        return _held_call_requester(entity_id)
+    return None
 
 
 async def owner_of(app: Any, kind: str, entity_id: str) -> str | None:

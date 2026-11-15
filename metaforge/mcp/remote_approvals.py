@@ -182,6 +182,7 @@ def build_remote_approval_gate(
                         "project": ask.project,
                         "route": "dashboard",
                         "client": ask.client,
+                        "requested_by": ask.requested_by,
                         # FORGE-466: the gateway expires the hold past this
                         # window if this side never closes it.
                         "timeout_seconds": timeout,
@@ -355,6 +356,7 @@ class RemoteApprovalLedger:
                     "session_id": ask.session_id,
                     "project": ask.project,
                     "client": ask.client,
+                    "requested_by": ask.requested_by,
                     "approval_key": ask.approval_key,
                     "arguments_hash": ask.arguments_hash,
                 },
@@ -395,6 +397,7 @@ class RemoteApprovalLedger:
                     "session_id": ask.session_id,
                     "project": ask.project,
                     "client": ask.client,
+                    "requested_by": ask.requested_by,
                     "agent": agent,
                     "on_behalf_of": on_behalf_of,
                     "approver": approver.actor_id,
@@ -431,6 +434,7 @@ class RemoteApprovalLedger:
                     "project": ask.project,
                     "route": route,
                     "client": ask.client,
+                    "requested_by": ask.requested_by,
                     "timeout_seconds": ask.timeout_seconds,
                     "approval_key": ask.approval_key,
                     "arguments_hash": ask.arguments_hash,

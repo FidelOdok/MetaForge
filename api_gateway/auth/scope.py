@@ -61,6 +61,7 @@ __all__ = [
     "ENTITY_RULES",
     "classify_routes",
     "decide",
+    "requested_by",
     "supports_project_scope",
 ]
 
@@ -107,6 +108,21 @@ class ProjectAuthorizer(Protocol):
         a failed request.
         """
         ...
+
+
+def requested_by(principal: Principal | None, requester: str | None) -> bool:
+    """Whether ``requester``, as recorded on an approval, is ``principal``.
+
+    The one exception to "an entity with no project is refused": a person
+    may see and decide their own request before it has a project (a held
+    ``project.create`` names none). Only an established requester counts
+    (:func:`api_gateway.chat.tool_approvals.verified_requester`).
+    """
+    from mcp_core.context import REQUESTER_PREFIX, is_requester
+
+    if principal is None or not principal.subject:
+        return False
+    return is_requester(requester, f"{REQUESTER_PREFIX}{principal.subject}")
 
 
 def supports_project_scope(provider: object) -> bool:
@@ -385,6 +401,10 @@ def _entity_ids(
     return found
 
 
+def _principal(request: Request) -> Principal | None:
+    return getattr(request.state, "principal", None)
+
+
 def _not_found(tenancy: RouteTenancy) -> ScopeDecision:
     # 404, not 403: the caller learns nothing about other accounts' ids.
     return ScopeDecision(allowed=False, status=404, tenancy=tenancy, detail="Not found")
@@ -467,10 +487,20 @@ async def decide(app: ASGIApp, request: Request, scope: ProjectScope) -> ScopeDe
                     )
                 owners.append(await ownership.chat_scope_project(app, kind, entity))
             entities = _entity_ids(route, path_params, request, body)
+            own_requests = 0
             for kind, entity_id in entities:
                 if not _UUIDISH.match(entity_id):
                     return _not_found(tenancy)
-                owners.append(await ownership.owner_of(app, kind, entity_id))
+                owner = await ownership.owner_of(app, kind, entity_id)
+                if owner is None and requested_by(
+                    _principal(request),
+                    await ownership.requester_of(app, kind, entity_id, route.path),
+                ):
+                    # The caller's own request with no project yet (a held
+                    # project.create): theirs to see and decide, nobody else's.
+                    own_requests += 1
+                    continue
+                owners.append(owner)
         except Exception as exc:  # a lookup failing is not "not yours"
             span.record_exception(exc)
             logger.warning("project_scope_lookup_failed", path=route.path, error=str(exc))
@@ -481,6 +511,15 @@ async def decide(app: ASGIApp, request: Request, scope: ProjectScope) -> ScopeDe
                 detail="Could not check which project this belongs to; try again.",
             )
 
+        if own_requests and not owners and pid is None:
+            logger.info(
+                "project_scope_own_request_allowed",
+                path=route.path,
+                method=request.method,
+                entities=own_requests,
+            )
+            span.set_attribute("route.own_request", True)
+            return ScopeDecision(allowed=True, tenancy=tenancy)
         if tenancy is RouteTenancy.PROJECT_ENTITY and not owners:
             return ScopeDecision(
                 allowed=False,

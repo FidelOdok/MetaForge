@@ -127,6 +127,12 @@ class ApprovalItem(BaseModel):
     deadline: str | None = None
     route: Literal["dashboard", "elicitation"] | None = None
     requested_by: str | None = None
+    #: The established identity that asked for this approval (a signed-in
+    #: person, ``sub:<subject>``), for held tool calls only; ``None`` when
+    #: nobody was verified. Unlike ``requested_by`` (a display label that may
+    #: be a trust level or an agent's name) this is what lets a person see and
+    #: decide their own request before it has a project.
+    requester: str | None = None
     reason_held: str | None = None
     findings: list[GateFinding] = Field(default_factory=list)
     allowed_decisions: list[DecisionName] = Field(default_factory=list)

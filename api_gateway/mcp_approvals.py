@@ -93,6 +93,11 @@ def build_mcp_approval_gate(
                 "project": project_for_hold(ask.project, ask.arguments),
                 "route": "dashboard",
                 "client": ask.client,
+                # Who asked, when the server established it: lets that person
+                # see and decide a hold that names no project yet.
+                "requested_by": ask.requested_by,
+                # Set only by this MCP server from a sign-in it verified.
+                "requested_by_verified": ask.requested_by is not None,
             }
         )
         store.start(run.id)
@@ -160,10 +165,10 @@ class InProcessApprovalLedger:
 
     async def policy_approval(self, ask: ApprovalAsk) -> ApprovalResolution | None:
         """The project's policy's approval of ``ask``, or ``None`` to hold it (FORGE-745)."""
-        from api_gateway.chat.tool_approvals import PolicyApprovalRequest, approve_by_policy
+        from api_gateway.chat.tool_approvals import PolicyApprovalRequest, record_policy_approval
 
         try:
-            answer = await approve_by_policy(
+            answer = await record_policy_approval(
                 PolicyApprovalRequest(
                     tool=ask.tool_id,
                     arguments=ask.arguments,
@@ -173,7 +178,9 @@ class InProcessApprovalLedger:
                     client=ask.client,
                     approval_key=ask.approval_key,
                     arguments_hash=ask.arguments_hash,
-                )
+                ),
+                requested_by=ask.requested_by,
+                requested_by_verified=ask.requested_by is not None,
             )
         except Exception as exc:  # noqa: BLE001 - no answer means a person decides
             logger.info("mcp_policy_approval_unavailable", tool_id=ask.tool_id, error=str(exc))
@@ -212,6 +219,8 @@ class InProcessApprovalLedger:
                     arguments_hash=ask.arguments_hash,
                 ),
                 verified=approver.verified,
+                requested_by=ask.requested_by,
+                requested_by_verified=ask.requested_by is not None,
             )
         except Exception as exc:  # noqa: BLE001 - no record means a person decides
             logger.info("mcp_delegated_approval_unavailable", tool_id=ask.tool_id, error=str(exc))
@@ -240,6 +249,8 @@ class InProcessApprovalLedger:
                 timeout_seconds=ask.timeout_seconds or DEFAULT_TIMEOUT_SECONDS,
                 approval_key=ask.approval_key,
                 arguments_hash=ask.arguments_hash,
+                requested_by=ask.requested_by,
+                requested_by_verified=ask.requested_by is not None,
             )
         except Exception as exc:  # noqa: BLE001 - reported as a refusal
             raise ApprovalLedgerUnavailableError(

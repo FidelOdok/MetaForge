@@ -26,6 +26,7 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -169,6 +170,33 @@ class McpCallContext(BaseModel):
             return True
         return bool(project_id) and str(project_id) in self.allowed_projects
 
+    @property
+    def requester(self) -> str | None:
+        """Who to record as having asked for a held call, or ``None``.
+
+        Only an identity the server established: a signed-in person
+        (``sub:<subject>``). A typed-in actor header, an API key and the
+        shared-secret login identify nobody, so they record nothing rather
+        than a name anyone could have written.
+        """
+        return self.actor_id if self.actor_is_attributable else None
+
+    def allows_approval(self, item: dict[str, Any]) -> bool:
+        """Whether this call may see and decide an approval item.
+
+        Everything :meth:`allows_project` allows, plus, for a confined caller,
+        an approval that names no project yet but was requested by this very
+        person (a held ``project.create``): without it the only person who
+        could decide it never sees it. Nobody else gains anything.
+        """
+        if self.allows_project(item.get("project_id")):
+            return True
+        return (
+            not item.get("project_id")
+            and self.actor_verified
+            and is_requester(item.get("requester"), self.actor_id)
+        )
+
     #: The all-zero session of the unattributed sentinel. Binding anything to
     #: it would be process-global by another name, which is the leak the
     #: binding registry below is keyed to avoid.
@@ -225,6 +253,25 @@ _DEFAULT_CONTEXT = McpCallContext(
 
 
 _current: ContextVar[McpCallContext] = ContextVar("mcp_call_context", default=_DEFAULT_CONTEXT)
+
+
+#: How a signed-in person's identity is written (``metaforge.mcp.oauth``).
+REQUESTER_PREFIX = "sub:"
+
+
+def is_requester(requester: object, actor_id: str | None) -> bool:
+    """Whether a recorded ``requester`` names the signed-in ``actor_id``.
+
+    ``actor_id`` must be a verified subject (``sub:<subject>``); the recorded
+    value may be written either way (``sub:<subject>`` or the bare subject).
+    Anything else, including no requester at all, is never a match.
+    """
+    if not isinstance(requester, str) or not requester or not actor_id:
+        return False
+    if not actor_id.startswith(REQUESTER_PREFIX):
+        return False
+    subject = actor_id[len(REQUESTER_PREFIX) :]
+    return bool(subject) and requester in (actor_id, subject)
 
 
 def current_context() -> McpCallContext:
@@ -605,6 +652,7 @@ __all__ = [
     "HEADER_SESSION",
     "ItemSlotClaim",
     "McpCallContext",
+    "REQUESTER_PREFIX",
     "bind_session_project",
     "bound_project",
     "clear_session_project",
@@ -614,6 +662,7 @@ __all__ = [
     "decode_item_slots",
     "encode_item_slots",
     "current_context",
+    "is_requester",
     "reset_context",
     "set_context",
     "with_context",

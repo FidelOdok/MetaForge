@@ -884,6 +884,11 @@ class ApprovalAsk:
     approval_key: str | None = None
     #: The canonical hash of the arguments alone, for the audit trail.
     arguments_hash: str | None = None
+    #: Who asked for the call, when the server established it: a signed-in
+    #: person's ``sub:<subject>``. Recorded on the ledger entry so that person
+    #: can see and decide their own request even before it has a project (a
+    #: held ``project.create`` names none). ``None`` when nobody was verified.
+    requested_by: str | None = None
 
 
 def effective_hold_window(gate_timeout: float | None, ask: ApprovalAsk, default: float) -> float:

@@ -22,6 +22,8 @@ from api_gateway.approvals.schemas import (
     Surface,
 )
 from api_gateway.auth.approver import approver_from_request
+from api_gateway.auth.dependencies import current_principal
+from api_gateway.auth.scope import requested_by
 from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector, collector_for
 
@@ -130,12 +132,25 @@ async def list_approvals(
     if kind is not None:
         items = [i for i in items if i.kind == kind]
     # On a gateway shared by several accounts (set by the auth middleware):
-    # only the caller's projects, and nothing that names no project.
+    # only the caller's projects, plus their own requests that name no
+    # project yet (a held project.create); nothing else that names none.
     scope = getattr(request.state, "project_scope", None)
     if scope is not None and not getattr(scope, "unrestricted", False):
         if project_id and not scope.allows(project_id):
             raise HTTPException(status_code=404, detail="Not found")
-        items = [i for i in items if i.project_id is not None and scope.allows(i.project_id)]
+        principal = current_principal(request)
+        own = {i.id for i in items if i.project_id is None and requested_by(principal, i.requester)}
+        items = [
+            i
+            for i in items
+            if (i.project_id is not None and scope.allows(i.project_id)) or i.id in own
+        ]
+        if own:
+            logger.info(
+                "approvals_own_unscoped_listed",
+                count=len(own),
+                subject=principal.subject if principal else None,
+            )
     unscoped = 0
     if project_id:
         unscoped = sum(1 for i in items if i.project_id is None)
