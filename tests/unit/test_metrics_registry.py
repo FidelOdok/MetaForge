@@ -99,7 +99,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 6 CAD design loop runs, iterations, renders, verdicts, calls and spend.
         # + 1 Imagine studio operations (FORGE-821).
         # + 3 CadQuery isolated script runner runs, durations and limit stops.
-        assert len(all_metrics) == 170
+        # + 1 MCP project-scope decisions (account-confined MCP calls).
+        assert len(all_metrics) == 171
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
