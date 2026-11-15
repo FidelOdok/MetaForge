@@ -6,6 +6,7 @@ import { refusalOf } from '../../../api/endpoints/create';
 import { useStudio } from '../../../hooks/use-imagine';
 import type { TwinNode } from '../../../types/twin';
 import { HandoverPanel } from './HandoverPanel';
+import { ValueSources } from './ValueSources';
 import { SketchWorkspace } from './SketchWorkspace';
 import { StudioFrame } from './StudioFrame';
 import { describeChanges, undoChanges } from './changes';
@@ -183,6 +184,7 @@ export function ImagineStage({ projectId, nodes, view, onView, onAskAssistant, o
         </div>
       )}
 
+      {data && data.status !== 'none' && <ValueSources config={data.config} />}
       {data && data.status !== 'none' && <HandoverPanel projectId={projectId} studio={data} onStartDeveloping={onStartDeveloping} />}
     </div>
   );

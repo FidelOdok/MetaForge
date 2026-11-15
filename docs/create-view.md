@@ -222,6 +222,20 @@ the controls beside a 3D view of at most 560 px when the frame is 900 px wide
 or more, and one column below that. When the product's config sets no form
 dimensions yet, the 3D view shows *No shape yet* instead of a default part.
 
+### Where the values come from
+
+Under the studio, a collapsed card lists where each sourced value came from, and its summary says
+how many the MetaForge library gave ("9 of 11 from the library"). Each row is a part's size or
+price, the chosen machine, or the material, with a badge: **Library** (the part's linked entry,
+the machine library or the material library, with the entry and version), **Typed in** (a value
+written into the studio with its own source), or **Estimate** (a typical or generic size that is
+not a read value). A machine row also says which limits came from the library's process guide and
+which are still defaults; a material row says which figures came from the library and which are
+still the catalogue's. The card reads the marks the studio write puts on each value
+(`derived_from`, `source`, `fromProcess`, `defaulted`); see
+[sizes, machines, materials and prices from the library](imagine-stage.md#sizes-from-the-library).
+Code: `dashboard/src/components/create/imagine/ValueSources.tsx` and `sources.ts`.
+
 ### The handover
 
 Under the studio, **Ready for engineering?** opens with **What is left, and
