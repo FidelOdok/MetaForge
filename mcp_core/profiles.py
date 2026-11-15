@@ -694,12 +694,33 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
     # Only the recorder is always kept: the tools that make the files come
     # with the phase's own profile (pcb_design, electronics), and a phase
     # with several deliverables must stay inside the phase budget.
-    "schematic": frozenset({"twin.record_design_files"}),
-    "pcb_layout": frozenset({"twin.record_design_files"}),
+    # The tools that make a schematic and a board ride with the deliverable:
+    # hardware_v1's electronics phase names the `electronics` discipline, whose
+    # profile only checks and exports, so a phase expected to deliver a board
+    # had no tool that could draw one (2026-11-15).
+    "schematic": frozenset(
+        {"twin.record_design_files", "kicad.generate_schematic", "kicad.run_erc"}
+    ),
+    "pcb_layout": frozenset(
+        {
+            "twin.record_design_files",
+            "kicad.generate_pcb",
+            "kicad.autoroute_pcb",
+            "kicad.run_drc",
+        }
+    ),
     "gerber": frozenset({"twin.record_design_files"}),
     "pick_and_place": frozenset({"twin.record_design_files"}),
     "pinmap": frozenset({"twin.create_firmware_scaffold", "twin.record_design_files"}),
-    "firmware_source": frozenset({"twin.create_firmware_scaffold", "twin.record_design_files"}),
+    "firmware_source": frozenset(
+        {
+            "twin.create_firmware_scaffold",
+            "twin.record_design_files",
+            "firmware.build",
+            "firmware.static_check",
+            "firmware.run_emulated",
+        }
+    ),
 }
 
 #: Families dropped first when a discipline mix overflows the budget: niche
