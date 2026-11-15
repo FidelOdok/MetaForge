@@ -685,7 +685,7 @@ typed size and the library's. An entry with only part of a size (a footprint wit
 not used: the warnings name the missing field, and the next rung (KiCad, the datasheet, an
 approximation) draws the part. A size the library gave earlier is dropped when the entry no
 longer holds it, so the studio and the library cannot drift. Code:
-`api_gateway/imagine/library_geometry.py` (FORGE-877).
+`api_gateway/imagine/library_geometry.py`.
 
 #### Prices from the library
 
