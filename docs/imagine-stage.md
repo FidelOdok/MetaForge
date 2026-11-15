@@ -684,7 +684,7 @@ machine's `defaulted`, and is named in the write's warnings. The owner's other i
 the studio's process are added beside it. A library machine of another process is not used and the
 write says so; an id the library does not hold is left for the formgraph validator to report.
 Machines derived earlier are rebuilt on every write; machines the agent wrote are kept. Code:
-`api_gateway/imagine/library_machines.py` (FORGE-879).
+`api_gateway/imagine/library_machines.py`.
 
 #### Prices from the library
 
