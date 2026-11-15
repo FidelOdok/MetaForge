@@ -388,6 +388,18 @@ def _machine_library() -> Any:
     return get_machine_library()
 
 
+def _process_limits(process: str) -> dict[str, Any] | None:
+    """The library process's design-guide limits for a studio process, or None."""
+    from api_gateway.library.catalog_routes import get_catalog
+    from twin_core.library.catalog import CatalogError, CatalogNotFoundError
+
+    try:
+        limits: dict[str, Any] = get_catalog().process_limits(process, None)
+    except (CatalogNotFoundError, CatalogError):
+        return None
+    return limits
+
+
 def _part_gaps(part: dict[str, Any]) -> list[str]:
     geometry = part.get("geometry") or {}
     source = next(
@@ -740,7 +752,7 @@ class ImagineService:
         # The machine and the in-house machines for the process come from the machine
         # library (FORGE-879), so process.machine can name the owner's own printer.
         config, machined = await asyncio.to_thread(
-            library_machines.derive_machines, config, _machine_library()
+            library_machines.derive_machines, config, _machine_library(), _process_limits
         )
         # A part with no size gets a labelled 3D body, so every part exists in 3D.
         # Reading a library and a model is file work: off the event loop.

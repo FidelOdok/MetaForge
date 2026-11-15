@@ -708,8 +708,10 @@ owner's own printer) or a vendor service's instance. Each write builds it into `
 from the library, the instance's own values over its model's: `buildVolume`, and the limits the
 library holds (`min_wall_mm` as `wallMin`, `min_feature_mm` as `featureMin`, `tolerance_mm` as
 `tolerance`), with `source` naming the library entry and `derived_from: "library"`. A figure the
-library does not hold comes from the studio's default machine for that process, is listed in the
-machine's `defaulted`, and is named in the write's warnings. The owner's other in-house machines for
+library does not hold comes, best first, from the library's process entry for that process (its
+sourced design-guide limits: minimum wall, feature and hole, and tolerance), listed in the machine's
+`fromProcess` with the guide's source in its `note`, else from the studio's default machine for that
+process, listed in the machine's `defaulted` and named in the write's warnings. The owner's other in-house machines for
 the studio's process are added beside it. A library machine of another process is not used and the
 write says so; an id the library does not hold is left for the formgraph validator to report.
 Machines derived earlier are rebuilt on every write; machines the agent wrote are kept. Code:

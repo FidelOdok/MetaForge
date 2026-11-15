@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Any, Protocol
 
@@ -111,10 +112,57 @@ def _model_of(lib: MachineSource, machine: MachineModel | MachineInstance) -> Ma
     return None
 
 
+#: A library process limit (its ``kind`` and bound) -> the studio's limit key.
+PROCESS_LIMIT_OF: dict[tuple[str, str], str] = {
+    ("wall_thickness", "min"): "wallMin",
+    ("feature_size", "min"): "featureMin",
+    ("hole_diameter", "min"): "holeMin",
+}
+
+#: (studio process) -> the library process's limits (``process_limits`` shape), or None.
+ProcessLimits = Callable[[str], "dict[str, Any] | None"]
+
+
+def _from_process(limits_doc: dict[str, Any] | None) -> tuple[dict[str, float], list[str]]:
+    """The studio limits a library process gives, and the sources they came from."""
+    if not isinstance(limits_doc, dict):
+        return {}, []
+    found: dict[str, float] = {}
+    refs: list[str] = []
+    for rule in limits_doc.get("limits") or []:
+        if not isinstance(rule, dict):
+            continue
+        for bound in ("min", "max"):
+            key = PROCESS_LIMIT_OF.get((str(rule.get("kind")), bound))
+            value = rule.get(bound)
+            if key and isinstance(value, (int, float)) and not isinstance(value, bool):
+                found[key] = float(value)
+                ref = str(rule.get("source_ref") or "").strip()
+                if ref and ref not in refs:
+                    refs.append(ref)
+    raw = limits_doc.get("candidate")
+    cand: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    tol = cand.get("achievable_tolerance_mm")
+    if isinstance(tol, (int, float)) and not isinstance(tol, bool) and tol > 0:
+        found["tolerance"] = float(tol)
+        for ref in cand.get("source_refs") or []:
+            if isinstance(ref, str) and ref not in refs:
+                refs.append(ref)
+    return found, refs
+
+
 def studio_machine(
-    machine: MachineModel | MachineInstance, model: MachineModel | None, process: str
+    machine: MachineModel | MachineInstance,
+    model: MachineModel | None,
+    process: str,
+    process_limits: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The formgraph machine for a library machine, with defaults named."""
+    """The formgraph machine for a library machine.
+
+    Each limit is, best first: the machine's own figure from the library, the library
+    process's sourced design-guide figure (``fromProcess``), the studio catalogue's default
+    (``defaulted``).
+    """
     caps = (
         effective_capabilities(machine, model)
         if isinstance(machine, MachineInstance)
@@ -138,12 +186,21 @@ def studio_machine(
         defaulted.append("buildVolume")
     limits = dict(default.get("limits") or {})
     refs: list[str] = []
+    own: set[str] = set()
     for key, limit in LIMIT_OF.items():
         cap = caps.get(key)
         if cap is not None and isinstance(cap.value, (int, float)):
             limits[limit] = float(cap.value)
+            own.add(limit)
             refs.append(f"{key} ({cap.source_kind}: {cap.source_ref or 'no ref'})")
-        elif limit in limits:
+    from_process, process_refs = _from_process(process_limits)
+    used_process: list[str] = []
+    for limit, value in from_process.items():
+        if limit not in own:
+            limits[limit] = value
+            used_process.append(limit)
+    for limit in ("wallMin", "featureMin", "holeMin", "tolerance"):
+        if limit in limits and limit not in own and limit not in used_process:
             defaulted.append(limit)
     mats = caps.get("materials")
     materials = (
@@ -168,8 +225,15 @@ def studio_machine(
         "limits": limits,
         "finishes": list(default.get("finishes") or []),
         "defaulted": sorted(set(defaulted)),
+        "fromProcess": sorted(used_process),
         "note": (
             f"From the MetaForge machine library: {'; '.join(refs) or 'no sourced figures'}. "
+            + (
+                f"From the library's {process} process ({', '.join(sorted(used_process))}): "
+                f"{'; '.join(process_refs)}. "
+                if used_process
+                else ""
+            )
             + (
                 f"Process defaults used for {', '.join(sorted(set(defaulted)))}."
                 if defaulted
@@ -185,9 +249,28 @@ def studio_machine(
     return out
 
 
-def derive_machines(config: dict[str, Any], lib: MachineSource) -> tuple[dict[str, Any], list[str]]:
+def derive_machines(
+    config: dict[str, Any],
+    lib: MachineSource,
+    process_limits: ProcessLimits | None = None,
+) -> tuple[dict[str, Any], list[str]]:
     """A copy of ``config`` with library machines in ``context.machines``, and notes."""
     out = copy.deepcopy(config)
+    memo: dict[str, dict[str, Any] | None] = {}
+
+    def _limits_for(process: str) -> dict[str, Any] | None:
+        if process_limits is None:
+            return None
+        if process not in memo:
+            try:
+                memo[process] = process_limits(process)
+            except Exception as exc:  # noqa: BLE001 - a library read never fails the write
+                logger.warning(
+                    "imagine_library_process_limits_failed", process=process, error=str(exc)
+                )
+                memo[process] = None
+        return memo[process]
+
     if not isinstance(out, dict):
         return out, []
     raw = out.get("process")
@@ -213,7 +296,7 @@ def derive_machines(config: dict[str, Any], lib: MachineSource) -> tuple[dict[st
                         f"{studio_process} machine or change the process"
                     )
                 else:
-                    entry = studio_machine(machine, model, process)
+                    entry = studio_machine(machine, model, process, _limits_for(process))
                     built.append(entry)
                     if entry["defaulted"]:
                         notes.append(
@@ -234,7 +317,9 @@ def derive_machines(config: dict[str, Any], lib: MachineSource) -> tuple[dict[st
                 continue
             model = _model_of(lib, inst)
             if _process(inst, model) == studio_process:
-                built.append(studio_machine(inst, model, studio_process))
+                built.append(
+                    studio_machine(inst, model, studio_process, _limits_for(studio_process))
+                )
         context = out.setdefault("context", {})
         block = context.get("machines") if isinstance(context.get("machines"), dict) else {}
         own = [

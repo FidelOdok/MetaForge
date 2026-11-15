@@ -175,3 +175,43 @@ async def test_a_studio_write_accepts_the_owners_library_machine(
     finally:
         library_routes.init_machine_library(None)
         ops.init_operations(None)
+
+
+PROTOLABS = "https://www.protolabs.com/en-gb/services/3d-printing/fused-deposition-modelling/"
+FDM_PROCESS = {
+    "process": "fdm",
+    "limits": [
+        {"kind": "wall_thickness", "min": 0.8, "source_ref": PROTOLABS},
+        {"kind": "feature_size", "min": 2.0, "source_ref": PROTOLABS},
+        {"kind": "hole_diameter", "min": 2.0, "source_ref": PROTOLABS},
+    ],
+    "candidate": {"achievable_tolerance_mm": 0.5, "source_refs": [PROTOLABS]},
+}
+
+
+def test_missing_machine_figures_come_from_the_library_process_first(
+    library: SqliteMachineLibrary,
+) -> None:
+    cr10 = _instance(library, "My CR-10 V3 (home)")
+    out, notes = library_machines.derive_machines(
+        _studio(cr10.id), library, process_limits=lambda p: FDM_PROCESS if p == "fdm" else None
+    )
+    m = next(x for x in _machines(out) if x["id"] == cr10.id)
+    assert m["limits"]["wallMin"] == 0.8  # the machine's own measurement still wins
+    assert m["limits"]["featureMin"] == 2.0 and m["limits"]["holeMin"] == 2.0
+    assert m["limits"]["tolerance"] == 0.5
+    assert {"featureMin", "holeMin", "tolerance"} <= set(m["fromProcess"])
+    assert "tolerance" not in m["defaulted"]
+    assert PROTOLABS in m["note"]
+
+
+def test_with_no_library_process_the_catalogue_default_is_named(
+    library: SqliteMachineLibrary,
+) -> None:
+    # negative control: no process entry, so the catalogue default fills and says so
+    cr10 = _instance(library, "My CR-10 V3 (home)")
+    out, _ = library_machines.derive_machines(
+        _studio(cr10.id), library, process_limits=lambda p: None
+    )
+    m = next(x for x in _machines(out) if x["id"] == cr10.id)
+    assert "tolerance" in m["defaulted"] and m["fromProcess"] == []
