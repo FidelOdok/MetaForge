@@ -729,6 +729,14 @@ version, supplier, SKU, the day it was read and how), and is derived again on ev
 wrote is left alone. One warning lists the linked parts that have no confirmed price. Code:
 `api_gateway/imagine/library_cost.py`.
 
+A part sold by the pack (a roll, reel, sheet or bag) is priced by what one unit uses. The library
+offer states its pack as `pack: {amount, unit, note?}` (units `m`, `cm`, `mm`, `m2`, `mm2`, `kg`,
+`g`, `l`, `ml`, `pcs`), and the studio part states its `use` in a unit of the same kind. The cost
+is the pack price at the break for the whole packs the build needs, times use over pack size, and
+its source names both amounts. A pack-sold part with no `use`, or a `use` in another kind of unit,
+is left out of the estimate and named in the write's warnings: a whole pack is never counted per
+unit.
+
 #### Library models: `g.model(name)`
 
 A component library entry can carry `form_code`: the body of a function of `g` that draws the part once,

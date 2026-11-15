@@ -609,6 +609,41 @@ def _whole(where: str, value: Any, *, low: int) -> int:
     return value
 
 
+#: Units a pack (a roll, reel, sheet, bag) or a part's use of one may be stated in:
+#: unit -> (what it measures, size in that measure's base unit). FORGE-882.
+PACK_UNITS: dict[str, tuple[str, float]] = {
+    "m": ("length", 1.0),
+    "cm": ("length", 0.01),
+    "mm": ("length", 0.001),
+    "m2": ("area", 1.0),
+    "mm2": ("area", 1e-6),
+    "kg": ("mass", 1.0),
+    "g": ("mass", 0.001),
+    "l": ("volume", 1.0),
+    "ml": ("volume", 0.001),
+    "pcs": ("count", 1.0),
+}
+
+
+def parse_pack(where: str, raw: Any) -> dict[str, Any]:
+    """How much one priced unit of an offer holds: ``{amount, unit, note?}``."""
+    if not isinstance(raw, dict):
+        raise CatalogError(
+            f"{where} must be {{amount, unit}}, for example {{amount: 16.46, unit: m}}"
+        )
+    unit = str(raw.get("unit") or "").strip()
+    if unit not in PACK_UNITS:
+        raise CatalogError(f"{where}.unit must be one of {', '.join(PACK_UNITS)}")
+    amount = raw.get("amount")
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount <= 0:
+        raise CatalogError(f"{where}.amount must be a number above 0")
+    out: dict[str, Any] = {"amount": float(amount), "unit": unit}
+    note = str(raw.get("note") or "").strip()
+    if note:
+        out["note"] = note[:120]
+    return out
+
+
 def parse_offer(where: str, raw: Any) -> dict[str, Any]:
     """A supplier's dated offer (2026-11-12): price breaks, stock, lead time, when and how read.
 
@@ -646,6 +681,8 @@ def parse_offer(where: str, raw: Any) -> dict[str, Any]:
     for key in ("stock", "lead_time_days"):
         if raw.get(key) is not None:
             out[key] = _whole(f"{where}.offer.{key}", raw.get(key), low=0)
+    if raw.get("pack") is not None:
+        out["pack"] = parse_pack(f"{where}.offer.pack", raw.get("pack"))
     out["confirmed"] = raw.get("confirmed", True) is not False
     return out
 
