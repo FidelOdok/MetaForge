@@ -174,10 +174,12 @@ a rules note naming the tools (`kicad.generate_schematic`,
 `firmware.run_emulated`), then a probe checks the twin for the phase's work
 products since the phase started (`schematic` and `pcb_layout`;
 `firmware_source`). If one is missing or the brain fails, the scripted handler
-runs and the summary starts with `FALLBACK:`. The `schematic`, `pcb_layout` and
+runs and the summary starts with `FALLBACK:`. The `pcb_layout` and
 `firmware_source` deliverables now carry the tools that make them in
-`DELIVERABLE_TOOLS` (`mcp_core/profiles.py`), so a phase expected to deliver a
-board can draw one whatever discipline it names.
+`DELIVERABLE_TOOLS` (`mcp_core/profiles.py`; the board's set includes the
+schematic tools), so a phase expected to deliver a board can draw one whatever
+discipline it names. `schematic` alone keeps only the recorder, because
+`design_v1`'s CAD phase also expects it and has no room in its tool budget.
 
 **Multi-part designs commit an assembly.** When a design has more
 than one part, the `cad_model` hint tells the agent to commit each part as its
