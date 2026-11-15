@@ -215,7 +215,10 @@ returns carries `shared: true|false`.
 Not yet confined: a design-flow **run** executing in the Temporal worker has
 no request, so it reads the library unscoped and can see other accounts'
 entries; so does the MCP sidecar's remote library, which calls the gateway
-as the deployment's service. Both are open in the hosted-pilot plan.
+as the deployment's service. Both are open in the hosted-pilot plan. (For a
+person signed in to MCP, `library.*` through a remote library is refused
+rather than answered unscoped; see
+[MCP calls are confined to the person's projects](#mcp-calls-are-confined-to-the-persons-projects).)
 
 A few routes the dashboard calls are still refused because their stores do
 not record a project yet (baselines, design-loop, design-flow versions,
@@ -264,10 +267,86 @@ password"). With it installed the shared secret is refused even if set:
 anyone holding it would act outside every account. A typed name can never
 pass for a verified subject, because the label is stripped of `:`.
 
-Binding a token to a person is what a project scope needs; applying that
-scope to MCP tool calls is a separate step. Until it is in place, an MCP
-endpoint on a gateway shared by several accounts must not be offered to more
-than one of them.
+### MCP calls are confined to the person's projects
+
+When the sign-in binds tokens to a person **and** the provider also implements
+`ProjectAuthorizer`, every MCP call from that person is checked against the
+projects `project_scope()` returns, with the same rules as the HTTP routes
+above (`metaforge/mcp/project_scope.py`). The provider is asked with a
+`Principal` carrying only the subject the token is bound to, so its
+`project_scope()` and `project_created()` must key on `principal.subject`.
+The answer is cached for 15 seconds per subject, and dropped when the person
+creates a project.
+
+Every registered tool has a tenancy in `TOOL_RULES`:
+
+| Tenancy | Tools (count) | What happens |
+|---|---|---|
+| `project` | `knowledge.search`, `session.start`, `twin.record_*`, `twin.commit_*`, `flow.propose` ... (65) | `project_id`, or the project the session is bound to, is required and must be the caller's. A tool given no `project_id` is handed the bound one, so it cannot read "no project" as "every project". Node ids named alongside are checked too |
+| `entity` | `twin.thread_for`, `files.read`, `run.get_status`, `flow.status`, `approvals.decide`, `session.log_event` ... (51) | each twin node, run, approval, agent session, upload or tool job named is looked up, and its project must be the caller's. Some (`twin.get_node`, `twin.evaluate_metric` ...) accept a project instead |
+| `account_list` | `project.list`, `project.open`, `project.get`, `approvals.list` (4) | answered from the caller's projects only, counts included |
+| `account_create` | `project.create` (1) | the new project is passed to `project_created()`; if that fails the project is deleted again and the call fails |
+| `shared_read` | the library's reads, `component.search_*`, `kicad.search_library`, `flow.list`, `health.check` ... (25) | reference data; library reads see shared entries plus the account's own |
+| `tenant_library` | `library.register_*`, `library.update_*` (12) | allowed when the scope names a `tenant`; changes to shared entries are refused by the store |
+| `stateless` | `aircraft.*`, `power.*`, `cadquery.validate_shape`, distributor searches, `web.*` ... (49) | computed from the arguments or asked of an outside service; no project data |
+| `adapter_workspace` | `freecad.*`, most `cadquery.*`, `calculix.run_*`, `kicad.*` exports, `tripo.*` ... (118) | work in a tool adapter's own work directory; allowed (see the limits below) |
+| `blocked` | see below (26) | refused, naming the tool and why |
+
+A project outside the caller's scope gets the same error as one that does not
+exist (`code: not_found`), so ids cannot be probed. A tool with no entry is
+refused (`code: tool_not_scoped`), and
+`tests/unit/test_mcp_project_scope.py` fails until every declared tool has
+one. A project the session is bound to (by `session.start`, `project.open`, a
+session handle or the `X-MetaForge-Project` header) is checked on every call,
+whatever the tool: a session bound to someone else's project reaches nothing.
+`resources/read` follows the same rules (`metaforge://twin/*/{project_id}`,
+`metaforge://flow/run/{run_id}`, `metaforge://files/{work_product_id}`); the
+knowledge-source resources are refused. The approval notices added to tool
+results, and cancelling or retrying a tool job over `/v1/jobs/{id}`, see only
+the caller's projects.
+
+Refused to a signed-in account, because nothing yet traces them to a project:
+`twin.query_cypher` and `twin.find_by_property` (whole twin);
+`knowledge.extract` and `knowledge.populate_bom` (whole knowledge store);
+`memory.*` (learned across every account's runs); the engineering-change tools
+(`twin.analyze_*`, `approve_*`, `commit_*`, `reject_engineering_change`,
+`execute_revalidation_plan`, `mark_engineering_change_rolled_back`);
+`twin.get_design_loop` and `twin.approve_design_loop`; `phase.claim`,
+`phase.submit`, `review.claim`, `review.submit` (refused on the gateway too);
+`vendor.place_order` and `vendor.order_status`; `library.discover_machine` and
+the machine job tools; `files.import_local` and `files.save_local` (the
+server's own disk). `flow.patch` and `flow.capabilities` are refused when
+given a `version_id` rather than a run or a template.
+
+Callers that are not a signed-in person are unchanged: a local install, the
+shared-secret login, `METAFORGE_MCP_API_KEY` callers and the design-flow
+service caller (`METAFORGE_MCP_SERVICE_KEY`), which is confined to its run's
+project by FORGE-487 instead. A token issued before the identity login was
+switched on carries no subject and is refused until the person signs in
+again. A provider whose `project_scope()` raises `AuthUnavailable` gets
+`code: scope_unavailable` (retryable), never an empty scope;
+`metaforge_mcp_project_scope_total{outcome="scope_unavailable"}` and the
+`McpProjectScopeUnavailable` alert watch for it.
+
+Limits, stated plainly:
+
+- **Adapter work directories are shared.** `adapter_workspace` tools take
+  paths and FreeCAD session ids in a tool container's scratch space, which is
+  not divided by account. Paths and session ids are generated and not
+  guessable, but one account holding another's path could read that file.
+- **References inside a project-scoped write are partly checked.** Node ids in
+  reference fields (`depends_on`, `supersedes`, `part_node_ids` ...) are
+  checked when they look like ids; item keys are resolved by the tool within
+  the named project. Ids such as concept option ids or required claim ids are
+  left to the tool.
+- **A library served by the gateway is refused.** When the sidecar reaches the
+  library through `METAFORGE_GATEWAY_URL`, the gateway cannot be told whose
+  view to apply, so `library.*` is refused to a signed-in account. Material
+  names resolved for other tools (FORGE-446) still use the gateway's view.
+- **Runs and uploads are looked up through the gateway.** The sidecar asks
+  `GET /v1/runs/{id}` and `GET /v1/uploads/{id}`; if it cannot (no
+  `METAFORGE_GATEWAY_URL`, or the gateway refuses it), calls naming them are
+  refused.
 
 ## Responses
 

@@ -642,6 +642,17 @@ def build_http_app(
     # establishes who they are; a shared credential, or none, is UNTRUSTED.
     # Both hold writes -- the difference is what a reviewer is told.
     server.declare_caller(Caller.REMOTE if identifies else Caller.UNTRUSTED)
+    # FORGE-859 part B: tokens bound to a person, and a provider that can say
+    # which projects that person may touch, confine their calls to those
+    # projects. Neither alone does anything: the shared secret and API keys
+    # identify nobody, and a provider without project scope has one account.
+    from api_gateway.auth.scope import supports_project_scope
+
+    if identifies and login is not None and supports_project_scope(login):
+        gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip() or None
+        server.attach_project_scope(
+            login, gateway_url=gateway_url, library_in_process=gateway_url is None
+        )
     # FORGE-487: the design-flow worker is the one HTTP caller that can be
     # something other than untrusted/remote, and only per request: it must
     # present ``service_key`` AND name a run the gateway confirms. Off unless
@@ -814,6 +825,22 @@ def build_http_app(
         body = json.loads(raw)
         return JSONResponse(body.get("result", body))
 
+    async def _job_in_scope(actor: str | None, job: Any) -> bool:
+        """FORGE-859: a signed-in account reaches only its own projects' jobs.
+
+        Answered as "not known here" otherwise, the same as a job that does
+        not exist. Unconfined callers (no scoper, an API key) are unaffected.
+        """
+        scoper = server.project_scoper
+        if scoper is None or not actor or not identifies:
+            return True
+        from mcp_core.context import McpCallContext
+
+        ctx = McpCallContext(actor_id=actor, actor_verified=True)
+        visible = await scoper.visible_projects(ctx)
+        project = getattr(job, "project_id", None)
+        return visible is None or (bool(project) and str(project) in visible)
+
     # FORGE-788: a slow tool job runs in the process it was called on, so a
     # job started here is cancelled or retried here. The gateway's operations
     # view relays to these with the same credential as /mcp.
@@ -823,11 +850,13 @@ def build_http_app(
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
-        _check_auth(request, authorization)
+        actor = _check_auth(request, authorization)
         from tool_registry.jobs import active_job_runner
 
         runner = active_job_runner()
         job = runner.get(job_id) if runner is not None else None
+        if job is not None and not await _job_in_scope(actor, job):
+            job = None
         if runner is None or job is None:
             return JSONResponse({"detail": f"job '{job_id}' is not known here"}, status_code=404)
         if not runner.owns(job_id):
@@ -846,11 +875,12 @@ def build_http_app(
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
-        _check_auth(request, authorization)
+        actor = _check_auth(request, authorization)
         from tool_registry.jobs import JobNotRetryableError, active_job_runner
 
         runner = active_job_runner()
-        if runner is None or runner.get(job_id) is None:
+        job = runner.get(job_id) if runner is not None else None
+        if runner is None or job is None or not await _job_in_scope(actor, job):
             return JSONResponse({"detail": f"job '{job_id}' is not known here"}, status_code=404)
         try:
             new = await runner.retry(job_id)
@@ -1214,7 +1244,7 @@ def build_http_app(
             queue multiple. Each response is emitted as a separate
             ``data:`` event so generic SSE clients can consume them.
             """
-            _check_auth(request, authorization)
+            verified_actor = _check_auth(request, authorization)
             queries = request.query_params.getlist("request")
             # MET-387: install per-stream context from headers; every
             # queued request runs under the same ctx (one SSE connection
@@ -1222,6 +1252,12 @@ def build_http_app(
             from mcp_core.context import context_from_headers, with_context
 
             ctx = context_from_headers(dict(request.headers))
+            # FORGE-859: the token's actor, as on POST /mcp, so a signed-in
+            # account's calls here are confined to its projects too.
+            if verified_actor:
+                ctx = ctx.model_copy(
+                    update={"actor_id": verified_actor, "actor_verified": identifies}
+                )
 
             async def _events() -> AsyncIterator[bytes]:
                 with with_context(ctx):
@@ -2072,6 +2108,10 @@ async def _bootstrap(
         component_recorder=component_recorder,
         # FORGE-523: twin.item_history, so a plugin can read revisions too.
         item_history_reader=make_item_history_reader(twin),
+    )
+    # FORGE-859: what a signed-in account's calls are checked against.
+    server.attach_ownership_sources(
+        twin=twin, agent_session_store=agent_session_store, project_backend=project_backend
     )
     # FORGE-724: tell a client's person about approvals waiting for them.
     if flow_bindings.get("design_flow_approvals_lister") is not None:

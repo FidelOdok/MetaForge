@@ -188,6 +188,33 @@ rebinding defeats: a page re-points its own name at this machine, and its
 `Origin` and the request's `Host` then agree. `/health`, the OAuth pages and
 `/.well-known/*` are not checked.
 
+#### Signed-in accounts and project scope
+
+When the OAuth sign-in binds each token to a person (an auth provider that
+implements `PasswordLogin`) and that provider also implements
+`ProjectAuthorizer`, every `tools/call` and `resources/read` from that person
+is checked against their projects before it runs, the approval hold included
+(`metaforge/mcp/project_scope.py`, FORGE-859). Each tool has a tenancy:
+`project`, `entity`, `account_list`, `account_create`, `shared_read`,
+`tenant_library`, `stateless`, `adapter_workspace` or `blocked`, and a tool
+with none is refused. A refusal is a JSON-RPC error (`-32001`) whose `data`
+carries `tool_id`, `code` and `retryable`:
+
+| `code` | Meaning |
+|---|---|
+| `not_found` | a project or entity outside the account's projects, worded exactly as one that does not exist |
+| `project_required` / `entity_required` | the tool needs a project (or the id it names) on a shared server |
+| `tool_not_scoped` | the tool, or one of its arguments, cannot be traced to a project and is refused |
+| `library_read_only` / `library_not_scoped` | the account cannot add to the library, or the library is served remotely |
+| `not_signed_in` | a token not bound to a person, such as one issued before the identity login |
+| `scope_unavailable` | the provider or an owner lookup could not answer; retryable |
+| `registration_failed` | `project.create` could not register the project to the account; nothing was created |
+
+Tool calls from a local install, an API key, the shared-secret login or the
+design-flow service are not affected. The tenancy of every tool and the
+limits are in
+[Authentication](deployment/authentication.md#mcp-calls-are-confined-to-the-persons-projects).
+
 #### Protocol revisions
 
 The server speaks the handshake revisions `2024-11-05`, `2025-06-18` and

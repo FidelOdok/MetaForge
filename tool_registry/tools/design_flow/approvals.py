@@ -26,6 +26,7 @@ from typing import Any
 
 import structlog
 
+from mcp_core.context import current_context
 from mcp_core.elicitation import ElicitAction, current_elicitor, inline_approver
 from observability.tracing import get_tracer
 from tool_registry.tools.design_flow.gates import (
@@ -57,6 +58,20 @@ _ASK_ELSEWHERE = (
 )
 
 
+async def _visible_items(lister: ApprovalsLister, project_id: str | None) -> list[dict[str, Any]]:
+    """The items this call may see (FORGE-859).
+
+    On an MCP server shared by several accounts, only items in the caller's
+    projects, and nothing that names no project, the same rule the gateway's
+    ``GET /v1/approvals`` applies to a signed-in account.
+    """
+    ctx = current_context()
+    items = await lister(project_id)
+    if ctx.allowed_projects is None:
+        return items
+    return [i for i in items if ctx.allows_project(i.get("project_id"))]
+
+
 def _summary(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": item.get("id"),
@@ -76,7 +91,11 @@ def _summary(item: dict[str, Any]) -> dict[str, Any]:
 async def list_pending(*, lister: ApprovalsLister, project_id: str | None = None) -> dict[str, Any]:
     """The pending approvals, summarised for the agent to show the person."""
     with tracer.start_as_current_span("approvals.list") as span:
-        items = [i for i in await lister(project_id) if i.get("status", "pending") == "pending"]
+        items = [
+            i
+            for i in await _visible_items(lister, project_id)
+            if i.get("status", "pending") == "pending"
+        ]
         span.set_attribute("approvals.count", len(items))
     logger.info("approvals_listed_in_chat", count=len(items), project_id=project_id)
     return {
@@ -156,7 +175,9 @@ async def decide_approval(
     """Ask the person to decide one pending item, and record their answer."""
     with tracer.start_as_current_span("approvals.decide") as span:
         span.set_attribute("approval.id", approval_id)
-        item = next((i for i in await lister(None) if i.get("id") == approval_id), None)
+        item = next(
+            (i for i in await _visible_items(lister, None) if i.get("id") == approval_id), None
+        )
         if item is None or item.get("status", "pending") != "pending":
             return _open(None, f"No pending approval '{approval_id}'. Call approvals.list.")
         if not item.get("decidable"):

@@ -131,7 +131,11 @@ provider that can check passwords (`METAFORGE_AUTH_MODE`; see
 [Authentication](../deployment/authentication.md#signing-in-to-mcp)), the
 sign-in page asks for your email and password instead, the same account as the
 dashboard, and the connection is bound to you. `METAFORGE_OAUTH_LOGIN_SECRET` is
-not needed and is ignored if set.
+not needed and is ignored if set. If that provider can also say which projects
+an account may touch, every tool call you make is confined to your projects:
+another account's project answers as "not found", and the few tools that
+cannot yet be traced to a project are refused by name. See
+[MCP calls are confined to the person's projects](../deployment/authentication.md#mcp-calls-are-confined-to-the-persons-projects).
 
 With `DATABASE_URL` set (the standard compose file sets it), registered
 clients and issued tokens are kept in Postgres (`mcp_oauth_clients`,
@@ -248,6 +252,9 @@ deliberate and is not a sign anything is broken.
 login secret, every call is attributable to the credential, not to a person.
 That is honest for a gateway with one owner and is *not* an access model for a
 team — `/health` on the gateway reports the posture it is actually running.
+Signing in with your own account (above) is the access model for several
+accounts: it binds the connection to a person and confines their calls to
+their projects.
 
 **A connection pooler with a small client limit runs out.** Each service
 (gateway, MCP sidecar, workers) opens several Postgres pools: the SQLAlchemy

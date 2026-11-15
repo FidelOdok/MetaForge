@@ -764,6 +764,19 @@ class MetricsRegistry:
         ),
         labels=[],
     )
+    #: FORGE-859: an MCP call by a signed-in account that its project scope
+    #: refused or confined, by outcome (``not_found``, ``tool_not_scoped``,
+    #: ``project_required``, ``scope_unavailable``, ``filtered`` ...) and the
+    #: tool's tenancy. No tool, project or subject label: those are unbounded.
+    MCP_PROJECT_SCOPE_TOTAL = MetricDefinition(
+        name="metaforge_mcp_project_scope_total",
+        type="counter",
+        description=(
+            "MCP calls by a signed-in account refused or confined by its project scope, "
+            "by outcome and tool tenancy (FORGE-859)"
+        ),
+        labels=["outcome", "tenancy"],
+    )
     TOOL_JOB_TOTAL = MetricDefinition(
         name="metaforge_tool_job_total",
         type="counter",
@@ -1814,6 +1827,7 @@ class MetricsRegistry:
             cls.MCP_ADAPTER_PROBE_TOTAL,
             cls.MCP_CODE_VERSION_CHECK_TOTAL,
             cls.MCP_ORIGIN_REJECTED_TOTAL,
+            cls.MCP_PROJECT_SCOPE_TOTAL,
             cls.TOOL_JOB_TOTAL,
         ]
 
@@ -2610,6 +2624,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.MCP_ORIGIN_REJECTED_TOTAL.name)
         if counter is not None:
             counter.add(1)
+
+    def record_mcp_project_scope(self, outcome: str, tenancy: str) -> None:
+        """One MCP call refused or confined by an account's project scope (FORGE-859)."""
+        counter = self._instruments.get(MetricsRegistry.MCP_PROJECT_SCOPE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "tenancy": tenancy})
 
     def record_mcp_error(self, tool_id: str, error_class: str, client: str = "unknown") -> None:
         """Record one MCP error, classified."""

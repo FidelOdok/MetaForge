@@ -145,7 +145,8 @@ class TestAlertingRules:
         # + 1 FEA on a committed CAD item failing (ItemFeaFailures, FORGE-833).
         # + 1 assembly fit checks failing (AssemblyCheckFailures, FORGE-841).
         # + 1 stray boards or schematics left out of releases (info).
-        assert len(rules) == 95
+        # + 1 MCP project scope unavailable (McpProjectScopeUnavailable, FORGE-859).
+        assert len(rules) == 96
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -231,7 +232,8 @@ class TestAlertingRules:
         # + 1 CadQuery scripts stopped at the memory limit (FORGE-832).
         # + 1 FEA on a committed CAD item failing (FORGE-833).
         # + 1 assembly fit checks failing (FORGE-841).
-        assert len(warnings) == 77
+        # + 1 MCP project scope unavailable (FORGE-859).
+        assert len(warnings) == 78
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -302,6 +304,9 @@ class TestAlertingRules:
                 "McpUnexpectedErrors",
                 # FORGE-604: browser requests refused for their Origin.
                 "McpOriginRejected",
+                # FORGE-859: signed-in accounts' MCP calls refused because their
+                # project scope could not be checked.
+                "McpProjectScopeUnavailable",
                 "DeviceOffline",
                 "ErrorBudgetBurnRate",
                 "HarnessProviderFallbackSustained",
