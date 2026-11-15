@@ -14,6 +14,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
+from metaforge.mcp.gateway_auth import gateway_auth_headers
 from metaforge.mcp.remote_flows import _Gateway
 
 __all__ = ["GatewayMachineView", "RemoteMachineLibrary"]
@@ -181,7 +182,7 @@ class GatewayMachineView:
         if self._client is not None:
             response = self._client.get(url)
         else:
-            with httpx.Client(timeout=self._timeout) as http:
+            with httpx.Client(timeout=self._timeout, headers=gateway_auth_headers()) as http:
                 response = http.get(url)
         if response.status_code == 404:
             raise KeyError(path)
@@ -218,7 +219,9 @@ def remote_material_source(gateway_url: str, *, client: httpx.AsyncClient | None
 
     async def resolve(name: str) -> dict[str, Any]:
         owned = client is None
-        http = client or httpx.AsyncClient(timeout=DEFAULT_TIMEOUT_SECONDS)
+        http = client or httpx.AsyncClient(
+            timeout=DEFAULT_TIMEOUT_SECONDS, headers=gateway_auth_headers()
+        )
         try:
             response = await http.get(f"{base}/v1/library/materials/resolve", params={"name": name})
         finally:

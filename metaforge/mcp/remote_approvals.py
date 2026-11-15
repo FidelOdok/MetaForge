@@ -49,6 +49,7 @@ from mcp_core.guardrails import (
     effective_hold_window,
     notify_held,
 )
+from metaforge.mcp.gateway_auth import gateway_auth_headers
 from observability.metrics import MetricsCollector, collector_for
 
 logger = structlog.get_logger(__name__)
@@ -165,7 +166,7 @@ def build_remote_approval_gate(
     async def gate(ask: ApprovalAsk) -> ApprovalResolution:
         timeout = effective_hold_window(timeout_seconds, ask, DEFAULT_TIMEOUT_SECONDS)
         owned = client is None
-        http = client or httpx.AsyncClient(timeout=30.0)
+        http = client or httpx.AsyncClient(timeout=30.0, headers=gateway_auth_headers())
         handed_off = False
         try:
             try:
@@ -335,7 +336,7 @@ class RemoteApprovalLedger:
     async def _post(self, url: str, body: dict[str, Any]) -> httpx.Response:
         if self._client is not None:
             return await self._client.post(url, json=body, timeout=self._timeout)
-        async with httpx.AsyncClient(timeout=self._timeout) as http:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=gateway_auth_headers()) as http:
             return await http.post(url, json=body)
 
     async def policy_approval(self, ask: ApprovalAsk) -> ApprovalResolution | None:
@@ -455,7 +456,7 @@ class RemoteApprovalLedger:
     async def _get(self, url: str) -> httpx.Response:
         if self._client is not None:
             return await self._client.get(url, timeout=self._timeout)
-        async with httpx.AsyncClient(timeout=self._timeout) as http:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=gateway_auth_headers()) as http:
             return await http.get(url)
 
     async def find_hold(self, approval_key: str) -> HeldApproval | None:
@@ -518,7 +519,9 @@ class RemoteApprovalLedger:
                     f"{self._endpoint}/{approval_id}", timeout=self._timeout
                 )
             else:
-                async with httpx.AsyncClient(timeout=self._timeout) as http:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout, headers=gateway_auth_headers()
+                ) as http:
                     current = await http.get(f"{self._endpoint}/{approval_id}")
             current.raise_for_status()
             body: dict[str, Any] = current.json()
@@ -559,7 +562,9 @@ class RemoteApprovalLedger:
         response = await self._post(f"{self._endpoint}/{approval_id}/resolve", body)
         if response.status_code == 409:
             # Decided elsewhere first. Read what is on record and act on it.
-            async with httpx.AsyncClient(timeout=self._timeout) as http:
+            async with httpx.AsyncClient(
+                timeout=self._timeout, headers=gateway_auth_headers()
+            ) as http:
                 current = await http.get(f"{self._endpoint}/{approval_id}")
             current.raise_for_status()
             return _STATUS_OUTCOMES.get(str(current.json().get("status")), ApprovalOutcome.REJECTED)

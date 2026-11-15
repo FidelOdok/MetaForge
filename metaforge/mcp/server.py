@@ -3807,7 +3807,9 @@ class UnifiedMcpServer:
             if gateway_url:
                 import httpx
 
-                async with httpx.AsyncClient(timeout=10.0) as http:
+                from metaforge.mcp.gateway_auth import gateway_auth_headers
+
+                async with httpx.AsyncClient(timeout=10.0, headers=gateway_auth_headers()) as http:
                     response = await http.get(f"{gateway_url.rstrip('/')}/v1/vendors/connectors")
                 response.raise_for_status()
                 connectors = response.json().get("connectors", [])

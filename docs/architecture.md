@@ -442,6 +442,12 @@ is `mcp_core/live_events.py`: the tool calls `publish_live_event`, and each
 process installs the publisher that fits it. A build driven from the Claude
 Code plugin therefore shows in the dashboard the same as one driven from a flow.
 
+The same key authenticates every other call the sidecar makes to the gateway:
+approvals and the approval ledger, flows and tasks, files, vendors, the
+library, and run and client-task checks (`metaforge/mcp/gateway_auth.py`).
+Without it, a gateway with an auth provider refuses those calls, and a held
+write cannot be recorded, so it is not run.
+
 `GET /v1/twin/projects/{id}/live` streams it. Its first frame is
 `live.snapshot`, the whole in-progress picture, so a viewer that opens late or
 reconnects is correct without replaying anything. Each change after it is one

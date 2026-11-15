@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from metaforge.mcp.gateway_auth import gateway_auth_headers
 from observability.tracing import get_tracer
 
 if TYPE_CHECKING:
@@ -1100,7 +1101,7 @@ def sidecar_owner_lookups(
             import httpx
 
             owned = http_client is None
-            http = http_client or httpx.AsyncClient(timeout=10.0)
+            http = http_client or httpx.AsyncClient(timeout=10.0, headers=gateway_auth_headers())
             try:
                 response = await http.get(f"{base}{path}")
             finally:

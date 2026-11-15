@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 import structlog
 
+from metaforge.mcp.gateway_auth import gateway_auth_headers
 from observability.tracing import get_tracer
 from tool_registry.tools.design_flow.gates import last_gate_decision
 
@@ -91,7 +92,9 @@ class _Gateway:
     ) -> Any:
         url = f"{self._base}{path}"
         owned = self._client is None
-        http = self._client or httpx.AsyncClient(timeout=self._timeout)
+        http = self._client or httpx.AsyncClient(
+            timeout=self._timeout, headers=gateway_auth_headers()
+        )
         try:
             try:
                 if headers:
