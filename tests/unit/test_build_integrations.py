@@ -952,7 +952,10 @@ class TestCloudPackage:
         assert f"/plugin install {CLOUD_PLUGIN_NAME}" in readme
         assert "FORGE-707" in readme
         assert "/mcp" in readme
-        assert "METAFORGE_OAUTH_LOGIN_SECRET" in readme
+        # The hosted gateway signs people in with their own account, not a
+        # shared secret (FORGE-859).
+        assert "MetaForge account" in readme
+        assert "METAFORGE_OAUTH_LOGIN_SECRET" not in readme
 
     def test_the_readme_explains_claude_ai(self, root: Path) -> None:
         """Adding a plugin does not add or sign in its connector, and a custom
