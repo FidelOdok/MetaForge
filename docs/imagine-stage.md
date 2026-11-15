@@ -672,6 +672,21 @@ part drawn this way in its warnings. A part with its own code keeps it, includin
 whose code the agent has since rewritten (for a real outline that is not a box), a reference to a part
 that does not exist is refused, and a component with no reference is flagged as a stand-in.
 
+#### Sizes from the library
+
+A real part linked to a library entry (`library`) takes its size from the entry on each write,
+before any other rung draws a body: `geometry.envelope` is the entry's `length_mm`, `width_mm`
+and `height_mm`, with `size_basis: read` (so the handover's `parts` item counts it),
+`derived_from: "library"`, and a `source` naming the entry, its version and the specs' sources.
+The body is the entry's bounding box; a part whose entry has a `form_code` is still drawn with that
+model (see below). An exact or generated model already on the part (a measured STEP, a KiCad
+body) is kept. Any other size on a linked part is replaced, and the write's warnings name the
+typed size and the library's. An entry with only part of a size (a footprint with no height) is
+not used: the warnings name the missing field, and the next rung (KiCad, the datasheet, an
+approximation) draws the part. A size the library gave earlier is dropped when the entry no
+longer holds it, so the studio and the library cannot drift. Code:
+`api_gateway/imagine/library_geometry.py`.
+
 #### Machines from the library
 
 `process.machine` may name a machine in the MetaForge machine library: an in-house instance (the

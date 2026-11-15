@@ -36,6 +36,7 @@ from api_gateway.imagine import (
     component_link,
     engine_page,
     library_cost,
+    library_geometry,
     library_link,
     library_machines,
     library_models,
@@ -723,6 +724,12 @@ class ImagineService:
         reason: str = "studio config from the agent",
         metric: str = "put",
     ) -> StudioResponse:
+        # A linked part's size comes from its library entry first (FORGE-877), so the
+        # rungs below draw only what the library cannot size.
+        lookup = library_cost.cached(library_cost.catalog_entry)
+        config, sized = await asyncio.to_thread(
+            library_geometry.derive_part_geometry, config, lookup
+        )
         # The machine and the in-house machines for the process come from the machine
         # library (FORGE-879), so process.machine can name the owner's own printer.
         config, machined = await asyncio.to_thread(
@@ -745,14 +752,12 @@ class ImagineService:
         # Library models the parts name travel with the revision (the page has no network).
         config, modelled = await asyncio.to_thread(library_models.embed, config, model)
         # A linked part with no cost of its own is priced from the library's confirmed offers.
-        config, priced = await asyncio.to_thread(
-            library_cost.price_parts, config, library_cost.cached(library_cost.catalog_entry)
-        )
+        config, priced = await asyncio.to_thread(library_cost.price_parts, config, lookup)
         # Real parts the component library does not hold yet: register once, reuse later.
         library = await asyncio.to_thread(
             library_link.library_notes, config, library_link.catalog_exists
         )
-        drawn = [*machined, *drawn, *linked, *modelled, *priced, *library]
+        drawn = [*sized, *machined, *drawn, *linked, *modelled, *priced, *library]
         try:
             checked = engine_page.validate_config(config)
         except engine_page.ConfigError as exc:
