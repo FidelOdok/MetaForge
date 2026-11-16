@@ -103,7 +103,8 @@ def content_digest(root: Path = OUT, lock: Path = VERSION_LOCK) -> str:
         if not path.is_file() or path == lock:
             continue
         data = path.read_bytes()
-        if path.name == "plugin.json":
+        # package.json is the opencode package's npm manifest (plugin add).
+        if path.name in ("plugin.json", "package.json"):
             manifest = json.loads(data)
             manifest.pop("version", None)
             data = json.dumps(manifest, sort_keys=True).encode()
@@ -1181,6 +1182,82 @@ def opencode_rules() -> str:
     )
 
 
+#: The npm name of the server plugin `opencode plugin add` installs.
+OPENCODE_PACKAGE_NAME = "metaforge-opencode"
+OPENCODE_PLUGIN_ADD = (
+    "opencode plugin add 'github:FidelOdok/MetaForge#main::path:integrations/opencode'"
+)
+
+
+def write_opencode_plugin(root: Path, server: dict) -> None:
+    """The V2 server plugin, so `opencode plugin add` installs the package.
+
+    ``server.js`` is plain JavaScript with no dependencies and no build step.
+    It reads ``metaforge-index.json``, written here from the files already in
+    the package, so the descriptions are parsed once, in Python, where the
+    tests can check them.
+    """
+    package = {
+        "name": OPENCODE_PACKAGE_NAME,
+        "version": VERSION,
+        "description": (
+            "MetaForge for opencode: the hosted gateway as an MCP server, with "
+            "commands, skills, subagents and working rules."
+        ),
+        "type": "module",
+        "exports": {".": "./server.js"},
+        "license": "Apache-2.0",
+        "homepage": "https://fidelodok.github.io/MetaForge/",
+        "repository": {
+            "type": "git",
+            "url": "git+https://github.com/FidelOdok/MetaForge.git",
+            "directory": "integrations/opencode",
+        },
+        "keywords": ["opencode-plugin", "hardware", "cad", "digital-twin"],
+    }
+    (root / "package.json").write_text(json.dumps(package, indent=2) + "\n")
+    shutil.copyfile(OPENCODE_DIR / "server.js", root / "server.js")
+
+    commands = []
+    for path in sorted((root / "commands" / PLUGIN_NAME).glob("*.md")):
+        front, _ = split_frontmatter(path.read_text(encoding="utf-8"))
+        commands.append(
+            {
+                "name": f"{PLUGIN_NAME}/{path.stem}",
+                "description": WORKFLOWS[path.stem][0],
+                "file": path.relative_to(root).as_posix(),
+            }
+        )
+    agents = []
+    for path in sorted((root / "agents").glob("*.md")):
+        front, _ = split_frontmatter(path.read_text(encoding="utf-8"))
+        description = front["description"]
+        if description.startswith('"'):
+            description = json.loads(description)
+        agents.append(
+            {"id": path.stem, "description": description, "file": path.relative_to(root).as_posix()}
+        )
+    skills = []
+    for path in sorted((root / "skills" / PLUGIN_NAME).glob("*/SKILL.md")):
+        front, _ = split_frontmatter(path.read_text(encoding="utf-8"))
+        skills.append(
+            {
+                "id": path.parent.name,
+                "name": front.get("name") or path.parent.name,
+                "description": front.get("description", ""),
+                "file": path.relative_to(root).as_posix(),
+            }
+        )
+    index = {
+        "mcp": {"metaforge": server},
+        "commands": commands,
+        "agents": agents,
+        "skills": skills,
+        "rules": OPENCODE_RULES_FILE,
+    }
+    (root / "metaforge-index.json").write_text(json.dumps(index, indent=2) + "\n")
+
+
 def build_opencode() -> Path:
     """The package for opencode: config, commands, agents, skills and rules.
 
@@ -1246,6 +1323,7 @@ def build_opencode() -> Path:
     (root / OPENCODE_RULES_FILE).write_text(opencode_rules())
     shutil.copyfile(OPENCODE_DIR / "install.sh", root / "install.sh")
     (root / "install.sh").chmod(0o755)
+    write_opencode_plugin(root, config["mcp"]["servers"]["metaforge"])
 
     print(f"  {len(skills)} skill(s), {len(commands)} command(s), {len(agents)} agent(s)")
 

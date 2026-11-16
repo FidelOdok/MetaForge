@@ -1,0 +1,22 @@
+{
+  "name": "metaforge-opencode",
+  "version": "0.2.79",
+  "description": "MetaForge for opencode: the hosted gateway as an MCP server, with commands, skills, subagents and working rules.",
+  "type": "module",
+  "exports": {
+    ".": "./server.js"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://fidelodok.github.io/MetaForge/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FidelOdok/MetaForge.git",
+    "directory": "integrations/opencode"
+  },
+  "keywords": [
+    "opencode-plugin",
+    "hardware",
+    "cad",
+    "digital-twin"
+  ]
+}
