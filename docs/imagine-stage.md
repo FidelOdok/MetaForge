@@ -702,8 +702,33 @@ current (`imax_mA`) with 25 % headroom (22 to 28 AWG), and a signal is 28 AWG. I
 routed run plus 15 mm for stripping and a service loop. A wire whose end has no drawn part is not
 drawn; it is listed with the reason. Hiding a part hides its wires. The summary
 (`window.FG_AUTHORED`) carries `wires` (net, ends, length, gauge, what sized it, whether both ends
-were placed), `unwired` and `wire_total_mm`. Code: `wireRoutes` in
-`api_gateway/imagine/engine/authored.js`.
+were placed, whether it fits), `unwired`, `wires_outside` and `wire_total_mm`.
+
+A wire fits when its whole route stays inside the enclosure, the box round the form's body
+parts, with each bend at least three times the wire's diameter in from every wall (its two
+ends sit on their parts' pins and need no allowance). A wire that leaves it glows red and is
+listed in `wires_outside`; with no body part, `fits` is `null` and nothing is judged. It is a
+box test: it says a wire leaves the enclosure, not that it clears every rib inside. Code:
+`wireRoutes` in `api_gateway/imagine/engine/authored.js`.
+
+#### Wiring checks
+
+The write also checks the wiring as a whole, and reports each finding as a warning that
+starts with `Wiring:`. These checks run only when the studio has a connection list:
+
+- **Unwired power.** A power or ground input (`bus: pwr`, `dir` `in` or `bi`) that no
+  connection reaches.
+- **Floating inputs.** A signal input (`dir: in`) that nothing drives. To leave one
+  unconnected on purpose, list it as `part.interface` in `context.connections.unused`.
+- **Wire size.** A power connection whose `wire: {awg}` is rated below its peak current with
+  25 % headroom. The ratings are the template engine's harness table: 28 AWG 1.4 A,
+  26 AWG 2.2 A, 24 AWG 3.5 A, 22 AWG 7 A. The peak is the lower `imax_mA` of the two ends, and
+  the finding names the gauge that fits. A gauge outside the table is also a finding.
+
+Outputs, bidirectional signals and excluded parts are not findings when unwired, since a board
+has many spare pins. The same findings hold the handover's `wiring` item. Whether the wires fit
+inside the enclosure is measured in the page, where the geometry is. Code:
+`api_gateway/imagine/wiring_checks.py`.
 
 #### Wiring checks
 
