@@ -263,11 +263,11 @@ verdict of its own, so it cannot show a pass the service did not compute.
 
 The report refreshes every ten seconds, so a step taken in the studio shows
 up without a reload. Under it, **Handover checklist** (collapsed) lists the
-nine items from `GET .../imagine/handover` that the handover itself checks: the ledger, the assumptions (confirmed or
+ten items from `GET .../imagine/handover` that the handover itself checks: the ledger, the assumptions (confirmed or
 explicitly accepted), the scenario tests, the requirements with their source
 and verification method, one chosen part per function, the manufacturing
 context, the concept assembly with component ids and an illustrative concept
-mesh, the proposed interface contracts and the screening results. Each item
+mesh, the proposed interface contracts, the screening results and the wiring. Each item
 is *Done*, *Missing* or *Assumed*.
 
 **Hand over to engineering** calls `POST .../imagine/handover` with an

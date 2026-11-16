@@ -45,6 +45,7 @@ from api_gateway.imagine import (
     resolve_part,
     studio_patch,
     verification_client,
+    wiring_checks,
 )
 from api_gateway.imagine.schemas import (
     COLLECTION_KINDS,
@@ -777,6 +778,8 @@ class ImagineService:
             library_link.library_notes, config, library_link.catalog_exists
         )
         drawn = [*material_notes, *sized, *machined, *drawn, *linked, *modelled, *priced, *library]
+        # The wiring as a whole: unwired power, floating inputs, wires too thin (FORGE-886).
+        wiring = wiring_checks.wiring_findings(_context(config))
         try:
             checked = engine_page.validate_config(config)
         except engine_page.ConfigError as exc:
@@ -818,7 +821,7 @@ class ImagineService:
                 "events": (head.state["events"] if head else {}),
                 "handover": None,
                 "rework": head.state.get("rework") if head else None,
-                "warnings": [*checked.warnings, *drawn],
+                "warnings": [*checked.warnings, *drawn, *wiring],
             }
             new = await self._write_revision(project_id, state, actor=actor, reason=reason)
         span.set_attribute("studio.revision", new.revision)
@@ -1590,6 +1593,10 @@ class ImagineService:
                 "missing",
                 "Open the studio so the engine runs its checks.",
             )
+
+        # 10. wiring: every power and signal input wired, each wire thick enough (FORGE-886)
+        w_status, w_detail = wiring_checks.checklist_item(_context(config))
+        add("wiring", "Parts wired and checked", w_status, w_detail)
 
         ready = all(i.status != "missing" for i in items)
         return HandoverChecklist(ready=ready, items=items)

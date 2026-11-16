@@ -328,8 +328,9 @@ kind of record (`api_gateway/imagine/twin_bridge.py`):
 
 `GET /handover` (and `twin.imagine_handover_status`) checks, in order. The gateway
 still evaluates this checklist to gate `POST /handover`. The verification service
-decides the same nine items for the validation report (see Validation), and a
-parity test keeps the two equal:
+decides the first nine items for the validation report (see Validation), and a
+parity test keeps the two equal. The tenth, `wiring`, is decided by the gateway
+alone for now:
 
 1. `ledger`: the intent ledger is complete, every statement reviewed.
 2. `assumptions`: each assumption confirmed, or explicitly accepted as an
@@ -351,6 +352,12 @@ parity test keeps the two equal:
    ready.
 8. `interfaces`: interfaces described, so contracts can be proposed.
 9. `screening`: screening results stored at V2.
+10. `wiring`: with a connection list, every power or ground input and every
+    signal input is wired (or listed in `connections.unused`) and each wire with a
+    `wire.awg` is thick enough for its peak current; any finding holds the handover.
+    With no connection list it reads `assumed` when two or more parts have
+    interfaces (they are wired in words only), and `done` otherwise. See
+    [Wiring checks](#wiring-checks).
 
 `ready` is true when no item is `missing`. `POST /handover` then writes the
 requirements, the manufacturing context, the ledger, the concept assembly
@@ -684,6 +691,25 @@ receiving part's voltage window, a signal is below the input's high threshold (a
 a 5 V input, which needs a level shifter), or a multi-pin interface is wired without naming the
 pin. The list reaches the page in the compiled context as `_context.connections`. Code:
 `validate_connections` in `api_gateway/imagine/formgraph/fg_context.py`.
+
+#### Wiring checks
+
+The write also checks the wiring as a whole, and reports each finding as a warning that
+starts with `Wiring:`. These checks run only when the studio has a connection list:
+
+- **Unwired power.** A power or ground input (`bus: pwr`, `dir` `in` or `bi`) that no
+  connection reaches.
+- **Floating inputs.** A signal input (`dir: in`) that nothing drives. To leave one
+  unconnected on purpose, list it as `part.interface` in `context.connections.unused`.
+- **Wire size.** A power connection whose `wire: {awg}` is rated below its peak current with
+  25 % headroom. The ratings are the template engine's harness table: 28 AWG 1.4 A,
+  26 AWG 2.2 A, 24 AWG 3.5 A, 22 AWG 7 A. The peak is the lower `imax_mA` of the two ends, and
+  the finding names the gauge that fits. A gauge outside the table is also a finding.
+
+Outputs, bidirectional signals and excluded parts are not findings when unwired, since a board
+has many spare pins. The same findings hold the handover's `wiring` item. Whether the wires fit
+inside the enclosure is measured in the page, where the geometry is. Code:
+`api_gateway/imagine/wiring_checks.py`.
 
 #### Sizes from the library
 

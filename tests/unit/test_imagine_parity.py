@@ -259,7 +259,14 @@ async def checklist_of(state: State) -> tuple[dict[str, str], bool]:
         updated_at=None,
     )
     result = await service._checklist(str(uuid4()), head)
-    return {i.id: i.status for i in result.items}, result.ready
+    # The wiring item (FORGE-886) is MetaForge's own until the imagine-v1 profile decides it,
+    # so it is left out of the comparison and out of the readiness the two must agree on.
+    items = {i.id: i.status for i in result.items if i.id not in CHECKLIST_ONLY}
+    return items, all(v != "missing" for v in items.values())
+
+
+#: Checklist items the verification service does not decide yet.
+CHECKLIST_ONLY = frozenset({"wiring"})
 
 
 def service_items(report: Any) -> dict[str, str]:
