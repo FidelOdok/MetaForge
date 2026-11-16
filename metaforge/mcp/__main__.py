@@ -1293,10 +1293,57 @@ def _form_params(raw: bytes) -> dict[str, str]:
     return dict(parse_qsl(raw.decode("utf-8")))
 
 
+_LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "metaforge-lockup-light.svg")
+_LOGO_ROUTE = "/brand/metaforge-lockup.svg"
+
+# MetaForge brand tokens, the same as the marketing site and the dashboard's
+# sign-in page: ink and muted text, brand orange, hairline borders, on white.
+_LOGIN_CSS = """
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600&display=swap');
+  :root { --ink:#111319; --muted:#636672; --orange:#ff5a0a; --orange-deep:#e64d00;
+          --line:#e1e2e5; --panel:#f7f7f8; --error:#c22a1e; color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; padding:40px 16px;
+         background:#fff; color:var(--ink);
+         font-family:'DM Sans', Arial, sans-serif; font-size:16px; line-height:1.55; }
+  .logo { display:block; width:200px; height:auto; margin:0 auto 28px; }
+  .card { width:100%; max-width:400px; padding:32px 28px; border:1px solid var(--line);
+          border-radius:10px; background:#fff; }
+  .eyebrow { display:flex; align-items:center; gap:10px; margin:0 0 14px;
+             font-family:'Space Grotesk', monospace; font-size:11px; font-weight:500;
+             letter-spacing:1.5px; text-transform:uppercase; color:var(--ink); }
+  .rule { width:23px; height:3px; background:var(--orange); }
+  h1 { margin:0; font-size:26px; line-height:1.15; font-weight:650; letter-spacing:-0.015em; }
+  .sub { margin:8px 0 22px; font-size:14px; color:var(--muted); }
+  label { display:flex; flex-direction:column; gap:6px; margin-bottom:16px;
+          font-family:'Space Grotesk', monospace; font-size:11px; font-weight:500;
+          letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); }
+  input[type=password], input[type=email], input[type=text] {
+          width:100%; height:44px; padding:0 14px; border:1px solid var(--line);
+          border-radius:6px; background:#fff; color:var(--ink);
+          font-family:'DM Sans', Arial, sans-serif; font-size:15px;
+          letter-spacing:normal; text-transform:none; }
+  input:hover { border-color:#c9cbd0; }
+  input:focus { outline:none; border-color:var(--orange);
+                box-shadow:0 0 0 3px rgba(255,90,10,.18); }
+  button { width:100%; height:46px; margin-top:4px; border:0; border-radius:6px;
+           background:var(--orange); color:#fff; font:inherit; font-size:15px;
+           font-weight:600; cursor:pointer; }
+  button:hover { background:var(--orange-deep); }
+  button:focus-visible { outline:3px solid var(--orange); outline-offset:3px; }
+  .err { margin:0 0 16px; font-size:14px; color:var(--error); }
+  .note { margin:18px 0 0; padding-top:16px; border-top:1px solid var(--line);
+          font-size:13px; color:var(--muted); }
+  .foot { margin-top:22px; font-family:'Space Grotesk', monospace; font-size:11px;
+          letter-spacing:1px; color:#8a8d95; text-align:center; }
+"""
+
+
 def _login_page(
     action: str, fields: dict[str, str], *, error: str = "", identity: bool = False
 ) -> str:
-    """Minimal login form for ``/authorize``.
+    """The sign-in page for ``/authorize``, in MetaForge's branding.
 
     ``identity`` (FORGE-859): the deployment's auth provider checks the
     person's own email and password, and the token is bound to them.
@@ -1313,60 +1360,60 @@ def _login_page(
         for k, v in fields.items()
         if v
     )
-    banner = f'<p class="err">{escape(error)}</p>' if error else ""
+    banner = f'<p class="err" role="alert">{escape(error)}</p>' if error else ""
+    title = "Sign in to MetaForge" if identity else "Authorize MetaForge MCP"
+    sub = (
+        "Connect your AI assistant to your MetaForge account."
+        if identity
+        else "Connect your AI assistant to this MetaForge gateway."
+    )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MetaForge MCP — Sign in</title>
-<style>
-  body {{ font-family: system-ui, sans-serif; background:#0b0f14; color:#e6edf3;
-         display:grid; place-items:center; height:100vh; margin:0; }}
-  form {{ background:#161b22; padding:2rem; border-radius:12px; width:min(360px,90vw);
-          box-shadow:0 8px 32px rgba(0,0,0,.4); }}
-  h1 {{ font-size:1.1rem; margin:0 0 1rem; }}
-  input[type=password], input[type=email], input[type=text] {{
-          width:100%; padding:.6rem; border-radius:8px;
-          border:1px solid #30363d; background:#0d1117; color:#e6edf3; box-sizing:border-box; }}
-  button {{ margin-top:1rem; width:100%; padding:.6rem; border:0; border-radius:8px;
-          background:#2f81f7; color:#fff; font-weight:600; cursor:pointer; }}
-  .err {{ color:#f85149; font-size:.85rem; }}
-</style></head>
+<title>Sign in | MetaForge</title>
+<style>{_LOGIN_CSS}</style></head>
 <body>
+<img class="logo" src="{_LOGO_ROUTE}" alt="MetaForge" width="200" height="55">
+<main class="card">
+<div class="eyebrow"><span class="rule" aria-hidden="true"></span>MetaForge MCP</div>
+<h1>{title}</h1>
+<p class="sub">{sub}</p>
 <form method="post" action="{action}">
-  <h1>{"Sign in to MetaForge" if identity else "Authorize MetaForge MCP"}</h1>
   {banner}
   {_identity_fields() if identity else _secret_fields()}
   {hidden}
   <button type="submit">{"Sign in" if identity else "Authorize"}</button>
 </form>
+</main>
+<p class="foot">Hardware from intent</p>
 </body></html>"""
 
 
 def _identity_fields() -> str:
-    return """<label>Email<br>
+    return """<label>Email
     <input type="email" name="email" required autofocus autocomplete="username">
   </label>
-  <label>Password<br>
+  <label>Password
     <input type="password" name="password" required autocomplete="current-password">
   </label>
-  <p style="font-size:.8rem;opacity:.7;margin:.6rem 0 0">
+  <p class="note">
     The same account you use in the MetaForge dashboard. This connection
     can reach only your account's projects.
   </p>"""
 
 
 def _secret_fields() -> str:
-    return """<label>Your name<br>
+    return """<label>Your name
     <input type="text" name="operator" autofocus placeholder="e.g. ana"
            autocomplete="username">
   </label>
-  <p style="font-size:.8rem;opacity:.7;margin:.2rem 0 .8rem">
-    Recorded against your work so a reviewer can see who did what. This
-    login is a shared secret, so the name is not verified.
-  </p>
-  <label>Access secret<br>
+  <label>Access secret
     <input type="password" name="login_secret" required>
-  </label>"""
+  </label>
+  <p class="note">
+    Your name is recorded against your work so a reviewer can see who did
+    what. This login is a shared secret, so the name is not verified.
+  </p>"""
 
 
 def _mount_oauth_routes(
@@ -1376,6 +1423,19 @@ def _mount_oauth_routes(
     login: Any = None,
 ) -> None:
     from urllib.parse import urlencode
+
+    @app.get(_LOGO_ROUTE, include_in_schema=False)
+    async def brand_logo() -> Response:
+        try:
+            with open(_LOGO_PATH, "rb") as fh:
+                body = fh.read()
+        except OSError:
+            return Response(status_code=404)
+        return Response(
+            body,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     @app.get("/.well-known/oauth-protected-resource")
     async def oauth_protected_resource(request: Request) -> JSONResponse:

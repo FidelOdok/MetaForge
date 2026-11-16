@@ -158,6 +158,14 @@ def test_the_login_page_asks_for_an_email_and_password(client) -> None:  # type:
     assert page.status_code == 200
     assert 'name="email"' in page.text and 'name="password"' in page.text
     assert "login_secret" not in page.text
+    # In MetaForge's branding, with the logo served by the same server
+    # without a token (FORGE-859 follow-up).
+    assert 'src="/brand/metaforge-lockup.svg"' in page.text
+    assert "#ff5a0a" in page.text
+    logo = client.get("/brand/metaforge-lockup.svg")
+    assert logo.status_code == 200
+    assert logo.headers["content-type"].startswith("image/svg+xml")
+    assert logo.content.startswith(b"<svg")
 
 
 def test_signing_in_binds_the_token_to_the_person(client) -> None:  # type: ignore[no-untyped-def]
