@@ -690,6 +690,20 @@ await check('a_wire_whose_end_cannot_be_placed_is_listed_not_drawn', () => {
   return none.wires.length === 0 && none.skipped.length === 0 ? true : 'none ' + JSON.stringify(none);
 });
 
+await check('a_wire_that_leaves_the_enclosure_is_named', () => {
+  // a body 0..100 x 0..20 x 0..10 holds both parts; the route rises to y 7
+  const body = { id: 'case', body: true, bbox: { min: [0, 0, 0], max: [100, 20, 10] } };
+  const inside = FG.wireRoutes(WIRE_CFG(), [...WIRE_PARTS, body]);
+  if (inside.outside.length || !inside.wires.every((w) => w.fits === true)) return 'inside ' + JSON.stringify(inside.outside);
+  // a lid at y 8 leaves 1 mm above the route: less than 3 x the 1.1 mm power wire's diameter
+  const low = { ...body, bbox: { min: [0, 0, 0], max: [100, 8, 10] } };
+  const r = FG.wireRoutes(WIRE_CFG(), [...WIRE_PARTS, low]);
+  if (JSON.stringify(r.outside) !== '["c1","c2"]') return 'low lid ' + JSON.stringify(r.outside);
+  // negative control: no body part, nothing is judged
+  const none = FG.wireRoutes(WIRE_CFG(), WIRE_PARTS);
+  return none.wires.every((w) => w.fits === null) && none.outside.length === 0 ? true : 'no body ' + JSON.stringify(none.wires.map((w) => w.fits));
+});
+
 await check('mount_draws_each_wire_as_a_tube_and_the_summary_lists_them', async () => {
   const el = () => { const e = { children: [], style: {}, attrs: {}, handlers: {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     appendChild(c) { this.children.push(c); return c; }, insertBefore(c) { this.children.unshift(c); return c; }, setAttribute(k, v) { this.attrs[k] = v; },
