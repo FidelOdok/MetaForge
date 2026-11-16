@@ -150,6 +150,15 @@ write:
   kg, thermal conductivity and flammability stay the catalogue's until the
   library holds them, and the write says so. Do not type material figures the
   library holds.
+- **Wire the parts in `context.connections`.** List every wire as
+  `{id, net, from, to}` with each end `part.interface` or
+  `part.interface.pin` (for example `board-a.d6` to `lvl-a.a1`, or
+  `board-a.i2c.SDA` to `lux-a.i2c.SDA`), from the parts' pinouts in the
+  library and the architecture; never invent a pin. Give each interface its
+  `pins` when it has more than one. The write refuses an end that is not a
+  real part, interface or pin, and one pin on two nets, and names a bus
+  mismatch, two outputs on one net, a supply outside a part's window, or a
+  3.3 V signal into a 5 V input (add the level shifter).
 - **Parts** in `context.components` need `schemaVersion: 1`, and each part
   `id`, `role` (`fn:<function>`, `board` or `battery`), `mpn`, `manufacturer`,
   `datasheet`, `retrieved`, `interfaces` and `geometry.envelope` with a
