@@ -36,7 +36,9 @@ plugin adds:
   session.
 
 `opencode plugin list` shows it, `opencode plugin update` fetches a newer
-`main`, and `opencode plugin remove` takes it out. The plugin is plain
+`main`, and `opencode plugin remove` takes it out. Right after the background
+service starts, the first `plugin list` or `mcp list` can come back empty while
+plugins load; run it again. The plugin is plain
 JavaScript with no dependencies, so there is nothing to build or fetch from
 npm.
 
