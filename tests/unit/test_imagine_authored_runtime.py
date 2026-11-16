@@ -77,6 +77,7 @@ CHECKS = [
     "mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change",
     "wires_run_between_the_interfaces_they_join_and_are_sized_like_the_engine_harness",
     "a_wire_whose_end_cannot_be_placed_is_listed_not_drawn",
+    "a_wire_that_leaves_the_enclosure_is_named",
     "mount_draws_each_wire_as_a_tube_and_the_summary_lists_them",
     "components_describe_each_part_its_readiness_and_the_functions_without_a_part",
     "components_a_guess_never_counts_as_a_real_size",

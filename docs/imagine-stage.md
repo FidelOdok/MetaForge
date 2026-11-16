@@ -695,8 +695,14 @@ current (`imax_mA`) with 25 % headroom (22 to 28 AWG), and a signal is 28 AWG. I
 routed run plus 15 mm for stripping and a service loop. A wire whose end has no drawn part is not
 drawn; it is listed with the reason. Hiding a part hides its wires. The summary
 (`window.FG_AUTHORED`) carries `wires` (net, ends, length, gauge, what sized it, whether both ends
-were placed), `unwired` and `wire_total_mm`. Code: `wireRoutes` in
-`api_gateway/imagine/engine/authored.js`.
+were placed, whether it fits), `unwired`, `wires_outside` and `wire_total_mm`.
+
+A wire fits when its whole route stays inside the enclosure, the box round the form's body
+parts, with each bend at least three times the wire's diameter in from every wall (its two
+ends sit on their parts' pins and need no allowance). A wire that leaves it glows red and is
+listed in `wires_outside`; with no body part, `fits` is `null` and nothing is judged. It is a
+box test: it says a wire leaves the enclosure, not that it clears every rib inside. Code:
+`wireRoutes` in `api_gateway/imagine/engine/authored.js`.
 
 #### Sizes from the library
 

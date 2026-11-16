@@ -1511,7 +1511,7 @@
   // harness rule: a power wire is sized from its peak current with 25 % headroom, a signal is
   // 28 AWG. Lengths carry 15 mm for stripping and a service loop, like the engine's cables.
   var WIRE_AWG = [[28, 1.4, 0.8], [26, 2.2, 0.9], [24, 3.5, 1.1], [22, 7, 1.3]]; // gauge, amps, outer diameter mm
-  var WIRE_SLACK_MM = 15, WIRE_CLEAR_MM = 3;
+  var WIRE_SLACK_MM = 15, WIRE_CLEAR_MM = 3, WIRE_BEND = 3;
   var NET_COLOURS = [0x2f6fff, 0x18a058, 0xe0a100, 0x9b4dff, 0x00a3b4, 0xff7a1a, 0xd6336c];
   function netColour(net, bus) {
     var n = String(net || '').toUpperCase();
@@ -1529,6 +1529,24 @@
       if (p && typeof p.component_ref === 'string' && !formOf[p.component_ref]) formOf[p.component_ref] = p.id;
     });
     (drawnParts || []).forEach(function (r) { if (r && r.bbox && r.bbox.min && r.bbox.max) boxOf[r.id] = r.bbox; });
+    // The enclosure: the box round the parts that make the product's body. A wire fits when
+    // its whole route stays inside it, and each bend a bend allowance (WIRE_BEND x the wire's
+    // diameter) in from each wall. This is a box test: it says a wire leaves the enclosure, not that it
+    // clears every rib inside.
+    var shell = null;
+    (drawnParts || []).forEach(function (r) {
+      if (!r || !r.body || !r.bbox || !r.bbox.min || !r.bbox.max) return;
+      if (!shell) shell = { min: r.bbox.min.slice(), max: r.bbox.max.slice() };
+      else for (var k = 0; k < 3; k++) { shell.min[k] = Math.min(shell.min[k], r.bbox.min[k]); shell.max[k] = Math.max(shell.max[k], r.bbox.max[k]); }
+    });
+    function fitsIn(pts, dia) {
+      if (!shell) return null;
+      // the ends sit on their parts' pins; the bends between them need room from each wall
+      return pts.every(function (q, i) {
+        var m = i === 0 || i === pts.length - 1 ? 0 : WIRE_BEND * dia;
+        return [0, 1, 2].every(function (k) { return q[k] >= shell.min[k] + m - 1e-6 && q[k] <= shell.max[k] - m + 1e-6; });
+      });
+    }
     function isNum(v) { return typeof v === 'number' && isFinite(v); }
     function end(ref) {
       var bits = typeof ref === 'string' ? ref.split('.') : [];
@@ -1562,11 +1580,13 @@
         length_mm: Math.round(run + WIRE_SLACK_MM), awg: g[0], diameter_mm: g[2], rated_A: g[1],
         sized_from: pwr ? (amps ? 'peak current ' + amps + ' A' : 'power wire, no current on record') : 'signal',
         placed: a.placed && b.placed, color: netColour(c.net, pwr ? 'pwr' : a.iface.bus),
+        fits: fitsIn(pts, g[2]),
         parts: [a.formPart, b.formPart],
       });
     });
     var total = wires.reduce(function (s, w) { return s + w.length_mm; }, 0);
-    return { wires: wires, skipped: skipped, total_mm: total };
+    return { wires: wires, skipped: skipped, total_mm: total, enclosure: shell,
+      outside: wires.filter(function (w) { return w.fits === false; }).map(function (w) { return w.id; }) };
   }
 
   function mount(env) {
@@ -1601,7 +1621,9 @@
       lastWires.wires.forEach(function (w) {
         var curve = new THREE.CatmullRomCurve3(w.points.map(function (q) { return new THREE.Vector3(q[0], q[1], q[2]); }), false, 'centripetal', 0.5);
         var mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(16, w.points.length * 12), w.diameter_mm / 2, 8, false),
-          new THREE.MeshStandardMaterial({ color: w.color, roughness: 0.55, metalness: 0.05 }));
+          new THREE.MeshStandardMaterial(Object.assign({ color: w.color, roughness: 0.55, metalness: 0.05 },
+            // a wire that leaves the enclosure glows red, like a clash
+            w.fits === false ? { emissive: 0xff2020, emissiveIntensity: 0.7 } : {})));
         mesh.name = 'wire ' + w.net + ' (' + w.id + ')';
         mesh.userData = { wire: w.id, net: w.net, kind: 'wire' };
         mesh.visible = !w.parts.some(function (id) { return hidden[id] || switchedOff(id); });
@@ -2303,7 +2325,8 @@
         errors: result ? result.errors : [],
         measured: result ? result.measured || null : null,
         joins: ((((env.cfg || {}).form || {}).authored || {}).joins) || [],
-        wires: lastWires.wires.map(function (w) { return { id: w.id, net: w.net, from: w.from, to: w.to, length_mm: w.length_mm, awg: w.awg, sized_from: w.sized_from, placed: w.placed }; }),
+        wires: lastWires.wires.map(function (w) { return { id: w.id, net: w.net, from: w.from, to: w.to, length_mm: w.length_mm, awg: w.awg, sized_from: w.sized_from, placed: w.placed, fits: w.fits }; }),
+        wires_outside: (lastWires.outside || []).slice(),
         unwired: lastWires.skipped.slice(),
         wire_total_mm: lastWires.total_mm,
       };
