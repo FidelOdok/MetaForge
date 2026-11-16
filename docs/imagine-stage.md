@@ -672,6 +672,19 @@ part drawn this way in its warnings. A part with its own code keeps it, includin
 whose code the agent has since rewritten (for a real outline that is not a box), a reference to a part
 that does not exist is refused, and a component with no reference is flagged as a stand-in.
 
+#### Wiring: connections between parts
+
+A studio records how its real parts are wired in `context.connections`:
+`{schemaVersion: 1, connections: [{id, net, from, to, wire?, color?}]}`, each end written
+`part.interface` or `part.interface.pin` against `context.components.parts`. An interface may list
+its `pins` (distinct names). Each write refuses an end that names no part, interface or pin, a
+connection id used twice, and a signal pin on two nets (power and ground may fan out). It warns
+when the buses differ, two outputs drive one net, nothing drives a net, a supply sits outside the
+receiving part's voltage window, a signal is below the input's high threshold (a 3.3 V output into
+a 5 V input, which needs a level shifter), or a multi-pin interface is wired without naming the
+pin. The list reaches the page in the compiled context as `_context.connections`. Code:
+`validate_connections` in `api_gateway/imagine/formgraph/fg_context.py`.
+
 #### Sizes from the library
 
 A real part linked to a library entry (`library`) takes its size from the entry on each write,

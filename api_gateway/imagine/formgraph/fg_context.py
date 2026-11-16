@@ -30,7 +30,7 @@ DEFAULT_MACHINES = os.path.join(HERE, 'data', 'machines.default.json')
 UK_SUPPLIERS = os.path.join(HERE, 'data', 'suppliers.uk.json')
 USER_MACHINES = None
 SCHEMA_VERSION = 1
-FILES = ('components', 'machines', 'options', 'models', 'scenarios', 'references', 'manufacturing')
+FILES = ('components', 'machines', 'options', 'models', 'scenarios', 'references', 'manufacturing', 'connections')
 FACES = {'+x', '-x', '+y', '-y', '+z', '-z'}
 ACCESS = {'usb', 'button', 'led', 'sound', 'sensor', 'antenna', 'sky', 'connector', 'vent', 'cable', 'other'}
 KEEPOUT = {'antenna', 'sky', 'airflow', 'heat', 'magnetic', 'clearance'}
@@ -211,6 +211,8 @@ def validate_context(cfg, ctx, cat, E, W):
                 E.append(f'{where}: sets "{k}", which is not a model input (model.input).')
             elif not isinstance(val, (int, float)):
                 E.append(f'{where}: sets {k} to a non-number.')
+
+    validate_connections(ctx, E, W)
 
     # machines
     machines, mats, procs = merged_machines(ctx)
@@ -462,6 +464,98 @@ def validate_manufacturing(ctx, machines, mats, cat, E, W):
             W.append(f'{where}: name the fastener for its {j["method"]} joint.')
 
 
+def _end(ref, parts):
+    """(part id, interface, pin or None, error) for an end written part.interface[.pin]."""
+    bits = str(ref or '').split('.')
+    if len(bits) not in (2, 3) or not all(bits):
+        return None, None, None, f'"{ref}" must be part.interface or part.interface.pin'
+    part = parts.get(bits[0])
+    if part is None:
+        return None, None, None, f'"{ref}": no context part "{bits[0]}"'
+    iface = next((f for f in part.get('interfaces') or [] if isinstance(f, dict) and f.get('id') == bits[1]), None)
+    if iface is None:
+        return None, None, None, f'"{ref}": part "{bits[0]}" has no interface "{bits[1]}"'
+    pin = bits[2] if len(bits) == 3 else None
+    pins = iface.get('pins') or []
+    if pin is not None and pin not in pins:
+        return None, None, None, f'"{ref}": interface "{bits[1]}" has no pin "{pin}"' + (f' (pins: {", ".join(map(str, pins))})' if pins else ' (it lists no pins)')
+    return bits[0], iface, pin, None
+
+
+def _drive_v(iface):
+    """The voltage an output drives: level_V, else the top of its window."""
+    if isinstance(iface.get('level_V'), (int, float)):
+        return float(iface['level_V'])
+    v = iface.get('v')
+    return float(v[1]) if isinstance(v, list) and len(v) == 2 else None
+
+
+def validate_connections(ctx, E, W):
+    """MetaForge (FORGE-883): the wiring between real parts' interfaces.
+
+    ``context.connections`` holds ``{schemaVersion, connections: [{id, net, from, to, wire?,
+    color?}]}``, each end ``part.interface`` or ``part.interface.pin``. A reference to a part,
+    interface or pin that does not exist, or one pin on two nets, is an error; buses that do
+    not match, two outputs driving each other, a power source outside the sink's window, a
+    signal below the input's window and an unnamed pin on a multi-pin interface are warnings.
+    """
+    block = ctx.get('connections') or {}
+    conns = block.get('connections') if isinstance(block, dict) else None
+    if not conns:
+        return
+    if not isinstance(conns, list):
+        E.append('context.connections.connections must be a list.')
+        return
+    parts = {p['id']: p for p in (ctx.get('components') or {}).get('parts', []) or [] if isinstance(p, dict) and p.get('id')}
+    seen_ids = set()
+    on_net = {}
+    for i, c in enumerate(conns):
+        where = f'connection [{i}]'
+        if not isinstance(c, dict) or not c.get('id') or not c.get('net'):
+            E.append(f'{where} needs an "id", a "net", "from" and "to".')
+            continue
+        where = f'connection "{c["id"]}"'
+        if c['id'] in seen_ids:
+            E.append(f'{where} appears twice.')
+        seen_ids.add(c['id'])
+        ends = []
+        for side in ('from', 'to'):
+            pid, iface, pin, err = _end(c.get(side), parts)
+            if err:
+                E.append(f'{where}: {err}.')
+            else:
+                ends.append((str(c[side]), pid, iface, pin))
+        if len(ends) != 2:
+            continue
+        for ref, _pid, iface, pin in ends:
+            if pin is None and len(iface.get('pins') or []) > 1:
+                W.append(f'{where}: "{ref}" has pins {", ".join(map(str, iface["pins"]))}; name the pin each wire lands on.')
+            # power and ground fan out; a signal pin belongs to one net
+            if iface.get('bus') != 'pwr':
+                prev = on_net.get(ref)
+                if prev is not None and prev != c['net']:
+                    E.append(f'{where}: "{ref}" is on two nets ("{prev}" and "{c["net"]}").')
+                on_net[ref] = c['net']
+        (ra, _, a, _), (rb, _, b, _) = ends
+        if a.get('bus') != b.get('bus'):
+            W.append(f'{where}: "{ra}" is {a.get("bus")} and "{rb}" is {b.get("bus")}; a wire joins like to like.')
+            continue
+        if a.get('dir') == 'out' and b.get('dir') == 'out':
+            W.append(f'{where}: "{ra}" and "{rb}" are two outputs driving each other.')
+        if a.get('dir') == 'in' and b.get('dir') == 'in':
+            W.append(f'{where}: "{ra}" and "{rb}" are both inputs; nothing drives this net.')
+        src, snk = (a, b) if a.get('dir') == 'out' or b.get('dir') == 'in' else (b, a)
+        rsnk = rb if snk is b else ra
+        need = snk.get('v')
+        drive = _drive_v(src)
+        if a.get('bus') == 'pwr' and isinstance(src.get('v'), list) and isinstance(need, list) and src is not snk:
+            if src['v'][0] < need[0] or src['v'][1] > need[1]:
+                if not (src['v'] == [0, 0] or need == [0, 0]):
+                    W.append(f'{where}: the supply is {src["v"][0]:g} to {src["v"][1]:g} V but "{rsnk}" needs {need[0]:g} to {need[1]:g} V.')
+        elif drive is not None and isinstance(need, list) and src is not snk and drive < need[0]:
+            W.append(f'{where}: a {drive:g} V signal into "{rsnk}", which reads high from {need[0]:g} V; add a level shifter.')
+
+
 def validate_interfaces(where, p, E, W):
     """Each interface: id, bus, dir, and for power the voltage window and current."""
     ifs = p.get('interfaces')
@@ -487,6 +581,9 @@ def validate_interfaces(where, p, E, W):
             E.append(f'{w}: v must be [min, max] in volts.')
         if f.get('bus') == 'pwr' and v is None:
             E.append(f'{w}: a power interface needs its voltage window "v".')
+        pins = f.get('pins')
+        if pins is not None and not (isinstance(pins, list) and all(isinstance(x, str) and x for x in pins) and len(set(pins)) == len(pins)):
+            E.append(f'{w}: pins must be a list of distinct pin names (MetaForge, FORGE-883).')
         for k in ('imax_mA', 'level_V'):
             if k in f and not (isinstance(f[k], (int, float)) and f[k] > 0):
                 E.append(f'{w}: {k} must be a positive number.')
@@ -768,6 +865,8 @@ def compile_context(cfg, ctx):
         'compiled': compile_parts(parts),
         'manufacturing': (ctx.get('manufacturing') or {}).get('parts', []) or [],
         'refs': fg_refs.pack_refs(ctx.get('references'), ctx.get('_folder')) if ctx.get('references') else [],
+        # MetaForge (FORGE-883): the wiring between real parts, for the page to draw.
+        'connections': [c for c in (ctx.get('connections') or {}).get('connections', []) or [] if isinstance(c, dict)],
     }
     return cfg
 
