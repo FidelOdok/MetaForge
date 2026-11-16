@@ -46,6 +46,7 @@ from api_gateway.imagine import (
     studio_patch,
     verification_client,
     wiring_checks,
+    wiring_outputs,
 )
 from api_gateway.imagine.schemas import (
     COLLECTION_KINDS,
@@ -1920,6 +1921,15 @@ class ImagineService:
                         note=f"direction {itf.get('dir') or 'n/a'}; from Imagine (V2)",
                     )
                 )
+        # The firmware pin map from the connection list goes first, so the 60-parameter cap
+        # trims bus descriptions before named pins (FORGE-887).
+        ctx = _context(config)
+        pin_params = [
+            CoupledParameter(owner="electronics", basis=ValueBasis.ESTIMATED, **spec)
+            for spec in wiring_outputs.pin_parameter_specs(ctx)
+        ]
+        names = {x.name for x in pin_params}
+        bus_params = [*pin_params, *(x for x in bus_params if x.name not in names)]
         contracts = []
         if cad_params:
             contracts.append(
@@ -1937,7 +1947,10 @@ class ImagineService:
                 InterfaceContract(
                     kind=ContractKind.EDA_FIRMWARE,
                     title="Electronics and firmware",
-                    plain="The firmware drives each part over the bus the schematic gives it.",
+                    plain=(
+                        "The firmware drives each part over the bus the schematic gives it"
+                        + (", on the pins the wiring names." if pin_params else ".")
+                    ),
                     owning_domains=["electronics", "firmware"],
                     parameters=bus_params[:60],
                     rationale=f"Proposed at the Imagine handover ({head.ref}).",
@@ -1949,6 +1962,23 @@ class ImagineService:
                 created.append(existing.ref)
                 continue
             created.append(await self.bridge.write_contract(project_id, contract, actor=actor))
+
+        # The wiring: table, harness BOM lines and the numbered sequence (FORGE-887).
+        wiring = wiring_outputs.handover_record(ctx, str(product.get("name") or "the product"))
+        if wiring is not None:
+            w_ref, _ = await self.bridge.record_decision(
+                project_id, title=wiring[0], rationale=wiring[1], depends_on=[head.ref]
+            )
+            created.append(w_ref)
+            head.state["wiring"] = {
+                "decision": w_ref,
+                "harness": wiring_outputs.harness_lines(ctx),
+                "pins": len(pin_params),
+                # the interconnect circuit an agent hands to kicad.generate_schematic
+                "circuit": wiring_outputs.interconnect_circuit(
+                    ctx, str(product.get("name") or "product")
+                ),
+            }
 
         for ev in head.state["events"].values():
             if ev.get("kind") == "screening":

@@ -321,7 +321,8 @@ kind of record (`api_gateway/imagine/twin_bridge.py`):
 | Parts (at handover) | A concept assembly decision: each chosen part gets its `CMP-` component id; sources, retrieved dates and envelopes are in the record |
 | Scenarios | Scenario requirements in `CS-IMAGINE` (verified by demonstration) |
 | Context edits | Manufacturing context changes with provenance (`imagine.studio`, the actor, the studio ref) |
-| Interfaces (at handover) | Proposed interface contracts: `IFC-CAD-EDA` (each part's envelope) and `IFC-EDA-FIRMWARE` (each part's buses). One Develop already holds is left alone |
+| Interfaces (at handover) | Proposed interface contracts: `IFC-CAD-EDA` (each part's envelope) and `IFC-EDA-FIRMWARE` (each part's buses, and the firmware pin map from the connection list). One Develop already holds is left alone |
+| Connections (at handover) | A wiring decision: the wiring table, the harness BOM lines and the numbered wiring sequence (see [Wiring at handover](#wiring-at-handover)) |
 | Screening results | An `evidence` record at V2: `dfm_status: preliminary_guidance`, the rule version, every rule's result |
 
 ## The handover gate
@@ -729,6 +730,38 @@ Outputs, bidirectional signals and excluded parts are not findings when unwired,
 has many spare pins. The same findings hold the handover's `wiring` item. Whether the wires fit
 inside the enclosure is measured in the page, where the geometry is. Code:
 `api_gateway/imagine/wiring_checks.py`.
+
+#### Wiring at handover
+
+When the studio has a connection list, the handover turns it into what Develop builds from
+(`api_gateway/imagine/wiring_outputs.py`):
+
+- **Firmware pin map.** One parameter per wired interface end, named
+  `pin_<part>_<interface>[_<pin>]`, whose value is its net and whose note names what it joins,
+  its bus and its direction. These lead the proposed `IFC-EDA-FIRMWARE` contract, ahead of
+  the bus descriptions, so the contract's 60-parameter cap trims descriptions before pins.
+- **Wiring table and harness BOM.** One row per connection: net, ends, gauge, length and what
+  sized the wire. The gauge is the connection's `wire.awg` when set, else the thinnest gauge
+  rated for the lower peak current (`imax_mA`) with 25 % headroom, else 28 AWG for a signal
+  and 26 AWG for power with no recorded current. A length is the connection's `length_mm` plus
+  15 mm for stripping; a connection without one is listed as still to measure, never guessed.
+  The BOM has one hook-up wire line per gauge with its number of cuts and, when every length is
+  known, the total in metres.
+- **Wiring sequence.** Numbered steps: ground first, then power, then signals, then a
+  continuity check of each net and a check for shorts between power and ground before the
+  first power-up.
+
+- **Interconnect circuit.** The wiring as a circuit for `kicad.generate_schematic`: each part
+  a generic one-row connector (`Connector_Generic:Conn_01xNN`, up to 40 pins) with one pin per
+  wired end in wiring order, a `Pins` field mapping each pin number back to
+  `part.interface[.pin]`, the part's `MPN`, and one net per net name, so power and ground fan
+  out. Every pin is passive, so KiCad's ERC checks that each net joins two pins and that no pin
+  is on two nets. The gateway does not run KiCad itself (agents reach tools over MCP): an agent
+  passes the circuit to `kicad.generate_schematic` and reads the ERC result.
+
+All four are recorded as one design decision, `Imagine wiring: <product>`, pinned to the studio
+revision, with V2 provenance; the circuit is in it as a JSON block. Lengths measured from the
+drawn form are a later step.
 
 #### Sizes from the library
 

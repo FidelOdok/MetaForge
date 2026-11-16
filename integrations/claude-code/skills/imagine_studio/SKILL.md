@@ -163,7 +163,11 @@ write:
   `connections.unused` (`["ring-a.dout"]`). Give a power wire its
   `wire: {awg}` when the build fixes it; the write names a wire too thin for
   its peak current, and the handover's `wiring` item holds until each
-  `Wiring:` warning is cleared.
+  `Wiring:` warning is cleared. Record a wire's measured run as
+  `length_mm` (from the studio's drawn wires) so the handover's harness BOM
+  has its length; a wire without one is listed as still to measure. After
+  the handover, pass the interconnect circuit in the `Imagine wiring`
+  decision to `kicad.generate_schematic` and report its ERC result.
 - **Parts** in `context.components` need `schemaVersion: 1`, and each part
   `id`, `role` (`fn:<function>`, `board` or `battery`), `mpn`, `manufacturer`,
   `datasheet`, `retrieved`, `interfaces` and `geometry.envelope` with a
