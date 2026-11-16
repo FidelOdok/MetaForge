@@ -692,6 +692,19 @@ a 5 V input, which needs a level shifter), or a multi-pin interface is wired wit
 pin. The list reaches the page in the compiled context as `_context.connections`. Code:
 `validate_connections` in `api_gateway/imagine/formgraph/fg_context.py`.
 
+An authored form draws each connection as a cable in the 3D view. A wire starts at the
+interface's `at` (mm from the part's centre) when the part has one, and at the centre of the
+form part that carries it (`component_ref`) when it does not. It rises 3 mm clear of the taller
+of its two parts, runs across and drops to the other end. Its colour follows the net: ground is
+black, power red, and each other net a colour of its own. Its size follows the template engine's
+harness rule: a power wire is the smallest gauge whose rating covers the lower recorded peak
+current (`imax_mA`) with 25 % headroom (22 to 28 AWG), and a signal is 28 AWG. Its length is the
+routed run plus 15 mm for stripping and a service loop. A wire whose end has no drawn part is not
+drawn; it is listed with the reason. Hiding a part hides its wires. The summary
+(`window.FG_AUTHORED`) carries `wires` (net, ends, length, gauge, what sized it, whether both ends
+were placed), `unwired` and `wire_total_mm`. Code: `wireRoutes` in
+`api_gateway/imagine/engine/authored.js`.
+
 #### Wiring checks
 
 The write also checks the wiring as a whole, and reports each finding as a warning that
