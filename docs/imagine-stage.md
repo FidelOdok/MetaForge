@@ -744,7 +744,10 @@ When the studio has a connection list, the handover turns it into what Develop b
   sized the wire. The gauge is the connection's `wire.awg` when set, else the thinnest gauge
   rated for the lower peak current (`imax_mA`) with 25 % headroom, else 28 AWG for a signal
   and 26 AWG for power with no recorded current. A length is the connection's `length_mm` plus
-  15 mm for stripping; a connection without one is listed as still to measure, never guessed.
+  15 mm for stripping; without one, the length the page drew for that wire (slack included),
+  when the gateway's headless look measured this same revision (`twin.imagine_look` records
+  each drawn wire's length and fit with its measurement); without either, it is listed as still
+  to measure, never guessed. Each row says where its length came from.
   The BOM has one hook-up wire line per gauge with its number of cuts and, when every length is
   known, the total in metres.
 - **Wiring sequence.** Numbered steps: ground first, then power, then signals, then a
@@ -760,8 +763,7 @@ When the studio has a connection list, the handover turns it into what Develop b
   passes the circuit to `kicad.generate_schematic` and reads the ERC result.
 
 All four are recorded as one design decision, `Imagine wiring: <product>`, pinned to the studio
-revision, with V2 provenance; the circuit is in it as a JSON block. Lengths measured from the
-drawn form are a later step.
+revision, with V2 provenance; the circuit is in it as a JSON block.
 
 #### Sizes from the library
 

@@ -248,6 +248,18 @@ def _clean_measured(value: Any) -> dict[str, Any]:
         raise ValueError(f"fit is not the shape the page makes: {exc}") from exc
     if fit is not None:
         out["fit"] = fit
+    wires = value.get("wires")
+    if wires is not None:
+        if not isinstance(wires, list) or not all(isinstance(w, dict) for w in wires):
+            raise ValueError("wires must be a list of objects")
+        out["wires"] = [
+            {
+                "id": str(w["id"])[:64],
+                "length_mm": _number(w["length_mm"]) if w.get("length_mm") is not None else None,
+                "fits": w.get("fits") if isinstance(w.get("fits"), bool) else None,
+            }
+            for w in wires[:200]
+        ]
     return out
 
 
@@ -1924,6 +1936,12 @@ class ImagineService:
         # The firmware pin map from the connection list goes first, so the 60-parameter cap
         # trims bus descriptions before named pins (FORGE-887).
         ctx = _context(config)
+        measured_doc = head.state.get("measured") or {}
+        drawn_lengths = (
+            wiring_outputs.measured_lengths(measured_doc.get("measured"))
+            if measured_doc.get("revision") == head.revision
+            else {}
+        )
         pin_params = [
             CoupledParameter(owner="electronics", basis=ValueBasis.ESTIMATED, **spec)
             for spec in wiring_outputs.pin_parameter_specs(ctx)
@@ -1964,7 +1982,9 @@ class ImagineService:
             created.append(await self.bridge.write_contract(project_id, contract, actor=actor))
 
         # The wiring: table, harness BOM lines and the numbered sequence (FORGE-887).
-        wiring = wiring_outputs.handover_record(ctx, str(product.get("name") or "the product"))
+        wiring = wiring_outputs.handover_record(
+            ctx, str(product.get("name") or "the product"), drawn_lengths
+        )
         if wiring is not None:
             w_ref, _ = await self.bridge.record_decision(
                 project_id, title=wiring[0], rationale=wiring[1], depends_on=[head.ref]
@@ -1972,7 +1992,7 @@ class ImagineService:
             created.append(w_ref)
             head.state["wiring"] = {
                 "decision": w_ref,
-                "harness": wiring_outputs.harness_lines(ctx),
+                "harness": wiring_outputs.harness_lines(ctx, drawn_lengths),
                 "pins": len(pin_params),
                 # the interconnect circuit an agent hands to kicad.generate_schematic
                 "circuit": wiring_outputs.interconnect_circuit(

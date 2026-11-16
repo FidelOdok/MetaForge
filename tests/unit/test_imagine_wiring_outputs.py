@@ -178,3 +178,68 @@ def test_the_interconnect_circuit_is_one_the_kicad_adapter_accepts() -> None:
 
 def test_no_connection_list_makes_no_circuit() -> None:
     assert wiring_outputs.interconnect_circuit(_ctx([]), "lamp") is None
+
+
+def test_a_length_measured_on_the_drawn_form_fills_a_gap_and_a_recorded_one_wins() -> None:
+    measured = {"wires": [{"id": "c1", "length_mm": 88}, {"id": "c2", "length_mm": 70.5}]}
+    drawn = wiring_outputs.measured_lengths(measured)
+    conns = [{k: v for k, v in c.items() if k != "length_mm"} for c in CONNS[:2]]
+    conns.append(CONNS[2])  # c2 keeps its recorded 45 mm
+    rows = {r["id"]: r for r in wiring_outputs.wiring_table(_ctx(conns), drawn)}
+    # the page's length already includes the slack
+    assert (
+        rows["c1"]["length_mm"] == 88 and rows["c1"]["length_from"] == "measured on the drawn form"
+    )
+    assert rows["c2"]["length_mm"] == 60 and rows["c2"]["length_from"] == "recorded"
+    # c3 has neither: still to measure
+    assert rows["c3"]["length_mm"] is None and rows["c3"]["length_from"] is None
+    assert wiring_outputs.measured_lengths(None) == {}
+    assert wiring_outputs.measured_lengths({"wires": [{"id": "x", "length_mm": -1}]}) == {}
+
+
+def test_the_look_and_the_store_keep_the_drawn_wires() -> None:
+    from api_gateway.imagine import look
+    from api_gateway.imagine.service import _clean_measured
+
+    fg = {"status": "ready", "wires": [{"id": "c1", "length_mm": 88, "fits": False, "net": "5V"}]}
+    assert look.summarize(fg)["wires"] == [{"id": "c1", "length_mm": 88, "fits": False}]
+    base = {"overlaps": [], "notes": []}
+    kept = _clean_measured({**base, "wires": [{"id": "c1", "length_mm": 88, "fits": "yes"}]})
+    assert kept["wires"] == [{"id": "c1", "length_mm": 88.0, "fits": None}]
+    assert "wires" not in _clean_measured(base)
+
+
+async def test_the_handover_uses_lengths_measured_on_this_revision_only() -> None:
+    from api_gateway.imagine.service import ImagineService
+    from api_gateway.operations import publisher as ops
+    from tests.unit.imagine_fixtures import full_config
+    from twin_core.api import InMemoryTwinAPI
+
+    ops.init_operations(None)
+    try:
+        svc = ImagineService(InMemoryTwinAPI.create())
+        cfg = full_config()
+        cfg["context"]["connections"] = {
+            "schemaVersion": 1,
+            "connections": [{"id": "c1", "net": "SDA", "from": "th-a.io", "to": "th-b.io"}],
+        }
+        pid = "7d1f1b5e-5d2a-4c4e-9a59-0d3f8f4a2c12"
+        await svc.put_studio(pid, cfg, actor="test")
+        await svc.record_measurement(
+            pid, 1, {"overlaps": [], "notes": [], "wires": [{"id": "c1", "length_mm": 72}]}
+        )
+        head = await svc._head(pid)
+        assert head is not None
+        svc.bridge.write_contract = _no_contract  # type: ignore[method-assign]
+        await svc._seed(pid, head, "test")
+        assert head.state["wiring"]["harness"][0]["qty_m"] == 0.072
+        # a measurement of another revision is not used
+        head.state["measured"]["revision"] = 0
+        await svc._seed(pid, head, "test")
+        assert head.state["wiring"]["harness"][0]["qty_m"] is None
+    finally:
+        ops.init_operations(None)
+
+
+async def _no_contract(project_id: str, contract: Any, actor: str) -> str:
+    return "contract:x"

@@ -101,8 +101,28 @@ def _length(c: dict[str, Any]) -> float | None:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
 
 
-def wiring_table(context: dict[str, Any]) -> list[dict[str, Any]]:
-    """One row per connection, in the order to wire them."""
+def measured_lengths(measured: Any) -> dict[str, float]:
+    """Each drawn wire's length from the page's measurement, by connection id.
+
+    The page's length already carries the 15 mm slack. A wire the page drew outside the
+    enclosure is still measured; its length is as drawn.
+    """
+    out: dict[str, float] = {}
+    for w in (measured or {}).get("wires") or [] if isinstance(measured, dict) else []:
+        v = w.get("length_mm") if isinstance(w, dict) else None
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 and w.get("id"):
+            out[str(w["id"])] = float(v)
+    return out
+
+
+def wiring_table(
+    context: dict[str, Any], drawn: dict[str, float] | None = None
+) -> list[dict[str, Any]]:
+    """One row per connection, in the order to wire them.
+
+    A length is the connection's recorded ``length_mm`` plus the slack; failing that, the
+    length the page measured on the drawn form (``drawn``, slack included); failing both, none.
+    """
     parts = _parts(context)
     order = {"ground": 0, "power": 1, "signal": 2}
     rows = []
@@ -111,16 +131,24 @@ def wiring_table(context: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         awg, why = wire_gauge(c, parts)
         run = _length(c)
+        cid = str(c.get("id") or f"c{i + 1}")
+        if run is not None:
+            length, source = run + SLACK_MM, "recorded"
+        elif drawn and cid in drawn:
+            length, source = drawn[cid], "measured on the drawn form"
+        else:
+            length, source = None, None
         rows.append(
             {
-                "id": str(c.get("id") or f"c{i + 1}"),
+                "id": cid,
                 "net": str(c.get("net") or ""),
                 "from": str(c["from"]),
                 "to": str(c["to"]),
                 "kind": _kind(c, parts),
                 "awg": awg,
                 "sized_from": why,
-                "length_mm": run + SLACK_MM if run is not None else None,
+                "length_mm": length,
+                "length_from": source,
                 "_i": i,
             }
         )
@@ -157,10 +185,12 @@ def pin_map(context: dict[str, Any]) -> list[dict[str, Any]]:
     return list(seen.values())
 
 
-def harness_lines(context: dict[str, Any]) -> list[dict[str, Any]]:
+def harness_lines(
+    context: dict[str, Any], drawn: dict[str, float] | None = None
+) -> list[dict[str, Any]]:
     """BOM lines for the hook-up wire, one per gauge, with the cut list."""
     by_gauge: dict[int, list[dict[str, Any]]] = {}
-    for r in wiring_table(context):
+    for r in wiring_table(context, drawn):
         by_gauge.setdefault(r["awg"], []).append(r)
     lines = []
     for awg in sorted(by_gauge, reverse=True):
@@ -185,9 +215,9 @@ def harness_lines(context: dict[str, Any]) -> list[dict[str, Any]]:
     return lines
 
 
-def wiring_sequence(context: dict[str, Any]) -> list[str]:
+def wiring_sequence(context: dict[str, Any], drawn: dict[str, float] | None = None) -> list[str]:
     """Numbered steps: ground, power, signals, then the checks before power-up."""
-    rows = wiring_table(context)
+    rows = wiring_table(context, drawn)
     if not rows:
         return []
     steps = []
@@ -201,9 +231,11 @@ def wiring_sequence(context: dict[str, Any]) -> list[str]:
     return [f"{i}. {s}" for i, s in enumerate(steps, 1)]
 
 
-def handover_record(context: dict[str, Any], product: str) -> tuple[str, str] | None:
+def handover_record(
+    context: dict[str, Any], product: str, drawn: dict[str, float] | None = None
+) -> tuple[str, str] | None:
     """The wiring decision's title and body; ``None`` when there is no connection list."""
-    rows = wiring_table(context)
+    rows = wiring_table(context, drawn)
     if not rows:
         return None
     with tracer.start_as_current_span("imagine.wiring_outputs") as span:
@@ -211,20 +243,20 @@ def handover_record(context: dict[str, Any], product: str) -> tuple[str, str] | 
             f"The wiring of {product} as recorded in the Imagine studio. Nets and pins come "
             "from the parts' pinouts; gauges follow the harness rule. Nothing here is above V2.",
             "",
-            "| # | Net | From | To | Wire | Length mm | Sized from |",
-            "|---|---|---|---|---|---|---|",
+            "| # | Net | From | To | Wire | Length mm | Sized from | Length from |",
+            "|---|---|---|---|---|---|---|---|",
         ]
         for i, r in enumerate(rows, 1):
             length = f"{r['length_mm']:g}" if r["length_mm"] is not None else "to measure"
             out.append(
                 f"| {i} | {r['net']} | {r['from']} | {r['to']} | {r['awg']} AWG | {length} "
-                f"| {r['sized_from']} |"
+                f"| {r['sized_from']} | {r['length_from'] or ''} |"
             )
         out += ["", "Harness BOM:", ""]
-        for line in harness_lines(context):
+        for line in harness_lines(context, drawn):
             qty = f"{line['qty_m']:g} m" if line["qty_m"] is not None else "length to measure"
             out.append(f"- {line['item']}: {line['cuts']} cuts, {qty}. {line['spec']}.")
-        out += ["", "Wiring sequence:", "", *wiring_sequence(context)]
+        out += ["", "Wiring sequence:", "", *wiring_sequence(context, drawn)]
         circuit = interconnect_circuit(context, product)
         if circuit is not None:
             out += [
