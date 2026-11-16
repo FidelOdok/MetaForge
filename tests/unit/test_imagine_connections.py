@@ -86,8 +86,28 @@ def test_an_end_that_is_not_a_part_or_interface_is_refused() -> None:
 
 
 def test_buses_that_do_not_match_are_named() -> None:
-    _, warnings = _check([{"id": "c1", "net": "X", "from": "board-a.v5", "to": "ring-a.din"}])
+    # a rail into an output is a mismatch; a rail into an input is a tie-off (below)
+    _, warnings = _check([{"id": "c1", "net": "X", "from": "board-a.v5", "to": "board-a.d6"}])
     assert any("pwr" in w and "gpio" in w for w in warnings)
+    _, warnings = _check([{"id": "c1", "net": "X", "from": "board-a.d6", "to": "lux-a.i2c.SDA"}])
+    assert any("like to like" in w for w in warnings)
+
+
+def test_an_input_tied_to_a_rail_or_ground_is_not_a_mismatch() -> None:
+    # a datasheet asks unused and enable inputs to be held at VCC or GND
+    _, warnings = _check(
+        [
+            {"id": "k1", "net": "GND", "from": "board-a.gnd", "to": "lvl-a.a1"},
+            {"id": "k2", "net": "5V", "from": "board-a.v5", "to": "ring-a.din"},
+        ]
+    )
+    assert warnings == []
+
+
+def test_a_tie_off_above_the_inputs_window_is_named() -> None:
+    parts = [*PARTS, {"id": "low", "interfaces": [_iface("en", "gpio", "in", v=[0, 3.6])]}]
+    _, warnings = _check([{"id": "k1", "net": "5V", "from": "board-a.v5", "to": "low.en"}], parts)
+    assert any("k1" in w and "low.en" in w and "window" in w for w in warnings)
 
 
 def test_two_outputs_driving_each_other_are_named() -> None:

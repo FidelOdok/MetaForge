@@ -1567,20 +1567,28 @@
       if (!c || typeof c !== 'object') return;
       var id = typeof c.id === 'string' ? c.id : 'c' + (i + 1), a = end(c.from), b = end(c.to);
       if (!a.p || !b.p) { skipped.push({ id: id, why: (!a.p ? String(c.from) + ' ' + a.why : String(c.to) + ' ' + b.why) }); return; }
-      var top = Math.max(a.box.max[1], b.box.max[1]) + WIRE_CLEAR_MM;
-      var pts = [a.p, [a.p[0], top, a.p[2]], [b.p[0], top, b.p[2]], b.p].filter(function (q, k, all) { return k === 0 || dist(q, all[k - 1]) > 1e-6; });
-      var run = 0;
-      for (var k = 1; k < pts.length; k++) run += dist(pts[k], pts[k - 1]);
       var pwr = a.iface.bus === 'pwr' || b.iface.bus === 'pwr';
       var imax = [a.iface.imax_mA, b.iface.imax_mA].filter(function (v) { return isNum(v) && v > 0; });
       var amps = imax.length ? Math.min.apply(null, imax) / 1000 : 0;
       var g = pwr && amps ? (WIRE_AWG.filter(function (w) { return w[1] >= amps * 1.25; })[0] || WIRE_AWG[3]) : pwr ? WIRE_AWG[1] : WIRE_AWG[0];
+      // The run goes over both parts when the enclosure has room for it. When that would take
+      // it through the lid (a part mounted under the lid, like a light ring under a diffuser),
+      // it runs under the lid instead, a bend allowance below it, and climbs to an end that
+      // sits higher (a touch pad on the lid). The ends sit on their pins and need no allowance.
+      var top = Math.max(a.box.max[1], b.box.max[1]) + WIRE_CLEAR_MM, under = false;
+      if (shell) {
+        var lid = shell.max[1] - WIRE_BEND * g[2];
+        if (top > lid) { top = lid; under = true; }
+      }
+      var pts = [a.p, [a.p[0], top, a.p[2]], [b.p[0], top, b.p[2]], b.p].filter(function (q, k, all) { return k === 0 || dist(q, all[k - 1]) > 1e-6; });
+      var run = 0;
+      for (var k = 1; k < pts.length; k++) run += dist(pts[k], pts[k - 1]);
       wires.push({
         id: id, net: String(c.net || id), from: String(c.from), to: String(c.to), points: pts,
         length_mm: Math.round(run + WIRE_SLACK_MM), awg: g[0], diameter_mm: g[2], rated_A: g[1],
         sized_from: pwr ? (amps ? 'peak current ' + amps + ' A' : 'power wire, no current on record') : 'signal',
         placed: a.placed && b.placed, color: netColour(c.net, pwr ? 'pwr' : a.iface.bus),
-        fits: fitsIn(pts, g[2]),
+        fits: fitsIn(pts, g[2]), route: under ? 'under the lid' : 'over the parts',
         parts: [a.formPart, b.formPart],
       });
     });
@@ -2325,7 +2333,7 @@
         errors: result ? result.errors : [],
         measured: result ? result.measured || null : null,
         joins: ((((env.cfg || {}).form || {}).authored || {}).joins) || [],
-        wires: lastWires.wires.map(function (w) { return { id: w.id, net: w.net, from: w.from, to: w.to, length_mm: w.length_mm, awg: w.awg, sized_from: w.sized_from, placed: w.placed, fits: w.fits }; }),
+        wires: lastWires.wires.map(function (w) { return { id: w.id, net: w.net, from: w.from, to: w.to, length_mm: w.length_mm, awg: w.awg, sized_from: w.sized_from, placed: w.placed, fits: w.fits, route: w.route }; }),
         wires_outside: (lastWires.outside || []).slice(),
         unwired: lastWires.skipped.slice(),
         wire_total_mm: lastWires.total_mm,
