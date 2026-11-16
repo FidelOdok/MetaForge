@@ -21,6 +21,7 @@ from scripts.build_integrations import (
     build_claude_code,
     build_claude_code_local,
     build_codex,
+    build_opencode,
     plugin_manifest,
     split_frontmatter,
 )
@@ -783,6 +784,7 @@ class TestPluginVersion:
         "claude-code-cloud/.claude-plugin/plugin.json",
         "codex/.codex-plugin/plugin.json",
         "codex/plugin.json",
+        "opencode/plugin.json",
     )
 
     def test_every_manifest_carries_the_locked_version(self) -> None:
@@ -812,6 +814,7 @@ class TestPluginVersion:
         build_claude_code_local()
         build_claude_code_cloud()
         build_codex(default_gateway_url=DEFAULT_GATEWAY_URL)
+        build_opencode()
         digest = content_digest()
         # The full digest, so a lock cut on another OS can be checked against it.
         assert digest == read_version_lock()["content_digest"], (
@@ -964,3 +967,239 @@ class TestCloudPackage:
         assert "**Add** it, then **Connect**" in readme
         assert "custom connector" in readme
         assert "FORGE-661" in readme
+
+
+# ---------------------------------------------------------------------------
+# opencode
+# ---------------------------------------------------------------------------
+
+
+class TestOpenCodePackage:
+    """The formats come from opencode 2.2.5 and its V2 docs; these pin them.
+
+    `mcp.servers.<name>` (V2 does not put server names straight under `mcp`),
+    `commands/**/*.md` named by their path, `agents/*.md` with V2 frontmatter,
+    `skills/**/SKILL.md` with the id taken from the folder, and rules through
+    `instructions`. The package was loaded by the binary itself; the README
+    says how.
+    """
+
+    @pytest.fixture(scope="class")
+    def root(self) -> Path:
+        return build_opencode()
+
+    def test_the_server_is_the_hosted_gateway_in_the_v2_shape(self, root: Path) -> None:
+        from scripts.build_integrations import HOSTED_GATEWAY_URL
+
+        config = json.loads((root / "opencode.json").read_text(encoding="utf-8"))
+        assert config["$schema"] == "https://opencode.ai/config.json"
+        assert config["mcp"] == {
+            "servers": {"metaforge": {"type": "remote", "url": HOSTED_GATEWAY_URL}}
+        }
+
+    def test_no_credential_and_oauth_left_on(self, root: Path) -> None:
+        """OAuth is the default for a remote server; a header or `oauth: false`
+        would replace the per-account sign-in with a key that bypasses it."""
+        for path in root.rglob("*.json"):
+            text = path.read_text(encoding="utf-8")
+            assert "Authorization" not in text, path
+            assert '"headers"' not in text, path
+            assert '"oauth"' not in text, path
+        assert "--header" not in (root / "install.sh").read_text(encoding="utf-8")
+
+    def test_the_rules_are_loaded_through_instructions(self, root: Path) -> None:
+        from scripts.build_integrations import OPENCODE_PROJECT_RULES, OPENCODE_RULES_FILE
+
+        config = json.loads((root / "opencode.json").read_text(encoding="utf-8"))
+        assert config["instructions"] == [OPENCODE_PROJECT_RULES]
+        assert OPENCODE_PROJECT_RULES == f".opencode/{OPENCODE_RULES_FILE}"
+        assert (root / OPENCODE_RULES_FILE).is_file()
+
+    def test_the_rules_are_the_session_start_rules(self, root: Path) -> None:
+        from scripts.build_integrations import load_session_rules
+
+        rules = (root / "metaforge-rules.md").read_text(encoding="utf-8")
+        for line in load_session_rules().splitlines()[1:]:
+            assert line.replace("/metaforge:approvals", "/metaforge/approvals") in rules
+        assert "/metaforge:" not in rules
+        # The PostToolUse reminder, carried as a rule.
+        assert "do not poll" in rules
+        # How opencode names the tools the skills mention.
+        assert "metaforge_flow_propose" in rules
+
+    def test_every_workflow_is_a_command_under_metaforge(self, root: Path) -> None:
+        names = {p.stem for p in (root / "commands" / "metaforge").glob("*.md")}
+        assert names == set(WORKFLOWS)
+        for name, (description, _body) in WORKFLOWS.items():
+            front, body = split_frontmatter(
+                (root / "commands" / "metaforge" / f"{name}.md").read_text(encoding="utf-8")
+            )
+            assert front == {"description": description}, name
+            assert body.strip()
+
+    def test_commands_carry_no_claude_code_wording(self, root: Path) -> None:
+        for path in (root / "commands").rglob("*.md"):
+            text = path.read_text(encoding="utf-8")
+            assert "/metaforge:" not in text, path
+            assert "/loop" not in text, path
+            assert "gateway_url" not in text, path
+            assert "metaforge-local` package" not in text, path
+            # `!` then a backtick runs a shell command when the command is
+            # used, outside opencode's permission flow.
+            assert "!`" not in text, path
+
+    def test_every_rewrite_still_matches_its_source(self) -> None:
+        """A rewrite whose source text has gone would silently ship the Claude
+        Code wording; the build refuses, and this names which."""
+        from scripts.build_integrations import OPENCODE_REWRITES
+
+        for name, rewrites in OPENCODE_REWRITES.items():
+            for old, _new in rewrites:
+                assert old in WORKFLOWS[name][1], f"/{name}: {old!r}"
+
+    def test_agents_are_subagents_with_v2_frontmatter_only(self, root: Path) -> None:
+        """`name` and `tools` are V1 fields, and `model: opus` is not a
+        provider/model id opencode can resolve."""
+        sources = sorted((REPO / "mcp_core" / "plugin_agents").glob("*.md"))
+        assert {p.name for p in (root / "agents").glob("*.md")} == {p.name for p in sources}
+        for source in sources:
+            src_front, src_body = split_frontmatter(source.read_text(encoding="utf-8"))
+            front, body = split_frontmatter(
+                (root / "agents" / source.name).read_text(encoding="utf-8")
+            )
+            assert front == {"description": src_front["description"], "mode": "subagent"}
+            assert body.strip() == src_body.strip()
+
+    def test_the_same_skills_ship_under_a_metaforge_group(self, root: Path) -> None:
+        main = build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
+        group = root / "skills" / "metaforge"
+        assert sorted(p.name for p in group.iterdir()) == sorted(
+            p.name for p in (main / "skills").iterdir()
+        )
+        for path in (main / "skills").rglob("*"):
+            if path.is_file():
+                shipped = group / path.relative_to(main / "skills")
+                assert shipped.read_bytes() == path.read_bytes(), shipped
+
+    def test_regenerating_changes_nothing(self, root: Path) -> None:
+        before = {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+        rebuilt = build_opencode()
+        after = {p: p.read_bytes() for p in sorted(rebuilt.rglob("*")) if p.is_file()}
+        assert before == after
+
+    def test_the_readme_says_how_to_install_sign_in_and_what_was_checked(self, root: Path) -> None:
+        from scripts.build_integrations import OPENCODE_VERIFIED_VERSION
+
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        assert "install.sh --project" in readme and "install.sh --global" in readme
+        assert "opencode mcp auth metaforge" in readme
+        assert "email and password" in readme
+        assert "Approvals page" in readme
+        assert OPENCODE_VERIFIED_VERSION in readme
+        for evidence in ("opencode mcp list", "opencode debug agents", "/api/skill"):
+            assert evidence in readme
+        assert "Not verified" in readme
+
+
+@pytest.mark.skipif(
+    __import__("shutil").which("sh") is None, reason="install.sh needs a POSIX shell"
+)
+class TestOpenCodeInstallScript:
+    """install.sh merges into an existing opencode.json without clobbering it."""
+
+    @pytest.fixture(scope="class")
+    def script(self) -> Path:
+        return build_opencode() / "install.sh"
+
+    def _run(self, script: Path, *args: str, env: dict[str, str] | None = None):  # type: ignore[no-untyped-def]
+        import os
+        import subprocess
+
+        return subprocess.run(
+            ["sh", str(script), *args],
+            capture_output=True,
+            text=True,
+            env={**os.environ, **(env or {})},
+            check=False,
+        )
+
+    def test_a_fresh_project_gets_everything(self, script: Path, tmp_path: Path) -> None:
+        from scripts.build_integrations import HOSTED_GATEWAY_URL
+
+        result = self._run(script, "--project", str(tmp_path))
+        assert result.returncode == 0, result.stderr
+        target = tmp_path / ".opencode"
+        config = json.loads((target / "opencode.json").read_text())
+        assert config["mcp"]["servers"]["metaforge"]["url"] == HOSTED_GATEWAY_URL
+        assert config["instructions"] == [".opencode/metaforge-rules.md"]
+        assert len(list((target / "commands" / "metaforge").glob("*.md"))) == len(WORKFLOWS)
+        assert len(list((target / "agents").glob("metaforge-*.md"))) == 3
+        skill = target / "skills" / "metaforge" / "intent-to-verified-design" / "SKILL.md"
+        assert skill.is_file()
+        assert (target / "metaforge-rules.md").is_file()
+        assert "opencode mcp auth metaforge" in result.stdout
+
+    def test_existing_settings_survive_and_a_rerun_changes_nothing(
+        self, script: Path, tmp_path: Path
+    ) -> None:
+        target = tmp_path / ".opencode"
+        target.mkdir()
+        mine = {
+            "model": "acme/reasoner",
+            "mcp": {"servers": {"other": {"type": "remote", "url": "https://x.example/mcp"}}},
+            "instructions": ["CONTRIBUTING.md"],
+        }
+        (target / "opencode.json").write_text(json.dumps(mine))
+        assert self._run(script, "--project", str(tmp_path)).returncode == 0
+        first = json.loads((target / "opencode.json").read_text())
+        assert first["model"] == "acme/reasoner"
+        assert set(first["mcp"]["servers"]) == {"other", "metaforge"}
+        assert first["instructions"] == ["CONTRIBUTING.md", ".opencode/metaforge-rules.md"]
+        assert json.loads((target / "opencode.json.bak").read_text()) == mine
+        assert self._run(script, "--project", str(tmp_path)).returncode == 0
+        assert json.loads((target / "opencode.json").read_text()) == first
+
+    def test_a_metaforge_server_already_there_is_kept(self, script: Path, tmp_path: Path) -> None:
+        target = tmp_path / ".opencode"
+        target.mkdir()
+        local = {"type": "remote", "url": "http://localhost:8765/mcp"}
+        config = target / "opencode.json"
+        config.write_text(json.dumps({"mcp": {"servers": {"metaforge": local}}}))
+        result = self._run(script, "--project", str(tmp_path))
+        assert result.returncode == 0
+        assert json.loads(config.read_text())["mcp"]["servers"]["metaforge"] == local
+        assert "kept your existing" in result.stdout
+
+    def test_a_v1_config_gets_a_v1_entry(self, script: Path, tmp_path: Path) -> None:
+        """V1 put servers straight under `mcp`; mixing in `mcp.servers` would
+        read as a server called `servers`."""
+        target = tmp_path / ".opencode"
+        target.mkdir()
+        old = {"type": "remote", "url": "https://x.example/mcp", "enabled": True}
+        (target / "opencode.json").write_text(json.dumps({"mcp": {"old": old}}))
+        assert self._run(script, "--project", str(tmp_path)).returncode == 0
+        mcp = json.loads((target / "opencode.json").read_text())["mcp"]
+        assert set(mcp) == {"old", "metaforge"}
+
+    def test_jsonc_with_comments_is_left_alone(self, script: Path, tmp_path: Path) -> None:
+        target = tmp_path / ".opencode"
+        target.mkdir()
+        text = '{\n  // mine\n  "model": "acme/reasoner",\n}\n'
+        (target / "opencode.jsonc").write_text(text)
+        result = self._run(script, "--project", str(tmp_path))
+        assert result.returncode == 1
+        assert (target / "opencode.jsonc").read_text() == text
+        assert not (target / "opencode.json").exists()
+        assert '"metaforge"' in result.stderr
+        # The files still went in; only the config edit is left to the person.
+        assert (target / "commands" / "metaforge" / "flow.md").is_file()
+
+    def test_global_uses_xdg_config_home_and_an_absolute_rules_path(
+        self, script: Path, tmp_path: Path
+    ) -> None:
+        result = self._run(script, "--global", env={"XDG_CONFIG_HOME": str(tmp_path)})
+        assert result.returncode == 0, result.stderr
+        target = tmp_path / "opencode"
+        config = json.loads((target / "opencode.json").read_text())
+        assert config["instructions"] == [str(target / "metaforge-rules.md")]
+        assert (target / "agents" / "metaforge-run-verifier.md").is_file()
