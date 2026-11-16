@@ -19,6 +19,7 @@ The KiCad interconnect schematic and lengths measured from the drawn form are la
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -224,6 +225,17 @@ def handover_record(context: dict[str, Any], product: str) -> tuple[str, str] | 
             qty = f"{line['qty_m']:g} m" if line["qty_m"] is not None else "length to measure"
             out.append(f"- {line['item']}: {line['cuts']} cuts, {qty}. {line['spec']}.")
         out += ["", "Wiring sequence:", "", *wiring_sequence(context)]
+        circuit = interconnect_circuit(context, product)
+        if circuit is not None:
+            out += [
+                "",
+                "Interconnect circuit for kicad.generate_schematic (each part a connector; "
+                "run ERC on the result):",
+                "",
+                "```json",
+                json.dumps(circuit, indent=1),
+                "```",
+            ]
         span.set_attribute("wiring.connections", len(rows))
         logger.info("imagine_wiring_handover", connections=len(rows))
         return f"Imagine wiring: {product}", "\n".join(out)
@@ -247,3 +259,71 @@ def pin_parameter_specs(context: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return specs
+
+
+#: Generic connectors in KiCad's own library go up to 40 pins in one row.
+MAX_CONN_PINS = 40
+
+
+def interconnect_circuit(context: dict[str, Any], product: str) -> dict[str, Any] | None:
+    """The wiring as a KiCad interconnect circuit for ``kicad.generate_schematic``.
+
+    Each part is drawn as a generic one-row connector (``Connector_Generic:Conn_01xNN``) with
+    one pin per wired end, in the order the ends first appear; the ``Pins`` field maps each pin
+    number back to ``part.interface[.pin]``. Connections that share a net name become one net,
+    so power and ground fan out. All pins are passive: KiCad's ERC then checks that every net
+    joins at least two pins and that no pin is on two nets. ``None`` when there is no
+    connection list, or a part has more wired ends than one connector row holds.
+    """
+    rows = wiring_table(context)
+    if not rows:
+        return None
+    parts = _parts(context)
+    pin_no: dict[str, dict[str, int]] = {}
+    nets: dict[str, list[str]] = {}
+    order: list[str] = []
+    for r in rows:
+        for ref in (r["from"], r["to"]):
+            pid = ref.split(".")[0]
+            if pid not in pin_no:
+                pin_no[pid] = {}
+                order.append(pid)
+            ends = pin_no[pid]
+            ends.setdefault(".".join(ref.split(".")[1:]), len(ends) + 1)
+    refs = {pid: f"J{i}" for i, pid in enumerate(order, 1)}
+    on_net: dict[str, str] = {}
+    for r in rows:
+        name = _slug(r["net"], 40).upper() or r["id"].upper()
+        for ref in (r["from"], r["to"]):
+            pid, rest = ref.split(".")[0], ".".join(ref.split(".")[1:])
+            node = f"{refs[pid]}.{pin_no[pid][rest]}"
+            if on_net.setdefault(node, name) != name:
+                continue  # one pin on two nets is refused by the checks; never drawn twice
+            if node not in nets.setdefault(name, []):
+                nets[name].append(node)
+    components = []
+    for pid in order:
+        n = len(pin_no[pid])
+        if n > MAX_CONN_PINS:
+            logger.info("imagine_interconnect_too_many_pins", part=pid, pins=n)
+            return None
+        part = parts.get(pid) or {}
+        fields = {
+            "Pins": "; ".join(f"{v} {k}" for v, k in sorted((v, k) for k, v in pin_no[pid].items()))
+        }
+        if part.get("mpn"):
+            fields["MPN"] = str(part["mpn"])
+        components.append(
+            {
+                "ref": refs[pid],
+                "symbol": f"Connector_Generic:Conn_01x{n:02d}",
+                "footprint": f"Connector_PinHeader_2.54mm:PinHeader_1x{n:02d}_P2.54mm_Vertical",
+                "value": str(part.get("name") or pid)[:60],
+                "fields": fields,
+            }
+        )
+    return {
+        "name": (_slug(product, 40) or "product") + "_interconnect",
+        "components": components,
+        "nets": [{"name": k, "nodes": v} for k, v in nets.items() if len(v) >= 1],
+    }

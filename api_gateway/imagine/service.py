@@ -1974,6 +1974,10 @@ class ImagineService:
                 "decision": w_ref,
                 "harness": wiring_outputs.harness_lines(ctx),
                 "pins": len(pin_params),
+                # the interconnect circuit an agent hands to kicad.generate_schematic
+                "circuit": wiring_outputs.interconnect_circuit(
+                    ctx, str(product.get("name") or "product")
+                ),
             }
 
         for ev in head.state["events"].values():

@@ -732,9 +732,17 @@ When the studio has a connection list, the handover turns it into what Develop b
   continuity check of each net and a check for shorts between power and ground before the
   first power-up.
 
-All three are recorded as one design decision, `Imagine wiring: <product>`, pinned to the studio
-revision, with V2 provenance. The KiCad interconnect schematic and lengths measured from the
-drawn form are later steps.
+- **Interconnect circuit.** The wiring as a circuit for `kicad.generate_schematic`: each part
+  a generic one-row connector (`Connector_Generic:Conn_01xNN`, up to 40 pins) with one pin per
+  wired end in wiring order, a `Pins` field mapping each pin number back to
+  `part.interface[.pin]`, the part's `MPN`, and one net per net name, so power and ground fan
+  out. Every pin is passive, so KiCad's ERC checks that each net joins two pins and that no pin
+  is on two nets. The gateway does not run KiCad itself (agents reach tools over MCP): an agent
+  passes the circuit to `kicad.generate_schematic` and reads the ERC result.
+
+All four are recorded as one design decision, `Imagine wiring: <product>`, pinned to the studio
+revision, with V2 provenance; the circuit is in it as a JSON block. Lengths measured from the
+drawn form are a later step.
 
 #### Sizes from the library
 

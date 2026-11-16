@@ -150,3 +150,31 @@ async def test_the_handover_writes_the_wiring_and_the_pin_map() -> None:
 async def _keep(store: list[Any], contract: Any) -> str:
     store.append(contract)
     return f"contract:{len(store)}"
+
+
+def test_the_interconnect_circuit_is_one_the_kicad_adapter_accepts() -> None:
+    from tool_registry.tools.kicad.circuit import Circuit
+
+    conns = [
+        *CONNS,
+        {"id": "c4", "net": "SDA", "from": "board-a.i2c.SDA", "to": "lux-a.i2c.SDA"},
+        # ground fans out to a third part on the same net
+        {"id": "c5", "net": "GND", "from": "board-a.gnd", "to": "lux-a.i2c.SCL"},
+    ]
+    raw = wiring_outputs.interconnect_circuit(_ctx(conns), "Night Light")
+    assert raw is not None
+    circuit = Circuit.model_validate(raw)
+    assert circuit.name == "night_light_interconnect"
+    by_ref = {c.ref: c for c in circuit.components}
+    # board-a's four wired ends: d6, v5, gnd, i2c.SDA, in first-seen order of the wiring table
+    board = by_ref["J1"]
+    assert board.symbol == "Connector_Generic:Conn_01x04" and board.value == "XIAO ESP32S3"
+    assert board.fields["Pins"] == "1 gnd; 2 v5; 3 d6; 4 i2c.SDA"
+    nets = {n.name: n.nodes for n in circuit.nets}
+    # one ground net joins all three ends, the board's ground pin once
+    assert nets["GND"] == ["J1.1", "J2.1", "J3.1"]
+    assert nets["SDA"] == ["J1.4", "J3.2"]  # the table wires ground first: lux SCL is pin 1
+
+
+def test_no_connection_list_makes_no_circuit() -> None:
+    assert wiring_outputs.interconnect_circuit(_ctx([]), "lamp") is None
