@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the per-harness plugin packages from one source (FORGE-382/383).
 
-Claude Code and Codex want the same things described in different files. The
+Claude Code, Codex and opencode want the same things described in different files. The
 source of truth is this script plus the repo it reads; the packages under
 ``integrations/`` are build output, regenerated rather than hand-edited.
 
@@ -294,7 +294,7 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
     }
 
 
-def write_skills(root: Path) -> list[str]:
+def write_skills(root: Path, *, skills_root: Path | None = None) -> list[str]:
     """Copy the domain skills in, with the frontmatter a harness needs.
 
     The frontmatter is *generated from* ``definition.json`` rather than added
@@ -316,8 +316,11 @@ def write_skills(root: Path) -> list[str]:
     drop procedures without saying which. ``PLUGIN.md`` may open with a
     frontmatter block whose ``description`` replaces the definition's, so the
     plugin copy can say *when* to use the skill as well as what it does.
+
+    ``skills_root`` overrides ``<root>/skills`` for a harness that groups them
+    (opencode reads ``skills/metaforge/<id>/SKILL.md`` under the same ids).
     """
-    skills_root = root / "skills"
+    skills_root = skills_root or root / "skills"
     written: list[str] = []
     for definition_path in sorted(REPO.glob("domain_agents/*/skills/*/definition.json")):
         try:
@@ -1040,6 +1043,306 @@ def build_codex(*, default_gateway_url: str) -> Path:
     return root
 
 
+# ---------------------------------------------------------------------------
+# opencode
+# ---------------------------------------------------------------------------
+#
+# Formats taken from opencode v2.2.5 itself and the V2 docs it points at
+# (https://opencode.ai/v2/docs/), not from the V1 docs:
+#
+#   MCP server      opencode.json  mcp.servers.<name> = {type: "remote", url}
+#                   (OAuth is on by default for a remote server; sign in with
+#                   `opencode mcp auth <name>`)
+#   tool names      <server>_<tool>, anything outside [A-Za-z0-9_-] -> "_",
+#                   so `flow.propose` is `metaforge_flow_propose`
+#   commands        {command,commands}/**/*.md; the path below the folder is
+#                   the name, so commands/metaforge/flow.md is /metaforge/flow.
+#                   Frontmatter: description, agent, model, subagent. The body
+#                   is the template; !`cmd` in it runs a shell command
+#   agents          {agent,agents}/**/*.md; frontmatter description, mode
+#                   (primary | subagent | all), model, permissions. `name`
+#                   and `tools` are V1 fields
+#   skills          skills/**/SKILL.md, id from the folder name, natively
+#   rules           AGENTS.md, or files listed in `instructions`
+#
+# The Claude Code PostToolUse reminder becomes one more line of the rules. A
+# V2 plugin could append it from `ctx.tool.hook("execute.after")`, but MCP
+# tools run inside Code Mode by default, and whether that hook sees the inner
+# `flow.propose` call cannot be checked without a signed-in session. A plugin
+# whose one job cannot be shown to work is not shipped.
+
+OPENCODE_DIR = REPO / "mcp_core" / "plugin_opencode"
+OPENCODE_RULES_FILE = "metaforge-rules.md"
+#: Where the rules live in a project install, relative to the project root.
+OPENCODE_PROJECT_RULES = f".opencode/{OPENCODE_RULES_FILE}"
+#: The opencode version this package was loaded and checked against.
+OPENCODE_VERIFIED_VERSION = "2.2.5"
+
+#: Claude Code wording in the shared workflow text, and what it becomes in
+#: opencode. Each source string must still exist: the build fails when one
+#: has gone, so a reworded workflow is looked at rather than shipped half
+#: translated.
+OPENCODE_REWRITES: dict[str, list[tuple[str, str]]] = {
+    "connect": [
+        (
+            "put the URL in the plugin's `gateway_url` setting",
+            "put the URL in the `url` of the `metaforge` server under `mcp.servers` in "
+            "their opencode.json (`opencode mcp add metaforge --url <url>` writes it)",
+        ),
+        (
+            "or install the `metaforge-local` package, which runs MetaForge as a local "
+            "process and needs no gateway at all",
+            "or run MetaForge as a local process with no gateway at all: a `local` "
+            'server whose `command` is `["metaforge-mcp", "--transport", "stdio", '
+            '"--profile", "all"]`',
+        ),
+    ],
+    "drive": [
+        ("`/metaforge:flow`", "`/metaforge/flow`"),
+        ("`/metaforge:approvals`", "`/metaforge/approvals`"),
+        (
+            "To keep reporting, the person can run `/loop 10m /metaforge:drive <run id>`.",
+            "To report again later, the person can run `/metaforge/drive <run id>` again.",
+        ),
+    ],
+    "doctor": [
+        (
+            "a plugin plus a user-scope server entry",
+            "this package's `metaforge` server plus a second entry under another "
+            "name in some other opencode.json",
+        ),
+    ],
+}
+
+
+def _yaml_scalar(text: str) -> str:
+    """One line, double-quoted when a plain YAML scalar would misread it."""
+    collapsed = " ".join(text.split())
+    if ": " in collapsed or " #" in collapsed or collapsed[:1] in "[{&*!|>'\"%@`":
+        return json.dumps(collapsed)
+    return collapsed
+
+
+def opencode_command_body(name: str, body: str) -> str:
+    for old, new in OPENCODE_REWRITES.get(name, []):
+        if old not in body:
+            raise SystemExit(f"opencode rewrite for /{name} no longer matches: {old!r}")
+        body = body.replace(old, new)
+    # `!` followed by a backtick is a shell command opencode runs before the
+    # prompt is sent, outside the permission flow. Nothing here should be one.
+    if "!`" in body:
+        raise SystemExit(f"/{name} would run a shell command in opencode")
+    return body
+
+
+def load_session_rules() -> str:
+    """The SessionStart hook's rules, read from the hook script itself."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "metaforge_hook", PLUGIN_HOOKS / "metaforge_hook.py"
+    )
+    if spec is None or spec.loader is None:
+        raise SystemExit("cannot load mcp_core/plugin_hooks/metaforge_hook.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return str(module.SESSION_RULES)
+
+
+def opencode_rules() -> str:
+    rules = load_session_rules().replace("/metaforge:approvals", "/metaforge/approvals")
+    bullets, _, skills_line = rules.rpartition("\n")
+    return (
+        "# MetaForge working rules\n\n"
+        "Installed by the MetaForge package for opencode and loaded through "
+        "`instructions` in opencode.json. Generated by "
+        "`scripts/build_integrations.py`; do not edit by hand.\n\n"
+        f"{bullets}\n"
+        # The PostToolUse reminder (see the note above OPENCODE_DIR).
+        "- When `flow.propose` or `flow.patch` comes back with status `proposed`, "
+        "the approval it names is held for a person. Nothing runs or changes until "
+        "they answer it. Report the approval id and stop; do not poll, and do not "
+        "look for a way to approve it.\n"
+        f"{skills_line}\n\n"
+        "## Tool names in opencode\n\n"
+        "Skills, commands and agents name MetaForge tools by their id, such as "
+        "`flow.propose` or `twin.get_node`. opencode names the `metaforge` server's "
+        "tools `metaforge_<id>` with the dot turned into an underscore: "
+        "`metaforge_flow_propose`, `metaforge_twin_get_node`. Under Code Mode they "
+        "are `tools.metaforge.flow_propose(...)`. Read a resource such as "
+        "`metaforge://twin/brief/<project_id>` with `read_mcp_resource` on the "
+        "`metaforge` server.\n\n"
+        "## Writes wait for a human\n\n"
+        "The gateway sees opencode as a remote caller, so a tool that writes is "
+        "held for approval and appears on the dashboard's Approvals page. Tell the "
+        "person it is waiting there rather than retrying. A refusal names what "
+        "happened (`rejected`, `timed_out` or `not_configured`); none is worth "
+        "retrying until a person has done something.\n"
+    )
+
+
+def build_opencode() -> Path:
+    """The package for opencode: config, commands, agents, skills and rules.
+
+    It points at the hosted gateway, like ``claude-code-cloud``, and signs in
+    with OAuth. There is no header and no key: an API key bypasses the
+    per-account scope the sign-in gives.
+    """
+    root = OUT / "opencode"
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True)
+
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "mcp": {"servers": {"metaforge": {"type": "remote", "url": HOSTED_GATEWAY_URL}}},
+        "instructions": [OPENCODE_PROJECT_RULES],
+    }
+    (root / "opencode.json").write_text(json.dumps(config, indent=2) + "\n")
+
+    # opencode reads no manifest from this package. This one carries the
+    # version (content_digest strips it from any plugin.json) and says what
+    # the folder is.
+    manifest = {
+        "name": PLUGIN_NAME,
+        "version": VERSION,
+        "description": (
+            "MetaForge for opencode: the hosted gateway as an MCP server, with the "
+            "commands, agents, skills and working rules of the Claude Code package."
+        ),
+        "homepage": "https://fidelodok.github.io/MetaForge/",
+        "repository": "https://github.com/FidelOdok/MetaForge",
+        "license": "Apache-2.0",
+        "opencode": OPENCODE_VERIFIED_VERSION,
+        "mcp": {"metaforge": HOSTED_GATEWAY_URL},
+    }
+    (root / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+    commands_dir = root / "commands" / PLUGIN_NAME
+    commands_dir.mkdir(parents=True)
+    commands: list[str] = []
+    for name, (description, body) in WORKFLOWS.items():
+        (commands_dir / f"{name}.md").write_text(
+            f"---\ndescription: {_yaml_scalar(description)}\n---\n\n"
+            f"{opencode_command_body(name, body)}\n"
+        )
+        commands.append(f"/{PLUGIN_NAME}/{name}")
+
+    agents_dir = root / "agents"
+    agents_dir.mkdir()
+    agents: list[str] = []
+    for source in sorted(PLUGIN_AGENTS.glob("*.md")):
+        front, body = split_frontmatter(source.read_text(encoding="utf-8"))
+        # Only V2 fields. `name` is V1 (the file name is the id), and
+        # Claude Code's `model: opus` is not a provider/model opencode knows.
+        (agents_dir / source.name).write_text(
+            f"---\ndescription: {_yaml_scalar(front['description'])}\nmode: subagent\n---\n\n"
+            f"{body.strip()}\n"
+        )
+        agents.append(source.stem)
+
+    skills = write_skills(root, skills_root=root / "skills" / PLUGIN_NAME)
+
+    (root / OPENCODE_RULES_FILE).write_text(opencode_rules())
+    shutil.copyfile(OPENCODE_DIR / "install.sh", root / "install.sh")
+    (root / "install.sh").chmod(0o755)
+
+    print(f"  {len(skills)} skill(s), {len(commands)} command(s), {len(agents)} agent(s)")
+
+    (root / "README.md").write_text(
+        "# MetaForge for opencode\n\n"
+        "**Generated by `scripts/build_integrations.py`. Do not edit by hand.**\n\n"
+        "The hosted MetaForge gateway as an MCP server in opencode, with the same "
+        "commands, agents and skills as the Claude Code package and its working "
+        f"rules. The server is `metaforge`, at `{HOSTED_GATEWAY_URL}`.\n\n"
+        "## Install\n\n"
+        "```\n"
+        "git clone --depth 1 https://github.com/FidelOdok/MetaForge.git\n"
+        "sh MetaForge/integrations/opencode/install.sh --project /path/to/your/project\n"
+        "# or, for every project:\n"
+        "sh MetaForge/integrations/opencode/install.sh --global\n"
+        "```\n\n"
+        "`--project` installs into the project's `.opencode/` folder, `--global` "
+        "into `~/.config/opencode/` (or `$XDG_CONFIG_HOME/opencode`). The script "
+        "copies the commands, agents, skills and rules, then adds two entries to "
+        "the `opencode.json` in that folder, creating it if there is none:\n\n"
+        "```json\n"
+        + json.dumps(
+            {
+                "mcp": {"servers": {"metaforge": config["mcp"]["servers"]["metaforge"]}},
+                "instructions": [OPENCODE_PROJECT_RULES],
+            },
+            indent=2,
+        )
+        + "\n```\n\n"
+        "Everything else in the file is kept, and the old file is saved as "
+        "`opencode.json.bak`. A `metaforge` server you already have is left as it "
+        "is. A file with comments (`opencode.jsonc`) is not rewritten; the script "
+        "prints the entries for you to add. A global install writes the rules "
+        "file's absolute path instead of the relative one. It needs `python3`.\n\n"
+        "By hand: copy `commands/`, `agents/`, `skills/` and "
+        f"`{OPENCODE_RULES_FILE}` into `.opencode/`, and add the entries above. "
+        "In a project with no `.opencode/opencode.json` yet, copying "
+        "`opencode.json` there as well does the same.\n\n"
+        "## Sign in\n\n"
+        "```\nopencode mcp auth metaforge\n```\n\n"
+        "Sign in with your MetaForge email and password, the ones you use on the "
+        "dashboard. There is no token or API key to enter: the gateway answers 401 "
+        "and opencode runs OAuth, then keeps the credentials outside your config. "
+        "You reach only your own account's projects. Inside opencode, `/mcps` does "
+        "the same. `opencode mcp logout metaforge` signs out.\n\n"
+        "Do not add an `Authorization` header or set `oauth: false`. An API key "
+        "skips the per-account scope the sign-in gives you.\n\n"
+        "## Writes wait for a human\n\n"
+        "A tool that writes is held for approval, because the hosted gateway sees "
+        "opencode as a remote caller. Held calls appear on the dashboard's "
+        "Approvals page, and `/metaforge/approvals` lists them.\n\n"
+        "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
+        "When signed in, the gateway's own MCP prompts also appear, as "
+        "`/metaforge:<name>`. They are the same workflows with wording for any "
+        "client; the `/metaforge/<name>` commands are written for opencode and "
+        "work before you sign in.\n\n"
+        "## Agents\n\n"
+        "Subagents (`mode: subagent`), launched by the main agent or by asking for "
+        "one by name:\n\n" + "\n".join(f"- `{a}`" for a in agents) + "\n\n"
+        "## Skills\n\n"
+        f"{len(skills)} skills, in `skills/{PLUGIN_NAME}/<id>/SKILL.md`. opencode "
+        "reads `SKILL.md` skills natively, takes the id from the folder name, and "
+        "lists each to the model by its description; the agent loads one with the "
+        "`skill` tool, or you can with `@<id>`.\n\n"
+        "## Rules\n\n"
+        f"`{OPENCODE_RULES_FILE}` holds the working rules the Claude Code package "
+        "adds at session start, loaded through `instructions`. It also says how "
+        "opencode names the tools: `flow.propose` is `metaforge_flow_propose`.\n\n"
+        "Not carried over as a hook: Claude Code's reminder after a held "
+        "`flow.propose` or `flow.patch`. It is a line in the rules instead. An "
+        "opencode plugin could add it after the tool returns, but MCP tools run "
+        "inside Code Mode by default, and whether the plugin hook sees that call "
+        "could not be checked without signing in, so no plugin ships.\n\n"
+        "## What is verified\n\n"
+        f"Loaded with opencode **{OPENCODE_VERIFIED_VERSION}** in a scratch home "
+        "directory, once installed with `--project` and once with `--global`:\n\n"
+        "- `opencode mcp list` prints `metaforge  needs authentication`: the server "
+        "is configured, reached the hosted address and got its 401. On a freshly "
+        "started opencode the first call can print `No MCP servers configured` "
+        "before the connection starts; run it again.\n"
+        "- `opencode debug agents` lists the three agents with `mode: subagent`.\n"
+        f"- The server's `GET /api/command` lists all {len(commands)} "
+        f"`/metaforge/<name>` commands and `GET /api/skill` all {len(skills)} "
+        "skills (through `opencode api get`).\n"
+        f"- The log shows `{OPENCODE_RULES_FILE}` loaded from `instructions`, and "
+        "no warning about any file in this package.\n\n"
+        "Not verified here: signing in and calling a tool, which needs a MetaForge "
+        "account. The hosted gateway publishes OAuth metadata with dynamic client "
+        "registration, which is the path opencode uses for a server that does not "
+        "offer a client metadata document.\n\n"
+        "The formats come from that binary and the V2 documentation it links "
+        "(https://opencode.ai/v2/docs/). If a later opencode stops loading them, "
+        "re-check against your version first.\n"
+    )
+    return root
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1063,6 +1366,9 @@ def main() -> int:
         # FORGE-658: takes no gateway URL either -- the hosted address is a constant.
         cloud = build_claude_code_cloud()
         print(f"wrote {cloud.relative_to(REPO)}")
+        # The hosted address is a constant here too.
+        opencode = build_opencode()
+        print(f"wrote {opencode.relative_to(REPO)}")
         catalog = build_marketplace()
         print(f"wrote {catalog.relative_to(REPO)}")
 

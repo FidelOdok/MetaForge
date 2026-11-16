@@ -547,7 +547,7 @@ and cannot reach `localhost`; read the
 **Technical documentation**
 
 - [Architecture](docs/architecture.md) and [the agent harness](docs/architecture/robust-harness-design.md)
-- [Supported integrations](docs/integrations/claude-code.md): [Claude Code](docs/integrations/claude-code.md), [Codex](docs/integrations/codex.md), [MCP config examples](docs/integrations/mcp-config-examples.md)
+- [Supported integrations](docs/integrations/claude-code.md): [Claude Code](docs/integrations/claude-code.md), [Codex](docs/integrations/codex.md), [opencode](docs/integrations/opencode.md), [MCP config examples](docs/integrations/mcp-config-examples.md)
 - API and MCP: [gateway API reference](docs/reference/gateway-api.md), [MCP specification](docs/mcp_spec.md), [capability matrix](docs/capability-matrix.md)
 - [Authentication and permissions](docs/deployment/authentication.md) and [approvals](docs/approvals.md)
 - [Deployment](docs/deployment/image-only-host.md), [verifying images](docs/deployment/verifying-images.md)

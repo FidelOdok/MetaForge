@@ -70,6 +70,7 @@ const sidebars = {
       items: [
         'integrations/hosted-harness', 'integrations/claude-code',
         'integrations/codex',
+        'integrations/opencode',
         'integrations/mcp-config-examples',
         'integrations/lightrag-ui',
         'harness-codex-subscription',

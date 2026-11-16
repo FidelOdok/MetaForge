@@ -46,7 +46,7 @@ One-shot (cron-friendly) by default; `--follow` polls.
 | **Claude Code** | hooks (`tools/session_capture/claude_code_adapter.py`) | ✅ | ✅ transcript | shipped |
 | **Codex CLI** | `tail` parser over `~/.codex/sessions/*.jsonl` | via tailer | ✅ | parser shipped (best-effort schema); `notify` adapter TODO |
 | **Cursor** | native `hooks.json` | ✅ | ⚠️ | **deferred** — use `tail` if Cursor writes a local transcript; native hook adapter pending schema verification |
-| **OpenCode** | TS plugin on its event bus | ✅ | ✅ | **deferred** — plugin pending; `tail` works if it persists a transcript |
+| **OpenCode** | Layer A through the [opencode package](integrations/opencode.md); a TS plugin for thoughts | via Layer A | ⚠️ | actions captured server-side once connected; a reasoning-capture plugin is still **deferred**, and `tail` works if it persists a transcript |
 | **Gemini CLI** | (no stable hook system at time of writing) | — | ⚠️ | **deferred** — `tail` + a parser once its chat-log format is confirmed |
 | **claude.ai web** | none (cloud, no local exec) | via Layer A | ✗ | **not adaptable** client-side — Layer A only; sessions labelled by OAuth subject |
 

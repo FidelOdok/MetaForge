@@ -435,6 +435,7 @@ this:
 |---|---|
 | Claude Code marketplace | shipped |
 | Codex `/plugins` | shipped, **not verified end to end** — see below |
+| opencode | shipped as `integrations/opencode/`; loaded by opencode 2.2.5, sign-in not verified here (see [opencode](integrations/opencode.md)) |
 | ChatGPT app directory | needs a public HTTPS endpoint and OAuth, which is the tunnel/broker work |
 | Hermes Skills Hub | MCP + skills; not yet packaged |
 

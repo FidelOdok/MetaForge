@@ -137,7 +137,7 @@ for the full walkthrough.
 | Tour the UI | [`dashboard-tour.md`](dashboard-tour.md) |
 | Lay out your own project on disk | [`project-structure.md`](project-structure.md) |
 | Know what's possible in Phase 1 | [`capability-matrix.md`](capability-matrix.md) |
-| Drive from Claude Code / Codex | [`integrations/claude-code.md`](integrations/claude-code.md), [`integrations/codex.md`](integrations/codex.md) |
+| Drive from Claude Code / Codex / opencode | [`integrations/claude-code.md`](integrations/claude-code.md), [`integrations/codex.md`](integrations/codex.md), [`integrations/opencode.md`](integrations/opencode.md) |
 | See how the Knowledge UI is hosted | [`integrations/lightrag-ui.md`](integrations/lightrag-ui.md) |
 | Hit a wall | [`troubleshooting.md`](troubleshooting.md) |
 | Understand the long-term plan | [`roadmap.md`](roadmap.md) |

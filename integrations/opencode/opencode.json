@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "metaforge": {
+        "type": "remote",
+        "url": "https://mcp.staging.metaforge.uk/mcp"
+      }
+    }
+  },
+  "instructions": [
+    ".opencode/metaforge-rules.md"
+  ]
+}
