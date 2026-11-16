@@ -10034,7 +10034,9 @@ class TwinServer(McpToolServer):
             # failure here must never cost the agent its look.
             try:
                 await self._imagine_studio.record_measurement(
-                    pid, base["revision"], before["measured"]
+                    pid,
+                    base["revision"],
+                    {**before["measured"], "wires": before.get("wires") or []},
                 )
             except Exception as exc:
                 logger.warning("imagine_measurement_not_recorded", project_id=pid, error=str(exc))

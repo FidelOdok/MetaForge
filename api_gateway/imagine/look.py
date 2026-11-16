@@ -139,6 +139,7 @@ def summarize(fg: dict[str, Any] | None) -> dict[str, Any]:
             "errors": [],
             "params": {},
             "measured": None,
+            "wires": [],
         }
     return {
         "status": fg.get("status", "none"),
@@ -147,6 +148,12 @@ def summarize(fg: dict[str, Any] | None) -> dict[str, Any]:
         "params": dict(fg.get("params") or {}),
         "errors": list(fg.get("errors") or []),
         "measured": _measured(fg.get("measured")),
+        # each drawn wire's routed length and whether it fits the enclosure (FORGE-887)
+        "wires": [
+            {"id": w.get("id"), "length_mm": w.get("length_mm"), "fits": w.get("fits")}
+            for w in fg.get("wires") or []
+            if isinstance(w, dict) and w.get("id")
+        ],
         "parts": [
             {
                 "id": p["id"],
