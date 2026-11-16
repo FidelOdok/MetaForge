@@ -785,6 +785,7 @@ class TestPluginVersion:
         "codex/.codex-plugin/plugin.json",
         "codex/plugin.json",
         "opencode/plugin.json",
+        "opencode/package.json",
     )
 
     def test_every_manifest_carries_the_locked_version(self) -> None:
@@ -1203,3 +1204,141 @@ class TestOpenCodeInstallScript:
         config = json.loads((target / "opencode.json").read_text())
         assert config["instructions"] == [str(target / "metaforge-rules.md")]
         assert (target / "agents" / "metaforge-run-verifier.md").is_file()
+
+
+_FAKE_OPENCODE = r"""
+const [modulePath, preset] = process.argv.slice(2)
+const plugin = (await import(modulePath)).default
+const mcp = new Map(preset ? [["metaforge", JSON.parse(preset)]] : [])
+const commands = [], skills = [], agents = new Map(), prompts = []
+const ctx = {
+  mcp: { transform: async (f) => f({ get: (k) => mcp.get(k), set: (k, v) => mcp.set(k, v) }) },
+  command: { transform: async (f) => f({ add: (c) => commands.push(c) }) },
+  skill: { transform: async (f) => f({ get: () => undefined, add: (s) => skills.push(s) }) },
+  agent: {
+    transform: async (f) =>
+      f({
+        get: (k) => agents.get(k),
+        update: (k, u) => { const a = agents.get(k) ?? {}; u(a); agents.set(k, a) },
+      }),
+  },
+  session: {
+    prompt: async (p) => prompts.push(p),
+    instructions: { entry: { put: async () => {} } },
+  },
+  event: { subscribe: () => ({ [Symbol.asyncIterator]: async function* () {} }) },
+}
+const stop = await plugin.setup(ctx)
+await commands.find((c) => c.name === "metaforge/drive")
+  .execute({ sessionID: "s", prompt: { text: "run_42" }, delivery: "steer" })
+console.log(JSON.stringify({
+  id: plugin.id,
+  mcp: Object.fromEntries(mcp),
+  commands: commands.map((c) => c.name),
+  skills: skills.map((s) => ({ id: s.id, path: s.path, content: s.content.slice(0, 3) })),
+  agents: Object.fromEntries(agents),
+  prompt: prompts[0],
+  cleanup: typeof stop,
+}))
+"""
+
+
+class TestOpenCodePlugin:
+    """`opencode plugin add 'github:FidelOdok/MetaForge#main::path:integrations/opencode'`.
+
+    The install failed with "Could not read package.json" before this existed.
+    The package is now also a V2 server plugin: package.json, server.js, and
+    an index the build writes so server.js parses nothing but JSON.
+    """
+
+    @pytest.fixture(scope="class")
+    def root(self) -> Path:
+        return build_opencode()
+
+    @pytest.fixture(scope="class")
+    def index(self, root: Path) -> dict:
+        return json.loads((root / "metaforge-index.json").read_text(encoding="utf-8"))
+
+    def test_package_json_is_an_es_module_exporting_server_js(self, root: Path) -> None:
+        from scripts.build_integrations import OPENCODE_PACKAGE_NAME, read_version_lock
+
+        package = json.loads((root / "package.json").read_text(encoding="utf-8"))
+        assert package["name"] == OPENCODE_PACKAGE_NAME
+        assert package["version"] == read_version_lock()["version"]
+        assert package["type"] == "module"
+        assert package["exports"] == {".": "./server.js"}
+        assert (root / "server.js").read_bytes() == (
+            REPO / "mcp_core" / "plugin_opencode" / "server.js"
+        ).read_bytes()
+        # Nothing to fetch from npm: V2 reads `id` and `setup` off the default
+        # export, so server.js imports only node built-ins.
+        assert "dependencies" not in package
+        imports = re.findall(r'^import .* from "([^"]+)"', (root / "server.js").read_text(), re.M)
+        assert imports and all(i.startswith("node:") for i in imports)
+
+    def test_the_index_names_files_that_exist(self, root: Path, index: dict) -> None:
+        for entry in [*index["commands"], *index["agents"], *index["skills"]]:
+            assert (root / entry["file"]).is_file(), entry["file"]
+        assert (root / index["rules"]).is_file()
+
+    def test_the_index_matches_what_install_sh_copies(self, root: Path, index: dict) -> None:
+        config = json.loads((root / "opencode.json").read_text(encoding="utf-8"))
+        assert index["mcp"] == config["mcp"]["servers"]
+        assert {c["name"]: c["description"] for c in index["commands"]} == {
+            f"metaforge/{name}": description for name, (description, _) in WORKFLOWS.items()
+        }
+        assert {a["id"] for a in index["agents"]} == {
+            p.stem for p in (root / "agents").glob("*.md")
+        }
+        assert {s["id"] for s in index["skills"]} == {
+            p.name for p in (root / "skills" / "metaforge").iterdir()
+        }
+
+    def test_every_description_is_a_clean_string(self, index: dict) -> None:
+        """A skill without a description is not advertised to the model, and a
+        YAML block marker or a leftover quote is not a description."""
+        for entry in [*index["agents"], *index["skills"]]:
+            text = entry["description"]
+            assert text and text[0] not in "\"'>|", entry
+            assert "Use when" in text or entry in index["skills"], entry
+
+    def test_the_readme_leads_with_plugin_add(self, root: Path) -> None:
+        from scripts.build_integrations import OPENCODE_PLUGIN_ADD
+
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        assert readme.index(OPENCODE_PLUGIN_ADD) < readme.index("install.sh --project")
+        assert "#main::path:integrations/opencode" in OPENCODE_PLUGIN_ADD
+
+    @pytest.mark.skipif(__import__("shutil").which("node") is None, reason="needs node")
+    @pytest.mark.parametrize(
+        "preset", [None, {"type": "remote", "url": "http://localhost:8765/mcp"}]
+    )
+    def test_setup_registers_everything_and_keeps_a_configured_server(
+        self, root: Path, index: dict, tmp_path: Path, preset: dict | None
+    ) -> None:
+        import subprocess
+
+        harness = tmp_path / "harness.mjs"
+        harness.write_text(_FAKE_OPENCODE, encoding="utf-8")
+        args = ["node", str(harness), (root / "server.js").as_uri()]
+        if preset:
+            args.append(json.dumps(preset))
+        # Run from elsewhere: files resolve from the module, not the cwd.
+        done = subprocess.run(args, capture_output=True, text=True, cwd=tmp_path, check=False)
+        assert done.returncode == 0, done.stderr
+        result = json.loads(done.stdout)
+        assert result["id"] == "metaforge"
+        assert result["mcp"]["metaforge"] == (preset or index["mcp"]["metaforge"])
+        assert sorted(result["commands"]) == sorted(f"metaforge/{n}" for n in WORKFLOWS)
+        assert len(result["skills"]) == len(index["skills"])
+        for skill in result["skills"]:
+            assert Path(skill["path"]).is_file() and Path(skill["path"]).is_absolute()
+            assert not skill["content"].startswith("---")
+        assert set(result["agents"]) == {a["id"] for a in index["agents"]}
+        for agent in result["agents"].values():
+            assert agent["mode"] == "subagent" and agent["system"] and agent["description"]
+        # No placeholder in the template: the argument follows a blank line,
+        # as opencode does for a markdown command.
+        assert result["prompt"]["text"].endswith("\n\nrun_42")
+        assert result["prompt"]["text"].startswith("Put a design run")
+        assert result["cleanup"] == "function"

@@ -1,0 +1,412 @@
+{
+  "mcp": {
+    "metaforge": {
+      "type": "remote",
+      "url": "https://mcp.staging.metaforge.uk/mcp"
+    }
+  },
+  "commands": [
+    {
+      "name": "metaforge/approvals",
+      "description": "See what is waiting for your decision, and decide it here",
+      "file": "commands/metaforge/approvals.md"
+    },
+    {
+      "name": "metaforge/connect",
+      "description": "Find the gateway to point this plugin at",
+      "file": "commands/metaforge/connect.md"
+    },
+    {
+      "name": "metaforge/design",
+      "description": "Design or revise a part",
+      "file": "commands/metaforge/design.md"
+    },
+    {
+      "name": "metaforge/doctor",
+      "description": "Check the connection and what is reachable",
+      "file": "commands/metaforge/doctor.md"
+    },
+    {
+      "name": "metaforge/drive",
+      "description": "Drive a design run until it is verified, restarting or fixing as it goes",
+      "file": "commands/metaforge/drive.md"
+    },
+    {
+      "name": "metaforge/fea",
+      "description": "Run a load case and record the evidence",
+      "file": "commands/metaforge/fea.md"
+    },
+    {
+      "name": "metaforge/flow",
+      "description": "Plan a design flow for this project",
+      "file": "commands/metaforge/flow.md"
+    },
+    {
+      "name": "metaforge/gate",
+      "description": "Review a maturity gate",
+      "file": "commands/metaforge/gate.md"
+    },
+    {
+      "name": "metaforge/imagine",
+      "description": "Start the Imagine studio for this product, then develop it after handover",
+      "file": "commands/metaforge/imagine.md"
+    },
+    {
+      "name": "metaforge/new",
+      "description": "Start a project, or open the one the user means",
+      "file": "commands/metaforge/new.md"
+    },
+    {
+      "name": "metaforge/replan",
+      "description": "Change a running design flow without starting again",
+      "file": "commands/metaforge/replan.md"
+    },
+    {
+      "name": "metaforge/status",
+      "description": "Where this project stands right now",
+      "file": "commands/metaforge/status.md"
+    },
+    {
+      "name": "metaforge/use",
+      "description": "Pick the project to work in for this session",
+      "file": "commands/metaforge/use.md"
+    },
+    {
+      "name": "metaforge/verify",
+      "description": "Check whether a design run achieved what was asked",
+      "file": "commands/metaforge/verify.md"
+    }
+  ],
+  "agents": [
+    {
+      "id": "metaforge-flow-planner",
+      "description": "Plans a MetaForge design flow from a user's intent and holds it for approval. Use when the user wants a new design started, a design flow set up, or asks what the plan for a hardware project should be. It compiles the intent, asks for anything missing, checks tool coverage, proposes a tailored flow and stops at the approval. It never starts a run and never approves anything.",
+      "file": "agents/metaforge-flow-planner.md"
+    },
+    {
+      "id": "metaforge-gate-reviewer",
+      "description": "Independently reviews a MetaForge design-flow gate and submits a recommendation (approve, retry, rework or reject) with reasons and a confidence. Use when review.list_tasks shows open gate reviews, when the user asks for a gate to be reviewed, or when a MetaForge result says a review is waiting. It reads the review brief and the twin with read-only tools and never decides a gate itself.",
+      "file": "agents/metaforge-gate-reviewer.md"
+    },
+    {
+      "id": "metaforge-run-verifier",
+      "description": "Decides whether a MetaForge design run actually achieved its intent. Use when the user asks if a design is done, finished, verified or ready, or before anyone reports a run as complete. It reads the run's lifecycle and the requirement statuses and reports the verdict honestly; it never calls a run done unless the verdict is COMPLETED_VERIFIED.",
+      "file": "agents/metaforge-run-verifier.md"
+    }
+  ],
+  "skills": [
+    {
+      "id": "analyze_hazards",
+      "name": "analyze_hazards",
+      "description": "Log the hazards of a system or subsystem, score each as severity x likelihood, classify the overall risk and record the hazard log in the MetaForge twin. Use when the user asks for a hazard analysis, risk assessment, FMEA-style hazard log, ISO 12100 or ISO 14971 style risk table, \"what could go wrong with this\", or when a design-flow gate reports that no risks are recorded or that a critical risk is unmitigated.",
+      "file": "skills/metaforge/analyze_hazards/SKILL.md"
+    },
+    {
+      "id": "author_design_sketch",
+      "name": "author_design_sketch",
+      "description": "Draw a scaled 2D design sketch of a part or mechanism as a chain of segments (lengths, thicknesses and joint angles in mm and degrees), side by side with the current design when it is a revision, and submit it for a person's approval before any CAD is built. Use when decide_sketch_needed says a sketch is required, when the user asks to see proportions or a layout before modelling, or before revising a committed part, linkage, leg, arm or bracket.",
+      "file": "skills/metaforge/author_design_sketch/SKILL.md"
+    },
+    {
+      "id": "check_cmf_compatibility",
+      "name": "check_cmf_compatibility",
+      "description": "Check that each part's chosen colour, material and finish (a library appearance) suits what the part is made of, list the finishing processes the choices need, and surface any appearance values still marked as assumptions. Use after choosing finishes for parts, before a render or a manufacturing release, or when the user asks whether a finish works on a material (for example anodising a plastic part).",
+      "file": "skills/metaforge/check_cmf_compatibility/SKILL.md"
+    },
+    {
+      "id": "check_ergonomics",
+      "name": "check_ergonomics",
+      "description": "Check whether people can hold, grip, press, reach and lift a product, by comparing its human-contact features (grip diameter and width, handle length, finger clearance, button size, actuation force, operating height, reach, hand-held mass) with limits from a cited anthropometric dataset or ergonomics guidance for the intended users. Use when the user asks if a handle, grip, button or product is comfortable or usable, or for an ergonomics review of a design.",
+      "file": "skills/metaforge/check_ergonomics/SKILL.md"
+    },
+    {
+      "id": "check_manufacturability",
+      "name": "check_manufacturability",
+      "description": "Design-for-manufacture (DFM) review of a finished design against the process chosen at the route gate. Check wall thickness, holes, inside corner and bend radii, draft, overhang and envelope against the process's sourced limits, report pass, fail or unknown per feature with the margin and the limit's source, write the manufacturing plan, and record the verdict for the DFM gate. Use in a flow's DFM Review phase, or when the user asks whether a design can be made by a process, wants a DFM review, or asks how a designed part will be made.",
+      "file": "skills/metaforge/check_manufacturability/SKILL.md"
+    },
+    {
+      "id": "check_power_budget",
+      "name": "check_power_budget",
+      "description": "Check an electronics design's power budget by summing worst-case load on each supply rail, comparing it against what the rail can deliver with the user's margin, flagging any rail over budget, and recording the sourced budget in the twin. Use when the user asks whether a regulator or battery can supply the board, asks for a power or current budget per rail, asks how much headroom a rail has, or when a power or current requirement needs analysis evidence.",
+      "file": "skills/metaforge/check_power_budget/SKILL.md"
+    },
+    {
+      "id": "check_tolerance",
+      "name": "check_tolerance",
+      "description": "Check a part's toleranced dimensions against what the chosen manufacturing process can actually hold, with a capability index per dimension, DFM flags for too-tight bands and sub-minimum features, and an optional RSS stack-up, then record the verdict in the twin. Use when the user asks whether tolerances are achievable, whether a part can be machined or printed to spec, wants a DFM or tolerance review, or asks about a tolerance stack-up on a committed part.",
+      "file": "skills/metaforge/check_tolerance/SKILL.md"
+    },
+    {
+      "id": "colour-material-finish",
+      "name": "colour-material-finish",
+      "description": "Choose and record a part's colour, material and finish (CMF) in the MetaForge library, with the colour named in its colour system and every value sourced. Use when the user picks or asks about a colour, a finish (anodised, powder coated, painted, moulded-in colour, bead blasted, polished) or a texture for a part, or wants a render to show the real finish.",
+      "file": "skills/metaforge/colour-material-finish/SKILL.md"
+    },
+    {
+      "id": "configure_rtos",
+      "name": "configure_rtos",
+      "description": "Write the RTOS configuration for a firmware project (task table, priorities, stack sizes, heap, tick rate) from task definitions and the MCU's memory, check it fits in RAM, and record it in the twin. Use when the user asks to set up or change FreeRTOS, Zephyr, ChibiOS, ThreadX or RTEMS configuration, asks for a task table or stack and heap sizing, or asks whether their tasks fit in the MCU's RAM.",
+      "file": "skills/metaforge/configure_rtos/SKILL.md"
+    },
+    {
+      "id": "convert-cad-files",
+      "name": "convert-cad-files",
+      "description": "Convert a supplier's or customer's CAD file (SolidWorks, CATIA, NX, Creo, Inventor, Parasolid, ACIS, STEP) or a mesh (STL, OBJ, PLY, FBX, glTF) to STEP, STL, GLB, glTF, OBJ, PLY or FBX with Zoo's cloud API, and measure its volume, surface area, centre of mass, bounding box and mass. Use when the user has a native CAD file MetaForge cannot read, needs an STL for a printer, or asks what a part weighs. Do not use to edit geometry (that is CAD authoring).",
+      "file": "skills/metaforge/convert-cad-files/SKILL.md"
+    },
+    {
+      "id": "create_assembly",
+      "name": "create_assembly",
+      "description": "Combine already-built CAD parts into one named multi-part assembly STEP at user-given positions, check that the parts, names and placements came out right, and commit the assembly to the twin linked to its part items. Use when the user asks to assemble, put together, stack or mount committed parts (for example a bracket on a plate, a gripper from its fingers and base, an arm from its links), or a design phase needs an assembly cad_model built from part cad_models.",
+      "file": "skills/metaforge/create_assembly/SKILL.md"
+    },
+    {
+      "id": "create_procurement_record",
+      "name": "create_procurement_record",
+      "description": "Record a purchase-order-style procurement record (line items with part number, quantity, unit cost, currency, distributor and lead time) in the MetaForge twin, with total cost and longest lead time, linked to the BOM it was sourced from. Use when the user asks to raise, record or save a purchase order, buy list, procurement record or order for a build, or to turn a priced BOM into an order the team can review.",
+      "file": "skills/metaforge/create_procurement_record/SKILL.md"
+    },
+    {
+      "id": "decide_sketch_needed",
+      "name": "decide_sketch_needed",
+      "description": "Decide, before any CAD tool runs, whether a proportions-and-topology design sketch must be made and approved by a person first, using five fixed rules (user asked for review, revision of built geometry, multi-part with moving joints, novel topology, four or more parts). Use when you are about to model or change a part or assembly with freecad or cadquery tools, when the user asks for a mechanism, linkage, limb, arm or multi-part assembly, or when the request changes geometry that is already committed.",
+      "file": "skills/metaforge/decide_sketch_needed/SKILL.md"
+    },
+    {
+      "id": "define_system_architecture",
+      "name": "define_system_architecture",
+      "description": "Capture a product's system architecture (the named components, the discipline that owns each, and the interfaces between them) as a reviewable block diagram in the twin before detailed design starts. Use when the user asks for a block diagram, a system breakdown, \"what talks to what\", an interface list or interface control table, or when a design flow phase requires a system_architecture deliverable.",
+      "file": "skills/metaforge/define_system_architecture/SKILL.md"
+    },
+    {
+      "id": "design_cad_iterative",
+      "name": "design_cad_iterative",
+      "description": "Refine one component's CAD automatically in MetaForge's self-validating design loop. A model writes CadQuery from the component's parametric plan, it is built and checked (validity, measurements, DFM for the selected process), rendered in a headless browser and reviewed by a vision critic, and revised until the critic is satisfied, every check passes, or a cap is reached. Use when the user asks to improve, refine, fix or iterate on a part's CAD model, to fix a DFM finding on a part, or to make a part match its brief, and the part has a parametric plan.",
+      "file": "skills/metaforge/design_cad_iterative/SKILL.md"
+    },
+    {
+      "id": "design_pcb",
+      "name": "design_pcb",
+      "description": "Generate a KiCad 9 schematic, PCB and routing through MetaForge from the circuit the user and you have worked out (parts as KiCad symbols and footprints, nets as REF.PIN), each step checked by KiCad's own ERC, DRC and schematic parity, and record the result. Use when the user asks for a schematic, a board, a layout or routing to be made, not checked.",
+      "file": "skills/metaforge/design_pcb/SKILL.md"
+    },
+    {
+      "id": "find_alternates",
+      "name": "find_alternates",
+      "description": "Find and rank up to three alternate parts for a BOM part that is risky to source, scoring each candidate on spec compatibility, availability, price and supply-risk reduction, using MetaForge's component search and live distributor data. Use when the user asks for an alternate, substitute, second source, drop-in replacement or cross-reference for a part, or when a part is out of stock, end of life, NRND, single-source or has a long lead time.",
+      "file": "skills/metaforge/find_alternates/SKILL.md"
+    },
+    {
+      "id": "form_factor_envelope",
+      "name": "form_factor_envelope",
+      "description": "Work out a product's form factor, the smallest outer envelope its contents need, from the internal components (positioned or stacked), the internal clearance and the wall thickness, and check it against a required maximum size. Use when the user asks how big a product or enclosure has to be, whether the contents fit a target size, or what envelope to design the housing around, before mechanical CAD starts.",
+      "file": "skills/metaforge/form_factor_envelope/SKILL.md"
+    },
+    {
+      "id": "gate-review",
+      "name": "gate-review",
+      "description": "Review a design-flow gate as an independent reviewer and recommend approve, retry, rework or reject with reasons and a confidence. Use when you are the gate reviewer (the metaforge-gate-reviewer subagent, or the gateway's own reviewer) and are given a review brief for one gate. Judge substance, not presence; never decide a gate, never write to the twin, never review a phase you worked on.",
+      "file": "skills/metaforge/gate-review/SKILL.md"
+    },
+    {
+      "id": "generate_cad",
+      "name": "generate_cad",
+      "description": "Generate one named parametric CAD part (plate, L-bracket, open-top enclosure or cylinder) from dimensions the user states, check the solid really matches them, and commit it to the twin as a cad_model. Use when the user asks for a simple plate, bracket, box enclosure, spacer, rod or cylinder with given sizes, wants a quick placeholder part in a project, or needs a first committed geometry before FEA.",
+      "file": "skills/metaforge/generate_cad/SKILL.md"
+    },
+    {
+      "id": "generate_cad_ir",
+      "name": "generate_cad_ir",
+      "description": "Build a featured CAD part step by step (body, sketches, pads, pockets, booleans, fillets, revolves, patterns) as an ordered feature list, execute it through the FreeCAD session tools or one CadQuery script, then export a correctly named STEP and commit it to the twin. Use when the user wants a real part with holes, pockets, cut-outs, bosses, rounded edges, revolved or patterned features at stated positions, or when a simple parametric primitive from generate_cad cannot represent the part.",
+      "file": "skills/metaforge/generate_cad_ir/SKILL.md"
+    },
+    {
+      "id": "generate_cad_script",
+      "name": "generate_cad_script",
+      "description": "Write a CadQuery (or FreeCAD) script for a described part, run it in the MetaForge sandbox, check the geometry against the user's dimensions, and commit it to the twin as a named CAD model. Use when the user asks for a part whose shape is more than a single primitive (\"model a bracket with a slot and two counterbored holes\", \"write a CadQuery script for this flange\"), hands you a script to run and record, or a design phase needs a cad_model deliverable that no dedicated generator covers.",
+      "file": "skills/metaforge/generate_cad_script/SKILL.md"
+    },
+    {
+      "id": "generate_checklist",
+      "name": "generate_checklist",
+      "description": "Build a regulatory compliance checklist for a product's target markets (UKCA, CE, FCC, PSTI) from MetaForge's built-in regime catalogue, with standards shared across regimes listed once. Use when the user asks what certifications, standards, declarations or test reports a product needs to sell in the UK, EU or US, asks for a compliance or certification checklist, or asks what evidence is still missing for market approval. Computes only; to save the checklist in the twin use record_compliance_checklist.",
+      "file": "skills/metaforge/generate_checklist/SKILL.md"
+    },
+    {
+      "id": "generate_enclosure",
+      "name": "generate_enclosure",
+      "description": "Generate an open-top PCB enclosure (shelled box with connector cutouts and mounting posts) from the board's real dimensions with CadQuery, check it fits, and commit it to the twin as a named CAD model. Use when the user asks for a case, housing or enclosure around a PCB (\"make an enclosure for the 60 x 40 mm controller board\"), when a hardware flow needs a mechanical housing for an electronics deliverable, or when board size and connector positions are known and a first-fit box is wanted.",
+      "file": "skills/metaforge/generate_enclosure/SKILL.md"
+    },
+    {
+      "id": "generate_hal",
+      "name": "generate_hal",
+      "description": "Write a thin hardware abstraction layer for a firmware project's MCU and peripherals (GPIO, SPI, I2C, UART, ADC, PWM, timers, DMA) using the pin assignments from the real KiCad schematic, and record what was generated in the twin. Use when the user asks to generate or set up a HAL, peripheral init code or a pin map for their board, asks to wire firmware to the schematic's pins, or starts firmware for a new board.",
+      "file": "skills/metaforge/generate_hal/SKILL.md"
+    },
+    {
+      "id": "generate_mesh",
+      "name": "generate_mesh",
+      "description": "Turn a committed CAD part into a CalculiX-ready tetrahedral finite element mesh with gmsh, check its quality, and identify the fixed and loaded faces by their real coordinates. Use when the user asks to mesh a part, prepare a part for FEA or thermal analysis, refine or coarsen a mesh, or find which mesh surface group is a given face (for example \"the face at x = 0\"), and before any calculix.run_fea or calculix.run_thermal call that has no mesh yet.",
+      "file": "skills/metaforge/generate_mesh/SKILL.md"
+    },
+    {
+      "id": "generate_parametric_feature",
+      "name": "generate_parametric_feature",
+      "description": "Build one of MetaForge's named parametric features (bolt_pattern, a plate with a circular bolt-hole pattern, or rib, a triangular gusset) from typed parameters in a FreeCAD session, check it, and commit it with its parameters so a later change becomes a linked revision. Use when the user asks for a bolt circle, a mounting plate with N holes on a pitch circle, a motor-face or flange hole pattern, a gusset or stiffening rib, or asks to change one parameter of such a feature they already made.",
+      "file": "skills/metaforge/generate_parametric_feature/SKILL.md"
+    },
+    {
+      "id": "generate_technical_drawing",
+      "name": "generate_technical_drawing",
+      "description": "Record a drawing package for a committed CAD part (toleranced dimensions, GD&T callouts, surface finishes and inspection requirements) as structured data linked to that part, after checking the nominal values against the real geometry. Use when the user asks for a drawing, a drawing spec, tolerances, GD&T or surface finish callouts for a part, or an inspection sheet, or when a manufacturing phase needs a technical_drawing deliverable. It does not render a 2D drawing sheet.",
+      "file": "skills/metaforge/generate_technical_drawing/SKILL.md"
+    },
+    {
+      "id": "imagine_studio",
+      "name": "imagine_studio",
+      "description": "Start or update the Imagine studio for a product from what the person said, with the twin tools, and after the person hands it over start Develop. Use when a project has no studio yet and the person describes a product (\"a desk lamp with a USB-C cable and a touch button\"), when they ask to start, fix or fill the Imagine studio, or when the studio is handed over and they ask to proceed to Develop. Not for editing a single part's CAD (use design_cad_iterative) or for a gated multi-phase design flow (use intent-to-verified-design).",
+      "file": "skills/metaforge/imagine_studio/SKILL.md"
+    },
+    {
+      "id": "ingest_knowledge",
+      "name": "ingest_knowledge",
+      "description": "Add a document (datasheet text, an application note, a standard's excerpt, a lessons-learned note, a design rule) to MetaForge's project-scoped knowledge layer so later searches and agents can cite it. Use when the user asks to ingest, index, remember, add to the knowledge base or \"make searchable\" a document, URL, datasheet or note, or when a source you just read with web.fetch should stay available for this project.",
+      "file": "skills/metaforge/ingest_knowledge/SKILL.md"
+    },
+    {
+      "id": "intent-to-verified-design",
+      "name": "intent-to-verified-design",
+      "description": "Take a hardware product from a stated intent to a verified design in MetaForge, end to end. Use when the user describes something they want built (\"design a wall shelf for 15 kg per shelf\", \"start a project for a 6-DOF arm\"), asks to set up or plan a design flow, asks what the next step on a project is, or asks whether a design meets its requirements. Covers project setup, typed requirements, the gated design flow (propose, human approval, run), design work, verification evidence and the release gate. Do not use for a single isolated tool call such as one FEA run on an existing part; use the matching domain skill for that.",
+      "file": "skills/metaforge/intent-to-verified-design/SKILL.md"
+    },
+    {
+      "id": "manage-machines",
+      "name": "manage-machines",
+      "description": "Record and read the machines a person can make parts on (3D printers, CNC mills and routers, laser cutters, press brakes, vendor machines) in the MetaForge machine library, with a source for every capability, and turn a machine into limits for process ranking and DFM. Use when the user mentions a machine they own or use (\"I have a CR-10\", \"our shop has a 3-axis mill\"), asks what they can make in-house, or when a manufacturing phase needs real machine limits. Also sends a G-code print to an in-house OctoPrint or Moonraker printer when the person asks, and records how it went as evidence.",
+      "file": "skills/metaforge/manage-machines/SKILL.md"
+    },
+    {
+      "id": "manage-processes-and-materials",
+      "name": "manage-processes-and-materials",
+      "description": "Record and read manufacturing processes (CNC milling, FDM, laser cutting, sheet-metal bending, moulding, PCB fabrication) with their design rules and achievable tolerance, and materials with their properties, in the MetaForge library, with a source for every value; and use them in a design flow. Use when the user names a material or process they want to use, asks what a process can hold or what a material's properties are, wants DFM limits for a process and material, or when a manufacturing phase needs sourced process rules or material properties.",
+      "file": "skills/metaforge/manage-processes-and-materials/SKILL.md"
+    },
+    {
+      "id": "mechanical-components",
+      "name": "mechanical-components",
+      "description": "Choose and record standard and purchased mechanical parts (screws, nuts, washers, bearings, standoffs, rails, extrusions, hinges, actuators) in the MetaForge library, with every dimension and rating sourced. Use when a design needs fasteners or bearings, when the user names a standard part (\"M3 x 10 cap screw\", \"608 bearing\"), or asks which bearing or screw fits. Standard parts are built from their standard's table; nothing is sized from memory.",
+      "file": "skills/metaforge/mechanical-components/SKILL.md"
+    },
+    {
+      "id": "mesh-from-prompt",
+      "name": "mesh-from-prompt",
+      "description": "Generate a 3D mesh from a text prompt or a reference image with Tripo AI or Meshy AI, bring it into MetaForge and keep it in the twin, optionally converted to STL or 3MF for printing. Use when the user asks for an organic or decorative shape, a figurine, a concept or look-alike model, or \"make a 3D model of this picture\". Do not use for a part that needs exact dimensions, hole patterns or mating faces (that is CAD: generate_cad_script or generate_cad), or for an FEA mesh (that is generate_mesh).",
+      "file": "skills/metaforge/mesh-from-prompt/SKILL.md"
+    },
+    {
+      "id": "move-files",
+      "name": "move-files",
+      "description": "Bring a person's files into MetaForge (images, photos, sketches, STEP, STL, OBJ, 3MF, G-code, KiCad projects, firmware, PDFs, spreadsheets, whole folders) and give files back to them (a download link, the content, or a copy in their project folder). Use when the user attaches or mentions a file they want MetaForge to use, asks to upload, import or send something, or asks to download, export or get a copy of a part, board, G-code or document.",
+      "file": "skills/metaforge/move-files/SKILL.md"
+    },
+    {
+      "id": "quote-and-order",
+      "name": "quote-and-order",
+      "description": "Get real prices from manufacturing vendors (PCB houses, 3D-print and CNC services, distributors) connected to MetaForge, record each quote in the twin, and place an order only when the person approves it. Use when the user asks what a board or part would cost to have made, wants a quote from a vendor, wants to compare vendors, or asks to order. Do not use for parts on the person's own machines; that is the manage-machines skill.",
+      "file": "skills/metaforge/quote-and-order/SKILL.md"
+    },
+    {
+      "id": "rank_manufacturing_processes",
+      "name": "rank_manufacturing_processes",
+      "description": "Choose how a part will be made BEFORE designing it. Rank candidate manufacturing processes on fit (envelope, minimum feature, tolerance, material), availability on the route and cost at the stated quantity, using only sourced capability values, then record the ranking and the recommended route for the person to pick at the route gate. Use in a flow's Manufacturing Route & Process Selection phase, or when the user asks how a part should be made, which process suits a quantity, or in-house versus a vendor.",
+      "file": "skills/metaforge/rank_manufacturing_processes/SKILL.md"
+    },
+    {
+      "id": "record_compliance_checklist",
+      "name": "record_compliance_checklist",
+      "description": "Build a regulatory compliance checklist for a project's target markets (UKCA, CE, FCC, PSTI) from MetaForge's built-in regime catalogue and save it in the twin as a reviewable work product linked to the project. Use when the user asks to save, record, attach or track a compliance or certification checklist for a project, or wants the checklist to show up on the project's work products for review. To only see the checklist without saving it, use generate_checklist.",
+      "file": "skills/metaforge/record_compliance_checklist/SKILL.md"
+    },
+    {
+      "id": "retrieve_knowledge",
+      "name": "retrieve_knowledge",
+      "description": "Search MetaForge's project knowledge layer (ingested datasheets, design rules, failure notes, past decisions) and answer with citations to the source and heading each fact came from. Use when the user asks what a datasheet, standard or earlier note says, asks \"do we have anything on\", \"what did we learn about\" or \"what is the limit for\" a part or rule, or when a design step needs a sourced value rather than a remembered one.",
+      "file": "skills/metaforge/retrieve_knowledge/SKILL.md"
+    },
+    {
+      "id": "run_cfd",
+      "name": "run_cfd",
+      "description": "Answer a flow or cooling question about a part honestly. Runs a steady incompressible internal flow with OpenFOAM when the fluid is bounded by an inlet, an outlet and walls (pressure drop and flow rate), runs the steady conduction model when the question is heat conducted to a fixed-temperature sink, and otherwise records the question, the assumptions and any results the user brings from their own CFD tool. Use when the user asks for CFD, airflow, pressure drop, flow velocity, duct or channel sizing, convection cooling, or \"will this part stay below N degrees\", or when a requirement needs flow or thermal evidence.",
+      "file": "skills/metaforge/run_cfd/SKILL.md"
+    },
+    {
+      "id": "run_drc",
+      "name": "run_drc",
+      "description": "Run KiCad's Design Rules Check on a PCB layout, sort the violations and unrouted connections, judge pass or fail, and record the result in the twin pinned to the board revision it checked. Use when the user asks to run DRC, check a board for clearance, track width, courtyard or unrouted-net problems, asks whether a layout is ready for Gerbers or fab, or when a flow gate needs DRC evidence.",
+      "file": "skills/metaforge/run_drc/SKILL.md"
+    },
+    {
+      "id": "run_erc",
+      "name": "run_erc",
+      "description": "Run KiCad's Electrical Rules Check on a schematic, sort the violations into errors and warnings, judge pass or fail on errors, and record the result in the twin pinned to the schematic it checked. Use when the user asks to run ERC, check a schematic for electrical errors, asks whether the schematic is clean before layout, or when a requirement or flow gate needs ERC evidence.",
+      "file": "skills/metaforge/run_erc/SKILL.md"
+    },
+    {
+      "id": "run_fea",
+      "name": "run_fea",
+      "description": "Run a static stress or modal finite element analysis on a committed CAD part with CalculiX, check that the answer can be trusted, and record it in the twin pinned to the geometry revision it analysed. Use when the user asks for stress, deflection, safety factor, natural frequency or \"will this hold\", or when a requirement with verification_method analysis needs structural evidence.",
+      "file": "skills/metaforge/run_fea/SKILL.md"
+    },
+    {
+      "id": "run_firmware",
+      "name": "run_firmware",
+      "description": "Compile firmware with PlatformIO through MetaForge and run it on an emulated board (Renode for STM32, Espressif QEMU for ESP32), checking what it prints on the UART and what it leaves in memory, and record the result as evidence. Use when the user asks whether generated or hand-written firmware builds, how much flash or RAM it uses, whether it boots, or wants it run without hardware.",
+      "file": "skills/metaforge/run_firmware/SKILL.md"
+    },
+    {
+      "id": "run_spice",
+      "name": "run_spice",
+      "description": "Simulate a circuit with ngspice through MetaForge (DC operating point or sweep, AC frequency response, transient), from a KiCad schematic's SPICE netlist or a netlist the user gives, and record the result as evidence. Use when the user asks to simulate a circuit, run SPICE or ngspice, check a filter's cutoff, a regulator's transient response, a bias point or a startup waveform.",
+      "file": "skills/metaforge/run_spice/SKILL.md"
+    },
+    {
+      "id": "scaffold_driver",
+      "name": "scaffold_driver",
+      "description": "Scaffold a device driver for one external peripheral chip (header, source and register map) on top of the project's HAL, with every register, address and bus setting taken from the part's datasheet and the board's schematic, and record it in the twin. Use when the user asks to write, start or scaffold a driver for a sensor, display, radio or other chip on SPI, I2C, UART or a parallel bus, or asks for a register map for a part on their board.",
+      "file": "skills/metaforge/scaffold_driver/SKILL.md"
+    },
+    {
+      "id": "score_bom_risk",
+      "name": "score_bom_risk",
+      "description": "Score the supply-chain risk of a project's BOM, part by part, across single source, lead time, lifecycle, price volatility, stock level and RoHS/REACH compliance, and roll it up so the riskiest parts surface first. Use when the user asks how risky the BOM is, which parts are hard to buy, single-source, long lead, end of life or obsolete, whether the BOM is ready to build, or for a supply-chain risk report before a build or gate review.",
+      "file": "skills/metaforge/score_bom_risk/SKILL.md"
+    },
+    {
+      "id": "slice-for-printing",
+      "name": "slice-for-printing",
+      "description": "Slice a model for FDM 3D printing with PrusaSlicer to get its real print time, filament use and weight, and price printing it at the Slant 3D print farm. Use when the user asks how long a part takes to print, how much filament or material it needs, to compare print settings (layer height, infill, supports, material), wants G-code for their printer, or asks what a print farm would charge. Do not use for CNC, sheet metal or PCB quotes (that is quote-and-order).",
+      "file": "skills/metaforge/slice-for-printing/SKILL.md"
+    },
+    {
+      "id": "source-engineering-values",
+      "name": "source-engineering-values",
+      "description": "Find an engineering value a design needs (a dimension, a height, a material, a section size, a thickness, a tolerance, a load) from a real source instead of guessing, and record the value together with where it came from. Use whenever a phase or a question needs a number or a material the user has not given, before you write it into a requirement, a CAD model or an analysis, and when choosing a purchasable part or stock size. Covers project documents, standards, past work, component search and selection, analysis, measurement, and stated assumptions.",
+      "file": "skills/metaforge/source-engineering-values/SKILL.md"
+    },
+    {
+      "id": "validate_stress",
+      "name": "validate_stress",
+      "description": "Give a pass or fail verdict on whether a part's peak von Mises stress stays within an allowable stress (limit stress divided by a required safety factor) under a stated static load, using a CalculiX static solve, then record the verdict pinned to the geometry revision. Use when the user asks \"does it pass\", \"is the safety factor at least 2\", \"is the bracket within allowable stress at 200 N\", or when a requirement states a stress limit or minimum safety factor. For deflection, natural frequency or an open-ended stress study use run_fea instead.",
+      "file": "skills/metaforge/validate_stress/SKILL.md"
+    },
+    {
+      "id": "workflow-lifecycle",
+      "name": "workflow-lifecycle",
+      "description": "Generate, inspect, and revise outcome-driven workflows from user intent; evaluate results, capability gaps, failures, and completion. Use when the work has meaningful dependencies, validation gates, iterative repair or lifecycle tracking, including MetaForge design flows (pair it with intent-to-verified-design for the MetaForge procedure). Avoid imposing a workflow on a simple independent task.",
+      "file": "skills/metaforge/workflow-lifecycle/SKILL.md"
+    }
+  ],
+  "rules": "metaforge-rules.md"
+}

@@ -1,6 +1,6 @@
 {
   "name": "metaforge",
-  "version": "0.2.78",
+  "version": "0.2.79",
   "description": "MetaForge for opencode: the hosted gateway as an MCP server, with the commands, agents, skills and working rules of the Claude Code package.",
   "homepage": "https://fidelodok.github.io/MetaForge/",
   "repository": "https://github.com/FidelOdok/MetaForge",

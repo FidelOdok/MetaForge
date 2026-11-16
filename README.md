@@ -544,6 +544,15 @@ gateway's address built in. claude.ai and ChatGPT run in someone else's datacent
 and cannot reach `localhost`; read the
 [hosted harness guide](docs/integrations/hosted-harness.md) first.
 
+For opencode, install the hosted-gateway package as a plugin (it applies to every
+project), then sign in with `opencode mcp auth metaforge`:
+
+```
+opencode plugin add 'github:FidelOdok/MetaForge#main::path:integrations/opencode'
+```
+
+See [opencode](docs/integrations/opencode.md), which also covers a per-project install.
+
 **Technical documentation**
 
 - [Architecture](docs/architecture.md) and [the agent harness](docs/architecture/robust-harness-design.md)

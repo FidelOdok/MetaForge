@@ -7,6 +7,16 @@ The hosted MetaForge gateway as an MCP server in opencode, with the same command
 ## Install
 
 ```
+opencode plugin add 'github:FidelOdok/MetaForge#main::path:integrations/opencode'
+```
+
+This installs the package as an opencode server plugin and adds it to your global config (`~/.config/opencode/opencode.json`), so it applies to every project: `opencode plugin add` has no per-project option. The plugin adds the `metaforge` server (unless you already configured one with that name), the commands, the skills, the subagents, and the rules as an instruction on each new session. `opencode plugin list` shows it; `opencode plugin update` picks up a newer `main`.
+
+### Or with install.sh
+
+For one project only, or to have the files themselves to read and commit, use the install script instead:
+
+```
 git clone --depth 1 https://github.com/FidelOdok/MetaForge.git
 sh MetaForge/integrations/opencode/install.sh --project /path/to/your/project
 # or, for every project:
@@ -84,11 +94,18 @@ Subagents (`mode: subagent`), launched by the main agent or by asking for one by
 
 `metaforge-rules.md` holds the working rules the Claude Code package adds at session start, loaded through `instructions`. It also says how opencode names the tools: `flow.propose` is `metaforge_flow_propose`.
 
-Not carried over as a hook: Claude Code's reminder after a held `flow.propose` or `flow.patch`. It is a line in the rules instead. An opencode plugin could add it after the tool returns, but MCP tools run inside Code Mode by default, and whether the plugin hook sees that call could not be checked without signing in, so no plugin ships.
+Not carried over as a hook: Claude Code's reminder after a held `flow.propose` or `flow.patch`. It is a line in the rules instead. An opencode plugin could add it after the tool returns, but MCP tools run inside Code Mode by default, and whether the plugin hook sees that call could not be checked without signing in, so the plugin does not add it.
 
 ## What is verified
 
-Loaded with opencode **2.2.5** in a scratch home directory, once installed with `--project` and once with `--global`:
+With opencode **2.2.5** in a scratch home directory, installed with `opencode plugin add` from this repository:
+
+- `opencode plugin list` shows `metaforge`, and the server's plugin list has it `active`.
+- `mcp list` shows `metaforge  needs authentication`. With a `metaforge` server already in a project's config, that one is used instead.
+- `GET /api/command` lists the 14 `metaforge/<name>` commands, `GET /api/skill` the 52 skills (paths inside the installed package), and `GET /api/agent` the three subagents.
+- A new session (`POST /api/session`) carries the `metaforge-rules` instruction entry, and running `metaforge/drive` with an argument admits the command text with the argument after it.
+
+Installed with `install.sh`, once with `--project` and once with `--global`:
 
 - `opencode mcp list` prints `metaforge  needs authentication`: the server is configured, reached the hosted address and got its 401. On a freshly started opencode the first call can print `No MCP servers configured` before the connection starts; run it again.
 - `opencode debug agents` lists the three agents with `mode: subagent`.
