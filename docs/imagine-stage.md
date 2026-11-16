@@ -690,13 +690,19 @@ connection id used twice, and a signal pin on two nets (power and ground may fan
 when the buses differ, two outputs drive one net, nothing drives a net, a supply sits outside the
 receiving part's voltage window, a signal is below the input's high threshold (a 3.3 V output into
 a 5 V input, which needs a level shifter), or a multi-pin interface is wired without naming the
-pin. The list reaches the page in the compiled context as `_context.connections`. Code:
-`validate_connections` in `api_gateway/imagine/formgraph/fg_context.py`.
+pin. A tie-off, an input (`dir: in`, not power) wired to a power or ground interface, is not a
+bus mismatch: datasheets ask unused and enable inputs to be held at a rail. It warns only when the
+rail's voltage window lies outside a window the input states. The list reaches the page in the
+compiled context as `_context.connections`. Code: `validate_connections` in
+`api_gateway/imagine/formgraph/fg_context.py`.
 
 An authored form draws each connection as a cable in the 3D view. A wire starts at the
 interface's `at` (mm from the part's centre) when the part has one, and at the centre of the
 form part that carries it (`component_ref`) when it does not. It rises 3 mm clear of the taller
-of its two parts, runs across and drops to the other end. Its colour follows the net: ground is
+of its two parts, runs across and drops to the other end. When that would take it through the
+enclosure's lid (a part mounted under the lid, such as a light ring under a diffuser), it runs a
+bend allowance under the lid instead and climbs to an end that sits higher, such as a touch pad
+on the lid; the summary's `route` says which (`over the parts` or `under the lid`). Its colour follows the net: ground is
 black, power red, and each other net a colour of its own. Its size follows the template engine's
 harness rule: a power wire is the smallest gauge whose rating covers the lower recorded peak
 current (`imax_mA`) with 25 % headroom (22 to 28 AWG), and a signal is 28 AWG. Its length is the

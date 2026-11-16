@@ -691,17 +691,31 @@ await check('a_wire_whose_end_cannot_be_placed_is_listed_not_drawn', () => {
 });
 
 await check('a_wire_that_leaves_the_enclosure_is_named', () => {
-  // a body 0..100 x 0..20 x 0..10 holds both parts; the route rises to y 7
+  // a body 0..100 x 0..20 x 0..10 holds both parts; the route rises to y 7 over them
   const body = { id: 'case', body: true, bbox: { min: [0, 0, 0], max: [100, 20, 10] } };
   const inside = FG.wireRoutes(WIRE_CFG(), [...WIRE_PARTS, body]);
-  if (inside.outside.length || !inside.wires.every((w) => w.fits === true)) return 'inside ' + JSON.stringify(inside.outside);
-  // a lid at y 8 leaves 1 mm above the route: less than 3 x the 1.1 mm power wire's diameter
-  const low = { ...body, bbox: { min: [0, 0, 0], max: [100, 8, 10] } };
-  const r = FG.wireRoutes(WIRE_CFG(), [...WIRE_PARTS, low]);
-  if (JSON.stringify(r.outside) !== '["c1","c2"]') return 'low lid ' + JSON.stringify(r.outside);
+  if (inside.outside.length || !inside.wires.every((w) => w.fits === true && w.route === 'over the parts')) return 'inside ' + JSON.stringify(inside.wires.map((w) => [w.fits, w.route]));
+  // a case that stops at x 50 leaves the ring (60..80) outside it: its wires leave the case
+  const short = { ...body, bbox: { min: [0, 0, 0], max: [50, 20, 10] } };
+  const r = FG.wireRoutes(WIRE_CFG(), [...WIRE_PARTS, short]);
+  if (JSON.stringify(r.outside) !== '["c1","c2"]') return 'short case ' + JSON.stringify(r.outside);
   // negative control: no body part, nothing is judged
   const none = FG.wireRoutes(WIRE_CFG(), WIRE_PARTS);
   return none.wires.every((w) => w.fits === null) && none.outside.length === 0 ? true : 'no body ' + JSON.stringify(none.wires.map((w) => w.fits));
+});
+
+await check('a_wire_that_cannot_go_over_the_parts_runs_under_the_lid', () => {
+  // a lid at y 8: over the parts (y 7) leaves 1 mm, less than 3 x the wire's diameter, so
+  // the wire runs a bend allowance under the lid instead and still fits
+  const low = { id: 'case', body: true, bbox: { min: [0, 0, 0], max: [100, 8, 10] } };
+  const r = FG.wireRoutes(WIRE_CFG(), [...WIRE_PARTS, low]);
+  const c1 = r.wires.find((w) => w.id === 'c1'), c2 = r.wires.find((w) => w.id === 'c2');
+  if (c1.route !== 'under the lid' || !c1.fits || !c2.fits) return 'route ' + JSON.stringify([c1.route, c1.fits, c2.fits]);
+  // the 24 AWG power wire (1.1 mm) runs at 8 - 3.3 = 4.7, the 28 AWG signal (0.8 mm) at 5.6
+  if (!near(c1.points[1][1], 4.7) || !near(c2.points[1][1], 5.6)) return 'heights ' + c1.points[1][1] + ' ' + c2.points[1][1];
+  // an end above that line (a pad on the lid) is climbed to, not judged
+  const lidPad = FG.wireRoutes(WIRE_CFG(), [WIRE_PARTS[0], { id: 'ring', bbox: { min: [60, 6, 0], max: [80, 8, 10] } }, low]);
+  return lidPad.wires.every((w) => w.fits === true) ? true : 'pad ' + JSON.stringify(lidPad.outside);
 });
 
 await check('mount_draws_each_wire_as_a_tube_and_the_summary_lists_them', async () => {

@@ -537,6 +537,17 @@ def validate_connections(ctx, E, W):
                     E.append(f'{where}: "{ref}" is on two nets ("{prev}" and "{c["net"]}").')
                 on_net[ref] = c['net']
         (ra, _, a, _), (rb, _, b, _) = ends
+        # A tie-off (MetaForge): an input held at a supply rail or ground, as a datasheet asks
+        # of unused or enable inputs. Not a bus mismatch; the rail must sit inside any window
+        # the input states.
+        tie = next(((r, rail, rin, inp) for r, rail, rin, inp in ((rb, a, ra, b), (ra, b, rb, a))
+                    if rail.get('bus') == 'pwr' and inp.get('bus') != 'pwr' and inp.get('dir') == 'in'), None)
+        if tie is not None:
+            r_in, rail, r_rail, inp = tie
+            rv, iv = rail.get('v'), inp.get('v')
+            if isinstance(rv, list) and isinstance(iv, list) and rv != [0, 0] and (rv[1] > iv[1] or rv[0] < iv[0]):
+                W.append(f'{where}: "{r_in}" is tied to "{r_rail}" at {rv[0]:g} to {rv[1]:g} V, outside its {iv[0]:g} to {iv[1]:g} V window.')
+            continue
         if a.get('bus') != b.get('bus'):
             W.append(f'{where}: "{ra}" is {a.get("bus")} and "{rb}" is {b.get("bus")}; a wire joins like to like.')
             continue
