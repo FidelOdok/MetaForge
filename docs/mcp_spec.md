@@ -188,6 +188,15 @@ rebinding defeats: a page re-points its own name at this machine, and its
 `Origin` and the request's `Host` then agree. `/health`, the OAuth pages and
 `/.well-known/*` are not checked.
 
+#### Redirect URIs
+
+`/authorize` accepts only a `redirect_uri` the client registered. A loopback
+redirect (`http://127.0.0.1`, `http://[::1]` or `http://localhost`) may use
+any port, as RFC 8252 section 7.3 asks: a native client such as opencode
+listens on whichever local port is free, so a later sign-in can use a
+different port from the one it registered. Scheme, host, path and query must
+still match, and every other redirect must match exactly.
+
 #### Signed-in accounts and project scope
 
 When the OAuth sign-in binds each token to a person (an auth provider that

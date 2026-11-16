@@ -158,6 +158,37 @@ def _actor_for(operator: str | None, fallback: str) -> str:
     return f"user:{cleaned}" if cleaned else fallback
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def redirect_uri_matches(registered: str, requested: str) -> bool:
+    """Whether ``requested`` may use the client's ``registered`` redirect URI.
+
+    Exact match, except for loopback redirects: a native app (opencode,
+    a CLI) listens on whatever local port is free at the time, so per
+    RFC 8252 section 7.3 the port of an ``http`` loopback URI is ignored
+    and everything else (scheme, host, path, query) must still match.
+    """
+    if requested == registered:
+        return True
+    from urllib.parse import urlsplit
+
+    try:
+        reg, req = urlsplit(registered), urlsplit(requested)
+        reg_host = (reg.hostname or "").lower()
+        req_host = (req.hostname or "").lower()
+        reg.port, req.port  # noqa: B018 - raises ValueError on a malformed port
+    except ValueError:
+        return False
+    if reg.scheme != "http" or req.scheme != "http":
+        return False
+    if reg_host not in _LOOPBACK_HOSTS or req_host != reg_host:
+        return False
+    if reg.username or reg.password or req.username or req.password:
+        return False
+    return (reg.path, reg.query) == (req.path, req.query) and not req.fragment
+
+
 @dataclass(frozen=True)
 class OAuthConfig:
     """OAuth server settings, sourced from the environment.
@@ -459,7 +490,9 @@ class OAuthProvider:
         client = self._store.clients.get(client_id)
         if client is None:
             raise OAuthError("invalid_client", "unknown client_id")
-        if not redirect_uri or redirect_uri not in client.redirect_uris:
+        if not redirect_uri or not any(
+            redirect_uri_matches(r, redirect_uri) for r in client.redirect_uris
+        ):
             raise OAuthError("invalid_request", "redirect_uri mismatch")
         if response_type != "code":
             raise OAuthError(

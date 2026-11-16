@@ -15,7 +15,13 @@ import hashlib
 
 import pytest
 
-from metaforge.mcp.oauth import OAuthConfig, OAuthError, OAuthProvider, verify_pkce_s256
+from metaforge.mcp.oauth import (
+    OAuthConfig,
+    OAuthError,
+    OAuthProvider,
+    redirect_uri_matches,
+    verify_pkce_s256,
+)
 
 
 def _pkce() -> tuple[str, str]:
@@ -128,6 +134,41 @@ def test_authorize_rejects_redirect_uri_mismatch() -> None:
             code_challenge_method="S256",
             scope=None,
         )
+
+
+def test_a_loopback_redirect_may_use_any_port() -> None:
+    # opencode registered on one free port and later listened on another
+    # (RFC 8252 section 7.3): the port of a loopback redirect is not fixed.
+    p = _provider()
+    reg = p.register_client({"redirect_uris": ["http://127.0.0.1:42323/callback"]})
+    client = p.validate_authorize(
+        client_id=reg["client_id"],
+        redirect_uri="http://127.0.0.1:51877/callback",
+        response_type="code",
+        code_challenge="c",
+        code_challenge_method="S256",
+        scope=None,
+    )
+    assert client.client_id == reg["client_id"]
+
+
+@pytest.mark.parametrize(
+    ("registered", "requested", "ok"),
+    [
+        ("http://127.0.0.1:42323/callback", "http://127.0.0.1:9/callback", True),
+        ("http://localhost:3000/cb", "http://localhost/cb", True),
+        ("http://[::1]:1/cb", "http://[::1]:2/cb", True),
+        ("http://127.0.0.1:1/callback", "http://127.0.0.1:2/other", False),
+        ("http://127.0.0.1:1/cb", "http://localhost:1/cb", False),
+        ("http://127.0.0.1:1/cb", "https://127.0.0.1:1/cb", False),
+        ("http://127.0.0.1:1/cb", "http://127.0.0.1:2/cb?x=1", False),
+        ("http://127.0.0.1:1/cb", "http://evil@127.0.0.1:2/cb", False),
+        ("https://claude.ai/cb", "https://claude.ai:444/cb", False),
+        ("http://example.com:1/cb", "http://example.com:2/cb", False),
+    ],
+)
+def test_only_loopback_redirects_ignore_the_port(registered: str, requested: str, ok: bool) -> None:
+    assert redirect_uri_matches(registered, requested) is ok
 
 
 def test_authorize_requires_s256() -> None:
