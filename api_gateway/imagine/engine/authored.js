@@ -1504,6 +1504,91 @@
     return out;
   }
 
+  // Wires (MetaForge, FORGE-885): the studio's connection list drawn between the parts it
+  // joins. A wire starts at the interface's own position on its part ("at", mm from the part
+  // centre) when the library has one, and at the part's centre when it does not; it rises
+  // clear of both parts, runs across and drops to the other end. Its size follows the engine's
+  // harness rule: a power wire is sized from its peak current with 25 % headroom, a signal is
+  // 28 AWG. Lengths carry 15 mm for stripping and a service loop, like the engine's cables.
+  var WIRE_AWG = [[28, 1.4, 0.8], [26, 2.2, 0.9], [24, 3.5, 1.1], [22, 7, 1.3]]; // gauge, amps, outer diameter mm
+  var WIRE_SLACK_MM = 15, WIRE_CLEAR_MM = 3, WIRE_BEND = 3;
+  var NET_COLOURS = [0x2f6fff, 0x18a058, 0xe0a100, 0x9b4dff, 0x00a3b4, 0xff7a1a, 0xd6336c];
+  function netColour(net, bus) {
+    var n = String(net || '').toUpperCase();
+    if (/^(GND|VSS|0V)\b|GND$/.test(n)) return 0x222222;
+    if (bus === 'pwr' || /^(V|\+)|VBUS|VIN|VCC|VDD|5V|3V3|BAT/.test(n)) return 0xd62828;
+    var h = 0;
+    for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+    return NET_COLOURS[h % NET_COLOURS.length];
+  }
+  function wireRoutes(cfg, drawnParts) {
+    var ctx = (cfg && cfg._context) || {}, conns = Array.isArray(ctx.connections) ? ctx.connections : [];
+    var lib = {}, formOf = {}, boxOf = {};
+    (Array.isArray(ctx.parts) ? ctx.parts : []).forEach(function (p) { if (p && typeof p.id === 'string') lib[p.id] = p; });
+    ((((cfg && cfg.form) || {}).authored || {}).parts || []).forEach(function (p) {
+      if (p && typeof p.component_ref === 'string' && !formOf[p.component_ref]) formOf[p.component_ref] = p.id;
+    });
+    (drawnParts || []).forEach(function (r) { if (r && r.bbox && r.bbox.min && r.bbox.max) boxOf[r.id] = r.bbox; });
+    // The enclosure: the box round the parts that make the product's body. A wire fits when
+    // its whole route stays inside it, and each bend a bend allowance (WIRE_BEND x the wire's
+    // diameter) in from each wall. This is a box test: it says a wire leaves the enclosure, not that it
+    // clears every rib inside.
+    var shell = null;
+    (drawnParts || []).forEach(function (r) {
+      if (!r || !r.body || !r.bbox || !r.bbox.min || !r.bbox.max) return;
+      if (!shell) shell = { min: r.bbox.min.slice(), max: r.bbox.max.slice() };
+      else for (var k = 0; k < 3; k++) { shell.min[k] = Math.min(shell.min[k], r.bbox.min[k]); shell.max[k] = Math.max(shell.max[k], r.bbox.max[k]); }
+    });
+    function fitsIn(pts, dia) {
+      if (!shell) return null;
+      // the ends sit on their parts' pins; the bends between them need room from each wall
+      return pts.every(function (q, i) {
+        var m = i === 0 || i === pts.length - 1 ? 0 : WIRE_BEND * dia;
+        return [0, 1, 2].every(function (k) { return q[k] >= shell.min[k] + m - 1e-6 && q[k] <= shell.max[k] - m + 1e-6; });
+      });
+    }
+    function isNum(v) { return typeof v === 'number' && isFinite(v); }
+    function end(ref) {
+      var bits = typeof ref === 'string' ? ref.split('.') : [];
+      if (bits.length < 2) return { why: 'is not part.interface' };
+      var part = lib[bits[0]];
+      if (!part) return { why: 'names no part in the studio' };
+      var iface = (part.interfaces || []).filter(function (f) { return f && f.id === bits[1]; })[0];
+      if (!iface) return { why: 'names no interface on ' + bits[0] };
+      var fid = formOf[bits[0]], box = fid ? boxOf[fid] : null;
+      if (!box) return { why: 'is on ' + bits[0] + ', which the form does not draw' };
+      var c = [0, 1, 2].map(function (k) { return (box.min[k] + box.max[k]) / 2; });
+      var at = Array.isArray(iface.at) && iface.at.length === 3 && iface.at.every(isNum) ? iface.at : null;
+      return { part: bits[0], formPart: fid, iface: iface, box: box, placed: !!at, p: at ? [c[0] + at[0], c[1] + at[1], c[2] + at[2]] : c };
+    }
+    function dist(a, b) { return Math.sqrt(Math.pow(a[0] - b[0], 2) + Math.pow(a[1] - b[1], 2) + Math.pow(a[2] - b[2], 2)); }
+    var wires = [], skipped = [];
+    conns.forEach(function (c, i) {
+      if (!c || typeof c !== 'object') return;
+      var id = typeof c.id === 'string' ? c.id : 'c' + (i + 1), a = end(c.from), b = end(c.to);
+      if (!a.p || !b.p) { skipped.push({ id: id, why: (!a.p ? String(c.from) + ' ' + a.why : String(c.to) + ' ' + b.why) }); return; }
+      var top = Math.max(a.box.max[1], b.box.max[1]) + WIRE_CLEAR_MM;
+      var pts = [a.p, [a.p[0], top, a.p[2]], [b.p[0], top, b.p[2]], b.p].filter(function (q, k, all) { return k === 0 || dist(q, all[k - 1]) > 1e-6; });
+      var run = 0;
+      for (var k = 1; k < pts.length; k++) run += dist(pts[k], pts[k - 1]);
+      var pwr = a.iface.bus === 'pwr' || b.iface.bus === 'pwr';
+      var imax = [a.iface.imax_mA, b.iface.imax_mA].filter(function (v) { return isNum(v) && v > 0; });
+      var amps = imax.length ? Math.min.apply(null, imax) / 1000 : 0;
+      var g = pwr && amps ? (WIRE_AWG.filter(function (w) { return w[1] >= amps * 1.25; })[0] || WIRE_AWG[3]) : pwr ? WIRE_AWG[1] : WIRE_AWG[0];
+      wires.push({
+        id: id, net: String(c.net || id), from: String(c.from), to: String(c.to), points: pts,
+        length_mm: Math.round(run + WIRE_SLACK_MM), awg: g[0], diameter_mm: g[2], rated_A: g[1],
+        sized_from: pwr ? (amps ? 'peak current ' + amps + ' A' : 'power wire, no current on record') : 'signal',
+        placed: a.placed && b.placed, color: netColour(c.net, pwr ? 'pwr' : a.iface.bus),
+        fits: fitsIn(pts, g[2]),
+        parts: [a.formPart, b.formPart],
+      });
+    });
+    var total = wires.reduce(function (s, w) { return s + w.length_mm; }, 0);
+    return { wires: wires, skipped: skipped, total_mm: total, enclosure: shell,
+      outside: wires.filter(function (w) { return w.fits === false; }).map(function (w) { return w.id; }) };
+  }
+
   function mount(env) {
     var THREE = env.THREE, doc = env.document || document, form = env.cfg.form, parts = form.authored.parts;
     env.options = Object.assign({}, env.options, { models: modelCode(form) });
@@ -1524,6 +1609,27 @@
     fitGroup.name = 'authored-fit';
     env.scene.add(fitGroup);
     var fitMarks = [];
+    // Wires (MetaForge, FORGE-885): the connection list as cables between the parts.
+    var wireGroup = new THREE.Group();
+    wireGroup.name = 'authored-wires';
+    env.scene.add(wireGroup);
+    var lastWires = { wires: [], skipped: [], total_mm: 0 };
+    function drawWires(result) {
+      while (wireGroup.children.length) { var o = wireGroup.children.pop(); if (o.geometry && o.geometry.dispose) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }
+      lastWires = wireRoutes(env.cfg, result ? result.parts : []);
+      if (!THREE.TubeGeometry || !THREE.CatmullRomCurve3 || !THREE.Vector3) return;
+      lastWires.wires.forEach(function (w) {
+        var curve = new THREE.CatmullRomCurve3(w.points.map(function (q) { return new THREE.Vector3(q[0], q[1], q[2]); }), false, 'centripetal', 0.5);
+        var mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(16, w.points.length * 12), w.diameter_mm / 2, 8, false),
+          new THREE.MeshStandardMaterial(Object.assign({ color: w.color, roughness: 0.55, metalness: 0.05 },
+            // a wire that leaves the enclosure glows red, like a clash
+            w.fits === false ? { emissive: 0xff2020, emissiveIntensity: 0.7 } : {})));
+        mesh.name = 'wire ' + w.net + ' (' + w.id + ')';
+        mesh.userData = { wire: w.id, net: w.net, kind: 'wire' };
+        mesh.visible = !w.parts.some(function (id) { return hidden[id] || switchedOff(id); });
+        wireGroup.add(mesh);
+      });
+    }
     function drawFit(fit) {
       while (fitGroup.children.length) { var o = fitGroup.children.pop(); if (o.geometry && o.geometry.dispose) o.geometry.dispose(); }
       fitMarks = fitMarkRegions(fit);
@@ -1663,6 +1769,10 @@
     function setPartHidden(id, hide) {
       if (hide) hidden[id] = true; else delete hidden[id];
       applyBehaviours();
+      wireGroup.children.forEach(function (m) {
+        var w = lastWires.wires.filter(function (x) { return x.id === m.userData.wire; })[0];
+        if (w) m.visible = !w.parts.some(function (pid) { return hidden[pid] || switchedOff(pid); });
+      });
       if (lastResult) renderParts(lastResult);
       renderScene();
       if (env.onView) env.onView();
@@ -1701,6 +1811,8 @@
       sideToken = null;
       clearSide();
       clear();
+      drawWires(null);
+      if (env.scene && env.scene.remove) env.scene.remove(wireGroup);
       drawScene(null);
       Object.keys(lightMap).forEach(function (id) { lightGroup.remove(lightMap[id]); delete lightMap[id]; });
       if (env.scene && env.scene.remove) { env.scene.remove(sceneGroup); env.scene.remove(lightGroup); env.scene.remove(fitGroup); }
@@ -2213,6 +2325,10 @@
         errors: result ? result.errors : [],
         measured: result ? result.measured || null : null,
         joins: ((((env.cfg || {}).form || {}).authored || {}).joins) || [],
+        wires: lastWires.wires.map(function (w) { return { id: w.id, net: w.net, from: w.from, to: w.to, length_mm: w.length_mm, awg: w.awg, sized_from: w.sized_from, placed: w.placed, fits: w.fits }; }),
+        wires_outside: (lastWires.outside || []).slice(),
+        unwired: lastWires.skipped.slice(),
+        wire_total_mm: lastWires.total_mm,
       };
       GLOBAL.FG_AUTHORED = summary;
       var desc = describe(summary, env.material ? env.material() : null, function (id) {
@@ -2251,6 +2367,7 @@
         });
       });
       lastResult = result;
+      drawWires(result);
       placeCut();
       renderParts(result);
       problems.textContent = '';
@@ -2521,9 +2638,9 @@
     if (env.graph) graphApi = buildGraphUi();
     render();
     return { render: render, group: group, panel: panel, params: params, graph: graphApi, setParam: setParam, recolour: recolour, setPartHidden: setPartHidden, hiddenParts: hiddenParts, setHiddenParts: setHiddenParts, setBehaviour: setBehaviour, behaviours: behaviourState, play: play, partInfo: partInfo, dispose: dispose, openPart: openPart, fitMarks: function () { return fitMarks.slice(); }, sceneGroup: function () { return sceneGroup; }, lights: lightsNow, openedPart: function () { return openedPart; }, partPreview: function (id) { return previewMakes[id] || null; },
-      setViewMode: setViewMode, viewMode: function () { return viewMode; }, setCut: setCut, cut: function () { return { axis: cut.axis, t: cut.t }; }, cutAt: cutPosition, proposedMakes: proposedMakes,
+      setViewMode: setViewMode, viewMode: function () { return viewMode; }, setCut: setCut, cut: function () { return { axis: cut.axis, t: cut.t }; }, cutAt: cutPosition, proposedMakes: proposedMakes, wires: function () { return lastWires; },
       tryVariant: tryVariant, showSideBySide: showSideBySide, sideBySide: function () { return sideGroup; }, useVariant: useVariant };
   }
 
-  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, estimateCost: estimateCost, renderCost: renderCost, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, renderComponents: renderComponents, measureForm: measureForm, fitCheck: fitCheck, fitWithJoins: fitWithJoins, fitMarkRegions: fitMarkRegions, screeningRules: screeningRules, workerSource: workerSource, modelCode: modelCode, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
+  return { LIMITS: LIMITS, HARDEN_NAMES: HARDEN_NAMES, KIND_STYLE: KIND_STYLE, lookOf: lookOf, behaviourMatrix: behaviourMatrix, specsOf: specsOf, nextStep: nextStep, estimateCost: estimateCost, renderCost: renderCost, NOT_ASSESSED: NOT_ASSESSED, describe: describe, renderSummary: renderSummary, describeComponents: describeComponents, wireRoutes: wireRoutes, netColour: netColour, renderComponents: renderComponents, measureForm: measureForm, fitCheck: fitCheck, fitWithJoins: fitWithJoins, fitMarkRegions: fitMarkRegions, screeningRules: screeningRules, workerSource: workerSource, modelCode: modelCode, run: run, runPart: runPart, sanitize: sanitize, measure: measure, sliderGrid: sliderGrid, buildGraph: buildGraph, portPos: portPos, mount: mount };
 });

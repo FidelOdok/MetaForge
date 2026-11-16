@@ -630,6 +630,115 @@ await check('mount_draws_publishes_a_summary_and_redraws_on_a_parameter_change',
 });
 
 
+// -- wires (FORGE-885): the connection list drawn between the parts it joins ----------------
+
+const WIRE_CFG = () => ({
+  form: { authored: { parts: [
+    { id: 'mcu', kind: 'component', component_ref: 'board-a' },
+    { id: 'ring', kind: 'component', component_ref: 'ring-a' },
+  ] } },
+  _context: {
+    parts: [
+      { id: 'board-a', interfaces: [
+        { id: 'v5', bus: 'pwr', dir: 'out', imax_mA: 2000, at: [5, 0, 0] },
+        { id: 'd6', bus: 'gpio', dir: 'out' },
+      ] },
+      { id: 'ring-a', interfaces: [
+        { id: 'pwr', bus: 'pwr', dir: 'in', at: [-5, 0, 0] },
+        { id: 'din', bus: 'gpio', dir: 'in' },
+      ] },
+      { id: 'lux-a', interfaces: [{ id: 'i2c', bus: 'i2c', dir: 'bi' }] },
+    ],
+    connections: [
+      { id: 'c1', net: '5V', from: 'board-a.v5', to: 'ring-a.pwr' },
+      { id: 'c2', net: 'DATA', from: 'board-a.d6', to: 'ring-a.din' },
+      { id: 'c3', net: 'SDA', from: 'board-a.d6', to: 'lux-a.i2c' },
+      { id: 'c4', net: 'X', from: 'board-a.nope', to: 'ring-a.din' },
+    ],
+  },
+});
+const WIRE_PARTS = [
+  { id: 'mcu', bbox: { min: [0, 0, 0], max: [20, 4, 10] } },
+  { id: 'ring', bbox: { min: [60, 0, 0], max: [80, 2, 10] } },
+];
+
+await check('wires_run_between_the_interfaces_they_join_and_are_sized_like_the_engine_harness', () => {
+  const r = FG.wireRoutes(WIRE_CFG(), WIRE_PARTS);
+  const c1 = r.wires.find((w) => w.id === 'c1'), c2 = r.wires.find((w) => w.id === 'c2');
+  if (!c1 || !c2) return 'wires ' + JSON.stringify(r.wires.map((w) => w.id));
+  // c1 starts at the board centre + at, ends at the ring centre + at
+  const a = c1.points[0], b = c1.points[c1.points.length - 1];
+  if (!(near(a[0], 15) && near(b[0], 65))) return 'ends ' + JSON.stringify([a, b]);
+  // it rises clear of the taller part (4 mm) plus 3 mm
+  if (!c1.points.every((q, i) => i === 0 || i === c1.points.length - 1 || near(q[1], 7))) return 'top ' + JSON.stringify(c1.points);
+  // 2 A peak with 25 % headroom is 2.5 A: 26 AWG (2.2 A) is too small, 24 AWG (3.5 A) fits
+  if (c1.awg !== 24 || c2.awg !== 28) return 'awg ' + c1.awg + ' ' + c2.awg;
+  // run = 5 up (centre 2 to 7) + 50 across + 6 down (7 to the ring centre at 1), plus 15 mm slack
+  if (c1.length_mm !== 76) return 'length ' + c1.length_mm;
+  if (!c1.placed || c2.placed) return 'placed ' + c1.placed + ' ' + c2.placed;
+  if (c1.color !== 0xd62828) return 'power colour ' + c1.color.toString(16);
+  return near(r.total_mm, c1.length_mm + c2.length_mm) ? true : 'total ' + r.total_mm;
+});
+
+await check('a_wire_whose_end_cannot_be_placed_is_listed_not_drawn', () => {
+  const r = FG.wireRoutes(WIRE_CFG(), WIRE_PARTS);
+  const why = Object.fromEntries(r.skipped.map((s) => [s.id, s.why]));
+  if (!why.c3 || !why.c3.includes('does not draw')) return 'c3 ' + why.c3;
+  if (!why.c4 || !why.c4.includes('no interface')) return 'c4 ' + why.c4;
+  // negative control: no connection list is no wires and nothing skipped
+  const none = FG.wireRoutes({ _context: { parts: [] } }, WIRE_PARTS);
+  return none.wires.length === 0 && none.skipped.length === 0 ? true : 'none ' + JSON.stringify(none);
+});
+
+await check('a_wire_that_leaves_the_enclosure_is_named', () => {
+  // a body 0..100 x 0..20 x 0..10 holds both parts; the route rises to y 7
+  const body = { id: 'case', body: true, bbox: { min: [0, 0, 0], max: [100, 20, 10] } };
+  const inside = FG.wireRoutes(WIRE_CFG(), [...WIRE_PARTS, body]);
+  if (inside.outside.length || !inside.wires.every((w) => w.fits === true)) return 'inside ' + JSON.stringify(inside.outside);
+  // a lid at y 8 leaves 1 mm above the route: less than 3 x the 1.1 mm power wire's diameter
+  const low = { ...body, bbox: { min: [0, 0, 0], max: [100, 8, 10] } };
+  const r = FG.wireRoutes(WIRE_CFG(), [...WIRE_PARTS, low]);
+  if (JSON.stringify(r.outside) !== '["c1","c2"]') return 'low lid ' + JSON.stringify(r.outside);
+  // negative control: no body part, nothing is judged
+  const none = FG.wireRoutes(WIRE_CFG(), WIRE_PARTS);
+  return none.wires.every((w) => w.fits === null) && none.outside.length === 0 ? true : 'no body ' + JSON.stringify(none.wires.map((w) => w.fits));
+});
+
+await check('mount_draws_each_wire_as_a_tube_and_the_summary_lists_them', async () => {
+  const el = () => { const e = { children: [], style: {}, attrs: {}, handlers: {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    appendChild(c) { this.children.push(c); return c; }, insertBefore(c) { this.children.unshift(c); return c; }, setAttribute(k, v) { this.attrs[k] = v; },
+    getAttribute(k) { return this.attrs[k]; }, addEventListener(k, f) { this.handlers[k] = f; }, removeChild() {}, querySelector: () => null, querySelectorAll: () => [] };
+    return e; };
+  const fakeDoc = { createElement: el, createTextNode: (t) => ({ text: t }), body: el() };
+  class Group { constructor() { this.children = []; } add(c) { this.children.push(c); } }
+  const tubes = [];
+  const THREE = {
+    Group, Mesh: class { constructor(g, m) { this.geometry = g; this.material = m; this.userData = {}; } },
+    BufferGeometry: class { setAttribute() {} setIndex() {} computeVertexNormals() {} dispose() {} },
+    MeshStandardMaterial: class { constructor(o) { this.o = o; } dispose() {} },
+    Float32BufferAttribute: class {},
+    Vector3: class { constructor(x, y, z) { this.x = x; this.y = y; this.z = z; } },
+    CatmullRomCurve3: class { constructor(pts) { this.pts = pts; } },
+    TubeGeometry: class { constructor(curve, seg, r) { this.curve = curve; this.r = r; tubes.push(this); } dispose() {} },
+  };
+  const cfg = WIRE_CFG();
+  cfg.form = { template: 'authored', params: {}, authored: { parts: [
+    { id: 'mcu', name: 'mcu', kind: 'component', component_ref: 'board-a', code: 'return [g.box(20, 4, 10)];' },
+    { id: 'ring', name: 'ring', kind: 'component', component_ref: 'ring-a', code: 'return [g.box(20, 2, 10).at(70, 0, 0)];' },
+  ] } };
+  const scene = new Group();
+  const m = FG.mount({ THREE, scene, cfg, document: fakeDoc, host: fakeDoc.body, options: OPTS });
+  await m.render();
+  const wg = scene.children.find((c) => c.name === 'authored-wires');
+  if (!wg || wg.children.length !== 2) return 'wire meshes ' + (wg && wg.children.length);
+  const a = globalThis.FG_AUTHORED;
+  if (!a.wires || a.wires.length !== 2 || a.unwired.length !== 2) return 'summary ' + JSON.stringify({ w: a.wires, u: a.unwired });
+  // the 24 AWG power wire is 1.1 mm across, the 28 AWG signal 0.8 mm
+  const thick = tubes.map((t) => t.r).sort();
+  return near(thick[0], 0.4) && near(thick[1], 0.55) && a.wire_total_mm > 0 ? true : 'radii ' + JSON.stringify(thick);
+});
+
+
 // -- the components panel: each real part, how far it is trusted, and what has no part -----
 
 const COMP_CFG = () => ({

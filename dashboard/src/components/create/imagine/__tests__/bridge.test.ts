@@ -10,6 +10,7 @@ import {
   safeMime,
   themedSrc,
   writeToEvent,
+  withoutToken,
 } from '../bridge';
 
 describe('parsePageMessage', () => {
@@ -115,3 +116,17 @@ describe('fg:applied', () => {
   });
 });
 
+
+
+describe('withoutToken', () => {
+  it('drops the engine token and keeps everything else', () => {
+    expect(withoutToken('/api/v1/engine?t=abc.def')).toBe('/api/v1/engine');
+    expect(withoutToken('/api/v1/engine?t=abc&theme=dark')).toBe('/api/v1/engine?theme=dark');
+    expect(withoutToken('/api/v1/engine?theme=dark&t=abc&rev=2')).toBe('/api/v1/engine?theme=dark&rev=2');
+    expect(withoutToken('https://api.x/engine?t=a#view')).toBe('https://api.x/engine#view');
+  });
+
+  it('leaves non-page addresses alone', () => {
+    expect(withoutToken('about:blank')).toBe('about:blank');
+  });
+});

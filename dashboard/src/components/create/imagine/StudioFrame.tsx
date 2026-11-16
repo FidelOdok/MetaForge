@@ -14,6 +14,7 @@ import {
   writeToEvent,
   type HostMessage,
   type StudioView,
+  withoutToken,
 } from './bridge';
 
 /** A new revision that never says it is ready replaces the old one anyway after this. */
@@ -86,7 +87,18 @@ export function StudioFrame({ projectId, src, collections, readOnly, revision, c
   const theme = useThemeStore((s) => s.resolvedTheme);
   // The revision in the address only forces a load; a form pushed in place leaves it alone.
   const [addrRev, setAddrRev] = useState(revision);
-  const frameSrc = useMemo(() => revisedSrc(themedSrc(src, theme), addrRev), [src, theme, addrRev]);
+  // The engine token changes on every studio refetch when the gateway asks for sign-in;
+  // a frame keyed by an address carrying it reloaded each time (the studio flickered).
+  // The address is rebuilt only when the page, theme or revision changes, with the
+  // newest token at that moment, so a later load is never refused for an expired one.
+  const latestSrc = useRef(src);
+  latestSrc.current = src;
+  const pageKey = withoutToken(src);
+  const frameSrc = useMemo(
+    () => revisedSrc(themedSrc(latestSrc.current, theme), addrRev),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the token alone must not reload the frame
+    [pageKey, theme, addrRev],
+  );
   const pageRev = useRef(revision);
   const pageConfig = useRef(config ?? null);
   const applying = useRef<{ revision: number; config: Record<string, unknown>; timer: number } | null>(null);
