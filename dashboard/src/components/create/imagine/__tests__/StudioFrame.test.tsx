@@ -100,6 +100,32 @@ describe('StudioFrame', () => {
     view.unmount();
   });
 
+  it('a new engine token alone does not reload the page (no flicker on refetch)', () => {
+    useThemeStore.setState({ resolvedTheme: 'light' });
+    const view = render(
+      <StudioFrame projectId={P} src="/api/v1/engine?t=tok1" collections={SNAPSHOT} readOnly={false} revision={3} />,
+    );
+    const first = screen.getByTestId('studio-frame');
+    const firstSrc = first.getAttribute('src');
+    // Every GET /studio signs a fresh token when the gateway asks for sign-in.
+    view.rerender(
+      <StudioFrame projectId={P} src="/api/v1/engine?t=tok2" collections={SNAPSHOT} readOnly={false} revision={3} />,
+    );
+    expect(screen.getByTestId('studio-frame')).toBe(first);
+    expect(screen.getByTestId('studio-frame')).toHaveAttribute('src', firstSrc ?? '');
+    expect(screen.queryByTestId('studio-frame-pending')).toBeNull();
+    view.unmount();
+  });
+
+  it('a real reload uses the newest token, so it is never refused as expired', () => {
+    useThemeStore.setState({ resolvedTheme: 'light' });
+    const view = render(<StudioFrame projectId={P} src="/api/v1/engine?t=tok1" collections={SNAPSHOT} readOnly={false} />);
+    view.rerender(<StudioFrame projectId={P} src="/api/v1/engine?t=tok2" collections={SNAPSHOT} readOnly={false} />);
+    act(() => useThemeStore.setState({ resolvedTheme: 'dark' }));
+    expect(screen.getByTestId('studio-frame-pending')).toHaveAttribute('src', '/api/v1/engine?t=tok2&theme=dark');
+    view.unmount();
+  });
+
   it('highlights a selected component through the shared selection', () => {
     const { win } = frame();
     fromPage({ fg: 1, type: 'fg:select', component_id: 'CMP-arm' }, win);

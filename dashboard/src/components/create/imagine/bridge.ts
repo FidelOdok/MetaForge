@@ -145,6 +145,22 @@ export function onlyFormChanged(prev: Record<string, unknown>, next: Record<stri
   return JSON.stringify(prev.form) !== JSON.stringify(next.form);
 }
 
+/**
+ * The page's address without its engine token (`t=`). When the gateway asks
+ * for sign-in, every `GET /studio` hands back the address with a newly signed
+ * token, so the address itself changes on every refetch. Only this part says
+ * which page to show; the token matters for the next load and nothing else.
+ */
+export function withoutToken(src: string): string {
+  if (/^(about|data|blob|javascript):/i.test(src)) return src;
+  const hashAt = src.indexOf('#');
+  const hash = hashAt >= 0 ? src.slice(hashAt) : '';
+  const base = (hashAt >= 0 ? src.slice(0, hashAt) : src)
+    .replace(/([?&])t=[^&]*(&|$)/, (_m, lead: string, tail: string) => (tail ? lead : ''))
+    .replace(/\?$/, '');
+  return `${base}${hash}`;
+}
+
 /** The page's address for one revision: the revision is only there to make the browser load it again. */
 export function revisedSrc(src: string, revision: number | null | undefined): string {
   if (revision === null || revision === undefined || /^(about|data|blob|javascript):/i.test(src)) return src;
