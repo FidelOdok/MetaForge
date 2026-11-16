@@ -158,7 +158,12 @@ write:
   `pins` when it has more than one. The write refuses an end that is not a
   real part, interface or pin, and one pin on two nets, and names a bus
   mismatch, two outputs on one net, a supply outside a part's window, or a
-  3.3 V signal into a 5 V input (add the level shifter).
+  3.3 V signal into a 5 V input (add the level shifter). Wire every power,
+  ground and signal input; list one left off on purpose in
+  `connections.unused` (`["ring-a.dout"]`). Give a power wire its
+  `wire: {awg}` when the build fixes it; the write names a wire too thin for
+  its peak current, and the handover's `wiring` item holds until each
+  `Wiring:` warning is cleared.
 - **Parts** in `context.components` need `schemaVersion: 1`, and each part
   `id`, `role` (`fn:<function>`, `board` or `battery`), `mpn`, `manufacturer`,
   `datasheet`, `retrieved`, `interfaces` and `geometry.envelope` with a

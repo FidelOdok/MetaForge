@@ -400,6 +400,7 @@ async def test_handover_is_refused_with_the_missing_items(client: httpx.AsyncCli
         "concept_assembly",
         "interfaces",
         "screening",
+        "wiring",
     }
     assert ids["assumptions"] == "missing" and ids["screening"] == "missing"
     res = await client.post(f"{BASE}/handover", json={"op_id": "h1"})
@@ -507,7 +508,7 @@ async def test_an_agent_writes_the_config_over_mcp(service: ImagineService) -> N
     got = await srv.imagine_get_studio({"project_id": PROJECT})
     assert got["revision"] == 1
     check = await srv.imagine_handover_status({"project_id": PROJECT})
-    assert check["ready"] is False and len(check["items"]) == 9
+    assert check["ready"] is False and len(check["items"]) == 10
     bad = base_config()
     bad["process"]["material"] = "unobtainium"
     with pytest.raises(ValueError, match="unobtainium"):
