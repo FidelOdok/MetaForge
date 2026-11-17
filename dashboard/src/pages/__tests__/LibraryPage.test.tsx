@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '../../test/test-utils';
-import type { LibraryComponent } from '../../api/endpoints/library';
+import type { LibraryComponent, LibraryOrganisation } from '../../api/endpoints/library';
 
 const api = vi.hoisted(() => ({
   listComponents: vi.fn(),
@@ -9,6 +9,9 @@ const api = vi.hoisted(() => ({
   exportLibrary: vi.fn(),
   importLibrary: vi.fn(),
   getComponentMesh: vi.fn(),
+  listOrganisations: vi.fn(),
+  searchLibrary: vi.fn(),
+  ORG_REGIONS: ['UK', 'EU', 'Europe', 'Asia', 'Americas', 'Oceania', 'Africa', 'Global'],
 }));
 vi.mock('../../api/endpoints/library', () => api);
 // The 3D view has its own tests; here it only says which part it was given.
@@ -53,10 +56,13 @@ const PARTS = [
 
 describe('LibraryPage', () => {
   beforeEach(() => {
-    Object.values(api).forEach((f) => f.mockReset());
+    Object.values(api).forEach((f) => {
+      if (typeof f === 'function') f.mockReset();
+    });
     api.listComponents.mockResolvedValue(PARTS);
     api.listMaterials.mockResolvedValue([]);
     api.listMachines.mockResolvedValue([]);
+    api.listOrganisations.mockResolvedValue([]);
   });
 
   it('lists every component and shows the first in detail', async () => {
@@ -140,4 +146,104 @@ describe('LibraryPage', () => {
     expect(within(cards[1]!).getByText('PLA, PETG')).toBeInTheDocument();
     expect(within(cards[1]!).queryByText(/from the model/)).toBeNull();
   });
+
+  it('shows organisations by role, a blocked one with its reason, and what each makes', async () => {
+    api.listOrganisations.mockResolvedValue(ORGS);
+    api.listComponents.mockResolvedValue([
+      part('nordic_nrf52840_qiaa_r', {
+        title: 'Nordic nRF52840',
+        manufacturer: 'Nordic',
+        manufacturer_org: 'or_nordic',
+      }),
+      part('fake_chip', { title: 'Fake chip', manufacturer: 'Shady', manufacturer_org: 'or_shady' }),
+    ]);
+    render(<LibraryPage />);
+    await screen.findByTestId('library-count');
+    fireEvent.click(screen.getByRole('tab', { name: /Organisations/ }));
+    expect(await screen.findByTestId('library-org-count')).toHaveTextContent('2 organisations');
+    // the first alphabetically is shown: Nordic Semiconductor, with the part it makes
+    const detail = screen.getByTestId('library-org-detail');
+    expect(within(detail).getByText('Nordic nRF52840')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: /Shady Parts/ }));
+    expect(await screen.findByText(/Blocked: counterfeits/)).toBeInTheDocument();
+    // filtering by role keeps only the sellers
+    fireEvent.click(screen.getByRole('button', { name: /Sellers/ }));
+    expect(screen.getByTestId('library-org-count')).toHaveTextContent('1 of 2');
+  });
+
+  it('warns on a part whose maker is blocked', async () => {
+    api.listOrganisations.mockResolvedValue(ORGS);
+    api.listComponents.mockResolvedValue([
+      part('fake_chip', { manufacturer: 'Shady', manufacturer_org: 'or_shady' }),
+    ]);
+    render(<LibraryPage />);
+    expect(await screen.findByTestId('library-blocked-maker')).toHaveTextContent(
+      'Its maker, Shady Parts, is blocked: counterfeits.',
+    );
+  });
+
+  it('searches the whole library and opens a result in its tab', async () => {
+    api.listOrganisations.mockResolvedValue(ORGS);
+    api.searchLibrary.mockResolvedValue({
+      query: 'nordic',
+      total: 2,
+      results: [
+        {
+          kind: 'organisation',
+          id: 'or_nordic',
+          name: 'nordic_semiconductor',
+          title: 'Nordic Semiconductor',
+          score: 8,
+          matched: ['alias'],
+          roles: ['manufacturer'],
+        },
+        {
+          kind: 'component',
+          id: 'co_nordic_nrf52840_qiaa_r',
+          name: 'nordic_nrf52840_qiaa_r',
+          title: 'Nordic nRF52840-QIAA-R: BLE SoC',
+          score: 8,
+          matched: ['name'],
+        },
+      ],
+    });
+    render(<LibraryPage />);
+    await screen.findByTestId('library-count');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search the whole library' }), {
+      target: { value: 'nordic' },
+    });
+    const hits = await screen.findAllByTestId('library-search-hit');
+    expect(hits).toHaveLength(2);
+    expect(api.searchLibrary).toHaveBeenCalledWith({ q: 'nordic', region: undefined });
+    fireEvent.click(hits[0]!);
+    expect(await screen.findByTestId('library-org-detail')).toHaveTextContent('Nordic Semiconductor');
+  });
 });
+
+const ORGS: LibraryOrganisation[] = [
+  org('or_nordic', 'Nordic Semiconductor', { aliases: ['Nordic'] }),
+  org('or_shady', 'Shady Parts', { roles: ['distributor'], status: 'blocked', status_reason: 'counterfeits' }),
+];
+
+function org(id: string, title: string, extra: Partial<LibraryOrganisation> = {}): LibraryOrganisation {
+  return {
+    id,
+    name: id,
+    title,
+    roles: ['manufacturer'],
+    aliases: [],
+    status: 'unreviewed',
+    status_reason: '',
+    country: '',
+    regions: [],
+    website: '',
+    quote_url: '',
+    certifications: [],
+    contacts: [],
+    lifecycle_policy: '',
+    connector: '',
+    notes: '',
+    version: 1,
+    ...extra,
+  };
+}

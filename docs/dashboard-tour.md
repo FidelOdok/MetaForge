@@ -563,9 +563,14 @@ verdict. A result recorded without a field keeps its numbers and says
   `GET /v1/simulation/results/{id}/field`. See
   [Simulation results in 3D](simulation-results.md).
 
-## `/library`: parts, materials and machines
+## `/library`: parts, organisations, materials and machines
 
-The component library the agents design with, as one browsable page. The
+The component library the agents design with, as one browsable page. Above
+the tabs, one box searches the whole library at once (parts with every
+spelling of their maker and sellers, organisations, materials, processes,
+machines and more), with a region menu; each result names its kind and the
+fields that matched, a part made or sold only by blocked organisations is
+marked blocked, and clicking a result opens it in its own tab. The
 **Components** tab has one toolbar: a search across maker, part number,
 specs and notes; chips for what a part is for (Lighting, Power, Control &
 radio, Sensors, Controls & display, Audio, Wires & connectors, Mechanical,
@@ -580,10 +585,15 @@ a 3D model or a part being discontinued. Picking a part opens it on its 3D
 view (the maker's own model in the colours its file states when one is
 attached, otherwise the model drawn from its sourced sizes, each shape in
 its material's look), labelled with where the model came from and its
-size; then its maker, part number, category, type, material and datasheet,
+size; then its maker (its organisation, with its review status, and a warning
+when the maker is blocked or every seller is), part number, category, type, material and datasheet,
 and folded sections for specs with their sources, supplier offers, model
 files with their licences, and notes. An empty section is not shown.
-**Materials** lists each material with its sourced properties. **Machines**
+**Organisations** lists manufacturers, sellers, fabricators and test labs,
+with chips for each role, region and status menus, and a warning icon on a
+blocked one; picking one shows its roles, country, regions, other spellings,
+certifications and website, the parts it makes and sells, and the machines it
+runs. **Materials** lists each material with its sourced properties. **Machines**
 shows the machines on the bench first (location, status, route and the
 model each is an instance of), then the machine models grouped by kind;
 each opens to its capabilities (travel, build volume, nozzle, laser power,
@@ -594,8 +604,8 @@ capabilities it takes from its model, marked "from the model".
 file; **Import** loads such a file and adds only what this library lacks,
 leaving every entry already here as it is.
 
-- **Backed by:** `GET /v1/library/components`, `/materials` and
-  `/machines`, `GET /v1/library/components/{ref}/mesh`,
+- **Backed by:** `GET /v1/library/search`, `GET /v1/library/components`,
+  `/organisations`, `/materials` and `/machines`, `GET /v1/library/components/{ref}/mesh`,
   `GET /v1/library/export`, `POST /v1/library/import` and
   `GET /v1/library/engine/{name}`. See
   [Component library](component-library.md).

@@ -366,3 +366,44 @@
   font-size: 10px;
   color: var(--mf-c-9a9aaa);
 }
+
+/* FORGE-450 / FORGE-895: the library-wide search and organisations. */
+.mf-library-global-search {
+  margin-bottom: 14px;
+}
+.mf-library-search.mf-library-search-wide {
+  flex: 1 1 420px;
+}
+.mf-library-global-search .mf-library-browser {
+  max-height: 340px;
+  overflow-y: auto;
+}
+.mf-library-search-kind {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mf-c-9a9aaa);
+  min-width: 88px;
+}
+.mf-library-org-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  vertical-align: middle;
+  color: var(--mf-c-9a9aaa);
+  border: 1px solid var(--mf-r-65-72-90-0p3);
+}
+.mf-library-org-status[data-status='approved'] {
+  color: var(--color-success, #3dd68c);
+  border-color: currentColor;
+}
+.mf-library-org-status[data-status='blocked'] {
+  color: var(--color-error, #ffb4ab);
+  border-color: currentColor;
+}
