@@ -112,6 +112,12 @@ ERGONOMIC_KINDS = [
     "reach_distance",
     "product_mass",
 ]
+
+#: FORGE-450: an organisation's roles, statuses and regions; kept equal to
+#: twin_core.library.organisations by tests/unit/test_library_organisations.py.
+ORG_ROLES = ["manufacturer", "distributor", "fabricator", "test_lab"]
+ORG_STATUSES = ["approved", "unreviewed", "blocked"]
+ORG_REGIONS = ["UK", "EU", "Europe", "Asia", "Americas", "Oceania", "Africa", "Global"]
 _ERGONOMIC = (
     "limit_kind is the feature it bounds, each in one unit: grip_diameter, grip_width, "
     "handle_length, finger_clearance, button_size, operating_height, reach_distance (mm), "
@@ -175,6 +181,7 @@ def catalog_tool_ids() -> set[str]:
         ("component", "components"),
         ("appearance", "appearances"),
         ("ergonomic_limit", "ergonomic_limits"),
+        ("organisation", "organisations"),
     ):
         ids |= {
             f"library.list_{plural}",
@@ -270,6 +277,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
         ("component", "components", COMPONENT_FAMILIES),
         ("appearance", "appearances", APPEARANCE_FINISHES),
         ("ergonomic_limit", "ergonomic_limits", ERGONOMIC_KINDS),
+        ("organisation", "organisations", ORG_ROLES),
     ):
 
         async def list_(args: dict[str, Any], kind: str = kind) -> dict[str, Any]:
@@ -301,6 +309,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 f"{'rule' if kind == 'process' else 'property'} and its source; family "
                 f"{'(the finish) ' if kind == 'appearance' else ''}"
                 f"{'(the feature kind) ' if kind == 'ergonomic_limit' else ''}"
+                f"{'(the role) ' if kind == 'organisation' else ''}"
                 f"narrows the list. Read this before choosing a {kind} so the choice rests "
                 "on recorded figures."
             ),
@@ -310,7 +319,13 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
         tool(
             f"library.get_{kind}",
             f"Get {kind.title()}",
-            f"One {kind} by id or name, with its sources and version history.",
+            f"One {kind} by id or name, with its sources and version history."
+            + (
+                " Any recorded spelling finds it: 'TI' and 'Texas Instruments Inc.' give the "
+                "same organisation when either is its title or an alias."
+                if kind == "organisation"
+                else ""
+            ),
             ref_schema,
             get_,
         )
@@ -339,6 +354,40 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "notes": {"type": "string"},
             }
             required = ["name", "limit_kind", "population", "source_kind"]
+        elif kind == "organisation":
+            register_desc = (
+                "Add an organisation once, however it is written: title (the name it trades "
+                "as), roles (manufacturer, distributor, fabricator, test_lab; a company may "
+                "have several), aliases (every other spelling, e.g. TI for Texas "
+                "Instruments), country (ISO 3166 two-letter), regions it serves (UK, EU, "
+                "Europe, Asia, Americas, Oceania, Africa, Global), website, quote_url, "
+                "certifications (e.g. ISO 9001, IATF 16949), contacts [{role, url or a "
+                "shared email}] (never a person's own details), lifecycle_policy, connector "
+                "(the vendor connector id that quotes from it) and status (unreviewed, "
+                "approved, or blocked with status_reason). Components whose manufacturer or "
+                "offers name it are linked to it. Held for the person's approval."
+            )
+            register_props = {
+                "name": {"type": "string"},
+                "title": {"type": "string"},
+                "roles": {"type": "array", "items": {"type": "string", "enum": families}},
+                "aliases": {"type": "array", "items": {"type": "string"}},
+                "status": {"type": "string", "enum": list(ORG_STATUSES)},
+                "status_reason": {"type": "string"},
+                "country": {"type": "string"},
+                "regions": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(ORG_REGIONS)},
+                },
+                "website": {"type": "string"},
+                "quote_url": {"type": "string"},
+                "certifications": {"type": "array", "items": {"type": "string"}},
+                "contacts": {"type": "array", "items": {"type": "object"}},
+                "lifecycle_policy": {"type": "string"},
+                "connector": {"type": "string"},
+                "notes": {"type": "string"},
+            }
+            required = ["title", "roles"]
         elif kind == "appearance":
             register_desc = (
                 "Add an appearance (colour, material and finish): name (identifier, e.g. "
@@ -486,12 +535,16 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                     "material": "title, designation, forms, processes, properties (merged by "
                     "name) or notes.",
                     "component": "title, specs (merged by name), geometry, material, "
-                    "suppliers (replaced), manufacturer, mpn, datasheet, interfaces "
+                    "suppliers (replaced), manufacturer, manufacturer_org (an organisation "
+                    "id or any of its spellings), mpn, datasheet, interfaces "
                     "(replaced) or notes.",
                     "appearance": "title, finish, colour (replaced), texture, properties "
                     "(merged by name), materials, processes, suppliers (replaced) or notes.",
                     "ergonomic_limit": "title, applies_to, min, max, population, "
                     "source_kind, source_ref or notes.",
+                    "organisation": "title, roles, aliases (replaced), status and "
+                    "status_reason, country, regions, website, quote_url, certifications, "
+                    "contacts, lifecycle_policy, connector or notes.",
                 }[kind]
                 + " The old version is kept. Held for the person's approval."
             ),

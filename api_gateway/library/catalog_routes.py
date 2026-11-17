@@ -285,6 +285,70 @@ async def update_ergonomic_limit(
 # -- the whole library as one file (2026-11-12) ------------------------------------------
 
 
+@router.get("/organisations")
+async def list_organisations(role: str | None = None, *, request: Request) -> dict[str, Any]:
+    """Manufacturers, distributors, fabricators and test labs (FORGE-450), by role."""
+    return _list("organisation", role, request)
+
+
+@router.get("/organisations/resolve")
+async def resolve_organisation(name: str, request: Request) -> dict[str, Any]:
+    """The organisation a written name refers to, through its aliases; 404 when none."""
+    org = get_catalog().resolve_organisation(name, viewer=library_tenant(request))
+    if org is None:
+        raise HTTPException(status_code=404, detail=f"no organisation answers to '{name}'")
+    return {"entry": _shown(org)}
+
+
+@router.post("/organisations/migrate")
+async def migrate_organisations(request: Request, apply: bool = False) -> dict[str, Any]:
+    """Organisations from the names the library already holds (FORGE-450).
+
+    Without ``apply`` it only reports: the organisations it would create (merged
+    spellings as aliases, roles from where each name appears), and related names left
+    for a person to merge or keep apart. With ``apply=true`` it creates them as
+    ``unreviewed`` and links components, offers and service-bureau machines. Shared
+    library data, so an account on a shared gateway may not run it.
+    """
+    from api_gateway.library.routes import get_machine_library
+    from twin_core.library.organisation_migration import apply_plan, plan_organisations
+
+    if library_tenant(request) is not None:
+        raise HTTPException(status_code=403, detail="organisations are shared library data")
+    by = _by(request, "")
+    with tracer.start_as_current_span("library.migrate_organisations") as span:
+        catalog, machines = get_catalog(), get_machine_library()
+        plan = plan_organisations(catalog, machines)
+        span.set_attribute("organisations.proposed", len(plan["proposed"]))
+        if not apply:
+            return {"applied": False, **plan}
+        result = apply_plan(plan, catalog, machines, by=f"organisation migration by {by}")
+        span.set_attribute("organisations.created", result["created"])
+    logger.info(
+        "organisations_migration_applied",
+        by=by,
+        **{k: v for k, v in result.items() if k != "failed"},
+    )
+    return {"applied": True, **result, "review": plan["review"]}
+
+
+@router.get("/organisations/{ref}")
+async def get_organisation(ref: str, request: Request) -> dict[str, Any]:
+    return _get("organisation", ref, request)
+
+
+@router.post("/organisations", status_code=201)
+async def register_organisation(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    return _register("organisation", body, request)
+
+
+@router.patch("/organisations/{ref}")
+async def update_organisation(
+    ref: str, body: UpdateEntryRequest, request: Request
+) -> dict[str, Any]:
+    return _update("organisation", ref, body, request)
+
+
 @router.get("/export")
 async def export_library(history: bool = False) -> dict[str, Any]:
     """Every current catalog entry and machine as one JSON document, to keep or move.

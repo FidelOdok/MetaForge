@@ -61,6 +61,12 @@ import structlog
 
 from twin_core.library.licences import ACCEPTED_LICENCES, is_accepted, normalise_licence
 from twin_core.library.machines import MACHINE_KINDS
+from twin_core.library.organisations import (
+    OrganisationEntry,
+    OrganisationError,
+    org_key,
+    parse_organisation,
+)
 from twin_core.library.viewer import FROM_CONTEXT, resolve
 
 logger = structlog.get_logger(__name__)
@@ -696,7 +702,9 @@ def parse_suppliers(raw: Any) -> list[dict[str, Any]]:
     for i, item in enumerate(raw):
         if not isinstance(item, dict) or not item.get("supplier") or not item.get("sku"):
             raise CatalogError("each supplier needs supplier and sku")
-        row: dict[str, Any] = {k: str(item[k]) for k in ("supplier", "sku", "url") if item.get(k)}
+        row: dict[str, Any] = {
+            k: str(item[k]) for k in ("supplier", "sku", "url", "org") if item.get(k)
+        }
         if item.get("offer") is not None:
             row["offer"] = parse_offer(f"suppliers[{i}]", item["offer"])
         out.append(row)
@@ -808,6 +816,8 @@ class ComponentEntry:
     suppliers: list[dict[str, Any]]
     models: list[dict[str, Any]] = field(default_factory=list)
     manufacturer: str = ""
+    #: The organisation entry the manufacturer is (FORGE-450), set when the name resolves.
+    manufacturer_org: str = ""
     mpn: str = ""
     datasheet: str = ""
     interfaces: list[dict[str, str]] = field(default_factory=list)
@@ -1022,6 +1032,8 @@ class SqliteCatalog:
             return ComponentEntry(specs=specs, **body)
         if body.get("kind") == "ergonomic_limit":
             return ErgonomicLimitEntry(**body)
+        if body.get("kind") == "organisation":
+            return OrganisationEntry(**body)
         if body.get("kind") == "appearance":
             props = {k: Sourced(**v) for k, v in (body.pop("properties", None) or {}).items()}
             return AppearanceEntry(properties=props, **body)
@@ -1048,6 +1060,11 @@ class SqliteCatalog:
                     f" ORDER BY owner {order} LIMIT 1",
                     (kind, ref.strip().lower(), *args),
                 ).fetchone()
+        if row is None and kind == "organisation":
+            # Any recorded spelling finds the organisation (FORGE-450).
+            found = self._org_index(viewer).get(org_key(ref))
+            if found is not None:
+                return found
         if row is None:
             raise CatalogNotFoundError(ref)
         entry = self._load(json.loads(row[0]))
@@ -1066,7 +1083,12 @@ class SqliteCatalog:
                 (kind, *args),
             ).fetchall()
         entries = [self._load(json.loads(r[0])) for r in rows]
-        return [e for e in entries if family is None or e.family == family]
+        if family is None:
+            return entries
+        if kind == "organisation":
+            # An organisation has roles, not a family: ``family`` filters by role.
+            return [e for e in entries if family in e.roles]
+        return [e for e in entries if getattr(e, "family", None) == family]
 
     def history(self, entry_id: str) -> builtins.list[dict[str, Any]]:
         with self._lock:
@@ -1186,12 +1208,29 @@ class SqliteCatalog:
         )
 
     def register(
-        self, kind: str, data: dict[str, Any], *, by: str = "", owner: Any = FROM_CONTEXT
+        self,
+        kind: str,
+        data: dict[str, Any],
+        *,
+        by: str = "",
+        owner: Any = FROM_CONTEXT,
+        relink: bool = True,
     ) -> Any:
-        """Add an entry; ``owner`` makes it an account's own, else it is shared."""
+        """Add an entry; ``owner`` makes it an account's own, else it is shared.
+
+        A new organisation links the components that name it; ``relink=False`` leaves that
+        to one :meth:`relink_organisations` call after a batch.
+        """
         owner = resolve(owner)
         now = self._clock()
-        entry: ProcessEntry | MaterialEntry | ComponentEntry | AppearanceEntry | ErgonomicLimitEntry
+        entry: (
+            ProcessEntry
+            | MaterialEntry
+            | ComponentEntry
+            | AppearanceEntry
+            | ErgonomicLimitEntry
+            | OrganisationEntry
+        )
         if kind == "process":
             family = str(data.get("family") or "")
             if family not in PROCESS_FAMILIES:
@@ -1285,11 +1324,34 @@ class SqliteCatalog:
                 updated_at=now,
                 **parse_ergonomic_limit(data),
             )
+        elif kind == "organisation":
+            title = str(data.get("title") or data.get("name") or "").strip()
+            if not title:
+                raise CatalogError("an organisation needs its title, the name it trades as")
+            try:
+                fields = parse_organisation(data)
+            except OrganisationError as exc:
+                raise CatalogError(str(exc)) from exc
+            name = data.get("name") or re.sub(r"[^a-z0-9]+", "_", org_key(title))[:63].strip("_")
+            entry = OrganisationEntry(
+                id=f"or_{uuid.uuid4().hex[:12]}",
+                name=_name(name),
+                title=title[:120],
+                notes=str(data.get("notes") or ""),
+                updated_at=now,
+                **fields,
+            )
+            self._check_org_keys(entry, owner)
         else:
             raise CatalogError(
-                "kind must be process, material, component, appearance or ergonomic_limit"
+                "kind must be process, material, component, appearance, ergonomic_limit "
+                "or organisation"
             )
+        if isinstance(entry, ComponentEntry):
+            self._link_component(entry, data.get("manufacturer_org"), owner)
         self._save(entry, by, new=True, owner=owner)
+        if isinstance(entry, OrganisationEntry) and relink:
+            self.relink_organisations(by=by)
         return entry
 
     def update(
@@ -1308,6 +1370,23 @@ class SqliteCatalog:
             )
         if isinstance(entry, ProcessEntry):
             allowed = {"title", "machine_kinds", "material_families", "rules", "notes"}
+        elif isinstance(entry, OrganisationEntry):
+            allowed = {
+                "title",
+                "roles",
+                "aliases",
+                "status",
+                "status_reason",
+                "country",
+                "regions",
+                "website",
+                "quote_url",
+                "certifications",
+                "contacts",
+                "lifecycle_policy",
+                "connector",
+                "notes",
+            }
         elif isinstance(entry, ComponentEntry):
             allowed = {
                 "title",
@@ -1318,6 +1397,7 @@ class SqliteCatalog:
                 "notes",
                 "models",
                 "manufacturer",
+                "manufacturer_org",
                 "mpn",
                 "datasheet",
                 "interfaces",
@@ -1371,6 +1451,18 @@ class SqliteCatalog:
             entry.needs_review = parsed["needs_review"]
             if "applies_to" in changes:
                 entry.applies_to = str(changes["applies_to"] or "").strip()
+        elif isinstance(entry, OrganisationEntry):
+            if "status" in changes and "status_reason" not in changes:
+                changes = {**changes, "status_reason": entry.status_reason}
+            try:
+                fields = parse_organisation(changes, partial=True)
+            except OrganisationError as exc:
+                raise CatalogError(str(exc)) from exc
+            for key, value in fields.items():
+                setattr(entry, key, value)
+            if "title" in changes:
+                entry.title = str(changes["title"] or "").strip()[:120] or entry.title
+            self._check_org_keys(entry, self.owner_of(entry.id))
         elif isinstance(entry, AppearanceEntry):
             if "finish" in changes:
                 if changes["finish"] not in APPEARANCE_FINISHES:
@@ -1432,6 +1524,12 @@ class SqliteCatalog:
                 entry.material = str(changes["material"] or "").strip().lower()
             if "suppliers" in changes:
                 entry.suppliers = parse_suppliers(changes["suppliers"])
+            if {"manufacturer", "manufacturer_org", "suppliers"} & set(changes):
+                if "manufacturer" in changes and "manufacturer_org" not in changes:
+                    entry.manufacturer_org = ""
+                self._link_component(
+                    entry, changes.get("manufacturer_org"), self.owner_of(entry.id)
+                )
         elif isinstance(entry, ProcessEntry):
             if "machine_kinds" in changes:
                 entry.machine_kinds = _choices(
@@ -1454,14 +1552,93 @@ class SqliteCatalog:
                 entry.designation = str(changes["designation"] or "").strip()
             if "stock" in changes:
                 entry.stock = parse_stock(changes["stock"])
-        if "title" in changes:
+        if "title" in changes and not isinstance(entry, OrganisationEntry):
             entry.title = str(changes["title"] or "").strip()
         if "notes" in changes:
             entry.notes = str(changes["notes"] or "")
         entry.version += 1
         entry.updated_at = self._clock()
         self._save(entry, by, new=False)
+        if isinstance(entry, OrganisationEntry):
+            self.relink_organisations(by=by)
         return entry
+
+    # ── organisations (FORGE-450) ────────────────────────────────────────
+
+    def _org_index(self, viewer: str | None) -> dict[str, OrganisationEntry]:
+        index: dict[str, OrganisationEntry] = {}
+        for org in self.list("organisation", viewer=viewer):
+            for key in org.keys():
+                index.setdefault(key, org)
+        return index
+
+    def _check_org_keys(self, entry: OrganisationEntry, owner: str | None) -> None:
+        """Two organisations may not answer to the same name or alias."""
+        for key, other in self._org_index(owner).items():
+            if other.id != entry.id and key in entry.keys():
+                raise CatalogError(
+                    f"'{key}' already names {other.title} ({other.id}); "
+                    "add it there as an alias, or use a different name"
+                )
+
+    def resolve_organisation(
+        self, text: Any, *, viewer: Any = FROM_CONTEXT
+    ) -> OrganisationEntry | None:
+        """The organisation ``text`` names: its id, or any recorded spelling. None if none."""
+        viewer = resolve(viewer)
+        ref = str(text or "").strip()
+        if not ref:
+            return None
+        if ref.startswith("or_"):
+            try:
+                found = self.get(ref, "organisation", viewer=viewer)
+            except CatalogNotFoundError:
+                return None
+            return found if isinstance(found, OrganisationEntry) else None
+        return self._org_index(viewer).get(org_key(ref))
+
+    def _link_component(self, entry: ComponentEntry, explicit: Any, owner: str | None) -> None:
+        """Point the manufacturer and each offer at their organisations where they resolve."""
+        if explicit:
+            org = self.resolve_organisation(str(explicit), viewer=owner)
+            if org is None:
+                raise CatalogError(f"manufacturer_org {explicit!r} is not an organisation")
+            entry.manufacturer_org = org.id
+        elif entry.manufacturer and not entry.manufacturer_org:
+            org = self.resolve_organisation(entry.manufacturer, viewer=owner)
+            entry.manufacturer_org = org.id if org else ""
+        for row in entry.suppliers:
+            if not row.get("org"):
+                org = self.resolve_organisation(row.get("supplier"), viewer=owner)
+                if org is not None:
+                    row["org"] = org.id
+            elif self.resolve_organisation(row["org"], viewer=owner) is None:
+                raise CatalogError(f"supplier org {row['org']!r} is not an organisation")
+
+    def relink_organisations(self, *, by: str = "") -> int:
+        """Link components whose manufacturer or offers name an organisation but do not
+        point at it yet. Returns how many entries changed (each gets a new version)."""
+        index = self._org_index(None)
+        changed = 0
+        for comp in self.list("component", viewer=None):
+            touched = False
+            if comp.manufacturer and not comp.manufacturer_org:
+                org = index.get(org_key(comp.manufacturer))
+                if org is not None and (self.owner_of(org.id) in (None, self.owner_of(comp.id))):
+                    comp.manufacturer_org, touched = org.id, True
+            for row in comp.suppliers:
+                if not row.get("org"):
+                    org = index.get(org_key(row.get("supplier")))
+                    if org is not None:
+                        row["org"], touched = org.id, True
+            if touched:
+                comp.version += 1
+                comp.updated_at = self._clock()
+                self._save(comp, by or "organisation-link", new=False)
+                changed += 1
+        if changed:
+            logger.info("catalog_organisations_relinked", components=changed)
+        return changed
 
 
 def _fmt(value: float) -> str:
