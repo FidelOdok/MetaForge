@@ -118,6 +118,16 @@ ERGONOMIC_KINDS = [
 ORG_ROLES = ["manufacturer", "distributor", "fabricator", "test_lab"]
 ORG_STATUSES = ["approved", "unreviewed", "blocked"]
 ORG_REGIONS = ["UK", "EU", "Europe", "Asia", "Americas", "Oceania", "Africa", "Global"]
+#: FORGE-895: what library.search covers; equal to twin_core.library.search.SEARCH_KINDS.
+SEARCH_KINDS = [
+    "component",
+    "organisation",
+    "material",
+    "process",
+    "machine",
+    "appearance",
+    "ergonomic_limit",
+]
 _ERGONOMIC = (
     "limit_kind is the feature it bounds, each in one unit: grip_diameter, grip_width, "
     "handle_length, finger_clearance, button_size, operating_height, reach_distance (mm), "
@@ -174,7 +184,12 @@ def catalog_tool_ids() -> set[str]:
     The ids are assembled per kind, which a literal-id source scan cannot
     see, so coverage checks import this (the same as ``distributor_tool_ids``).
     """
-    ids = {"library.process_limits", "library.standard_part", "library.resolve_component_model"}
+    ids = {
+        "library.process_limits",
+        "library.standard_part",
+        "library.resolve_component_model",
+        "library.search",
+    }
     for kind, plural in (
         ("process", "processes"),
         ("material", "materials"),
@@ -193,6 +208,8 @@ def catalog_tool_ids() -> set[str]:
 
 
 class CatalogService(Protocol):
+    async def search(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
+
     async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]: ...
 
     async def get_entry(self, kind: str, ref: str) -> dict[str, Any]: ...
@@ -570,6 +587,41 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
         return await service.standard_part(
             str(args["family"]), str(args["size"]), float(length) if length is not None else None
         )
+
+    async def search(args: dict[str, Any]) -> dict[str, Any]:
+        return await service.search(args)
+
+    tool(
+        "library.search",
+        "Search Library",
+        (
+            "Search the whole library at once, before the web: components (name, MPN, title, "
+            "maker and every spelling of it, suppliers, SKUs), organisations (manufacturers, "
+            "distributors, fabricators, test labs by title, alias, country, region), "
+            "materials, processes, machines and their operators, appearances and ergonomic "
+            "limits. Every word of q must match; results come best first, each naming the "
+            "fields that matched. kinds narrows the kinds; role, region and status filter "
+            "organisations and the components and machines linked to one (region UK finds "
+            "parts with a UK seller and UK fabricators). A component made or sold only by a "
+            "blocked organisation carries blocked: do not choose it without saying so."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "q": {"type": "string", "description": "Words to find, e.g. 'xiao' or 'sls'."},
+                "kinds": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": SEARCH_KINDS},
+                },
+                "role": {"type": "string", "enum": ORG_ROLES},
+                "region": {"type": "string", "enum": ORG_REGIONS},
+                "status": {"type": "string", "enum": ORG_STATUSES},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            },
+            "required": ["q"],
+        },
+        search,
+    )
 
     tool(
         "library.standard_part",

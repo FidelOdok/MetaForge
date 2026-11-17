@@ -204,6 +204,8 @@ READ_ONLY: frozenset[str] = frozenset(
         # FORGE-635: ergonomic limit reads.
         "library.list_ergonomic_limits",
         "library.get_ergonomic_limit",
+        # FORGE-895: one search across every library kind.
+        "library.search",
         # FORGE-450: organisation reads (any recorded spelling finds one).
         "library.list_organisations",
         "library.get_organisation",

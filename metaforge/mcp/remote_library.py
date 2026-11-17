@@ -106,6 +106,17 @@ class RemoteMachineLibrary:
             "ergonomic_limit": "ergonomic-limits",
         }[kind]
 
+    async def search(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        params: list[tuple[str, Any]] = [("q", arguments.get("q") or "")]
+        params += [("kind", k) for k in arguments.get("kinds") or []]
+        for key in ("role", "region", "status", "limit"):
+            if arguments.get(key):
+                params.append((key, arguments[key]))
+        result: dict[str, Any] = await self._gateway.request(
+            "GET", f"/v1/library/search?{urlencode(params)}"
+        )
+        return result
+
     async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]:
         query = f"?{urlencode({'family': family})}" if family else ""
         result: dict[str, Any] = await self._gateway.request(
