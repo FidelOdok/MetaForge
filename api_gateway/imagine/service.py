@@ -1994,6 +1994,8 @@ class ImagineService:
                 "decision": w_ref,
                 "harness": wiring_outputs.harness_lines(ctx, drawn_lengths),
                 "pins": len(pin_params),
+                # the controller's signal pins in the firmware agent's pin_map shape
+                "firmware_pin_map": wiring_outputs.firmware_pin_map(ctx),
                 # the interconnect circuit an agent hands to kicad.generate_schematic
                 "circuit": wiring_outputs.interconnect_circuit(
                     ctx, str(product.get("name") or "product")

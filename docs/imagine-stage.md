@@ -760,6 +760,11 @@ When the studio has a connection list, the handover turns it into what Develop b
   continuity check of each net and a check for shorts between power and ground before the
   first power-up.
 
+- **Firmware pin map.** The controller's signal pins (the board part, `role: board`) in the
+  firmware agent's `pin_map` shape: `{signal, pin, peripheral, direction, to}`, with the net as
+  the signal, the board's own pin name (`D1`, `D4`) as the pin and the bus as the peripheral;
+  power and ground are left out. It is listed in the wiring decision and kept with the handed-over
+  studio, so firmware is generated against named pins rather than words.
 - **Interconnect circuit.** The wiring as a circuit for `kicad.generate_schematic`: each part
   a generic one-row connector (`Connector_Generic:Conn_01xNN`, up to 40 pins) with one pin per
   wired end in wiring order, a `Pins` field mapping each pin number back to

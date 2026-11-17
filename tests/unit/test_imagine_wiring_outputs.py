@@ -243,3 +243,24 @@ async def test_the_handover_uses_lengths_measured_on_this_revision_only() -> Non
 
 async def _no_contract(project_id: str, contract: Any, actor: str) -> str:
     return "contract:x"
+
+
+def test_the_firmware_pin_map_is_the_boards_signal_pins_in_the_agents_shape() -> None:
+    ctx = _ctx(
+        [*CONNS, {"id": "c4", "net": "SDA", "from": "board-a.i2c.SDA", "to": "lux-a.i2c.SDA"}]
+    )
+    ctx["components"]["parts"][0]["role"] = "board"
+    pins = wiring_outputs.firmware_pin_map(ctx)
+    # power and ground are not the firmware's to drive
+    assert [p["signal"] for p in pins] == ["DATA", "SDA"]
+    data = pins[0]
+    assert {k: data[k] for k in ("signal", "pin", "peripheral", "direction")} == {
+        "signal": "DATA",
+        "pin": "d6",
+        "peripheral": "GPIO",
+        "direction": "out",
+    }
+    assert data["to"] == ["ring-a.din"] and pins[1]["pin"] == "i2c.SDA"
+    # no board, no pin map
+    ctx["components"]["parts"][0]["role"] = "fn:e_ctrl"
+    assert wiring_outputs.firmware_pin_map(ctx) == []
