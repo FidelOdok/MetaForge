@@ -776,6 +776,18 @@ When the studio has a connection list, the handover turns it into what Develop b
 All four are recorded as one design decision, `Imagine wiring: <product>`, pinned to the studio
 revision, with V2 provenance; the circuit is in it as a JSON block.
 
+#### Who the part is, from the library
+
+A part linked to a library entry needs only its `id`, `role`, `library` and `interfaces` in the
+studio. On each write its empty `manufacturer`, `mpn`, `datasheet`, `name` and `retrieved` are
+filled from the entry (`retrieved` is the date of the entry's current version), and the part
+records `facts_from` naming the entry, its version and the fields it took. A value the agent
+wrote is kept. Interfaces are not copied: a library entry's pin names are not always valid
+studio interface ids. Together with the size, model and price below, linking a part means the
+agent need not read the entry at all. An Imagine-stage design turn, which writes a whole
+studio, gets its own tool-call budget: 60 by default (`METAFORGE_CHAT_IMAGINE_MAX_STEPS`),
+never below the general chat budget. Code: `api_gateway/imagine/library_facts.py`.
+
 #### Sizes from the library
 
 A real part linked to a library entry (`library`) takes its size from the entry on each write,

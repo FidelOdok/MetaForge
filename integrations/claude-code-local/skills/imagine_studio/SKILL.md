@@ -172,7 +172,11 @@ write:
 - **Parts** in `context.components` need `schemaVersion: 1`, and each part
   `id`, `role` (`fn:<function>`, `board` or `battery`), `mpn`, `manufacturer`,
   `datasheet`, `retrieved`, `interfaces` and `geometry.envelope` with a
-  `source`.
+  `source`. A part linked to a library entry (`"library": "<entry name>"`)
+  needs only `id`, `role`, `library` and its `interfaces`: the write fills its
+  maker, order code, datasheet, title, retrieved date, size, model and price
+  from the entry. Do not read an entry you only link; read one when you need
+  something it holds to decide.
 - **Real parts live in the component library.** Before researching a part,
   look for it with `library.list_components` (family `module`, `battery` or
   `electronic`) and use what it holds: the entry's specs carry their sources.

@@ -36,6 +36,7 @@ from api_gateway.imagine import (
     component_link,
     engine_page,
     library_cost,
+    library_facts,
     library_geometry,
     library_link,
     library_machines,
@@ -754,6 +755,11 @@ class ImagineService:
         # A linked part's size comes from its library entry first (FORGE-877), so the
         # rungs below draw only what the library cannot size.
         lookup = library_cost.cached(library_cost.catalog_entry)
+        # Its maker, order code, datasheet and title too, where the part leaves them empty
+        # (FORGE-896): the agent need not read the entry to link a part.
+        config, identified = await asyncio.to_thread(
+            library_facts.derive_part_facts, config, lookup
+        )
         config, sized = await asyncio.to_thread(
             library_geometry.derive_part_geometry, config, lookup
         )
@@ -790,7 +796,17 @@ class ImagineService:
         library = await asyncio.to_thread(
             library_link.library_notes, config, library_link.catalog_exists
         )
-        drawn = [*material_notes, *sized, *machined, *drawn, *linked, *modelled, *priced, *library]
+        drawn = [
+            *identified,
+            *material_notes,
+            *sized,
+            *machined,
+            *drawn,
+            *linked,
+            *modelled,
+            *priced,
+            *library,
+        ]
         # The wiring as a whole: unwired power, floating inputs, wires too thin (FORGE-886).
         wiring = wiring_checks.wiring_findings(_context(config))
         try:

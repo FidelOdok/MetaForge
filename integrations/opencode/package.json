@@ -1,6 +1,6 @@
 {
   "name": "metaforge-opencode",
-  "version": "0.2.79",
+  "version": "0.2.80",
   "description": "MetaForge for opencode: the hosted gateway as an MCP server, with commands, skills, subagents and working rules.",
   "type": "module",
   "exports": {
