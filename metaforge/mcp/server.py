@@ -153,6 +153,7 @@ from mcp_core.service_auth import (
 from mcp_core.workflows import WORKFLOWS, prompt_body, prompt_manifest
 from metaforge.mcp.capture import SessionCapture
 from metaforge.mcp.project_scope import McpProjectScoper, ProjectScopeError
+from metaforge.version import package_version
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
 from tool_registry.bootstrap import bootstrap_tool_registry
@@ -340,7 +341,7 @@ class UnifiedMcpServer:
     def __init__(
         self,
         adapters: list[McpToolServer],
-        version: str = "0.1.0",
+        version: str | None = None,
         session_capture: SessionCapture | None = None,
         tool_registry: ToolRegistry | None = None,
         profile: str | None = None,
@@ -404,7 +405,9 @@ class UnifiedMcpServer:
         # MCP envelope and popped. Bounded by that pop; see _remember_hold.
         self._approval_records: dict[str, ApprovalRecord] = {}
         self._exempt_local_writes = exempt_local_writes
-        self._version = version
+        # The installed release (stamped by the release workflow), unless a
+        # caller names one. It used to be a literal "0.1.0".
+        self._version = version or package_version()
         # FORGE-332: what the transport in front of us enforces. Only the
         # transport knows, so it tells us; None means nobody said, and the
         # health report says exactly that rather than guessing "open".

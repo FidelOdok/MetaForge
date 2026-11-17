@@ -76,6 +76,7 @@ from metaforge.mcp.http_elicitation import (
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.origin import OriginPolicy
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
+from metaforge.version import package_version
 from observability.metrics import collector_for
 
 logger = structlog.get_logger("metaforge.mcp")
@@ -664,7 +665,7 @@ def build_http_app(
     server.attach_client_task_grant(_client_task_verifier_from_env())
     app = FastAPI(
         title="MetaForge MCP",
-        version="0.1.0",
+        version=package_version(),
         description=(
             "Unified MCP server aggregating every MetaForge tool adapter. "
             "POST /mcp with a JSON-RPC body. /mcp/sse streams responses "
