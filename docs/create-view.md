@@ -1018,8 +1018,11 @@ Three routes: **Make at home**, **Use my workshop** and **Have it made**.
 part suggests CNC machining, a single plastic part FDM printing), and allows
 any other. Home and workshop builds pick a registered machine from the machine
 library; a saved machine is not proof it is ready. For an external maker,
-quotes, orders, file sharing and payment each go through their own connector
-and approval; without a connector, *Download making files* exports STL or STEP
+the manufacturer field suggests the library's fabricators as you type (never a
+blocked one) and warns when the name typed is an organisation the library
+blocks, by any of its recorded spellings; it stays free text, so a maker not in
+the library can still be named. Quotes, orders, file sharing and payment each
+go through their own connector and approval; without a connector, *Download making files* exports STL or STEP
 through `/v1/manufacture/release`.
 
 A **build** is one manufacturing attempt of one exact revision (work product
