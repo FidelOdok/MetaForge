@@ -523,8 +523,12 @@ class TestTheHub:
 
 
 @pytest.mark.asyncio
-class TestTheCallStreamCarriesTheOpenPrompt:
-    """The held call's own stream stays open for its prompt after the result.
+class TestTheCallStreamEndsWithTheResult:
+    """With no ``GET /mcp``, the held call's stream closes after its result.
+
+    It used to stay open for the prompt, and OpenCode (which waits for the
+    stream to close) hung the call for the prompt's whole lifetime. The
+    approval waits for a person on the dashboard instead.
 
     Driven over raw ASGI with the call-stream tests' exchange helper, because
     a buffered test client would never return a stream that is still open.
@@ -560,7 +564,7 @@ class TestTheCallStreamCarriesTheOpenPrompt:
             "params": {"name": "project.create", "arguments": {"name": "drone"}},
         }
 
-    async def test_the_result_comes_back_and_the_prompt_stays_until_answered(
+    async def test_the_stream_closes_after_the_result_and_the_hold_waits(
         self, gateway: httpx.AsyncClient
     ) -> None:
         async with gateway as http:
@@ -569,34 +573,20 @@ class TestTheCallStreamCarriesTheOpenPrompt:
             await call.start()
             ask = await call.next_event()
             assert ask is not None and ask["method"] == "elicitation/create"
-            # The call returns promptly, held, on the same stream.
+            # The call returns, held, on the same stream...
             result = await call.next_event()
-            assert result is not None and result["id"] == 1
+            while result is not None and result.get("id") != 1:
+                result = await call.next_event()  # the withdrawal comes first
+            assert result is not None
             assert result["result"]["_meta"]["approval"]["held"] is True
-            assert projects.calls == []
-            # The stream is still open, and nothing withdrew the question.
-            pending = asyncio.ensure_future(call.next_event())
-            await asyncio.sleep(0.3)
-            assert not pending.done()
-            # The person answers well after the call returned.
-            reply, _ = await client.post_json(
-                {"jsonrpc": "2.0", "id": ask["id"], "result": {"action": "accept"}},
-                session=session,
-            )
-            assert reply.status == 202
-            assert await asyncio.wait_for(pending, 5) is None  # the stream closes
-
-            async def decided() -> bool:
-                return (await _entry(http))["status"] != "awaiting_approval"
-
-            await _until(decided)
+            # ...and the stream then ends instead of waiting for the prompt.
+            assert await asyncio.wait_for(call.next_event(), 5) is None
+            await asyncio.wait_for(call.task, timeout=5)
             entry = await _entry(http)
-            # The identical retry runs, once.
-            again, body = await client.post_json(self._create(), session=session)
 
-        assert entry["approved_by"] == "local:elicitation"
-        assert body["result"]["isError"] is False
-        assert projects.calls == [{"name": "drone"}]
+        # Nothing decided it: it waits for a person on another surface.
+        assert entry["status"] == "awaiting_approval"
+        assert projects.calls == []
 
     async def test_a_client_that_hangs_up_drops_the_prompt_undecided(
         self, gateway: httpx.AsyncClient

@@ -1188,30 +1188,10 @@ def build_http_app(
                     # Re-serialised so the event is one line whatever the
                     # handler's formatting.
                     yield frame(json.dumps(json.loads(result)))
-                # An approval prompt kept open past the call (a held call's,
-                # or one put to the person on its reply) is still waiting on
-                # this stream, and this client has no other stream to carry
-                # it. The stream stays open, with keep-alives, until every
-                # such prompt is answered or withdrawn, or the client hangs
-                # up, which drops them without deciding anything.
-                if call.pending:
-                    logger.info(
-                        "mcp_call_stream_kept_open",
-                        session_id=session_id,
-                        open_prompts=len(call.pending),
-                    )
-                    idle = 0.0
-                    while call.pending or not call.queue.empty():
-                        try:
-                            message = await asyncio.wait_for(call.queue.get(), timeout=1.0)
-                        except TimeoutError:
-                            idle += 1.0
-                            if idle >= 15.0:
-                                idle = 0.0
-                                yield b": keep-alive\n\n"
-                            continue
-                        idle = 0.0
-                        yield frame(message)
+                # The stream ends with the response, as Streamable HTTP
+                # requires; a prompt still open on it is cancelled by the
+                # close below, which decides nothing. Prompts outlive a call
+                # only on the session's GET /mcp (see ElicitationHub.persistent).
                 hub.close_call_stream(call)
                 logger.info("mcp_call_stream_completed", session_id=session_id)
             finally:

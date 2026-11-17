@@ -383,6 +383,19 @@ class ElicitationHub:
             return False
         return channel.stream_open or self._current_call_stream(session_id) is not None
 
+    def persistent(self, session_id: str | None) -> bool:
+        """Whether a question to this session can outlive the current call.
+
+        Only on an open standalone ``GET /mcp``. A call's own stream must
+        close once its response is sent (Streamable HTTP), and a client such
+        as OpenCode waits for that close before it treats the call as done:
+        holding it open for a prompt hung the call for the prompt's lifetime.
+        """
+        if not session_id:
+            return False
+        channel = self._channels.get(session_id)
+        return channel is not None and channel.eligible
+
     # -- asking and answering ------------------------------------------
 
     async def elicit(
@@ -572,6 +585,10 @@ class HttpElicitor:
         worse than one that is never chosen.
         """
         return self._hub.available(self._session())
+
+    def persistent(self) -> bool:
+        """Consulted before a prompt is left open past its call."""
+        return self._hub.persistent(self._session())
 
     async def __call__(self, message: str, requested_schema: dict[str, Any]) -> ElicitResult:
         session_id = self._session()

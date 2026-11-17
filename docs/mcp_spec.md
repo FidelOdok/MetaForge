@@ -424,9 +424,9 @@ A durable inline hold waits up to 20 seconds for the answer inside the call
 and states the approval's lifetime in the `elicitation/create` message. The
 question is then **not** withdrawn: it stays open until the approval is
 decided on any surface (withdrawn with the reason `approval decided
-elsewhere`) or expires (`approval expired`), at most an hour. Over HTTP a
-call stream carrying such a question stays open after the call's result
-until the question is answered or withdrawn. See
+elsewhere`) or expires (`approval expired`), at most an hour. Over HTTP this
+holds only for a question on the session's `GET /mcp` stream: a call's own
+stream ends with its result, which withdraws a question still open on it. See
 [The prompt outlives the call](approvals.md#the-prompt-outlives-the-call). Without an approval ledger an
 inline hold uses the same window rule as a dashboard hold:
 `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100) without a progress channel,

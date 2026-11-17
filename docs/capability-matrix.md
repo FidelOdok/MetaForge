@@ -1111,14 +1111,14 @@ response. `Accept: */*` is not taken as consent to a stream.
 If the client hangs up while a question is open, the question is cancelled
 at once, so the call ends `timed_out` and nothing is written.
 
-A durable hold's question outlives its call. The call still returns after
+A durable hold's question can outlive its call. The call still returns after
 waiting 20 seconds for the answer, but the question stays open until the
 approval is decided on any surface or expires (at most an hour):
 
 | The question went | After the call's result |
 |---|---|
 | down `GET /mcp` | it stays pending on that stream |
-| on the call's own stream | the stream stays open after the result, with keep-alives, until the question is answered or withdrawn |
+| on the call's own stream | the stream ends with the result, as Streamable HTTP requires, so the question is withdrawn at the end of the 20-second wait and the approval waits on the dashboard |
 
 Decided elsewhere or expired, it is withdrawn with `notifications/cancelled`
 (`approval decided elsewhere`, `approval expired`). Answered, the answer is
