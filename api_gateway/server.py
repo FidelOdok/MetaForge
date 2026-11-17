@@ -1213,13 +1213,20 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # SAME instance can be reused both for twin.record_component_selection
     # and inside component_selector_fn, and again by the REST route's own
     # init_component_selector below -- one recording path, not three.
+    from api_gateway.library.organisation_lookup import make_organisation_resolver
+
     component_recorder_fn = make_component_recorder(
         twin,
         project_backend,
         catalog_store=getattr(app.state, "component_catalog_store", None),
+        # FORGE-450: the gateway reads its own library.
+        organisations=make_organisation_resolver(gateway_url=""),
     )
     component_selector_fn = make_component_selector(
-        twin, decision_recorder=decision_recorder, component_recorder=component_recorder_fn
+        twin,
+        decision_recorder=decision_recorder,
+        component_recorder=component_recorder_fn,
+        organisations=make_organisation_resolver(gateway_url=""),
     )
 
     # FORGE-266: attach/replace a hierarchy node's REALIZED_BY/INSTANCE_OF

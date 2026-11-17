@@ -1908,6 +1908,23 @@ class TwinServer(McpToolServer):
                                 "a gate with nothing linking it to this decision."
                             ),
                         },
+                        "organisations": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-450: the library organisations the manufacturer and "
+                                "distributor names resolved to (id, title, status, roles, "
+                                "regions). The BOM identity uses the maker's canonical name."
+                            ),
+                        },
+                        "blocked": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "The maker or supplier is blocked in the library, with the "
+                                "reason. The part is still recorded; say so to the person "
+                                "and propose an alternative rather than keep it silently."
+                            ),
+                        },
                         "bom_work_product_id": {
                             "type": ["string", "null"],
                             "description": (

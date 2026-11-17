@@ -30,6 +30,8 @@ logger = structlog.get_logger(__name__)
 MARK = "library"
 #: The currency the studio's estimate adds.
 HOME_CURRENCY = "GBP"
+#: The region a seller is preferred from, with the home currency (FORGE-450).
+HOME_REGION = "UK"
 
 Lookup = Callable[[str], "dict[str, Any] | None"]
 
@@ -79,11 +81,18 @@ def best_offer(entry: dict[str, Any], qty: int, use: Any = None) -> dict[str, An
     use, or a use in another kind of unit, prices nothing: a whole pack is never counted
     per unit.
     """
-    found: list[tuple[bool, float, dict[str, Any]]] = []
+    found: list[tuple[bool, bool, float, dict[str, Any]]] = []
+    orgs: dict[str, Any] = entry.get("_orgs") or {}
     for sup in entry.get("suppliers") or []:
         offer = sup.get("offer") if isinstance(sup, dict) else None
         if not isinstance(offer, dict) or offer.get("confirmed") is False:
             continue
+        # FORGE-450: a blocked seller's offer is never used; one serving the home region
+        # (or everywhere) comes before one that does not, after the currency.
+        seller = orgs.get(str(sup.get("org") or "")) or {}
+        if seller.get("status") == "blocked":
+            continue
+        far = bool(seller) and not ({HOME_REGION, "Global"} & set(seller.get("regions") or []))
         pack = offer.get("pack")
         packs = 1
         share = 1.0
@@ -103,6 +112,7 @@ def best_offer(entry: dict[str, Any], qty: int, use: Any = None) -> dict[str, An
         found.append(
             (
                 currency != HOME_CURRENCY,
+                far,
                 unit,
                 {
                     "unit": unit,
@@ -122,8 +132,23 @@ def best_offer(entry: dict[str, Any], qty: int, use: Any = None) -> dict[str, An
         )
     if not found:
         return None
-    found.sort(key=lambda row: (row[0], row[1]))
-    return found[0][2]
+    found.sort(key=lambda row: (row[0], row[1], row[2]))
+    return found[0][3]
+
+
+def _only_blocked(entry: dict[str, Any]) -> bool:
+    """Every confirmed offer comes from a blocked seller (FORGE-450)."""
+    orgs = entry.get("_orgs") or {}
+    offers = [
+        sup
+        for sup in entry.get("suppliers") or []
+        if isinstance(sup, dict)
+        and isinstance(sup.get("offer"), dict)
+        and sup["offer"].get("confirmed") is not False
+    ]
+    return bool(offers) and all(
+        (orgs.get(str(sup.get("org") or "")) or {}).get("status") == "blocked" for sup in offers
+    )
 
 
 def _sold_by_pack(entry: dict[str, Any]) -> bool:
@@ -145,6 +170,7 @@ def price_parts(config: dict[str, Any], lookup: Lookup) -> tuple[dict[str, Any],
     qty = _build_qty(out)
     unpriced: list[str] = []
     needs_use: list[str] = []
+    blocked: list[str] = []
     for part in parts:
         if not isinstance(part, dict) or part.get("standIn"):
             continue
@@ -162,7 +188,9 @@ def price_parts(config: dict[str, Any], lookup: Lookup) -> tuple[dict[str, Any],
         cost = best_offer(entry, qty, part.get("use"))
         if cost is None:
             part.pop("cost", None)
-            if _sold_by_pack(entry) and _amount(part.get("use")) is None:
+            if _only_blocked(entry):
+                blocked.append(str(part.get("id") or name))
+            elif _sold_by_pack(entry) and _amount(part.get("use")) is None:
                 needs_use.append(str(part.get("id") or name))
             else:
                 unpriced.append(str(part.get("id") or name))
@@ -171,6 +199,12 @@ def price_parts(config: dict[str, Any], lookup: Lookup) -> tuple[dict[str, Any],
         cost["derived_from"] = MARK
         part["cost"] = cost
     notes: list[str] = []
+    if blocked:
+        notes.append(
+            f"{len(blocked)} linked part(s) are sold only by organisations the library blocks, "
+            f"so the estimate leaves them out: {', '.join(blocked)}. Find another seller, or "
+            "choose another part."
+        )
     if needs_use:
         notes.append(
             f"{len(needs_use)} linked part(s) are sold by the pack (a roll, reel or sheet), so "
@@ -204,8 +238,20 @@ def catalog_entry(name: str) -> dict[str, Any] | None:
     from api_gateway.library.catalog_routes import get_catalog
     from twin_core.library.catalog import CatalogNotFoundError
 
+    catalog = get_catalog()
     try:
-        entry: dict[str, Any] = get_catalog().get(name, "component").as_dict()
+        entry: dict[str, Any] = catalog.get(name, "component").as_dict()
     except CatalogNotFoundError:
         return None
+    # The sellers' organisations, so an offer can be judged by who sells it (FORGE-450).
+    orgs: dict[str, Any] = {}
+    for sup in entry.get("suppliers") or []:
+        org_id = str(sup.get("org") or "") if isinstance(sup, dict) else ""
+        if org_id and org_id not in orgs:
+            try:
+                org = catalog.get(org_id, "organisation").as_dict()
+            except CatalogNotFoundError:
+                continue
+            orgs[org_id] = {k: org.get(k) for k in ("title", "status", "status_reason", "regions")}
+    entry["_orgs"] = orgs
     return entry
