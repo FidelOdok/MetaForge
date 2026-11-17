@@ -807,6 +807,18 @@ class MetricsRegistry:
         description="Adapter health probes by adapter and outcome",
         labels=["adapter_id", "result"],
     )
+    #: Approval prompts kept open on a client past the call that raised them.
+    #: ``kind`` is ``hold`` (a held call's own prompt) or ``item`` (put to the
+    #: person unasked); ``outcome`` is ``opened`` once, then one of
+    #: ``answered``, ``not_decided``, ``decided_elsewhere``, ``expired``,
+    #: ``dropped`` (dismissed or the client went away) or ``record_failed``
+    #: (the person answered and the answer could not be recorded).
+    MCP_STANDING_PROMPT_TOTAL = MetricDefinition(
+        name="metaforge_mcp_standing_prompt_total",
+        type="counter",
+        description="Approval prompts kept open past their call, by kind and outcome",
+        labels=["kind", "outcome"],
+    )
     #: Is this process running the code sitting next to it (FORGE-411)?
     #:
     #: A counter rather than a gauge for the reason given above, and
@@ -1825,6 +1837,7 @@ class MetricsRegistry:
             cls.MCP_TOOL_CALL_DURATION,
             cls.MCP_ERROR_TOTAL,
             cls.MCP_ADAPTER_PROBE_TOTAL,
+            cls.MCP_STANDING_PROMPT_TOTAL,
             cls.MCP_CODE_VERSION_CHECK_TOTAL,
             cls.MCP_ORIGIN_REJECTED_TOTAL,
             cls.MCP_PROJECT_SCOPE_TOTAL,
@@ -2651,6 +2664,12 @@ class MetricsCollector:
                     "result": "reachable" if reachable else "unreachable",
                 },
             )
+
+    def record_mcp_standing_prompt(self, kind: str, outcome: str) -> None:
+        """Record one approval prompt kept open past its call, or how it ended."""
+        counter = self._instruments.get(MetricsRegistry.MCP_STANDING_PROMPT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind, "outcome": outcome})
 
     def record_mcp_code_version(self, result: str, reloads: bool = False) -> None:
         """Record one code-version check (FORGE-411).

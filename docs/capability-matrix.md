@@ -1080,7 +1080,7 @@ The three-action response maps onto the outcomes above:
 |---|---|
 | `accept` | approved, whatever the content |
 | `decline` | `rejected`: they refused the prompt itself |
-| `cancel`, or no answer inside the window | nobody decided: a durable hold stays pending, a blocking one ends `timed_out` |
+| `cancel`, or no answer inside the window | nobody decided: a durable hold stays pending (and its prompt stays open, below), a blocking one ends `timed_out` |
 
 The form has no yes/no checkbox, only an optional note, so Accept and Decline
 are the decision. An older form carried a required `approve` box, and an
@@ -1110,6 +1110,25 @@ response. `Accept: */*` is not taken as consent to a stream.
 
 If the client hangs up while a question is open, the question is cancelled
 at once, so the call ends `timed_out` and nothing is written.
+
+A durable hold's question outlives its call. The call still returns after
+waiting 20 seconds for the answer, but the question stays open until the
+approval is decided on any surface or expires (at most an hour):
+
+| The question went | After the call's result |
+|---|---|
+| down `GET /mcp` | it stays pending on that stream |
+| on the call's own stream | the stream stays open after the result, with keep-alives, until the question is answered or withdrawn |
+
+Decided elsewhere or expired, it is withdrawn with `notifications/cancelled`
+(`approval decided elsewhere`, `approval expired`). Answered, the answer is
+recorded on the approval exactly as one inside the call would be. Either
+stream closing (the client disconnecting, or a client that stops reading once
+it has its result) answers the question `cancel`, which decides nothing. The
+prompts the sidecar raises by itself for approvals a session has not been
+asked about travel the same way. See
+[The prompt outlives the call](approvals.md#the-prompt-outlives-the-call)
+and [Any approval in the client chat](approvals.md#any-approval-in-the-client-chat).
 
 `client.can_elicit` in `health/check` is a snapshot taken inside that
 call. Over HTTP it is true when `GET /mcp` is open, or when the

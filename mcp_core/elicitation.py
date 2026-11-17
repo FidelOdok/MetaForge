@@ -61,16 +61,19 @@ __all__ = [
     "ElicitResult",
     "Elicitor",
     "ElicitationUnavailableError",
+    "KeepOpen",
     "LateAnswerSink",
     "approval_request",
     "ask_on_hold",
     "cancelled_notification",
     "current_elicitor",
     "current_late_answer_sink",
+    "current_prompt_lifetime",
     "declares_form_elicitation",
     "elicitation_gate",
     "inline_approver",
     "outcome_of_answer",
+    "prompt_lifetime",
     "result_from_payload",
     "with_elicitor",
 ]
@@ -218,7 +221,8 @@ def approval_request(ask: ApprovalAsk) -> tuple[str, dict[str, Any]]:
                 "",
                 f"Accept approves it, Decline refuses it. You can also decide it on the "
                 f"MetaForge Approvals page. The approval stays open for about {minutes} "
-                f"minutes; once approved, {ask.tool_id} runs when it is called again "
+                "minutes, and this prompt with it until it is decided here or anywhere "
+                f"else; once approved, {ask.tool_id} runs when it is called again "
                 "with the same arguments.",
             ]
         else:
@@ -498,6 +502,43 @@ def current_late_answer_sink() -> LateAnswerSink | None:
     return _late_answer_sink.get()
 
 
+# --- A prompt that outlives its call (FORGE-780 follow-up) ------------------
+#
+# A transport bounds how long it waits for one answer (``StdioElicitor`` and
+# the HTTP hub: 180 s). A durable hold's prompt that is kept open after its
+# call returned has to live as long as the approval does, so the asker sets
+# the lifetime here and the elicitor reads it when it sends the question.
+
+_prompt_lifetime: ContextVar[float | None] = ContextVar("mcp_prompt_lifetime", default=None)
+
+
+def current_prompt_lifetime() -> float | None:
+    """How long the question being sent may wait for its answer, or ``None``.
+
+    ``None`` keeps the elicitor's own timeout.
+    """
+    return _prompt_lifetime.get()
+
+
+@contextmanager
+def prompt_lifetime(seconds: float | None) -> Iterator[None]:
+    """Questions sent inside the block wait up to ``seconds`` for an answer."""
+    token = _prompt_lifetime.set(seconds)
+    try:
+        yield
+    finally:
+        _prompt_lifetime.reset(token)
+
+
+#: ``(question, record)``: given a question still open when a held call's
+#: wait ends, and the coroutine that records an answer to it on the approval.
+#: The receiver keeps the question open and records what the person answers.
+KeepOpen = Callable[
+    ["asyncio.Task[ElicitResult]", Callable[[ElicitResult], Awaitable[ApprovalOutcome | None]]],
+    None,
+]
+
+
 async def ask_on_hold(
     elicitor: Elicitor,
     ledger: ApprovalLedger,
@@ -505,14 +546,22 @@ async def ask_on_hold(
     approval_id: str,
     *,
     wait_seconds: float,
+    keep_open: KeepOpen | None = None,
+    lifetime_seconds: float | None = None,
 ) -> ApprovalOutcome | None:
     """Ask the client about an open durable hold, briefly (FORGE-780).
 
     Returns the outcome on record once the person answered within
     ``wait_seconds``, or ``None`` when nobody did: the hold then stays
-    pending, to be decided anywhere. A dismissal decides nothing either. An
-    answer that arrives after the wait is recorded on the hold by the late
-    sink, never applied to a call directly.
+    pending, to be decided anywhere. A dismissal decides nothing either.
+
+    When nobody answered in time the question is either withdrawn (no
+    ``keep_open``), with a late answer still recorded on the hold by the late
+    sink, or handed to ``keep_open`` with the coroutine that records an answer,
+    so the prompt stays on the client until the approval is decided or
+    expires. ``lifetime_seconds`` is how long the elicitor may wait for that
+    answer. Either way an answer only ever decides the record; nothing is run
+    on it directly.
 
     Raises :class:`ElicitationUnavailableError` when the client refused for
     the person without showing the prompt; the hold is left pending for the
@@ -523,41 +572,70 @@ async def ask_on_hold(
     # another request whose context is not this one.
     approver = inline_approver()
 
-    def record_late(result: ElicitResult) -> None:
+    async def record(result: ElicitResult) -> ApprovalOutcome | None:
+        """Record one answer on the hold. ``None``: it decided nothing."""
         outcome = outcome_of_answer(result)
         if outcome not in (ApprovalOutcome.APPROVED, ApprovalOutcome.REJECTED):
-            return
-
-        async def close() -> None:
-            try:
-                recorded = await ledger.close_hold(
-                    approval_id, outcome, route=ELICITATION_ROUTE, approver=approver
-                )
-            except Exception as exc:  # noqa: BLE001 - the record stays pending
-                logger.warning(
-                    "elicitation_late_answer_not_recorded",
-                    approval_id=approval_id,
-                    tool_id=ask.tool_id,
-                    error=str(exc) or type(exc).__name__,
-                )
-                return
-            logger.info(
-                "elicitation_late_answer_recorded",
+            return None
+        try:
+            recorded = await ledger.close_hold(
+                approval_id, outcome, route=ELICITATION_ROUTE, approver=approver
+            )
+        except Exception as exc:  # noqa: BLE001 - the record stays pending
+            logger.warning(
+                "elicitation_late_answer_not_recorded",
                 approval_id=approval_id,
                 tool_id=ask.tool_id,
-                answered=outcome.value,
-                recorded=recorded.value,
+                error=str(exc) or type(exc).__name__,
             )
+            return None
+        logger.info(
+            "elicitation_late_answer_recorded",
+            approval_id=approval_id,
+            tool_id=ask.tool_id,
+            answered=outcome.value,
+            recorded=recorded.value,
+        )
+        return recorded
 
-        task = asyncio.ensure_future(close())
+    def record_late(result: ElicitResult) -> None:
+        if outcome_of_answer(result) not in (ApprovalOutcome.APPROVED, ApprovalOutcome.REJECTED):
+            return
+        task = asyncio.ensure_future(record(result))
         _background.add(task)
         task.add_done_callback(_background.discard)
 
+    # The question runs as a task of its own, created while the late sink and
+    # the lifetime are set, so the elicitor sees both when it sends.
     token = _late_answer_sink.set(record_late)
+    life = _prompt_lifetime.set(lifetime_seconds if keep_open is not None else None)
+    try:
+        question: asyncio.Task[ElicitResult] = asyncio.ensure_future(elicitor(message, schema))
+    finally:
+        _prompt_lifetime.reset(life)
+        _late_answer_sink.reset(token)
     started = time.monotonic()
     try:
-        result = await asyncio.wait_for(elicitor(message, schema), timeout=wait_seconds)
-    except TimeoutError:
+        done, _ = await asyncio.wait({question}, timeout=wait_seconds)
+    except asyncio.CancelledError:
+        question.cancel()
+        raise
+    if not done:
+        if keep_open is not None:
+            keep_open(question, record)
+            logger.info(
+                "elicitation_wait_ended_prompt_kept_open",
+                tool_id=ask.tool_id,
+                approval_id=approval_id,
+                wait_seconds=wait_seconds,
+                lifetime_seconds=lifetime_seconds,
+            )
+            return None
+        question.cancel()
+        try:
+            await question
+        except asyncio.CancelledError:
+            pass
         logger.info(
             "elicitation_wait_ended_hold_open",
             tool_id=ask.tool_id,
@@ -565,8 +643,7 @@ async def ask_on_hold(
             wait_seconds=wait_seconds,
         )
         return None
-    finally:
-        _late_answer_sink.reset(token)
+    result = question.result()
     waited = time.monotonic() - started
     if result.action is not ElicitAction.ACCEPT and waited < UNATTENDED_ANSWER_SECONDS:
         logger.warning(

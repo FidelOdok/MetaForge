@@ -271,6 +271,33 @@ never gets one. The list is fetched at most every 15 seconds and a failure
 to fetch it never affects the call. The plugin's session rules tell the agent
 to pass the notice on straight away.
 
+**Asked without asking.** Where the client can show a prompt (it declared
+elicitation and has a stream the question can travel on, see
+[Over HTTP: which stream carries the question](capability-matrix.md#over-http-which-stream-carries-the-question)),
+the same reply also puts each such approval to the person in a prompt of its
+own, with the question `approvals.decide` asks: only the decisions the item
+allows right now, a reason where one is required, and the answer recorded
+through `POST /v1/approvals/{id}/inline-decision` exactly as `approvals.decide`
+records it (the first decision on any surface wins). The rules:
+
+- Only items this call may see, by the rule `approvals.list` applies (the
+  caller's projects, plus the caller's own requests that name no project yet).
+- Only items that can be decided now. One whose checks failed, or that a run
+  holds, is in the notice but not asked.
+- Each item is asked once per MCP session, and at most 3 such prompts are open
+  at a time per session; the rest are asked on later replies as those close.
+  A held call of this session that was already asked in its own prompt is not
+  asked again.
+- The prompt stays open until the item is decided here or on any other
+  surface, or its deadline passes (an hour at most). Decided elsewhere or
+  expired, it is withdrawn. Dismissing it decides nothing and it is not asked
+  again in this session; the dashboard and `approvals.decide` still decide it.
+- The design-flow worker is never asked, nor is a client that cannot show a
+  prompt (a claude.ai web connector, a request with no stream to carry it, a
+  2026-07-28 handshake-free request). Those get the notice alone.
+
+The tool call this rides on does not wait for the answer.
+
 Both are on the `core` profile, the plugin's default connection. To make room
 under its 40-tool cap, `memory.list_insights` and
 `memory.retrieve_similar_experience` moved to the full profile.
@@ -305,21 +332,24 @@ the client's own approval prompt".
    tool, a canonical hash of the arguments (sorted JSON; the transport's
    `_meta` and reserved `__` arguments are left out), the caller's MCP session
    and the project (the `project_id` argument, else the session's project). It
-   is `pending` with an expiry, 30 minutes by default
+   is `pending` with an expiry, 1 hour by default
    (`METAFORGE_TOOL_APPROVAL_TTL_S`, at most 3600 seconds). A pending approval
    with the same key is reused, never opened twice.
-2. **Asked briefly.** A client that can show a prompt is asked in it for up to
-   20 seconds. Any other client is waited on for 20 seconds in case the person
-   is already on the Approvals page, with progress notifications when the call
-   carries a `progressToken`. An answer in that time runs or refuses the call
-   at once.
+2. **Asked.** A client that can show a prompt is asked in it, and the call
+   waits up to 20 seconds for the answer. Any other client is waited on for 20
+   seconds in case the person is already on the Approvals page, with progress
+   notifications when the call carries a `progressToken`. An answer in that
+   time runs or refuses the call at once. Unanswered, the call returns (step
+   3) but **the prompt stays open** in the client until the approval is
+   decided on any surface or expires: see
+   [The prompt outlives the call](#the-prompt-outlives-the-call).
 3. **Returned.** Unanswered, the call returns straight away. It is a tool
    result with `isError: true` (the tool did not run) whose text tells the
    agent to tell the person, and whose `_meta.approval` carries:
 
    ```json
    {"held": true, "approval_id": "run_...", "expires_at": "2026-11-04T10:30:00+00:00",
-    "expires_in_seconds": 1800, "next_step": "retry this exact call once it is approved",
+    "expires_in_seconds": 3600, "next_step": "retry this exact call once it is approved",
     "code": "approval_required", "outcome": "awaiting_person", "route": "elicitation",
     "where": "...", "repeated": false}
    ```
@@ -329,11 +359,12 @@ the client's own approval prompt".
    JSON-RPC error data, as before.
 4. **Decided anywhere.** The client's prompt, `POST /v1/approvals/{id}/decision`
    (the dashboard's Approvals page), and the plugin's `approvals.decide` all
-   decide the same record. The first decision wins; a later one is a 409. A
-   prompt answered after the call returned still lands on the record: the
-   sidecar keeps where a withdrawn question's answer goes, and an Accept or
-   Decline that arrives late approves or rejects the approval. Dismissing the
-   prompt decides nothing.
+   decide the same record. The first decision wins; a later one is a 409. The
+   prompt answered after the call returned lands on the record the same way
+   an answer inside the call does: Accept approves, Decline refuses. If the
+   prompt was withdrawn and the client still sends an answer, the sidecar
+   records it too (it keeps where a withdrawn question's answer goes).
+   Dismissing the prompt decides nothing.
 5. **Retried.** The same session calling the same tool with the same arguments
    (same hash, same project) finds the decision. Approved, unexpired and
    unused: the call runs immediately and the approval is marked used. It is
@@ -344,6 +375,42 @@ the client's own approval prompt".
 6. **Expired.** A pending approval past its expiry is closed `timed_out`, and
    an approved one not used before its expiry is no longer honoured. The next
    identical call opens a new hold.
+
+### The prompt outlives the call
+
+A client's tool call cannot wait for a person: Claude Code gives up after 120
+seconds. So the call returns after its 20-second wait, and the prompt does not
+go with it. The sidecar keeps the `elicitation/create` open and:
+
+- **withdraws it when the approval is decided elsewhere** (the dashboard,
+  `forge approvals`, `approvals.decide`, another client), checking the ledger
+  every 5 seconds, with `notifications/cancelled` and the reason
+  `approval decided elsewhere`;
+- **withdraws it when the approval expires**, with the reason
+  `approval expired`. Its lifetime is the hold's
+  (`METAFORGE_TOOL_APPROVAL_TTL_S`), and never more than an hour;
+- **records the person's answer** when they give one: Accept approves and
+  Decline refuses, under the same rules as an answer inside the call, and the
+  identical retry then runs once (the agent is told on its next reply);
+- **drops it without deciding anything** when the client disconnects. The
+  approval stays pending for every other surface.
+
+Which channel carries it depends on the client. A client with `GET /mcp` open
+gets the question there, and it simply stays pending. A client with no such
+stream (OpenCode, Claude Code) was asked on the held call's own response
+stream; that stream now stays open after the tool result, with keep-alives,
+until the prompt is answered or withdrawn. A client that stops reading the
+stream once it has its result drops the prompt, which leaves the approval
+exactly where it was before this change: on the dashboard, with the notice.
+
+The agent can never answer the prompt. Only the person's response to
+`elicitation/create`, or a decision on another human surface, decides it.
+
+The log events are `mcp_standing_prompt_opened` and
+`mcp_standing_prompt_closed` (with `outcome`), and the counter
+`metaforge_mcp_standing_prompt_total{kind, outcome}`; an answer that could
+not be recorded (`outcome="record_failed"`) fires
+`McpApprovalPromptAnswerNotRecorded`.
 
 Durable holds survive a gateway restart: a pending one is restored as pending
 until its expiry, where a blocking hold whose waiter died with the process is

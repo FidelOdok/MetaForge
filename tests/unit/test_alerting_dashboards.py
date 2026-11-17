@@ -146,7 +146,8 @@ class TestAlertingRules:
         # + 1 assembly fit checks failing (AssemblyCheckFailures, FORGE-841).
         # + 1 stray boards or schematics left out of releases (info).
         # + 1 MCP project scope unavailable (McpProjectScopeUnavailable, FORGE-859).
-        assert len(rules) == 96
+        # + 1 MCP approval prompt answers not recorded (McpApprovalPromptAnswerNotRecorded).
+        assert len(rules) == 97
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -233,7 +234,8 @@ class TestAlertingRules:
         # + 1 FEA on a committed CAD item failing (FORGE-833).
         # + 1 assembly fit checks failing (FORGE-841).
         # + 1 MCP project scope unavailable (FORGE-859).
-        assert len(warnings) == 78
+        # + 1 answers to MCP approval prompts not recorded.
+        assert len(warnings) == 79
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -296,6 +298,9 @@ class TestAlertingRules:
                 # FORGE-492: the guardrail keeps refusing a tool a phase calls.
                 "DesignFlowToolRefusalSustained",
                 "McpAdapterUnreachable",
+                # An answer to an approval prompt kept open past its call
+                # could not be recorded.
+                "McpApprovalPromptAnswerNotRecorded",
                 "McpErrorRateHigh",
                 # FORGE-411: the process is serving code other than the
                 # checkout beside it. Warning rather than critical because it

@@ -324,16 +324,21 @@ class StdioElicitor:
                 }
             )
         )
+        from mcp_core.elicitation import current_prompt_lifetime
+
+        # A prompt kept open past its call waits as long as its approval lives.
+        timeout = current_prompt_lifetime() or self._timeout
         try:
-            payload = await asyncio.wait_for(future, timeout=self._timeout)
+            payload = await asyncio.wait_for(future, timeout=timeout)
         except TimeoutError:
             self._pending.pop(message_id, None)
             logger.warning("mcp_elicitation_timeout", message_id=message_id)
             self._withdraw(message_id, "approval request timed out")
             return ElicitResult(ElicitAction.CANCEL)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
             self._pending.pop(message_id, None)
-            self._withdraw(message_id, "approval window ended")
+            reason = str(exc.args[0]) if exc.args and exc.args[0] else "approval window ended"
+            self._withdraw(message_id, reason)
             raise
 
         # FORGE-423: shared with the HTTP elicitor. The three defaults here
@@ -1178,12 +1183,36 @@ def build_http_app(
                     while not call.queue.empty():
                         yield frame(call.queue.get_nowait())
                     break
-                hub.close_call_stream(call)
                 result = task.result()
                 if result:
                     # Re-serialised so the event is one line whatever the
                     # handler's formatting.
                     yield frame(json.dumps(json.loads(result)))
+                # An approval prompt kept open past the call (a held call's,
+                # or one put to the person on its reply) is still waiting on
+                # this stream, and this client has no other stream to carry
+                # it. The stream stays open, with keep-alives, until every
+                # such prompt is answered or withdrawn, or the client hangs
+                # up, which drops them without deciding anything.
+                if call.pending:
+                    logger.info(
+                        "mcp_call_stream_kept_open",
+                        session_id=session_id,
+                        open_prompts=len(call.pending),
+                    )
+                    idle = 0.0
+                    while call.pending or not call.queue.empty():
+                        try:
+                            message = await asyncio.wait_for(call.queue.get(), timeout=1.0)
+                        except TimeoutError:
+                            idle += 1.0
+                            if idle >= 15.0:
+                                idle = 0.0
+                                yield b": keep-alive\n\n"
+                            continue
+                        idle = 0.0
+                        yield frame(message)
+                hub.close_call_stream(call)
                 logger.info("mcp_call_stream_completed", session_id=session_id)
             finally:
                 # Normal end, or the client hung up mid-question. Either way
@@ -2179,9 +2208,13 @@ async def _bootstrap(
     server.attach_ownership_sources(
         twin=twin, agent_session_store=agent_session_store, project_backend=project_backend
     )
-    # FORGE-724: tell a client's person about approvals waiting for them.
+    # FORGE-724: tell a client's person about approvals waiting for them, and
+    # (with the decider approvals.decide uses) put each to them in a prompt.
     if flow_bindings.get("design_flow_approvals_lister") is not None:
-        server.attach_approval_notices(flow_bindings["design_flow_approvals_lister"])
+        server.attach_approval_notices(
+            flow_bindings["design_flow_approvals_lister"],
+            flow_bindings.get("design_flow_gate_decider"),
+        )
     # The evaluators' tier-2 calls (calculix.run_fea, run_thermal,
     # freecad.list_named_faces) go through this server's own registry, which
     # only exists now -- the same late binding the gateway does.

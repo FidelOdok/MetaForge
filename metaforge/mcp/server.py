@@ -53,9 +53,12 @@ from mcp_core.elicitation import (
     ELICITATION_PROTOCOL_VERSION,
     ElicitationUnavailableError,
     Elicitor,
+    ElicitResult,
     ask_on_hold,
     declares_form_elicitation,
     elicitation_gate,
+    inline_approver,
+    prompt_lifetime,
 )
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
@@ -153,6 +156,7 @@ from mcp_core.service_auth import (
 from mcp_core.workflows import WORKFLOWS, prompt_body, prompt_manifest
 from metaforge.mcp.capture import SessionCapture
 from metaforge.mcp.project_scope import McpProjectScoper, ProjectScopeError
+from metaforge.mcp.standing_prompts import MAX_PROMPT_SECONDS, StandingPrompts
 from metaforge.version import package_version
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
@@ -192,14 +196,23 @@ POLICY_APPROVABLE_TOOLS = frozenset({"phase.claim"})
 #: FORGE-741 / FORGE-780: how long a held call still waits on the dashboard
 #: before it returns, in case the person is already looking; well inside the
 #: shortest client tool timeout seen (Claude Code's 120 s). The hold itself
-#: lasts ``METAFORGE_TOOL_APPROVAL_TTL_S`` (30 min by default).
+#: lasts ``METAFORGE_TOOL_APPROVAL_TTL_S`` (1 hour by default, the cap).
 HANDOFF_WAIT_SECONDS = 20.0
 HANDOFF_POLL_SECONDS = 1.0
 #: FORGE-780: how long a held call waits on the client's own prompt before it
-#: returns. An answer after this still lands on the approval record.
+#: returns. The prompt stays open after this (see ``StandingPrompts``) and an
+#: answer to it still lands on the approval record.
 ELICITATION_WAIT_SECONDS = DEFAULT_ELICITATION_WAIT_SECONDS
 #: Held calls per session watched for a decision, to tell the agent once.
 _WATCHED_HOLDS_PER_SESSION = 8
+#: How many approvals the server puts to one session's person by itself at a
+#: time (prompts it raised unasked that are still open). The rest wait for a
+#: later reply, so a session that arrives to twenty pending items is not
+#: handed twenty prompts at once.
+AUTO_PROMPTS_OPEN_PER_SESSION = 3
+#: How much longer the transport waits on a kept-open prompt than the prompt
+#: lives, so it is the server that withdraws it at expiry, with that reason.
+_PROMPT_TRANSPORT_GRACE = 30.0
 _APPROVAL_NOTICE_SESSIONS = 512
 _METHOD_NOT_FOUND = METHOD_NOT_FOUND
 _TOOL_EXECUTION_ERROR = TOOL_EXECUTION_ERROR
@@ -358,6 +371,9 @@ class UnifiedMcpServer:
         self._adapters = list(adapters)
         # FORGE-724: pending-approval notices on tool results (off until attached).
         self._approvals_lister: Any = None
+        # Records a person's answer to an approval prompt, like approvals.decide
+        # (``service.decide``). None: the server never prompts unasked.
+        self._approvals_decider: Any = None
         self._approvals_told: dict[str, set[str]] = {}
         # FORGE-780: this session's held calls not yet decided, approval id ->
         # tool, so the next reply after one is approved can say so.
@@ -438,6 +454,9 @@ class UnifiedMcpServer:
         # all -- "which plugin tool is failing, for whom" was a question
         # you answered by reading Loki by hand.
         self._metrics = metrics
+        # Approval prompts kept open on a client past the call that raised
+        # them, until the approval is decided anywhere or expires.
+        self._standing = StandingPrompts(metrics=metrics)
         # FORGE-859: a signed-in account's calls confined to its projects.
         # None (the default, and every deployment without an identity login
         # whose provider can answer for projects) leaves every call as it was.
@@ -682,7 +701,7 @@ class UnifiedMcpServer:
             pass
         return self._caller
 
-    def attach_approval_notices(self, lister: Any) -> None:
+    def attach_approval_notices(self, lister: Any, decider: Any = None) -> None:
         """Mention new pending approvals on tool results (FORGE-724).
 
         ``lister`` is the ``approvals.list`` binding: ``(project_id | None) ->
@@ -690,8 +709,14 @@ class UnifiedMcpServer:
         reached the dashboard, so a person working in a client never heard of
         them. With this on, the first tool result after an approval appears
         carries one sentence saying so, once per item per session.
+
+        ``decider`` is the ``approvals.decide`` binding (``service.decide``).
+        With it, a client that can show a prompt is also asked: each such
+        approval is put to the person once per session, and the prompt stays
+        open until it is decided anywhere or expires.
         """
         self._approvals_lister = lister
+        self._approvals_decider = decider
 
     async def _approval_notice(self, tool_name: str) -> tuple[str, int] | None:
         """One sentence about approvals this session has not been told of, or None."""
@@ -735,6 +760,10 @@ class UnifiedMcpServer:
                         and is_requester(i.get("requester"), ctx.actor_id)
                     )
                 ]
+        # Put what this session's person has not been asked about to them, in
+        # a prompt, where the client can show one. The sentence below still
+        # goes out, for the agent and for a client that cannot.
+        await self._prompt_unasked(session, ctx, items)
         told = self._approvals_told.setdefault(session, set())
         if len(self._approvals_told) > _APPROVAL_NOTICE_SESSIONS:
             self._approvals_told.pop(next(iter(self._approvals_told)))
@@ -755,6 +784,114 @@ class UnifiedMcpServer:
         )
         logger.info("approval_notice_added", session=session, pending=total, new=len(new))
         return sentence, total
+
+    async def _prompt_unasked(self, session: str, ctx: Any, items: list[dict[str, Any]]) -> None:
+        """Put pending approvals this session was never asked about to its person.
+
+        The same question ``approvals.decide`` asks, offering only the
+        decisions the item allows, with a reason where one is required, and
+        the answer recorded the same way. Each item is asked once per session,
+        at most :data:`AUTO_PROMPTS_OPEN_PER_SESSION` at a time, and only
+        items this call may see (``approvals.list``'s rule). The prompt stays
+        open until the item is decided anywhere or expires; the call this
+        reply belongs to does not wait for it.
+        """
+        decider = self._approvals_decider
+        elicitor = self._elicitor
+        if decider is None or elicitor is None or not items:
+            return
+        # A returned question (2026-07-28) cannot outlive its request, and a
+        # client that cannot be asked gets the notice alone.
+        if current_modern_request() is not None or not self.can_elicit:
+            return
+        from tool_registry.tools.design_flow.approvals import (
+            approval_question,
+            is_promptable,
+            record_answer,
+        )
+
+        room = AUTO_PROMPTS_OPEN_PER_SESSION - self._standing.open_count(session)
+        if room <= 0:
+            return
+        unattended_key = self._unattended_key()
+        prompted: list[str] = []
+        with tracer.start_as_current_span("mcp.approval_prompt_unasked") as span:
+            for item in items:
+                if len(prompted) >= room:
+                    break
+                approval_id = str(item.get("id") or "")
+                if not approval_id or self._standing.asked(session, approval_id):
+                    continue
+                allows = getattr(ctx, "allows_approval", None)
+                if callable(allows) and not allows(item):
+                    continue
+                if not is_promptable(item):
+                    continue
+                lifetime = _item_prompt_lifetime(item)
+                if lifetime <= 0:
+                    continue
+                message, schema = approval_question(item, None)
+                # Taken now: the answer arrives on another request.
+                approver = inline_approver()
+                with prompt_lifetime(lifetime + _PROMPT_TRANSPORT_GRACE):
+                    question: asyncio.Task[ElicitResult] = asyncio.ensure_future(
+                        elicitor(message, schema)
+                    )
+
+                async def on_answer(
+                    result: ElicitResult, _item: dict[str, Any] = item, _approver: Any = approver
+                ) -> str:
+                    recorded = await record_answer(
+                        _item, result, decider=decider, approver=_approver
+                    )
+                    logger.info(
+                        "approval_prompt_answered",
+                        approval_id=_item.get("id"),
+                        status=recorded.get("status"),
+                        decision=recorded.get("decision"),
+                    )
+                    return "answered" if recorded.get("status") == "decided" else "not_decided"
+
+                async def still_pending(_id: str = approval_id) -> bool:
+                    return _id in await self._pending_approval_ids()
+
+                def on_unattended(key: str = unattended_key) -> None:
+                    # The client answered for the person: ask it nothing more.
+                    self._elicitation_unattended.add(key)
+                    logger.warning("approval_prompt_unattended", session=session)
+
+                self._standing.keep_open(
+                    session=session,
+                    approval_id=approval_id,
+                    kind="item",
+                    question=question,
+                    lifetime_seconds=lifetime,
+                    still_pending=still_pending,
+                    on_answer=on_answer,
+                    on_unattended=on_unattended,
+                )
+                prompted.append(approval_id)
+            span.set_attribute("approvals.prompted", len(prompted))
+        if prompted:
+            # Let each question go out now, while this call's own stream is
+            # still open: a client with no other stream reads it there, and
+            # the stream then stays open for it after the result.
+            await asyncio.sleep(0)
+            logger.info("approval_prompted_unasked", session=session, approvals=prompted)
+
+    async def _pending_approval_ids(self) -> set[str]:
+        """Ids of every pending approval, from the notice's short-lived cache."""
+        lister = self._approvals_lister
+        if lister is None:
+            return set()
+        now = time.monotonic()
+        cache = self._pending_cache.get(None)
+        if cache is not None and now - cache[0] < _APPROVAL_NOTICE_TTL_SECONDS:
+            items = cache[1]
+        else:
+            items = [i for i in await lister(None) if i.get("status", "pending") == "pending"]
+            self._pending_cache[None] = (now, items)
+        return {str(i.get("id")) for i in items}
 
     def attach_client_task_grant(self, verifier: Any) -> bool:
         """Turn on scoped writes for a client working a claimed task (FORGE-584).
@@ -3074,9 +3211,40 @@ class UnifiedMcpServer:
         held_from = time.monotonic()
         outcome: ApprovalOutcome | None = None
         if route == "elicitation" and self._elicitor is not None:
+            prompt_session = self._session_key()
+            self._standing.mark_asked(prompt_session, approval_id)
+
+            def keep_open(question: asyncio.Task[ElicitResult], record: Any) -> None:
+                # The call returns now; its prompt stays on the client until
+                # the approval is decided anywhere or expires.
+                async def still_pending() -> bool:
+                    return await ledger.read_hold(approval_id) is None
+
+                async def on_answer(result: ElicitResult) -> str:
+                    recorded = await record(result)
+                    return "record_failed" if recorded is None else "answered"
+
+                self._standing.keep_open(
+                    session=prompt_session,
+                    approval_id=approval_id,
+                    kind="hold",
+                    question=question,
+                    lifetime_seconds=min(ttl, MAX_PROMPT_SECONDS),
+                    still_pending=still_pending,
+                    on_answer=on_answer,
+                )
+
             try:
                 outcome = await ask_on_hold(
-                    self._elicitor, ledger, ask, approval_id, wait_seconds=ELICITATION_WAIT_SECONDS
+                    self._elicitor,
+                    ledger,
+                    ask,
+                    approval_id,
+                    wait_seconds=ELICITATION_WAIT_SECONDS,
+                    keep_open=keep_open,
+                    # The transport's own bound sits a little past the
+                    # prompt's, so the expiry is the server's withdrawal.
+                    lifetime_seconds=min(ttl, MAX_PROMPT_SECONDS) + _PROMPT_TRANSPORT_GRACE,
                 )
             except ElicitationUnavailableError as exc:
                 # The client answered for the person without showing them the
@@ -4080,6 +4248,25 @@ def _stable_session() -> str:
     except Exception:  # noqa: BLE001 - no context: no session
         return ""
     return str(ctx.session_id) if ctx.session_is_stable else ""
+
+
+def _item_prompt_lifetime(item: dict[str, Any]) -> float:
+    """How long a prompt about one approval item may stay open, in seconds.
+
+    Until the item's own ``deadline`` when it has one, and never longer than
+    :data:`MAX_PROMPT_SECONDS`. A deadline already past gives 0: not asked.
+    """
+    deadline = item.get("deadline") or item.get("expires_at")
+    if not deadline:
+        return MAX_PROMPT_SECONDS
+    try:
+        when = datetime.fromisoformat(str(deadline).replace("Z", "+00:00"))
+    except ValueError:
+        return MAX_PROMPT_SECONDS
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    left = (when - datetime.now(UTC)).total_seconds()
+    return max(0.0, min(left, MAX_PROMPT_SECONDS))
 
 
 def _effective_project(arguments: dict[str, Any]) -> str | None:

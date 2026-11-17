@@ -53,7 +53,7 @@ services:
       # FORGE-780: a held tool write's approval lasts this long (s) for the
       # identical retry; paid tools auto-approved by a project policy are
       # capped per project per hour.
-      - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-1800}
+      - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-3600}
       - METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR=${METAFORGE_AUTO_APPROVE_IMAGE_PER_HOUR:-20}
       - METAFORGE_AUTO_APPROVE_MESH_PER_HOUR=${METAFORGE_AUTO_APPROVE_MESH_PER_HOUR:-3}
       # cadquery.execute_script runs isolated, so an auto policy may approve it, up
@@ -574,7 +574,7 @@ services:
       # FORGE-780: a held tool write's approval lasts this long (s) for the
       # identical retry; paid tools auto-approved by a project policy are
       # capped per project per hour.
-      - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-1800}
+      - METAFORGE_TOOL_APPROVAL_TTL_S=${METAFORGE_TOOL_APPROVAL_TTL_S:-3600}
       - METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=${METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY:-false}
       # Let a delegated agent fix the release baseline and approve the
       # manufacturing release for a person (default false).

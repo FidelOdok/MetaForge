@@ -100,7 +100,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 Imagine studio operations (FORGE-821).
         # + 3 CadQuery isolated script runner runs, durations and limit stops.
         # + 1 MCP project-scope decisions (account-confined MCP calls).
-        assert len(all_metrics) == 171
+        # + 1 MCP approval prompts kept open past their call.
+        assert len(all_metrics) == 172
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

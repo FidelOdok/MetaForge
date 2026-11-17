@@ -660,6 +660,23 @@ groups:
             Held writes are not being decided. Not a fault -- nobody is
             watching the queue, or a reviewer is saying no repeatedly.
 
+      # A person answered an approval prompt that outlived its call, and the
+      # answer could not be recorded: they believe they decided something
+      # that is still pending.
+      - alert: McpApprovalPromptAnswerNotRecorded
+        expr: increase(metaforge_mcp_standing_prompt_total{outcome="record_failed"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "An answer to an MCP approval prompt was not recorded"
+          description: >-
+            Someone answered an approval prompt in their client and the
+            sidecar could not record it on the approval, which is still
+            pending. Look for mcp_standing_prompt_answer_not_recorded and
+            elicitation_late_answer_not_recorded in the mcp-http logs, and
+            check that the sidecar can reach the gateway.
+
       - alert: McpUnexpectedErrors
         expr: rate(metaforge_mcp_error_total{error_class="unexpected"}[10m]) > 0
         for: 5m

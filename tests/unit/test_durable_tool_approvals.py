@@ -259,7 +259,7 @@ class TestTheHoldOutlivesTheCall:
         assert data["route"] == "elicitation"
         assert data["next_step"] == "retry this exact call once it is approved"
         assert data["expires_at"]
-        assert data["expires_in_seconds"] > 1700  # 30 min default
+        assert data["expires_in_seconds"] > 3500  # 1 hour default
         assert entry["status"] == "awaiting_approval"
         assert entry["request"]["approval_key"]
         assert entry["request"]["arguments_hash"] == arguments_hash(
@@ -372,7 +372,7 @@ class TestTheHoldOutlivesTheCall:
         async with gateway as http:
             server = await _server(http, ran)
             first = _held(await _call(server))["approval_id"]
-            now[0] += 1800 + 31  # past the lifetime and the gateway's grace
+            now[0] += 3600 + 31  # past the lifetime and the gateway's grace
             [entry] = await _entries(http)
             second = _held(await _call(server))["approval_id"]
 
