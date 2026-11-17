@@ -26,6 +26,13 @@ class FirmwareConfig(BaseModel):
     work_dir: str = Field(
         default="/workspace", description="Adapter workspace: projects, build output, run logs"
     )
+    library_dir: str = Field(
+        default="/opt/platformio/offline-libs",
+        description=(
+            "Libraries installed in the image (one folder each), the only ones a build may "
+            "use: a build has no network"
+        ),
+    )
     max_build_time: int = Field(default=600, ge=1, description="Max build time, seconds")
     max_emulation_time: int = Field(
         default=120, ge=1, description="Max wall-clock time for one emulated run, seconds"
@@ -40,6 +47,7 @@ class FirmwareConfig(BaseModel):
             platformio_core_dir=env.get("PLATFORMIO_CORE_DIR", os.path.expanduser("~/.platformio")),
             freertos_kernel_dir=env.get("FREERTOS_KERNEL_DIR", "/opt/freertos-kernel"),
             work_dir=env.get("FIRMWARE_WORK_DIR", "/workspace"),
+            library_dir=env.get("FIRMWARE_LIBRARY_DIR", "/opt/platformio/offline-libs"),
             max_build_time=int(env.get("FIRMWARE_MAX_BUILD_TIME", "600")),
             max_emulation_time=int(env.get("FIRMWARE_MAX_EMULATION_TIME", "120")),
         )
