@@ -48,11 +48,13 @@ export interface LibraryComponent {
   origin: string;
   standard?: string;
   manufacturer?: string;
+  /** The organisation entry the maker is, when its name resolves (FORGE-450). */
+  manufacturer_org?: string;
   mpn?: string;
   datasheet?: string;
   material?: string;
   specs: Record<string, SourcedValue>;
-  suppliers?: Array<{ supplier: string; sku: string; url?: string; offer?: SupplierOffer }>;
+  suppliers?: Array<{ supplier: string; sku: string; url?: string; org?: string; offer?: SupplierOffer }>;
   models?: ModelRepresentation[];
   form_code?: string;
   notes: string;
@@ -85,8 +87,76 @@ export interface LibraryMachine {
   route?: string;
   status?: string;
   location?: string;
+  /** The organisation that runs it: a service bureau (FORGE-450). */
+  operator_org?: string;
   connection?: { protocol?: string; url?: string };
   version: number;
+}
+
+export type OrgRole = 'manufacturer' | 'distributor' | 'fabricator' | 'test_lab';
+export type OrgStatus = 'approved' | 'unreviewed' | 'blocked';
+export const ORG_REGIONS = ['UK', 'EU', 'Europe', 'Asia', 'Americas', 'Oceania', 'Africa', 'Global'] as const;
+
+/** A manufacturer, distributor, fabricator or test lab, recorded once however it is written. */
+export interface LibraryOrganisation {
+  id: string;
+  name: string;
+  title: string;
+  roles: OrgRole[];
+  aliases: string[];
+  status: OrgStatus;
+  status_reason: string;
+  country: string;
+  regions: string[];
+  website: string;
+  quote_url: string;
+  certifications: string[];
+  contacts: Array<{ role: string; url?: string; email?: string }>;
+  lifecycle_policy: string;
+  connector: string;
+  notes: string;
+  version: number;
+}
+
+export type SearchKind =
+  | 'component'
+  | 'organisation'
+  | 'material'
+  | 'process'
+  | 'machine'
+  | 'appearance'
+  | 'ergonomic_limit';
+
+/** One library search result; ``matched`` names the fields that matched. */
+export interface SearchHit {
+  kind: SearchKind;
+  id: string;
+  name: string;
+  title: string;
+  score: number;
+  matched: string[];
+  /** A component made or sold only by blocked organisations says why. */
+  blocked?: string[];
+  status?: OrgStatus;
+  roles?: OrgRole[];
+  manufacturer?: string;
+  mpn?: string;
+  layer?: string;
+}
+
+export interface SearchResult {
+  query: string;
+  total: number;
+  results: SearchHit[];
+}
+
+export interface SearchParams {
+  q: string;
+  kinds?: SearchKind[];
+  role?: OrgRole;
+  region?: string;
+  status?: OrgStatus;
+  limit?: number;
 }
 
 /** One coloured group of a maker's model, as the gateway's mesh route returns it. */
@@ -123,6 +193,23 @@ export async function listMaterials(): Promise<LibraryMaterial[]> {
 export async function listMachines(): Promise<LibraryMachine[]> {
   const { data } = await apiClient.get<{ machines: LibraryMachine[] }>('/library/machines');
   return data.machines;
+}
+
+export async function listOrganisations(): Promise<LibraryOrganisation[]> {
+  const { data } = await apiClient.get<{ entries: LibraryOrganisation[] }>('/library/organisations');
+  return data.entries;
+}
+
+/** The whole library searched at once, best first (FORGE-895). */
+export async function searchLibrary(params: SearchParams): Promise<SearchResult> {
+  const query = new URLSearchParams({ q: params.q });
+  (params.kinds ?? []).forEach((k) => query.append('kind', k));
+  if (params.role) query.set('role', params.role);
+  if (params.region) query.set('region', params.region);
+  if (params.status) query.set('status', params.status);
+  query.set('limit', String(params.limit ?? 60));
+  const { data } = await apiClient.get<SearchResult>(`/library/search?${query.toString()}`);
+  return data;
 }
 
 export async function getComponentMesh(name: string): Promise<ComponentMesh> {

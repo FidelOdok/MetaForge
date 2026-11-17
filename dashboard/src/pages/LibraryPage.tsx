@@ -6,6 +6,8 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { PartPreview, activeMakerModel } from '../components/library/PartPreview';
+import { OrganisationsTab, OrgStatusBadge } from '../components/library/OrganisationsTab';
+import { LibrarySearch } from '../components/library/LibrarySearch';
 import { CATEGORIES, categoryOf, type Category } from '../lib/libraryCategory';
 import { LEVELS, LEVEL_HELP, levelOf, type Level } from '../lib/libraryLevel';
 import { DEMOS, demosOf, type Demo } from '../lib/libraryDemo';
@@ -16,15 +18,19 @@ import {
   listComponents,
   listMachines,
   listMaterials,
+  listOrganisations,
   type LibraryComponent,
   type LibraryMachine,
   type LibraryMaterial,
+  type LibraryOrganisation,
+  type SearchHit,
   type SourcedValue,
 } from '../api/endpoints/library';
 
-type Tab = 'components' | 'materials' | 'machines';
+type Tab = 'components' | 'organisations' | 'materials' | 'machines';
 const TABS: Array<[Tab, string]> = [
   ['components', 'Components'],
+  ['organisations', 'Organisations'],
   ['materials', 'Materials'],
   ['machines', 'Machines'],
 ];
@@ -126,12 +132,34 @@ function Section({ title, count, open, children }: { title: string; count?: numb
   );
 }
 
-function ComponentDetail({ part }: { part: LibraryComponent }) {
+function ComponentDetail({
+  part,
+  orgs,
+}: {
+  part: LibraryComponent;
+  orgs: Map<string, LibraryOrganisation>;
+}) {
   const models = (part.models || []).filter((m) => (m.status ?? 'active') === 'active');
   const specs = Object.keys(part.specs || {}).length;
   const suppliers = part.suppliers || [];
+  const maker = part.manufacturer_org ? orgs.get(part.manufacturer_org) : undefined;
+  const sellers = suppliers.map((s) => (s.org ? orgs.get(s.org) : undefined));
+  const blockedSellers = sellers.length > 0 && sellers.every((o) => o?.status === 'blocked');
   const facts: Array<[string, ReactNode]> = [
-    ...(part.manufacturer ? ([['Maker', part.manufacturer]] as Array<[string, ReactNode]>) : []),
+    ...(part.manufacturer
+      ? ([
+          [
+            'Maker',
+            maker ? (
+              <span>
+                {maker.title} <OrgStatusBadge org={maker} />
+              </span>
+            ) : (
+              part.manufacturer
+            ),
+          ],
+        ] as Array<[string, ReactNode]>)
+      : []),
     ['Part', <span className="font-mono mf-library-break">{part.mpn || part.name}</span>],
     ['Category', categoryOf(part)],
     ['Level', <span title={LEVEL_HELP[levelOf(part)]}>{levelOf(part)}</span>],
@@ -157,6 +185,16 @@ function ComponentDetail({ part }: { part: LibraryComponent }) {
             status before designing it in.
           </p>
         )}
+        {maker?.status === 'blocked' && (
+          <p className="mf-library-warning" data-testid="library-blocked-maker">
+            <AlertTriangle size={13} aria-hidden="true" /> Its maker, {maker.title}, is blocked: {maker.status_reason}.
+          </p>
+        )}
+        {blockedSellers && (
+          <p className="mf-library-warning">
+            <AlertTriangle size={13} aria-hidden="true" /> Every recorded seller of this part is blocked.
+          </p>
+        )}
       </header>
       <dl className="mf-library-facts">
         {facts.map(([k, v]) => (
@@ -171,8 +209,9 @@ function ComponentDetail({ part }: { part: LibraryComponent }) {
       </Section>
       <Section title="Suppliers" count={suppliers.length}>
         <ul className="mf-library-list-plain">
-          {suppliers.map((s) => (
+          {suppliers.map((s, i) => (
             <li key={`${s.supplier}-${s.sku}`}>
+              {sellers[i] && sellers[i]?.status !== 'unreviewed' && <OrgStatusBadge org={sellers[i]!} />}{' '}
               {s.url ? (
                 <a href={s.url} target="_blank" rel="noopener noreferrer">
                   {s.supplier} {s.sku}
@@ -225,14 +264,22 @@ function Chip({
   );
 }
 
-function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
+function ComponentsTab({
+  parts,
+  orgs,
+  focus,
+}: {
+  parts: LibraryComponent[];
+  orgs: Map<string, LibraryOrganisation>;
+  focus?: string | null;
+}) {
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState<Category | ''>('');
   const [level, setLevel] = useState<Level | ''>('');
   const [demo, setDemo] = useState<Demo | ''>('');
   const [only3d, setOnly3d] = useState(false);
   const [hideEnding, setHideEnding] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(focus ?? null);
   const groups = useMemo(() => {
     const counts = new Map<Category, number>();
     parts.forEach((p) => counts.set(categoryOf(p), (counts.get(categoryOf(p)) ?? 0) + 1));
@@ -353,7 +400,7 @@ function ComponentsTab({ parts }: { parts: LibraryComponent[] }) {
           </ul>
         </div>
         {current ? (
-          <ComponentDetail part={current} />
+          <ComponentDetail part={current} orgs={orgs} />
         ) : (
           <EmptyState title="No part matches" description="Clear the search or a filter." />
         )}
@@ -467,6 +514,8 @@ function MachinesTab({ machines }: { machines: LibraryMachine[] }) {
 /** The component, material and machine library: browse it, see each part in 3D, save or load it. */
 export function LibraryPage() {
   const [tab, setTab] = useState<Tab>('components');
+  /** What a search result asked to open: the entry's name or id in its tab. */
+  const [focus, setFocus] = useState<{ tab: Tab; ref: string; at: number } | null>(null);
   const toast = useToast();
   const client = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -474,6 +523,27 @@ export function LibraryPage() {
   const components = useQuery({ queryKey: ['library', 'components'], queryFn: listComponents });
   const materials = useQuery({ queryKey: ['library', 'materials'], queryFn: listMaterials });
   const machines = useQuery({ queryKey: ['library', 'machines'], queryFn: listMachines });
+  const organisations = useQuery({ queryKey: ['library', 'organisations'], queryFn: listOrganisations });
+  const orgById = useMemo(
+    () => new Map((organisations.data ?? []).map((o) => [o.id, o])),
+    [organisations.data],
+  );
+
+  function openHit(hit: SearchHit) {
+    const target: Tab | null =
+      hit.kind === 'component'
+        ? 'components'
+        : hit.kind === 'organisation'
+          ? 'organisations'
+          : hit.kind === 'material'
+            ? 'materials'
+            : hit.kind === 'machine'
+              ? 'machines'
+              : null;
+    if (!target) return;
+    setTab(target);
+    setFocus({ tab: target, ref: hit.kind === 'organisation' ? hit.id : hit.name, at: Date.now() });
+  }
 
   async function onExport() {
     setBusy(true);
@@ -518,6 +588,7 @@ export function LibraryPage() {
     components: components.data?.length,
     materials: materials.data?.length,
     machines: machines.data?.length,
+    organisations: organisations.data?.length,
   };
 
   return (
@@ -549,6 +620,7 @@ export function LibraryPage() {
           </>
         }
       />
+      <LibrarySearch onOpen={openHit} />
       <div className="mf-library-tabs" role="tablist">
         {TABS.map(([t, name]) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
@@ -563,7 +635,23 @@ export function LibraryPage() {
       {!components.isLoading && !components.isError && tab === 'components' && parts.length === 0 && (
         <EmptyState title="The library is empty" description="Import a library file, or let an agent research parts." />
       )}
-      {tab === 'components' && parts.length > 0 && <ComponentsTab parts={parts} />}
+      {tab === 'components' && parts.length > 0 && (
+        <ComponentsTab
+          key={focus?.tab === 'components' ? `focus-${focus.at}` : 'browse'}
+          parts={parts}
+          orgs={orgById}
+          focus={focus?.tab === 'components' ? focus.ref : null}
+        />
+      )}
+      {tab === 'organisations' && (
+        <OrganisationsTab
+          key={focus?.tab === 'organisations' ? `focus-${focus.at}` : 'browse'}
+          orgs={organisations.data ?? []}
+          parts={parts}
+          machines={machines.data ?? []}
+          focus={focus?.tab === 'organisations' ? focus.ref : null}
+        />
+      )}
       {tab === 'materials' && <MaterialsTab materials={materials.data ?? []} />}
       {tab === 'machines' && <MachinesTab machines={machines.data ?? []} />}
     </div>
