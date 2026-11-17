@@ -185,6 +185,33 @@ def pin_map(context: dict[str, Any]) -> list[dict[str, Any]]:
     return list(seen.values())
 
 
+def firmware_pin_map(context: dict[str, Any]) -> list[dict[str, Any]]:
+    """The controller's signal pins in the firmware agent's shape (FORGE-889).
+
+    ``[{signal, pin, peripheral, direction, to}]`` for each wired end on the studio's board
+    (``role: board``): the net as the signal, the board's own pin name (``D1``, ``D4``,
+    ``i2c.SDA``) as the pin, and the bus as the peripheral. Power and ground are left out:
+    firmware does not drive them. Empty when the studio has no board or no wiring.
+    """
+    parts = _parts(context)
+    boards = {pid for pid, p in parts.items() if p.get("role") == "board"}
+    out: list[dict[str, Any]] = []
+    for e in pin_map(context):
+        if e["part"] not in boards or e["bus"] == "pwr":
+            continue
+        out.append(
+            {
+                "signal": e["net"],
+                "pin": e["ref"].split(".", 1)[1],
+                "peripheral": str(e["bus"] or "gpio").upper(),
+                "direction": e["dir"] or "",
+                "to": e["to"],
+                "board": e["part_name"],
+            }
+        )
+    return out
+
+
 def harness_lines(
     context: dict[str, Any], drawn: dict[str, float] | None = None
 ) -> list[dict[str, Any]]:
@@ -257,6 +284,14 @@ def handover_record(
             qty = f"{line['qty_m']:g} m" if line["qty_m"] is not None else "length to measure"
             out.append(f"- {line['item']}: {line['cuts']} cuts, {qty}. {line['spec']}.")
         out += ["", "Wiring sequence:", "", *wiring_sequence(context, drawn)]
+        firmware = firmware_pin_map(context)
+        if firmware:
+            out += ["", "Firmware pin map (the controller's signal pins):", ""]
+            out += [
+                f"- {f['signal']}: {f['board']} {f['pin']} "
+                f"({f['peripheral']}, {f['direction'] or 'n/a'}) to {', '.join(f['to'])}"
+                for f in firmware
+            ]
         circuit = interconnect_circuit(context, product)
         if circuit is not None:
             out += [
