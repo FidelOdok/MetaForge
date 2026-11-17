@@ -806,14 +806,55 @@ class FirmwareServer(McpToolServer):
         ini = project / "platformio.ini"
         if not ini.exists():
             flags = [str(f) for f in arguments.get("build_flags") or []]
+            libs = self._offline_libraries(arguments.get("libraries") or [])
             ini.write_text(
                 "[env:app]\n"
                 f"board = {board}\n"
                 f"framework = {framework}\n"
-                + (f"build_flags = {' '.join(flags)}\n" if flags else ""),
+                + (f"build_flags = {' '.join(flags)}\n" if flags else "")
+                # The library dependency finder picks each one by the headers the code
+                # includes; only the image's own copies, since a build has no network.
+                + (f"lib_extra_dirs = {self.config.library_dir}\n" if libs else ""),
                 encoding="utf-8",
             )
         return "app" if not arguments.get("env") else str(arguments["env"])
+
+    def available_libraries(self) -> list[dict[str, str]]:
+        """Each library the image holds: its name and version, from its own metadata."""
+        root = Path(self.config.library_dir)
+        found: list[dict[str, str]] = []
+        for folder in sorted(p for p in root.glob("*") if p.is_dir()) if root.is_dir() else []:
+            name, version = folder.name, ""
+            meta = folder / "library.json"
+            props = folder / "library.properties"
+            if meta.is_file():
+                data = json.loads(meta.read_text(encoding="utf-8", errors="replace") or "{}")
+                name, version = str(data.get("name") or name), str(data.get("version") or "")
+            elif props.is_file():
+                for line in props.read_text(encoding="utf-8", errors="replace").splitlines():
+                    key, _, value = line.partition("=")
+                    if key.strip() == "name":
+                        name = value.strip()
+                    elif key.strip() == "version":
+                        version = value.strip()
+            found.append({"name": name, "version": version, "folder": folder.name})
+        return found
+
+    def _offline_libraries(self, wanted: list[Any]) -> list[dict[str, str]]:
+        """The image's libraries a build asks for; an unknown name is refused, never fetched."""
+        if not wanted:
+            return []
+        have = self.available_libraries()
+        by_name = {lib["name"].lower(): lib for lib in have}
+        by_name.update({lib["folder"].lower(): lib for lib in have})
+        missing = [str(w) for w in wanted if str(w).strip().lower() not in by_name]
+        if missing:
+            names = ", ".join(f"{lib['name']} {lib['version']}".strip() for lib in have) or "none"
+            raise ValueError(
+                f"libraries not in the image: {', '.join(missing)}. A build has no network; "
+                f"installed: {names}"
+            )
+        return [by_name[str(w).strip().lower()] for w in wanted]
 
     def _board_info(self, board: str) -> dict[str, Any]:
         """The board's platform and MCU, from the installed platforms' manifests.
@@ -1301,11 +1342,25 @@ _BUILD_SCHEMA: dict[str, Any] = {
         },
         "board": {
             "type": "string",
-            "description": "PlatformIO board id with files, e.g. disco_f407vg or esp32dev",
+            "description": (
+                "PlatformIO board id with files, e.g. disco_f407vg, esp32dev or seeed_xiao_esp32s3"
+            ),
         },
         "framework": {
             "type": "string",
-            "description": "With files: stm32cube (STM32) or espidf (ESP32)",
+            "description": (
+                "With files: stm32cube (STM32), espidf or arduino (ESP32, including "
+                "seeed_xiao_esp32s3)"
+            ),
+        },
+        "libraries": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "With files: libraries the code includes, by name, from those installed in "
+                "the image (a build has no network), e.g. 'Adafruit NeoPixel', 'BH1750'. "
+                "An unknown name is refused with the list of installed ones."
+            ),
         },
         "env": {"type": "string", "description": "PlatformIO env to build; default the first"},
         "build_flags": {

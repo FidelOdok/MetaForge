@@ -103,9 +103,12 @@ ENV PLATFORMIO_CORE_DIR=/opt/platformio \
     ESPRESSIF32_VERSION=${ESPRESSIF32_VERSION}
 COPY --chown=metaforge:metaforge tool_registry/tools/firmware/seed/ /tmp/seed/
 RUN sed -i "s/^platform = ststm32$/platform = platformio\/ststm32@${STSTM32_VERSION}/" /tmp/seed/stm32/platformio.ini \
-    && sed -i "s/^platform = espressif32$/platform = platformio\/espressif32@${ESPRESSIF32_VERSION}/" /tmp/seed/esp32/platformio.ini \
+    && sed -i "s/^platform = espressif32$/platform = platformio\/espressif32@${ESPRESSIF32_VERSION}/" /tmp/seed/esp32/platformio.ini /tmp/seed/esp32-arduino/platformio.ini \
     && pio run -d /tmp/seed/stm32 \
     && pio run -d /tmp/seed/esp32 \
+    && pio run -d /tmp/seed/esp32-arduino \
+    && mkdir -p "${PLATFORMIO_CORE_DIR}/offline-libs" \
+    && cp -r /tmp/seed/esp32-arduino/.pio/libdeps/xiao_s3_arduino/* "${PLATFORMIO_CORE_DIR}/offline-libs/" \
     && pio check -d /tmp/seed/stm32 -e f4 \
     && rm -rf /tmp/seed "${PLATFORMIO_CORE_DIR}/.cache"
 
