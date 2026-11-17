@@ -793,7 +793,7 @@ configured. Verified on an empty environment, from a working directory
 outside the repo:
 
 ```
-initialize  : {'name': 'metaforge-mcp', 'version': '0.1.0'}
+initialize  : {'name': 'metaforge-mcp', 'version': '0.3.797'}
 health      : healthy | adapters 13 | tools 105
 ```
 
