@@ -740,7 +740,7 @@ reporting what came back:
 {
   "service": "metaforge-mcp",
   "status": "degraded",
-  "version": "0.1.0",
+  "version": "0.3.797",
   "uptime_seconds": 3600.0,
   "adapter_count": 3,
   "tool_count": 100,
@@ -753,6 +753,13 @@ reporting what came back:
   ]
 }
 ```
+
+`version` is the release the server was installed as, the same number the
+gateway's `/health` reports: the release workflow stamps it into the package
+before building the image, so a released image says `0.3.797` and a build
+after a release says `0.3.797+g1a2b3c4`. The `initialize` result's
+`serverInfo.version` carries it too. A checkout run without installing says
+`0.0.0+unknown`. Each adapter's own `version` is separate and unchanged.
 
 The same report carries `client.can_elicit` (see
 [Answering in the harness](capability-matrix.md#answering-in-the-harness)),
